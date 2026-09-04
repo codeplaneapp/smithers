@@ -310,7 +310,7 @@ The stdio MCP server.
 | `succeeded`, `failed` | constructors | The two envelopes. |
 | `Tool` | interface | `name`, `description`, `readOnly`, `schema`, `inputSchema`, `call`. |
 | `supportedTools` | `ReadonlyArray<Tool>` | The eleven control-backed tools. |
-| `unsupportedReasons`, `unsupportedTools` | | The ten 0.x names that answer `unsupported`, and why. |
+| `unsupportedReasons`, `unsupportedTools` | | The twelve retired names that answer `unsupported`, and why. |
 | `rawTools` | `(verbs) => ReadonlyArray<Tool>` | One directory entry per shipped verb, naming the shell command. Not a second execution path. |
 | `Options`, `tools` | `{ surface?, allowedTools?, readOnly?, verbs? }` | The session's scope, and the tools it leaves. |
 | `requested` | `(args) => boolean` | Whether `--mcp` was passed. |

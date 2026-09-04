@@ -105,10 +105,10 @@ Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `CER
 
 `smthrs --mcp` serves the Smithers MCP server on stdio, so an agent inspects runs through the same control plane the verbs use. `smthrs mcp add --agent <id>` writes the server entry into one agent's configuration, and `smthrs mcp add` with no `--agent` writes it into every agent the CLI knows: `claude` and `codex`.
 
-The server answers a `{ ok, data?, error? }` envelope on every tool. Ten of the twenty-one 0.x tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smthrs up` and `smthrs ls`.
+The server answers a `{ ok, data?, error? }` envelope on every tool. Twelve retired tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smthrs up` and `smthrs ls`.
 
 MCP mutations carry an `agent` principal. Approval and denial are operator-only:
-`resolve_approval` and the automatic approval in `run_workflow` return `UNAUTHORIZED`,
+`resolve_approval` and the automatic approval in `run_flow` return `UNAUTHORIZED`,
 including for `remembered` grants. An operator launches flows with `smthrs up` and
 resolves approvals with `smthrs approve` or `smthrs deny`. Read tools remain available.
 

@@ -58,10 +58,10 @@ const find = (name: string) =>
     .find((tool) => tool.name === name)!
 
 describe("the tool surface", () => {
-  it("exposes the eleven Control-backed tools by their 0.x names", () => {
+  it("exposes the eleven Control-backed tools by their flow names", () => {
     expect(McpServer.supportedTools.map((tool) => tool.name)).toEqual([
-      "list_workflows",
-      "run_workflow",
+      "list_flows",
+      "run_flow",
       "list_runs",
       "get_run",
       "watch_run",
@@ -74,10 +74,12 @@ describe("the tool surface", () => {
     ])
   })
 
-  it("keeps the ten unsupported names, answering with a reason", () => {
+  it("keeps the twelve unsupported names, answering with a reason", () => {
     // Removing them would make an agent's call fail as "unknown tool", which
     // reads as a client bug rather than as a missing release feature.
     expect(McpServer.unsupportedTools.map((tool) => tool.name)).toEqual([
+      "list_workflows",
+      "run_workflow",
       "revert_attempt",
       "fork_run",
       "replay_run",
@@ -91,8 +93,22 @@ describe("the tool surface", () => {
     ])
   })
 
-  it("defaults to the semantic surface, all twenty-one tools", () => {
-    expect(McpServer.tools().map((tool) => tool.name)).toHaveLength(21)
+  it("redirects retired workflow names without executing them", async () => {
+    for (const [oldName, newName] of [["list_workflows", "list_flows"], ["run_workflow", "run_flow"]] as const) {
+      const result = await call(find(oldName), { flowId: "demo/ship" })
+      expect(result).toMatchObject({ ok: false, error: { code: "unsupported" } })
+      expect(JSON.stringify(result)).toContain(newName)
+    }
+  })
+
+  it("accepts the retired run tool's arguments and returns its replacement over MCP", async () => {
+    const result = await rpcCall("run_workflow", { flowId: "demo/ship", input: {} })
+    expect(JSON.stringify(result)).toContain("run_flow")
+    expect(JSON.stringify(result)).toContain("unsupported")
+  })
+
+  it("defaults to the semantic surface, all twenty-three tools", () => {
+    expect(McpServer.tools().map((tool) => tool.name)).toHaveLength(23)
   })
 
   it("mirrors the shipped verbs on the raw surface", () => {
@@ -101,14 +117,14 @@ describe("the tool surface", () => {
     expect(raw).toHaveLength(Verb.shipped.length)
     expect(raw.map((tool) => tool.name)).toContain("cli_ps")
     expect(raw.find((tool) => tool.name === "cli_ps")?.description).toContain("smthrs ps")
-    expect(McpServer.tools({ surface: "both", verbs: Verb.shipped })).toHaveLength(21 + Verb.shipped.length)
+    expect(McpServer.tools({ surface: "both", verbs: Verb.shipped })).toHaveLength(23 + Verb.shipped.length)
   })
 
   it("scopes a session to an allowlist and to read-only tools", () => {
-    expect(McpServer.tools({ allowedTools: ["get_run", "run_workflow"] }).map((tool) => tool.name))
-      .toEqual(["run_workflow", "get_run"])
+    expect(McpServer.tools({ allowedTools: ["get_run", "run_flow"] }).map((tool) => tool.name))
+      .toEqual(["run_flow", "get_run"])
     expect(McpServer.tools({ readOnly: true }).map((tool) => tool.name))
-      .not.toContain("run_workflow")
+      .not.toContain("run_flow")
     expect(McpServer.tools({ readOnly: true }).map((tool) => tool.name)).toContain("get_run")
   })
 
@@ -141,12 +157,12 @@ describe("the envelope", () => {
   })
 
   it("lists flows, runs, and one run's events over the control plane", async () => {
-    expect(await call(find("list_workflows"))).toMatchObject({ ok: true })
+    expect(await call(find("list_flows"))).toMatchObject({ ok: true })
     expect(await call(find("list_runs"), { flowId: "system/test", status: "running" })).toMatchObject({ ok: true })
   })
 
   it("omits reserved system flows from the workflow catalog", async () => {
-    const result = await call(find("list_workflows")) as {
+    const result = await call(find("list_flows")) as {
       readonly ok: true
       readonly data: ReadonlyArray<{
         readonly flowId: string
@@ -171,7 +187,7 @@ describe("the envelope", () => {
         }))
     ).pipe(Layer.provide(control))
 
-    const result = await callWith(recordingControl, find("run_workflow"), { flowId: "system/release" })
+    const result = await callWith(recordingControl, find("run_flow"), { flowId: "system/release" })
 
     expect(result).toMatchObject({ ok: false, error: { code: "unsupported" } })
     expect((result as { readonly error: { readonly message: string } }).error.message)
@@ -209,7 +225,7 @@ describe("the envelope", () => {
   })
 
   it("refuses a non-object workflow input", async () => {
-    const result = await rpcCall("run_workflow", { flowId: "project/demo", input: "not-an-object" })
+    const result = await rpcCall("run_flow", { flowId: "project/demo", input: "not-an-object" })
 
     expect(result).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
     expect((result as { readonly error: { readonly message: string } }).error.message).toContain("input")
@@ -226,7 +242,7 @@ describe("the envelope", () => {
     for (const name of ["get_run", "watch_run", "get_run_events", "explain_run", "get_chat_transcript"]) {
       expect(await call(find(name))).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
     }
-    expect(await call(find("run_workflow"))).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
+    expect(await call(find("run_flow"))).toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
     expect(await call(find("get_node_detail"), { runId: "run-1" }))
       .toMatchObject({ ok: false, error: { code: "INVALID_INPUT" } })
     expect(await call(find("resolve_approval"), { approval: "{", decision: "approve" }))
@@ -345,7 +361,7 @@ describe("the envelope", () => {
   })
 
   it("uses a tagged control failure's stable code", async () => {
-    expect(await call(find("run_workflow"), { flowId: "project/missing" }))
+    expect(await call(find("run_flow"), { flowId: "project/missing" }))
       .toMatchObject({ ok: false, error: { code: "FLOW_NOT_FOUND" } })
   })
 
@@ -532,11 +548,11 @@ describe("what each tool answers on the path through", () => {
         }))
     ).pipe(Layer.provide(projectControl))
 
-  it("refuses self-approval through run_workflow and leaves no launched run", async () => {
+  it("refuses self-approval through run_flow and leaves no launched run", async () => {
     await Effect.runPromise(
       Effect.gen(function*() {
         const runtime = yield* ControlRuntime.ControlRuntime
-        const result = yield* find("run_workflow").call({ flowId: "demo/ship", input: { target: "main" } })
+        const result = yield* find("run_flow").call({ flowId: "demo/ship", input: { target: "main" } })
         expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
         expect(yield* runtime.grants).toEqual([])
         expect(yield* runtime.listRuns).toEqual([])
@@ -657,8 +673,8 @@ describe("the JSON-RPC surface", () => {
       readonly result: { readonly tools: ReadonlyArray<Record<string, unknown>> }
     }
 
-    expect(listed.result.tools).toHaveLength(21)
-    expect(listed.result.tools[0]).toMatchObject({ name: "list_workflows", annotations: { readOnlyHint: true } })
+    expect(listed.result.tools).toHaveLength(23)
+    expect(listed.result.tools[0]).toMatchObject({ name: "list_flows", annotations: { readOnlyHint: true } })
   })
 
   it("answers a call for a tool this session does not expose", async () => {
@@ -778,7 +794,7 @@ describe("the in-process stdio loop", () => {
           jsonrpc: "2.0",
           id: "call",
           method: "tools/call",
-          params: { name: "list_workflows", arguments: {} }
+          params: { name: "list_flows", arguments: {} }
         })
       ].join("\n") + "\n"
     )
@@ -858,7 +874,7 @@ describe("a real stdio round trip", () => {
             // arrives with, so a change to that number is never silent.
             handshakeTimeoutMs: 45_000
           })
-          const supported = yield* client.callTool("list_workflows", {})
+          const supported = yield* client.callTool("list_flows", {})
           const unsupported = yield* client.callTool("time_travel", {})
           return { tools: client.tools.map((tool) => tool.name), supported, unsupported }
         })
@@ -866,8 +882,8 @@ describe("a real stdio round trip", () => {
     )
 
     expect(McpClient.defaultHandshakeTimeoutMs).toBe(10_000)
-    expect(result.tools).toHaveLength(21)
-    expect(result.tools).toContain("list_workflows")
+    expect(result.tools).toHaveLength(23)
+    expect(result.tools).toContain("list_flows")
     expect(result.tools).toContain("ask_human")
 
     // One Control-backed tool answering over the real transport, and one

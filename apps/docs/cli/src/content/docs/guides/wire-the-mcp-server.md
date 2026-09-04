@@ -68,7 +68,7 @@ execution path.
 
 ## The tool surface
 
-Eleven tools reach the control plane: `list_workflows`, `run_workflow`,
+Eleven tools reach the control plane: `list_flows`, `run_flow`,
 `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`,
 `list_pending_approvals`, `resolve_approval`, `get_node_detail`, and
 `get_chat_transcript`.
@@ -101,7 +101,7 @@ Reserved `system/*` flows are not listed and cannot be launched, matching
 
 Every MCP mutation is attributed to an `agent` principal. Approval and denial
 are operator-only: `resolve_approval` returns `UNAUTHORIZED` at every scope,
-including `remembered`. `run_workflow` also returns `UNAUTHORIZED` when it
+including `remembered`. `run_flow` also returns `UNAUTHORIZED` when it
 attempts to approve its plan, and launches no run. Operators use `smthrs up`
 to launch a flow and `smthrs approve` or `smthrs deny` to decide an approval.
 Read tools, including `list_pending_approvals`, remain available.
@@ -134,3 +134,5 @@ configure.
 - [`smthrs mcp`](https://smithers.sh/docs/reference/cli/mcp/): the per-verb reference.
 - [MCP setup](https://smithers.sh/docs/guides/mcp-setup/): the product guide.
 - [`@smthrs/mcp`](https://mcp.smithers.sh/reference/api/): the client and the flow projection.
+
+The retired names `list_workflows` and `run_workflow` remain tombstones: they return an `unsupported` error directing callers to `list_flows` and `run_flow`. They do not list or launch anything.

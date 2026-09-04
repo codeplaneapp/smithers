@@ -7,8 +7,8 @@ description: "The tools smthrs --mcp serves over stdio: eleven supported control
 
 | Tool | Read-only | Returns | CLI equivalent |
 | --- | --- | --- | --- |
-| `list_workflows` | yes | The flows discovered under this project | [`smthrs ls`](/docs/reference/cli/ls/) |
-| `run_workflow` | no | `UNAUTHORIZED`: automatic approval is operator-only | [`smthrs up`](/docs/reference/cli/up/) |
+| `list_flows` | yes | The flows discovered under this project | [`smthrs ls`](/docs/reference/cli/ls/) |
+| `run_flow` | no | `UNAUTHORIZED`: automatic approval is operator-only | [`smthrs up`](/docs/reference/cli/up/) |
 | `list_runs` | yes | Run summaries, optionally filtered | [`smthrs ps`](/docs/reference/cli/ps/) |
 | `get_run` | yes | One run's summary | [`smthrs status`](/docs/reference/cli/status/) |
 | `watch_run` | yes | Events of one run after a sequence | [`smthrs logs --follow`](/docs/reference/cli/logs/) |
@@ -33,7 +33,7 @@ One request or response frame is at most 4 MiB. One history result is at most 10
 
 The eleven supported tools, in the order `supportedTools` declares them.
 
-### list_workflows
+### list_flows
 
 Lists the flows discovered under this project.
 
@@ -43,7 +43,7 @@ Returns: `data` is an array of flow items, one per discovered flow. Reserved `sy
 
 CLI equivalent: [`smthrs ls`](/docs/reference/cli/ls/).
 
-### run_workflow
+### run_flow
 
 Attempts to plan, approve, and launch a flow. MCP uses an `agent` principal, so the approval step is refused and no run launches.
 
@@ -178,7 +178,7 @@ The `--surface` flag chooses which tool families a session exposes; `--read-only
 - `semantic` (the default): the eleven supported tools plus the ten named-but-unsupported tools below.
 - `--surface raw`: one `cli_<verb>` directory tool per shipped CLI verb, dashes rewritten as underscores. A raw tool executes nothing: it answers `{ ok: true, data: { command, description, note } }`, a pointer to run `smthrs <verb>` from a shell while the semantic tools perform the control-plane operations directly.
 - `--surface both`: the union of the two.
-- `--read-only`: drops every tool whose read-only hint is false (`run_workflow` and `resolve_approval`).
+- `--read-only`: drops every tool whose read-only hint is false (`run_flow` and `resolve_approval`).
 - `--allowed-tools name1,name2`: keeps only the named tools.
 
 ## Named but unsupported
@@ -197,3 +197,5 @@ The ten 0.x tool names 1.0.0-rc.0 does not implement keep their names and answer
 | `time_travel` | Time travel is a library API (`@smthrs/time-travel`) and is not composed into the CLI. |
 | `list_artifacts` | The artifact projection is not part of this release. |
 | `ask_human` | There is no question or answer RPC; approvals park the run, so use `list_pending_approvals`. |
+
+The retired names `list_workflows` and `run_workflow` return `unsupported` with the replacement name (`list_flows` or `run_flow`); they never execute the operation.

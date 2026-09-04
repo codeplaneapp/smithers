@@ -142,7 +142,7 @@ const runIdArguments = Schema.Struct({
   runId: describedString("The run to read.")
 })
 
-const runWorkflowArguments = Schema.Struct({
+const runFlowArguments = Schema.Struct({
   flowId: describedString("The flow to run, as `smthrs ls` names it."),
   input: Schema.optionalKey(
     Schema.Record(Schema.String, Schema.Unknown).annotate({ description: "The flow's input." })
@@ -287,14 +287,14 @@ const decodeApproval = (value: unknown): ControlService.ApprovalInput | undefine
 }
 
 /**
- * The eleven Control-backed tools, by their 0.x names.
+ * The eleven Control-backed tools using the current flow vocabulary.
  *
  * @category constants
  * @since 1.0.0
  */
 export const supportedTools: ReadonlyArray<Tool> = [
   makeTool({
-    name: "list_workflows",
+    name: "list_flows",
     description: "List the flows discovered under this project.",
     readOnly: true,
     schema: emptyArguments,
@@ -310,11 +310,11 @@ export const supportedTools: ReadonlyArray<Tool> = [
       )
   }),
   makeTool({
-    name: "run_workflow",
+    name: "run_flow",
     description:
       "Operator-only: planning and launching a flow requires approval. MCP calls return UNAUTHORIZED; use smthrs up as an operator.",
     readOnly: false,
-    schema: runWorkflowArguments,
+    schema: runFlowArguments,
     call: (args) => {
       const flowId = text(args["flowId"])
       if (flowId === undefined) return Effect.succeed(missingArgument("flowId"))
@@ -518,13 +518,15 @@ export const supportedTools: ReadonlyArray<Tool> = [
 ]
 
 /**
- * The ten 0.x tool names rc.0 answers with an `unsupported` envelope, and the
+ * The retired tool names rc.0 answers with an `unsupported` envelope, and the
  * reason each gives.
  *
  * @category constants
  * @since 1.0.0
  */
 export const unsupportedReasons: ReadonlyArray<readonly [name: string, reason: string]> = [
+  ["list_workflows", "renamed to list_flows; use list_flows"],
+  ["run_workflow", "renamed to run_flow; use run_flow with flowId"],
   ["revert_attempt", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
   ["fork_run", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
   ["replay_run", "time travel is a library API (@smthrs/time-travel) and is not composed into the CLI"],
@@ -549,7 +551,7 @@ export const unsupportedTools: ReadonlyArray<Tool> = unsupportedReasons.map(([na
     name,
     description: `Not available in 1.0.0-rc.0: ${reason}.`,
     readOnly: true,
-    schema: emptyArguments,
+    schema: name === "run_workflow" ? runFlowArguments : emptyArguments,
     call: () =>
       Effect.succeed(
         failed(
