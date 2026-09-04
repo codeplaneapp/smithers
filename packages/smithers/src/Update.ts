@@ -7,8 +7,8 @@
  * installs, and got it wrong often enough that the honest answer is to print
  * the command for the package manager the operator actually uses.
  *
- * A release candidate publishes under the `rc` tag, so the comparison is
- * against `rc` first and `latest` second: an rc.0 install told about a 0.35
+ * A release candidate publishes under the `next` tag, so the comparison is
+ * against `next` first and `latest` second: an rc.0 install told about a 0.35
  * `latest` would be told to downgrade.
  *
  * @since 1.0.0
@@ -39,7 +39,7 @@ export const registryUrl = `https://registry.npmjs.org/-/package/${packageName}/
 export interface Status {
   readonly current: string
   readonly available: string | undefined
-  readonly tag: "rc" | "latest" | undefined
+  readonly tag: "next" | "latest" | undefined
   readonly upToDate: boolean
   readonly install: string | undefined
 }
@@ -83,8 +83,8 @@ export const isNewer = (candidate: string, current: string): boolean => {
  * @since 1.0.0
  */
 export const compare = (current: string, tags: Readonly<Record<string, string>>): Status => {
-  const candidates: ReadonlyArray<readonly ["rc" | "latest", string | undefined]> = [
-    ["rc", tags["rc"]],
+  const candidates: ReadonlyArray<readonly ["next" | "latest", string | undefined]> = [
+    ["next", tags["next"]],
     ["latest", tags["latest"]]
   ]
   for (const [tag, version] of candidates) {

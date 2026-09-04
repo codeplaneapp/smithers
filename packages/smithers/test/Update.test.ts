@@ -28,20 +28,20 @@ describe("version comparison", () => {
 })
 
 describe("the status", () => {
-  it("prefers the rc tag, so a candidate is never told to downgrade", () => {
-    const status = Update.compare("1.0.0-rc.0", { latest: "0.35.0", rc: "1.0.0-rc.1" })
+  it("prefers the next tag, so a candidate is never told to downgrade", () => {
+    const status = Update.compare("1.0.0-rc.0", { latest: "0.35.0", next: "1.0.0-rc.1" })
 
-    expect(status).toMatchObject({ available: "1.0.0-rc.1", tag: "rc", upToDate: false })
+    expect(status).toMatchObject({ available: "1.0.0-rc.1", tag: "next", upToDate: false })
     expect(status.install).toBe("npm install -g @smthrs/cli@1.0.0-rc.1")
   })
 
-  it("falls through to latest when the rc tag has nothing newer", () => {
-    expect(Update.compare("1.0.0-rc.0", { latest: "1.0.0", rc: "1.0.0-rc.0" }))
+  it("falls through to latest when the next tag has nothing newer", () => {
+    expect(Update.compare("1.0.0-rc.0", { latest: "1.0.0", next: "1.0.0-rc.0" }))
       .toMatchObject({ available: "1.0.0", tag: "latest" })
   })
 
   it("reports up to date when neither tag is newer", () => {
-    const status = Update.compare("1.0.0-rc.1", { latest: "0.35.0", rc: "1.0.0-rc.1" })
+    const status = Update.compare("1.0.0-rc.1", { latest: "0.35.0", next: "1.0.0-rc.1" })
 
     expect(status).toEqual({
       current: "1.0.0-rc.1",
@@ -54,9 +54,9 @@ describe("the status", () => {
   })
 
   it("renders the current state and the install command", () => {
-    expect(Update.render(Update.compare("1.0.0-rc.1", { rc: "1.0.0-rc.1" })))
+    expect(Update.render(Update.compare("1.0.0-rc.1", { next: "1.0.0-rc.1" })))
       .toBe("@smthrs/cli 1.0.0-rc.1 is current.")
-    expect(Update.render(Update.compare("1.0.0-rc.0", { rc: "1.0.0-rc.1" })))
+    expect(Update.render(Update.compare("1.0.0-rc.0", { next: "1.0.0-rc.1" })))
       .toContain("npm install -g @smthrs/cli@1.0.0-rc.1")
   })
 
