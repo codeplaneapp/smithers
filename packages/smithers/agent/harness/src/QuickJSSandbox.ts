@@ -1214,7 +1214,21 @@ const openRealm = (
 
         const outcome = yield* Sandbox.driveCell({
           pending,
-          ...(evaluation.mint === undefined ? {} : { mint: evaluation.mint }),
+          ...(evaluation.mint === undefined
+            ? {}
+            : {
+              mint: (mint: Sandbox.Mint) =>
+                Effect.suspend(() => {
+                  const pausedAt = clock.now()
+                  return evaluation.mint!(mint).pipe(
+                    Effect.onExit(() =>
+                      Effect.sync(() => {
+                        clockBase += clock.now() - pausedAt
+                      })
+                    )
+                  )
+                })
+            }),
           ...(evaluation.bounded === undefined ? {} : { bounded: evaluation.bounded }),
           flush: () => poll(),
           finished: () => {

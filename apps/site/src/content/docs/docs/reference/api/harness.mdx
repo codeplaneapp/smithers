@@ -108,7 +108,7 @@ disable them.
 | `calls`       | 64      | per frame   | Flow calls one cell may make. A `ctx.checkpoint()` mint settles on the same channel and counts.                  |
 | `memoryBytes` | 128 MiB | per **run** | What the realm's own names hold, weighed by the panel probe at each frame's close.                               |
 | `steps`       | 1,000   | per frame   | Interrupt checks, not bytecode operations. At least `Sandbox.minimumSteps`.                                      |
-| `timeMs`      | 30,000  | per frame   | The cell's own JavaScript time. Time suspended in a `ctx.call` does not count. At least `Sandbox.minimumTimeMs`. |
+| `timeMs`      | 30,000  | per frame   | The cell's own JavaScript time. Time suspended in a `ctx.call` or `ctx.checkpoint()` does not count. At least `Sandbox.minimumTimeMs`. |
 | `totalMs`     | 900,000 | per frame   | Whole-evaluation time, host calls included. The backstop for a call that never settles.                          |
 | `callMs`      | 120,000 | per call    | Wall-clock time one flow call may take before it settles as a catchable timeout.                                 |
 

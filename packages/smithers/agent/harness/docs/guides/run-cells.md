@@ -133,14 +133,14 @@ is per frame: the host clears it as the next frame opens.
 `Sandbox.defaultLimits` fills every ceiling a caller omits, and a partial
 override cannot disable the others:
 
-| Limit         | Default | Scope                                                                                |
-| ------------- | ------- | ------------------------------------------------------------------------------------ |
-| `calls`       | 64      | Per frame. A `ctx.checkpoint()` mint counts.                                         |
-| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close.                           |
-| `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                |
-| `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call`. |
-| `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                               |
-| `callMs`      | 120,000 | Per call; settles an overrunning call as a catchable `timeout`.                      |
+| Limit         | Default | Scope                                                                                                      |
+| ------------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `calls`       | 64      | Per frame. A `ctx.checkpoint()` mint counts.                                                               |
+| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close.                                                 |
+| `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                                      |
+| `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call` or `ctx.checkpoint()`. |
+| `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                                                     |
+| `callMs`      | 120,000 | Per call; settles an overrunning call as a catchable `timeout`.                                            |
 
 `steps` and `timeMs` have typed floors (`Sandbox.minimumSteps`,
 `Sandbox.minimumTimeMs`), and `memoryBytes` has `Sandbox.minimumMemoryBytes`:

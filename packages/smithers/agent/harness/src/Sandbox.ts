@@ -192,8 +192,8 @@ export interface Limits {
    * {@link minimumTimeMs}.
    *
    * This bounds the cell's own JavaScript execution. Time spent suspended in
-   * an outstanding `ctx.call` does not count: a host call's duration belongs
-   * to the flow that runs it, and charging it here rejected every cell that
+   * an outstanding `ctx.call` or `ctx.checkpoint()` does not count: host work
+   * belongs to the boundary that runs it, and charging it here rejected every cell that
    * awaited a real test run — 57 of the 62 rejected frames in the first
    * SWE-bench benchmark were legitimate long `bash` calls hitting this clock.
    */

@@ -46,6 +46,7 @@ const wideCatalog = (
 
 interface Options {
   readonly call?: Sandbox.Handler | undefined
+  readonly mint?: Sandbox.Minter | undefined
   readonly limits?: Sandbox.Limits | undefined
 }
 
@@ -70,6 +71,7 @@ const inRealm = (
       cell: Cell.source(text),
       frame: 0,
       call: options.call ?? succeeds,
+      ...(options.mint === undefined ? {} : { mint: options.mint }),
       limits: options.limits
     })
     return frame.outcome
@@ -199,6 +201,44 @@ describe("QuickJSSandbox limits", () => {
       })
     )
   }, 60_000)
+
+  it("does not charge checkpoint suspension to the cell compute clock", async () => {
+    let now = 0
+    const outcome = await Effect.gen(function*() {
+      const sandbox = yield* QuickJSSandbox.makeWithClock
+      const limits = { timeMs: 1_000, steps: Number.MAX_SAFE_INTEGER }
+      const realm = yield* sandbox.openRealm!({ flows, limits })
+      const frame = yield* realm.evaluate({
+        cell: Cell.source(
+          `const checkpoint = await ctx.checkpoint()
+           let sum = 0
+           for (let index = 0; index < 100000; index++) sum += index
+           ctx.done(checkpoint.checkpoint + String(sum).slice(0, 0))`
+        ),
+        frame: 0,
+        call: succeeds,
+        mint: () =>
+          Effect.sync(() => {
+            now += 5_000
+            return new Cell.CallResult({
+              outcome: "success",
+              value: Cell.checkpoint("slow-checkpoint")
+            })
+          }),
+        limits
+      })
+      return frame.outcome
+    }).pipe(
+      Effect.provideService(QuickJSSandbox.ComputeClock, { now: () => now }),
+      Effect.scoped,
+      Effect.runPromise
+    )
+
+    expect(outcome).toMatchObject({
+      _tag: "settled",
+      transition: { _tag: "complete", output: "slow-checkpoint" }
+    })
+  })
 
   it("charges the prelude to the step budget, so a realm too small for its own catalog never opens", async () => {
     // The catalog is installed by interpreted code, and it is installed once
