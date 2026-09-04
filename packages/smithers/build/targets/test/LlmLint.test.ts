@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import { execFile } from "node:child_process"
+import { execFile, spawnSync } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -71,6 +71,56 @@ const scriptCli = async (name: string, body: string): Promise<string> => {
   await Fs.writeFile(executable, `#!/usr/bin/env node\n${body}\n`, "utf8")
   await Fs.chmod(executable, 0o755)
   return executable
+}
+
+const isErrno = (cause: unknown, code: string): boolean =>
+  typeof cause === "object" && cause !== null && "code" in cause && cause.code === code
+
+/** Whether the host still knows the pid: `kill -0`, so a zombie counts until it is reaped. */
+const processIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (cause) {
+    return !isErrno(cause, "ESRCH")
+  }
+}
+
+/**
+ * Whether the pid's work has ended. A killed orphan lingers as a zombie until
+ * pid 1 reaps it — longer than any polite wait on a loaded machine — and a
+ * zombie's work is over, so `Z` counts as ended while a live state is a real
+ * survivor.
+ */
+const processHasEnded = (pid: number): boolean => {
+  if (!processIsAlive(pid)) return true
+  const state = spawnSync("ps", ["-o", "state=", "-p", String(pid)]).stdout?.toString().trim() ?? ""
+  return state === "" || state.startsWith("Z")
+}
+
+/** Polls a host-visible condition in real time; the delay only spaces bounded retries. */
+const waitFor = async (condition: () => boolean, description: string, timeoutMs = 5_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${description}`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
+/**
+ * The pids a kill fixture renames into place: the model CLI the review owns,
+ * then the descendant that must not survive it. The fixture writes the pair to
+ * a temporary path and renames it, so a read is never torn.
+ */
+const readPids = async (path: string, timeoutMs = 15_000): Promise<ReadonlyArray<number>> => {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const text = await Fs.readFile(path, "utf8").catch(() => "")
+    const pids = text.split("\n").filter((line) => line !== "").map(Number)
+    if (pids.length === 2 && pids.every(Number.isInteger)) return pids
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for the fixture pids in ${path}`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
 }
 
 /** Runs one review with a real executable standing in for git on PATH. */
@@ -814,16 +864,23 @@ describe("LlmLint.review resource and filesystem boundaries", () => {
 
   it.skipIf(process.platform === "win32")("kills the model process group when its effect is interrupted", async () => {
     await write("src/a.ts", "export const a = 3\n")
-    const started = NodePath.join(root, "model-started")
-    const marker = NodePath.join(root, "escaped-after-interrupt")
-    const childProgram = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "x"), 250)`
+    // The grandchild parks on a fifo nobody ever opens for writing, so it sits
+    // in `open(2)` and a signal is the only thing that can end it. A
+    // grandchild on a timer instead raced the interrupt: under load the timer
+    // fired first, and the side effect it wrote read back as a process group
+    // the interrupt had failed to kill.
+    const gate = NodePath.join(root, "interrupt-gate")
+    expect(spawnSync("mkfifo", [gate]).status).toBe(0)
+    const pidFile = NodePath.join(root, "model-pids")
+    const partial = `${pidFile}.partial`
     const executable = await scriptCli(
       "interrupt-tree",
       `import { spawn } from "node:child_process"\n` +
-        `import { writeFileSync } from "node:fs"\n` +
+        `import { renameSync, writeFileSync } from "node:fs"\n` +
         "process.stdin.resume()\n" +
-        `writeFileSync(${JSON.stringify(started)}, "x")\n` +
-        `spawn(process.execPath, ["-e", ${JSON.stringify(childProgram)}], { stdio: "ignore" })\n` +
+        `const child = spawn("cat", [${JSON.stringify(gate)}], { stdio: "ignore" })\n` +
+        `writeFileSync(${JSON.stringify(partial)}, process.pid + "\\n" + child.pid + "\\n")\n` +
+        `renameSync(${JSON.stringify(partial)}, ${JSON.stringify(pidFile)})\n` +
         "setInterval(() => undefined, 1_000)"
     )
     const controller = new AbortController()
@@ -831,24 +888,38 @@ describe("LlmLint.review resource and filesystem boundaries", () => {
       LlmLint.review({ workspaceRoot: root, executable }, payload()),
       { signal: controller.signal }
     )
-    // Booting the fake model CLI is a node process spawn plus a module load.
-    // On a machine running the whole workspace test matrix at once that takes
-    // seconds, so the wait is a deadline well inside the 30 s test timeout
-    // rather than a fixed attempt count; it still returns the moment the
-    // marker lands.
-    const startedBy = Date.now() + 20_000
-    while (Date.now() < startedBy) {
-      if (await Fs.stat(started).then(() => true, () => false)) break
-      await new Promise((resolve) => setTimeout(resolve, 10))
+    const started: Array<number> = []
+    try {
+      // Booting the fake model CLI is a node process spawn plus a module load.
+      // On a machine running the whole workspace test matrix at once that takes
+      // seconds, so the wait is a deadline well inside the 30 s test timeout
+      // rather than a fixed attempt count; it still returns the moment the pids
+      // land.
+      const [model = Number.NaN, grandchild = Number.NaN] = await readPids(pidFile)
+      started.push(model, grandchild)
+      expect([model, grandchild].every(Number.isInteger), "the fixture printed a model and a grandchild pid")
+        .toBe(true)
+      // The interrupt must be the only thing that can end this pair. A fixture
+      // that had finished on its own would turn a kill that did nothing into a
+      // kill that looks like it worked.
+      expect(processHasEnded(model), `the model process ${model} ended before the interrupt was issued`).toBe(false)
+      expect(processHasEnded(grandchild), `the grandchild ${grandchild} ended before the interrupt was issued`)
+        .toBe(false)
+      controller.abort()
+      await running.catch(() => undefined)
+      // The group is gone, asked of the host rather than inferred from a side
+      // effect that never happened.
+      await waitFor(() => processHasEnded(model), `the model process ${model} to end`)
+      await waitFor(() => processHasEnded(grandchild), `the escaped grandchild ${grandchild} to end`)
+    } finally {
+      for (const pid of started) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {
+          // Already gone, which is the point.
+        }
+      }
     }
-    expect(await Fs.stat(started).then(() => true, () => false)).toBe(true)
-    controller.abort()
-    await running.catch(() => undefined)
-    // The escaped grandchild writes its marker 250 ms after it is spawned, so
-    // the settle window has to outlast that timer under load for the absence
-    // of the marker to prove the process group was killed.
-    await new Promise((resolve) => setTimeout(resolve, 1_500))
-    await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
   })
 
   it("withholds configured and built-in cache credentials from the model", async () => {
