@@ -1,11 +1,11 @@
 ---
 title: "Content addressing"
-description: "Step keys are derived from canonical content, so renaming an activity cannot corrupt replay and a changed declaration re-keys exactly its dependent cone."
+description: "Step keys combine canonical content with the declaration identity needed to prevent collisions, while caller-owned keys can opt into rename stability."
 sidebar:
   order: 3
 ---
 
-A durable engine faces an identity question on every step: when this run resumes, which recorded result belongs to this step? Effect's own workflow package answers with the activity's name, so renaming an activity corrupts replay: the resumed run asks for a name nothing was recorded under. Smithers answers with content. A step is keyed by what it is, not by what it is called.
+A durable engine faces an identity question on every step: when this run resumes, which recorded result belongs to this step? Smithers answers with canonical content plus the declaration coordinates needed to keep distinct actions apart. A name is durable identity for ordinal actions and for string-keyed sealed actions; callers that need rename-stable sealed identity must supply the object form of `idempotencyKey`.
 
 ## Keys are derived from canonical content
 
@@ -24,7 +24,9 @@ Canonicalization is what makes the hash meaningful across hosts and across time:
 
 ## What folds into a step key
 
-A call node's key material folds the declared schemas of the callee as their JSON Schema documents, so a change to what a callee accepts or produces re-keys the call. A plan node's key is a function of what the node consumes: an edited declaration re-keys that node and its dependent cone, and nothing else. Structural names are lookup addresses only and never enter the hashed value, so renaming an action or a node re-keys nothing.
+A call node's key material folds the declared schemas of the callee as their JSON Schema documents, so a change to what a callee accepts or produces re-keys the call. A plan node's key is a function of what the node consumes: an edited declaration re-keys that node and its dependent cone, and nothing else.
+
+Action dispatches add one identity boundary. Non-sealed actions use a run-local ordinal allocated under a scope containing the action name, optional idempotency material, and structural call site; the name prevents two otherwise indistinguishable declarations from sharing a counter. A sealed action with a string `idempotencyKey` folds the action name, key string, and declared schemas together, so two actions that both choose `"row-1"` cannot replay each other's outcomes. Renaming either form therefore re-keys it and re-executes it on resume. For a sealed action whose identity must survive a rename, use an object `idempotencyKey`: that object is caller-owned key material and the engine does not add the action name, although it still adds cache-environment and file-boundary facts.
 
 The reference itself is hashed with its tag, so a pending reference and a resolved reference to the same dependency cannot collide. A dependency digest is resolved as an own property, so a reference naming `toString` or `constructor` is a refusal, not a colliding key.
 
@@ -52,7 +54,7 @@ Derivation fails with `KeyDerivationError` carrying a stable code: `canonicaliza
 
 Canonicalization inherits JSON's erasures: negative zero canonicalizes as zero, an undefined object member is omitted, and an undefined array element canonicalizes as null. A distinction that matters to identity has to be encoded explicitly.
 
-Content addressing trades a rename's convenience for replay's integrity. Keying on content means a stale result can never be served under a fresh declaration; it also means a refactor that changes payloads re-executes steps a name-keyed system would have served. The engine chooses re-execution, because a wrong replay is silent and a re-execution is visible.
+Content addressing trades some refactor convenience for replay integrity. Changed payloads and renamed name-scoped actions re-execute rather than risk serving a result from another declaration. When an author deliberately owns the complete stable identity through an object-form sealed key, renames can replay safely because separating that operation from every other one is then the caller's responsibility. A wrong replay is silent and a re-execution is visible, so the default boundary favors re-execution.
 
 ## Related
 

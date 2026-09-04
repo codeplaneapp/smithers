@@ -15,7 +15,7 @@ One sentence per term, using the same names the prose uses.
 | [capability](/docs/concepts/kernel/) | One member of the closed `Capability.Action` vocabulary (such as `fs:read`, `net:get`, or `model:call`), carrying the exact resource a grant authorizes. |
 | [cell](/docs/concepts/agent-runtime/) | The JavaScript program the model emits for one frame, evaluated in a persistent QuickJS realm whose only authority is `ctx.call`. |
 | [compensation](/docs/concepts/time-travel/) | The undo of an effect inside its declared boundary, performed by registered handlers when a rewind crosses the record. |
-| [content addressing](/docs/concepts/content-addressing/) | Keying a step by its canonical content rather than its name, so a rename cannot corrupt replay and a changed declaration re-keys exactly its dependent cone. |
+| [content addressing](/docs/concepts/content-addressing/) | Keying a step from canonical content plus declaration identity. Names scope ordinal and string-keyed actions; an object-form sealed key is the explicit rename-stable form. |
 | control plane | The `Control` service and everything serving it: `plan`, `run`, `approve`, `deny`, `steer`, `signal`, `cancel`, `resume`, `list`, and `watch` over durable runs. |
 | deferred | A durable wait point (`DurableDeferred`) that parks a run until another process completes it by token, first writer wins. |
 | detached run | A run launched with `smthrs up -d` in a child process that outlives the launcher, reported admitted once its run row is durable. |
@@ -48,7 +48,7 @@ One sentence per term, using the same names the prose uses.
 | [seat](/docs/concepts/agent-runtime/) | A model assignment in two halves: the declared string (such as `anthropic:claude-sonnet-4-5`) and the resolved credentialed model a `SeatResolver` returns. |
 | signal | A durable JSON delivery to a run's named wait point, made with `smthrs signal` or `Control.signal`. |
 | [step](/docs/concepts/durable-execution/) | One journaled unit of work in a run, committed in a single transaction together with the state it describes. |
-| [step key](/docs/concepts/content-addressing/) | The content-addressed identity of a step: a `key1_`-prefixed SHA-256 over the canonical content, so renaming an action re-keys nothing. |
+| [step key](/docs/concepts/content-addressing/) | The `key1_`-prefixed SHA-256 identity of a step. Its canonical material includes an action name for ordinal and string-keyed actions, but not for caller-owned object-keyed sealed actions. |
 | steering | A durable, attributed message to a live run (a body, a seat, a thinking level, or a tool set) that the next turn picks up. |
 | suspended | The result a flow settles with when it parks on a durable wait and will be re-driven. |
 | [sync](/docs/concepts/sync/) | Read-only journal replication: `Sync.Read` pages entries and `Sync.Subscribe` streams them to followers under a credit bound. |
