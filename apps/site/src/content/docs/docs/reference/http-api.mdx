@@ -38,6 +38,18 @@ One shared bearer authenticates every mount and binds one principal. There are n
 
 Two mounts are deliberate exceptions to edge authentication. `POST /rpc` authenticates in band through the `ControlRpcs.ControlAuth` middleware, whose refusal is the typed control error `Unauthorized`, not an edge status; the `/rpc/ws` upgrade stays edge-authenticated because a refused handshake has no RPC channel to answer on. `GET /health` is unauthenticated so a supervisor can ask which workspace a gateway belongs to before deciding to keep or replace it. The local request guard answers `invalid_host` (421) or `invalid_origin` (403) before those exceptions. On the edge-authenticated paths the remaining refusal vocabulary is `unauthorized` (401) without the credential, `malformed_request` (400) for a body carrying no RPC request message, and `request_too_large` (413) for a body over the limit (default 1 MiB).
 
+## Worker relay authentication
+
+When the web Worker's `GATEWAY_UPSTREAM_URL` is configured, its gateway relay
+requires a validated, allowlisted session before attaching the deployment's
+`GATEWAY_AUTH_TOKEN` or configured session identity. This includes HTTP RPC
+and WebSocket upgrades. A missing or invalid session receives 401; an account
+outside the allowlist receives 403. If `IDENTITY_UPSTREAM_URL` is unset, the
+relay fails closed with 501.
+
+Only ordinary `GET` and `HEAD` requests to the exact `/health` mount remain
+anonymous. A WebSocket upgrade at that path still requires a session.
+
 ## The RPC surface
 
 Three RPC groups share the gateway. The sources pin the procedure names, the error vocabularies, and the subscription frame tags; row-level payload shapes are not pinned here and are decoded by selector through `GatewaySchema.rowSchemaFor`.

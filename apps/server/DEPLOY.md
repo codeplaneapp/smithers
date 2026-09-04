@@ -77,6 +77,21 @@ Deploying this Worker does not deploy them, and a broken sign-in is more
 often theirs than ours. `apps/UPSTREAMS.md` names each one, its source, its
 hostname, and how to deploy it with a receipt.
 
+### The engine gateway relay needs an identity upstream
+
+When `GATEWAY_UPSTREAM_URL` is set, this Worker relays `/rpc`, `/projections`,
+`/sync`, and any WebSocket upgrade to the engine gateway under its own
+`GATEWAY_AUTH_TOKEN`, which that gateway honours as the operator. Every one of
+those relays therefore requires the same validated, allowlisted session the
+workflow routes require, so `IDENTITY_UPSTREAM_URL` must be set on any
+deployment that sets `GATEWAY_UPSTREAM_URL`.
+
+Configuring the gateway upstream without the identity upstream fails closed:
+the relay answers `501` naming `IDENTITY_UPSTREAM_URL`, never an anonymous
+forward. Ordinary `GET` and `HEAD` requests to the exact `/health` mount stay
+anonymous, so a supervisor can still ask which workspace a gateway belongs to.
+A WebSocket upgrade at that path still requires a session.
+
 ## Rollback
 
 Cloudflare Workers keep prior versions. To roll back to the version recorded

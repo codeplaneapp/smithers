@@ -381,18 +381,161 @@ describe("smithers mvp worker", () => {
     }
   })
 
-  test("gateway seam strips client identity headers and re-injects the session's", async () => {
-    let seen: Headers | undefined
+  test("gateway RPC refuses an anonymous relay before spending the Worker's gateway credential", async () => {
+    let gatewayCalls = 0
     const env: WorkerEnv = {
       ...assetsEnv(),
       GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_SESSION_USER_ID: "user-123",
-      GATEWAY_SESSION_USER_ROLE: "member",
-      GATEWAY_SESSION_USER_SCOPES: "run:read run:write"
+      GATEWAY_AUTH_TOKEN: "gateway-service-token",
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
+    }
+    await withMockedFetch(
+      (request) => {
+        const hostname = new URL(request.url).hostname
+        if (hostname === "identity.test") return new Response("{}", { status: 401 })
+        if (hostname === "gateway.test") {
+          gatewayCalls += 1
+          return new Response("{}", { status: 200 })
+        }
+        return undefined
+      },
+      async () => {
+        for (
+          const path of ["/rpc", "/rpc/", "/rpc;transport-parameter", "/projections", "/sync", "/healthz"]
+        ) {
+          const response = await worker.fetch(post(path, {}), env)
+          expect([path, response.status]).toEqual([path, 401])
+        }
+        // A socket upgrade carries the same operator authority as `POST /rpc`
+        // and is a `GET`, so a method-shaped gate relays it anonymously. The
+        // Worker treats any upgrade as gateway-bound, so the path does not
+        // narrow this either.
+        for (const path of ["/rpc/ws", "/projections/ws", "/sync/ws", "/anything"]) {
+          const response = await worker.fetch(
+            new Request(`https://mvp.test${path}`, { headers: { upgrade: "websocket" } }),
+            env
+          )
+          expect([path, response.status]).toEqual([path, 401])
+        }
+      }
+    )
+    expect(gatewayCalls).toBe(0)
+  })
+
+  test("the gateway relay keeps GET /health anonymous, and only that exact mount", async () => {
+    let healthCalls = 0
+    const env: WorkerEnv = {
+      ...assetsEnv(),
+      GATEWAY_UPSTREAM_URL: "https://gateway.test",
+      GATEWAY_AUTH_TOKEN: "gateway-service-token",
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
+    }
+    await withMockedFetch(
+      (request) => {
+        const hostname = new URL(request.url).hostname
+        if (hostname === "identity.test") return new Response("{}", { status: 401 })
+        if (hostname === "gateway.test") {
+          healthCalls += 1
+          return new Response(JSON.stringify({ workspace: "local" }), { status: 200 })
+        }
+        return undefined
+      },
+      async () => {
+        // A supervisor asks which workspace a gateway belongs to before it
+        // decides to keep or replace it, and it holds no session to do it.
+        const probe = await worker.fetch(new Request("https://mvp.test/health"), env)
+        expect(probe.status).toBe(200)
+        expect(healthCalls).toBe(1)
+        // The route table matches `/health` by prefix. The anonymous door is
+        // the exact mount, never everything the prefix admits.
+        const upgraded = await worker.fetch(
+          new Request("https://mvp.test/health", { headers: { upgrade: "websocket" } }),
+          env
+        )
+        expect(upgraded.status).toBe(401)
+        expect(healthCalls).toBe(1)
+      }
+    )
+  })
+
+  test("gateway RPC fails closed without an identity service", async () => {
+    let gatewayCalls = 0
+    await withMockedFetch(
+      () => {
+        gatewayCalls += 1
+        return new Response("{}", { status: 200 })
+      },
+      async () => {
+        const response = await worker.fetch(post("/rpc", {}), {
+          ...assetsEnv(),
+          GATEWAY_UPSTREAM_URL: "https://gateway.test",
+          GATEWAY_AUTH_TOKEN: "gateway-service-token"
+        })
+        expect(response.status).toBe(501)
+        expect(await response.text()).toContain("IDENTITY_UPSTREAM_URL")
+      }
+    )
+    expect(gatewayCalls).toBe(0)
+  })
+
+  test("gateway RPC refuses an invalid or unallowlisted session and identity failures", async () => {
+    const env: WorkerEnv = {
+      ...assetsEnv(),
+      GATEWAY_UPSTREAM_URL: "https://gateway.test",
+      GATEWAY_AUTH_TOKEN: "gateway-service-token",
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
+    }
+    for (
+      const [identityStatus, identityBody, expectedStatus] of [
+        [401, {}, 401],
+        [200, { login: "will", allowlisted: false }, 403],
+        [200, {}, 502],
+        [503, {}, 502]
+      ] as const
+    ) {
+      let gatewayCalls = 0
+      await withMockedFetch(
+        (request) => {
+          if (new URL(request.url).hostname === "identity.test") {
+            expect(request.headers.get("cookie")).toBe("smithers_session=untrusted")
+            return new Response(JSON.stringify(identityBody), { status: identityStatus })
+          }
+          gatewayCalls += 1
+          return new Response("{}", { status: 200 })
+        },
+        async () => {
+          const request = post("/rpc", {})
+          request.headers.set("cookie", "smithers_session=untrusted")
+          const response = await worker.fetch(request, env)
+          expect(response.status).toBe(expectedStatus)
+        }
+      )
+      expect(gatewayCalls).toBe(0)
+    }
+  })
+
+  test("gateway RPC validates a session before attaching the Worker's gateway credential", async () => {
+    let seen: Headers | undefined
+    let validations = 0
+    const env: WorkerEnv = {
+      ...assetsEnv(),
+      GATEWAY_UPSTREAM_URL: "https://gateway.test",
+      GATEWAY_AUTH_TOKEN: "gateway-service-token",
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
     }
     const originalFetch = globalThis.fetch
-    globalThis.fetch = (async (input: unknown) => {
-      const request = input as Request
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(String(input), init)
+      if (new URL(request.url).hostname === "identity.test") {
+        validations += 1
+        expect(new URL(request.url).pathname).toBe("/api/identity/validate")
+        expect(request.headers.get("cookie")).toBe("smithers_session=abc")
+        expect(request.headers.get("authorization")).toBeNull()
+        return new Response(JSON.stringify({ login: "will", allowlisted: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      }
       if (new URL(request.url).hostname === "gateway.test") {
         seen = request.headers
         return new Response("{}", { status: 200 })
@@ -408,20 +551,73 @@ describe("smithers mvp worker", () => {
           "x-user-scopes": "admin:*",
           "x-user-role": "admin",
           "x-smithers-token-id": "forged",
-          authorization: "Bearer stolen"
+          authorization: "Bearer stolen",
+          cookie: "smithers_session=abc"
         },
         body: "{}"
       })
       const response = await worker.fetch(request, env)
       expect(response.status).toBe(200)
-      expect(seen?.get("x-user-id")).toBe("user-123")
-      expect(seen?.get("x-user-role")).toBe("member")
-      expect(seen?.get("x-user-scopes")).toBe("run:read run:write")
+      expect(validations).toBe(1)
+      expect(seen?.get("authorization")).toBe("Bearer gateway-service-token")
+      expect(seen?.get("x-user-id")).toBeNull()
+      expect(seen?.get("x-user-role")).toBeNull()
+      expect(seen?.get("x-user-scopes")).toBeNull()
       expect(seen?.get("x-smithers-token-id")).toBeNull()
-      expect(seen?.get("authorization")).toBeNull()
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+
+  /*
+   * The placeholder-session branch is the other half of `gatewayIdentityHeaders`,
+   * and it injects the caller's identity rather than a bearer. The session gate
+   * runs ahead of it too: which identity the relay attaches never decides
+   * whether the relay happens.
+   */
+  test("a placeholder-session deployment still injects its identity, and still needs a session", async () => {
+    const env: WorkerEnv = {
+      ...assetsEnv(),
+      GATEWAY_UPSTREAM_URL: "https://gateway.test",
+      GATEWAY_SESSION_USER_ID: "user-123",
+      GATEWAY_SESSION_USER_ROLE: "member",
+      GATEWAY_SESSION_USER_SCOPES: "run:read run:write",
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
+    }
+    let seen: Headers | undefined
+    let gatewayCalls = 0
+    let allowlisted = false
+    await withMockedFetch(
+      (request) => {
+        if (new URL(request.url).hostname === "identity.test") {
+          return new Response(JSON.stringify({ login: "will", allowlisted }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        }
+        gatewayCalls += 1
+        seen = request.headers
+        return new Response("{}", { status: 200 })
+      },
+      async () => {
+        const sessioned = (): Request => {
+          const request = post("/rpc", {})
+          request.headers.set("cookie", "smithers_session=abc")
+          request.headers.set("x-user-id", "evil")
+          return request
+        }
+        expect((await worker.fetch(sessioned(), env)).status).toBe(403)
+        expect(gatewayCalls).toBe(0)
+
+        allowlisted = true
+        expect((await worker.fetch(sessioned(), env)).status).toBe(200)
+        expect(gatewayCalls).toBe(1)
+        expect(seen?.get("x-user-id")).toBe("user-123")
+        expect(seen?.get("x-user-role")).toBe("member")
+        expect(seen?.get("x-user-scopes")).toBe("run:read run:write")
+        expect(seen?.get("authorization")).toBeNull()
+      }
+    )
   })
 })
 

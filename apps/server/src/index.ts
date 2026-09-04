@@ -947,18 +947,28 @@ const gatewayIdentityHeaders = (env: WorkerEnv): Record<string, string> | Respon
 }
 
 /**
- * Forward a gateway-bound request to the per-session upstream, stripping every
- * client-supplied identity header and re-injecting identity only from the
- * validated session (here: deployment-configured placeholder values).
+ * Validate the caller before attaching the deployment's gateway identity.
+ * The shared relay guards every RPC alias and WebSocket upgrade, since its
+ * service credential grants the upstream gateway's operator authority.
  */
-const proxyToGateway = (request: Request, env: WorkerEnv): Promise<Response> => {
+const proxyToGateway = async (request: Request, env: WorkerEnv): Promise<Response> => {
   const upstream = env.GATEWAY_UPSTREAM_URL?.trim()
-  if (upstream === undefined || upstream === "") return Promise.resolve(gatewayNotConfigured())
-
-  const identity = gatewayIdentityHeaders(env)
-  if (identity instanceof Response) return Promise.resolve(identity)
+  if (upstream === undefined || upstream === "") return gatewayNotConfigured()
 
   const url = new URL(request.url)
+  // Supervisors probe workspace identity without a session. Keep that
+  // exception confined to the exact health mount, excluding upgrades.
+  const anonymousProbe = url.pathname === "/health" &&
+    (request.method === "GET" || request.method === "HEAD") &&
+    request.headers.get("upgrade") === null
+  if (!anonymousProbe) {
+    const session = await requireWorkflowSession(request, env)
+    if (session instanceof Response) return session
+  }
+
+  const identity = gatewayIdentityHeaders(env)
+  if (identity instanceof Response) return identity
+
   const target = new URL(url.pathname + url.search, upstream)
   const headers = new Headers(request.headers)
   for (const name of STRIPPED_IDENTITY_HEADERS) headers.delete(name)
@@ -2391,6 +2401,8 @@ export default {
     if (url.pathname.startsWith(ADMIN_ROUTE_PREFIX)) {
       return handleAdmin(request, env, url)
     }
+    // `proxyToGateway` requires the validated session itself, beside the
+    // service credential that relay attaches.
     if (gatewayBound) return proxyToGateway(request, env)
     // Any other /api/* path is an unknown route: the same canonical 404 the
     // admin surface answers non-admins with, so nothing is enumerable.
