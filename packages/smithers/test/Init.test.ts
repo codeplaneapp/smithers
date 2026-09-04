@@ -5,6 +5,7 @@
  * and `init.e2e.test.js`): run state must never reach a commit, the edit is
  * idempotent, and a directory that is not a repository is left alone.
  */
+import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -26,6 +27,17 @@ afterEach(() => {
 })
 
 describe("the ignore rule", () => {
+  it("keeps repository Grafana state out of git without hiding its configuration", () => {
+    const state = ["apps/observability/data/grafana.db", "apps/observability/data/plugins/cache.json"]
+    const result = spawnSync("git", ["check-ignore", "--no-index", "--stdin"], {
+      cwd: new URL("../../../", import.meta.url),
+      input: [...state, "apps/observability/docker-compose.yml"].join("\n"),
+      encoding: "utf8"
+    })
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim().split("\n")).toEqual(state)
+  })
+
   it("creates a .gitignore holding .flows/ in a repository without one", () => {
     const root = directory(".git")
 
