@@ -82,8 +82,8 @@ limitation. Use `{ network: true }` only when full network access is intended.
 
 ### What a sandbox admits
 
-Every mechanism hides the workspace, admits exactly the read set, and lets the
-tool write exactly the write set. The read set is what the content key covers
+Inside the workspace, each mechanism limits reads to the admitted read set
+and writes to the admitted write set. The read set includes keyed inputs
 plus the paths a rule discovers for itself:
 
 - the target's expanded declared inputs, the declared outputs of every
@@ -106,10 +106,19 @@ targets, and what a tool writes on its own account: a cargo crate's `target`
 directory, a `Foundry.Build` or `Foundry.Test` rule's `out` and `cache_path`
 as `forge config` resolves them, and `.git` for a submodule checkout.
 
-The confined process gets a private temporary directory and home, so nothing a
-tool caches lands in the real home or the shared temp directory. One host
-cache stays visible, `COREPACK_HOME`, because a `pnpm` on `PATH` is often
-corepack's shim and the program it execs lives there.
+Native confinement does **not** isolate reads outside the workspace. Linux
+binds the host root read-only before hiding the workspace and `/tmp`; macOS
+denies reads only under the workspace. Other host files remain readable,
+including the real home's `.ssh`, `.aws`, and `SMITHERS_HOME` when they are
+outside the hidden roots. A private `HOME` and temporary directory redirect
+writes; they do not hide those original paths or make native builds hermetic.
+`COREPACK_HOME` also remains readable because package-manager shims need it.
+
+This supports host-installed tools, libraries, SDKs, and package-manager stores
+whose complete read dependencies are not declared today. Use the Docker
+mechanism with an image containing the toolchain when host-file read isolation
+is required; only its declared host mounts are exposed. Explicit read mounts
+and symlinks into host stores still expose the files they admit.
 
 Cache keys carry the platform and the architecture, so a result produced on
 one platform is never served to another.

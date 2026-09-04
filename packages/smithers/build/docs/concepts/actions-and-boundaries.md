@@ -179,9 +179,15 @@ A target declaring `services` must also declare `{ network: "loopback" }` or
 Since Linux refuses loopback-only access, a cross-platform service consumer
 must explicitly opt into the full network.
 
-An undeclared read is missing or refused, an undeclared write fails at the
-kernel, and the run fails. The sandbox denies at the kernel, so the witness is
-the tool's own error text; the failure carries the paths that text names and
+An undeclared read **under the workspace** is missing or refused, and an
+undeclared write fails at the kernel. Native sandboxes leave host files outside
+the workspace readable, including `.ssh`, `.aws`, and `SMITHERS_HOME` outside
+hidden roots. Their private `HOME` redirects writes without hiding the original
+home. Linux also hides `/tmp`. Host-installed tools and their undeclared
+library/SDK/store dependencies need those reads today; use a Docker image with
+only the required host mounts when host-file read isolation is required.
+
+For denied operations, the witness is the tool's own error text; the failure carries the paths that text names and
 which side of the boundary each fell on:
 
 ```text

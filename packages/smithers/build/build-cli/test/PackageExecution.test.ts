@@ -1306,6 +1306,31 @@ export const Package = S.Package({ targets: { push } })
 })
 
 describe.runIf(process.platform === "darwin")("sandbox enforcement (macOS)", () => {
+  it("documents the native boundary: host files outside the workspace remain readable", async () => {
+    const root = await temporaryWorkspace()
+    const hostFiles = await temporaryWorkspace()
+    await write(hostFiles, ".ssh/fixture", "synthetic ssh data")
+    await write(hostFiles, ".aws/fixture", "synthetic aws data")
+    await write(hostFiles, "smithers/fixture", "synthetic state")
+    await write(root, "WORKSPACE.ts", workspaceModule())
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const probe = S.Shell.Test({ command: ${
+        JSON.stringify(
+          `cat '${hostFiles}/.ssh/fixture' '${hostFiles}/.aws/fixture' '${hostFiles}/smithers/fixture' > /dev/null`
+        )
+      } })
+export const Package = S.Package({ targets: { probe } })
+`
+    )
+    commitAll(root)
+    const result = await serve(root, ["//:probe"])
+    expect(result.exitCode, result.logs).toBe(0)
+    expect(result.logs).toContain("//:probe  ran")
+  })
+
   it("denies network by default, allows it under { network: true }, and skips the wrapper for none", async () => {
     const server = NodeHttp.createServer((_request, response) => response.end("ok"))
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))

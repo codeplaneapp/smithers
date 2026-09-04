@@ -57,13 +57,21 @@ with an `unresolved_action` refusal. The per-target status is on each page under
 ## Are actions sandboxed?
 
 Yes, where a policy asks for it. On the `PACKAGE.ts` surface every target is
-confined unless it declares `sandbox: "none"`; on the `PACKAGE.ts` surface the
-root `Workspace({ sandbox: {} })` declaration confines every tool-running
-target. The mechanism is bubblewrap on Linux, seatbelt on macOS, and Docker
-where the workspace declares an image. A confined tool reads only its declared
-inputs and its dependencies' outputs under the workspace, writes only its
-declared outputs, and has no network unless the policy opens it. A host that
-cannot enforce a declared confinement fails the target closed. See
+confined unless it declares `sandbox: "none"` or the workspace selects
+`S.Sandbox.None()`. The mechanism is bubblewrap on Linux, seatbelt on macOS, and Docker
+where the workspace declares an image. Inside the workspace, reads are
+limited to admitted inputs, dependency outputs, and tool support paths such as
+`node_modules`; writes are limited to admitted outputs and private scratch
+paths. Networking is closed unless the policy explicitly opens it.
+
+Native bubblewrap and seatbelt confinement **does not hide host files outside
+the workspace** (apart from Linux's private `/tmp`). The real home's `.ssh`,
+`.aws`, and `SMITHERS_HOME` remain readable when outside those hidden roots.
+Redirecting `HOME` does not prevent a tool from opening their original paths.
+These mechanisms constrain workspace reads, host writes, and network access;
+they are not host-secret read isolation. Docker exposes only its declared host
+mounts and uses the image's toolchain, so choose it when that isolation is
+required. A host that cannot enforce a declared confinement fails the target closed. See
 [Actions and boundaries](../concepts/actions-and-boundaries.md#hermeticity).
 
 ## Is `node_modules` cached?
