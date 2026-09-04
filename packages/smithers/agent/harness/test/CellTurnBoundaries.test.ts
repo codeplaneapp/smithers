@@ -1274,10 +1274,15 @@ describe("CellTurn defaults and refusals a shipped binding cannot reach", () => 
 })
 
 describe("CellTurn frame failures", () => {
-  it("records an oversized flow result as a typed heap rejection", async () => {
+  it.each(
+    [
+      ["string", { blob: "z".repeat(3 * 1024 * 1024) }],
+      ["array", Array(200_000).fill(0)]
+    ] as const
+  )("records an oversized %s flow result as a typed heap rejection", async (_, value) => {
     const { engine, events, failure } = await run({
       script: [emits(`const result = await ctx.call("fs/list", {})\nctx.done(String(result.blob.length))`)],
-      calls: [{ _tag: "Success", value: { blob: "z".repeat(3 * 1024 * 1024) } }],
+      calls: [{ _tag: "Success", value }],
       state: state({ maxFrames: 1 }),
       limits: { memoryBytes: Sandbox.minimumMemoryBytes, steps: Number.MAX_SAFE_INTEGER }
     })
@@ -2019,7 +2024,9 @@ describe("CellTurn delivery through the durable notification queue", () => {
       Effect.gen(function*() {
         const queue = yield* NotificationQueue.NotificationQueue
         yield* queue.admit("run", {
-          ...(delivery === "steer" ? { _tag: "human-steer" as const, delivery } : { _tag: "human-followup" as const, delivery }),
+          ...(delivery === "steer"
+            ? { _tag: "human-steer" as const, delivery }
+            : { _tag: "human-followup" as const, delivery }),
           id: "follow-up",
           targetLineageId: "run/root",
           provenance: {
@@ -2033,7 +2040,7 @@ describe("CellTurn delivery through the durable notification queue", () => {
         const source = yield* Notifications.make({ runId: "run", lineageId: "run/root" })
         yield* CellTurn.run({
           state: new CellTurn.State({ ...state({ maxFrames, approvalChannel }), revalidations: 0 }),
-          flows: [],
+          flows: [descriptor("edit", { writes: ["/**"] })],
           limits: { steps: 100 }
         }).pipe(
           Stream.runForEach((event) => Effect.sync(() => events.push(event))),

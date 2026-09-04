@@ -357,7 +357,8 @@ const raisedFrom = (dumped: unknown): Cell.Raised => {
 const handleFromJson = (
   context: QuickJSContext,
   defineDataProperty: QuickJSHandle,
-  value: Schema.Json
+  value: Schema.Json,
+  depth = 0
 ): QuickJSHandle => {
   if (value === null) return context.null
   switch (typeof value) {
@@ -369,10 +370,12 @@ const handleFromJson = (
       return context.newString(value)
   }
 
+  // Leave enough host stack to release every ancestor handle on refusal.
+  if (depth >= 128) throw new Error("The flow result exceeds 128 levels of JSON nesting")
   const container = Array.isArray(value) ? context.newArray() : context.newObject()
   try {
     for (const [key, item] of Object.entries(value)) {
-      const child = handleFromJson(context, defineDataProperty, item)
+      const child = handleFromJson(context, defineDataProperty, item, depth + 1)
       try {
         const property = context.newString(key)
         try {
@@ -1000,8 +1003,8 @@ const openRealm = (
     const heapUsed = (): number => {
       const snapshot = runtime.computeMemoryUsage()
       try {
-        const usage = context.dump(snapshot) as { readonly memory_used_size?: unknown }
-        return typeof usage.memory_used_size === "number" ? usage.memory_used_size : memoryBytes
+        const usage = context.dump(snapshot) as { readonly memory_used_size: number }
+        return usage.memory_used_size
       } finally {
         snapshot.dispose()
       }
@@ -1015,25 +1018,50 @@ const openRealm = (
     ): QuickJSHandle => {
       const deferred = context.newPromise()
       const reply = (payload: Schema.Json): void => {
-        const payloadBytes = bytes.size(JSON.stringify(payload))
         const remaining = Math.max(0, memoryBytes - heapUsed())
+        // JSON byte length misses the storage for values, properties and array
+        // slots. Reserve scratch space for the bridge and conservatively price
+        // each allocation before any handle can poison the realm on failure.
+        let payloadBytes = 64 * 1024
+        const values: Array<Schema.Json> = [payload]
+        while (values.length > 0 && payloadBytes < remaining) {
+          const value = values.pop()!
+          payloadBytes += 64
+          if (typeof value === "string") payloadBytes += bytes.size(value) * 2
+          else if (value !== null && typeof value === "object") {
+            for (const [key, child] of Object.entries(value)) {
+              payloadBytes += 128 + bytes.size(key) * 2
+              values.push(child)
+            }
+          }
+        }
         if (payloadBytes >= remaining) {
           exhausted = exhausted ?? new Cell.Rejected({
             code: "limit_exceeded",
             reason: "heap",
             message:
-              `The flow result needs at least ${payloadBytes} bytes of QuickJS heap, but only ${remaining} bytes remain ` +
+              `The flow result is estimated to need ${payloadBytes} bytes of QuickJS heap, but only ${remaining} bytes remain ` +
               `under this run's ceiling of ${memoryBytes}. The result was not materialized.`
           })
           deferred.resolve(context.undefined)
           deferred.dispose()
           return
         }
-        const handle = handleFromJson(context, defineDataProperty, payload)
+        let handle: QuickJSHandle | undefined
         try {
+          handle = handleFromJson(context, defineDataProperty, payload)
           deferred.resolve(handle)
+        } catch {
+          // Deep JSON can exhaust the host stack while building handles even
+          // when its allocation fits. Settle the bridge after cleanup so the
+          // rejected frame remains recordable and realm disposal stays safe.
+          exhausted = new Cell.Rejected({
+            code: "limit_exceeded",
+            message: "Materializing the flow result exceeded the realm's limits."
+          })
+          deferred.resolve(context.undefined)
         } finally {
-          handle.dispose()
+          handle?.dispose()
           deferred.dispose()
         }
       }

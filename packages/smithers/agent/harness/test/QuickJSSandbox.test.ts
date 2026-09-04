@@ -540,6 +540,33 @@ describe("QuickJSSandbox interruption", () => {
 })
 
 describe("QuickJSSandbox memory pressure", () => {
+  it("rejects excessive JSON nesting without leaking partial handles", async () => {
+    let value: Schema.Json = null
+    for (let depth = 0; depth < 10_000; depth++) value = { child: value }
+    // The host may hand the bridge any JSON tree, independent of a schema
+    // constructor's own recursion limit.
+    const result = Object.assign(new Cell.CallResult({ outcome: "success", value: null }), { value })
+    const outcome = await outcomeOf("const listed = await ctx.call(\"fs/list\", {}); ctx.done(\"received\")", {
+      call: () => Effect.succeed(result)
+    })
+    expect(outcome).toMatchObject({ _tag: "rejected", code: "limit_exceeded" })
+    expect(await outcomeOf("ctx.done(\"still usable\")")).toMatchObject({
+      _tag: "settled",
+      transition: { _tag: "complete", output: "still usable" }
+    })
+  }, 60_000)
+
+  it("accounts for array storage when the JSON bytes fit the remaining heap", async () => {
+    const exit = await evaluate("const listed = await ctx.call(\"fs/list\", {}); ctx.done(String(listed.length))", {
+      limits: { memoryBytes: Sandbox.minimumMemoryBytes, steps: Number.MAX_SAFE_INTEGER },
+      call: () => Effect.succeed(new Cell.CallResult({ outcome: "success", value: Array(200_000).fill(0) }))
+    })
+    expect(exit).toMatchObject({
+      _tag: "Success",
+      value: { _tag: "rejected", code: "limit_exceeded", reason: "heap" }
+    })
+  }, 60_000)
+
   it("rejects a result larger than the remaining heap without aborting the frame", async () => {
     const exit = await evaluate(
       `const listed = await ctx.call("fs/list", {})
