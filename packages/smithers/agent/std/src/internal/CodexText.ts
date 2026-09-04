@@ -58,38 +58,41 @@ interface Split {
   readonly after: string
 }
 
+/** A UTF-8 continuation byte is `10xxxxxx`; every other byte starts a character. */
+const isContinuation = (byte: number | undefined): boolean => byte !== undefined && (byte & 0b1100_0000) === 0b1000_0000
+
+/** The last character boundary at or before `offset`. */
+const boundaryAtOrBefore = (bytes: Uint8Array, offset: number): number => {
+  let at = Math.min(offset, bytes.byteLength)
+  while (at > 0 && at < bytes.byteLength && isContinuation(bytes[at])) at--
+  return at
+}
+
+/** The first character boundary at or after `offset`. */
+const boundaryAtOrAfter = (bytes: Uint8Array, offset: number): number => {
+  let at = Math.max(offset, 0)
+  while (at < bytes.byteLength && isContinuation(bytes[at])) at++
+  return at
+}
+
+/**
+ * Splits `s` into the head that fits `beginningBytes` and the tail that fits
+ * `endBytes`, both cut on UTF-8 character boundaries, and counts the characters
+ * dropped between them.
+ *
+ * The boundaries are read off the encoded bytes rather than by re-encoding one
+ * character at a time: a per-character `TextEncoder.encode` costs about two
+ * microseconds, which is nineteen seconds for the eight megabytes a bounded
+ * capture can hand this function.
+ */
 const splitString = (s: string, beginningBytes: number, endBytes: number): Split => {
   if (s === "") return { removedChars: 0, before: "", after: "" }
   const bytes = encoder.encode(s)
-  const len = bytes.byteLength
-  const tailStartTarget = Math.max(len - endBytes, 0)
-  let prefixEnd = 0
-  let suffixStart = len
+  const tailStartTarget = Math.max(bytes.byteLength - endBytes, 0)
+  const prefixEnd = boundaryAtOrBefore(bytes, beginningBytes)
+  const suffixStart = boundaryAtOrAfter(bytes, Math.max(tailStartTarget, prefixEnd))
   let removedChars = 0
-  let suffixStarted = false
-
-  let idx = 0
-  for (const ch of s) {
-    const chLen = encoder.encode(ch).byteLength
-    const charEnd = idx + chLen
-    if (charEnd <= beginningBytes) {
-      prefixEnd = charEnd
-      idx = charEnd
-      continue
-    }
-    if (idx >= tailStartTarget) {
-      if (!suffixStarted) {
-        suffixStart = idx
-        suffixStarted = true
-      }
-      idx = charEnd
-      continue
-    }
-    removedChars = removedChars + 1
-    idx = charEnd
-  }
-
-  if (suffixStart < prefixEnd) suffixStart = prefixEnd
+  for (let at = prefixEnd; at < suffixStart; at++) if (!isContinuation(bytes[at])) removedChars++
   return {
     removedChars,
     before: decoder.decode(bytes.subarray(0, prefixEnd)),
@@ -100,9 +103,8 @@ const splitString = (s: string, beginningBytes: number, endBytes: number): Split
 const truncateWithByteEstimate = (s: string, maxBytes: number, useTokens: boolean): string => {
   if (s === "") return ""
   const totalBytes = byteLength(s)
-  const totalChars = [...s].length
   if (maxBytes === 0) {
-    return formatTruncationMarker(useTokens, useTokens ? approxTokensFromByteCount(totalBytes) : totalChars)
+    return formatTruncationMarker(useTokens, useTokens ? approxTokensFromByteCount(totalBytes) : [...s].length)
   }
   if (totalBytes <= maxBytes) return s
   const leftBudget = Math.floor(maxBytes / 2)
