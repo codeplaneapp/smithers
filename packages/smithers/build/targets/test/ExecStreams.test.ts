@@ -167,8 +167,10 @@ describe("bounded capture", () => {
   it("carries the tail of each stream on a failure, not the head", async () => {
     const error = await failed(payload(
       `process.stdout.write('o'.repeat(10) + 'STDOUT-END');` +
-        `process.stderr.write('e'.repeat(${Exec.stderrTailLimit * 2}) + 'STDERR-END');` +
-        `process.exit(3)`
+        // Exit from the write's callback: a stream this much larger than the
+        // pipe buffer is still draining when the call returns, and exiting
+        // before it drains would truncate the tail this case is about.
+        `process.stderr.write('e'.repeat(${Exec.stderrTailLimit * 2}) + 'STDERR-END', () => process.exit(3));`
     ))
 
     expect(error.exitCode).toBe(3)

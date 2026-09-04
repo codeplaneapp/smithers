@@ -85,10 +85,16 @@ export const outputLimit = 200 * 1024
  * Maximum length of each stream tail carried by {@link ExecError}, in UTF-16
  * code units.
  *
+ * A failing gate has to name what failed. At 8 KiB a test runner's own
+ * summary survived while the list of failing test names above it did not, so
+ * a red CI target reported "2 tests failed" and nothing else, and the only
+ * way to learn which two was to reproduce the run by hand. The tail is the
+ * evidence a person acts on, so it holds a runner's failure list.
+ *
  * @category constants
  * @since 0.1.0
  */
-export const stderrTailLimit = 8 * 1024
+export const stderrTailLimit = 64 * 1024
 
 /**
  * Default wall-clock duration of one external tool process.
