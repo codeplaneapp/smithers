@@ -41,9 +41,13 @@ describe("SmithersError", () => {
     expect(rewrapped.summary).toBe("no bot token")
   })
 
+  // Spelled out rather than interpolated on purpose: this is the string a user
+  // reads in a log, so a change to ERROR_REFERENCE_URL has to be deliberate
+  // enough to edit a test. The URL moved under /docs/ because the bare
+  // /reference/errors path 404s on the live site.
   it("freezes the wire-visible message format", () => {
     expect(new SmithersError("INVALID_INPUT", "no bot token").message).toBe(
-      "no bot token See https://smithers.sh/reference/errors"
+      "no bot token See https://smithers.sh/docs/reference/errors"
     )
   })
 
@@ -385,7 +389,9 @@ describe("error codes", () => {
 
   it("documents details carried by input and init-data failures", () => {
     expect(smithersErrorDefinitions.INVALID_INPUT.details)
-      .toBe("`{ [field]: value }` on the signal-name failures, otherwise none")
+      .toBe(
+        "`{ [field]: value }` on the signal-name failures, `{ maxLength }` on the chunk-size failure, `{ maxAgeSeconds }` or `{ nowMs }` on the init-data policy failures, otherwise none"
+      )
     expect(smithersErrorDefinitions.TELEGRAM_INIT_DATA_INVALID.details)
       .toBe("`{ authDate }` on the expiry failures, otherwise none")
   })

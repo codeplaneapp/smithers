@@ -13,10 +13,15 @@
 /**
  * The documentation page every code points at.
  *
+ * This URL is appended to the message of every `SmithersError`, so it reaches
+ * a user in a log line they cannot edit. It has to resolve on the live site:
+ * it was `https://smithers.sh/reference/errors` and 404ed, because the page
+ * lives under `/docs/`.
+ *
  * @category constants
  * @since 1.0.0
  */
-export const ERROR_REFERENCE_URL = "https://smithers.sh/reference/errors"
+export const ERROR_REFERENCE_URL = "https://smithers.sh/docs/reference/errors"
 
 /**
  * What a code means and when it is raised.
@@ -39,7 +44,8 @@ export const smithersErrorDefinitions = {
   INVALID_INPUT: {
     when:
       "An integration helper receives an argument it cannot use: a missing bot token, an approval option key containing a colon, callback data over Telegram's 64-byte limit, or a non-https Mini App URL.",
-    details: "`{ [field]: value }` on the signal-name failures, otherwise none"
+    details:
+      "`{ [field]: value }` on the signal-name failures, `{ maxLength }` on the chunk-size failure, `{ maxAgeSeconds }` or `{ nowMs }` on the init-data policy failures, otherwise none"
   },
   INTEGRATION_ERROR: {
     when:
@@ -49,7 +55,7 @@ export const smithersErrorDefinitions = {
   TELEGRAM_API_ERROR: {
     when:
       "The Telegram Bot API answers a call with `ok: false`, a non-JSON body, or a transport failure. The bot token is redacted from the message and details.",
-    details: "{ method, errorCode, description, retryAfterSeconds }"
+    details: "{ method, errorCode, description, retryAfterSeconds, deliveredMessageIds }"
   },
   TELEGRAM_INIT_DATA_INVALID: {
     when:
