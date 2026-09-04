@@ -20,10 +20,29 @@ const unblockCommand = (card: string): string => {
   return card.slice(start + prefix.length, end)
 }
 
+/**
+ * The executable a rendered command names: its first shell word.
+ *
+ * The recording shim is written under that name rather than a spelling this
+ * file repeats, because the two have to be the same word for the shim to
+ * shadow anything. They were not: the card renders `smthrs` and the shim was
+ * written as `smithers`, so `/bin/sh` resolved the real CLI off `PATH` and
+ * each case booted the control plane for minutes before failing on a run id
+ * that does not exist.
+ */
+const executableOf = (command: string): string => {
+  const name = command.trimStart().split(/\s/)[0] ?? ""
+  if (!/^[\w.-]+$/.test(name)) {
+    throw new Error(`the unblock command does not start with a bare executable: ${command}`)
+  }
+  return name
+}
+
 const recordArguments = (command: string): ReadonlyArray<ReadonlyArray<string>> => {
   const root = mkdtempSync(join(tmpdir(), "smithers-forensics-"))
   staged.push(root)
-  const executable = join(root, "smithers")
+  const name = executableOf(command)
+  const executable = join(root, name)
   const record = join(root, "argv.jsonl")
   writeFileSync(
     executable,
@@ -35,13 +54,24 @@ appendFileSync(process.env.SMITHERS_ARGV_RECORD, JSON.stringify(process.argv.sli
   )
   writeFileSync(record, "", "utf8")
 
-  execFileSync("/bin/sh", ["-c", command], {
-    env: {
-      ...process.env,
-      PATH: `${root}:${process.env.PATH ?? ""}`,
-      SMITHERS_ARGV_RECORD: record
-    }
-  })
+  const env = {
+    ...process.env,
+    PATH: `${root}:${process.env.PATH ?? ""}`,
+    SMITHERS_ARGV_RECORD: record
+  }
+
+  // What the shell will actually run, asserted before it runs it. Without
+  // this the only symptom of a shim that shadows nothing is a real CLI boot
+  // per invocation, which reads as a slow suite rather than as this defect.
+  const resolved = execFileSync("/bin/sh", ["-c", `command -v ${name}`], { encoding: "utf8", env, timeout: 30_000 })
+    .trim()
+  if (resolved !== executable) {
+    throw new Error(`PATH resolves ${name} to ${resolved}, not the recording shim at ${executable}`)
+  }
+
+  // The shim is a two-line script, so a run that reaches half a minute is a
+  // process this test did not mean to start.
+  execFileSync("/bin/sh", ["-c", command], { env, timeout: 30_000 })
 
   return readFileSync(record, "utf8").trim().split("\n").filter((line) => line !== "")
     .map((line) => JSON.parse(line) as ReadonlyArray<string>)
