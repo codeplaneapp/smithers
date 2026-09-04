@@ -1,8 +1,31 @@
+/**
+ * Bootstrap responses for native and web application sessions.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
 
+/**
+ * Shared app api version used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const APP_API_VERSION = 1 as const
+/**
+ * The app bootstrap route shared by server and client.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const APP_BOOTSTRAP_PATH = "/api/bootstrap"
 
+/**
+ * Validates runtime capability values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RuntimeCapabilitySchema = z.enum([
   "agent",
   "identity",
@@ -22,8 +45,20 @@ export const RuntimeCapabilitySchema = z.enum([
   // local.* door, so `code.*` flows hide on the web and the refusal names the native app.
   "local.lsp"
 ])
+/**
+ * The decoded value accepted by {@link RuntimeCapabilitySchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RuntimeCapability = z.infer<typeof RuntimeCapabilitySchema>
 
+/**
+ * Validates app bootstrap values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AppBootstrapSchema = z.object({
   apiVersion: z.literal(APP_API_VERSION),
   host: z.enum(["cloud", "local"]),
@@ -36,7 +71,19 @@ export const AppBootstrapSchema = z.object({
     mode: z.enum(["enforced", "trusted-only", "unavailable"])
   }).nullable()
 })
+/**
+ * The decoded value accepted by {@link AppBootstrapSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AppBootstrap = z.infer<typeof AppBootstrapSchema>
 
+/**
+ * Converts has capability values for the shared wire contract.
+ *
+ * @since 1.0.0
+ * @category conversions
+ */
 export const hasCapability = (bootstrap: AppBootstrap, capability: RuntimeCapability): boolean =>
   bootstrap.capabilities.includes(capability)

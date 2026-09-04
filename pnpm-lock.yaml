@@ -1902,12 +1902,24 @@ importers:
         specifier: 4.4.3
         version: 4.4.3
     devDependencies:
-      '@types/bun':
-        specifier: latest
-        version: 1.4.0
+      '@types/node':
+        specifier: 25.9.5
+        version: 25.9.5
+      dprint:
+        specifier: 0.55.2
+        version: 0.55.2
+      eslint:
+        specifier: 9.39.1
+        version: 9.39.1(jiti@2.7.0)(supports-color@10.2.2)
       typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
+        specifier: 6.0.3
+        version: 6.0.3
+      typescript-eslint:
+        specifier: 8.65.0
+        version: 8.65.0(eslint@9.39.1(jiti@2.7.0)(supports-color@10.2.2))(supports-color@10.2.2)(typescript@6.0.3)
+      vitest:
+        specifier: 4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@25.9.5)(@vitest/coverage-v8@4.1.9)(happy-dom@20.11.2)(vite@8.2.1(@types/node@25.9.5)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.12)(yaml@2.9.0))
 
   packages/smithers:
     dependencies:

@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
-import { RuntimeCapabilitySchema } from "./AppBootstrap"
-import { cloudCapabilities, localCapabilities } from "./HostCapabilities"
+import { describe, expect, test } from "vitest"
+import { RuntimeCapabilitySchema } from "../src/AppBootstrap.ts"
+import { cloudCapabilities, localCapabilities } from "../src/HostCapabilities.ts"
 
 const booleans = [false, true] as const
 

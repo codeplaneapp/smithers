@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { browserFetch, extractReadableText, isPublicAddress } from "./BrowserFetch"
+import { describe, expect, test } from "vitest"
+import { browserFetch, extractReadableText, isPublicAddress } from "../src/BrowserFetch.ts"
 
 /*
  * The browser tool's hard guards (§2d): https only, public hosts only AFTER

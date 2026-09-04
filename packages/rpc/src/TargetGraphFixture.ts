@@ -1,6 +1,11 @@
+/**
+ * Adapters from captured build-CLI envelopes to target graph contracts.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
-import type { GraphNode, TargetGraphResponse } from "./TargetGraph"
-import { splitLabel } from "./LocalApp"
+import { splitLabel } from "./LocalApp.ts"
+import type { GraphNode, TargetGraphResponse } from "./TargetGraph.ts"
 
 /*
  * The CLI envelope → contract mapping, shared so the local backend
@@ -13,6 +18,12 @@ import { splitLabel } from "./LocalApp"
  * CLI on the force workspace live in `packages/rpc/fixtures/force/`.
  */
 
+/**
+ * Validates cli graph envelope values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CliGraphEnvelopeSchema = z.object({
   pattern: z.string(),
   format: z.string(),
@@ -23,8 +34,20 @@ export const CliGraphEnvelopeSchema = z.object({
   edges: z.array(z.object({ from: z.string(), to: z.string(), kind: z.enum(["data", "gates", "services", "deps"]) })),
   warnings: z.array(z.string())
 })
+/**
+ * The decoded value accepted by {@link CliGraphEnvelopeSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CliGraphEnvelope = z.infer<typeof CliGraphEnvelopeSchema>
 
+/**
+ * Validates cli plan envelope values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CliPlanEnvelopeSchema = z.object({
   verb: z.string(),
   pattern: z.string(),
@@ -45,9 +68,18 @@ export const CliPlanEnvelopeSchema = z.object({
     })
   )
 })
+/**
+ * The decoded value accepted by {@link CliPlanEnvelopeSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CliPlanEnvelope = z.infer<typeof CliPlanEnvelopeSchema>
 
-/** A private (unlabeled) helper node reads `__private_` (or another `__` prefix) in its name. */
+/** A private (unlabeled) helper node reads `__private_` (or another `__` prefix) in its name.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const isPrivateLabel = (label: string): boolean => splitLabel(label).name.startsWith("__")
 
 /**
@@ -55,6 +87,8 @@ export const isPrivateLabel = (label: string): boolean => splitLabel(label).name
  * per target row (rule from the loader's `target` field), the edges as
  * classified, private helpers flagged. `generatedAt`/`durationMs` describe
  * THIS load, so the caller stamps them.
+ * @since 1.0.0
+ * @category conversions
  */
 export const targetGraphFromCli = (
   envelope: CliGraphEnvelope,
@@ -82,6 +116,8 @@ export const targetGraphFromCli = (
  * Merge a `--plan --format json` envelope onto graph nodes: the plan's rule,
  * mode, key, cacheability, argv, sandbox, outputs, and refusal land on the
  * node it names; nodes the plan never mentions keep their loader row.
+ * @since 1.0.0
+ * @category conversions
  */
 export const mergePlanFacts = (
   graph: TargetGraphResponse,

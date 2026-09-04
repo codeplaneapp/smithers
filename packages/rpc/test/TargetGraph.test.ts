@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
+import { describe, expect, test } from "vitest"
 import {
   AffectedCardPayloadSchema,
   AffectedResponseSchema,
@@ -8,10 +8,12 @@ import {
   criticalPath,
   GRAPH_EDGE_KINDS,
   GraphCardPayloadSchema,
+  type GraphEdge,
   GraphEdgeKindSchema,
   GraphEdgeSchema,
   GraphNodeSchema,
   NODE_RUN_STATUSES,
+  type NodeTiming,
   NodeTimingSchema,
   reachable,
   RunHistoryCardPayloadSchema,
@@ -22,10 +24,8 @@ import {
   RunTimelineCardPayloadSchema,
   TARGET_GRAPH_ROUTES,
   TargetGraphResponseSchema,
-  TargetRunEventSchema,
-  type GraphEdge,
-  type NodeTiming
-} from "./TargetGraph"
+  TargetRunEventSchema
+} from "../src/TargetGraph.ts"
 
 /*
  * The fixtures are the CLI's real envelopes captured from `~/artsy/force`
@@ -99,8 +99,21 @@ describe("GraphNodeSchema", () => {
   })
 
   test("parses the minimum the loader can emit: no kinds, no plan, no source", () => {
-    const parsed = GraphNodeSchema.parse({ label: "//:claudeMd", package: "//", name: "claudeMd", rule: "Filegroup", kinds: [] })
-    expect(parsed).toEqual({ label: "//:claudeMd", package: "//", name: "claudeMd", rule: "Filegroup", kinds: [], private: false })
+    const parsed = GraphNodeSchema.parse({
+      label: "//:claudeMd",
+      package: "//",
+      name: "claudeMd",
+      rule: "Filegroup",
+      kinds: []
+    })
+    expect(parsed).toEqual({
+      label: "//:claudeMd",
+      package: "//",
+      name: "claudeMd",
+      rule: "Filegroup",
+      kinds: [],
+      private: false
+    })
   })
 
   test("carries a private helper node and a plan-time refusal", () => {
@@ -196,7 +209,10 @@ describe("NodeTimingSchema", () => {
   })
 
   test("accepts a null exit code (killed) and a refusal reason", () => {
-    expect(NodeTimingSchema.parse({ label: "//src:go", status: "refused", reason: "host bin absent: go", exitCode: null }).exitCode).toBeNull()
+    expect(
+      NodeTimingSchema.parse({ label: "//src:go", status: "refused", reason: "host bin absent: go", exitCode: null })
+        .exitCode
+    ).toBeNull()
   })
 
   test("refuses an unknown status and a string duration", () => {
@@ -207,7 +223,16 @@ describe("NodeTimingSchema", () => {
 })
 
 describe("RunSummarySchema", () => {
-  const summary = { total: 12, hit: 9, ran: 2, failed: 0, skipped: 1, durationMs: 8123, ok: true, criticalPath: ["//src:srcs", "//src:typeCheck"] }
+  const summary = {
+    total: 12,
+    hit: 9,
+    ran: 2,
+    failed: 0,
+    skipped: 1,
+    durationMs: 8123,
+    ok: true,
+    criticalPath: ["//src:srcs", "//src:typeCheck"]
+  }
 
   test("parses the summary line's counts with a critical path", () => {
     expect(RunSummarySchema.parse(summary).criticalPath).toEqual(["//src:srcs", "//src:typeCheck"])
@@ -231,7 +256,20 @@ describe("TargetRunEventSchema", () => {
     { type: "stderr", data: "warn\n", label: "//src:typeCheck" },
     { type: "node", node: { label: "//src:typeCheck", status: "running", startedAt: 2 }, at: 2 },
     { type: "node", node: { label: "//src:typeCheck", status: "ran", durationMs: 4900, exitCode: 0 }, at: 3 },
-    { type: "summary", summary: { total: 3, hit: 1, ran: 2, failed: 0, skipped: 0, durationMs: 4900, ok: true, criticalPath: ["//src:srcs", "//src:typeCheck"] }, at: 4 },
+    {
+      type: "summary",
+      summary: {
+        total: 3,
+        hit: 1,
+        ran: 2,
+        failed: 0,
+        skipped: 0,
+        durationMs: 4900,
+        ok: true,
+        criticalPath: ["//src:srcs", "//src:typeCheck"]
+      },
+      at: 4
+    },
     { type: "exit", code: 0 },
     { type: "exit", code: null },
     { type: "error", message: "spawn ENOENT" }
@@ -239,15 +277,27 @@ describe("TargetRunEventSchema", () => {
 
   test("parses every frame the WS topic carries, in order", () => {
     expect(frames.map((frame) => TargetRunEventSchema.parse(frame).type)).toEqual([
-      "started", "stdout", "stdout", "stderr", "node", "node", "summary", "exit", "exit", "error"
+      "started",
+      "stdout",
+      "stdout",
+      "stderr",
+      "node",
+      "node",
+      "summary",
+      "exit",
+      "exit",
+      "error"
     ])
   })
 
   test("refuses an unknown frame type, a missing discriminator, and a bad inner shape", () => {
     expect(TargetRunEventSchema.safeParse({ type: "progress", pct: 1 }).success).toBe(false)
     expect(TargetRunEventSchema.safeParse({ data: "no type" }).success).toBe(false)
-    expect(TargetRunEventSchema.safeParse({ type: "node", node: { label: "//a:a", status: "cached" }, at: 1 }).success).toBe(false)
-    expect(TargetRunEventSchema.safeParse({ type: "node", node: { label: "//a:a", status: "ran" } }).success).toBe(false)
+    expect(TargetRunEventSchema.safeParse({ type: "node", node: { label: "//a:a", status: "cached" }, at: 1 }).success)
+      .toBe(false)
+    expect(TargetRunEventSchema.safeParse({ type: "node", node: { label: "//a:a", status: "ran" } }).success).toBe(
+      false
+    )
     expect(TargetRunEventSchema.safeParse({ type: "started", runId: "r1", label: "//a:a", at: 1 }).success).toBe(false)
     expect(TargetRunEventSchema.safeParse({ type: "exit" }).success).toBe(false)
     expect(TargetRunEventSchema.safeParse({ type: "stdout", data: 12 }).success).toBe(false)
@@ -268,7 +318,13 @@ describe("RunRecordSchema and the history/replay envelopes", () => {
 
   test("defaults `labels` to an empty list and keeps a still-running record open", () => {
     expect(RunRecordSchema.parse(record).labels).toEqual([])
-    const running = RunRecordSchema.parse({ runId: "r2", repoId: "force", label: "//src:lint", status: "running", startedAt: 1 })
+    const running = RunRecordSchema.parse({
+      runId: "r2",
+      repoId: "force",
+      label: "//src:lint",
+      status: "running",
+      startedAt: 1
+    })
     expect(running.endedAt).toBeUndefined()
     expect(running.summary).toBeUndefined()
   })
@@ -347,14 +403,18 @@ describe("CiMatrixResponseSchema", () => {
   test("refuses a missing yaml and a matrix axis that is not a string list", () => {
     const broken = { ...ci, workflows: [{ ...ci.workflows[0], yaml: undefined }] }
     expect(CiMatrixResponseSchema.safeParse(broken).success).toBe(false)
-    const badMatrix = { ...ci, workflows: [{ ...ci.workflows[0], jobs: [{ name: "t", targets: [], matrix: { shard: "1/4" } }] }] }
+    const badMatrix = {
+      ...ci,
+      workflows: [{ ...ci.workflows[0], jobs: [{ name: "t", targets: [], matrix: { shard: "1/4" } }] }]
+    }
     expect(CiMatrixResponseSchema.safeParse(badMatrix).success).toBe(false)
   })
 })
 
 describe("the five card payloads", () => {
   test("each carries pending, done and failed without inventing data", () => {
-    expect(GraphCardPayloadSchema.parse({ repoId: "force", repoName: "artsy/force", status: "pending" }).graph).toBeUndefined()
+    expect(GraphCardPayloadSchema.parse({ repoId: "force", repoName: "artsy/force", status: "pending" }).graph)
+      .toBeUndefined()
     expect(
       GraphCardPayloadSchema.parse({
         repoId: "force",
@@ -368,14 +428,27 @@ describe("the five card payloads", () => {
         repoId: "force",
         repoName: "artsy/force",
         status: "done",
-        graph: { repoId: "force", nodes: [], edges: [], warnings: [], generatedAt: "2026-08-27T00:00:00.000Z", durationMs: 1 },
+        graph: {
+          repoId: "force",
+          nodes: [],
+          edges: [],
+          warnings: [],
+          generatedAt: "2026-08-27T00:00:00.000Z",
+          durationMs: 1
+        },
         focus: "//src:typeCheck",
         runId: "r1"
       }).focus
     ).toBe("//src:typeCheck")
 
     expect(
-      RunTimelineCardPayloadSchema.parse({ repoId: "force", runId: "r1", label: "//src:typeCheck", status: "running", nodes: [] }).cursor
+      RunTimelineCardPayloadSchema.parse({
+        repoId: "force",
+        runId: "r1",
+        label: "//src:typeCheck",
+        status: "running",
+        nodes: []
+      }).cursor
     ).toBeUndefined()
     expect(
       RunTimelineCardPayloadSchema.parse({
@@ -384,23 +457,53 @@ describe("the five card payloads", () => {
         label: "//src:typeCheck",
         status: "done",
         nodes: [{ label: "//src:typeCheck", status: "ran", durationMs: 4900 }],
-        summary: { total: 1, hit: 0, ran: 1, failed: 0, skipped: 0, durationMs: 4900, ok: true, criticalPath: ["//src:typeCheck"] },
+        summary: {
+          total: 1,
+          hit: 0,
+          ran: 1,
+          failed: 0,
+          skipped: 0,
+          durationMs: 4900,
+          ok: true,
+          criticalPath: ["//src:typeCheck"]
+        },
         cursor: 1_700_000_000_000
       }).cursor
     ).toBe(1_700_000_000_000)
 
     expect(RunHistoryCardPayloadSchema.parse({ repoId: "force", status: "pending", runs: [] }).selected).toBeUndefined()
-    expect(AffectedCardPayloadSchema.parse({ repoId: "force", status: "failed", error: "not a git repo" }).result).toBeUndefined()
+    expect(AffectedCardPayloadSchema.parse({ repoId: "force", status: "failed", error: "not a git repo" }).result)
+      .toBeUndefined()
     expect(CiMatrixCardPayloadSchema.parse({ repoId: "force", status: "pending" }).result).toBeUndefined()
   })
 
   test("each refuses a status outside pending/done/failed and a mistyped result", () => {
     expect(GraphCardPayloadSchema.safeParse({ repoId: "force", repoName: "f", status: "running" }).success).toBe(false)
-    expect(RunTimelineCardPayloadSchema.safeParse({ repoId: "force", runId: "r1", label: "//a:a", status: "done", nodes: [{ label: "//a:a" }] }).success).toBe(false)
-    expect(RunTimelineCardPayloadSchema.safeParse({ repoId: "force", runId: "r1", label: "//a:a", status: "pending", nodes: [] }).success).toBe(true)
-    expect(RunHistoryCardPayloadSchema.safeParse({ repoId: "force", status: "done", runs: [{ runId: "r1" }] }).success).toBe(false)
-    expect(AffectedCardPayloadSchema.safeParse({ repoId: "force", status: "done", result: { repoId: "force" } }).success).toBe(false)
-    expect(CiMatrixCardPayloadSchema.safeParse({ repoId: "force", status: "done", result: { workflows: [] } }).success).toBe(false)
+    expect(
+      RunTimelineCardPayloadSchema.safeParse({
+        repoId: "force",
+        runId: "r1",
+        label: "//a:a",
+        status: "done",
+        nodes: [{ label: "//a:a" }]
+      }).success
+    ).toBe(false)
+    expect(
+      RunTimelineCardPayloadSchema.safeParse({
+        repoId: "force",
+        runId: "r1",
+        label: "//a:a",
+        status: "pending",
+        nodes: []
+      }).success
+    ).toBe(true)
+    expect(RunHistoryCardPayloadSchema.safeParse({ repoId: "force", status: "done", runs: [{ runId: "r1" }] }).success)
+      .toBe(false)
+    expect(
+      AffectedCardPayloadSchema.safeParse({ repoId: "force", status: "done", result: { repoId: "force" } }).success
+    ).toBe(false)
+    expect(CiMatrixCardPayloadSchema.safeParse({ repoId: "force", status: "done", result: { workflows: [] } }).success)
+      .toBe(false)
   })
 })
 
@@ -443,7 +546,9 @@ describe("reachable, on the real force graph", () => {
       "//src:relayArtifacts",
       "//src:srcs"
     ])
-    const planned = planFixture.targets.map((target: { label: string }) => target.label).filter((label: string) => label !== "//src:typeCheck")
+    const planned = planFixture.targets.map((target: { label: string }) => target.label).filter((label: string) =>
+      label !== "//src:typeCheck"
+    )
     expect([...reachable(forceEdges, "//src:typeCheck", "deps")].sort()).toEqual([...planned].sort())
   })
 
@@ -494,7 +599,9 @@ describe("reachable, on graphs the loader should never emit but might", () => {
 
   test("an empty edge list reaches nothing, and duplicate edges do not duplicate the set", () => {
     expect(reachable([], "a", "deps").size).toBe(0)
-    expect([...reachable([dep("a", "b"), dep("a", "b"), { from: "a", to: "b", kind: "data" }], "a", "deps")]).toEqual(["b"])
+    expect([...reachable([dep("a", "b"), dep("a", "b"), { from: "a", to: "b", kind: "data" }], "a", "deps")]).toEqual([
+      "b"
+    ])
   })
 
   test("every edge kind walks alike: reachability is kind-blind", () => {
@@ -526,7 +633,11 @@ describe("criticalPath", () => {
   })
 
   test("a chain returns the whole chain, root last", () => {
-    expect(criticalPath([timing("a", 1), timing("b", 2), timing("c", 3)], [dep("a", "b"), dep("b", "c")])).toEqual(["c", "b", "a"])
+    expect(criticalPath([timing("a", 1), timing("b", 2), timing("c", 3)], [dep("a", "b"), dep("b", "c")])).toEqual([
+      "c",
+      "b",
+      "a"
+    ])
   })
 
   test("a diamond takes the slower arm", () => {
@@ -536,7 +647,9 @@ describe("criticalPath", () => {
   })
 
   test("a cache hit on the chain stays on the path because its subtree is slow", () => {
-    expect(criticalPath([timing("root", 10), timing("hit", 0), timing("dep", 500)], [dep("root", "hit"), dep("hit", "dep")]))
+    expect(
+      criticalPath([timing("root", 10), timing("hit", 0), timing("dep", 500)], [dep("root", "hit"), dep("hit", "dep")])
+    )
       .toEqual(["dep", "hit", "root"])
   })
 
@@ -559,7 +672,11 @@ describe("criticalPath", () => {
       "b",
       "a"
     ])
-    expect(criticalPath([timing("a"), timing("b"), timing("c")], [dep("a", "b"), dep("b", "c")])).toEqual(["c", "b", "a"])
+    expect(criticalPath([timing("a"), timing("b"), timing("c")], [dep("a", "b"), dep("b", "c")])).toEqual([
+      "c",
+      "b",
+      "a"
+    ])
   })
 
   test("a node with a duration but no dependency still wins over a slower-total sibling chain", () => {

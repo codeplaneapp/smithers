@@ -1,5 +1,10 @@
+/**
+ * Cards rendered from agent, code-intelligence, and repository events.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
-import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles"
+import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles.ts"
 import {
   ChangeAnalyzerRunSchema,
   ChangeCheckSchema,
@@ -10,15 +15,22 @@ import {
   ChangeOwnersSchema,
   ChangeReviewRequestSchema,
   ChangeRevisionSchema,
+  ChangesetStateSchema,
   ChangeThreadSchema,
   ChangeTurnSchema,
   ChangeVerdictSchema,
   ChangeWalkthroughSchema,
-  ChangesetStateSchema,
   LandingBlockSchema,
   RevisionPinSchema
-} from "./Changes"
-import { HARNESS_IDS, LSP_DIAGNOSTICS_CAP, LSP_HOVER_CAP_CHARS, LspDiagnosticSchema, RepoSchema, TargetSchema } from "./LocalApp"
+} from "./Changes.ts"
+import {
+  HARNESS_IDS,
+  LSP_DIAGNOSTICS_CAP,
+  LSP_HOVER_CAP_CHARS,
+  LspDiagnosticSchema,
+  RepoSchema,
+  TargetSchema
+} from "./LocalApp.ts"
 import {
   AffectedCardPayloadSchema,
   CiMatrixCardPayloadSchema,
@@ -29,22 +41,61 @@ import {
   RunRecordSchema,
   RunSummarySchema,
   RunTimelineCardPayloadSchema
-} from "./TargetGraph"
+} from "./TargetGraph.ts"
 
 /*
  * The targets card's table state (apps/ui cards/TargetsTable.ts): the filter
  * the user set, the row they selected, and what the card has read about
  * individual targets. All optional: cards persisted before the table parse.
  */
+/**
+ * Shared target run states used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const TARGET_RUN_STATES = ["never", "passed", "failed", "running"] as const
+/**
+ * Validates target run state values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetRunStateSchema = z.enum(TARGET_RUN_STATES)
+/**
+ * The decoded value accepted by {@link TargetRunStateSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetRunState = z.infer<typeof TargetRunStateSchema>
 
-/** The table's views: the repository's essentials, everything, or what ran most recently. */
+/** The table's views: the repository's essentials, everything, or what ran most recently.
+ * @since 1.0.0
+ * @category constants
+ */
 export const TARGETS_VIEW_MODES = ["featured", "all", "recent"] as const
+/**
+ * Validates targets view mode values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetsViewModeSchema = z.enum(TARGETS_VIEW_MODES)
+/**
+ * The decoded value accepted by {@link TargetsViewModeSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetsViewMode = z.infer<typeof TargetsViewModeSchema>
 
+/**
+ * Validates targets view values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetsViewSchema = z.object({
   /** Featured / All / Recent; absent = Featured when the repo has featured or starred targets, else All. */
   mode: TargetsViewModeSchema.optional(),
@@ -63,9 +114,18 @@ export const TargetsViewSchema = z.object({
   /** Per group label, the member labels picked to run; absent = every member. */
   picked: z.record(z.string(), z.array(z.string())).optional()
 })
+/**
+ * The decoded value accepted by {@link TargetsViewSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetsView = z.infer<typeof TargetsViewSchema>
 
-/** What the card has read about one target through `graph <label> --plan`. */
+/** What the card has read about one target through `graph <label> --plan`.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetDetailSchema = z.object({
   status: z.enum(["pending", "done", "failed"]),
   node: GraphNodeSchema.optional(),
@@ -73,6 +133,12 @@ export const TargetDetailSchema = z.object({
   rdeps: z.array(z.string()).optional(),
   error: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link TargetDetailSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetDetail = z.infer<typeof TargetDetailSchema>
 
 /*
@@ -82,14 +148,29 @@ export type TargetDetail = z.infer<typeof TargetDetailSchema>
  * the transcript; the client renders it with zero UI changes per DESIGN.md §5.
  */
 
+/**
+ * Validates card plan item values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CardPlanItemSchema = z.object({
   id: z.string(),
   title: z.string(),
   status: z.enum(["pending", "active", "done"])
 })
+/**
+ * The decoded value accepted by {@link CardPlanItemSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CardPlanItem = z.infer<typeof CardPlanItemSchema>
 
-/** The seams a form field's select may draw its options from (apps/ui flows/FlowForms.ts OPTION_PROVIDERS). */
+/** The seams a form field's select may draw its options from (apps/ui flows/FlowForms.ts OPTION_PROVIDERS).
+ * @since 1.0.0
+ * @category constants
+ */
 export const FORM_OPTION_PROVIDERS = [
   "harnesses",
   "agent-harnesses",
@@ -124,11 +205,23 @@ const cardBaseShape = {
  * 429 with no structured body (plue#472's shape is not deployed) reads as
  * the verbatim error, never an invented reset.
  */
+/**
+ * Validates git hub rate limit values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const GitHubRateLimitSchema = z.object({
   limit: z.number().int().nonnegative(),
   remaining: z.number().int().nonnegative(),
   resetAt: z.string().nullable()
 })
+/**
+ * The decoded value accepted by {@link GitHubRateLimitSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type GitHubRateLimit = z.infer<typeof GitHubRateLimitSchema>
 
 /*
@@ -138,10 +231,22 @@ export type GitHubRateLimit = z.infer<typeof GitHubRateLimitSchema>
  * Both ids are empty strings on the wire when the guest has reported none;
  * the parser turns those into null and the card renders nothing.
  */
+/**
+ * Validates workspace head values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const WorkspaceHeadSchema = z.object({
   changeId: z.string().nullable(),
   commitId: z.string().nullable()
 })
+/**
+ * The decoded value accepted by {@link WorkspaceHeadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkspaceHead = z.infer<typeof WorkspaceHeadSchema>
 
 /*
@@ -152,12 +257,24 @@ export type WorkspaceHead = z.infer<typeof WorkspaceHeadSchema>
  * BOOTED — empty for a container, and optional so a card written before this
  * lane still parses. The header renders its TAG only, never the whole path.
  */
+/**
+ * Validates workspace environment values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const WorkspaceEnvironmentSchema = z.object({
   source: z.string(),
   revision: z.string().nullable(),
   closureHash: z.string().nullable(),
   image: z.string().nullable().optional()
 })
+/**
+ * The decoded value accepted by {@link WorkspaceEnvironmentSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkspaceEnvironment = z.infer<typeof WorkspaceEnvironmentSchema>
 
 /*
@@ -169,6 +286,12 @@ export type WorkspaceEnvironment = z.infer<typeof WorkspaceEnvironmentSchema>
  * in the facet's ephemeral holder — they are deliberately absent from this
  * schema, because everything in a card payload is written to disk.
  */
+/**
+ * Validates workspace desktop values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const WorkspaceDesktopSchema = z.object({
   /**
    * plue#496 `ready`: true only after the guest's `smithers-desktop-start`
@@ -179,6 +302,12 @@ export const WorkspaceDesktopSchema = z.object({
   streamUrl: z.string().nullable(),
   session: z.object({ id: z.string(), expiresAt: z.string().nullable() }).nullable()
 })
+/**
+ * The decoded value accepted by {@link WorkspaceDesktopSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkspaceDesktop = z.infer<typeof WorkspaceDesktopSchema>
 
 /*
@@ -186,6 +315,12 @@ export type WorkspaceDesktop = z.infer<typeof WorkspaceDesktopSchema>
  * NixOS closure and the image it produced. `platformBase` is plue's
  * `repository_id 0`; `coldPull` is an empty `golden_snapshot_id`, which means
  * the first boot of that closure pays a 20–40 s registry pull.
+ */
+/**
+ * Validates environment image row values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
  */
 export const EnvironmentImageRowSchema = z.object({
   id: z.string(),
@@ -198,6 +333,12 @@ export const EnvironmentImageRowSchema = z.object({
   platformBase: z.boolean(),
   coldPull: z.boolean()
 })
+/**
+ * The decoded value accepted by {@link EnvironmentImageRowSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type EnvironmentImageRow = z.infer<typeof EnvironmentImageRowSchema>
 
 /**
@@ -205,6 +346,8 @@ export type EnvironmentImageRow = z.infer<typeof EnvironmentImageRowSchema>
  * services.WorkspaceFileEntry). `type` is plue's own word — `file`, `dir`, or
  * `symlink` — kept verbatim; the shared file-list row the card reuses only
  * knows file and dir, so the mapping happens at the render, never here.
+ * @since 1.0.0
+ * @category schemas
  */
 export const WorkspaceFileEntrySchema = z.object({
   name: z.string(),
@@ -212,6 +355,12 @@ export const WorkspaceFileEntrySchema = z.object({
   type: z.string(),
   size: z.number().int().nonnegative().nullable()
 })
+/**
+ * The decoded value accepted by {@link WorkspaceFileEntrySchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkspaceFileEntry = z.infer<typeof WorkspaceFileEntrySchema>
 
 /**
@@ -219,6 +368,8 @@ export type WorkspaceFileEntry = z.infer<typeof WorkspaceFileEntrySchema>
  * `port` / `url`, services.WorkspaceManagedService). The port and the url
  * are `omitempty` on the wire, so a service that publishes neither carries
  * neither and the row shows a name and a state alone.
+ * @since 1.0.0
+ * @category schemas
  */
 export const WorkspaceServiceSchema = z.object({
   name: z.string(),
@@ -228,6 +379,12 @@ export const WorkspaceServiceSchema = z.object({
   /** plue#483 `url`; null when the service publishes none. */
   url: z.string().nullable().optional()
 })
+/**
+ * The decoded value accepted by {@link WorkspaceServiceSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type WorkspaceService = z.infer<typeof WorkspaceServiceSchema>
 
 /*
@@ -235,6 +392,12 @@ export type WorkspaceService = z.infer<typeof WorkspaceServiceSchema>
  * `GET …/agent-sessions/{id}/egress`, services.SandboxEgressAuditEntry): what
  * the computer called and which secret NAMES the proxy swapped in. The values
  * are never on the wire and never rendered.
+ */
+/**
+ * Validates sandbox egress row values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
  */
 export const SandboxEgressRowSchema = z.object({
   occurredAt: z.string(),
@@ -245,8 +408,20 @@ export const SandboxEgressRowSchema = z.object({
   allowed: z.boolean(),
   swappedSecretNames: z.array(z.string())
 })
+/**
+ * The decoded value accepted by {@link SandboxEgressRowSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type SandboxEgressRow = z.infer<typeof SandboxEgressRowSchema>
 
+/**
+ * Validates card values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CardSchema = z.discriminatedUnion("kind", [
   z.object({
     ...cardBaseShape,
@@ -1503,8 +1678,20 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   })
 ])
+/**
+ * The decoded value accepted by {@link CardSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type Card = z.infer<typeof CardSchema>
 
+/**
+ * Validates card patch values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CardPatchSchema = z.object({
   title: z.string().optional(),
   body: z.string().optional(),
@@ -1513,4 +1700,10 @@ export const CardPatchSchema = z.object({
   createdAt: z.number().optional(),
   ordinal: z.number().int().nonnegative().optional()
 })
+/**
+ * The decoded value accepted by {@link CardPatchSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CardPatch = z.infer<typeof CardPatchSchema>

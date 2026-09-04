@@ -1,3 +1,8 @@
+/**
+ * Context payloads supplied to agents across native and browser transports.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
 
 /*
@@ -11,8 +16,20 @@ import { z } from "zod"
  * of pleading ignorance about the host environment.
  */
 
+/**
+ * Shared agent runtime context version used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const AGENT_RUNTIME_CONTEXT_VERSION = 1
 
+/**
+ * Validates agent runtime connector values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentRuntimeConnectorSchema = z.object({
   kind: z.string(),
   name: z.string(),
@@ -21,6 +38,12 @@ export const AgentRuntimeConnectorSchema = z.object({
   root: z.string(),
   branch: z.string().nullable()
 })
+/**
+ * The decoded value accepted by {@link AgentRuntimeConnectorSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRuntimeConnector = z.infer<typeof AgentRuntimeConnectorSchema>
 
 /*
@@ -29,6 +52,12 @@ export type AgentRuntimeConnector = z.infer<typeof AgentRuntimeConnectorSchema>
  * harness (a subagent), or a card — and can read a tab's output with
  * `tab.read <id>`. Optional on the context so a boundary built before tabs
  * existed still validates the payload.
+ */
+/**
+ * Validates agent runtime tab values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
  */
 export const AgentRuntimeTabSchema = z.object({
   id: z.string(),
@@ -44,8 +73,20 @@ export const AgentRuntimeTabSchema = z.object({
   exitCode: z.number().nullable().optional(),
   active: z.boolean()
 })
+/**
+ * The decoded value accepted by {@link AgentRuntimeTabSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRuntimeTab = z.infer<typeof AgentRuntimeTabSchema>
 
+/**
+ * Validates agent runtime world document values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentRuntimeWorldDocumentSchema = z.object({
   path: z.string(),
   title: z.string(),
@@ -62,8 +103,20 @@ export const AgentRuntimeWorldDocumentSchema = z.object({
   /** True when `body` is the head of a longer note the budget cut. */
   bodyTruncated: z.boolean().optional()
 })
+/**
+ * The decoded value accepted by {@link AgentRuntimeWorldDocumentSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRuntimeWorldDocument = z.infer<typeof AgentRuntimeWorldDocumentSchema>
 
+/**
+ * Validates agent runtime context values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentRuntimeContextSchema = z.object({
   version: z.literal(AGENT_RUNTIME_CONTEXT_VERSION),
   product: z.literal("smithers"),
@@ -150,6 +203,12 @@ export const AgentRuntimeContextSchema = z.object({
   capabilities: z.array(z.string()),
   limitations: z.array(z.string())
 })
+/**
+ * The decoded value accepted by {@link AgentRuntimeContextSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRuntimeContext = z.infer<typeof AgentRuntimeContextSchema>
 
 /*
@@ -163,7 +222,10 @@ const capturedAtLabel = (capturedAt: number): string =>
     ? new Date(capturedAt).toISOString()
     : "unknown"
 
-/** The hidden-context block the server boundary folds into the turn's instructions. */
+/** The hidden-context block the server boundary folds into the turn's instructions.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string => {
   const lines = [
     "# Runtime context — the Smithers app you are running inside (context version 1)",
@@ -210,9 +272,7 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
   }
   if (context.github.connected) {
     const loaded = typeof context.github.repositories === "number"
-      ? `${context.github.repositories} ${
-        context.github.repositories === 1 ? "repository" : "repositories"
-      } loaded`
+      ? `${context.github.repositories} ${context.github.repositories === 1 ? "repository" : "repositories"} loaded`
       : "repository inventory unknown"
     lines.push(
       `- GitHub: CONNECTED as ${
@@ -313,6 +373,8 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
  * and the deployed product Worker) apply before calling the upstream chat
  * service: instructions plus the rendered context block. Upstream sees one
  * instructions string; the structured context itself never crosses to it.
+ * @since 1.0.0
+ * @category conversions
  */
 export const composeAgentInstructions = (
   instructions: string,

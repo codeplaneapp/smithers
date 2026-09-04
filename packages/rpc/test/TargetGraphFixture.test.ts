@@ -1,14 +1,14 @@
-import { describe, expect, test } from "bun:test"
-import graphFixture from "../fixtures/force/graph.json"
-import planFixture from "../fixtures/force/plan-typeCheck.json"
-import { criticalPath, reachable } from "./TargetGraph"
+import { describe, expect, test } from "vitest"
+import graphFixture from "../fixtures/force/graph.json" with { type: "json" }
+import planFixture from "../fixtures/force/plan-typeCheck.json" with { type: "json" }
+import { criticalPath, reachable } from "../src/TargetGraph.ts"
 import {
   CliGraphEnvelopeSchema,
   CliPlanEnvelopeSchema,
   isPrivateLabel,
   mergePlanFacts,
   targetGraphFromCli
-} from "./TargetGraphFixture"
+} from "../src/TargetGraphFixture.ts"
 
 /*
  * The captured force workspace (packages/rpc/fixtures/force/): 82 targets,

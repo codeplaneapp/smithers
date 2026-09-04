@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
-import { CardSchema } from "./Cards"
-import { LSP_DIAGNOSTICS_CAP } from "./LocalApp"
+import { describe, expect, test } from "vitest"
+import { CardSchema } from "../src/Cards.ts"
+import { LSP_DIAGNOSTICS_CAP } from "../src/LocalApp.ts"
 
 const base = { id: "card-r1", title: "Aomi", status: "active", createdAt: 0, ordinal: 0 }
 
@@ -96,7 +96,11 @@ describe("the file card", () => {
         line: 317,
         column: 62,
         diagnostics: [diagnostic],
-        hover: { line: 63, character: 7, contents: "const isRecord: (value: unknown) => value is Record<string, unknown>" },
+        hover: {
+          line: 63,
+          character: 7,
+          contents: "const isRecord: (value: unknown) => value is Record<string, unknown>"
+        },
         intel: { state: "missing", note: "npm i -g typescript-language-server typescript" }
       }
     })
@@ -148,9 +152,16 @@ describe("the agent cards", () => {
     const card = CardSchema.parse({ ...base, kind: "agents", payload: { native: true, agents: [row] } })
     if (card.kind !== "agents") return
     expect(card.payload.agents[0]?.available).toBe(true)
-    expect(CardSchema.safeParse({ ...base, kind: "agents", payload: { native: true, agents: [{ ...row, id: "Bad Id" }] } }).success).toBe(false)
     expect(
-      CardSchema.safeParse({ ...base, kind: "agents", payload: { native: true, agents: [{ ...row, model: { ...row.model, id: "gpt 5" } }] } })
+      CardSchema.safeParse({ ...base, kind: "agents", payload: { native: true, agents: [{ ...row, id: "Bad Id" }] } })
+        .success
+    ).toBe(false)
+    expect(
+      CardSchema.safeParse({
+        ...base,
+        kind: "agents",
+        payload: { native: true, agents: [{ ...row, model: { ...row.model, id: "gpt 5" } }] }
+      })
         .success
     ).toBe(false)
   })
@@ -183,14 +194,42 @@ describe("the agent cards", () => {
       }
     })
     if (card.kind !== "flow-form") return
-    expect(card.payload.fields[1]?.options?.[1]).toEqual({ value: "opencode", label: "OpenCode", disabled: true, reason: "no credential" })
+    expect(card.payload.fields[1]?.options?.[1]).toEqual({
+      value: "opencode",
+      label: "OpenCode",
+      disabled: true,
+      reason: "no credential"
+    })
     expect(card.payload.draft.harness).toBe("codex")
     const payload = card.payload
-    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, fields: [{ name: "x", label: "X", kind: "date", required: true }] } }).success).toBe(false)
-    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, fields: [{ name: "x", label: "X", kind: "select", required: true, optionsFrom: "moons" }] } }).success).toBe(false)
-    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, via: "system" } }).success).toBe(false)
+    expect(
+      CardSchema.safeParse({
+        ...base,
+        kind: "flow-form",
+        payload: { ...payload, fields: [{ name: "x", label: "X", kind: "date", required: true }] }
+      }).success
+    ).toBe(false)
+    expect(
+      CardSchema.safeParse({
+        ...base,
+        kind: "flow-form",
+        payload: {
+          ...payload,
+          fields: [{ name: "x", label: "X", kind: "select", required: true, optionsFrom: "moons" }]
+        }
+      }).success
+    ).toBe(false)
+    expect(CardSchema.safeParse({ ...base, kind: "flow-form", payload: { ...payload, via: "system" } }).success).toBe(
+      false
+    )
     // The hand-made agent form is gone: the generic card is the only form.
-    expect(CardSchema.safeParse({ ...base, kind: "agent-form", payload: { mode: "create", draft: {}, harnesses: [], models: [], phase: "editing" } }).success).toBe(false)
+    expect(
+      CardSchema.safeParse({
+        ...base,
+        kind: "agent-form",
+        payload: { mode: "create", draft: {}, harnesses: [], models: [], phase: "editing" }
+      }).success
+    ).toBe(false)
   })
 
   test("the models card is what the harness printed, with its source", () => {
@@ -221,6 +260,8 @@ describe("the agent cards", () => {
     expect(card.payload.purpose).toBe("Reviews diffs.")
     const { roleId: _roleId, purpose: _purpose, ...bare } = payload
     expect(CardSchema.safeParse({ ...base, kind: "agent", payload: bare }).success).toBe(true)
-    expect(CardSchema.safeParse({ ...base, kind: "agent", payload: { ...payload, roleId: "Not An Id" } }).success).toBe(false)
+    expect(CardSchema.safeParse({ ...base, kind: "agent", payload: { ...payload, roleId: "Not An Id" } }).success).toBe(
+      false
+    )
   })
 })

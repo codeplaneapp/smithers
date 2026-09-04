@@ -1,4 +1,9 @@
-import type { PickLocalRepositoryResult, RepositoryAccess } from "./NativeRepository"
+/**
+ * Privileged native operations exposed to the application renderer.
+ *
+ * @since 1.0.0
+ */
+import type { PickLocalRepositoryResult, RepositoryAccess } from "./NativeRepository.ts"
 
 /*
  * The two native doors the local app keeps on Electrobun RPC (LOCAL-APP.md,
@@ -11,6 +16,12 @@ import type { PickLocalRepositoryResult, RepositoryAccess } from "./NativeReposi
  * with `requests` and `messages`); packages/rpc does not depend on the SDK,
  * which in 2.x lives only in apps/ui's Hutch devkit. apps/ui's
  * `BrowserView.defineRPC<SmithersNativeRPC>` checks the shape at the use site.
+ */
+/**
+ * The smithers native rpc contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
  */
 export interface SmithersNativeRPC {
   readonly bun: {

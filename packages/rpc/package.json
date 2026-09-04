@@ -15,16 +15,21 @@
     }
   },
   "scripts": {
-    "check": "tsc --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src"
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings=0 && dprint check"
   },
   "dependencies": {
     "zod": "4.4.3",
     "@smthrs/canonical": "1.0.0-rc.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5.7.2"
+    "typescript": "6.0.3",
+    "dprint": "0.55.2",
+    "eslint": "9.39.1",
+    "typescript-eslint": "8.65.0",
+    "@types/node": "25.9.5",
+    "vitest": "4.1.9"
   }
 }

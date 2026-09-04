@@ -1,11 +1,11 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import {
   AGENT_RUNTIME_CONTEXT_VERSION,
   AgentRuntimeContextSchema,
   composeAgentInstructions,
   renderAgentRuntimeContext
-} from "./AgentContext"
-import type { AgentRuntimeContext } from "./AgentContext"
+} from "../src/AgentContext.ts"
+import type { AgentRuntimeContext } from "../src/AgentContext.ts"
 
 const contextFixture = (overrides: Partial<AgentRuntimeContext> = {}): AgentRuntimeContext => ({
   version: AGENT_RUNTIME_CONTEXT_VERSION,
@@ -146,7 +146,9 @@ describe("renderAgentRuntimeContext", () => {
     )
     // A boundary built before the field renders no cloud line and still validates.
     expect(renderAgentRuntimeContext(contextFixture())).not.toContain("Smithers Cloud:")
-    expect(AgentRuntimeContextSchema.safeParse(contextFixture({ cloud: { state: "signed-out", username: null } })).success).toBe(true)
+    expect(
+      AgentRuntimeContextSchema.safeParse(contextFixture({ cloud: { state: "signed-out", username: null } })).success
+    ).toBe(true)
   })
 
   test("carries the honest capabilities and limitations verbatim", () => {

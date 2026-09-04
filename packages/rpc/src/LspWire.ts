@@ -1,3 +1,8 @@
+/**
+ * Language-server payloads projected into public code-intelligence responses.
+ *
+ * @since 1.0.0
+ */
 /*
  * The Language Server Protocol shapes as far as Smithers reads them (LSP
  * 3.17), and the one conversion of each into the typed answers of
@@ -10,17 +15,35 @@
  * server runs on. Runtime-free: strings and numbers only.
  */
 import { isRecord } from "@smthrs/canonical/Record"
-import { LSP_HOVER_CAP_CHARS } from "./LocalApp"
-import type { LspDiagnostic, LspHover, LspRange, LspSeverity } from "./LocalApp"
+import { LSP_HOVER_CAP_CHARS } from "./LocalApp.ts"
+import type { LspDiagnostic, LspHover, LspRange, LspSeverity } from "./LocalApp.ts"
 
+/**
+ * The lsp position wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspPositionWire {
   readonly line: number
   readonly character: number
 }
+/**
+ * The lsp range wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspRangeWire {
   readonly start: LspPositionWire
   readonly end: LspPositionWire
 }
+/**
+ * The lsp diagnostic wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspDiagnosticWire {
   readonly range: LspRangeWire
   readonly message: string
@@ -29,17 +52,50 @@ export interface LspDiagnosticWire {
   readonly source?: string
   readonly relatedInformation?: unknown
 }
+/**
+ * The lsp location wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspLocationWire {
   readonly uri: string
   readonly range: LspRangeWire
 }
+/**
+ * The lsp location link wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspLocationLinkWire {
   readonly targetUri: string
   readonly targetRange: LspRangeWire
   readonly targetSelectionRange?: LspRangeWire
 }
+/**
+ * The lsp marked string contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type LspMarkedString = string | { readonly language: string; readonly value: string }
-export type LspHoverContents = LspMarkedString | ReadonlyArray<LspMarkedString> | { readonly kind: string; readonly value: string }
+/**
+ * The lsp hover contents contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type LspHoverContents = LspMarkedString | ReadonlyArray<LspMarkedString> | {
+  readonly kind: string
+  readonly value: string
+}
+/**
+ * The lsp hover wire contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface LspHoverWire {
   readonly contents: LspHoverContents
   readonly range?: LspRangeWire
@@ -47,8 +103,10 @@ export interface LspHoverWire {
 
 const SEVERITIES: Readonly<Record<number, LspSeverity>> = { 1: "error", 2: "warning", 3: "information", 4: "hint" }
 
-
-/** 0-based, end-exclusive → 1-based, end-exclusive. */
+/** 0-based, end-exclusive → 1-based, end-exclusive.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const toWireRange = (range: LspRangeWire): LspRange => ({
   line: range.start.line + 1,
   character: range.start.character + 1,
@@ -75,6 +133,8 @@ const lastSegment = (path: string): string => path.split("/").filter((segment) =
  * absolute path keeps only its last segment behind `…/`. The renderer, the
  * model and the `/ws` bus all read the result; nothing downstream sees
  * `/Users/<name>/…` or `/nix/store/…`.
+ * @since 1.0.0
+ * @category conversions
  */
 export const redactHostPaths = (text: string, root: string): string =>
   text.replace(PATH_TOKEN, (token) => {
@@ -85,8 +145,14 @@ export const redactHostPaths = (text: string, root: string): string =>
     return `…/${lastSegment(path)}${trailing}`
   })
 
-/** The hover's text as one markdown string, through `redact`, cut at the cap and saying so. */
-export const hoverContents = (contents: LspHoverContents, redact: (text: string) => string = (text) => text): LspHover => {
+/** The hover's text as one markdown string, through `redact`, cut at the cap and saying so.
+ * @since 1.0.0
+ * @category conversions
+ */
+export const hoverContents = (
+  contents: LspHoverContents,
+  redact: (text: string) => string = (text) => text
+): LspHover => {
   const joined = Array.isArray(contents)
     ? (contents as ReadonlyArray<LspMarkedString>).map(markedString).join("\n\n")
     : isRecord(contents) && "kind" in contents
@@ -97,8 +163,14 @@ export const hoverContents = (contents: LspHoverContents, redact: (text: string)
   return { contents: truncated ? text.slice(0, LSP_HOVER_CAP_CHARS) : text, truncated }
 }
 
-/** One diagnostic as the card and the model see it, its message through `redact`; related information stays with the server. */
-export const toDiagnostic = (item: LspDiagnosticWire, redact: (text: string) => string = (text) => text): LspDiagnostic => ({
+/** One diagnostic as the card and the model see it, its message through `redact`; related information stays with the server.
+ * @since 1.0.0
+ * @category conversions
+ */
+export const toDiagnostic = (
+  item: LspDiagnosticWire,
+  redact: (text: string) => string = (text) => text
+): LspDiagnostic => ({
   ...toWireRange(item.range),
   severity: SEVERITIES[item.severity ?? 1] ?? "error",
   message: redact(item.message),
@@ -111,6 +183,8 @@ export const toDiagnostic = (item: LspDiagnosticWire, redact: (text: string) => 
  * points elsewhere (a linked package, a lib.d.ts): a target the renderer
  * cannot open as a file card of this repository is counted, never invented
  * away. Percent-escapes are decoded; a URI that is not a file URI is null.
+ * @since 1.0.0
+ * @category conversions
  */
 export const relativeToRoot = (uri: string, rootUri: string): string | null => {
   const root = rootUri.endsWith("/") ? rootUri.slice(0, -1) : rootUri
@@ -123,7 +197,10 @@ export const relativeToRoot = (uri: string, rootUri: string): string | null => {
   }
 }
 
-/** The one `initialize` capability set both adapters announce: markdown hovers, no related information, full-text sync. */
+/** The one `initialize` capability set both adapters announce: markdown hovers, no related information, full-text sync.
+ * @since 1.0.0
+ * @category constants
+ */
 export const LSP_CLIENT_CAPABILITIES = {
   textDocument: {
     synchronization: { dynamicRegistration: false, didSave: false },

@@ -1,11 +1,27 @@
-import { describe, expect, test } from "bun:test"
-import type { Target } from "./LocalApp"
-import { groupTargets, groupTargetsByWorkspace } from "./TargetPresentation"
+import { describe, expect, test } from "vitest"
+import type { Target } from "../src/LocalApp.ts"
+import { groupTargets, groupTargetsByWorkspace } from "../src/TargetPresentation.ts"
 
-const targets: ReadonlyArray<Target> = [
-  { id: "one", label: "//src:lint", target: "Shell.Test", kinds: ["lint"], package: "//src", name: "lint", workspace: "." },
+const targets: readonly [Target, Target, Target] = [
+  {
+    id: "one",
+    label: "//src:lint",
+    target: "Shell.Test",
+    kinds: ["lint"],
+    package: "//src",
+    name: "lint",
+    workspace: "."
+  },
   { id: "two", label: "//:test", target: "Shell.Test", kinds: ["test"], package: "//", name: "test", workspace: "sdk" },
-  { id: "three", label: "//src:typecheck", target: "Shell.Test", kinds: ["typecheck"], package: "//src", name: "typecheck", workspace: "." }
+  {
+    id: "three",
+    label: "//src:typecheck",
+    target: "Shell.Test",
+    kinds: ["typecheck"],
+    package: "//src",
+    name: "typecheck",
+    workspace: "."
+  }
 ]
 
 describe("trusted target presentation data", () => {

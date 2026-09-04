@@ -1,3 +1,8 @@
+/**
+ * Requests and bounded responses for the browser-fetch tool.
+ *
+ * @since 1.0.0
+ */
 /*
  * The browser tool's server half (Wave 10, §2d): fetch-and-extract, not a
  * session. One isomorphic handler shared by the deployed product Worker and
@@ -10,11 +15,35 @@
  * ("Smithers read <host>") — the raw payload never enters the conversation.
  */
 
+/**
+ * Shared browser fetch max bytes used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const BROWSER_FETCH_MAX_BYTES = 1024 * 1024
+/**
+ * Shared browser fetch timeout ms used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const BROWSER_FETCH_TIMEOUT_MS = 10_000
+/**
+ * Shared browser fetch max text used by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
 export const BROWSER_FETCH_MAX_TEXT = 20_000
 const MAX_REDIRECTS = 3
 
+/**
+ * The browser fetch success contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface BrowserFetchSuccess {
   readonly ok: true
   readonly status: number
@@ -27,13 +56,31 @@ export interface BrowserFetchSuccess {
   readonly blockReason: string | null
 }
 
+/**
+ * The browser fetch failure contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface BrowserFetchFailure {
   readonly ok: false
   readonly message: string
 }
 
+/**
+ * The browser fetch outcome contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type BrowserFetchOutcome = BrowserFetchSuccess | BrowserFetchFailure
 
+/**
+ * The resolve host contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type ResolveHost = (hostname: string) => Promise<ReadonlyArray<string>>
 
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"])
@@ -84,7 +131,10 @@ const mappedIpv4 = (rest: string): string | undefined => {
   return `${(a >> 8) & 0xff}.${a & 0xff}.${(b >> 8) & 0xff}.${b & 0xff}`
 }
 
-/** Is one IPv4/IPv6 literal a public, routable address a server-side fetch may target? */
+/** Is one IPv4/IPv6 literal a public, routable address a server-side fetch may target?
+ * @since 1.0.0
+ * @category conversions
+ */
 export const isPublicAddress = (raw: string): boolean => {
   const ip = normalizeIpLiteral(raw)
   const v4 = parseIpv4(ip)
@@ -153,7 +203,10 @@ const guardTarget = async (
   return { addresses }
 }
 
-/** Pull the readable text out of an HTML page: no scripts, no styles, no tags. */
+/** Pull the readable text out of an HTML page: no scripts, no styles, no tags.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const extractReadableText = (html: string): string => {
   const withoutBlocks = html
     .replace(/<script\b[\s\S]*?<\/script\s*>/gi, " ")
@@ -230,6 +283,12 @@ const readCapped = async (body: ReadableStream<Uint8Array>): Promise<string> => 
   return new TextDecoder().decode(merged)
 }
 
+/**
+ * The browser fetch deps contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface BrowserFetchDeps {
   readonly resolveHost: ResolveHost
   /**
@@ -241,7 +300,10 @@ export interface BrowserFetchDeps {
   readonly timeoutMs?: number
 }
 
-/** Fetch-and-extract one page under the browser tool's hard guards. */
+/** Fetch-and-extract one page under the browser tool's hard guards.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const browserFetch = async (
   rawUrl: string,
   deps: BrowserFetchDeps
@@ -327,7 +389,10 @@ export const browserFetch = async (
   return { ok: false, message: "The page redirected too many times." }
 }
 
-/** The workerd DNS resolver: DNS-over-HTTPS, since workerd exposes no dns module. */
+/** The workerd DNS resolver: DNS-over-HTTPS, since workerd exposes no dns module.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const resolveHostOverHttps: ResolveHost = async (hostname) => {
   const query = async (type: string): Promise<Array<string>> => {
     const response = await fetch(
@@ -350,7 +415,10 @@ export const resolveHostOverHttps: ResolveHost = async (hostname) => {
   return [...a, ...aaaa]
 }
 
-/** The JSON body the /api/tools/browser-fetch route answers with. */
+/** The JSON body the /api/tools/browser-fetch route answers with.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const browserFetchResponseBody = (
   outcome: BrowserFetchOutcome
 ): Record<string, unknown> =>

@@ -1,20 +1,20 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import {
   AGENT_ROLE_IDS,
   AGENT_ROLES,
-  AgentPutRequestSchema,
-  AgentRoleSchema,
   agentIdFromLabel,
+  AgentPutRequestSchema,
   agentRole,
+  AgentRoleSchema,
   agentRoleTitle,
   findAgentRole,
   isAgentRoleId,
   isBuiltinAgentRoleId,
   orderedAgentRoles,
   roleLaunchArgv
-} from "./AgentRoles"
-import type { AgentRole } from "./AgentRoles"
-import { HARNESS_IDS } from "./LocalApp"
+} from "../src/AgentRoles.ts"
+import type { AgentRole } from "../src/AgentRoles.ts"
+import { HARNESS_IDS } from "../src/LocalApp.ts"
 
 const CLAUDE = { binary: "claude", flag: ["--model"] }
 const CODEX = { binary: "codex", flag: ["-m"] }
@@ -42,8 +42,15 @@ describe("the agent role registry", () => {
       expect(AgentRoleSchema.safeParse(role).success).toBe(true)
       expect("launch" in role).toBe(false)
     }
-    expect(agentRole("orchestrator")).toMatchObject({ model: { id: "claude-fable-5" }, harness: "claude", delegates: true })
-    expect(agentRole("explainer")).toMatchObject({ model: { id: "kimi-for-coding/k3", provider: "kimi-for-coding" }, harness: "opencode-kimi" })
+    expect(agentRole("orchestrator")).toMatchObject({
+      model: { id: "claude-fable-5" },
+      harness: "claude",
+      delegates: true
+    })
+    expect(agentRole("explainer")).toMatchObject({
+      model: { id: "kimi-for-coding/k3", provider: "kimi-for-coding" },
+      harness: "opencode-kimi"
+    })
     expect(agentRole("implementation")).toMatchObject({ model: { id: "gpt-5.6-sol" }, harness: "codex" })
     expect(agentRole("trivial-implementation")).toMatchObject({ model: { id: "gpt-5.6-luna" }, harness: "codex" })
     expect(agentRole("ui")).toMatchObject({ harness: "opencode-kimi", model: { id: "kimi-for-coding/k3" } })
@@ -70,23 +77,40 @@ describe("the agent role registry", () => {
     }
     for (const model of ["gpt 5", "-m", "--dangerously-skip-permissions", "", "x".repeat(82)]) {
       expect(AgentRoleSchema.safeParse({ ...custom, model: { ...custom.model, id: model } }).success).toBe(false)
-      expect(AgentPutRequestSchema.safeParse({
-        label: custom.label,
-        purpose: custom.purpose,
-        harness: custom.harness,
-        model: { ...custom.model, id: model }
-      }).success).toBe(false)
+      expect(
+        AgentPutRequestSchema.safeParse({
+          label: custom.label,
+          purpose: custom.purpose,
+          harness: custom.harness,
+          model: { ...custom.model, id: model }
+        }).success
+      ).toBe(false)
     }
     // Provider-qualified ids (opencode) and dotted versions pass.
-    expect(AgentRoleSchema.safeParse({ ...custom, model: { ...custom.model, id: "cerebras/gpt-oss-120b" } }).success).toBe(true)
-    expect(AgentPutRequestSchema.safeParse({ label: "R", purpose: "", harness: "codex", model: custom.model }).success).toBe(true)
-    expect(AgentPutRequestSchema.safeParse({ label: "R", purpose: "", harness: "codex", model: custom.model, extra: 1 }).success).toBe(false)
+    expect(AgentRoleSchema.safeParse({ ...custom, model: { ...custom.model, id: "cerebras/gpt-oss-120b" } }).success)
+      .toBe(true)
+    expect(AgentPutRequestSchema.safeParse({ label: "R", purpose: "", harness: "codex", model: custom.model }).success)
+      .toBe(true)
+    expect(
+      AgentPutRequestSchema.safeParse({ label: "R", purpose: "", harness: "codex", model: custom.model, extra: 1 })
+        .success
+    ).toBe(false)
   })
 
   test("the launch argv is composed per harness: binary, model flag, model id, then the task as the first prompt", () => {
     expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE)).toEqual(["claude", "--model", "claude-fable-5"])
-    expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE, " plan it ")).toEqual(["claude", "--model", "claude-fable-5", "plan it"])
-    expect(roleLaunchArgv(agentRole("implementation"), CODEX, "add a retry")).toEqual(["codex", "-m", "gpt-5.6-sol", "add a retry"])
+    expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE, " plan it ")).toEqual([
+      "claude",
+      "--model",
+      "claude-fable-5",
+      "plan it"
+    ])
+    expect(roleLaunchArgv(agentRole("implementation"), CODEX, "add a retry")).toEqual([
+      "codex",
+      "-m",
+      "gpt-5.6-sol",
+      "add a retry"
+    ])
     expect(roleLaunchArgv(custom, CODEX)).toEqual(["codex", "-m", "gpt-5.6-terra"])
     expect(roleLaunchArgv(agentRole("explainer"), OPENCODE)).toEqual(["opencode", "--model", "kimi-for-coding/k3"])
     expect(roleLaunchArgv(agentRole("explainer"), OPENCODE, "why did this fail")).toEqual([

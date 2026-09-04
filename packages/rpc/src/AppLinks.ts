@@ -1,4 +1,9 @@
 /**
+ * Native application download and handoff link contracts.
+ *
+ * @since 1.0.0
+ */
+/**
  * Where the web app sends a visitor for the native app.
  *
  * Null until a native build is published: as of 2026-09-02,

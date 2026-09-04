@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test"
-import { CardSchema } from "./Cards"
-import { RevisionPinSchema } from "./Changes"
+import { describe, expect, test } from "vitest"
+import { CardSchema } from "../src/Cards.ts"
+import { RevisionPinSchema } from "../src/Changes.ts"
 
 /*
  * Lane change (ADR 0003 — the change is the unit): the change and diff card
@@ -25,7 +25,16 @@ const changePayload = {
   diff: null,
   checks: [{ context: "typecheck", state: "success" }],
   findings: null,
-  reviews: [{ reviewer: "will", reviewerKind: "human", verdict: "approve", confidence: null, summary: "", commitId: null, seq: null, lastReviewedSeq: null }],
+  reviews: [{
+    reviewer: "will",
+    reviewerKind: "human",
+    verdict: "approve",
+    confidence: null,
+    summary: "",
+    commitId: null,
+    seq: null,
+    lastReviewedSeq: null
+  }],
   threads: [{ path: "src/server.ts", line: 12, body: "why bounded?", author: null, createdAt: null, state: null }],
   conflicts: [],
   stack: {
@@ -59,7 +68,14 @@ describe("the change card", () => {
         currentSeq: 5,
         revisionCount: 5,
         revisions: [{ seq: 5, commitId: "a03f5f1e", source: "agent", agentSessionId: "a03f5f" }],
-        findings: [{ analyzer: "lint", severity: "warn", path: "src/a.ts", line: 3, summary: "unused", raisedAtSeq: 3 }],
+        findings: [{
+          analyzer: "lint",
+          severity: "warn",
+          path: "src/a.ts",
+          line: 3,
+          summary: "unused",
+          raisedAtSeq: 3
+        }],
         changeset: {
           id: 7,
           organization: "canary-changesets-e2e",
@@ -88,7 +104,11 @@ describe("the change card", () => {
   })
 
   test("a missing landing state (stack: null) parses — a change with no landing request", () => {
-    const card = CardSchema.parse({ ...base, kind: "change", payload: { ...changePayload, stack: null, reviews: null, threads: null } })
+    const card = CardSchema.parse({
+      ...base,
+      kind: "change",
+      payload: { ...changePayload, stack: null, reviews: null, threads: null }
+    })
     if (card.kind !== "change") throw new Error("wrong kind")
     expect(card.payload.stack).toBeNull()
   })
@@ -102,14 +122,24 @@ describe("the change card", () => {
         conflicts: null,
         checks: null,
         stack: null,
-        unread: { conflicts: "Reading conflicts failed (500)", checks: "Reading statuses failed (500)", stack: "upstream down" }
+        unread: {
+          conflicts: "Reading conflicts failed (500)",
+          checks: "Reading statuses failed (500)",
+          stack: "upstream down"
+        }
       }
     })
     if (card.kind !== "change") throw new Error("wrong kind")
     expect(card.payload.conflicts).toBeNull()
     expect(card.payload.unread?.conflicts).toBe("Reading conflicts failed (500)")
     /* The stack keeps the request's change ids so the card can name the top change a whole-stack land runs from. */
-    expect(CardSchema.safeParse({ ...base, kind: "change", payload: { ...changePayload, stack: { ...changePayload.stack, changeIds: undefined } } }).success).toBe(false)
+    expect(
+      CardSchema.safeParse({
+        ...base,
+        kind: "change",
+        payload: { ...changePayload, stack: { ...changePayload.stack, changeIds: undefined } }
+      }).success
+    ).toBe(false)
   })
 })
 
@@ -125,7 +155,15 @@ describe("the diff card", () => {
         to: "current",
         pin: { changeId: "qupxosqw", seq: null, commitId: "a03f5f1e" },
         files: [
-          { path: "src/a.ts", changeType: "modified", isBinary: false, additions: 3, deletions: 1, patch: "@@ -1 +1 @@", conflicted: true },
+          {
+            path: "src/a.ts",
+            changeType: "modified",
+            isBinary: false,
+            additions: 3,
+            deletions: 1,
+            patch: "@@ -1 +1 @@",
+            conflicted: true
+          },
           { path: "src/big.ts", changeType: "modified", isBinary: false, additions: 500, deletions: 0, patchLines: 812 }
         ]
       }
@@ -140,7 +178,14 @@ describe("the diff card", () => {
     const parsed = CardSchema.safeParse({
       ...base,
       kind: "diff",
-      payload: { repo: "o/r", changeId: "qupxosqw", from: "parent", to: "current", pin: { seq: null, commitId: "a03f5f1e" }, files: [] }
+      payload: {
+        repo: "o/r",
+        changeId: "qupxosqw",
+        from: "parent",
+        to: "current",
+        pin: { seq: null, commitId: "a03f5f1e" },
+        files: []
+      }
     })
     expect(parsed.success).toBe(false)
   })

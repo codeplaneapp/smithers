@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { AgentTurnFrameSchema, isAgentTurnFrame } from "./NativeAgent"
-import type { AgentTurnFrame } from "./NativeAgent"
+import { describe, expect, test } from "vitest"
+import { AgentTurnFrameSchema, isAgentTurnFrame } from "../src/NativeAgent.ts"
+import type { AgentTurnFrame } from "../src/NativeAgent.ts"
 
 const parses = (value: unknown): boolean => AgentTurnFrameSchema.safeParse(value).success
 
@@ -69,11 +69,12 @@ describe("AgentTurnFrame — chain family (DESIGN.md §14)", () => {
 
 /*
  * The dependency law of DESIGN.md §14: src/shared mirrors chain vocabulary and
- * never imports it. This keeps the Worker and both bridges effect-free.
+ * imports only the runtime-free canonical record guard. This keeps the Worker
+ * and both bridges free of Effect runtime imports.
  */
-describe("src/shared stays runtime-free", () => {
+describe("RPC sources stay runtime-free", () => {
   test("only the runtime-free canonical record guard crosses the Smithers boundary", () => {
-    const dir = join(import.meta.dir)
+    const dir = join(import.meta.dirname, "../src")
     for (const file of readdirSync(dir)) {
       if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue
       const source = readFileSync(join(dir, file), "utf8")

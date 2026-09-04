@@ -1,6 +1,13 @@
-import { describe, expect, test } from "bun:test"
-import { LSP_HOVER_CAP_CHARS } from "./LocalApp"
-import { hoverContents, LSP_CLIENT_CAPABILITIES, redactHostPaths, relativeToRoot, toDiagnostic, toWireRange } from "./LspWire"
+import { describe, expect, test } from "vitest"
+import { LSP_HOVER_CAP_CHARS } from "../src/LocalApp.ts"
+import {
+  hoverContents,
+  LSP_CLIENT_CAPABILITIES,
+  redactHostPaths,
+  relativeToRoot,
+  toDiagnostic,
+  toWireRange
+} from "../src/LspWire.ts"
 
 /*
  * The one conversion of the LSP wire into the typed answers, shared by the
@@ -26,24 +33,57 @@ describe("the LSP wire conversion", () => {
     expect(long.contents).toHaveLength(LSP_HOVER_CAP_CHARS)
     expect(long.truncated).toBe(true)
     // The redaction runs before the cut, so a path never straddles it.
-    expect(hoverContents("module \"/home/developer/workspace/src/greet\"", (text) => redactHostPaths(text, "/home/developer/workspace")))
+    expect(
+      hoverContents(
+        "module \"/home/developer/workspace/src/greet\"",
+        (text) => redactHostPaths(text, "/home/developer/workspace")
+      )
+    )
       .toEqual({ contents: "module \"src/greet\"", truncated: false })
   })
 
   test("a diagnostic's numeric severity becomes its word, an unknown or absent one is an error, and the code is a string", () => {
     const range = { start: { line: 3, character: 23 }, end: { line: 3, character: 29 } }
-    expect(toDiagnostic({ range, message: "Property 'lenght' does not exist", severity: 1, code: 2551, source: "typescript" }))
-      .toEqual({ line: 4, character: 24, endLine: 4, endCharacter: 30, severity: "error", message: "Property 'lenght' does not exist", source: "typescript", code: "2551" })
+    expect(
+      toDiagnostic({
+        range,
+        message: "Property 'lenght' does not exist",
+        severity: 1,
+        code: 2551,
+        source: "typescript"
+      })
+    )
+      .toEqual({
+        line: 4,
+        character: 24,
+        endLine: 4,
+        endCharacter: 30,
+        severity: "error",
+        message: "Property 'lenght' does not exist",
+        source: "typescript",
+        code: "2551"
+      })
     expect(toDiagnostic({ range, message: "unused", severity: 4 }).severity).toBe("hint")
     expect(toDiagnostic({ range, message: "?", severity: 9 }).severity).toBe("error")
-    expect(toDiagnostic({ range, message: "?" })).toEqual({ line: 4, character: 24, endLine: 4, endCharacter: 30, severity: "error", message: "?" })
+    expect(toDiagnostic({ range, message: "?" })).toEqual({
+      line: 4,
+      character: 24,
+      endLine: 4,
+      endCharacter: 30,
+      severity: "error",
+      message: "?"
+    })
   })
 
   test("free text loses the machine's paths: under the root relative, elsewhere the last segment behind …/", () => {
     const root = "/home/developer/workspace"
-    expect(redactHostPaths(`File '${root}/src/a.ts' is not under 'rootDir' '${root}'.`, root)).toBe("File 'src/a.ts' is not under 'rootDir' '.'.")
+    expect(redactHostPaths(`File '${root}/src/a.ts' is not under 'rootDir' '${root}'.`, root)).toBe(
+      "File 'src/a.ts' is not under 'rootDir' '.'."
+    )
     expect(redactHostPaths("at /nix/store/abc-typescript/lib/lib.es5.d.ts:12:3", root)).toBe("at …/lib.es5.d.ts:12:3")
-    expect(redactHostPaths("see https://example.com/a/b and src/x.ts", root)).toBe("see https://example.com/a/b and src/x.ts")
+    expect(redactHostPaths("see https://example.com/a/b and src/x.ts", root)).toBe(
+      "see https://example.com/a/b and src/x.ts"
+    )
   })
 
   test("a file URI under the root is root-relative; one elsewhere, or not a file URI, is null", () => {

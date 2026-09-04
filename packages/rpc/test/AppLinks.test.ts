@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { DOWNLOAD_URL } from "./AppLinks"
+import { describe, expect, test } from "vitest"
+import { DOWNLOAD_URL } from "../src/AppLinks.ts"
 
 describe("app links", () => {
   test("there is no download link until a native release carries an asset", () => {

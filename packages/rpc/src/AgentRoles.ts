@@ -1,5 +1,10 @@
+/**
+ * Role and event contracts for coordinated agents.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
-import { HARNESS_IDS } from "./LocalApp"
+import { HARNESS_IDS } from "./LocalApp.ts"
 
 /*
  * The agent roles (docs/LOCAL-APP.md "Tabs" → "Agents";
@@ -27,19 +32,48 @@ import { HARNESS_IDS } from "./LocalApp"
  *    opencode role stores is the `provider/model` the binary accepts.
  */
 
-/** A role id: lowercase, starts with a letter, 2–41 characters, no spaces. */
+/** A role id: lowercase, starts with a letter, 2–41 characters, no spaces.
+ * @since 1.0.0
+ * @category constants
+ */
 export const AGENT_ROLE_ID = /^[a-z][a-z0-9-]{1,40}$/
-export const AgentRoleIdSchema = z.string().regex(AGENT_ROLE_ID, "an agent id is lowercase letters, digits and dashes, starting with a letter")
+/**
+ * Validates agent role id values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const AgentRoleIdSchema = z.string().regex(
+  AGENT_ROLE_ID,
+  "an agent id is lowercase letters, digits and dashes, starting with a letter"
+)
+/**
+ * The decoded value accepted by {@link AgentRoleIdSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRoleId = z.infer<typeof AgentRoleIdSchema>
 
 /**
  * A model id as a harness accepts it on its command line: no spaces and no
  * leading dash, so it can never be read as a second flag (flag injection).
+ * @since 1.0.0
+ * @category constants
  */
 export const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._/:-]{0,80}$/
+/**
+ * Validates model id values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ModelIdSchema = z.string().regex(MODEL_ID, "a model id has no spaces and does not start with a dash")
 
-/** The built-in role ids: the seed rows, in menu order. */
+/** The built-in role ids: the seed rows, in menu order.
+ * @since 1.0.0
+ * @category constants
+ */
 export const AGENT_ROLE_IDS = [
   "orchestrator",
   "explainer",
@@ -48,8 +82,20 @@ export const AGENT_ROLE_IDS = [
   "ui",
   "fast-ui"
 ] as const
+/**
+ * The builtin agent role id contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type BuiltinAgentRoleId = (typeof AGENT_ROLE_IDS)[number]
 
+/**
+ * Validates agent role model values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentRoleModelSchema = z.object({
   /** The provider the model belongs to, for the human ("anthropic", "openai", "kimi-for-coding"). */
   provider: z.string(),
@@ -58,8 +104,20 @@ export const AgentRoleModelSchema = z.object({
   /** The label the menus show ("Fable 5"). */
   label: z.string()
 })
+/**
+ * The decoded value accepted by {@link AgentRoleModelSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRoleModel = z.infer<typeof AgentRoleModelSchema>
 
+/**
+ * Validates agent role values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentRoleSchema = z.object({
   id: AgentRoleIdSchema,
   label: z.string().min(1).max(60),
@@ -75,13 +133,22 @@ export const AgentRoleSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number()
 })
+/**
+ * The decoded value accepted by {@link AgentRoleSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentRole = z.infer<typeof AgentRoleSchema>
 
 const seeded = (
   role: Omit<AgentRole, "builtin" | "createdAt" | "updatedAt">
 ): AgentRole => ({ ...role, builtin: true, createdAt: 0, updatedAt: 0 })
 
-/** The built-in roles: the seed of every agents store, in menu order. */
+/** The built-in roles: the seed of every agents store, in menu order.
+ * @since 1.0.0
+ * @category constants
+ */
 export const AGENT_ROLES: ReadonlyArray<AgentRole> = [
   seeded({
     id: "orchestrator",
@@ -133,18 +200,30 @@ export const AGENT_ROLES: ReadonlyArray<AgentRole> = [
   })
 ]
 
-/** Whether a string is a well-formed agent id (built-in or custom); not whether one exists. */
+/** Whether a string is a well-formed agent id (built-in or custom); not whether one exists.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const isAgentRoleId = (value: string): value is AgentRoleId => AGENT_ROLE_ID.test(value)
 
-/** Whether an id names one of the seeded rows. */
+/** Whether an id names one of the seeded rows.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const isBuiltinAgentRoleId = (value: string): value is BuiltinAgentRoleId =>
   (AGENT_ROLE_IDS as ReadonlyArray<string>).includes(value)
 
-/** The role with this id in a list (the built-ins by default), or undefined. */
+/** The role with this id in a list (the built-ins by default), or undefined.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const findAgentRole = (id: string, roles: ReadonlyArray<AgentRole> = AGENT_ROLES): AgentRole | undefined =>
   roles.find((candidate) => candidate.id === id)
 
-/** A built-in role by id; throws for anything else (the built-ins are the compile-time table). */
+/** A built-in role by id; throws for anything else (the built-ins are the compile-time table).
+ * @since 1.0.0
+ * @category conversions
+ */
 export const agentRole = (id: BuiltinAgentRoleId): AgentRole => {
   const role = findAgentRole(id)
   if (role === undefined) throw new Error(`Unknown agent role ${id}`)
@@ -155,6 +234,8 @@ export const agentRole = (id: BuiltinAgentRoleId): AgentRole => {
  * The agents as every menu lists them: the built-ins in table order, then
  * the custom agents oldest first. An empty list (nothing loaded yet) is the
  * built-ins, because they are never removable — a loaded list is never empty.
+ * @since 1.0.0
+ * @category conversions
  */
 export const orderedAgentRoles = (roles: ReadonlyArray<AgentRole>): ReadonlyArray<AgentRole> => {
   if (roles.length === 0) return AGENT_ROLES
@@ -167,7 +248,10 @@ export const orderedAgentRoles = (roles: ReadonlyArray<AgentRole>): ReadonlyArra
   )
 }
 
-/** "Explainer · Kimi K3": the menu label. */
+/** "Explainer · Kimi K3": the menu label.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const agentRoleTitle = (role: AgentRole): string => `${role.label} · ${role.model.label}`
 
 /**
@@ -176,6 +260,8 @@ export const agentRoleTitle = (role: AgentRole): string => `${role.label} · ${r
  * Bun host's harness table (apps/ui/src/bun/Harnesses.ts) states these,
  * verified against each installed binary's `--help`; this module only
  * composes with them.
+ * @since 1.0.0
+ * @category models
  */
 export interface HarnessModelSpec {
   /** argv[0]: the binary name, resolved to a path server-side. */
@@ -192,6 +278,8 @@ export interface HarnessModelSpec {
  * a flag. `claude [prompt]` and `codex [PROMPT]` take the task positionally;
  * the OpenCode TUI takes none, so a task runs through
  * `opencode run -m provider/model <message>` (opencode 1.18.22 `run --help`).
+ * @since 1.0.0
+ * @category conversions
  */
 export const roleLaunchArgv = (
   role: Pick<AgentRole, "model">,
@@ -213,9 +301,27 @@ export const roleLaunchArgv = (
  * what the harness's own list command printed, or the table's verified
  * suggestions when it has no list command.
  */
+/**
+ * Validates agents response values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentsResponseSchema = z.object({ agents: z.array(AgentRoleSchema) })
+/**
+ * The decoded value accepted by {@link AgentsResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentsResponse = z.infer<typeof AgentsResponseSchema>
 
+/**
+ * Validates agent put request values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentPutRequestSchema = z.object({
   label: z.string().min(1).max(60),
   purpose: z.string().max(400),
@@ -223,10 +329,28 @@ export const AgentPutRequestSchema = z.object({
   model: AgentRoleModelSchema,
   delegates: z.boolean().optional()
 }).strict()
+/**
+ * The decoded value accepted by {@link AgentPutRequestSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentPutRequest = z.infer<typeof AgentPutRequestSchema>
 
+/**
+ * Validates agent response values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentResponseSchema = z.object({ agent: AgentRoleSchema })
 
+/**
+ * Validates harness models response values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const HarnessModelsResponseSchema = z.object({
   harnessId: z.enum(HARNESS_IDS),
   /** One model id per line the list command printed, or the verified suggestions. */
@@ -235,11 +359,19 @@ export const HarnessModelsResponseSchema = z.object({
   /** Why the list is empty or fell back, in the host's words; absent when it answered. */
   reason: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link HarnessModelsResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type HarnessModelsResponse = z.infer<typeof HarnessModelsResponseSchema>
 
 /**
  * The id a new agent gets from its name when none was typed: "Docs writer"
  * → "docs-writer". Undefined when nothing id-shaped survives.
+ * @since 1.0.0
+ * @category conversions
  */
 export const agentIdFromLabel = (label: string): AgentRoleId | undefined => {
   const slug = label

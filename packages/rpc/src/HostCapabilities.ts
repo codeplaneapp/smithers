@@ -1,4 +1,9 @@
-import type { RuntimeCapability } from "./AppBootstrap"
+/**
+ * Capabilities advertised by the current application host.
+ *
+ * @since 1.0.0
+ */
+import type { RuntimeCapability } from "./AppBootstrap.ts"
 
 /**
  * The one place each host's bootstrap capability list is spelled out.
@@ -10,7 +15,10 @@ import type { RuntimeCapability } from "./AppBootstrap"
  * emission order; a row is kept only when its flag is on.
  */
 
-/** What the Worker has configured. `terminal` is the W4 relay; it stays false until that lane lands. */
+/** What the Worker has configured. `terminal` is the W4 relay; it stays false until that lane lands.
+ * @since 1.0.0
+ * @category models
+ */
 export interface CloudCapabilityEnv {
   readonly identity: boolean
   readonly jjhub: boolean
@@ -19,7 +27,10 @@ export interface CloudCapabilityEnv {
   readonly terminal: boolean
 }
 
-/** What a Bun launch has configured. `jjhub` is the cloud upstream; offline launches have none. */
+/** What a Bun launch has configured. `jjhub` is the cloud upstream; offline launches have none.
+ * @since 1.0.0
+ * @category models
+ */
 export interface LocalCapabilityOptions {
   readonly agent: boolean
   readonly identity: boolean
@@ -30,7 +41,10 @@ export interface LocalCapabilityOptions {
 const present = (rows: ReadonlyArray<readonly [RuntimeCapability, boolean]>): Array<RuntimeCapability> =>
   rows.filter(([, on]) => on).map(([capability]) => capability)
 
-/** The Worker never emits `cloud.pat`: it holds no PAT session; the GitHub cookie is its only identity. */
+/** The Worker never emits `cloud.pat`: it holds no PAT session; the GitHub cookie is its only identity.
+ * @since 1.0.0
+ * @category conversions
+ */
 export const cloudCapabilities = (env: CloudCapabilityEnv): Array<RuntimeCapability> =>
   present([
     ["agent", env.agent],
@@ -44,6 +58,8 @@ export const cloudCapabilities = (env: CloudCapabilityEnv): Array<RuntimeCapabil
  * Both cloud doors ride the jjhub upstream: without one, the Bun server
  * answers 501 on `/api/cloud-auth/*` and on the `/api/cloud-ws/` tunnel, so
  * claiming either would name a door the host has closed.
+ * @since 1.0.0
+ * @category conversions
  */
 export const localCapabilities = (opts: LocalCapabilityOptions): Array<RuntimeCapability> =>
   present([

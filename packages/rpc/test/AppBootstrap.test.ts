@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { APP_API_VERSION, AppBootstrapSchema, RuntimeCapabilitySchema, hasCapability } from "./AppBootstrap"
+import { describe, expect, test } from "vitest"
+import { APP_API_VERSION, AppBootstrapSchema, hasCapability, RuntimeCapabilitySchema } from "../src/AppBootstrap.ts"
 
 describe("app bootstrap contract", () => {
   test("validates a local offline host without inventing cloud services", () => {

@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test"
-import { isLocalSessionToken, localSessionProtocol, LOCAL_SESSION_PROTOCOL_PREFIX } from "./LocalSession"
+import { describe, expect, test } from "vitest"
+import { isLocalSessionToken, LOCAL_SESSION_PROTOCOL_PREFIX, localSessionProtocol } from "../src/LocalSession.ts"
 
 describe("local session capability contract", () => {
   test("accepts exactly a 256-bit unpadded base64url token", () => {

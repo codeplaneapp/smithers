@@ -1,8 +1,19 @@
+/**
+ * Native agent event and control payloads.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
-import type { AgentRuntimeContext } from "./AgentContext"
-import type { AgentRoleId } from "./AgentRoles"
-import { CardPatchSchema, CardSchema } from "./Cards"
+import type { AgentRuntimeContext } from "./AgentContext.ts"
+import type { AgentRoleId } from "./AgentRoles.ts"
+import { CardPatchSchema, CardSchema } from "./Cards.ts"
 
+/**
+ * The fetch like contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit
@@ -13,6 +24,12 @@ export type FetchLike = (
  * (flows/ui workers/chat/src/index.ts validateBody): plain role messages,
  * plus the function_call / function_call_output items a tool-loop
  * continuation turn carries.
+ */
+/**
+ * The agent chat message contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
  */
 export type AgentChatMessage =
   | { readonly role: "user" | "assistant"; readonly content: string }
@@ -28,7 +45,10 @@ export type AgentChatMessage =
     readonly output: string
   }
 
-/** The OpenAI JSON-schema function tool spec the chat worker passes upstream. */
+/** The OpenAI JSON-schema function tool spec the chat worker passes upstream.
+ * @since 1.0.0
+ * @category models
+ */
 export interface AgentToolSpec {
   readonly type: "function"
   readonly name: string
@@ -36,6 +56,12 @@ export interface AgentToolSpec {
   readonly parameters: Record<string, unknown>
 }
 
+/**
+ * The start agent turn request contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export interface StartAgentTurnRequest {
   readonly runId: string
   readonly messages: ReadonlyArray<AgentChatMessage>
@@ -70,6 +96,12 @@ export interface StartAgentTurnRequest {
   readonly role?: AgentRoleId
 }
 
+/**
+ * The start agent turn result contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type StartAgentTurnResult =
   | { readonly status: "started" }
   | { readonly status: "error"; readonly message: string }
@@ -80,6 +112,12 @@ export type StartAgentTurnResult =
  * /api/agent/turn/cancel ends the turn's stream with it so the client renders
  * the kill honestly instead of watching the stream silently stop.
  */
+/**
+ * Validates agent turn done reason values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AgentTurnDoneReasonSchema = z.enum(["stop", "tool_call", "tool_limit", "cancelled"])
 
 /*
@@ -89,7 +127,10 @@ export const AgentTurnDoneReasonSchema = z.enum(["stop", "tool_call", "tool_limi
  * without pulling effect. On a chain turn `runId` is the lineage id.
  */
 
-/** The chain's gate observations, plus the two execution-produced kinds. */
+/** The chain's gate observations, plus the two execution-produced kinds.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ChainGateKindSchema = z.enum([
   "shape",
   "fuel",
@@ -99,13 +140,22 @@ export const ChainGateKindSchema = z.enum([
   "script_failed"
 ])
 
-/** Why a lineage parked — the chain's suspension reason vocabulary. */
+/** Why a lineage parked — the chain's suspension reason vocabulary.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ChainParkCodeSchema = z.enum(["approval", "event", "timer", "quota", "plugin"])
 
-/** How a settled call resolved: executed live, cache hit, or replayed prefix. */
+/** How a settled call resolved: executed live, cache hit, or replayed prefix.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ChainCallVerdictSchema = z.enum(["run", "hit", "replay"])
 
-/** How a link ended: the three trampoline outcomes. */
+/** How a link ended: the three trampoline outcomes.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const ChainLinkOutcomeSchema = z.enum(["done", "to", "park"])
 
 /*
@@ -119,6 +169,12 @@ export const ChainLinkOutcomeSchema = z.enum(["done", "to", "park"])
  * The `link.*` / `call.*` / `gate.rejected` / `steering.drained` / `park`
  * family streams a chain turn (DESIGN.md §14): frames carry what live
  * rendering needs; the chainEvents journal remains the full evidence.
+ */
+/**
+ * Validates agent turn frame values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
  */
 export const AgentTurnFrameSchema = z.discriminatedUnion("type", [
   z.object({
@@ -200,7 +256,19 @@ export const AgentTurnFrameSchema = z.discriminatedUnion("type", [
     card: CardSchema.optional()
   })
 ])
+/**
+ * The decoded value accepted by {@link AgentTurnFrameSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AgentTurnFrame = z.infer<typeof AgentTurnFrameSchema>
 
+/**
+ * Converts is agent turn frame values for the shared wire contract.
+ *
+ * @since 1.0.0
+ * @category conversions
+ */
 export const isAgentTurnFrame = (value: unknown): value is AgentTurnFrame =>
   AgentTurnFrameSchema.safeParse(value).success

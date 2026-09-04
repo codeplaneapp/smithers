@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import {
   CLOUD_LSP_FRAME_CAP_BYTES,
   CLOUD_LSP_REASSEMBLY_CAP_BYTES,
@@ -34,7 +34,7 @@ import {
   TARGET_PATTERN,
   TargetSchema,
   withRetryAfter
-} from "./LocalApp"
+} from "../src/LocalApp.ts"
 
 /*
  * The local-app wire model (apps/ui/docs/LOCAL-APP.md "Targets: load and
@@ -124,7 +124,10 @@ describe("the code-intelligence wire model", () => {
     expect(LspPositionRequestSchema.safeParse({ ...position, character: 0 }).success).toBe(false)
     expect(LspPositionRequestSchema.safeParse({ ...position, line: 1.5 }).success).toBe(false)
     expect(LspPositionRequestSchema.safeParse({ ...position, cwd: "/" }).success).toBe(false)
-    expect(LspFileRequestSchema.parse({ repoId: "r1", path: "src/index.ts" })).toEqual({ repoId: "r1", path: "src/index.ts" })
+    expect(LspFileRequestSchema.parse({ repoId: "r1", path: "src/index.ts" })).toEqual({
+      repoId: "r1",
+      path: "src/index.ts"
+    })
     expect(LspFileRequestSchema.safeParse({ repoId: "r1", path: "" }).success).toBe(false)
     expect(LspFileRequestSchema.safeParse({ repoId: "r1", path: "a".repeat(4097) }).success).toBe(false)
   })
@@ -133,7 +136,12 @@ describe("the code-intelligence wire model", () => {
     expect(LspHoverResponseSchema.parse({ hover: null, digest })).toEqual({ hover: null, digest })
     const hover = { contents: "const x: number", truncated: false, range }
     expect(LspHoverResponseSchema.parse({ hover, digest })).toEqual({ hover, digest })
-    expect(LspHoverResponseSchema.safeParse({ hover: { contents: "x".repeat(LSP_HOVER_CAP_CHARS + 1), truncated: true }, digest }).success).toBe(false)
+    expect(
+      LspHoverResponseSchema.safeParse({
+        hover: { contents: "x".repeat(LSP_HOVER_CAP_CHARS + 1), truncated: true },
+        digest
+      }).success
+    ).toBe(false)
     // The cut is stated, never inferred from the length; an answer without a digest names no file.
     expect(LspHoverResponseSchema.safeParse({ hover: { contents: "x" }, digest }).success).toBe(false)
     expect(LspHoverResponseSchema.safeParse({ hover }).success).toBe(false)
@@ -141,20 +149,40 @@ describe("the code-intelligence wire model", () => {
 
   test("definitions are repository-relative locations, at most the cap, with the server's total and the count outside the repository", () => {
     const location = { path: "src/lib.ts", ...range }
-    expect(LspDefinitionResponseSchema.parse({ locations: [location], total: 1, omitted: 0, digest }).locations).toEqual([location])
+    expect(LspDefinitionResponseSchema.parse({ locations: [location], total: 1, omitted: 0, digest }).locations)
+      .toEqual([location])
     // An empty list with omitted targets is a definition elsewhere, and the shape carries that fact.
     expect(LspDefinitionResponseSchema.parse({ locations: [], total: 1, omitted: 1, digest }).omitted).toBe(1)
     expect(LspDefinitionResponseSchema.safeParse({ locations: [], digest }).success).toBe(false)
-    expect(LspDefinitionResponseSchema.safeParse({ locations: Array.from({ length: LSP_LOCATIONS_CAP + 1 }, () => location), total: 21, omitted: 0, digest }).success)
+    expect(
+      LspDefinitionResponseSchema.safeParse({
+        locations: Array.from({ length: LSP_LOCATIONS_CAP + 1 }, () => location),
+        total: 21,
+        omitted: 0,
+        digest
+      }).success
+    )
       .toBe(false)
   })
 
   test("diagnostics distinguish an empty publication from none within the wait, and carry the total behind the cap", () => {
-    expect(LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 1, items: [diagnostic], total: 1, digest }).items).toEqual([diagnostic])
-    expect(LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 2, items: [], total: 0, digest }).items).toEqual([])
-    expect(LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: null, items: null, total: null, digest }).items).toBeNull()
-    expect(LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 1, items: [diagnostic], total: 132, digest }).total).toBe(132)
-    expect(LspDiagnosticsResponseSchema.safeParse({ path: "src/index.ts", version: 1, items: [diagnostic], digest }).success).toBe(false)
+    expect(
+      LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 1, items: [diagnostic], total: 1, digest })
+        .items
+    ).toEqual([diagnostic])
+    expect(LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 2, items: [], total: 0, digest }).items)
+      .toEqual([])
+    expect(
+      LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: null, items: null, total: null, digest })
+        .items
+    ).toBeNull()
+    expect(
+      LspDiagnosticsResponseSchema.parse({ path: "src/index.ts", version: 1, items: [diagnostic], total: 132, digest })
+        .total
+    ).toBe(132)
+    expect(
+      LspDiagnosticsResponseSchema.safeParse({ path: "src/index.ts", version: 1, items: [diagnostic], digest }).success
+    ).toBe(false)
     expect(
       LspDiagnosticsResponseSchema.safeParse({
         path: "src/index.ts",
@@ -176,11 +204,24 @@ describe("the code-intelligence wire model", () => {
   })
 
   test("the bus frame and the server list carry the same shapes", () => {
-    const frame = { type: "lsp.diagnostics" as const, repoId: "r1", path: "src/index.ts", version: 3, items: [diagnostic], total: 3, digest }
+    const frame = {
+      type: "lsp.diagnostics" as const,
+      repoId: "r1",
+      path: "src/index.ts",
+      version: 3,
+      items: [diagnostic],
+      total: 3,
+      digest
+    }
     expect(LspDiagnosticsMessageSchema.parse(frame)).toEqual(frame)
-    expect(LspServersResponseSchema.parse({ servers: [{ repoId: "r1", language: "typescript", state: "ready" }] }).servers[0]?.state)
+    expect(
+      LspServersResponseSchema.parse({ servers: [{ repoId: "r1", language: "typescript", state: "ready" }] }).servers[0]
+        ?.state
+    )
       .toBe("ready")
-    expect(LspServersResponseSchema.safeParse({ servers: [{ repoId: "r1", language: "cobol", state: "ready" }] }).success).toBe(false)
+    expect(
+      LspServersResponseSchema.safeParse({ servers: [{ repoId: "r1", language: "cobol", state: "ready" }] }).success
+    ).toBe(false)
   })
 
   test("a failure names its code, and a missing server carries the install line verbatim", () => {
@@ -193,7 +234,8 @@ describe("the code-intelligence wire model", () => {
     })
     expect(missing.error.code).toBe("language_server_missing")
     expect(missing.error.install).toBe("npm i -g typescript-language-server typescript")
-    expect(LspErrorResponseSchema.parse({ error: { code: "timeout", message: "No answer within 5 s." } }).error.install).toBeUndefined()
+    expect(LspErrorResponseSchema.parse({ error: { code: "timeout", message: "No answer within 5 s." } }).error.install)
+      .toBeUndefined()
   })
 })
 
@@ -216,7 +258,16 @@ describe("the cloud LSP relay contract", () => {
     expect(CloudLspFragmentSchema.parse({ seq: 1, last: false, data: "{" })).toEqual({ seq: 1, last: false, data: "{" })
     expect(CloudLspFragmentSchema.safeParse({ seq: 0, last: true, data: "" }).success).toBe(false)
     expect(CloudLspFragmentSchema.safeParse({ seq: 1, last: true, data: "", extra: 1 }).success).toBe(false)
-    expect(CloudLspSessionSchema.parse({ id: "s1", workspace_id: "ws-1", status: "running", kind: "lsp", language: "typescript", idle_timeout_secs: 600 }))
+    expect(
+      CloudLspSessionSchema.parse({
+        id: "s1",
+        workspace_id: "ws-1",
+        status: "running",
+        kind: "lsp",
+        language: "typescript",
+        idle_timeout_secs: 600
+      })
+    )
       .toEqual({ id: "s1", status: "running", kind: "lsp", language: "typescript" })
     expect(CloudLspSessionSchema.safeParse({ id: "s1", status: "running", kind: "terminal" }).success).toBe(false)
   })
@@ -231,4 +282,3 @@ describe("the cloud LSP relay contract", () => {
     expect(retryAfterOf("guest_not_ready: activating (retry after 30 s) ")).toBe(30)
   })
 })
-

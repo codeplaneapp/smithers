@@ -1,10 +1,10 @@
 /**
  * Targets for the shared agent contract: the typecheck and the unit suite.
  *
- * Both apps import this package, so its gates run in the same pipeline job as
- * theirs. The suite runs under Bun, which is what the apps' own scripts use, so
- * the runtime is the root Bun declaration and nothing here spells `bun` into an
- * argv.
+ * Both apps import this package. The suite uses the same Vitest runner and
+ * test directory convention as the other contract packages.
+ *
+ * @since 1.0.0
  */
 import { Smithers } from "@smthrs/targets"
 
@@ -20,28 +20,52 @@ const sources = Smithers.glob("//packages/rpc/src/**/*.ts")
  * @category build
  */
 const check = Smithers.Typecheck({
-  srcs: [sources],
+  srcs: [sources, Smithers.glob("test/**/*.ts")],
   deps: [],
-  tsconfig: Smithers.file("tsconfig.json"),
+  tsconfig: Smithers.file("tsconfig.test.json"),
   buildMode: false,
   incremental: false,
   cwd
 })
 
 /**
- * The unit suite: everything under `src/`.
+ * The unit suite: everything under `test/`.
  *
  * @since 0.1.0
  * @category test
  */
-const unitTests = Smithers.NodeTest({
-  runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
-  runner: Smithers.testSuite(["src"]),
-  srcs: [sources],
+const unitTests = Smithers.Vitest({
+  tests: [Smithers.glob("test/**/*.test.ts")],
+  sources: [sources],
   deps: [],
+  config: Smithers.file("vitest.config.ts"),
+  environment: "node",
+  passWithNoTests: false,
   cwd
 })
 
+const lint = Smithers.EsLint({
+  sources: [sources],
+  configs: [Smithers.file("eslint.config.js"), Smithers.file("//eslint.jsdoc.js")],
+  deps: [],
+  maxWarnings: 0,
+  fix: false,
+  cwd
+})
+const fmt = Smithers.Dprint({
+  sources: [Smithers.glob("**/*.{ts,json,md,js}")],
+  config: Smithers.file("dprint.json"),
+  deps: [],
+  fix: false,
+  cwd
+})
+
+/**
+ * Build, lint, formatting, and test gates for the public wire contracts.
+ *
+ * @since 1.0.0
+ * @category packages
+ */
 export const Package = Smithers.Package({
-  targets: { check, unitTests }
+  targets: { check, unitTests, lint, fmt }
 })

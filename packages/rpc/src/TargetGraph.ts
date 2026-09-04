@@ -1,3 +1,8 @@
+/**
+ * Target graphs, run summaries, and traversal utilities.
+ *
+ * @since 1.0.0
+ */
 import { z } from "zod"
 
 /*
@@ -14,12 +19,30 @@ import { z } from "zod"
  * the diff-affected set, and the generated CI matrix.
  */
 
-/** Edge kinds the loader classifies (`Concepts`: three edge kinds plus plain deps). */
+/** Edge kinds the loader classifies (`Concepts`: three edge kinds plus plain deps).
+ * @since 1.0.0
+ * @category constants
+ */
 export const GRAPH_EDGE_KINDS = ["data", "gates", "services", "deps"] as const
+/**
+ * Validates graph edge kind values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const GraphEdgeKindSchema = z.enum(GRAPH_EDGE_KINDS)
+/**
+ * The decoded value accepted by {@link GraphEdgeKindSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type GraphEdgeKind = z.infer<typeof GraphEdgeKindSchema>
 
-/** One node of the target graph: the loader row plus the plan facts the backend could resolve. */
+/** One node of the target graph: the loader row plus the plan facts the backend could resolve.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const GraphNodeSchema = z.object({
   /** Canonical label, `//pkg/path:name`. */
   label: z.string(),
@@ -51,16 +74,37 @@ export const GraphNodeSchema = z.object({
   /** Declaration site for "open in editor". */
   source: z.object({ file: z.string(), line: z.number().optional() }).optional()
 })
+/**
+ * The decoded value accepted by {@link GraphNodeSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type GraphNode = z.infer<typeof GraphNodeSchema>
 
+/**
+ * Validates graph edge values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const GraphEdgeSchema = z.object({
   from: z.string(),
   to: z.string(),
   kind: GraphEdgeKindSchema
 })
+/**
+ * The decoded value accepted by {@link GraphEdgeSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>
 
-/** `POST /api/targets/graph` `{ repoId, plan?: boolean, labels?: string[] }` */
+/** `POST /api/targets/graph` `{ repoId, plan?: boolean, labels?: string[] }`
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetGraphResponseSchema = z.object({
   repoId: z.string(),
   nodes: z.array(GraphNodeSchema),
@@ -76,14 +120,47 @@ export const TargetGraphResponseSchema = z.object({
   digest: z.string().optional(),
   durationMs: z.number()
 })
+/**
+ * The decoded value accepted by {@link TargetGraphResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetGraphResponse = z.infer<typeof TargetGraphResponseSchema>
 
-/** Per-node run status as the executor reports it. */
-export const NODE_RUN_STATUSES = ["pending", "running", "hit", "ran", "failed", "skipped", "refused", "cancelled"] as const
+/** Per-node run status as the executor reports it.
+ * @since 1.0.0
+ * @category constants
+ */
+export const NODE_RUN_STATUSES = [
+  "pending",
+  "running",
+  "hit",
+  "ran",
+  "failed",
+  "skipped",
+  "refused",
+  "cancelled"
+] as const
+/**
+ * Validates node run status values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const NodeRunStatusSchema = z.enum(NODE_RUN_STATUSES)
+/**
+ * The decoded value accepted by {@link NodeRunStatusSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NodeRunStatus = z.infer<typeof NodeRunStatusSchema>
 
-/** One node's timing row in a run (the Gantt row). */
+/** One node's timing row in a run (the Gantt row).
+ * @since 1.0.0
+ * @category schemas
+ */
 export const NodeTimingSchema = z.object({
   label: z.string(),
   status: NodeRunStatusSchema,
@@ -104,9 +181,18 @@ export const NodeTimingSchema = z.object({
   /** The target's rule (`Vitest`, `EsLint`), from the executor's results block when it prints one. */
   rule: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link NodeTimingSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type NodeTiming = z.infer<typeof NodeTimingSchema>
 
-/** Run-level summary the executor prints at the end (`N targets: a hit, b ran, c failed, d skipped`). */
+/** Run-level summary the executor prints at the end (`N targets: a hit, b ran, c failed, d skipped`).
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunSummarySchema = z.object({
   total: z.number(),
   hit: z.number(),
@@ -118,6 +204,12 @@ export const RunSummarySchema = z.object({
   /** Labels on the longest dependency chain by wall time, root last. */
   criticalPath: z.array(z.string())
 })
+/**
+ * The decoded value accepted by {@link RunSummarySchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunSummary = z.infer<typeof RunSummarySchema>
 
 /**
@@ -134,6 +226,12 @@ export type RunSummary = z.infer<typeof RunSummarySchema>
  */
 const frameSeq = { seq: z.number().int().nonnegative().optional() }
 
+/**
+ * Validates target run event values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const TargetRunEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("stdout"), data: z.string(), label: z.string().optional(), ...frameSeq }),
   z.object({ type: z.literal("stderr"), data: z.string(), label: z.string().optional(), ...frameSeq }),
@@ -150,9 +248,18 @@ export const TargetRunEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("node"), node: NodeTimingSchema, at: z.number(), ...frameSeq }),
   z.object({ type: z.literal("summary"), summary: RunSummarySchema, at: z.number(), ...frameSeq })
 ])
+/**
+ * The decoded value accepted by {@link TargetRunEventSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type TargetRunEvent = z.infer<typeof TargetRunEventSchema>
 
-/** One recorded run, for history and replay. */
+/** One recorded run, for history and replay.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunRecordSchema = z.object({
   runId: z.string(),
   repoId: z.string(),
@@ -165,20 +272,47 @@ export const RunRecordSchema = z.object({
   exitCode: z.number().nullable().optional(),
   summary: RunSummarySchema.optional()
 })
+/**
+ * The decoded value accepted by {@link RunRecordSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunRecord = z.infer<typeof RunRecordSchema>
 
-/** `POST /api/targets/runs` `{ repoId }` */
+/** `POST /api/targets/runs` `{ repoId }`
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunHistoryResponseSchema = z.object({ runs: z.array(RunRecordSchema) })
+/**
+ * The decoded value accepted by {@link RunHistoryResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunHistoryResponse = z.infer<typeof RunHistoryResponseSchema>
 
-/** `POST /api/targets/runs/replay` `{ runId }` — every recorded frame in order, for the scrubber. */
+/** `POST /api/targets/runs/replay` `{ runId }` — every recorded frame in order, for the scrubber.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunReplayResponseSchema = z.object({
   run: RunRecordSchema,
   events: z.array(TargetRunEventSchema)
 })
+/**
+ * The decoded value accepted by {@link RunReplayResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunReplayResponse = z.infer<typeof RunReplayResponseSchema>
 
-/** `POST /api/targets/affected` `{ repoId }` — what the working-tree diff re-keys. */
+/** `POST /api/targets/affected` `{ repoId }` — what the working-tree diff re-keys.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AffectedResponseSchema = z.object({
   repoId: z.string(),
   base: z.string(),
@@ -196,9 +330,18 @@ export const AffectedResponseSchema = z.object({
   limits: z.array(z.string()).optional(),
   durationMs: z.number()
 })
+/**
+ * The decoded value accepted by {@link AffectedResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AffectedResponse = z.infer<typeof AffectedResponseSchema>
 
-/** `POST /api/targets/ci` `{ repoId }` — the generated GitHub matrix, as the graph implies it. */
+/** `POST /api/targets/ci` `{ repoId }` — the generated GitHub matrix, as the graph implies it.
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CiMatrixResponseSchema = z.object({
   repoId: z.string(),
   workflows: z.array(
@@ -221,11 +364,23 @@ export const CiMatrixResponseSchema = z.object({
   warnings: z.array(z.string()).optional(),
   durationMs: z.number()
 })
+/**
+ * The decoded value accepted by {@link CiMatrixResponseSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CiMatrixResponse = z.infer<typeof CiMatrixResponseSchema>
 
 /*
  * Card payloads (the chat surface). Cards.ts adds one `kind` per payload:
  * `graph`, `run-timeline`, `run-history`, `affected`, `ci-matrix`.
+ */
+/**
+ * Validates graph card payload values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
  */
 export const GraphCardPayloadSchema = z.object({
   repoId: z.string(),
@@ -244,8 +399,20 @@ export const GraphCardPayloadSchema = z.object({
    */
   run: z.object({ nodes: z.array(NodeTimingSchema), summary: RunSummarySchema.optional() }).optional()
 })
+/**
+ * The decoded value accepted by {@link GraphCardPayloadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type GraphCardPayload = z.infer<typeof GraphCardPayloadSchema>
 
+/**
+ * Validates run timeline card payload values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunTimelineCardPayloadSchema = z.object({
   repoId: z.string(),
   runId: z.string(),
@@ -262,8 +429,20 @@ export const RunTimelineCardPayloadSchema = z.object({
   /** Stream/process failure text; a failed card renders this verbatim. */
   error: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link RunTimelineCardPayloadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunTimelineCardPayload = z.infer<typeof RunTimelineCardPayloadSchema>
 
+/**
+ * Validates run history card payload values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const RunHistoryCardPayloadSchema = z.object({
   repoId: z.string(),
   status: z.enum(["pending", "done", "failed"]),
@@ -271,25 +450,58 @@ export const RunHistoryCardPayloadSchema = z.object({
   selected: z.string().optional(),
   error: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link RunHistoryCardPayloadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type RunHistoryCardPayload = z.infer<typeof RunHistoryCardPayloadSchema>
 
+/**
+ * Validates affected card payload values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const AffectedCardPayloadSchema = z.object({
   repoId: z.string(),
   status: z.enum(["pending", "done", "failed"]),
   result: AffectedResponseSchema.optional(),
   error: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link AffectedCardPayloadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type AffectedCardPayload = z.infer<typeof AffectedCardPayloadSchema>
 
+/**
+ * Validates ci matrix card payload values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
 export const CiMatrixCardPayloadSchema = z.object({
   repoId: z.string(),
   status: z.enum(["pending", "done", "failed"]),
   result: CiMatrixResponseSchema.optional(),
   error: z.string().optional()
 })
+/**
+ * The decoded value accepted by {@link CiMatrixCardPayloadSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
 export type CiMatrixCardPayload = z.infer<typeof CiMatrixCardPayloadSchema>
 
-/** Routes this contract adds to the local server (LOCAL-APP.md "Targets: graph and runs"). */
+/** Routes this contract adds to the local server (LOCAL-APP.md "Targets: graph and runs").
+ * @since 1.0.0
+ * @category constants
+ */
 export const TARGET_GRAPH_ROUTES = {
   graph: "/api/targets/graph",
   runs: "/api/targets/runs",
@@ -304,6 +516,8 @@ export const TARGET_GRAPH_ROUTES = {
  * rdeps = incoming). The start label is not in the set unless a cycle
  * returns to it; an unknown label and a leaf both yield the empty set, so
  * a caller that must tell them apart checks `nodes` first.
+ * @since 1.0.0
+ * @category conversions
  */
 export const reachable = (
   edges: ReadonlyArray<GraphEdge>,
@@ -336,6 +550,8 @@ export const reachable = (
  * node durations is longest, root last. Nodes without timings count as 0.
  * Pure, so the backend computes it for `summary` and the UI can recompute
  * it for a replay cursor.
+ * @since 1.0.0
+ * @category conversions
  */
 export const criticalPath = (
   nodes: ReadonlyArray<NodeTiming>,
@@ -361,7 +577,9 @@ export const criticalPath = (
   const solve = (rootLabel: string): void => {
     if (best.has(rootLabel)) return
     visiting.add(rootLabel)
-    const frames: Array<{ label: string; deps: Array<string>; index: number; longest: number; via: string | undefined }> = [
+    const frames: Array<
+      { label: string; deps: Array<string>; index: number; longest: number; via: string | undefined }
+    > = [
       { label: rootLabel, deps: deps.get(rootLabel) ?? [], index: 0, longest: 0, via: undefined }
     ]
     while (frames.length > 0) {
@@ -376,7 +594,10 @@ export const criticalPath = (
         }
         // A dep still in `visiting` is a back edge: it contributes 0 and can
         // never be `via`, or the path walk below would loop through the cycle.
-        if (known !== undefined && (known.total > frame.longest || (frame.via === undefined && known.total === frame.longest))) {
+        if (
+          known !== undefined &&
+          (known.total > frame.longest || (frame.via === undefined && known.total === frame.longest))
+        ) {
           frame.longest = known.total
           frame.via = dep
         }
@@ -395,7 +616,7 @@ export const criticalPath = (
    * which is where a Bazel-style critical path ends.
    */
   const dependedOn = new Set<string>()
-  for (const [from, list] of deps) if (duration.has(from)) for (const to of list) dependedOn.add(to)
+  for (const [from, list] of deps) if (duration.has(from)) { for (const to of list) dependedOn.add(to) }
   let root: string | undefined
   let rootTotal = -1
   for (const node of nodes) {
