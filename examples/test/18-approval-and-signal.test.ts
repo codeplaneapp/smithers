@@ -22,7 +22,7 @@ it.effect("gates a launch on a plan approval and ends a durable wait with a sign
     expect(summary.plan.launches).toBe(1)
     // A denied plan refuses the launch instead of parking it.
     expect(summary.plan.deniedDecision).toBe("denied")
-    expect(summary.plan.deniedLaunch).toBe("/control/ClaimLost")
+    expect(summary.plan.deniedLaunch).toBe("/control/PlanDenied")
 
     // The first drive parked INSIDE the run, on the token the clearance step
     // registered for itself. `approval` rather than `event`: the run is waiting

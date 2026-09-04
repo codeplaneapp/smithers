@@ -13,5 +13,5 @@ it.effect.skipIf(!hasKey)(
       console.log("LIVE MODEL ANSWER:", JSON.stringify(result))
       expect(result.answer.length).toBeGreaterThan(0)
     }),
-  30_000
+  120_000
 )
