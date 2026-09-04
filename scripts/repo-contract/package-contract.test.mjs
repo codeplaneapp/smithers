@@ -28,15 +28,7 @@ const releaseVersion = "1.0.0-rc.0"
  * synchronized version. Adding a row is a review decision, which is the point of
  * enumerating them instead of loosening the assertion.
  */
-const offReleaseLine = new Map([
-  [
-    "@smthrs/migrate",
-    "The migration tool for upgrading 0.x projects. It is versioned "
-    + "independently of the runtime it migrates to, so it does not move with the "
-    + "RC line. Revisit before the first publish: if it ships with the RC it "
-    + "needs the RC version and the `next` dist-tag."
-  ]
-])
+const offReleaseLine = new Map([])
 
 /**
  * The one publishable package whose whole surface is a single throwing module,
