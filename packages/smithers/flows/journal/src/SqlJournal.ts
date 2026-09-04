@@ -3,13 +3,14 @@
  *
  * Lossy telemetry events remain optimistic until the single scoped writer
  * commits them, so a process crash can lose accepted-but-unwritten telemetry.
- * Lifecycle events use `emitDurable` and return only after commit.
+ * Lifecycle events use `emitDurable` and return after commit, except inside
+ * `transact`, where their savepoint completes before the outer commit.
  *
- * Governing design: `docs/pages/concepts/journal.md`.
- * Prior-art decision: `docs/pages/concepts/sync.md`.
+ * Governing design: `packages/smithers/flows/journal/docs/concepts/two-channels.md`.
+ * Prior-art decision: `packages/smithers/flows/sync/docs/concepts/replay-then-follow.md`.
  *
- * The replay-then-follow stream follows Effect `EventJournal` and opencode
- * `packages/smithers/flows/core/src/event.ts`. The bounded send queue deliberately deviates
+ * The replay-then-follow stream follows Effect's `EventJournal` and OpenCode's
+ * upstream event stream design. The bounded send queue deliberately deviates
  * from their synchronous durable writes by allocating the canonical per-run
  * sequence before admission. SQLite retry and transaction behavior comes
  * through `@smthrs/database`.
@@ -1648,14 +1649,14 @@ export const layer = (
        * Reads the durable allocation floor for a run (or a producer) inside the
        * caller's transaction.
        *
-       * Stated deviation from smithers `packages/db/src/adapter.js`, which
-       * allocates `MAX(seq) + 1` under `BEGIN IMMEDIATE`: Effect's SQL client
+       * Unlike the retired 0.x database adapter's `MAX(seq) + 1` allocation
+       * under `BEGIN IMMEDIATE`, Effect's SQL client
        * has no `beginTransaction` hook on the SQLite backends we ship
        * (`@effect/sql-sqlite-node` never forwards one), so `DurableWriter.write`
        * runs the default DEFERRED transaction. The read therefore takes a
        * shared lock and the later INSERT upgrades it. Under WAL, enabled by
        * `NodeDatabase`, a concurrent writer makes that upgrade fail with
-       * `SQLITE_BUSY_SNAPSHOT`, which `WriteRetry.isRetryableSqliteWriteError`
+       * `SQLITE_BUSY_SNAPSHOT`, which `WriteRetry.isRetryableWriteError`
        * classifies as retryable, so the whole transaction (floor read
        * included) replays against the committed snapshot. Allocation is
        * conflict-free by retry rather than by lock escalation; the invariant
@@ -1663,7 +1664,7 @@ export const layer = (
        * `packages/smithers/flows/journal/test/JournalDurable.test.ts` ("emitDurable never
        * collides when two connections write one run concurrently").
        *
-       * Governing design: `docs/pages/concepts/journal.md`.
+       * Governing design: `packages/smithers/flows/journal/docs/concepts/two-channels.md`.
        */
       const nextDurable = (
         column: "seq" | "source_seq",

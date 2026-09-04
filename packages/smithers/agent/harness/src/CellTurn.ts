@@ -1473,7 +1473,7 @@ const RecordedFrame = Schema.Struct({
  * re-derive identically when a cell is re-executed, so a resumed run addresses
  * the same trees its original attempt did — and short enough for a model to
  * read back in a print. `minted` is this frame's own tally; the run's is
- * `State.checkpoints`, folded in when the frame closes.
+ * `State.checkpointIds`, folded in when the frame closes.
  */
 const minter = (
   state: State,
@@ -2728,9 +2728,9 @@ const frame = (
     }
     if (transition._tag === "complete") {
       // The completion's own evidence, judged once per demand. A run gets
-      // exactly one frame wrong for free — the last one — and three things can
+      // exactly one frame wrong for free — the last one — and four things can
       // be wrong with it, each read off measurements the controller already
-      // took and each with its own cap:
+      // took, under three caps:
       //
       // 1. `UnmovedTree`: the tree it is completing on is the tree it opened
       //    on, so there is no change for any evidence to be about;

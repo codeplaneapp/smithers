@@ -394,10 +394,8 @@ export interface PackageNode extends Planner.PlannedTarget {
   /** Declaration-specific process timeout, already reduced to milliseconds. */
   readonly timeoutMs: number
   /**
-   * The workspace-relative directory the tool spawns in. `bin`-form tools
-   * run from the declaring package (their configs resolve upward and their
-   * scope is the package); `command`, `bun`, and script forms run from the
-   * workspace root, which their text is written against.
+   * The workspace-relative directory the tool spawns in. Tools default to
+   * the workspace root; Foundry and Npm.Pack select their package directory.
    */
   readonly cwd: string
   readonly env: Readonly<Record<string, string>>
@@ -530,7 +528,7 @@ export interface RunOptions {
    * `--sweep`: lets a `Git.Commit` target with no declared path scope commit
    * the whole working tree.
    *
-   * `Git.Commit` attrs cannot express a scope, so the rule used to stage
+   * A `Git.Commit` without a `changes` scope owns nothing. The rule used to stage
    * everything the tree carried — a concurrent agent's edits included — with a
    * reporter warning as the only notice. A notice is not a guard. Without this
    * flag the commit refuses, naming the changes it would have absorbed; the
@@ -678,7 +676,7 @@ interface PlanContext {
   readonly rootModes: ReadonlyMap<string, Mode>
   /** The invoker's `--input name=value` payload values, decoded per agent node at plan time. */
   readonly inputs: Readonly<Record<string, string>>
-  /** Secret presence used only for typed outward refusals; values never enter plans or keys. */
+  /** Host and Nix environment used to resolve tools and construct their execution plans. */
   readonly environment: Readonly<Record<string, string | undefined>>
   /** The workspace's resolved Nix environment, when it declares one; its PATH is `environment`'s. */
   readonly nixEnvironment: NixExec.ResolvedEnvironment | undefined
@@ -4032,8 +4030,8 @@ export const execute = async (
    * against `writeSet`; out-of-set changes are reverted and fail the body,
    * and a failed body reverts everything it touched. Shared by tool runs
    * (`runWriteEnforced`), agent candidate application, and CI-file
-   * publishing, so every PACKAGE.ts write path is confined the same
-   * way.
+   * publishing. Declarative `runEmit` writes use their resolved output paths
+   * directly and do not pass through this snapshot-and-revert guard.
    */
   const enforceWriteSet = async (
     writeSet: ReadonlyArray<string>,

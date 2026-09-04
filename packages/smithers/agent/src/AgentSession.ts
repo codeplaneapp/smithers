@@ -42,10 +42,9 @@
  * journal for the control plane's resume events and re-drives the parked
  * engine execution.
  *
- * Reference consulted: `reference/effect` `unstable/workflow` by way of
- * `@smthrs/engine`'s `FlowRuntime` (register/execute/poll/resume), and
- * `reference/opencode` `packages/smithers/flows/core/src/session` for the shape of a
- * background run driver owned by a scope.
+ * Prior art: Effect's workflow runtime (register/execute/poll/resume), adapted
+ * by `@smthrs/engine`, and OpenCode's scope-owned background session driver.
+ * These are upstream designs, not paths in this repository.
  *
  * @since 0.1.0
  */
@@ -920,12 +919,6 @@ export const requestCancel = (
         message: `The engine could not record a cancellation for ${runId}`,
         cause
       })
-    // The row is read BEFORE the request. `RunStore.requestCancel` has no
-    // status predicate yet (triage B-02), so a settled row would take the
-    // column and answer `AlreadyRequested` forever after — and `Control.cancel`
-    // would then transition a stale control row to `cancelled` over an engine
-    // row reading `completed`, which is the terminal disagreement B-11 forbids.
-    //
     // The read is a guard, not the answer: a store that cannot answer `get` —
     // a stub host, a missing row — leaves the request itself to decide, which
     // is exactly what this port did before the guard existed.
