@@ -77,10 +77,10 @@ The full composition, with the storage underneath it, is in
 
 [`smthrs serve`](/cli/serve) hosts this exact assembly for a project on disk.
 If you want a gateway rather than a library, install the CLI instead. It is
-published under a prerelease dist-tag, so name the version:
+published under the prerelease `next` dist-tag:
 
 ```bash
-npm install --global @smthrs/cli@1.0.0-rc.0
+npm install --global @smthrs/cli@next
 ```
 
 Then see the [Quickstart](./quickstart.md).
