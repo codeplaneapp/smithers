@@ -177,6 +177,7 @@ const ci = Smithers.GithubCiGen({
         // repository replaced: `//packages/...` does not reach `apps/`, and the
         // apps-e2e job runs `//apps/ui` alone. They sit in this job rather than
         // in apps-e2e because none of them needs a browser.
+        { name: "Server", verb: Smithers.Verb.Ci, pattern: "//apps/server/..." },
         { name: "Review app and workers", verb: Smithers.Verb.Ci, pattern: "//apps/review/..." },
         { name: "Bug worker", verb: Smithers.Verb.Ci, pattern: "//apps/bug-worker/..." },
         { name: "Status site", verb: Smithers.Verb.Ci, pattern: "//apps/status-site/..." },

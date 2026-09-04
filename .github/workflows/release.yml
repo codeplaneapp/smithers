@@ -200,6 +200,11 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: Server
+        run: pnpm exec smithers-build ci '//apps/server/...'
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Review app and workers
         run: pnpm exec smithers-build ci '//apps/review/...'
         env:

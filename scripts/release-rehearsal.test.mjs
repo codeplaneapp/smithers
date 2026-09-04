@@ -221,3 +221,10 @@ test("the dispatch inputs keep the rehearsal safe by default", () => {
   assert.equal(inputs.dryRun.default, true)
   assert.equal(inputs.releaseTag.default, "")
 })
+
+test("CI gates the server's checks and tests in the required test job", () => {
+  const ci = parseWorkflow(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8"))
+  const server = ci.jobs.test.steps.find((entry) => entry.name === "Server")
+  assert.equal(server?.run, "pnpm exec smithers-build ci '//apps/server/...'")
+  assert.equal(server?.if, undefined)
+})
