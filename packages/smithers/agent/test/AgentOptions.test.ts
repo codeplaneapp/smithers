@@ -388,18 +388,13 @@ describe("the frame budget", () => {
     })
   }
 
-  it("treats a budget of zero and a budget of one identically: one frame, then stop", async () => {
-    // The budget is checked after a frame settles, not before it opens, so
-    // zero is not "run nothing" — it is "run one frame and stop", exactly as
-    // one is. Both close the turn with the budget-exhausted resolution rather
-    // than a completion.
-    const zero = await run(0)
-    const one = await run(1)
-    expect(zero.calls).toBe(1)
-    expect(one.calls).toBe(1)
-    expect(zero.tags).toEqual(one.tags)
-    expect(zero.tags.filter((tag) => tag === "turn-opened")).toHaveLength(1)
-    expect(zero.tags).toContain("resolved")
+  it("disarms a zero budget and keeps a positive budget bounded", async () => {
+    const unlimited = await run(0, [keepGoing, complete])
+    expect(unlimited.calls).toBe(2)
+    expect(unlimited.output).toBe("done")
+    const bounded = await run(1, [keepGoing, complete])
+    expect(bounded.calls).toBe(1)
+    expect(bounded.output).toBeUndefined()
   })
 
   it("spends the whole budget on a cell that never completes", async () => {
