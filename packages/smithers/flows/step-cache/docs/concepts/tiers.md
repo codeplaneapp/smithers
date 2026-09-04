@@ -46,9 +46,12 @@ engine. [`@smthrs/engine-store`](/api/engine-store) commits the cache row and
 the journal record that explains it inside a single `DurableWriter`
 transaction, and a host call must never be held across a write transaction: an
 inline `put` would hold a network round trip inside it, block every other
-writer for its duration, and roll the local row back whenever a shared cache is
-unreachable. That engine composes this store in `"deferred"` mode and publishes
-through its own `CacheSync` seam once the transaction has committed.
+writer for its duration. That engine composes this store in `"deferred"` mode
+and publishes through its own `CacheSync` seam once the transaction has
+committed.
+
+The shared tier is only an accelerator. A refused read is treated as a miss;
+a refused inline publication is counted and the local outcome is returned.
 
 :::danger
 A write transaction must never span a host call. A caller holding one wants

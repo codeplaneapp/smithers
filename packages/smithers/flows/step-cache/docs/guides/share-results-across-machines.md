@@ -107,8 +107,8 @@ would spread a divergence the caller is about to fail the run over.
 A write transaction must never span a host call. A caller that records the
 cache row and the record explaining it in one transaction takes `"deferred"`,
 and publishes after the transaction commits. An inline `put` inside a
-transaction holds a network round trip in it, blocks every other writer for its
-duration, and rolls the local row back whenever the shared tier is unreachable.
+transaction holds a network round trip in it and blocks every other writer for
+its duration.
 :::
 
 That caller is [`@smthrs/engine-store`](/api/engine-store). It composes this
@@ -122,6 +122,11 @@ A lookup tries the local tier, falls through to the shared tier on a miss, and
 writes a shared hit back into the local store before the caller sees it. Your
 `GetOptions` travel to both tiers, so a provenance fence or an age bound means
 the same thing at each.
+
+If the shared tier refuses a lookup, the composition counts the refusal and
+answers a miss so the step can execute. If an inline publication is refused,
+it counts the refusal and returns the successful local outcome. A shared cache
+outage never fails a run.
 
 The write-back can lose a race with a sibling run on this machine. The
 composition then re-reads the local tier and serves the durable local row,

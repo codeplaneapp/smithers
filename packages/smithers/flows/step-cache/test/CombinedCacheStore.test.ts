@@ -72,6 +72,7 @@ const durableTier = (
   options: {
     readonly gateGet?: Deferred.Deferred<void>
     readonly reachedGet?: Deferred.Deferred<void>
+    readonly failGet?: CacheStore.CacheStoreError
     readonly failPut?: CacheStore.CacheStoreError
   } = {}
 ) => {
@@ -93,9 +94,10 @@ const durableTier = (
         const wait = options.gateGet === undefined ? Effect.void : Deferred.await(options.gateGet)
         return announce.pipe(
           Effect.andThen(wait),
-          Effect.map(() => {
+          Effect.flatMap(() => {
+            if (options.failGet !== undefined) return Effect.fail(options.failGet)
             const row = rows.get(keyDigest)
-            return row === undefined ? Option.none() : Option.some(row)
+            return Effect.succeed(row === undefined ? Option.none() : Option.some(row))
           })
         )
       }),
@@ -265,6 +267,29 @@ describe("lookups", () => {
       const combined = CombinedCacheStore.make({ local: tier().store, remote: tier().store })
       expect(Option.isNone(yield* (combined.get(entry.keyDigest)))).toBe(true)
     }))
+
+  it.effect("treats a shared-tier refusal as a miss", () =>
+    Effect.gen(function*() {
+      const refused = new CacheStore.CacheStoreError({
+        code: "persistence_failed",
+        message: "the remote cache tier refused a lookup"
+      })
+      const local = durableTier()
+      const remote = durableTier({ failGet: refused })
+      const combined = CombinedCacheStore.make({ local: local.store, remote: remote.store })
+      let executions = 0
+
+      const result = yield* combined.get(entry.keyDigest).pipe(
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.sync(() => ++executions),
+          onSome: () => Effect.succeed(-1)
+        }))
+      )
+      expect(result).toBe(1)
+      expect(executions).toBe(1)
+      expect(remote.calls).toEqual(["get"])
+      expect(yield* count(CacheStoreMetrics.remoteFailure.get)).toBe(1)
+    }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
 })
 
 describe("publications", () => {
@@ -401,11 +426,11 @@ describe("write-back races", () => {
       })
   )
 
-  it.effect("keeps the local row and fails the caller when the shared publication fails", () =>
+  it.effect("keeps the local row and succeeds when the shared publication fails", () =>
     Effect.gen(function*() {
-      // Partial success: the local insert committed and the shared write did not.
-      // The local row is what this machine replays from, so it survives; the
-      // caller sees the transport failure and the shared tier holds nothing.
+      // Partial success: the local insert committed and the shared write did
+      // not. The shared tier is an accelerator, so its outage is counted but
+      // cannot replace the durable local outcome with a failed run.
       const local = durableTier()
       const refused = new CacheStore.CacheStoreError({
         code: "persistence_failed",
@@ -417,14 +442,14 @@ describe("write-back races", () => {
         remote: failed.store
       })
 
-      const failure = yield* (Effect.flip(combined.put(entry)))
-      expect(failure.code).toBe("persistence_failed")
+      expect(yield* combined.put(entry)).toEqual({ _tag: "Inserted" })
       expect(failed.calls).toEqual(["put"])
       expect(failed.outcomes).toEqual([])
       expect(failed.rows.size).toBe(0)
       expect(Option.isNone(yield* (failed.store.get(entry.keyDigest)))).toBe(true)
       expect(local.rows.get(entry.keyDigest)).toEqual(entry)
       expect(local.outcomes).toEqual([{ _tag: "Inserted" }])
+      expect(yield* count(CacheStoreMetrics.remoteFailure.put)).toBe(1)
 
       // Retry semantics, pinned: the same `put` against a healthy shared tier
       // republishes and reports `ExistingSame` off the surviving local row. It is
@@ -436,7 +461,7 @@ describe("write-back races", () => {
       )
       expect(retried).toEqual({ _tag: "ExistingSame" })
       expect(healthy.rows.get(entry.keyDigest)).toEqual(entry)
-    }))
+    }).pipe(Effect.provideService(Metric.MetricRegistry, new Map())))
 })
 
 describe("evictions", () => {

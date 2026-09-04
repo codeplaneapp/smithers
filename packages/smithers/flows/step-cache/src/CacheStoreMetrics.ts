@@ -92,3 +92,32 @@ export const put: {
   ExistingSame: Metric.withAttributes(puts, { outcome: "existing_same" }),
   Conflict: Metric.withAttributes(puts, { outcome: "conflict" })
 }
+
+/**
+ * Counter over shared-tier refusals, dimensioned by `operation` (`get` or
+ * `put`). A combined store degrades these refusals to a miss or a successful
+ * local recording because the shared tier is only an accelerator.
+ *
+ * Read the attributed views on {@link remoteFailure}: every update carries an
+ * `operation` attribute, so this bare handle aggregates nothing and always
+ * reads zero.
+ *
+ * @category metrics
+ * @since 1.0.0-rc.0
+ */
+export const remoteFailures = Metric.counter("flows_step_cache_remote_failures", {
+  description: "Shared step cache refusals by operation"
+})
+
+/**
+ * `remoteFailures` views keyed by the refused shared-tier operation.
+ *
+ * @category metrics
+ * @since 1.0.0-rc.0
+ */
+export const remoteFailure: {
+  readonly [Operation in "get" | "put"]: Metric.Metric<number, Metric.CounterState<number>>
+} = {
+  get: Metric.withAttributes(remoteFailures, { operation: "get" }),
+  put: Metric.withAttributes(remoteFailures, { operation: "put" })
+}

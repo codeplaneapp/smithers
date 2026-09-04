@@ -439,6 +439,21 @@ The `puts` views keyed by the `PutResult` tag the recording resolved to. Their
 `outcome` attributes are `inserted`, `existing_same`, and `conflict`. A
 `conflict` is the signal an inconsistency receiver acts on.
 
+### remoteFailures and remoteFailure
+
+```ts
+const remoteFailures: Metric.Counter<number>
+const remoteFailure: {
+  readonly [Operation in "get" | "put"]: Metric.Metric<
+    number,
+    Metric.CounterState<number>
+  >
+}
+```
+
+`flows_step_cache_remote_failures` counts shared-tier refusals by `operation`.
+Read its `get` and `put` views; the bare handle always reads zero.
+
 ## CombinedCacheStore
 
 Two tiers composed into one `CacheStore.Service`: local first, shared second,
@@ -463,9 +478,8 @@ interface Options {
 | `publication` | `"inline"` (the default) writes both tiers before `put` returns. `"deferred"` writes the local tier only and leaves the shared write to the caller. |
 
 Take `"deferred"` whenever the `put` runs inside a write transaction: an inline
-publication would hold a network round trip inside it and roll the local row
-back whenever the shared tier is unreachable. Lookups stay read-through in both
-modes.
+publication would hold a network round trip inside it. Lookups stay
+read-through in both modes.
 
 ### make
 
@@ -474,8 +488,10 @@ const make: (options: Options) => CacheStore.Service
 ```
 
 Composes the two tiers. `get` reads local, then remote, and writes a remote hit
-back locally. `put` records locally and, in `"inline"` mode, publishes; the
-local outcome is always the answer. `evict` and `sweepExpired` are local only.
+back locally. A refused remote read is a miss. `put` records locally and, in
+`"inline"` mode, publishes; a refused publication preserves the local outcome.
+The shared tier is an accelerator and cannot fail either operation. `evict`
+and `sweepExpired` are local only.
 
 ### layer
 

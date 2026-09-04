@@ -52,10 +52,9 @@ export interface Options {
    * cache row and the journal record that explains it inside a single
    * `DurableWriter` transaction, and a host call must never be held across a
    * write transaction — an inline `put` would hold a network round trip inside
-   * it and roll the local row back whenever a shared cache is unreachable. That
-   * engine composes this store in `"deferred"` mode and publishes through its
-   * own `CacheSync` seam once the transaction has committed. Lookups stay
-   * read-through in both modes.
+   * it. That engine composes this store in `"deferred"` mode and publishes
+   * through its own `CacheSync` seam once the transaction has committed.
+   * Lookups stay read-through in both modes.
    */
   readonly publication?: "inline" | "deferred" | undefined
 }
@@ -77,7 +76,15 @@ export const make = (options: Options): CacheStore.Service => {
       // its recorded version when it holds one and its head otherwise.
       const cached = yield* local.get(keyDigest, options)
       if (Option.isSome(cached)) return cached
-      const shared = yield* remote.get(keyDigest, options)
+      // A shared cache is an accelerator. Its refusal is observable, but it
+      // cannot replace the executable miss path with a failed run.
+      const shared = yield* remote.get(keyDigest, options).pipe(
+        Effect.catch(() =>
+          Metric.update(CacheStoreMetrics.remoteFailure.get, 1).pipe(
+            Effect.as(Option.none<CacheStore.CacheEntry>())
+          )
+        )
+      )
       if (Option.isNone(shared)) return shared
       // Write-back, exactly as `downloadActionResultFromRemote` does: the
       // shared entry becomes a local row so this machine's next lookup — and
@@ -119,7 +126,16 @@ export const make = (options: Options): CacheStore.Service => {
       // In `"deferred"` mode the shared write is the caller's, precisely so it
       // can happen outside whatever transaction this `put` runs in.
       if (!deferred) {
-        const published = yield* remote.put(entry)
+        // The local row is already the durable answer. A refused publication
+        // leaves another host without this acceleration; it does not revoke
+        // the successful local recording.
+        const published = yield* remote.put(entry).pipe(
+          Effect.catch(() =>
+            Metric.update(CacheStoreMetrics.remoteFailure.put, 1).pipe(
+              Effect.as(undefined)
+            )
+          )
+        )
         // The shared outcome is deliberately not the caller's answer: this
         // machine replays from its own row, and `@smthrs/engine-store`'s
         // `CacheSync` makes the same call for the deferred path. But a shared
@@ -130,7 +146,7 @@ export const make = (options: Options): CacheStore.Service => {
         // `CacheStoreMetrics.put.Conflict` exists to surface. Counting it is
         // the only way an operator ever sees it, because nothing else on this
         // path returns, fails, or records it.
-        if (published._tag === "Conflict") yield* Metric.update(CacheStoreMetrics.put.Conflict, 1)
+        if (published?._tag === "Conflict") yield* Metric.update(CacheStoreMetrics.put.Conflict, 1)
       }
       return outcome
     })

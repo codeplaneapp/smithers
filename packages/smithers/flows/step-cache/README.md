@@ -21,7 +21,7 @@ The root exports five namespaces, also available through matching subpaths.
 | Namespace            | Contract                                                                                                                                                                     |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CacheStore`         | Schemas, limits, validation helpers, `CacheStoreError`, `get`, `put`, fenced `evict`, `sweepExpired`, SQL `layer`, and explicit failing `makeNoop` / `layerNoop` test seams. |
-| `CacheStoreMetrics`  | Hit, miss, and put-outcome counters.                                                                                                                                         |
+| `CacheStoreMetrics`  | Hit, miss, put-outcome, and degraded shared-tier operation counters.                                                                                                         |
 | `CombinedCacheStore` | Local-first read-through, local write-back, and inline or deferred remote publication.                                                                                       |
 | `RemoteCacheStore`   | Bounded HTTP action-cache client under `/ac/{keyDigest}`.                                                                                                                    |
 | `Migrations`         | Namespaced migration `set`, `run`, and prerequisite `layer`.                                                                                                                 |
@@ -103,6 +103,11 @@ When entries reference artifacts, publish every artifact to the shared
 artifact tier before publishing the cache entry. Use deferred publication when
 the local write occurs inside a database transaction; perform remote I/O only
 after that transaction commits.
+
+The shared tier is an accelerator, not a run dependency. A refused remote
+lookup degrades to a miss, and a refused inline publication preserves the
+local `put` outcome. Both increment `flows_step_cache_remote_failures` with an
+`operation` of `get` or `put`.
 
 ## Documentation
 

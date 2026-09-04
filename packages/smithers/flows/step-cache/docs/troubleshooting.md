@@ -178,9 +178,11 @@ conflict. If bodies are legitimately large, raise `maxResponseBytes` up to the
 4 MiB bound, and reduce what the step records into `result` past that. See
 [implement a shared cache server](./guides/implement-a-shared-tier.md).
 
-Under `CombinedCacheStore` in `"inline"` mode, a failed publication fails the
-caller even though the local row is already durable. Compose `"deferred"` mode
-and publish outside the write path when that is not what you want.
+`CombinedCacheStore` degrades a refused shared lookup to a miss and preserves a
+successful local outcome when an inline publication is refused. Both refusals
+increment `flows_step_cache_remote_failures`; inspect the `operation` attribute
+to distinguish reads from writes. Use `"deferred"` mode to keep the network
+round trip outside a database write transaction.
 
 ## decode_failed: the shared tier's answer
 
