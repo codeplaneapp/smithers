@@ -113,6 +113,15 @@ describe("the workspace package contract", () => {
     }
   })
 
+  it("ships the root LICENSE verbatim in every published package", () => {
+    const license = readFileSync(join(root, "LICENSE"))
+    for (const entry of publishable) {
+      const where = `packages/${entry.directory}`
+      assert.ok(entry.manifest.files.includes("LICENSE"), `${where} must list LICENSE in files`)
+      assert.deepEqual(readFileSync(join(root, where, "LICENSE")), license, `${where}/LICENSE must match root`)
+    }
+  })
+
   it("tags the release line so an RC never lands on the latest dist-tag", () => {
     for (const entry of publishable) {
       if (offReleaseLine.has(entry.manifest.name)) continue
