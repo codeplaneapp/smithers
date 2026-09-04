@@ -23,6 +23,7 @@ import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
 case "$FLOWS_FAKE_JJ" in
+  refused) echo "Warning: Refused to snapshot some files:" 1>&2; echo "  artifact.bin: 2.0MiB (2097152 bytes); the maximum size allowed is 1.0MiB (1048576 bytes)" 1>&2; exit 0 ;;
   conflict) echo "Error: would leave conflicts in note.txt" 1>&2; exit 1 ;;
   revision-not-found) echo "Error: Revision not found" 1>&2; exit 1 ;;
   path-doesnt-exist) echo "Error: Path doesn't exist" 1>&2; exit 1 ;;
@@ -113,6 +114,14 @@ describe.skipIf(process.platform === "win32")("NodeJj failure classification", (
     delete process.env.SMITHERS_JJ_PATH
     await rm(directory, { recursive: true, force: true })
   })
+
+  it.live("fails typed when a successful command warns that files were refused", () =>
+    Effect.gen(function*() {
+      const error = yield* status("refused")
+      expect(error.code).toBe("snapshot_refused")
+      expect(error.message).toContain("artifact.bin")
+      expect(error.command).toBe("jj status")
+    }))
 
   it.live("classifies conflict vocabulary as `conflict`", () =>
     Effect.gen(function*() {

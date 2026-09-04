@@ -95,6 +95,17 @@ describe.skipIf(!jjInstalled)("NodeJj", () => {
       expect(status).toContain("Working copy")
     }))
 
+  it.effect("captures and restores a new 2 MiB artifact", () =>
+    Effect.gen(function*() {
+      const file = join(repository, "large-artifact.bin")
+      const contents = Buffer.alloc(2 * 1024 * 1024, 0x61)
+      yield* Effect.promise(() => writeFile(file, contents))
+      const { changeId } = yield* run(Effect.flatMap(Jj, (jj) => jj.snapshot("large artifact")))
+      yield* Effect.promise(() => rm(file))
+      yield* run(Effect.flatMap(Jj, (jj) => jj.restore(changeId)))
+      expect(readFileSync(file).equals(contents)).toBe(true)
+    }))
+
   it.effect("snapshots without a message when none is supplied", () =>
     Effect.gen(function*() {
       yield* Effect.promise(() => writeFile(join(repository, "unnamed.txt"), "x\n"))

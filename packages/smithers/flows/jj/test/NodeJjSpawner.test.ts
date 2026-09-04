@@ -32,6 +32,7 @@ import * as NodeJj from "../src/node/NodeJj.ts"
 
 const script = `#!/bin/sh
 case "$1" in
+  restore) echo "Warning: Refused to snapshot some files:" 1>&2; exit 0 ;;
   status) echo "the working copy is clean"; exit 0 ;;
   root) echo "/scripted/root"; exit 0 ;;
   diff) echo "Error: Revision not found" 1>&2; exit 1 ;;
@@ -145,6 +146,13 @@ const run = <A, E>(effect: Effect.Effect<A, E, Jj>, spawner: Layer.Layer<ChildPr
 process.on("exit", () => rmSync(directory, { recursive: true, force: true }))
 
 describe.skipIf(process.platform === "win32")("NodeJj.layerSpawner", () => {
+  it.live("fails typed on refused-file warnings through the host spawner", () =>
+    Effect.gen(function*() {
+      const error = yield* run(Effect.flip(Effect.flatMap(Jj, (jj) => jj.restore("saved"))), realSpawner)
+      expect(error.code).toBe("snapshot_refused")
+      expect(error.message).toContain("Refused to snapshot")
+    }))
+
   it.live("runs jj through the host spawner and returns its stdout", () =>
     Effect.gen(function*() {
       const output = yield* run(Effect.flatMap(Jj, (jj) => jj.status()), realSpawner)

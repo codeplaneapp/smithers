@@ -94,6 +94,11 @@ executed, so a broken explicit path is reported rather than a different binary
 being quietly substituted. An override that names nothing falls through to
 `PATH`, and `smthrs doctor` says so. This package vendors no `jj` binaries.
 
+Node and Bun snapshots disable jj's default new-file size limit with
+`--config snapshot.max-new-file-size=0`, so new artifacts larger than 1 MiB are
+included. Any command that still warns `Refused to snapshot some files` fails
+with `JjError.code = "snapshot_refused"`, even when jj exits successfully.
+
 One invocation buffers at most **64 MiB of each output stream**, counted in
 bytes as they arrive rather than in decoded characters. jj is not an attacker,
 but the engine outlives any one command, so a child that never stops printing is

@@ -35,7 +35,7 @@ import type { PlatformError } from "effect/PlatformError"
  * @since 0.1.0
  * @slop
  */
-export const JjErrorCode = Schema.Literals(["not_installed", "conflict", "invalid_ref", "unknown"])
+export const JjErrorCode = Schema.Literals(["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unknown"])
 
 /**
  * The value form of {@link JjErrorCode}.

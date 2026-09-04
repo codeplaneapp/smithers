@@ -33,6 +33,7 @@ import * as ChildProcess from "node:child_process"
 import { realpathSync, statSync } from "node:fs"
 import { mkdtemp, readdir, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, resolve } from "node:path"
+import { stripVTControlCharacters } from "node:util"
 import { isJjError, Jj, JjError, jjErrorCause } from "../Jj.ts"
 import { resolveJjBinary } from "./resolveJjBinary.ts"
 
@@ -92,13 +93,19 @@ const REVISION_VOCABULARY = [
  */
 const CONFLICT_VOCABULARY = /^(?:error|caused by):[^\n]*conflict(?:s|ed|ing)?(?![\w./-])/m
 
+const SNAPSHOT_REFUSAL = /^Warning: Refused to snapshot some files:/im
+
+const refusedFiles = (stderr: string): boolean => SNAPSHOT_REFUSAL.test(stripVTControlCharacters(stderr))
+
 const classify = (method: string, args: ReadonlyArray<string>, output: Output): JjError => {
   // jj reports on stderr; the stdout fallback is for a build that reports there
   // instead. Concatenating both let one stream's incidental wording outrank the
   // other's diagnosis.
   const reported = output.stderr.trim() || output.stdout.trim()
   const text = reported.toLowerCase()
-  const code: JjError["code"] = REVISION_VOCABULARY.some((pattern) => pattern.test(text))
+  const code: JjError["code"] = refusedFiles(output.stderr)
+    ? "snapshot_refused"
+    : REVISION_VOCABULARY.some((pattern) => pattern.test(text))
     ? "invalid_ref"
     : CONFLICT_VOCABULARY.test(text)
     ? "conflict"
@@ -386,7 +393,9 @@ type Run = (method: string, args: ReadonlyArray<string>, cwd?: string) => Effect
 
 /** Turns a finished invocation into either its stdout or a classified failure. */
 const settle = (method: string, args: ReadonlyArray<string>, output: Output): Effect.Effect<string, JjError> =>
-  output.exitCode === 0 ? Effect.succeed(output.stdout) : Effect.fail(classify(method, args, output))
+  output.exitCode === 0 && !refusedFiles(output.stderr)
+    ? Effect.succeed(output.stdout)
+    : Effect.fail(classify(method, args, output))
 
 /** Runs `jj` with argv (never a shell string) in `cwd`. */
 const jj: Run = (method, args, cwd) =>
@@ -519,7 +528,10 @@ const viaSpawner = (spawner: ChildProcessSpawner["Service"]): Run => (method, ar
  * does not, or the containment story would be bought with a behavior change.
  */
 const operations = (run: Run, repositoryRoot?: string) => {
-  const inRepository = (method: string, args: ReadonlyArray<string>) => run(method, args, repositoryRoot)
+  const inRepository = (method: string, args: ReadonlyArray<string>) =>
+    // In jj 0.39, zero disables the new-file size limit. Apply it to every
+    // snapshot invocation, since each can discover new files in the working copy.
+    run(method, method === "snapshot" ? [...args, "--config", "snapshot.max-new-file-size=0"] : args, repositoryRoot)
   /**
    * Fences one working-copy operation on the workspace it runs in.
    *

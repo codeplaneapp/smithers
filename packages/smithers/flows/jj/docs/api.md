@@ -122,7 +122,7 @@ Both optional operations are capability-checked like every other one:
 
 | Export                | Signature                                                                                                              | Meaning                                                                                                                  |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "unknown"]>` and the type                                | The closed reason vocabulary.                                                                                            |
+| `JjErrorCode`         | `Schema.Literals<["not_installed", "conflict", "invalid_ref", "snapshot_refused", "unknown"]>` and the type            | The closed reason vocabulary.                                                                                            |
 | `JjError`             | `class JjError` with `_tag` `"@smthrs/jj/JjError"`                                                                     | A jj failure, shaped after `effect/PlatformError`.                                                                       |
 | `jjError(options)`    | `(options: { code: JjErrorCode; module?: string; method: string; description?: string; command?: string }) => JjError` | Composes the human message from the code, the failing `module.method`, and the description. `module` defaults to `"Jj"`. |
 | `isJjError(error)`    | `(error: unknown) => error is JjError`                                                                                 | Tells "jj said no" from "the capability kernel said no" without matching `_tag` by hand.                                 |
@@ -192,6 +192,11 @@ exclusive `.jj/smithers.lock` owner directory across processes. The snapshot's
 CLI calls therefore cannot interleave with another state operation. A caller
 reclaims a lock whose owner process has exited, so an abruptly killed host does
 not strand the repository.
+
+Node and Bun snapshots disable jj's default new-file size limit with
+`--config snapshot.max-new-file-size=0`, so new artifacts larger than 1 MiB are
+included. Any command that still warns `Refused to snapshot some files` fails
+with `JjError.code = "snapshot_refused"`, even when jj exits successfully.
 
 One invocation buffers at most 64 MiB of each output stream, counted in bytes as
 they arrive rather than in decoded characters, and past the ceiling the child is
