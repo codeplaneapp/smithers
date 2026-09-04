@@ -670,8 +670,8 @@ describe("AgentSession", () => {
     // attempt's frame one ended at `permission-required`; the approved attempt
     // answers the same `ask`, at the same ordinal of the same frame, with a
     // `cell-call-settled` and then runs the frame to its end. Both rows stand,
-    // and the run's whole record is 21 rows from the park plus the 7 the
-    // resume added, which is the count the discarded suppression prototype
+    // and the run's whole record is 21 rows from the park plus the 8 the
+    // resume added (including the completion drain), which is the count the discarded suppression prototype
     // could not reach.
     expect(outcome.agentTrail.map((entry) => entry.eventType)).toContain("control.agent.permission-required")
     const asks = outcome.agentTrail.filter((entry) =>
@@ -680,7 +680,8 @@ describe("AgentSession", () => {
     )
     expect(asks).toHaveLength(1)
     expect((asks[0]!.payload as { readonly value: { readonly approved: boolean } }).value.approved).toBe(true)
-    expect(outcome.agentTrail).toHaveLength(28)
+    expect(outcome.agentTrail).toHaveLength(29)
+    expect(outcome.agentTrail.filter((entry) => entry.eventType === "control.agent.steering-drained")).toHaveLength(2)
     // One row per identity: nothing was journaled twice, and nothing that the
     // resume produced was refused as a duplicate of something else.
     expect(new Set(outcome.agentTrail.map((entry) => entry.sourceSeq)).size)

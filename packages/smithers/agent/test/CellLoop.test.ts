@@ -351,9 +351,10 @@ describe("the cell loop on the durable engine", () => {
     )
 
     expect(outcome._tag).toBe("completed")
-    // One live drain across both attempts: the resumed run replayed the
-    // journaled record instead of asking the already-drained queue again.
-    expect(drains).toHaveLength(1)
+    // One live drain per completed frame across both attempts: the resumed
+    // run replays frame zero's record, then drains its completing frame.
+    expect(drains).toHaveLength(2)
+    expect(new Set(drains).size).toBe(2)
     // Both sealed model steps replayed, so the provider saw each frame once —
     // an unjournaled drain would rebuild frame 1's context without the insert,
     // re-key the sealed step, and call the provider a third time.
