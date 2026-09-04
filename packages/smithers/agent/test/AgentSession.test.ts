@@ -48,6 +48,7 @@ import * as AgentSession from "../src/AgentSession.ts"
 import type * as FlowEngineLike from "../src/FlowEngineLike.ts"
 import * as Seat from "../src/Seat.ts"
 import * as SeatResolver from "../src/SeatResolver.ts"
+import legacyCompaction from "./fixtures/legacyCompaction.json" with { type: "json" }
 import * as Safety from "./Safety.ts"
 
 const prepared: Route.PreparedRequest = {
@@ -371,7 +372,8 @@ interface Outcome {
  */
 const drive = (
   gate: Deferred.Deferred<void>,
-  decision: "approve" | "deny" = "approve"
+  decision: "approve" | "deny" = "approve",
+  legacy = false
 ): Effect.Effect<Outcome, unknown, Control.Control | ControlRuntime.ControlRuntime | Journal.Journal> =>
   Effect.gen(function*() {
     const control = yield* Control.Control
@@ -413,18 +415,40 @@ const drive = (
     yield* awaitStatus(runtime, runId, "waiting-approval")
 
     const approval = Schema.decodeUnknownSync(ControlSchema.ApprovalPayload)(requestedPayload.payload)
+    if (legacy) {
+      // Put the incompatible record beyond the first page of session history.
+      for (let index = 0; index < 1_000; index++) {
+        yield* journal.emitDurableUnfenced(
+          new JournalEvent.Input({
+            runId: JournalEvent.RunId.make(runId),
+            sourceId: JournalEvent.SourceId.make("legacy-fixture"),
+            eventType: "telemetry",
+            payload: { index }
+          })
+        )
+      }
+      yield* journal.emitDurableUnfenced(
+        new JournalEvent.Input({
+          runId: JournalEvent.RunId.make(runId),
+          sourceId: JournalEvent.SourceId.make("legacy-fixture"),
+          ...legacyCompaction
+        })
+      )
+    }
     yield* decision === "approve" ? control.approve(approval) : control.deny(approval)
     yield* control.resume({ runId, idempotencyKey: "resume:1" })
-    yield* awaitStatus(runtime, runId, "completed")
+    yield* awaitStatus(runtime, runId, legacy ? "failed" : "completed")
 
     const grants = yield* runtime.grants
     yield* journal.flush
-    const page = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 1_000 })
+    const page = yield* journal.entries({ runId: JournalEvent.RunId.make(runId), limit: 10_000 })
     return {
       runId,
       requestedQuestion: requestedPayload.question,
       grantTokens: grants.map((grant) => grant.tokenId),
-      agentTrail: page.entries.filter((entry) => entry.eventType.startsWith("control.agent."))
+      agentTrail: page.entries.filter((entry) =>
+        entry.eventType.startsWith("control.agent.") || entry.eventType === "control.run.failed"
+      )
     }
   })
 
@@ -525,6 +549,24 @@ const textOf = (request: ModelRequest.ModelRequest): string =>
     .join("\n")
 
 describe("AgentSession", () => {
+  it("refuses a pre-user-summary journal on resume before another live model call", { timeout: 30_000 }, async () => {
+    const captured: Array<Captured> = []
+    const notes: Array<string> = []
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        return yield* drive(gate, "approve", true).pipe(
+          Effect.provide(stack({ resolve: seat(capturing(captured)), notes, gate }))
+        )
+      }).pipe(Effect.scoped) as Effect.Effect<Outcome>
+    )
+    expect(captured).toHaveLength(2)
+    expect(notes).toEqual(["frame zero note"])
+    const failed = outcome.agentTrail.find((entry) => entry.eventType === "control.run.failed")
+    expect(JSON.stringify(failed?.payload)).toContain("/harness/HarnessError")
+    expect(JSON.stringify(failed?.payload)).toContain("predates harness journal format 2")
+  })
+
   it("waits through an accepted control row before driving the engine", async () => {
     let reads = 0
     await expect(Effect.runPromise(

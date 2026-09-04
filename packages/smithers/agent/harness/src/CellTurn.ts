@@ -38,6 +38,7 @@ import * as NarrowedCheck from "./NarrowedCheck.ts"
 import * as Sandbox from "./Sandbox.ts"
 import * as Steering from "./Steering.ts"
 import * as Sufficiency from "./Sufficiency.ts"
+import { journalVersion } from "./Transcript.ts"
 import * as TruncatedOutput from "./TruncatedOutput.ts"
 import * as UnmovedTree from "./UnmovedTree.ts"
 import * as UnresolvedFailure from "./UnresolvedFailure.ts"
@@ -270,6 +271,11 @@ const eventType = AgentEvent.eventType
  */
 export class State extends Schema.Class<State>("flows/harness/CellTurn/State")({
   session: Schema.String,
+  /** Missing versions decode as legacy so resume refuses before any model call. */
+  journalVersion: Schema.Number.pipe(
+    Schema.withConstructorDefault(Effect.succeed(journalVersion)),
+    Schema.withDecodingDefaultKey(Effect.succeed(1))
+  ),
   frame: NonNegativeSafeInt,
   maxFrames: MaxFrames,
   /**
@@ -855,7 +861,7 @@ const keyMaterialFrom = (
   version: "flows/key-material/v2",
   kind: "sealed",
   body: { _tag: "ModelCall", request },
-  inputs: [{ _tag: "Literal", value: { contextDigest: contextWindow.digest } }],
+  inputs: [{ _tag: "Literal", value: { contextDigest: contextWindow.digest, journalVersion } }],
   layers: [...new Set(state.layers)].sort(),
   capabilities: [...new Set(state.capabilityEnvelope.map(Capability.format))].sort(),
   effects: Effects.make({
@@ -3092,6 +3098,12 @@ export const run = (
       const steering = yield* Steering.Source
 
       let current = input.state
+      if (current.journalVersion !== journalVersion) {
+        return yield* new HarnessError({
+          code: "incompatible_journal",
+          message: `Controller state predates harness journal format ${journalVersion}; start a new run.`
+        })
+      }
       // Once, and only on a run's own first frame: a resumed run replays its
       // arming from the journal it already wrote, and a second record would
       // make the gate count runs instead of arming decisions.

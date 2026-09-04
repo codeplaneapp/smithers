@@ -16,8 +16,42 @@ import { Result, Schema } from "effect"
 import * as AgentEvent from "./AgentEvent.ts"
 import type * as Cell from "./Cell.ts"
 import type * as EngineLike from "./EngineLike.ts"
+import { HarnessError } from "./HarnessError.ts"
 import * as DemandText from "./internal/demandText.ts"
 import { printsObservation } from "./internal/printsObservation.ts"
+
+/**
+ * Journal and model-key format after summaries became user context.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const journalVersion = 2
+
+/**
+ * Refuses history whose replay could address different sealed model steps.
+ * Historical display projection is separate from permission to resume.
+ *
+ * @category validation
+ * @since 1.0.0-rc.0
+ */
+export const validateJournal = (
+  entries: ReadonlyArray<JournalEvent.Entry>
+): Result.Result<void, HarnessError> => {
+  for (const entry of entries) {
+    if (!entry.eventType.startsWith("control.agent.")) continue
+    const payload = entry.payload as Record<string, unknown> | null
+    if (payload === null || typeof payload !== "object" || payload["journalVersion"] !== journalVersion) {
+      return Result.fail(
+        new HarnessError({
+          code: "incompatible_journal",
+          message: `Journal sequence ${entry.seq} predates harness journal format ${journalVersion}; start a new run.`
+        })
+      )
+    }
+  }
+  return Result.succeed(undefined)
+}
 
 /**
  * Stable failures produced while projecting a durable transcript.
@@ -266,7 +300,9 @@ export const projectStateResult = (
   if (compaction !== undefined) {
     messages.push({
       kind: "summary",
-      message: compaction.payload.summary
+      message: ModelRequest.Message.user(
+        compaction.payload.summary.content.filter((part): part is ModelRequest.TextPart => part.type === "text")
+      )
     })
   }
   // Set only after emitting a print and cleared whenever another message is

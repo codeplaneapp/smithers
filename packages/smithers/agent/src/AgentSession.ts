@@ -67,6 +67,7 @@ import * as Notifications from "@smthrs/harness/Notifications"
 import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as Steering from "@smthrs/harness/Steering"
+import * as Transcript from "@smthrs/harness/Transcript"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
@@ -1346,6 +1347,19 @@ export const make = (
       instance: FlowRuntime.FlowInstance["Service"]
     ) =>
       Effect.gen(function*() {
+        // Check before opening any model or cell boundary. A new hash alone
+        // would turn old settlements into misses and repeat their side effects.
+        let after: JournalEvent.Seq | undefined
+        for (;;) {
+          const page = yield* journal.entries({
+            runId: JournalEvent.RunId.make(payload.runId),
+            limit: 1_000,
+            ...(after === undefined ? {} : { after })
+          })
+          yield* Effect.fromResult(Transcript.validateJournal(page.entries))
+          if (!page.hasMore) break
+          after = page.entries.at(-1)!.seq
+        }
         const plan = yield* runtime.getPlan(payload.planId)
         const card = plan.card
         const descriptor = yield* registry.get(card.flowId)
@@ -1436,7 +1450,11 @@ export const make = (
                 const material = JSON.parse(JSON.stringify(projected.payload)) as Record<string, unknown>
                 const sourceSeq = traceIdentity(frame, ordinal, cell, projected.eventType, material)
                 ordinal += 1
-                pending.push({ sourceSeq, eventType: projected.eventType, payload: { ...material, at } })
+                pending.push({
+                  sourceSeq,
+                  eventType: projected.eventType,
+                  payload: { ...material, at, journalVersion: Transcript.journalVersion }
+                })
               }
             }))
         const pump = yield* Effect.forkChild(

@@ -1,0 +1,11 @@
+{
+  "eventType": "control.agent.compaction-settled",
+  "payload": {
+    "replacedPrefixDigest": "pre-user-summary-prefix",
+    "summary": {
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "Earlier work summarized." }],
+      "stopReason": "stop"
+    }
+  }
+}

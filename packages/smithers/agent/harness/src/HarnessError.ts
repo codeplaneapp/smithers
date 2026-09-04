@@ -18,6 +18,7 @@ import { Schema } from "effect"
  */
 export const HarnessErrorCode = Schema.Literals([
   "assembly_failed",
+  "incompatible_journal",
   "render_failed",
   "projection_failed",
   "model_failed",

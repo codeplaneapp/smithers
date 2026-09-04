@@ -390,6 +390,7 @@ describe("HarnessError", () => {
   it("pins and round-trips exactly the codes this package raises", () => {
     const codes = [
       "assembly_failed",
+      "incompatible_journal",
       "render_failed",
       "projection_failed",
       "model_failed",

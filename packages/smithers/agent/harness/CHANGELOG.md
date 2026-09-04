@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking journal format 2.** Summary text is user context. Controller state,
+  session journals, and model-key inputs now carry this harness format version.
+  Resuming an older state or session journal fails with typed
+  `HarnessError` code `incompatible_journal` before any live model call. Start a
+  new run; rc.0 does not promise journal compatibility. Historical transcript
+  display remains available and renders summaries as user messages.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 The first published release of this package. `0.1.0` was never published; the

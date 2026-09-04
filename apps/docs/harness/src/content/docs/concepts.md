@@ -67,9 +67,19 @@ Implemented by `Sandbox.ts`, `QuickJSSandbox.ts`, `VariablesPanel.ts`.
 
 A frame is `model -> cell -> realm evaluation -> durable flow calls ->
 transition`. Every `ctx.call` is its own keyed, journaled, permission-gated
-boundary, so a cell is never one opaque activity: a crash or a permission park
-mid-cell re-executes the cell source from the top, replays the boundaries that
-already settled, and reaches the parked call deterministically.
+boundary. On a compatible journal, a crash or a permission park mid-cell
+re-executes source from the top and replays settled calls. This requires the
+same controller format, declarations, and deterministic cell computation;
+changing key material can turn a replay into a fresh call.
+
+Harness journal format 2 changes summaries to user context. The agent session
+checks persisted trace versions before opening model or cell boundaries, and
+`CellTurn.run` rejects controller state decoded from an older format with typed
+`HarnessError` code `incompatible_journal`. Start a new run for old journals;
+rc.0 has no compatibility promise. Transcript projection is for display and
+normalizes historical summary text to user messages; it does not authorize
+resuming a historical run. The session trace is best-effort telemetry, while
+the engine's sealed steps and recorded boundaries provide durable replay.
 
 The controller's own reads of the world go through `EngineLike.record` for the
 same reason. `(name, identity)` together key a record, and the controller folds

@@ -313,6 +313,17 @@ const resolvedText = (events: ReadonlyArray<AgentEvent.AgentEvent>): string => {
   return part?.type === "text" ? part.text : ""
 }
 
+it("rejects controller state decoded from the previous journal format before calling the model", async () => {
+  const encoded: Record<string, unknown> = { ...Schema.encodeSync(CellTurn.State)(state()) }
+  delete encoded.journalVersion
+  const legacy = Schema.decodeUnknownSync(CellTurn.State)(encoded)
+  const model = ScriptedModel.make([emits(`ctx.done("must not run")`)])
+  const engine = ScriptedEngine.make(model.model)
+  const { failure } = await collect({ state: legacy, flows: [] }, { engine: engine.layer })
+  expect(failure).toMatchObject({ code: "incompatible_journal" })
+  expect(model.recorder.requests).toHaveLength(0)
+})
+
 describe("CellTurn seat and placement", () => {
   it("keys a sealed step on every placement a run may declare, and on none when it declares none", async () => {
     const declared: ReadonlyArray<readonly [Descriptor.Placement, Placement.Placement]> = [

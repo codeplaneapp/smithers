@@ -17,6 +17,39 @@ import { entry, journal } from "./fixtures/journal.ts"
 const project = (entries: ReadonlyArray<JournalEvent.Entry>): ReadonlyArray<ModelRequest.Message> =>
   Result.getOrThrow(Transcript.projectResult(entries))
 
+it("validates current session journals while leaving unrelated control history alone", () => {
+  expect(Result.isSuccess(Transcript.validateJournal([
+    entry(1, "control.run.started", {}),
+    entry(2, "control.agent.discipline-armed", { journalVersion: Transcript.journalVersion })
+  ]))).toBe(true)
+})
+
+it.each([null, "invalid", {}, { journalVersion: 1 }, { journalVersion: 999 }])(
+  "refuses incompatible session payload %j",
+  (payload) => {
+    const result = Transcript.validateJournal([entry(1, "control.agent.compaction-settled", payload)])
+    expect(Result.isFailure(result) && result.failure.code).toBe("incompatible_journal")
+  }
+)
+
+it("renders a historical assistant summary as user context", () => {
+  const projected = Result.getOrThrow(
+    Transcript.projectResult([entry(
+      1,
+      "flows.harness.compaction-settled.v1",
+      new AgentEvent.CompactionSettled({
+        eventType: "flows.harness.compaction-settled.v1",
+        replacedPrefixDigest: "old-prefix",
+        summary: ModelRequest.Message.assistant([
+          ModelRequest.ThinkingPart.make({ text: "internal thought" }),
+          ModelRequest.TextPart.make({ text: "Earlier work" })
+        ], { stopReason: "stop" })
+      })
+    )])
+  )
+  expect(projected).toEqual([ModelRequest.Message.user("Earlier work")])
+})
+
 describe("Transcript", () => {
   it("orders entries and ignores journal-only events", () => {
     const entries = [
@@ -211,7 +244,7 @@ describe("Transcript", () => {
     // The transcript grows: the compaction summary leads, the model's own reply
     // follows, and the steer lands after it. A `continue` replaces nothing.
     expect(projected.messages.map(({ message }) => message)).toEqual([
-      ModelRequest.Message.assistant("compacted", { stopReason: "stop" }),
+      ModelRequest.Message.user("compacted"),
       ModelRequest.Message.assistant("cell source", { stopReason: "stop" }),
       ModelRequest.Message.user("then steer")
     ])
