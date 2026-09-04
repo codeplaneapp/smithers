@@ -55,7 +55,7 @@ import { packageVersion } from "./Version.ts"
 const global = {
   credential: Flag.string("credential").pipe(
     Flag.optional,
-    Flag.withDescription("Bearer token for the remote control plane; falls back to SMITHERS_API_KEY")
+    Flag.withDescription("Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv")
   ),
   json: Flag.boolean("json").pipe(
     Flag.withDescription("Print the machine-readable document instead of the human rendering")
@@ -141,7 +141,17 @@ const noticeIgnoredBackends = Effect.sync(() => {
   }
 })
 
+const noticeCredentialFlag = Effect.gen(function*() {
+  const root = yield* rootCommand
+  if (Option.isSome(root.credential)) {
+    yield* Console.error(
+      "Warning: --credential exposes secrets in process listings and shell history; SMITHERS_API_KEY is the preferred channel."
+    )
+  }
+})
+
 const guardGlobals = Effect.gen(function*() {
+  yield* noticeCredentialFlag
   const root = yield* rootCommand
   // A 0.x PostgreSQL or PGlite project still exports its connection strings.
   // rc.0 ignores them and says so, once per invocation, because a silently
@@ -1601,6 +1611,7 @@ const bug = Command.make("bug", {
 
 const doctor = Command.make("doctor", {}, () =>
   Effect.gen(function*() {
+    yield* noticeCredentialFlag
     // Doctor owns the unsupported-backend check. The shared guard would fail
     // before the report exists, so this handler keeps its notices and lets
     // `Doctor.failed` decide the command status from the complete report.

@@ -50,7 +50,7 @@ import { Effect } from "effect"
 import { Command as Cli } from "effect/unstable/cli"
 
 const config = NodeControl.makeConfig(
-  ["--remote", "http://127.0.0.1:3000", "--credential", "alpha-secret"],
+  ["--remote", "http://127.0.0.1:3000"],
   process.env,
   process.cwd()
 )
@@ -63,6 +63,10 @@ const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
 `@smthrs/cli/package.json` is exported for package metadata. `internal/*` and nested `*/index` subpaths are not public.
 
 Control servers bind `127.0.0.1` by default. See the [control-plane guide](https://smithers.sh/docs/guides/control-plane/) before opting into a non-loopback bind.
+
+`SMITHERS_API_KEY` is the preferred credential channel. The compatibility
+flag `--credential` warns on stderr, even under `--quiet`, because argv is
+visible in process listings and may remain in shell history.
 
 ## Exit codes
 
@@ -86,7 +90,7 @@ rc.0 reads a closed set of variables, all listed by `Environment.names`, with fo
 | Variable                                 | Meaning                                                           |
 | ---------------------------------------- | ----------------------------------------------------------------- |
 | `SMITHERS_REMOTE`                        | Fallback for `--remote`.                                          |
-| `SMITHERS_API_KEY`                       | Fallback for `--credential`.                                      |
+| `SMITHERS_API_KEY`                       | Preferred credential channel; avoids argv exposure.               |
 | `SMITHERS_MCP_CONFIG`                    | Fallback for `--mcp-config`.                                      |
 | `SMITHERS_BACKEND`                       | SQLite only. Any other value exits 1 with `unsupported_database`. |
 | `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` | How long `up -d` waits for its child to report admission.         |

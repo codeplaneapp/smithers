@@ -72,7 +72,7 @@ Anything else needs both an explicit `--listen` and a bearer token, because an u
 plane on a LAN address can launch agents with your credentials and nothing
 about that looks wrong from the outside.
 
-**Fix.** Pass both: `smthrs serve --host 0.0.0.0 --listen --credential <token>`.
+**Fix.** Pass both: `smthrs serve --host 0.0.0.0 --listen` with `SMITHERS_API_KEY` exported.
 `--credential` falls back to `SMITHERS_API_KEY`.
 
 The missing-token message reads `without a Bearer [REDACTED_TOKEN]` rather than

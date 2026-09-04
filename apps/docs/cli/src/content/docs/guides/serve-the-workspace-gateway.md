@@ -48,17 +48,18 @@ Loopback needs no credential. `Serve.loopbackHosts` is `127.0.0.1`, `::1`, and
 `localhost`; the local ingress guard rejects foreign Host values and browser
 origins so a web page or rebound hostname cannot inherit the local operator.
 
-Anything else needs both an explicit `--listen` and a bearer token:
+Anything else needs both an explicit `--listen` and a bearer token. Export
+`SMITHERS_API_KEY` before starting the server:
 
 ```bash
-smthrs serve --host 0.0.0.0 --port 3000 --listen --credential "$SMITHERS_API_KEY"
+smthrs serve --host 0.0.0.0 --port 3000 --listen
 ```
 
 Omitting either one is refused before the server is built:
 
 ```text
 Refusing to bind 0.0.0.0: pass --listen to serve on a non-loopback address.
-Refusing to bind 0.0.0.0 without a Bearer [REDACTED_TOKEN]: pass --credential or set SMITHERS_API_KEY.
+Refusing to bind 0.0.0.0 without a Bearer [REDACTED_TOKEN]: set SMITHERS_API_KEY (preferred) or pass --credential.
 ```
 
 The second sentence is written as "without a bearer token" in `Serve.refuse`.
@@ -68,7 +69,10 @@ an operator reads is the one above.
 The rule is strict because the failure it prevents is silent: an
 unauthenticated control plane on a laptop's LAN address can launch agents with
 the operator's credentials, and nothing about that looks wrong from the
-outside. `--credential` falls back to `SMITHERS_API_KEY`.
+outside. Prefer the exported `SMITHERS_API_KEY` environment variable. The
+compatibility flag `--credential` warns on stderr even under `--quiet`: its
+value is visible in process listings and may remain in shell history. The
+warning never echoes the credential.
 
 Read the [control-plane guide](https://smithers.sh/docs/guides/control-plane/)
 before opting into a non-loopback bind.
