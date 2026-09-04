@@ -14,11 +14,11 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/bui
 
 The `exports` map publishes the index, every module under `src` through the `./*` subpath, and the manifest:
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/targets` | `src/index.ts` | Node.js 22.19.0+ |
-| `@smthrs/targets/Target` | `src/Target.ts` | Node.js 22.19.0+ |
-| `@smthrs/targets/package.json` | `package.json` | Node.js 22.19.0+ |
+| Import                         | Source          | Platform         |
+| ------------------------------ | --------------- | ---------------- |
+| `@smthrs/targets`              | `src/index.ts`  | Node.js 22.19.0+ |
+| `@smthrs/targets/Target`       | `src/Target.ts` | Node.js 22.19.0+ |
+| `@smthrs/targets/package.json` | `package.json`  | Node.js 22.19.0+ |
 
 The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. The subpaths `./internal/*` and `./index` map to `null`, so neither resolves. The package publishes TypeScript sources, not a built distribution, and `effect` is a peer dependency pinned to `4.0.0-rc.108`.
 
@@ -26,8 +26,8 @@ The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. 
 
 `src/index.ts` declares one namespace export:
 
-| Namespace | Summary |
-| --- | --- |
+| Namespace  | Summary                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `Smithers` | Every declaration constructor, catalog rule, macro, action, and error a `PACKAGE.ts` or `WORKSPACE.ts` file reaches, under one name. |
 
 <!-- verify: src/index.ts documents this namespace as "the whole legacy declaration authoring surface", while README.md and src/Smithers.ts call it the PACKAGE.ts authoring surface. Which wording is intended? -->
@@ -226,164 +226,164 @@ Extracts and validates fenced source blocks from one Markdown file. `file` is th
 
 Every other export of `Smithers.ts`, in source order:
 
-| Name | Kind | Summary |
-| --- | --- | --- |
-| `Smithers.RemoteCache` | namespace | Workspace remote-cache declarations. |
-| `Smithers.Input` | namespace | Declared input schemas and constructors. |
-| `Smithers.Target` | namespace | Target construction and target metadata. |
-| `Smithers.SafeFs` | namespace | Confined filesystem reads shared by discovery. |
-| `Smithers.PackageJsonDeclaration` | namespace | Package manifest declarations, rendering, and target synthesis. |
-| `Smithers.PackageJsonTemplate` | namespace | Shared inert manifest templates. |
-| `Smithers.pnpmWorkspace` | constructor | Creates a workspace-membership input without reading the filesystem. |
-| `Smithers.Flags` | constructor | The flag surface: the workspace declaration constructor, and a property-access reference to one declared flag. |
-| `Smithers.Host` | constructor | The host surface: the workspace declaration constructor, and `Host.bin(name)` for one declared binary. |
-| `Smithers.Sandbox` | constructor | The sandbox implementation constructors. |
-| `Smithers.Sandboxes` | constructor | Declares the workspace sandbox implementations by name. |
-| `Smithers.LocalRepository` | constructor | Declares an opaque child Smithers workspace at a workspace-relative path. |
-| `Smithers.Owners` | namespace | `Owners.declare` validates an `owners` option, and `Owners.Codeowners` and `Owners.Tree` project every declaration into `.github/CODEOWNERS` and the per-directory `OWNERS` tree. |
-| `Smithers.Teams` | constructor | Validates a team roster: team names are login-shaped, members are logins, and every list is deduplicated and sorted. |
-| `Smithers.gitCommit` | constructor | References one git commit without invoking git. |
-| `Smithers.Mcp` | constructor | Declared MCP servers. |
-| `Smithers.NodeModule` | constructor | References an installed module, or one of its binaries through `NodeModule.Bin`. |
-| `Smithers.symlink` | constructor | Declares that a generated file is a symbolic link to `path`. |
-| `Smithers.Alias` | rule | A second name for one target: a distinct node whose kinds mirror the aliased target and whose only dependency is it. |
-| `Smithers.Files` | constructor | The declared file-set algebra, `Files.difference` and `Files.digest`. |
-| `Smithers.ImportClosure` | rule | The transitive import closure of the entry files, as per-file rows. |
-| `Smithers.Materialize` | rule | Places a build target's cached output tree into the working tree. |
-| `Smithers.Suite` | rule | A named group of check-capable targets that run together. |
-| `Smithers.Test` | rule | A declarative assertion over the file algebra. |
-| `Smithers.Copy` | rule | Copies one declared artifact or file-producing target to a path. |
-| `Smithers.Literal` | rule | Materializes fixed bytes at a declared path. |
-| `Smithers.Overlay` | rule | A derived file set with selected members replaced. |
-| `Smithers.Cron` | rule | A package-level inert schedule rendered by generated GitHub CI. |
-| `Smithers.PackageDefaults` | constructor | Declares pure workspace defaults. |
-| `Smithers.Exec` | action | The one shared action every catalog target uses to run a tool. |
-| `Smithers.ExecError` | schema | A typed external-tool failure. |
-| `Smithers.ExecLive` | layer | Implements `Exec` with a `node:child_process` spawn. |
-| `Smithers.BunSuite` | macro | Re-runs one package's vitest suite under Bun. |
-| `Smithers.FaultSuite` | macro | Runs one package's fault-injection cases, serially, without coverage. |
-| `Smithers.DocsReferenceSync` | macro | Reviews changed public APIs against the prose that documents them. |
-| `Smithers.DurableIdentityGuard` | macro | Reviews changed sources for identity strings, migrations, persisted schemas, and durable keys. |
-| `Smithers.JsdocTruthfulness` | macro | Reviews changed exports against the JSDoc that describes them. |
-| `Smithers.reviewPrompt` | constant | The framing every review rubric is prepended with. |
-| `Smithers.Fetch` | rule | A remote file pinned by sha256 and written to `out`. |
-| `Smithers.ExpandFilegroup` | action | Reads the files one group names and returns them digested. |
-| `Smithers.ExpandFilegroupLive` | layer | Implements `ExpandFilegroup`, resolving payload paths against `workspaceRoot`. |
-| `Smithers.FilegroupError` | error | Expanding a group's declared sources failed on a filesystem error. |
-| `Smithers.isFilegroup` | guard | Checks whether a value is a `Filegroup` target. |
-| `Smithers.Install` | rule | Plans an install for the declared package manager. |
-| `Smithers.Lockfile` | rule | Regenerates the declared manager's lockfile without linking a tree. |
-| `Smithers.PnpmWorkspace` | rule | Generates and drift-checks `pnpm-workspace.yaml`. |
-| `Smithers.Tsconfig` | rule | Generates and drift-checks a `tsconfig.json`. |
-| `Smithers.HttpSecret` | constructor | Binds a declared secret to one or more exact HTTP origins. |
-| `Smithers.TsBuild` | rule | Builds a JavaScript distribution with `tsc -p`, `tsup`, or the package's own build program. |
-| `Smithers.DtsBuild` | rule | Emits type declarations with `tsc --emitDeclarationOnly` or `tsup --dts-only`. |
-| `Smithers.Typecheck` | rule | Checks a package with `tsc --noEmit` or TypeScript build mode. |
-| `Smithers.Vitest` | rule | Plans a non-watch `vitest run` test target. |
-| `Smithers.VitestCoverage` | rule | Plans `vitest run` with coverage and declares the coverage directory output. |
-| `Smithers.VitestWatch` | rule | Plans an interactive Vitest watch session. |
-| `Smithers.BiomeCheck` | rule | Plans Biome lint and format checks without writing files. |
-| `Smithers.Dprint` | rule | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`. |
-| `Smithers.EsLint` | rule | Plans ESLint over declared source sets. |
-| `Smithers.DepsLint` | rule | Plans missing, unused, and undeclared dependency checks. |
-| `Smithers.PackageLint` | rule | Plans publint and optional packed-tarball type checks. |
-| `Smithers.DocsParity` | rule | Checks that a package documents itself in prose beside its code. |
-| `Smithers.CheckDocs` | action | Checks one package README for presence, a title, and real prose. |
-| `Smithers.CheckDocsLive` | layer | Implements `CheckDocs` with confined, descriptor-stable, bounded reads. |
-| `Smithers.DocsParityError` | error | A package's documentation is missing or too thin to describe the package. |
-| `Smithers.SortPackageJson` | rule | Plans `sort-package-json` validation or rewriting. |
-| `Smithers.generated` | constructor | Asks for a model-written value instead of a literal one. |
-| `Smithers.PackageJson` | constructor | Declares one package's manifest. |
-| `Smithers.PackageJsonCheck` | rule | Regenerates a package manifest in memory and fails on drift. |
-| `Smithers.PackageJsonWrite` | rule | Rewrites a package manifest from its declaration. |
-| `Smithers.SyncPackageJson` | action | Regenerates one manifest and either compares it or writes it. |
-| `Smithers.SyncPackageJsonLive` | layer | Implements `SyncPackageJson` against the filesystem, the workspace field cache, and, in `refresh` mode only, the model CLI. |
-| `Smithers.NewPackage` | rule | Scaffolds a new workspace package. |
-| `Smithers.ScaffoldPackage` | action | Creates one package directory in the source tree. |
-| `Smithers.ScaffoldPackageLive` | layer | Implements `ScaffoldPackage` against the source tree. |
-| `Smithers.CheckFile` | action | Compares one generated file against its checked-in form. |
-| `Smithers.CheckFileLive` | layer | Implements `CheckFile` with a read and a byte comparison. |
-| `Smithers.checkGeneratedFile` | effect | Fails with `DriftError` unless the checked-in file matches. |
-| `Smithers.DriftError` | error | A checked-in file is missing or differs from its generated form. |
-| `Smithers.WriteFile` | action | Writes one generated file. |
-| `Smithers.WriteFileError` | error | A generated file could not be written. |
-| `Smithers.WriteFileLive` | layer | Implements `WriteFile` with an atomic write through a sibling temp file that is renamed into place. |
-| `Smithers.writeGeneratedFile` | effect | Writes contents to a sibling temp file, then renames it into place. |
-| `Smithers.GithubCiGen` | rule | Generates the GitHub Actions CI workflow from declared attrs. |
-| `Smithers.GithubWorkflow` | namespace | Reading and rendering GitHub Actions workflow files. |
-| `Smithers.NpmPublish` | rule | Plans npm publication after versioning, build, and package validation deps. |
-| `Smithers.JsrPublish` | rule | Plans JSR publication after npm publication and shared release deps. |
-| `Smithers.TypedocDocs` | rule | Plans TypeDoc generation into the declared documentation directory. |
-| `Smithers.LlmLint` | rule | Reviews changed files with a model and fails on rubric findings. |
-| `Smithers.ClaudeCliMissing` | error | The engine CLI executable was not found on the host. |
-| `Smithers.FindingsError` | error | The review completed and at least one finding met the `failOn` threshold. |
-| `Smithers.LlmReview` | action | The one sealed model action reviewing every batch of changed files. |
-| `Smithers.LlmReviewError` | error | A review round failed before producing findings. |
-| `Smithers.LlmReviewLive` | layer | Implements `LlmReview` with `git diff` and a model CLI. |
-| `Smithers.Clean` | rule | Removes the declared targets' outputs and the named scratch paths, and nothing else. |
-| `Smithers.Dev` | rule | Plans a long-lived development or watch command. |
-| `Smithers.ToolBuild` | rule | Runs one arbitrary command for Rust, Zig, native addons, or another toolchain through the shared action. |
-| `Smithers.ToolRun` | rule | Plans one irreversible external operation. |
-| `Smithers.NodeTest` | rule | Runs one declared JavaScript program as a test gate. |
-| `Smithers.entrypoint` | constructor | Declares a run of one program that gates on its exit code. |
-| `Smithers.testRunner` | constructor | Declares a run of the runtime's own test runner over the given files. |
-| `Smithers.testSuite` | constructor | Declares a run of the runtime's own test runner over the suites under the given directories. |
-| `Smithers.NodeBinary` | rule | Runs one declared JavaScript program under the build verb. |
-| `Smithers.CaptureOutputs` | action | Digests the declared outputs of a build target. |
-| `Smithers.CaptureOutputsLive` | layer | Implements `CaptureOutputs`, resolving declared paths against `workspaceRoot`. |
-| `Smithers.measureOutput` | function | Measures one declared output, or fails with an `OutputError`. |
-| `Smithers.OutputError` | error | Digesting one declared output failed. |
-| `Smithers.readOutputManifest` | function | Reads an untrusted value as the exact output manifest the target declared. |
-| `Smithers.verifyOutputs` | function | Re-measures every declared output and compares it to a manifest. |
-| `Smithers.Verb` | namespace and type | The CLI verbs a generated pipeline may run across a target graph. |
-| `Smithers.RustToolchain` | namespace and type | Declared Rust toolchains and the argv they install and run cargo with. |
-| `Smithers.Rust` | namespace and type | The workspace Rust surface, `Rust.Toolchain({ workspace, channel })` or `Rust.Toolchain({ toolchain, lockfile })`. |
-| `Smithers.CiToolchain` | namespace and type | What one generated CI job requires before its targets run. |
-| `Smithers.SecretProxy` | namespace | Placeholder minting and outbound secret substitution. |
-| `Smithers.Mise` | namespace | mise version authority and pinned binary references. |
-| `Smithers.Foundry` | namespace | Foundry toolchain plus the `Foundry.Build`, `Foundry.Test`, and `Foundry.Fmt` targets. |
-| `Smithers.Anvil` | namespace | Anvil fork services, `Anvil.Fork`. |
-| `Smithers.Repo` | namespace | Cross-repository target edges into opaque local workspaces, `Repo.Target`. |
-| `Smithers.Memory` | namespace | The `Memory.Retain` target and the `Memory.SmithersCloud` workspace declaration. |
-| `Smithers.Bundler` | namespace | The bundler surface, `Bundler.Rspack`. |
-| `Smithers.Go` | namespace | Go toolchain and package rules. |
-| `Smithers.Stamp` | namespace | Late-bound build stamps. |
-| `Smithers.Nix` | namespace | Nix dev-shell version authority and tools. |
-| `Smithers.Changesets` | namespace | Changesets versioning and publishing targets, `Changesets.Version` and `Changesets.Publish`. |
-| `Smithers.Api` | namespace | API-surface checks, `Api.Compat`. |
-| `Smithers.Size` | namespace | Artifact-size checks, `Size.Budgets`. |
+| Name                              | Kind               | Summary                                                                                                                                                                           |
+| --------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Smithers.RemoteCache`            | namespace          | Workspace remote-cache declarations.                                                                                                                                              |
+| `Smithers.Input`                  | namespace          | Declared input schemas and constructors.                                                                                                                                          |
+| `Smithers.Target`                 | namespace          | Target construction and target metadata.                                                                                                                                          |
+| `Smithers.SafeFs`                 | namespace          | Confined filesystem reads shared by discovery.                                                                                                                                    |
+| `Smithers.PackageJsonDeclaration` | namespace          | Package manifest declarations, rendering, and target synthesis.                                                                                                                   |
+| `Smithers.PackageJsonTemplate`    | namespace          | Shared inert manifest templates.                                                                                                                                                  |
+| `Smithers.pnpmWorkspace`          | constructor        | Creates a workspace-membership input without reading the filesystem.                                                                                                              |
+| `Smithers.Flags`                  | constructor        | The flag surface: the workspace declaration constructor, and a property-access reference to one declared flag.                                                                    |
+| `Smithers.Host`                   | constructor        | The host surface: the workspace declaration constructor, and `Host.bin(name)` for one declared binary.                                                                            |
+| `Smithers.Sandbox`                | constructor        | The sandbox implementation constructors.                                                                                                                                          |
+| `Smithers.Sandboxes`              | constructor        | Declares the workspace sandbox implementations by name.                                                                                                                           |
+| `Smithers.LocalRepository`        | constructor        | Declares an opaque child Smithers workspace at a workspace-relative path.                                                                                                         |
+| `Smithers.Owners`                 | namespace          | `Owners.declare` validates an `owners` option, and `Owners.Codeowners` and `Owners.Tree` project every declaration into `.github/CODEOWNERS` and the per-directory `OWNERS` tree. |
+| `Smithers.Teams`                  | constructor        | Validates a team roster: team names are login-shaped, members are logins, and every list is deduplicated and sorted.                                                              |
+| `Smithers.gitCommit`              | constructor        | References one git commit without invoking git.                                                                                                                                   |
+| `Smithers.Mcp`                    | constructor        | Declared MCP servers.                                                                                                                                                             |
+| `Smithers.NodeModule`             | constructor        | References an installed module, or one of its binaries through `NodeModule.Bin`.                                                                                                  |
+| `Smithers.symlink`                | constructor        | Declares that a generated file is a symbolic link to `path`.                                                                                                                      |
+| `Smithers.Alias`                  | rule               | A second name for one target: a distinct node whose kinds mirror the aliased target and whose only dependency is it.                                                              |
+| `Smithers.Files`                  | constructor        | The declared file-set algebra, `Files.difference` and `Files.digest`.                                                                                                             |
+| `Smithers.ImportClosure`          | rule               | The transitive import closure of the entry files, as per-file rows.                                                                                                               |
+| `Smithers.Materialize`            | rule               | Places a build target's cached output tree into the working tree.                                                                                                                 |
+| `Smithers.Suite`                  | rule               | A named group of check-capable targets that run together.                                                                                                                         |
+| `Smithers.Test`                   | rule               | A declarative assertion over the file algebra.                                                                                                                                    |
+| `Smithers.Copy`                   | rule               | Copies one declared artifact or file-producing target to a path.                                                                                                                  |
+| `Smithers.Literal`                | rule               | Materializes fixed bytes at a declared path.                                                                                                                                      |
+| `Smithers.Overlay`                | rule               | A derived file set with selected members replaced.                                                                                                                                |
+| `Smithers.Cron`                   | rule               | A package-level inert schedule rendered by generated GitHub CI.                                                                                                                   |
+| `Smithers.PackageDefaults`        | constructor        | Declares pure workspace defaults.                                                                                                                                                 |
+| `Smithers.Exec`                   | action             | The one shared action every catalog target uses to run a tool.                                                                                                                    |
+| `Smithers.ExecError`              | schema             | A typed external-tool failure.                                                                                                                                                    |
+| `Smithers.ExecLive`               | layer              | Implements `Exec` with a `node:child_process` spawn.                                                                                                                              |
+| `Smithers.BunSuite`               | macro              | Re-runs one package's vitest suite under Bun.                                                                                                                                     |
+| `Smithers.FaultSuite`             | macro              | Runs one package's fault-injection cases, serially, without coverage.                                                                                                             |
+| `Smithers.DocsReferenceSync`      | macro              | Reviews changed public APIs against the prose that documents them.                                                                                                                |
+| `Smithers.DurableIdentityGuard`   | macro              | Reviews changed sources for identity strings, migrations, persisted schemas, and durable keys.                                                                                    |
+| `Smithers.JsdocTruthfulness`      | macro              | Reviews changed exports against the JSDoc that describes them.                                                                                                                    |
+| `Smithers.reviewPrompt`           | constant           | The framing every review rubric is prepended with.                                                                                                                                |
+| `Smithers.Fetch`                  | rule               | A remote file pinned by sha256 and written to `out`.                                                                                                                              |
+| `Smithers.ExpandFilegroup`        | action             | Reads the files one group names and returns them digested.                                                                                                                        |
+| `Smithers.ExpandFilegroupLive`    | layer              | Implements `ExpandFilegroup`, resolving payload paths against `workspaceRoot`.                                                                                                    |
+| `Smithers.FilegroupError`         | error              | Expanding a group's declared sources failed on a filesystem error.                                                                                                                |
+| `Smithers.isFilegroup`            | guard              | Checks whether a value is a `Filegroup` target.                                                                                                                                   |
+| `Smithers.Install`                | rule               | Plans an install for the declared package manager.                                                                                                                                |
+| `Smithers.Lockfile`               | rule               | Regenerates the declared manager's lockfile without linking a tree.                                                                                                               |
+| `Smithers.PnpmWorkspace`          | rule               | Generates and drift-checks `pnpm-workspace.yaml`.                                                                                                                                 |
+| `Smithers.Tsconfig`               | rule               | Generates and drift-checks a `tsconfig.json`.                                                                                                                                     |
+| `Smithers.HttpSecret`             | constructor        | Binds a declared secret to one or more exact HTTP origins.                                                                                                                        |
+| `Smithers.TsBuild`                | rule               | Builds a JavaScript distribution with `tsc -p`, `tsup`, or the package's own build program.                                                                                       |
+| `Smithers.DtsBuild`               | rule               | Emits type declarations with `tsc --emitDeclarationOnly` or `tsup --dts-only`.                                                                                                    |
+| `Smithers.Typecheck`              | rule               | Checks a package with `tsc --noEmit` or TypeScript build mode.                                                                                                                    |
+| `Smithers.Vitest`                 | rule               | Plans a non-watch `vitest run` test target.                                                                                                                                       |
+| `Smithers.VitestCoverage`         | rule               | Plans `vitest run` with coverage and declares the coverage directory output.                                                                                                      |
+| `Smithers.VitestWatch`            | rule               | Plans an interactive Vitest watch session.                                                                                                                                        |
+| `Smithers.BiomeCheck`             | rule               | Plans Biome lint and format checks without writing files.                                                                                                                         |
+| `Smithers.Dprint`                 | rule               | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.                                                                                                          |
+| `Smithers.EsLint`                 | rule               | Plans ESLint over declared source sets.                                                                                                                                           |
+| `Smithers.DepsLint`               | rule               | Plans missing, unused, and undeclared dependency checks.                                                                                                                          |
+| `Smithers.PackageLint`            | rule               | Plans publint and optional packed-tarball type checks.                                                                                                                            |
+| `Smithers.DocsParity`             | rule               | Checks that a package documents itself in prose beside its code.                                                                                                                  |
+| `Smithers.CheckDocs`              | action             | Checks one package README for presence, a title, and real prose.                                                                                                                  |
+| `Smithers.CheckDocsLive`          | layer              | Implements `CheckDocs` with confined, descriptor-stable, bounded reads.                                                                                                           |
+| `Smithers.DocsParityError`        | error              | A package's documentation is missing or too thin to describe the package.                                                                                                         |
+| `Smithers.SortPackageJson`        | rule               | Plans `sort-package-json` validation or rewriting.                                                                                                                                |
+| `Smithers.generated`              | constructor        | Asks for a model-written value instead of a literal one.                                                                                                                          |
+| `Smithers.PackageJson`            | constructor        | Declares one package's manifest.                                                                                                                                                  |
+| `Smithers.PackageJsonCheck`       | rule               | Regenerates a package manifest in memory and fails on drift.                                                                                                                      |
+| `Smithers.PackageJsonWrite`       | rule               | Rewrites a package manifest from its declaration.                                                                                                                                 |
+| `Smithers.SyncPackageJson`        | action             | Regenerates one manifest and either compares it or writes it.                                                                                                                     |
+| `Smithers.SyncPackageJsonLive`    | layer              | Implements `SyncPackageJson` against the filesystem, the workspace field cache, and, in `refresh` mode only, the model CLI.                                                       |
+| `Smithers.NewPackage`             | rule               | Scaffolds a new workspace package.                                                                                                                                                |
+| `Smithers.ScaffoldPackage`        | action             | Creates one package directory in the source tree.                                                                                                                                 |
+| `Smithers.ScaffoldPackageLive`    | layer              | Implements `ScaffoldPackage` against the source tree.                                                                                                                             |
+| `Smithers.CheckFile`              | action             | Compares one generated file against its checked-in form.                                                                                                                          |
+| `Smithers.CheckFileLive`          | layer              | Implements `CheckFile` with a read and a byte comparison.                                                                                                                         |
+| `Smithers.checkGeneratedFile`     | effect             | Fails with `DriftError` unless the checked-in file matches.                                                                                                                       |
+| `Smithers.DriftError`             | error              | A checked-in file is missing or differs from its generated form.                                                                                                                  |
+| `Smithers.WriteFile`              | action             | Writes one generated file.                                                                                                                                                        |
+| `Smithers.WriteFileError`         | error              | A generated file could not be written.                                                                                                                                            |
+| `Smithers.WriteFileLive`          | layer              | Implements `WriteFile` with an atomic write through a sibling temp file that is renamed into place.                                                                               |
+| `Smithers.writeGeneratedFile`     | effect             | Writes contents to a sibling temp file, then renames it into place.                                                                                                               |
+| `Smithers.GithubCiGen`            | rule               | Generates the GitHub Actions CI workflow from declared attrs.                                                                                                                     |
+| `Smithers.GithubWorkflow`         | namespace          | Reading and rendering GitHub Actions workflow files.                                                                                                                              |
+| `Smithers.NpmPublish`             | rule               | Plans npm publication after versioning, build, and package validation deps.                                                                                                       |
+| `Smithers.JsrPublish`             | rule               | Plans JSR publication after npm publication and shared release deps.                                                                                                              |
+| `Smithers.TypedocDocs`            | rule               | Plans TypeDoc generation into the declared documentation directory.                                                                                                               |
+| `Smithers.LlmLint`                | rule               | Reviews changed files with a model and fails on rubric findings.                                                                                                                  |
+| `Smithers.ClaudeCliMissing`       | error              | The engine CLI executable was not found on the host.                                                                                                                              |
+| `Smithers.FindingsError`          | error              | The review completed and at least one finding met the `failOn` threshold.                                                                                                         |
+| `Smithers.LlmReview`              | action             | The one sealed model action reviewing every batch of changed files.                                                                                                               |
+| `Smithers.LlmReviewError`         | error              | A review round failed before producing findings.                                                                                                                                  |
+| `Smithers.LlmReviewLive`          | layer              | Implements `LlmReview` with `git diff` and a model CLI.                                                                                                                           |
+| `Smithers.Clean`                  | rule               | Removes the declared targets' outputs and the named scratch paths, and nothing else.                                                                                              |
+| `Smithers.Dev`                    | rule               | Plans a long-lived development or watch command.                                                                                                                                  |
+| `Smithers.ToolBuild`              | rule               | Runs one arbitrary command for Rust, Zig, native addons, or another toolchain through the shared action.                                                                          |
+| `Smithers.ToolRun`                | rule               | Plans one irreversible external operation.                                                                                                                                        |
+| `Smithers.NodeTest`               | rule               | Runs one declared JavaScript program as a test gate.                                                                                                                              |
+| `Smithers.entrypoint`             | constructor        | Declares a run of one program that gates on its exit code.                                                                                                                        |
+| `Smithers.testRunner`             | constructor        | Declares a run of the runtime's own test runner over the given files.                                                                                                             |
+| `Smithers.testSuite`              | constructor        | Declares a run of the runtime's own test runner over the suites under the given directories.                                                                                      |
+| `Smithers.NodeBinary`             | rule               | Runs one declared JavaScript program under the build verb.                                                                                                                        |
+| `Smithers.CaptureOutputs`         | action             | Digests the declared outputs of a build target.                                                                                                                                   |
+| `Smithers.CaptureOutputsLive`     | layer              | Implements `CaptureOutputs`, resolving declared paths against `workspaceRoot`.                                                                                                    |
+| `Smithers.measureOutput`          | function           | Measures one declared output, or fails with an `OutputError`.                                                                                                                     |
+| `Smithers.OutputError`            | error              | Digesting one declared output failed.                                                                                                                                             |
+| `Smithers.readOutputManifest`     | function           | Reads an untrusted value as the exact output manifest the target declared.                                                                                                        |
+| `Smithers.verifyOutputs`          | function           | Re-measures every declared output and compares it to a manifest.                                                                                                                  |
+| `Smithers.Verb`                   | namespace and type | The CLI verbs a generated pipeline may run across a target graph.                                                                                                                 |
+| `Smithers.RustToolchain`          | namespace and type | Declared Rust toolchains and the argv they install and run cargo with.                                                                                                            |
+| `Smithers.Rust`                   | namespace and type | The workspace Rust surface, `Rust.Toolchain({ workspace, channel })` or `Rust.Toolchain({ toolchain, lockfile })`.                                                                |
+| `Smithers.CiToolchain`            | namespace and type | What one generated CI job requires before its targets run.                                                                                                                        |
+| `Smithers.SecretProxy`            | namespace          | Placeholder minting and outbound secret substitution.                                                                                                                             |
+| `Smithers.Mise`                   | namespace          | mise version authority and pinned binary references.                                                                                                                              |
+| `Smithers.Foundry`                | namespace          | Foundry toolchain plus the `Foundry.Build`, `Foundry.Test`, and `Foundry.Fmt` targets.                                                                                            |
+| `Smithers.Anvil`                  | namespace          | Anvil fork services, `Anvil.Fork`.                                                                                                                                                |
+| `Smithers.Repo`                   | namespace          | Cross-repository target edges into opaque local workspaces, `Repo.Target`.                                                                                                        |
+| `Smithers.Memory`                 | namespace          | The `Memory.Retain` target and the `Memory.SmithersCloud` workspace declaration.                                                                                                  |
+| `Smithers.Bundler`                | namespace          | The bundler surface, `Bundler.Rspack`.                                                                                                                                            |
+| `Smithers.Go`                     | namespace          | Go toolchain and package rules.                                                                                                                                                   |
+| `Smithers.Stamp`                  | namespace          | Late-bound build stamps.                                                                                                                                                          |
+| `Smithers.Nix`                    | namespace          | Nix dev-shell version authority and tools.                                                                                                                                        |
+| `Smithers.Changesets`             | namespace          | Changesets versioning and publishing targets, `Changesets.Version` and `Changesets.Publish`.                                                                                      |
+| `Smithers.Api`                    | namespace          | API-surface checks, `Api.Compat`.                                                                                                                                                 |
+| `Smithers.Size`                   | namespace          | Artifact-size checks, `Size.Budgets`.                                                                                                                                             |
 
 ## Errors
 
 Every tagged error and coded refusal the package defines, with the module each one lives in named in the Sources section. The first nineteen are `Schema.TaggedError` classes or a tagged schema; the last six are `Error` subclasses carrying a `name` and a `code` or a field, not a `_tag`:
 
-| Tag | Raised when | Fields |
-| --- | --- | --- |
-| `smithers-build/AgentSessionError` | An agent execution fails while resolving, diffing, reading, spawning, parsing, applying, gating, settling, or consulting the verdict cache. | `phase`, `message` |
-| `smithers-build/AgentNeedsInput` | A required payload input is missing or invalid, before any session spawn. | `field`, `expected`, `message` |
-| `smithers-build/AgentMcpUnreachable` | A declared MCP server does not answer the reachability precheck, before any session spawn. | `name`, `url`, `message` |
-| `smithers-build/AgentWriteEscape` | A session proposes a write outside its declared write-set. The candidate is rejected whole. | `path`, `writeSet`, `message` |
-| `smithers-build/AgentFindingsError` | A check-mode `Agent.Lint` completes and the agent reports findings. | `findings`, `message` |
-| `smithers-build/AgentRoundsExhausted` | The candidate and gate loop uses `maxRounds` without a green gate set. | `rounds`, `diff`, `gateReport`, `message` |
-| `smithers-build/AgentPrSettleRefused` | An `Agent.Pr` loop converges and the pull-request settle action is not bound. | `diff`, `gateReport`, `message` |
-| `smithers-build/ImportClosureError` | An import closure cannot be resolved: an entry is missing, a file is unreadable, the resolver configuration is invalid, or a bound is hit. | `message` |
-| `smithers-build/FilesTestError` | A file-algebra assertion fails, or cannot be answered completely. | `message`, `leftover`, `unresolved`, `dynamic` |
-| `smithers-build/FilegroupError` | Expanding a group's declared sources fails on a filesystem error. | `message` |
-| `smithers-build/DocsParityError` | A package's documentation is missing or too thin to describe the package. | `path`, `message` |
-| `smithers-build/DriftError` | A checked-in generated file is missing, drifted, or unreadable. | `path`, `message`, `reason` |
-| `smithers-build/WriteFileError` | A generated file cannot be written. | `path`, `message` |
-| `smithers-build/OutputError` | Digesting one declared output fails. | `path`, `message` |
-| `smithers-build/ClaudeCliMissing` | The engine CLI executable is not found on the host. | `executable`, `message` |
-| `smithers-build/LlmReviewError` | A review round fails before producing findings, in the `diff`, `read`, `review`, or `parse` phase. | `phase`, `message` |
-| `smithers-build/FindingsError` | A review completes and at least one finding meets the `failOn` threshold. | `failOn`, `findings` |
-| `smithers-build/NotImplemented` | A catalog stub is executed under a bare Flow runtime instead of the package executor. | `target`, `message` |
-| `smithers-build/ExecError` | A tool run fails. `code` is one of `invalid_payload`, `spawn_failed`, `timed_out`, `signaled`, `stream_failed`, `secret_proxy_failed`, or `exit_status`. | `argv`, `cwd`, `exitCode`, `stdout`, `stderr`, `code`, `signal` |
-| `Refused` | An outward invocation is refused before any outward action, with `code` `missing_secret` or `approval_unsatisfied`. | `code`, `rule` |
-| `PrRefused` | A `Github.Pr` invocation is refused before any provider call, with `code` `missing_token_secret` or `approval_unsatisfied`. | `code` |
-| `SecretUnavailable` | A declared secret has no value on this host. | `env` |
-| `SecretAudienceDenied` | A placeholder is used for an origin the declaration does not authorize. | `env`, `audience` |
-| `SecretValueInvalid` | A host value cannot safely cross an HTTP request boundary. | `env` |
-| `WorkflowParseError` | A workflow file cannot be read as a GitHub Actions workflow. | `line` |
+| Tag                                   | Raised when                                                                                                                                              | Fields                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `smithers-build/AgentSessionError`    | An agent execution fails while resolving, diffing, reading, spawning, parsing, applying, gating, settling, or consulting the verdict cache.              | `phase`, `message`                                              |
+| `smithers-build/AgentNeedsInput`      | A required payload input is missing or invalid, before any session spawn.                                                                                | `field`, `expected`, `message`                                  |
+| `smithers-build/AgentMcpUnreachable`  | A declared MCP server does not answer the reachability precheck, before any session spawn.                                                               | `name`, `url`, `message`                                        |
+| `smithers-build/AgentWriteEscape`     | A session proposes a write outside its declared write-set. The candidate is rejected whole.                                                              | `path`, `writeSet`, `message`                                   |
+| `smithers-build/AgentFindingsError`   | A check-mode `Agent.Lint` completes and the agent reports findings.                                                                                      | `findings`, `message`                                           |
+| `smithers-build/AgentRoundsExhausted` | The candidate and gate loop uses `maxRounds` without a green gate set.                                                                                   | `rounds`, `diff`, `gateReport`, `message`                       |
+| `smithers-build/AgentPrSettleRefused` | An `Agent.Pr` loop converges and the pull-request settle action is not bound.                                                                            | `diff`, `gateReport`, `message`                                 |
+| `smithers-build/ImportClosureError`   | An import closure cannot be resolved: an entry is missing, a file is unreadable, the resolver configuration is invalid, or a bound is hit.               | `message`                                                       |
+| `smithers-build/FilesTestError`       | A file-algebra assertion fails, or cannot be answered completely.                                                                                        | `message`, `leftover`, `unresolved`, `dynamic`                  |
+| `smithers-build/FilegroupError`       | Expanding a group's declared sources fails on a filesystem error.                                                                                        | `message`                                                       |
+| `smithers-build/DocsParityError`      | A package's documentation is missing or too thin to describe the package.                                                                                | `path`, `message`                                               |
+| `smithers-build/DriftError`           | A checked-in generated file is missing, drifted, or unreadable.                                                                                          | `path`, `message`, `reason`                                     |
+| `smithers-build/WriteFileError`       | A generated file cannot be written.                                                                                                                      | `path`, `message`                                               |
+| `smithers-build/OutputError`          | Digesting one declared output fails.                                                                                                                     | `path`, `message`                                               |
+| `smithers-build/ClaudeCliMissing`     | The engine CLI executable is not found on the host.                                                                                                      | `executable`, `message`                                         |
+| `smithers-build/LlmReviewError`       | A review round fails before producing findings, in the `diff`, `read`, `review`, or `parse` phase.                                                       | `phase`, `message`                                              |
+| `smithers-build/FindingsError`        | A review completes and at least one finding meets the `failOn` threshold.                                                                                | `failOn`, `findings`                                            |
+| `smithers-build/NotImplemented`       | A catalog stub is executed under a bare Flow runtime instead of the package executor.                                                                    | `target`, `message`                                             |
+| `smithers-build/ExecError`            | A tool run fails. `code` is one of `invalid_payload`, `spawn_failed`, `timed_out`, `signaled`, `stream_failed`, `secret_proxy_failed`, or `exit_status`. | `argv`, `cwd`, `exitCode`, `stdout`, `stderr`, `code`, `signal` |
+| `Refused`                             | An outward invocation is refused before any outward action, with `code` `missing_secret` or `approval_unsatisfied`.                                      | `code`, `rule`                                                  |
+| `PrRefused`                           | A `Github.Pr` invocation is refused before any provider call, with `code` `missing_token_secret` or `approval_unsatisfied`.                              | `code`                                                          |
+| `SecretUnavailable`                   | A declared secret has no value on this host.                                                                                                             | `env`                                                           |
+| `SecretAudienceDenied`                | A placeholder is used for an origin the declaration does not authorize.                                                                                  | `env`, `audience`                                               |
+| `SecretValueInvalid`                  | A host value cannot safely cross an HTTP request boundary.                                                                                               | `env`                                                           |
+| `WorkflowParseError`                  | A workflow file cannot be read as a GitHub Actions workflow.                                                                                             | `line`                                                          |
 
 ## Example
 

@@ -1,12 +1,93 @@
 ---
 title: "Testing"
-description: "Strict SHA-256 hashing with injected and synchronous Effect entry points"
+description: "Hash deterministically in a test with syncCrypto, inject a failing Crypto service to exercise the typed failures, and what this package's own suite pins."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/crypto/docs/testing.md"
 ---
 
-The package-owned Crypto suite pins published SHA-256 and UTF-8 vectors, a
-million-byte vector, malformed Unicode, direct and schema APIs, and
-synchronous, injected, and Web Crypto parity. Property tests compare both entry
-points over arbitrary valid text and byte views. Adversarial service tests cover
-input snapshots, malformed or mutable output, missing services, exact stable
-failures with preserved causes, diagnostic redaction, and irreversibility.
+Hashing is deterministic, so the only question a test has to answer is which
+`Crypto` service the code under test receives.
+
+## Hash without a platform layer
+
+`syncCrypto` is the package's own implementation wearing the `Crypto`
+interface. Provide it and the test hashes for real with no platform
+dependency:
+
+```ts
+import { digest, syncCrypto } from "@smthrs/crypto"
+import * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
+
+Effect.runSync(Effect.provideService(digest("abc"), Crypto.Crypto, syncCrypto))
+// "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+```
+
+`Effect.runSync` works here because the whole operation is synchronous. Under
+a platform layer the same program is asynchronous, so use `Effect.runPromise`
+when you want to test against the real host.
+
+Assert against published vectors rather than against a value you captured from
+your own code. The empty string is
+`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` and `"abc"`
+is `ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`.
+
+## Exercise the failure paths
+
+Every failure `digest` reports comes from a host that misbehaved, so a test
+reaches all of them by constructing a `Crypto` service that misbehaves on
+purpose:
+
+```ts
+import * as Crypto from "effect/Crypto"
+import * as Effect from "effect/Effect"
+
+const host = (operation: Crypto.Crypto["digest"]): Crypto.Crypto =>
+  Crypto.make({ randomBytes: (size) => new Uint8Array(size), digest: operation })
+
+// invalid_digest, naming the length it received.
+const short = host(() => Effect.succeed(new Uint8Array(31)))
+
+// digest_failed, with the host failure preserved as `cause`.
+const broken = host(() => Effect.fail(cause))
+```
+
+Then flip the effect and match on the code, which is the stable part:
+
+```ts
+Effect.runSync(Effect.flip(Effect.provideService(digest("secret"), Crypto.Crypto, short)))
+// Sha256Error { code: "invalid_digest", ... }
+```
+
+The two input failures need no host at all: pass an unpaired surrogate for
+`invalid_text` and a non-`Uint8Array` value for `invalid_input`.
+
+## What this package's suite pins
+
+The package's own tests are the reason the guarantees on
+[the contract](/contract/) are stated as facts rather than intentions:
+
+- **Published vectors** for text and bytes through `digest`, `digestSync`, and
+  the `Sha256` schema, including the million-character FIPS vector.
+- **Parity** between `digestSync`, the injected path under Node, and
+  `crypto.subtle.digest` in the same runtime.
+- **Property tests** over arbitrary text and arbitrary byte views, asserting
+  that the two entry points agree, that malformed text fails the same way on
+  both, and that a subarray hashes exactly its own window.
+- **Adversarial hosts**: a service that returns the wrong length, a non-byte
+  value, a detached buffer, a non-Effect, a defect, or an output buffer it
+  reuses and mutates between calls, plus one that mutates the bytes it was
+  handed.
+- **Redaction**: no hashed value appears in an error message or a schema
+  issue, even when the caller passed `reportInput: true`.
+- **Irreversibility**: encoding through the `Sha256` schema always fails with
+  the exact forbidden-encode message.
+
+The suite also runs under Bun through the repository's runtime-compatibility
+matrix, so the two entry points are checked against both hosts.
+
+## Related
+
+- [Hash inside synchronous code](/guides/hash-in-synchronous-code/): the
+  same `syncCrypto` seam, in production code.
+- [Troubleshooting](/troubleshooting/): the symptom-by-symptom list of what
+  each failure means.

@@ -12,21 +12,21 @@ interruption: interrupt the fiber running the stream and the call stops.
 
 ## The event vocabulary
 
-| `type` | Fields | Meaning |
-| --- | --- | --- |
-| `text-start` | `id` | Opens a text part. |
-| `text-delta` | `id`, `text` | One chunk of that part's content. |
-| `text-end` | `id` | Closes the part. |
-| `thinking-start` | `id`, `signature?` | Opens a reasoning part. |
-| `thinking-delta` | `id`, `text` | One chunk of reasoning. |
-| `thinking-end` | `id` | Closes the part. |
-| `tool-call-start` | `id`, `name` | Opens a tool call and names the tool. |
-| `tool-call-delta` | `id`, `arguments` | One chunk of the JSON argument text. |
-| `tool-call-end` | `id`, `arguments?` | Closes the call, repeating the full argument text when the provider sends it. |
-| `tool-result` | `id`, `output`, `isError?` | A harness's report of an executed call; not part of the settled message. |
-| `usage` | the `Usage` counters | Token counts reported mid-stream. |
-| `retry` | `attempt`, `code`, `delayMillis` | A bounded model-boundary retry, recorded for run reports. |
-| `settle` | `stopReason`, `responseId?`, `itemIds?` | Ends the stream and states why. |
+| `type`            | Fields                                  | Meaning                                                                       |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| `text-start`      | `id`                                    | Opens a text part.                                                            |
+| `text-delta`      | `id`, `text`                            | One chunk of that part's content.                                             |
+| `text-end`        | `id`                                    | Closes the part.                                                              |
+| `thinking-start`  | `id`, `signature?`                      | Opens a reasoning part.                                                       |
+| `thinking-delta`  | `id`, `text`                            | One chunk of reasoning.                                                       |
+| `thinking-end`    | `id`                                    | Closes the part.                                                              |
+| `tool-call-start` | `id`, `name`                            | Opens a tool call and names the tool.                                         |
+| `tool-call-delta` | `id`, `arguments`                       | One chunk of the JSON argument text.                                          |
+| `tool-call-end`   | `id`, `arguments?`                      | Closes the call, repeating the full argument text when the provider sends it. |
+| `tool-result`     | `id`, `output`, `isError?`              | A harness's report of an executed call; not part of the settled message.      |
+| `usage`           | the `Usage` counters                    | Token counts reported mid-stream.                                             |
+| `retry`           | `attempt`, `code`, `delayMillis`        | A bounded model-boundary retry, recorded for run reports.                     |
+| `settle`          | `stopReason`, `responseId?`, `itemIds?` | Ends the stream and states why.                                               |
 
 Parts correlate by `id`: deltas and the end event carry the `id` of the
 start event they belong to, so interleaved text, thinking, and tool calls
@@ -65,7 +65,7 @@ To render progressively, consume the stream directly and switch on
 `event.type`:
 
 ```ts
-yield* Stream.runForEach(model.stream(request), (event) => {
+yield * Stream.runForEach(model.stream(request), (event) => {
   if (event.type === "text-delta") return Effect.sync(() => process.stdout.write(event.text))
   return Effect.void
 })
@@ -79,15 +79,15 @@ durable boundary waited and tried again, and `settledMessage` skips it.
 A well-formed stream ends with exactly one `settle` event. Its `stopReason`
 is one of seven values:
 
-| `stopReason` | Meaning |
-| --- | --- |
-| `stop` | The model finished its turn. |
-| `length` | The output hit the token budget. |
-| `tool-calls` | The model asked for tools; execute them and continue. |
-| `content-filter` | The provider refused on safety grounds. |
-| `error` | The provider failed the turn. |
-| `aborted` | The stream was interrupted. This layer's own value; no provider reports it. |
-| `unknown` | The provider's reason did not map. |
+| `stopReason`     | Meaning                                                                     |
+| ---------------- | --------------------------------------------------------------------------- |
+| `stop`           | The model finished its turn.                                                |
+| `length`         | The output hit the token budget.                                            |
+| `tool-calls`     | The model asked for tools; execute them and continue.                       |
+| `content-filter` | The provider refused on safety grounds.                                     |
+| `error`          | The provider failed the turn.                                               |
+| `aborted`        | The stream was interrupted. This layer's own value; no provider reports it. |
+| `unknown`        | The provider's reason did not map.                                          |
 
 A stream that ends without `settle` was interrupted: the fiber was cancelled
 or the transport died. `settledMessage` still returns a message, with

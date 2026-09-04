@@ -21,8 +21,11 @@ import * as Cargo from "@smthrs/targets/Cargo"
 import * as Compose from "@smthrs/targets/Compose"
 import * as CronTarget from "@smthrs/targets/CronTarget"
 import type * as Docker from "@smthrs/targets/Docker"
+import * as DocsCheck from "@smthrs/targets/DocsCheck"
+import * as DocsPage from "@smthrs/targets/DocsPage"
 import * as Exec from "@smthrs/targets/Exec"
 import * as ExecSandbox from "@smthrs/targets/ExecSandbox"
+import * as GeneratedFile from "@smthrs/targets/GeneratedFile"
 import * as GithubTarget from "@smthrs/targets/GithubTarget"
 import type * as GitTarget from "@smthrs/targets/GitTarget"
 import * as Input from "@smthrs/targets/Input"
@@ -134,7 +137,8 @@ const checkModeRules: ReadonlySet<string> = new Set([
   "Changesets.Version",
   "Go.Lint",
   "Go.Generate",
-  "Cargo.Fmt"
+  "Cargo.Fmt",
+  "Docs.Check"
 ])
 
 /**
@@ -157,11 +161,26 @@ const outwardRules: ReadonlySet<string> = new Set([
   "Memory.Retain",
   "Agent.Diff",
   "Agent.Pr",
+  "Docs.Page",
   "Anvil.Fork",
   "Docker.Serve",
   "Docker.Service",
   "Docker.Push"
 ])
+
+/**
+ * Rules that spawn an agent under a verb the aggregate `ci` plans. `ci` is
+ * the unattended, hermetic verb, and a model call is neither, so a plan made
+ * with `unattended: true` skips these roots the way `ci` already skips every
+ * `run` and `review` target. The same rule under its own verb
+ * (`smithers-build docs`) plans and runs normally.
+ *
+ * A rule-name set rather than a `Target.make` metadata flag: the executor
+ * already keys `outwardRules`, `checkModeRules`, and `keyOnlyDependencyRules`
+ * on rule names, and one attended rule does not pay for a new metadata field
+ * and its validation. Promote it when a second one exists.
+ */
+const attendedRules: ReadonlySet<string> = new Set(["Docs.Page"])
 
 /**
  * Rules whose attr targets are key-only references, never execution edges:
@@ -293,6 +312,21 @@ export type LaneData =
     readonly languages: ReadonlyArray<string>
     /** Pages whose titled fences are written beside the page's files, never compiled on their own. */
     readonly context: ReadonlyArray<string>
+  }
+  | {
+    readonly kind: "docs-check"
+    /** Workspace-relative path of the committed stamp sidecar. */
+    readonly stamp: string
+    /** Workspace-relative path of the generated page the stamp judges. */
+    readonly output: string
+    /** Provenance recorded in the stamp and never compared. */
+    readonly producer: string | undefined
+    /**
+     * The `inputs` attr as the planner resolved it: every file row, with the
+     * digest the plan keyed on, sorted by path. Computed at plan time so the
+     * verdict reads the same bytes the node's own key does.
+     */
+    readonly files: ReadonlyArray<Input.FileDigest>
   }
   | { readonly kind: "published"; readonly manifestPath: string }
   | { readonly kind: "api-compat" }
@@ -461,6 +495,13 @@ export interface RunOptions {
   readonly remoteCache?: Workspace.RemoteCacheAccess | undefined
   readonly verb: PackageVerb
   readonly pattern: string
+  /**
+   * The plan runs with nobody attending it: the aggregate `ci` verb. Roots
+   * whose rule spawns an agent under a verb `ci` aggregates (`Docs.Page`
+   * under `docs`) are not selected. The same pattern under the verb itself
+   * selects them.
+   */
+  readonly unattended?: boolean | undefined
   readonly write?: boolean | undefined
   readonly fix?: boolean | undefined
   readonly plan?: boolean | undefined
@@ -1366,7 +1407,8 @@ const capabilitiesFor = (rule: string, mode: Mode, sandbox: PackageNode["sandbox
   if (
     mode === "write" || rule === "Shell.Build" || rule === "Foundry.Build" || rule === "Docker.Build" ||
     rule === "Docker.Bake" || rule === "Bundler.Rspack.build" || rule === "Materialize" ||
-    rule === "Clean" || rule === "Agent.Diff" || rule === "Agent.Pr" || rule === "Git.Commit" ||
+    rule === "Clean" || rule === "Agent.Diff" || rule === "Agent.Pr" || rule === "Docs.Page" ||
+    rule === "Git.Commit" ||
     rule === "Npm.Pack" || rule === "Copy" || rule === "Literal" || rule === "Git.Submodules" ||
     rule === "Git.Submodule" || rule === "Changesets.Version" || rule === "Npm.Published" ||
     rule === "Fetch" ||
@@ -1664,6 +1706,12 @@ const visit = async (
   if (rule === "TsBuild") {
     const outDir = attrMember(attrs, "outDir")
     if (typeof outDir === "string") outDirs.push(Input.resolvePath(packagePath, outDir))
+  }
+
+  // A page's single `output` is its whole write-set.
+  if (rule === "Docs.Page") {
+    const output = attrMember(attrs, "output")
+    if (typeof output === "string") writeSet.push(Input.resolvePath(packagePath, output))
   }
 
   const changes = attrMember(attrs, "changes")
@@ -2250,6 +2298,51 @@ const visit = async (
       }
       break
     }
+    case "Docs.Page": {
+      // A page is the docs-verb spelling of an Agent.Diff: same payload
+      // shape, same candidate/gate loop, so it rides the diff lane and no
+      // second agent runtime exists.
+      const pageAttrs = attrs as DocsPage.PageAttrs
+      lane = {
+        kind: "agent",
+        flavor: "diff",
+        payload: DocsPage.pagePayload(pageAttrs, implementationContext),
+        gateLabels: gateLabelsOf(pageAttrs.gates),
+        dataLabels: dataLabelsOf(DocsPage.dataOf(pageAttrs), depLabels)
+      }
+      break
+    }
+    case "Docs.Check": {
+      // The closure is the `inputs` attr alone, resolved from the rows the
+      // planner already digested. The stamp and the page are declared inputs
+      // too, so they key the node, but a closure carrying them would make
+      // every stamp write stale the moment it landed.
+      const checkAttrs = attrs as DocsCheck.Attrs
+      const stampPath = Input.resolvePath(packagePath, checkAttrs.stamp.path)
+      const pagePath = Input.resolvePath(packagePath, checkAttrs.output.path)
+      const resolved = docsCheckFiles(context, checkAttrs, declaredInputs, depLabels)
+      if (typeof resolved === "string") {
+        noteRefusal(resolved)
+        break
+      }
+      if (resolved.some((file) => file.path === pagePath)) {
+        noteRefusal("Docs.Check inputs must not include the page it checks")
+        break
+      }
+      if (resolved.some((file) => file.path === stampPath)) {
+        noteRefusal("Docs.Check inputs must not include the stamp it writes")
+        break
+      }
+      writeSet.push(stampPath)
+      lane = {
+        kind: "docs-check",
+        stamp: stampPath,
+        output: pagePath,
+        producer: checkAttrs.producer,
+        files: resolved
+      }
+      break
+    }
     case "Git.Commit":
       lane = { kind: "git-commit" }
       break
@@ -2803,6 +2896,60 @@ const visit = async (
   context.visiting.delete(target)
   context.nodes.set(label, node)
   return node
+}
+
+/**
+ * Resolves a `Docs.Check` `inputs` attr to the file rows the planner keyed:
+ * a declared file or glob contributes its own expanded rows, and a Filegroup
+ * contributes the declared inputs of its planned node and, through nested
+ * groups, of theirs.
+ *
+ * The rows are the planner's, not a second reading of the tree. Confinement,
+ * symlink policy, size limits, and ignore rules all live in
+ * `Input.expandGlob`/`Input.digestFile`, so a fresh digest pass here could
+ * disagree with the key the node was admitted under. Reusing the plan rows
+ * makes the verdict and the cache key the same bytes by construction.
+ *
+ * Returns the refusal text when a member cannot be keyed by content.
+ */
+const docsCheckFiles = (
+  context: PlanContext,
+  attrs: DocsCheck.Attrs,
+  declaredInputs: ReadonlyArray<Workspace.ExpandedInput>,
+  depLabels: ReadonlyMap<Target.AnyTarget, string>
+): ReadonlyArray<Input.FileDigest> | string => {
+  const rows = new Map<string, Input.FileDigest>()
+  const expanded = new Map<Input.Declared, Workspace.ExpandedInput>()
+  for (const input of declaredInputs) expanded.set(input.declaration, input)
+  const visited = new Set<string>()
+  const walk = (label: string): void => {
+    if (visited.has(label)) return
+    visited.add(label)
+    const dependency = context.nodes.get(label)
+    if (dependency === undefined) return
+    for (const input of dependency.declaredInputs) {
+      if (input.declaration._tag === "GitDiff") continue
+      for (const file of input.files) rows.set(file.path, file)
+    }
+    if (dependency.rule !== "Filegroup") return
+    for (const inner of dependency.dependencies) walk(inner)
+  }
+  for (const member of attrs.inputs.flatMap((entry) => Array.isArray(entry) ? entry : [entry])) {
+    if (Target.isTarget(member)) {
+      const memberRule = Target.metadata(member).target
+      const label = depLabels.get(member)
+      if (label === undefined) return "Docs.Check inputs name a target that was not planned"
+      if (memberRule !== "Filegroup") {
+        return `Docs.Check inputs must be files, globs, or Filegroup targets; ${label} is a ${memberRule}`
+      }
+      walk(label)
+      continue
+    }
+    const input = expanded.get(member)
+    if (input === undefined) return `Docs.Check input was not expanded by the planner: ${JSON.stringify(member)}`
+    for (const file of input.files) rows.set(file.path, file)
+  }
+  return [...rows.values()].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 }
 
 /** The planned labels of a lane's `data` members that are targets; declared inputs live on the node itself. */

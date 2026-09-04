@@ -33,7 +33,7 @@ Agent-facing projection of executable, model-visible module routes.
 ### `Command.make`
 
 ```ts
-(routes: ReadonlyArray<Route.Route>) => Effect.Effect<CommandSurface, FsError>
+;((routes: ReadonlyArray<Route.Route>) => Effect.Effect<CommandSurface, FsError>)
 ```
 
 Constructs a command surface from routes. Every supplied route is validated
@@ -48,12 +48,12 @@ this projection. Two routes claiming one command name fail with
 The runtime projection `Command.make` returns. The surface and every value it
 returns are frozen.
 
-| Member    | Signature                                                                               | Behavior                                                                     |
-| --------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `list`    | `() => ReadonlyArray<ListedCommand>`                                                    | Lists executable model-visible routes in stable segment order without loading them. |
-| `parse`   | `(commandString: string) => Effect<ParsedCommand, FsError>`                             | Loads the selected module and schema-decodes an agent command string without invoking. |
-| `execute` | `(commandString: string) => Effect<unknown, FsError, FlowInvoker.FlowInvoker>`          | Parses, invokes through `FlowInvoker`, and output-encodes an agent command string. |
-| `call`    | `<N extends Route.Name>(name: N, input: Route.Input<N>) => Effect<Route.Output<N>, FsError, FlowInvoker.FlowInvoker>` | Loads and invokes an exact named route using snapshotted input. |
+| Member    | Signature                                                                                                             | Behavior                                                                               |
+| --------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `list`    | `() => ReadonlyArray<ListedCommand>`                                                                                  | Lists executable model-visible routes in stable segment order without loading them.    |
+| `parse`   | `(commandString: string) => Effect<ParsedCommand, FsError>`                                                           | Loads the selected module and schema-decodes an agent command string without invoking. |
+| `execute` | `(commandString: string) => Effect<unknown, FsError, FlowInvoker.FlowInvoker>`                                        | Parses, invokes through `FlowInvoker`, and output-encodes an agent command string.     |
+| `call`    | `<N extends Route.Name>(name: N, input: Route.Input<N>) => Effect<Route.Output<N>, FsError, FlowInvoker.FlowInvoker>` | Loads and invokes an exact named route using snapshotted input.                        |
 
 `parse` and `execute` accept a listed name with slashes or with spaces:
 `"nested/visible --number 42"` and `"nested visible --number 42"` resolve the
@@ -75,19 +75,19 @@ invocation with `invocation_unavailable`.
 
 A route advertised to an agent.
 
-| Field         | Type                  | Description                          |
-| ------------- | --------------------- | ------------------------------------ |
-| `name`        | `string`              | The slash-joined route name.         |
+| Field         | Type                  | Description                               |
+| ------------- | --------------------- | ----------------------------------------- |
+| `name`        | `string`              | The slash-joined route name.              |
 | `description` | `string \| undefined` | The discovered description, when present. |
 
 ### `ParsedCommand`
 
 A decoded command-string invocation.
 
-| Field   | Type                      | Description                                  |
-| ------- | ------------------------- | -------------------------------------------- |
-| `route` | `Route.Route`             | The resolved route.                          |
-| `argv`  | `ReadonlyArray<string>`   | The lexed command tokens.                    |
+| Field   | Type                        | Description                                     |
+| ------- | --------------------------- | ----------------------------------------------- |
+| `route` | `Route.Route`               | The resolved route.                             |
+| `argv`  | `ReadonlyArray<string>`     | The lexed command tokens.                       |
 | `input` | `A` (defaults to `unknown`) | The decoded, frozen input ready for invocation. |
 
 ## CommandTree
@@ -96,10 +96,10 @@ The bounded, immutable segment trie shared by every command projection.
 
 ### Constants
 
-| Export                    | Value  | Description                                          |
-| ------------------------- | ------ | ---------------------------------------------------- |
-| `maximumRoutes`           | `256`  | Maximum routes accepted by one tree.                 |
-| `maximumTotalSegments`    | `4096` | Maximum total path segments accepted by one tree.    |
+| Export                    | Value  | Description                                               |
+| ------------------------- | ------ | --------------------------------------------------------- |
+| `maximumRoutes`           | `256`  | Maximum routes accepted by one tree.                      |
+| `maximumTotalSegments`    | `4096` | Maximum total path segments accepted by one tree.         |
 | `maximumResolutionTokens` | `4096` | Maximum tokens accepted by one direct resolution request. |
 
 ### `CommandTree`
@@ -107,24 +107,24 @@ The bounded, immutable segment trie shared by every command projection.
 A node of the command trie. A node may carry a route, children, or both:
 `domains` and `domains/list` may both be routable in the same tree.
 
-| Field      | Type                                | Description                        |
-| ---------- | ----------------------------------- | ---------------------------------- |
-| `route`    | `Option.Option<Route.Route>`        | The route ending at this node, when one exists. |
-| `children` | `ReadonlyMap<string, CommandTree>`  | Child nodes keyed by segment.      |
+| Field      | Type                               | Description                                     |
+| ---------- | ---------------------------------- | ----------------------------------------------- |
+| `route`    | `Option.Option<Route.Route>`       | The route ending at this node, when one exists. |
+| `children` | `ReadonlyMap<string, CommandTree>` | Child nodes keyed by segment.                   |
 
 ### `Resolved`
 
 A route selected from an argv prefix, with the unconsumed tokens.
 
-| Field   | Type                    | Description                              |
-| ------- | ----------------------- | ---------------------------------------- |
-| `route` | `Route.Route`           | The selected route.                      |
+| Field   | Type                    | Description                                |
+| ------- | ----------------------- | ------------------------------------------ |
+| `route` | `Route.Route`           | The selected route.                        |
 | `rest`  | `ReadonlyArray<string>` | The tokens the route name did not consume. |
 
 ### `CommandTree.make`
 
 ```ts
-(input: ReadonlyArray<Route.Route>) => Effect.Effect<CommandTree, FsError>
+;((input: ReadonlyArray<Route.Route>) => Effect.Effect<CommandTree, FsError>)
 ```
 
 Builds one immutable command trie. Two routes claiming the same segment path
@@ -138,7 +138,7 @@ containers fail with `invalid_route` without executing user code. Trees above
 ### `CommandTree.resolve`
 
 ```ts
-(tree: CommandTree, input: ReadonlyArray<string>) => Effect.Effect<Resolved, FsError>
+;((tree: CommandTree, input: ReadonlyArray<string>) => Effect.Effect<Resolved, FsError>)
 ```
 
 Resolves the longest routable prefix of an argv. Lookup tokens are normalized
@@ -151,7 +151,7 @@ supplied it. A request above `maximumResolutionTokens` fails with
 ### `CommandTree.resolveExact`
 
 ```ts
-(tree: CommandTree, argv: ReadonlyArray<string>) => Effect.Effect<Route.Route, FsError>
+;((tree: CommandTree, argv: ReadonlyArray<string>) => Effect.Effect<Route.Route, FsError>)
 ```
 
 Resolves one complete route name and refuses unconsumed path segments with
@@ -160,7 +160,7 @@ Resolves one complete route name and refuses unconsumed path segments with
 ### `CommandTree.traverse`
 
 ```ts
-(tree: CommandTree) => ReadonlyArray<Route.Route>
+;((tree: CommandTree) => ReadonlyArray<Route.Route>)
 ```
 
 Lists every route in stable segment order.
@@ -180,7 +180,7 @@ A placement literal produced by registry discovery.
 ### `Directive.compile`
 
 ```ts
-(literal: Literal) => Placement.Placement
+;((literal: Literal) => Placement.Placement)
 ```
 
 Compiles a discovered placement literal into the corresponding
@@ -198,8 +198,8 @@ Filesystem routing over metadata-only registry discovery.
 
 Configuration for one bounded file-router scan.
 
-| Field  | Type     | Description                          |
-| ------ | -------- | ------------------------------------ |
+| Field  | Type     | Description                                   |
+| ------ | -------- | --------------------------------------------- |
 | `root` | `string` | The flows tree to scan, relative or absolute. |
 
 ### `Warning`
@@ -214,15 +214,15 @@ the registry's optional `cause`.
 The immutable metadata-only result of scanning a flows tree. The result and
 both arrays are frozen.
 
-| Field      | Type                            | Description                          |
-| ---------- | ------------------------------- | ------------------------------------ |
-| `routes`   | `ReadonlyArray<Route.Route>`    | The discovered routes, sorted by name. |
-| `warnings` | `ReadonlyArray<Warning>`        | Non-fatal discovery diagnostics.     |
+| Field      | Type                         | Description                            |
+| ---------- | ---------------------------- | -------------------------------------- |
+| `routes`   | `ReadonlyArray<Route.Route>` | The discovered routes, sorted by name. |
+| `warnings` | `ReadonlyArray<Warning>`     | Non-fatal discovery diagnostics.       |
 
 ### `FileRouter.scan`
 
 ```ts
-(config: ScanConfig) => Effect.Effect<ScanResult, FsError, FileSystem.FileSystem | Path.Path>
+;((config: ScanConfig) => Effect.Effect<ScanResult, FsError, FileSystem.FileSystem | Path.Path>)
 ```
 
 Scans a flows root without importing or evaluating any flow module. The
@@ -260,18 +260,18 @@ the run loop, permissions, and durability, so it supplies this service.
 
 One materialized invocation. Projections pass it frozen.
 
-| Field   | Type        | Description                                  |
-| ------- | ----------- | -------------------------------------------- |
-| `name`  | `string`    | The resolved route name.                     |
-| `flow`  | `Flow.Any`  | The loaded flow, from [@smthrs/core](/api/core). |
-| `input` | `unknown`   | The schema-decoded, frozen input.            |
+| Field   | Type       | Description                                      |
+| ------- | ---------- | ------------------------------------------------ |
+| `name`  | `string`   | The resolved route name.                         |
+| `flow`  | `Flow.Any` | The loaded flow, from [@smthrs/core](/api/core). |
+| `input` | `unknown`  | The schema-decoded, frozen input.                |
 
 ### `Service`
 
 Executes a materialized flow.
 
-| Field    | Type                                                        | Description                |
-| -------- | ----------------------------------------------------------- | -------------------------- |
+| Field    | Type                                                          | Description                 |
+| -------- | ------------------------------------------------------------- | --------------------------- |
 | `invoke` | `(invocation: Invocation) => Effect.Effect<unknown, FsError>` | Runs one materialized flow. |
 
 ### `FlowInvoker`
@@ -285,7 +285,7 @@ The flow invocation service tag, keyed `"/fs/FlowInvoker"`.
 ### `FlowInvoker.make`
 
 ```ts
-(implementation: Service) => Service
+;((implementation: Service) => Service)
 ```
 
 Constructs a frozen flow invoker from an implementation. The implementation
@@ -296,7 +296,7 @@ invoking anything.
 ### `FlowInvoker.makeNoop`
 
 ```ts
-(overrides?: Partial<Service>) => Service
+;((overrides?: Partial<Service>) => Service)
 ```
 
 Constructs an invoker that fails every invocation with
@@ -307,7 +307,7 @@ replaces that default; an accessor or non-function override throws
 ### `FlowInvoker.layerNoop`
 
 ```ts
-(overrides?: Partial<Service>) => Layer.Layer<FlowInvoker>
+;((overrides?: Partial<Service>) => Layer.Layer<FlowInvoker>)
 ```
 
 Provides `makeNoop` as the `FlowInvoker` layer.
@@ -320,10 +320,21 @@ The single typed error returned by the file-routing surfaces.
 
 ```ts
 type Code =
-  | "root_missing" | "read_failed" | "invalid_root" | "discovery_failed"
-  | "parse_failed" | "unknown_command" | "duplicate_route" | "invalid_route"
-  | "resource_limit" | "load_failed" | "unsupported_body" | "unsupported_schema"
-  | "decode_failed" | "encode_failed" | "invocation_unavailable"
+  | "root_missing"
+  | "read_failed"
+  | "invalid_root"
+  | "discovery_failed"
+  | "parse_failed"
+  | "unknown_command"
+  | "duplicate_route"
+  | "invalid_route"
+  | "resource_limit"
+  | "load_failed"
+  | "unsupported_body"
+  | "unsupported_schema"
+  | "decode_failed"
+  | "encode_failed"
+  | "invocation_unavailable"
 ```
 
 Stable failure codes for routing, parsing, loading, and decoding, also
@@ -367,7 +378,7 @@ dispatching to the same route.
 ### `Incur.createCli`
 
 ```ts
-(name: string, routes: ReadonlyArray<Route.Route>) => Effect.Effect<IncurCli.Cli, FsError, FlowInvoker.FlowInvoker>
+;((name: string, routes: ReadonlyArray<Route.Route>) => Effect.Effect<IncurCli.Cli, FsError, FlowInvoker.FlowInvoker>)
 ```
 
 Projects routes onto an Incur CLI while preserving metadata-only discovery.
@@ -411,13 +422,13 @@ The immutable metadata projection of a discovered flow, and its lazy loader.
 
 ### Constants
 
-| Export                   | Value   | Description                                     |
-| ------------------------ | ------- | ----------------------------------------------- |
-| `maximumRouteDepth`      | `64`    | Maximum number of path segments in one route.   |
-| `maximumSegmentLength`   | `255`   | Maximum UTF-16 length of one route segment.     |
-| `maximumRouteNameLength` | `4096`  | Maximum UTF-16 length of one slash-joined route name. |
+| Export                   | Value   | Description                                            |
+| ------------------------ | ------- | ------------------------------------------------------ |
+| `maximumRouteDepth`      | `64`    | Maximum number of path segments in one route.          |
+| `maximumSegmentLength`   | `255`   | Maximum UTF-16 length of one route segment.            |
+| `maximumRouteNameLength` | `4096`  | Maximum UTF-16 length of one slash-joined route name.  |
 | `maximumPathLength`      | `16384` | Maximum UTF-16 length of one source or companion path. |
-| `maximumCapabilities`    | `256`   | Maximum number of capabilities declared by one route. |
+| `maximumCapabilities`    | `256`   | Maximum number of capabilities declared by one route.  |
 
 ### `Kind`
 
@@ -432,20 +443,20 @@ How a route's body is stored on disk.
 A path-derived command route. Everything here comes from registry discovery,
 which never evaluates a flow module. Materializing the flow is `Route.load`.
 
-| Field            | Type                                            | Description                                   |
-| ---------------- | ----------------------------------------------- | --------------------------------------------- |
-| `name`           | `string`                                        | The slash-joined, NFC-normalized route name.  |
-| `segments`       | `ReadonlyArray<string>`                         | The NFC-normalized path segments.             |
-| `kind`           | `Kind`                                          | How the body is stored on disk.               |
-| `sourcePath`     | `string`                                        | The absolute path of the flow entry.          |
-| `description`    | `Option.Option<string>`                         | The discovered description.                   |
-| `input`          | `Descriptor.SchemaRef`                          | The input schema locator, from [@smthrs/registry](/api/registry). |
-| `output`         | `Descriptor.SchemaRef`                          | The output schema locator.                    |
-| `capabilities`   | `ReadonlyArray<string>`                         | Declared capabilities.                        |
-| `effects`        | `Descriptor.EffectDeclaration`                  | The declared reads, writes, mode, conflict policy, and tier. |
-| `modelInvocable` | `boolean`                                       | Whether command surfaces may execute this route. |
-| `placement`      | `Option.Option<Descriptor.Placement>`           | The discovered placement literal, when present. |
-| `ui`             | `Option.Option<string>`                         | The absolute `ui.tsx` companion path, when present. |
+| Field            | Type                                  | Description                                                       |
+| ---------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| `name`           | `string`                              | The slash-joined, NFC-normalized route name.                      |
+| `segments`       | `ReadonlyArray<string>`               | The NFC-normalized path segments.                                 |
+| `kind`           | `Kind`                                | How the body is stored on disk.                                   |
+| `sourcePath`     | `string`                              | The absolute path of the flow entry.                              |
+| `description`    | `Option.Option<string>`               | The discovered description.                                       |
+| `input`          | `Descriptor.SchemaRef`                | The input schema locator, from [@smthrs/registry](/api/registry). |
+| `output`         | `Descriptor.SchemaRef`                | The output schema locator.                                        |
+| `capabilities`   | `ReadonlyArray<string>`               | Declared capabilities.                                            |
+| `effects`        | `Descriptor.EffectDeclaration`        | The declared reads, writes, mode, conflict policy, and tier.      |
+| `modelInvocable` | `boolean`                             | Whether command surfaces may execute this route.                  |
+| `placement`      | `Option.Option<Descriptor.Placement>` | The discovered placement literal, when present.                   |
+| `ui`             | `Option.Option<string>`               | The absolute `ui.tsx` companion path, when present.               |
 
 ### `Manifest`
 
@@ -473,8 +484,10 @@ Declaration merging intentionally starts from an empty manifest.
 
 ```ts
 type Name = keyof Manifest extends never ? string : Extract<keyof Manifest, string>
-type Input<N extends Name> = N extends keyof Manifest ? Manifest[N] extends { readonly input: infer I } ? I : unknown : unknown
-type Output<N extends Name> = N extends keyof Manifest ? Manifest[N] extends { readonly output: infer O } ? O : unknown : unknown
+type Input<N extends Name> = N extends keyof Manifest ? Manifest[N] extends { readonly input: infer I } ? I : unknown
+  : unknown
+type Output<N extends Name> = N extends keyof Manifest ? Manifest[N] extends { readonly output: infer O } ? O : unknown
+  : unknown
 ```
 
 `Name` narrows to generated manifest keys when a manifest is available, and
@@ -485,7 +498,7 @@ so development discovery can proceed.
 ### `Route.snapshot`
 
 ```ts
-(input: Route) => Effect.Effect<Route, FsError>
+;((input: Route) => Effect.Effect<Route, FsError>)
 ```
 
 Copies and validates caller-owned route metadata before asynchronous use.
@@ -503,7 +516,7 @@ Every violation fails with `invalid_route`.
 ### `Route.isCommandRoute`
 
 ```ts
-(route: Route) => boolean
+;((route: Route) => boolean)
 ```
 
 True only for routes the agent and Incur command surfaces may execute: kind
@@ -512,7 +525,7 @@ True only for routes the agent and Incur command surfaces may execute: kind
 ### `Route.load`
 
 ```ts
-(input: Route) => Effect.Effect<Flow.Any, FsError>
+;((input: Route) => Effect.Effect<Flow.Any, FsError>)
 ```
 
 Materializes the flow behind a route. The route is snapshotted first. Only

@@ -66,25 +66,25 @@ see the [quickstart](./quickstart.md).
 The root entry point re-exports seventeen namespaces. Each is also importable
 on its own subpath, such as `@smthrs/model/Route`.
 
-| Namespace | What it owns |
-| --- | --- |
-| `Model` | The one provider seam: a request in, a stream of typed events out. |
-| `ModelRequest` | The serializable, credential-free declaration of one model call. |
-| `ModelEvent` | The normalized events one call emits, and the `settledMessage` fold. |
-| `ModelError` | The provider-neutral failure vocabulary. |
-| `Route` | A resolved route: endpoint, protocol, framing, and credentials. |
-| `Protocol` | The wire contract of a model API family. |
-| `Endpoint` | The credential-free HTTP target of a route, and its validation. |
-| `Auth` | Credential handling: redacted keys, signing, optional refresh. |
-| `Framing` | Byte-stream framing: `sse` and `ndjson`. |
-| `RequestExecutor` | Bounded retries, quota classification, safe diagnostics. |
-| `AnthropicMessages` | Anthropic Messages lowering and stream parsing. |
-| `OpenAIResponses` | OpenAI Responses lowering and stream parsing. |
-| `OpenAIChatCompletions` | OpenAI Chat Completions lowering and stream parsing. |
-| `OpenAIChatGPT` | Route construction for the ChatGPT-subscription backend. |
-| `DeferredTools` | Replay-safe policy for native deferred tool loading. |
-| `ToolStream` | Pure accumulation of fragmented tool-call arguments. |
-| `CanonicalJson` | Deterministic JSON encoding for model-step inputs. |
+| Namespace               | What it owns                                                         |
+| ----------------------- | -------------------------------------------------------------------- |
+| `Model`                 | The one provider seam: a request in, a stream of typed events out.   |
+| `ModelRequest`          | The serializable, credential-free declaration of one model call.     |
+| `ModelEvent`            | The normalized events one call emits, and the `settledMessage` fold. |
+| `ModelError`            | The provider-neutral failure vocabulary.                             |
+| `Route`                 | A resolved route: endpoint, protocol, framing, and credentials.      |
+| `Protocol`              | The wire contract of a model API family.                             |
+| `Endpoint`              | The credential-free HTTP target of a route, and its validation.      |
+| `Auth`                  | Credential handling: redacted keys, signing, optional refresh.       |
+| `Framing`               | Byte-stream framing: `sse` and `ndjson`.                             |
+| `RequestExecutor`       | Bounded retries, quota classification, safe diagnostics.             |
+| `AnthropicMessages`     | Anthropic Messages lowering and stream parsing.                      |
+| `OpenAIResponses`       | OpenAI Responses lowering and stream parsing.                        |
+| `OpenAIChatCompletions` | OpenAI Chat Completions lowering and stream parsing.                 |
+| `OpenAIChatGPT`         | Route construction for the ChatGPT-subscription backend.             |
+| `DeferredTools`         | Replay-safe policy for native deferred tool loading.                 |
+| `ToolStream`            | Pure accumulation of fragmented tool-call arguments.                 |
+| `CanonicalJson`         | Deterministic JSON encoding for model-step inputs.                   |
 
 ## Where to go next
 

@@ -67,7 +67,7 @@ A cell states its intent by calling `ctx.done(output)`; the host renders the
 structured output as canonical JSON, which is the text the declared schema
 decodes:
 
-```ts
+````ts
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Model from "@smthrs/model/Model"
@@ -114,7 +114,7 @@ const seats = SeatResolver.layer({
       })
     )
 })
-```
+````
 
 This resolver is the only seam between the deterministic run and a live one. A
 production resolver answers with a provider route and a real context window;

@@ -16,7 +16,7 @@ calls. What an application does with an event, which flow a pull request starts
 and which run an issue comment signals, stays a Flow the application writes,
 because that part is not a provider concern.
 
-There is no `smithers listeners` verb and no gateway-level webhook
+There is no `smthrs listeners` verb and no gateway-level webhook
 configuration at 1.0. Webhook ingress is library code: a provider builds a
 `@smthrs/control` `Channel`, the application registers it with `Channels`, and
 `Channels.ingest` runs verify, decode, map, dispatch in that fixed order.

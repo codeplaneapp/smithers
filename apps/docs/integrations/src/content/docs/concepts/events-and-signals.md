@@ -16,14 +16,14 @@ it is named in, and the cursor contract that makes polling safe.
 
 One delivery decodes to one event:
 
-| Field           | What it is                                                                       |
-| --------------- | -------------------------------------------------------------------------------- |
-| `source`        | The source that produced it: `github`, `linear`, `telegram`.                     |
-| `eventName`     | `integration:<service>:<event>`, the most specific form the payload supports.    |
-| `correlationId` | What the event is about, or `null` when it addresses nothing narrower.           |
-| `payload`       | The provider payload, as delivered.                                              |
-| `dedupeKey`     | The provider's stable delivery identity, so a redelivery is recognizable.        |
-| `receivedAtMs`  | When the event was received, in Unix milliseconds.                               |
+| Field           | What it is                                                                    |
+| --------------- | ----------------------------------------------------------------------------- |
+| `source`        | The source that produced it: `github`, `linear`, `telegram`.                  |
+| `eventName`     | `integration:<service>:<event>`, the most specific form the payload supports. |
+| `correlationId` | What the event is about, or `null` when it addresses nothing narrower.        |
+| `payload`       | The provider payload, as delivered.                                           |
+| `dedupeKey`     | The provider's stable delivery identity, so a redelivery is recognizable.     |
+| `receivedAtMs`  | When the event was received, in Unix milliseconds.                            |
 
 The schema refuses a name `Core.SignalName.eventName` could not have built,
 such as one whose event segment carries a second colon. A name that reaches
@@ -60,8 +60,8 @@ pending notification carrying the newest payload. For the queue itself, see
 Each provider also exposes the full ordered ladder its payload answers to,
 most specific first, for a caller that routes on a broader form:
 
-| Provider | Names                                                | Correlations                          |
-| -------- | ---------------------------------------------------- | ------------------------------------- |
+| Provider | Names                                                                            | Correlations                          |
+| -------- | -------------------------------------------------------------------------------- | ------------------------------------- |
 | GitHub   | `integration:github:pull_request.opened`, then `integration:github:pull_request` | `owner/repo#12`, `owner/repo`, `null` |
 | Linear   | `integration:linear:issue.update`, then `integration:linear:issue`               | `ENG-123`, `ENG`, `null`              |
 

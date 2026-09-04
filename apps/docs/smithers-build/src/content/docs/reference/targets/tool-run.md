@@ -45,9 +45,9 @@ Reach for `ToolRun` when an operation changes external state and has no file
 output to cache. It is the deliberate escape hatch for a one-off command, the
 way [ToolBuild](/reference/targets/tool-build/) is for a one-off build. When the operation has a
 stable identity, add a purpose-built target type instead: the release targets
-[NpmPublish](../../../../targets/src/NpmPublish.ts) and `JsrPublish` are the
+[NpmPublish](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/targets/src/NpmPublish.ts) and `JsrPublish` are the
 worked examples, and adding a type is what the
-[no-raw-commands rule](https://github.com/smithersai/smithers/blob/main/packages/CONTRIBUTING.md) asks for over reaching for
+[no-raw-commands rule](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) asks for over reaching for
 this escape hatch. Do not use `ToolRun` for a check whose exit code is a
 verdict — that is a cacheable gate, so it is a [NodeTest](/reference/targets/node-test/),
 `Vitest`, or a lint target. Do not use it for a long-lived watch process — that
@@ -86,7 +86,7 @@ in `env`. The value is read from the named environment variable at execution
 time and substituted into the child process by the proxy, so it appears in
 neither the recorded plan nor the content key. A `ToolRun` that a coding agent
 runs still receives the credential; a plan a human reads never shows it. See
-[Secret](../../../../targets/src/Secret.ts).
+[Secret](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/targets/src/Secret.ts).
 
 ## Channels
 

@@ -1,8 +1,8 @@
 /**
  * Deterministic test layer bundles.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "A test harness is a
- * layer set".
+ * Governing design: `packages/testing/docs/concepts/test-tiers.md`, "The unit
+ * tier".
  *
  * @since 0.0.0
  */
@@ -147,8 +147,8 @@ export const poisonedClockAndRandom: Layer.Layer<never> = Layer.mergeAll(
 /**
  * A plan-time bundle: Host, Model, Clock, and Random access is rejected
  * instead of reaching a real environment. It deliberately does not provide an
- * engine. Governing design: `packages/testing/docs/concepts.md`, "Purity
- * poison".
+ * engine. Governing design: `packages/testing/docs/concepts/test-tiers.md`,
+ * "The plan-time tier".
  *
  * @since 0.0.0
  * @category layers

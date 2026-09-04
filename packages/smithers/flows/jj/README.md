@@ -3,16 +3,15 @@
 **Documentation:** https://jj.smithers.sh
 
 Jujutsu version control as a portable Effect host service. Smithers snapshots the
-working copy around every step, so jj is host access — it goes through a layer
+working copy around every step, so jj is host access: it goes through a layer
 like the filesystem does, not through an ad-hoc `spawn`.
 
 ```sh
 pnpm add @smthrs/jj
 ```
 
-The complete API reference, including every entry point and every export, is
-generated from this package's own sources and published at
-<https://smithers.sh/docs/reference/api/jj>. This file is the overview.
+The complete API reference, including every export and every signature, is at
+<https://jj.smithers.sh/reference/api/>. This file is the overview.
 
 ## Entry points
 
@@ -22,15 +21,15 @@ subpath, the way `effect` keeps `@effect/platform-node` out of `effect`, so
 importing the contract never resolves a `node:` built-in. `package.json` exports
 `./*` over `src/`, so every module below is public.
 
-| Import                            | Platform                                                    |
-| --------------------------------- | ----------------------------------------------------------- |
-| `@smthrs/jj`                      | any — contract only; bundles for the browser                |
-| `@smthrs/jj/browser/BrowserJj`    | browser — jj-lib compiled to WASM over a virtual FS         |
-| `@smthrs/jj/browser/WasiPreview1` | browser — the WASI preview 1 shim that module runs on       |
-| `@smthrs/jj/browser/WasiFs`       | browser — the synchronous filesystem surface the shim needs |
-| `@smthrs/jj/node/NodeJj`          | Node (`node:child_process`)                                 |
-| `@smthrs/jj/node/resolveJjBinary` | Node — which `jj` file this host spawns, and why            |
-| `@smthrs/jj/bun/BunJj`            | Bun, reusing the Node adapter                               |
+| Import                            | Platform                                                   |
+| --------------------------------- | ---------------------------------------------------------- |
+| `@smthrs/jj`                      | any: contract only; bundles for the browser                |
+| `@smthrs/jj/browser/BrowserJj`    | browser: jj-lib compiled to WASM over a virtual FS         |
+| `@smthrs/jj/browser/WasiPreview1` | browser: the WASI preview 1 shim that module runs on       |
+| `@smthrs/jj/browser/WasiFs`       | browser: the synchronous filesystem surface the shim needs |
+| `@smthrs/jj/node/NodeJj`          | Node (`node:child_process`)                                |
+| `@smthrs/jj/node/resolveJjBinary` | Node: which `jj` file this host spawns, and why            |
+| `@smthrs/jj/bun/BunJj`            | Bun, reusing the Node adapter                              |
 
 `pnpm run browser` at the repository root pins the bundleability of that table.
 
@@ -48,7 +47,7 @@ importing the contract never resolves a `node:` built-in. `package.json` exports
 | `NodeJj.layerAt`, `BunJj.layerAt`                       | The same, bound to one absolute repository root.                                             |
 | `NodeJj.layerSpawner`, `BunJj.layerSpawner`             | The same commands through the host's `ChildProcessSpawner`, so a contained host contains jj. |
 | `NodeJj.layerSpawnerAt`, `BunJj.layerSpawnerAt`         | Repository-bound and spawner-routed together.                                                |
-| `resolveJjBinary`, `describe`, `overrideVariables`, ... | Which `jj` file this host spawns, and the guidance `smithers doctor` prints.                 |
+| `resolveJjBinary`, `describe`, `overrideVariables`, ... | Which `jj` file this host spawns, and the guidance `smthrs doctor` prints.                   |
 | `BrowserJj.make`, `BrowserJj.layer`, `BrowserJjOptions` | jj-lib compiled to `wasm32-wasip1`, run over a virtual filesystem.                           |
 | `BrowserJj.layerUnsupported`                            | The fallback for hosts that ship no wasm module; fails `not_installed`.                      |
 | `WasiPreview1.make`, `Errno`, `WasiExitError`           | The WASI preview 1 shim the browser layer instantiates the module against.                   |
@@ -89,11 +88,11 @@ comes back, since every jj command snapshots the working copy first.
 [NodeJj.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/NodeJj.test.ts)
 pins that with a marker editor on `JJ_EDITOR`.
 
-`SMITHERS_JJ_PATH` (with `FLOWS_JJ_PATH` as an rc.0 alias) names the `jj` binary
-the Node and Bun layers spawn. An override that names an existing file stays
-authoritative even when it cannot be executed, so a broken explicit path is
-reported rather than a different binary being quietly substituted. An override
-that names nothing falls through to `PATH`, and `smithers doctor` says so.
+`SMITHERS_JJ_PATH` names the `jj` binary the Node and Bun layers spawn. An
+override that names an existing file stays authoritative even when it cannot be
+executed, so a broken explicit path is reported rather than a different binary
+being quietly substituted. An override that names nothing falls through to
+`PATH`, and `smthrs doctor` says so. This package vendors no `jj` binaries.
 
 One invocation buffers at most **64 MiB of each output stream**, counted in
 bytes as they arrive rather than in decoded characters. jj is not an attacker,
@@ -109,19 +108,19 @@ data for the same reason: an `Error` serializes to `{}`.
 
 ## Browser
 
-A tab cannot spawn the `jj` binary. What it can do is run **jj-lib itself** —
-the real one, pinned at v0.44.0 as a cargo git dependency — compiled to
+A tab cannot spawn the `jj` binary. What it can do is run **jj-lib itself**,
+the real one, pinned to a fork revision as a cargo git dependency, compiled to
 `wasm32-wasip1` and fed a filesystem. `BrowserJj.layer` does exactly that: a
-small Rust crate (`crates/flows-jj`) exposes the six `Jj` contract operations
-from jj-lib, and a hand-written WASI preview1 shim in this package routes
-every filesystem syscall to the same virtual-FS slice `BrowserFileSystem` is
-mounted on (ZenFS in production, `node:fs` in tests). All six operations work:
-`snapshot`, `restore`, `diff`, `workspaceAdd`, `workspaceForget`, `status` —
-real change ids, a real op log, repos that survive a reload.
+small Rust crate (`crates/flows-jj`) exposes the `Jj` contract operations from
+jj-lib, and a hand-written WASI preview 1 shim in this package routes every
+filesystem syscall to the same virtual-FS slice `BrowserFileSystem` is mounted
+on (ZenFS in production, `node:fs` in tests). `snapshot`, `restore`, `diff`,
+`workspaceAdd`, `workspaceForget`, and `status` all work: real change ids, a
+real op log, repos that survive a reload.
 
 Like `BrowserFileSystem`, the layer is a **function**: the page owns the
 filesystem mount and the wasm bytes, so both arrive as arguments. The library
-never fetches — hand it a compiled `WebAssembly.Module` or the raw bytes.
+never fetches; hand it a compiled `WebAssembly.Module` or the raw bytes.
 
 ```ts
 import { Jj } from "@smthrs/jj"
@@ -144,7 +143,7 @@ The wasm artifact ships in the package at `wasm/flows_jj.wasm`; how it becomes
 a URL is the bundler's business (Vite: `?url` import, or copy it as an asset).
 It is rebuilt reproducibly with `pnpm run build:wasm` in this package, which
 drives `crates/flows-jj/build-wasm.mjs` (`cargo build --release --target
-wasm32-wasip1` + copy). Reproducible means per host triple: cargo builds
+wasm32-wasip1` plus a copy). Reproducible means per host triple: cargo builds
 build scripts for the host, which puts the host triple into every symbol
 hash, so the committed bytes are the `x86_64-unknown-linux-gnu` build that CI
 reproduces. The script refuses to run on another host and prints the
@@ -156,7 +155,7 @@ what lets a page hand over bytes it is still loading. Replacing a field on the
 options object afterwards changes nothing.
 
 **Durability is the mount's job, not this layer's.** ZenFS fronts OPFS or
-IndexedDB with a synchronous mirror and writes back asynchronously — that sync
+IndexedDB with a synchronous mirror and writes back asynchronously. That sync
 mirror is precisely what lets jj-lib run without threads, but it means an op
 returning does not mean bytes hit disk. Call `fs.sync()` (or your mount's
 equivalent) after jj operations before assuming reload-survival. The layer
@@ -165,14 +164,16 @@ does not own the mount and never syncs for you.
 **The divergences from `NodeJj` are real and are not hidden:**
 
 - **Simple backend, no git.** Repos are created with jj's Simple backend
-  (`Workspace::init_simple`), not the git backend — `gix` is compiled out.
-  There is no fetch/push/clone and no colocated `.git`; browser git interop
-  needs a `fetch()`-based smart-HTTP client, which rc.0 does not ship. Native
-  jj _can_ open these repos (`jj debug init-simple` creates the same shape).
-  Upstream calls the Simple backend a testing backend and does not promise
-  on-disk format stability; the pinned jj fork rev is what freezes the format.
-- **Auto-init.** `snapshot` initializes a repo at the workspace root if none
-  exists. `NodeJj` fails in a directory that is not a workspace.
+  (`Workspace::init_simple`), not the git backend, because `gix` is compiled
+  out. There is no fetch/push/clone and no colocated `.git`; browser git
+  interop needs a `fetch()`-based smart-HTTP client, which rc.0 does not ship.
+  Native jj _can_ open these repos (`jj debug init-simple` creates the same
+  shape). Upstream calls the Simple backend a testing backend and does not
+  promise on-disk format stability; the pinned jj fork rev is what freezes the
+  format.
+- **Auto-init.** Every operation initializes a repo at the workspace root if
+  none exists. `NodeJj` fails in a directory that is not a workspace, so a
+  mistyped `root` here yields a fresh empty repo rather than a "no repo" error.
 - **A pinned `workspaceAdd` is two calls.** The frozen ABI has no revision
   field, so a revisioned add is the add followed by a restore rooted at the new
   lane. The whole sequence runs uninterruptibly. If the restore fails, the add
@@ -185,20 +186,25 @@ does not own the mount and never syncs for you.
 - **`root(from)` answers for its own slice.** The layer owns one workspace, so
   it answers the configured root for any path inside it and fails for a path
   that is not, rather than answering for an unrelated tree.
+- **Symlinks degrade to regular files.** jj-lib on `wasm32-wasip1` reports
+  symlinks unsupported, so checkout materializes a tree symlink as a regular
+  file, and snapshotting a real on-disk symlink stores the linked file's
+  content as the target. The representation is stable across further
+  snapshot/restore cycles.
 - **Synchronous and on the calling thread.** Each operation runs the wasm to
-  completion — no incremental progress, and interruption waits for the op to
+  completion: no incremental progress, and interruption waits for the op to
   finish, the same posture as `BrowserChildProcessSpawner`. Hosts that care
   should put the Smithers runtime in a Worker; this layer does not do it for
   them.
 - **Single-threaded.** jj's rayon-parallel working-copy paths degrade to
   serial execution on threadless wasm. Correct, just not parallel.
 - **The output text is ours.** `status` and `diff` are rendered by the
-  `flows-jj` crate, not by jj-cli — `diff` is git-format unified diff, and
+  `flows-jj` crate, not by jj-cli: `diff` is git-format unified diff, and
   `status` is a concise change-id + A/M/D listing. Both are stable and
   tested, but not byte-identical to what the CLI prints.
-- **`not_installed` now means "no wasm module".** The wasm side only produces
+- **`not_installed` means "no wasm module".** The wasm side only produces
   `conflict`, `invalid_ref`, and `unknown`; `not_installed` comes from the TS
-  side — `layerUnsupported`, kept exported for hosts that ship no module.
+  side, from `layerUnsupported`, kept exported for hosts that ship no module.
 
-See the [kernel reference](https://smithers.sh/docs/reference/api/kernel), which owns the
-closed host service list this contract is one slot of.
+See the [kernel reference](https://kernel.smithers.sh/reference/api/), which
+owns the closed host service list this contract is one slot of.

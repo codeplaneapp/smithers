@@ -47,17 +47,16 @@ Scan a flows directory, build the agent command surface, and execute one
 command through a stub invoker:
 
 ```ts
-import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
+import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
 import { Effect, Layer } from "effect"
 import { resolve } from "node:path"
 
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
 
 const invoker = FlowInvoker.make({
-  invoke: ({ input }) =>
-    Effect.succeed({ accepted: true, number: (input as { readonly number: number }).number })
+  invoke: ({ input }) => Effect.succeed({ accepted: true, number: (input as { readonly number: number }).number })
 })
 
 const program = Effect.gen(function*() {

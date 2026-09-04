@@ -24,7 +24,8 @@ import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import * as Effect from "effect/Effect"
 
 const seats = SeatResolver.layer({
-  resolve: (id) => Effect.succeed(Seat.make({ id, model: scripted, route: recordedRoute, contextWindowTokens: 200_000 }))
+  resolve: (id) =>
+    Effect.succeed(Seat.make({ id, model: scripted, route: recordedRoute, contextWindowTokens: 200_000 }))
 })
 ```
 
@@ -71,17 +72,17 @@ all, one park decision, one structured-output rejection.
 Every optional service ships an explicit absence, so a test provides the
 smallest composition that type-checks:
 
-| Service | Explicit absence |
-| --- | --- |
-| `Agent` | `Agent.makeNoop()`, `Agent.layerNoop()` |
-| `SeatResolver` | `SeatResolver.layerNoop()`: fails every resolve with `SeatUnresolved`. |
-| `QuotaPolicy` | `QuotaPolicy.layerUnclassified()`: every refusal stays a failure. |
-| `Budget` | `Budget.layerUnbounded()`: accounts nothing, refuses nothing. |
-| `EventSink` | `EventSink.layerNoop()`: drops every event. |
-| `ChildFlows.Children` | `ChildFlows.makeNoop()`: refuses every operation catchably. |
-| `FlowStore` | `FlowStore.layerNoop()` or `FlowStore.layerMemory()`. |
+| Service                         | Explicit absence                                                                  |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| `Agent`                         | `Agent.makeNoop()`, `Agent.layerNoop()`                                           |
+| `SeatResolver`                  | `SeatResolver.layerNoop()`: fails every resolve with `SeatUnresolved`.            |
+| `QuotaPolicy`                   | `QuotaPolicy.layerUnclassified()`: every refusal stays a failure.                 |
+| `Budget`                        | `Budget.layerUnbounded()`: accounts nothing, refuses nothing.                     |
+| `EventSink`                     | `EventSink.layerNoop()`: drops every event.                                       |
+| `ChildFlows.Children`           | `ChildFlows.makeNoop()`: refuses every operation catchably.                       |
+| `FlowStore`                     | `FlowStore.layerNoop()` or `FlowStore.layerMemory()`.                             |
 | `WorkspaceObservation.Observer` | provide none (unobserved) or `WorkspaceObservation.layerNoop` (fails on purpose). |
-| `EngineLike` | `EngineLike.layerNoop()` from [`@smthrs/harness`](https://harness.smithers.sh/reference/api/). |
+| `EngineLike`                    | `EngineLike.layerNoop()` from [`@smthrs/harness`](https://harness.smithers.sh/reference/api/).                  |
 
 ## What not to stub
 

@@ -1,0 +1,88 @@
+---
+title: "Installation"
+description: "Install @smthrs/database, the runtime it requires, and the import subpaths for the driver-neutral root, the Node SQLite driver, and the in-memory test database."
+sidebar:
+  order: 1
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/database/docs/installation.md"
+---
+
+## Install
+
+```bash
+pnpm add @smthrs/database effect
+```
+
+`effect` is a direct dependency of this package and must resolve to the same
+version your application uses. Mixing two copies of `effect` splits the
+`SqlClient` service identity, and a writer built against one copy cannot see a
+client provided from the other.
+
+The Node driver pulls in `@effect/sql-sqlite-node`, which ships with the
+package. You do not install it separately.
+
+## Requirements
+
+| Requirement | Value            | Why                                                                                                                                                   |
+| ----------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js     | 22.19.0 or later | `NodeDatabase` opens the database through the built-in `node:sqlite` module.                                                                          |
+| Runtime     | Node.js, not Bun | `NodeDatabase.layer` refuses to open a durable database when `process.versions.bun` is set. See [why rc.0 is SQLite only](/concepts/sqlite-only/). |
+| Database    | SQLite           | rc.0 ships no Postgres or PGlite layer.                                                                                                               |
+
+## Import subpaths
+
+The root entry point is driver neutral and bundles for browsers. Every driver
+is platform specific and lives at its own subpath, the way `effect` keeps its
+platform packages out of its root.
+
+```ts
+// Driver neutral. Safe in a browser bundle.
+import { DatabaseMetrics, DurableWriter, Migrations, UnsupportedBackend } from "@smthrs/database"
+
+// Or one namespace at a time, which is what the repository does.
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as Migrations from "@smthrs/database/Migrations"
+
+// Node only.
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+```
+
+`@smthrs/database/internal/*` is blocked by the export map. Everything a
+consumer needs is reachable from the paths above.
+
+## What a real composition adds
+
+This package provides a client and a write policy. It does not provide tables.
+An application that stores run state composes the storage packages that own
+them, and each one contributes its migration set:
+
+```bash
+pnpm add @smthrs/journal @smthrs/run-store @smthrs/step-cache @smthrs/engine-store
+```
+
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) exports `Migrations.sets`, the
+complete list a durable engine needs, so most applications compose that rather
+than assembling the sets by hand. For the wiring, see
+[Compose a database layer](/guides/compose-a-database/).
+
+## Verify the install
+
+```ts
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as TestDatabase from "@smthrs/database/test/TestDatabase"
+import * as Effect from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+
+const check = Effect.gen(function*() {
+  const sql = yield* SqlClient.SqlClient
+  const writer = yield* DurableWriter.DurableWriter
+  return yield* writer.write(sql`SELECT 1 AS value`)
+})
+
+Effect.runPromise(check.pipe(Effect.provide(TestDatabase.layer), Effect.scoped))
+  .then(console.log)
+```
+
+`TestDatabase.layer` opens a fresh `:memory:` database with the production
+client and the production writer, so a successful run proves both halves
+resolved.

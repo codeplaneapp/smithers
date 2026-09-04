@@ -58,7 +58,7 @@ finalization, so wrap the program in `Effect.scoped`.
 ## Evaluate a cell
 
 ```ts
-const frame = yield* realm.evaluate({
+const frame = yield * realm.evaluate({
   cell: Cell.source(text),
   frame: 0,
   call: handler
@@ -77,14 +77,14 @@ frame 7 says which cell threw. The returned `Sandbox.RealmFrame` carries:
 
 The evaluation options are `Sandbox.RealmEvaluation`:
 
-| Field | Purpose |
-| --- | --- |
-| `cell` | The `Cell.Source` to run; construct it with `Cell.source(text)`. |
-| `frame` | The controller frame number. |
-| `call` | The `Sandbox.Handler` that resolves the cell's flow calls. |
-| `mint` | Optional `Sandbox.Minter` that settles `ctx.checkpoint()`. Absent means the run pins no trees. |
+| Field     | Purpose                                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------------------------- |
+| `cell`    | The `Cell.Source` to run; construct it with `Cell.source(text)`.                                               |
+| `frame`   | The controller frame number.                                                                                   |
+| `call`    | The `Sandbox.Handler` that resolves the cell's flow calls.                                                     |
+| `mint`    | Optional `Sandbox.Minter` that settles `ctx.checkpoint()`. Absent means the run pins no trees.                 |
 | `bounded` | Set when the caller journals and bounds each settlement itself, so the loop adds no `callMs` clock of its own. |
-| `limits` | Per-evaluation limit overrides. |
+| `limits`  | Per-evaluation limit overrides.                                                                                |
 
 ## Write the handler
 
@@ -117,10 +117,10 @@ The failure split is the contract `EngineLike.call` declares:
 
 One evaluation settles with one of three `Cell.Outcome` members:
 
-| Tag | Meaning |
-| --- | --- |
-| `settled` | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`. |
-| `raised` | The cell ran and threw. The thrown value is projected into stable `name` and `message` text. |
+| Tag        | Meaning                                                                                                                                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `settled`  | The cell ran and produced a well-formed transition: `continue` when it called neither `ctx.done` nor `ctx.park`, `complete` for `ctx.done(output)`, `park` for `ctx.park(reason, message)`.                          |
+| `raised`   | The cell ran and threw. The thrown value is projected into stable `name` and `message` text.                                                                                                                         |
 | `rejected` | The cell never ran, or produced no transition. The `code` is a `Cell.RejectionCode`: `no_cell`, `imports_forbidden`, `compile_failed`, `invalid_transition`, `unsupported_language`, `limit_exceeded`, or `stalled`. |
 
 `ctx.done` and `ctx.park` take effect where they are called: the run is over
@@ -133,14 +133,14 @@ is per frame: the host clears it as the next frame opens.
 `Sandbox.defaultLimits` fills every ceiling a caller omits, and a partial
 override cannot disable the others:
 
-| Limit | Default | Scope |
-| --- | --- | --- |
-| `calls` | 64 | Per frame. A `ctx.checkpoint()` mint counts. |
-| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close. |
-| `steps` | 1,000 | Per frame; interrupt checks, not bytecode operations. |
-| `timeMs` | 30,000 | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call`. |
-| `totalMs` | 900,000 | Per frame; whole-evaluation time, host calls included. |
-| `callMs` | 120,000 | Per call; settles an overrunning call as a catchable `timeout`. |
+| Limit         | Default | Scope                                                                                |
+| ------------- | ------- | ------------------------------------------------------------------------------------ |
+| `calls`       | 64      | Per frame. A `ctx.checkpoint()` mint counts.                                         |
+| `memoryBytes` | 128 MiB | Per run, weighed by the panel probe at each frame's close.                           |
+| `steps`       | 1,000   | Per frame; interrupt checks, not bytecode operations.                                |
+| `timeMs`      | 30,000  | Per frame; the cell's own JavaScript time, excluding time suspended in a `ctx.call`. |
+| `totalMs`     | 900,000 | Per frame; whole-evaluation time, host calls included.                               |
+| `callMs`      | 120,000 | Per call; settles an overrunning call as a catchable `timeout`.                      |
 
 `steps` and `timeMs` have typed floors (`Sandbox.minimumSteps`,
 `Sandbox.minimumTimeMs`), and `memoryBytes` has `Sandbox.minimumMemoryBytes`:

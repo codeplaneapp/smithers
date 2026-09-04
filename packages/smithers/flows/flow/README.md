@@ -127,9 +127,9 @@ back to `@smthrs/engine`.
 The root exports these namespaces, also available from matching
 `@smthrs/flow/*` subpaths.
 
-The full, generated export tables are on the
-[API reference](https://smithers.sh/docs/reference/api/flow); the table below is the shape of
-the surface.
+Every export, with its signature and defaults, is on the
+[export reference](https://flow.smithers.sh/reference/flow/); the table below is
+the shape of the surface.
 
 | Namespace         | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -331,7 +331,7 @@ const Deployment = Poll.make("deploy/wait", {
 // A spent budget fails Poll.PollExhausted, which a body catches like any
 // other declared failure. Provide Poll.layer beside Sleep.layer. A check that
 // can hang bounds itself: race the work against a durable clock inside the
-// check's own implementation (docs/pages/api/flow.md shows the recipe), so the
+// check's own implementation (the poll guide shows the recipe), so the
 // bound is replayable and a check that ran out of time costs one attempt.
 //
 // A schedule no clock can keep is refused at declaration with a RangeError:
@@ -377,7 +377,7 @@ const recorded = HumanTask.answer({ token, value: { decision: "ship" } })
 // `timeoutMs` races the answer against one durable clock per question. Both
 // hosts resume a run parked on that race, so a deadline settles under
 // `@smthrs/engine`'s in-process engine and under the SQLite engine store
-// alike (docs/pages/api/flow.md has the detail).
+// alike (the human-task guide has the detail).
 ```
 
 ### DurableClock — durable sleep
@@ -492,8 +492,8 @@ RetryPolicy.isNonRetryable(policy, new Error("x"))
 // yields RetryPolicy.RetryAttemptsExhausted.
 ```
 
-Full API documentation is at
-[smithers.sh/api/flow](https://smithers.sh/docs/reference/api/flow). See also the
-[engine reference](https://smithers.sh/docs/reference/api/engine),
-[failure and retry](https://smithers.sh/docs/concepts/retries), and
-[step keys](https://smithers.sh/docs/concepts/content-addressing).
+Full documentation, including the concepts, the task guides, and the export
+reference, is at [flow.smithers.sh](https://flow.smithers.sh). See also the
+[engine reference](https://engine.smithers.sh/reference/api/),
+[retries](https://smithers.sh/docs/concepts/retries/), and
+[content addressing](https://smithers.sh/docs/concepts/content-addressing/).

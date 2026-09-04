@@ -2,8 +2,8 @@
  * Runner-agnostic conformance cases for complete Host bundles.
  *
  * One shared suite parameterized by layer set. Governing designs:
- * `packages/testing/docs/concepts.md`, "Host-layer conformance" and "Tickets,
- * not exceptions".
+ * `packages/testing/docs/concepts/conformance.md`, "The host suite is
+ * parameterized by a declaration".
  *
  * @since 0.0.0
  */

@@ -76,7 +76,6 @@ that window before the launch is reported as failed.
 
 `--quiet` suppresses the document itself, not only the stderr notices its own
 description names.
-<!-- verify: --quiet is described as "Drop the banners and notices commands write to stderr", but Command.ts `render` skips the stdout Console.log when it is set. Which is the intended contract? -->
 
 ## Exit codes
 

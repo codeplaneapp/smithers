@@ -1,235 +1,440 @@
 ---
 title: "API reference"
-description: "A driver-neutral SQL contract with a bounded write-retry seam, plus the composed migration ladder"
+description: "Every public export of @smthrs/database: the DurableWriter service and its layers, the DatabaseError vocabulary, the Migrations composer, the Node SQLite driver, the in-memory test layer, and the metric handle."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/database/docs/api.md"
 ---
 
-## What this package owns
+The root entry point is driver neutral and bundles for browsers. Each driver is
+platform specific and lives at an explicit subpath.
 
-`@smthrs/database` owns driver composition, the shared write policy, and the
-normalized database failure vocabulary. Domain tables and queries belong to the
-packages that read them: `@smthrs/journal`, `@smthrs/run-store`,
-`@smthrs/step-cache`, and `@smthrs/engine-store`. Queries use Effect's own
-`SqlClient` service directly, and this package adds only the write policy on top
-of it.
+| Import                                | Exports                                                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------ |
+| `@smthrs/database`                    | `DurableWriter`, `Migrations`, `DatabaseMetrics`, `UnsupportedBackend` as namespaces |
+| `@smthrs/database/DurableWriter`      | the write boundary, its errors, and its layers                                       |
+| `@smthrs/database/Migrations`         | the migration composer                                                               |
+| `@smthrs/database/DatabaseMetrics`    | the write-retry counter                                                              |
+| `@smthrs/database/UnsupportedBackend` | the ignored connection-string names                                                  |
+| `@smthrs/database/node/NodeDatabase`  | Node only. The `node:sqlite` client layer                                            |
+| `@smthrs/database/test/TestDatabase`  | Node only. The in-memory client and writer                                           |
+
+`@smthrs/database/internal/*` is blocked by the export map.
+
+## DurableWriter
+
+The write boundary shared by the durable stores, free of journal or host
+knowledge. Queries go through Effect's `SqlClient` directly; only writes come
+here.
+
+### DurableWriter
 
 ```ts
-import { DurableWriter } from "@smthrs/database"
-import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import { Effect, Layer } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
-
-const program = Effect.gen(function*() {
-  const sql = yield* Effect.service(SqlClient.SqlClient)
-  const writer = yield* DurableWriter.DurableWriter
-  return yield* writer.write(sql`SELECT 1 AS value`)
-}).pipe(Effect.provide(
-  Layer.provideMerge(DurableWriter.layer(), NodeDatabase.layer({ filename: "flows.db" }))
-))
+class DurableWriter extends Context.Service<DurableWriter, Service>()("@smthrs/database/DurableWriter") {}
 ```
 
-## The `write` contract
+The service tag. `yield* DurableWriter.DurableWriter` resolves the writer.
 
-`DurableWriter.write(effect)` runs `effect` inside one transaction with
-transaction-scoped retries.
+### Service
 
-**Serialization is part of the contract, not an incidental property.** An
-implementation MUST guarantee that two concurrent `write` transactions are
-mutually serialized: they may not both commit results computed from snapshots
-that exclude each other's writes. Consumers rely on this for correctness rather
-than isolation hygiene. The engine store closes a run-parent edge by inserting
-into a table whose `PRIMARY KEY (child_id, parent_id)` supplies the uniqueness
-and then walking the ancestor graph inside the same `write`, and its safety
-argument (of two edges that jointly close a cycle, exactly the later one fails)
-holds only under serialized writers. SQLite meets the contract with its
-single-writer transaction lock. A PostgreSQL or PGlite implementation must run
-write transactions at `SERIALIZABLE` and retry `40001`; plain `READ COMMITTED`
-does not satisfy the contract, and adopting it would silently reintroduce the
-cycle race.
+```ts
+interface Service {
+  readonly write: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | DatabaseError, R>
+}
+```
 
-**Retries belong to the outermost transaction.** A `write` nested inside another
-`write` joins the enclosing transaction as a savepoint and does not retry: a
-transient conflict dooms the enclosing transaction's snapshot, so replaying the
-savepoint alone can never resolve it. Only the outermost `write` retries,
-replaying the whole transaction body verbatim against committed state. Its
-classifier follows `cause` chains, so a store that has already normalized a
-savepoint failure into its own error type still keeps the outermost transaction
-replaying. That is what makes `Journal.transact`, a state projection and its
-lifecycle entry in one transaction, retryable as a unit.
+`write` runs `effect` inside one transaction with transaction-scoped retries,
+and widens the error channel with `DatabaseError`. Every `SqlError` in a failed
+cause is normalized to a `DatabaseError` on the way out.
 
-The contract is pinned by a reusable conformance suite.
-`packages/smithers/flows/database/test/contract/DatabaseWriteContract.ts` exports
-`describeContract(harness)`, and `test/DatabaseWriteContract.test.ts` runs it
-against two `NodeDatabase` connections over one file and against the shared
-in-memory `TestDatabase` connection. **A new backend layer is not done until it
-is added there.** A harness supplies two `DurableWriter` services over one
-store, and the suite checks no lost update on a concurrent read-modify-write,
-exactly one winner for two check-then-insert writers over a table with no unique
-index, cross-connection visibility of a committed write, and whole-transaction
-rollback.
+Two guarantees are contract rather than implementation detail:
 
-## What is retried, and what is not
+- **Serialization.** Two concurrent `write` transactions are mutually
+  serialized. They may not both commit results computed from snapshots that
+  exclude each other's writes.
+- **Nesting.** A `write` inside the client's open transaction joins it as a
+  savepoint and does not retry. Only the outermost `write` retries, replaying
+  the whole transaction body verbatim against committed state. Its
+  classification follows `cause` chains, so a nested store's domain error that
+  preserves `cause` still keeps the outermost transaction replaying.
 
-Retry classification is deliberately dialect-blind, because `DurableWriter.make`
-accepts any `SqlClient` and PGlite and Durable Object SQLite report a failure as
-a plain `Error` with no code at all.
+See [the write boundary](/concepts/write-boundary/).
 
-| Category   | Recognized as                                                                                                                                                          | Retried |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Busy       | `SQLITE_BUSY*`, `SQLITE_LOCKED*`, `40001`, `40P01`, `55P03`, and the texts `database is locked`, `database is busy`, `could not serialize access`, `deadlock detected` | yes     |
-| I/O        | `SQLITE_IOERR*` and the text `disk i/o error`                                                                                                                          | no      |
-| Constraint | `ConstraintError` and `UniqueViolation`                                                                                                                                | no      |
-| Unknown    | anything else                                                                                                                                                          | no      |
+### make
 
-`fromSqlError` maps the busy vocabulary to code `busy`, the I/O vocabulary to
-`io`, the constraint vocabulary to `constraint`, and everything else to
-`unknown`. **I/O failures are normalized but never replayed.** A unique
-violation is never retried either: it is the first-writer-wins signal the stores
-decide on.
+```ts
+const make: (sql: SqlClient.SqlClient, options?: WriteRetryOptions | undefined) => Service
+```
 
-The two classifiers share one predicate pair, so the code a caller receives
-after the budget is exhausted always names the category the budget was spent on.
-A typed failure must carry an Effect `SqlError` somewhere in its cause chain to
-qualify as retryable, so an application error whose message happens to quote
-database text is not replayed. The one exception is the raw rollback defect
-Effect 4.0.0-rc.108 raises with no `SqlError` attached, which is matched on the
-defect channel alone.
+Builds the writer around an existing SQL client. Accepts any Effect
+`SqlClient`, which is why the retry classification is dialect blind.
 
-Retries are bounded, and the defaults are:
+### layer
 
-| Option        | Default | Meaning                                     |
-| ------------- | ------- | ------------------------------------------- |
-| `maxAttempts` | `10`    | total attempts, including the initial write |
-| `baseDelayMs` | `50`    | initial exponential backoff delay           |
-| `maxDelayMs`  | `10000` | upper bound for a single retry delay        |
+```ts
+const layer: (options?: WriteRetryOptions | undefined) => Layer.Layer<DurableWriter, never, SqlClient.SqlClient>
+```
+
+Provides the writer over the context's SQL client. Compose it above a driver
+layer with `Layer.provideMerge` so both services stay in the output.
+
+### makeNoop
+
+```ts
+const makeNoop: () => Service
+```
+
+A writer stub whose every write fails with `DatabaseError` code `unsupported`.
+
+### layerNoop
+
+```ts
+const layerNoop: Layer.Layer<DurableWriter>
+```
+
+Provides the unsupported writer stub.
+
+### WriteRetryOptions
+
+```ts
+interface WriteRetryOptions {
+  readonly maxAttempts?: number | undefined
+  readonly baseDelayMs?: number | undefined
+  readonly maxDelayMs?: number | undefined
+}
+```
+
+| Field         | Default | Meaning                                                |
+| ------------- | ------- | ------------------------------------------------------ |
+| `maxAttempts` | `10`    | Total attempts, including the initial write.           |
+| `baseDelayMs` | `50`    | Initial exponential backoff delay, in milliseconds.    |
+| `maxDelayMs`  | `10000` | Upper bound for a single retry delay, in milliseconds. |
 
 Jitter is applied before the cap, so `maxDelayMs` bounds the delay that is
-actually slept. Any value that is not a safe integer of at least 1 clamps to 1
-rather than failing, so a mis-tuned option degrades into a single attempt
-instead of an unbounded one. Every scheduled replay increments
-`flows_db_write_retries`; the attempt that finally fails is not counted.
+actually slept. Any value that is not a safe integer of at least 1 clamps to 1.
+Delays use Effect's `Clock`, so `TestClock` drives them.
 
-## Affected-row counts
+### DatabaseErrorCode
 
-`affectedRows(raw)` reads how many rows a write touched out of the driver's
-native `.raw` result. SQLite drivers report `changes` and node-postgres reports
-`rowCount`, so a consumer that casts to one shape silently reads `undefined` on
-the other backend and turns a successful compare-and-swap delete into a reported
-no-op. A count is accepted as a non-negative safe integer, or as an exact
-`bigint` in that range, which is what `node:sqlite` returns when a caller enables
-Effect's `SqlClient.SafeIntegers`. Only an own data property counts: an
-inherited or accessor-backed `changes` did not come from the statement that ran.
-A shape carrying neither field fails with `unsupported`, and the failure carries
-only the shape of the offending result, never its values.
+```ts
+const DatabaseErrorCode: Schema.Literals<["busy", "constraint", "io", "unsupported", "unknown"]>
+type DatabaseErrorCode = typeof DatabaseErrorCode.Type
+```
 
-## Opens that 1.0.0-rc.0 refuses
+The stable failure categories this package exposes.
 
-`NodeDatabase.layer` refuses three opens before it creates a connection and
-raises `UnsupportedDatabase` as a defect in each case. The error channel of
-`layer` stays `never`, so every durable package composes it unchanged; match the
-defect with `isUnsupportedDatabase` when a command needs to report it.
+### DatabaseError
 
-| Code                        | Refused when                                                    | Message                                                                              |
-| --------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `unsupported_runtime`       | `process.versions.bun` is set                                   | `1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only`                       |
-| `unsupported_database_file` | the file has at least one table and no `flows_migrations` table | `<path> is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)` |
-| `database_locked`           | a peer held the file for the whole ladder, so it was never read | `<path> could not be inspected because another process holds it`                     |
+```ts
+class DatabaseError extends Schema.TaggedError<DatabaseError>()("@smthrs/database/DatabaseError", {
+  code: DatabaseErrorCode,
+  cause: Schema.optional(Schema.Defect())
+}) {}
+```
 
-The runtime check runs first, so a Bun process learns it is the wrong runtime
-rather than something about the file it named. The file check
-reads `sqlite_master` through a read-only connection, including for a SQLite
-`file:` URI filename, which `node:sqlite` accepts and which would otherwise slip
-past a filesystem probe. A URI is probed by its path alone: its query says how
-to open the file, never which tables the file holds, and a read-only open of
-`file:<path>?mode=rw` fails on the mode conflict before reading one, which would
-wave a 0.x database through. It says nothing when the file cannot be inspected
-at all: a path that does not exist, a directory, an in-memory name, or a file
-SQLite refuses to read. None of those is a 0.x database, so the driver's own
-open decides what happens next.
+A normalized database failure, suitable for consumers outside a driver. Narrow
+it with `Schema.is(DatabaseError)` or catch it by its tag
+`@smthrs/database/DatabaseError`.
 
-A file a peer holds locked is not one of those cases. The probe retries on the
-same ladder the open uses, so a 0.x `smithers.db` is refused whether or not a
-0.x writer held it at that moment. A lock nobody releases exhausts the ladder,
-and that is refused too, with `database_locked`.
+| Code          | Meaning                                                                                |
+| ------------- | -------------------------------------------------------------------------------------- |
+| `busy`        | A transient lock or serialization conflict. The only category that is replayed.        |
+| `constraint`  | A constraint or unique violation. Never replayed: it is the first-writer-wins signal.  |
+| `io`          | An I/O failure. Normalized but never replayed, even when a busy cause sits beneath it. |
+| `unsupported` | The noop writer, or a raw result with no readable affected-row count.                  |
+| `unknown`     | A SQL failure in none of the above categories.                                         |
 
-Opening is retried because the client issues `PRAGMA journal_mode = WAL` inside
-its constructor, and SQLite performs that mode change only with the file to
-itself. The client sets `PRAGMA busy_timeout` first and the mode change does
-honour it: measured on `node:sqlite` against a peer holding a shared read lock,
-the conversion waits the whole timeout and then fails with `database is locked`.
-A lock that outlasts the timeout still fails, and so does `SQLITE_BUSY_RECOVERY`
-while a peer recovers the log. Both arrive as construction-time defects rather
-than the `SqlError` values the write retry classifies, so they are handled at
-the layer instead, on a fixed ladder of 40 attempts with a 5 ms base delay
-capped at 250 ms. Because a contended attempt can spend up to the configured
-`busyTimeout` inside SQLite before that delay, the ladder's wall-clock cost is
-bounded by the timeout, not by the delays. The ladder is deliberately not
-configurable: it bounds a driver-internal race during layer construction, before
-any service exists to configure.
+### fromSqlError
 
-## Environment names 1.0.0-rc.0 ignores
+```ts
+const fromSqlError: (error: SqlError.SqlError) => DatabaseError
+```
 
-`UnsupportedBackend.ignoredNames(process.env)` lists the connection strings a
-0.x PostgreSQL or PGlite deployment exports, `SMITHERS_TEST_PG_URL` and every
-`SMITHERS_POSTGRES_*` name, and `ignoredNotice(name)` is the line each one gets:
+Converts an Effect SQL error into the stable vocabulary. The category comes
+from the same classifier the retry decision reads, so the code a caller is told
+and the decision to replay cannot disagree about one error.
+
+Classification, in precedence order: a lock timeout is `busy`; a constraint or
+unique violation is `constraint`; an I/O cause is `io`; a busy cause is `busy`;
+anything else is `unknown`.
+
+The busy vocabulary is `SQLITE_BUSY*`, `SQLITE_LOCKED*`, SQLSTATE `40001`,
+`40P01`, `55P03`, and the texts `database is locked`, `database is busy`,
+`could not serialize access`, `deadlock detected`, and
+`cannot rollback - no transaction is active`. The I/O vocabulary is
+`SQLITE_IOERR*` and the text `disk i/o error`.
+
+### affectedRows
+
+```ts
+const affectedRows: (raw: unknown) => Effect.Effect<number, DatabaseError>
+```
+
+Reads how many rows a write statement affected from a driver's raw result,
+which `SqlClient` exposes as `.raw`. Reads an own `changes` property (SQLite
+drivers) or an own `rowCount` property (node-postgres).
+
+A count is accepted as a non-negative safe integer, or as an exact `bigint` in
+that range, which is what `node:sqlite` returns when `SqlClient.SafeIntegers`
+is enabled. Only an own data property counts, so an inherited field is ignored
+and an accessor is never executed.
+
+Fails with code `unsupported` when neither field is readable. The failure's
+`cause` carries the shape of the result and never its values: its type, up to
+eight key names, and its length if it was an array.
+
+See [Read a write's affected-row count](/guides/count-affected-rows/).
+
+## Migrations
+
+Composes per-package SQL migration sets over one migrations table.
+
+### table
+
+```ts
+const table: "flows_migrations"
+```
+
+The single table every Smithers package records its applied migrations in. Its
+presence is also what tells the Node driver that a file is a Smithers 1.0
+database.
+
+### idBlock
+
+```ts
+const idBlock: 1000
+```
+
+The spacing between the migration id blocks packages reserve with
+`MigrationSet.idOffset`. A package may ship this many migrations before it
+would reach its neighbour.
+
+### MigrationSet
+
+```ts
+interface MigrationSet {
+  readonly namespace: string
+  readonly idOffset: number
+  readonly migrations: Readonly<Record<string, Effect.Effect<void, unknown, SqlClient.SqlClient>>>
+}
+```
+
+One package's migrations, namespaced so they cannot collide with another
+package's.
+
+| Field        | Meaning                                                                                                                                           |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `namespace`  | Prefixes every migration name in the ledger. Unique among the sets composed together.                                                             |
+| `idOffset`   | A non-negative safe integer multiple of `idBlock`, unique among the sets composed together. Lifts the set's local ids into the block it reserves. |
+| `migrations` | Keyed `<localId>_<name>`, with the local id in `0..idBlock - 1`.                                                                                  |
+
+### loader
+
+```ts
+const loader: (sets: ReadonlyArray<MigrationSet>) => Migrator.Loader<SqlClient.SqlClient>
+```
+
+Builds a `Migrator` loader from namespaced sets, resolved into one list ordered
+by global migration id rather than by the order the sets were given.
+
+The set list and each migration record are snapshotted when this function is
+called, so later caller mutation cannot change a loader already returned.
+
+It fails the migration, as a `Migrator.MigrationError` of kind `BadState`,
+rather than returning a list the migrator would quietly mishandle:
+
+| Rejected                             | Message                                                                                                        |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Duplicate namespace                  | `Duplicate migration namespace: <namespace>`                                                                   |
+| Duplicate offset                     | `Duplicate migration id offset <offset> for namespace <namespace>`                                             |
+| Negative or fractional offset        | `... an id offset must be a non-negative integer`                                                              |
+| Unsafe integer offset                | `... an id offset must be a safe integer in the range 0..<max>`                                                |
+| Misaligned offset                    | `... an id offset must be a multiple of idBlock (1000)`                                                        |
+| Malformed key                        | `Malformed migration key "<key>" in namespace <namespace>`                                                     |
+| Local id at or above `idBlock`       | `Local migration id <id> ... is outside the block range 0..999 and would claim a neighbouring package's block` |
+| Two keys realizing one id            | `Migration id <id> is claimed twice: <owner> and <claimant>`                                                   |
+| An id the high-water mark would skip | `Migration <id>_<name> would be skipped: the database has already applied migration id <highWater> ...`        |
+| An unreadable ledger id              | `flows_migrations contains an invalid migration_id: <value>`                                                   |
+
+On a fresh database the loader applies global id zero itself, inside the
+migrator's transaction, because the migrator's high-water mark starts at zero
+and would silently skip it. A caller wiring the loader into its own `Migrator`
+therefore gets id zero applied but not reported in the migrator's completed
+list.
+
+### run
+
+```ts
+const run: (sets: ReadonlyArray<MigrationSet>) => Effect.Effect<
+  ReadonlyArray<readonly [id: number, name: string]>,
+  Migrator.MigrationError | SqlError,
+  SqlClient.SqlClient
+>
+```
+
+Runs every migration in the given sets that has not been applied yet, and
+answers the `[id, name]` pairs it applied on this pass, including id zero. A
+pass with nothing to do answers an empty array.
+
+The whole migrator pass, the `BEGIN IMMEDIATE`, the loader, and the pending
+migrations, retries on the same transient-lock vocabulary the durable writer
+uses, so two connections migrating one SQLite file serialize instead of failing
+on the peer's write lock.
+
+A failing migration takes the whole pass with it: the partial DDL and the
+ledger rows roll back, and it surfaces as a `Failed` `MigrationError` on the
+defect channel.
+
+### layer
+
+```ts
+const layer: (sets: ReadonlyArray<MigrationSet>) => Layer.Layer<
+  never,
+  Migrator.MigrationError | SqlError,
+  SqlClient.SqlClient
+>
+```
+
+Runs the given migration sets before exposing the database to durable services.
+
+See [the migration ladder](/concepts/migration-ladder/) and
+[Add a migration](/guides/add-a-migration/).
+
+## DatabaseMetrics
+
+Metric definitions for the durable write boundary. This module defines handles
+only. No exporter ships here: provide one, for example from
+[`@smthrs/observability`](https://observability.smithers.sh/reference/api/), and the counter appears in it.
+
+### writeRetries
+
+```ts
+const writeRetries: Metric.Counter
+```
+
+Counter `flows_db_write_retries`, described as "Durable write transaction
+replays after transient conflicts". Incremented once per scheduled retry of a
+recognized transient conflict, across every store that writes through the
+boundary. The attempt that finally fails past the retry budget is not counted:
+it surfaces on the error channel instead.
+
+## UnsupportedBackend
+
+The environment half of the SQLite-only contract. Strings only, so it is
+browser safe.
+
+### ignoredNames
+
+```ts
+const ignoredNames: (environment: Readonly<Record<string, string | undefined>>) => ReadonlyArray<string>
+```
+
+The `SMITHERS_*` names 1.0.0-rc.0 ignores: `SMITHERS_TEST_PG_URL` and every
+name beginning `SMITHERS_POSTGRES_`. Sorted, so an operator reading two runs
+compares two identical lists. An exported-but-blank name counts as unset.
+
+The separator is part of the prefix, so `SMITHERS_POSTGRESQL_URL`, a name
+neither release reads, is not announced.
+
+### ignoredNotice
+
+```ts
+const ignoredNotice: (name: string) => string
+```
+
+The one line an ignored name gets:
 
 ```text
 ignored: SMITHERS_POSTGRES_URL has no effect in 1.0.0-rc.0 (SQLite only)
 ```
 
-It is a notice, not a refusal: nothing about the run changes and the exit code
-does not move. Choosing a backend is the separate case, and `SMITHERS_BACKEND`
-or `--backend` with any value but `sqlite` exits 1 with `unsupported_database`,
-a refusal the CLI owns.
+It is a notice, not a refusal: it changes no exit code and no result.
 
-## Migrations
+## NodeDatabase
 
-Every storage package above this one owns its own tables and therefore its own
-migrations, but they all migrate one database and record their progress in one
-`flows_migrations` table. A `MigrationSet` declares a `namespace` that prefixes
-its migration names and an `idOffset`, a multiple of `idBlock` (1000), that
-reserves a block of migration ids, so two packages that both ship an
-`0001_initial` land on distinct identities instead of colliding or silently
-shadowing one another through a merged record.
+Node only. `import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"`.
 
-`loader(sets)` rejects a duplicate namespace, a duplicate offset, an offset that
-is not an aligned safe integer, a malformed key, a local id outside its block,
-and any realized id collision the offsets failed to prevent. It also rejects the
-second way a block scheme can lose a table: Effect's `Migrator` decides what to
-run from a single high-water mark, so a migration whose id sits at or below the
-highest id the database already applied would be assumed done and never run.
-Migrating a database with the `2000` block alone and then composing every set
-would otherwise leave the `0` and `1000` blocks' tables uncreated. That fails
-loudly instead. The one such skip that is legitimate work, global id zero on a
-fresh database, the loader applies itself inside the migrator's transaction.
+Provides the `node:sqlite` SQL client through `@effect/sql-sqlite-node`, and
+nothing else. The write policy lives in `DurableWriter.layer`, composed on top.
 
-`run(sets)` and `layer(sets)` apply the composed sets in id order, not in the
-order the sets were given, and wrap the whole migrator pass in the same
-transient-lock retry the durable writer uses, so two connections migrating one
-SQLite file serialize instead of failing on the peer's `BEGIN IMMEDIATE` lock.
+### layer
 
-The shipped offsets are `journal` at `0`, `run-store` at `idBlock`, `step-cache`
-at `idBlock * 2`, `engine-store` at `idBlock * 3`, `plan` at `idBlock * 4`,
-`time-travel` at `idBlock * 5`, and `integrations` at `idBlock * 6`.
-`@smthrs/engine-store/Migrations` is the composed list a durable engine
-installs.
+```ts
+const layer: (options: NodeDatabaseOptions) => Layer.Layer<SqlClient.SqlClient>
+```
 
-## Dialect status
+Provides the SQL client. WAL is enabled by the underlying client by default.
 
-SQLite is the shipped backend, in both the Node file form and the in-memory test
-form.
+The error channel is `never` by design, so every durable package composes it
+unchanged. A refused open is raised as a defect carrying `UnsupportedDatabase`,
+and a lock during construction is retried on a fixed ladder of 40 attempts with
+a 5 ms base delay capped at 250 ms. That ladder is not configurable: it bounds a
+driver-internal race during layer construction, before any service exists to
+configure.
 
-:::warning
-The package root bundles for browsers as a contract, but no browser SQL client
-layer ships here. There is no `PgDatabase` or `PGliteDatabase` layer, and the
-journal schema is SQLite-flavoured DDL, so a Postgres client wrapped by
-`DurableWriter.make` gets correct retry classification but not a runnable
-schema. Postgres and PGlite layers, and a dialect-parameterized migration
-ladder, are Planned and do not ship in this release.
-:::
+### NodeDatabaseOptions
 
-The database service does not run domain migrations. Compose
-[`Journal.Migrations.layer`](https://journal.smithers.sh/reference/api/#migrations) before exposing journal
-stores. See [Run durably over SQLite](https://smithers.sh/docs/tutorials/first-flow/#6-run-durably-over-sqlite) and the
-[`@smthrs/journal`](https://journal.smithers.sh/reference/api/), [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/), and
-[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) references.
+```ts
+interface NodeDatabaseOptions {
+  readonly filename: string
+  readonly sqlite?: Omit<SqliteClient.SqliteClientConfig, "filename"> | undefined
+}
+```
+
+| Field      | Meaning                                                                                                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `filename` | The SQLite database filename. A `file:` URI is accepted, and `:memory:` opens a private in-memory database. The parent directory is not created. |
+| `sqlite`   | Additional driver configuration. WAL remains enabled unless explicitly disabled.                                                                 |
+
+### UnsupportedDatabaseCode
+
+```ts
+const UnsupportedDatabaseCode: Schema.Literals<[
+  "unsupported_runtime",
+  "unsupported_database_file",
+  "database_locked"
+]>
+type UnsupportedDatabaseCode = typeof UnsupportedDatabaseCode.Type
+```
+
+### UnsupportedDatabase
+
+```ts
+class UnsupportedDatabase extends Schema.TaggedError<UnsupportedDatabase>()(
+  "@smthrs/database/UnsupportedDatabase",
+  { code: UnsupportedDatabaseCode, message: Schema.String }
+) {}
+```
+
+A refusal to open a durable database in 1.0.0-rc.0, raised as a defect rather
+than a typed failure because neither refusal is recoverable at run time.
+
+| Code                        | Refused when                                                    | Message                                                                              |
+| --------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `unsupported_runtime`       | `process.versions.bun` is set                                   | `1.0.0-rc.0 runs the durable engine on Node.js >=22.19.0 only`                       |
+| `unsupported_database_file` | the file has at least one table and no `flows_migrations` table | `<path> is not a Smithers 1.0 database (1.0.0-rc.0 does not load a 0.x smithers.db)` |
+| `database_locked`           | a peer held the file for the whole open ladder                  | `<path> could not be inspected because another process holds it`                     |
+
+### isUnsupportedDatabase
+
+```ts
+const isUnsupportedDatabase: (input: unknown) => input is UnsupportedDatabase
+```
+
+Narrows an unknown defect to this driver's refusal. Use it in
+`Effect.catchDefect` and re-raise anything else unchanged.
+
+## TestDatabase
+
+Node only. `import * as TestDatabase from "@smthrs/database/test/TestDatabase"`.
+
+### layer
+
+```ts
+const layer: Layer.Layer<DurableWriter.DurableWriter | SqlClient.SqlClient>
+```
+
+Provides the production Node SQLite client and the production durable writer
+over a fresh in-memory database. `:memory:` is private to a connection, so both
+halves share one connection and serialization comes from the client's
+in-process transaction mutex rather than from the database.
+
+See [Test against a database](/guides/test-against-a-database/).

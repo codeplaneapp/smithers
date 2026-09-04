@@ -58,6 +58,7 @@ exists for future additions and is unused. See
 | ------------------------------ | ------ | --------- | -------- | ------------------------------------------------------------------------------------- |
 | [EsLint](es-lint.md)           | `lint` | Never     | Executes | Runs ESLint over declared source sets with a flat config.                             |
 | [BiomeCheck](biome-check.md)   | `lint` | Never     | Executes | Runs `biome check` and `biome format` without writing files.                          |
+| [Dprint](dprint.md)            | `lint` | Never     | Executes | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.              |
 | [DepsLint](deps-lint.md)       | `lint` | Never     | Executes | Checks dependency declarations with knip or depcheck.                                 |
 | [PackageLint](package-lint.md) | `lint` | Never     | Executes | Checks the published package surface with publint and attw.                           |
 | [LlmLint](llm-lint.md)         | `lint` | Never     | Executes | Reviews changed files with a model against a rubric, through the claude or codex CLI. |
@@ -78,6 +79,8 @@ exists for future additions and is unused. See
 | Target                       | Kinds  | Cacheable | Status   | Summary                                                |
 | ---------------------------- | ------ | --------- | -------- | ------------------------------------------------------ |
 | [DocsParity](docs-parity.md) | `docs` | Always    | Executes | Requires a substantive README beside a package's code. |
+| [Docs.Page](docs-page.md) | `docs` | Never | Executes | Writes one documentation page with an agent; `ci` never selects it. |
+| [Docs.Check](docs-check.md) | `lint`, `docs` | Check form | Executes | Fails when a committed agent-written page is older than its inputs, or was hand-edited. |
 | [Markdown.CodeBlocks](markdown-code-blocks.md) | `build`, `test` | Always | Executes | Compiles a page's fenced code blocks; `title=` fences concatenate into files, `fragment` fences are skipped. |
 
 `PackageJson` uses separate targets for checking and source-tree writes.

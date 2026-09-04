@@ -104,6 +104,21 @@ artifact tier before publishing the cache entry. Use deferred publication when
 the local write occurs inside a database transaction; perform remote I/O only
 after that transaction commits.
 
-See the [step-cache API](https://smithers.sh/docs/reference/api/step-cache),
-[step-key contract](https://smithers.sh/docs/concepts/content-addressing), and
-[journal architecture](https://smithers.sh/docs/concepts/durable-execution).
+## Documentation
+
+- [API reference](https://step-cache.smithers.sh/reference/api/): every public
+  export, with signatures.
+- [Quickstart](https://step-cache.smithers.sh/quickstart/): record a result,
+  read it back through its provenance, expire it, and evict it.
+- [The head and the ledger](https://step-cache.smithers.sh/concepts/head-and-ledger/):
+  why one `put` writes two rows.
+- [Guides](https://step-cache.smithers.sh/guides/compose-a-store/): composing
+  the store, reading a recorded result, expiring and evicting entries, sharing
+  results across machines, implementing a shared tier, observing outcomes, and
+  testing.
+- [Troubleshooting](https://step-cache.smithers.sh/troubleshooting/): every
+  failure this package reports, its cause, and the fix.
+
+See also [content addressing](https://smithers.sh/docs/concepts/content-addressing/)
+on smithers.sh, and [`@smthrs/journal`](https://journal.smithers.sh) for the
+event log this store's provenance rows name.

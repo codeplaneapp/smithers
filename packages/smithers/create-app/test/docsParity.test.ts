@@ -1,21 +1,18 @@
 /**
- * What holds `docs/` to the package while there is no generator.
+ * What holds `docs/` to the package.
  *
- * `packages/smithers/flows/canonical` and `packages/smithers/flows/crypto` project their pages out of their
- * own JSDoc through a `Smithers.Generate` target, so a claim in the published
- * page cannot drift from the code. This package is private at 1.0.0-rc.0, owns
- * no page under `docs/pages`, and its prose is written by hand in `docs/`
- * instead — which means nothing checked it at all: `docs/api.md` could name a
- * subpath the package stopped exporting, a constructor that was renamed, or a
- * flag the bin no longer takes, and every gate stayed green.
+ * `docs/` is the source of create-app.smithers.sh: `apps/docs/shared/sync-content.mjs`
+ * stitches it into the site, and `docs/README.md` is the landing page. Nothing
+ * in that pipeline reads the package, so without these cases `docs/api.md`
+ * could name a subpath the package stopped exporting, a constructor that was
+ * renamed, or a flag the bin no longer takes, and every gate stayed green.
  *
- * These cases are the parts of that page a machine can settle. What they cannot
- * settle is whether the prose is true, which is why `docs/README.md` says the
- * page is reviewed by hand and what to replace this with when the package
- * publishes.
+ * These cases are the parts a machine can settle: the reference page against
+ * the export map and the bin, and the landing page against the pages that
+ * exist. Whether the prose is true is a reviewer's job.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import * as CreateApp from "../src/index.ts"
@@ -86,11 +83,32 @@ describe("docs/api.md", () => {
   })
 })
 
+/** Every Markdown page under `docs/`, as docs-relative posix paths. */
+const pages = (): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  const walk = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`
+      if (entry.isDirectory()) walk(join(directory, entry.name), relative)
+      else if (entry.name.endsWith(".md")) found.push(relative)
+    }
+  }
+  walk(join(packageRoot, "docs"), "")
+  return found.sort()
+}
+
 describe("docs/README.md", () => {
   const readme = read("docs/README.md")
 
-  it("lists every file in docs/", () => {
-    const listed = [...readme.matchAll(/^\| `([^`]+)`/gm)].map((match) => match[1]!)
-    expect([...listed].sort()).toEqual(["api.md", "routing.md"])
+  /**
+   * The landing page is the only entry point a reader lands on, and the
+   * sidebar is computed from the synced tree rather than authored, so a page
+   * nothing links to is a page nobody finds. This is the cheap half of that:
+   * a new page has to be introduced somewhere on the landing page.
+   */
+  it("links every other page in docs/", () => {
+    const others = pages().filter((page) => page !== "README.md")
+    expect(others.length).toBeGreaterThan(0)
+    expect(others.filter((page) => !readme.includes(`](./${page})`))).toEqual([])
   })
 })

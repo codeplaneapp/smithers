@@ -1,102 +1,202 @@
-## Derive a current key
+---
+title: "API reference"
+description: "Every export of @smthrs/keys: deriveKey, DerivedKey, StoredKey, KeyV1, digest, KeyDerivationError, and KeyDerivationErrorCode, with signatures, requirements, and failures."
+---
 
-Use `deriveKey` when producing an identity. It requires an Effect
-`Crypto.Crypto` service and returns a branded `KeyV1`.
+`@smthrs/keys` exports one module. Every name below is available from the root
+entry point and from `@smthrs/keys/Key`.
 
-```typescript
+```ts
+import { DerivedKey, deriveKey, digest, KeyDerivationError, KeyV1, StoredKey } from "@smthrs/keys"
+```
+
+## Derivation
+
+Both entry points perform the same three steps: canonicalize with
+[`@smthrs/canonical`](/api/canonical), hash the canonical UTF-8 document with
+SHA-256 through the injected Effect `Crypto` service that
+[`@smthrs/crypto`](/api/crypto) wraps, and prefix the lowercase digest with
+`key1_`. Neither validates an existing key. See
+[Key derivation](./concepts/key-derivation.md).
+
+### deriveKey
+
+```ts
+const deriveKey: (input: unknown) => Effect.Effect<KeyV1, KeyDerivationError, Crypto.Crypto>
+```
+
+Derives the current key format from structured input.
+
+- `input`: any value with a canonical form. Values without one fail; see
+  [Key material](./concepts/key-material.md).
+- Returns a branded `KeyV1`, always 69 characters.
+- Requires `Crypto.Crypto` from `effect/Crypto`. A missing service is an
+  unsatisfied Effect requirement and therefore a configuration defect, not a
+  `KeyDerivationError`.
+- Fails with `KeyDerivationError`.
+
+```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { deriveKey } from "@smthrs/keys"
-import { Effect } from "effect"
+import * as Effect from "effect/Effect"
 
 const key = await Effect.runPromise(
-  deriveKey({ domain: "example/compile", version: 1, input: "main.ts" }).pipe(
+  deriveKey({ domain: "example/compile", version: 1, source: "main.ts" }).pipe(
     Effect.provide(NodeCrypto.layer)
   )
 )
-// key1_<64 lowercase hex>
+// key1_74a286a394e4b0619c05801dd4e7315deeb83b8203cd3c3ee7cd6033ec55c683
 ```
 
-The algorithm for version one is fixed:
+### DerivedKey
 
-1. Encode the input with `@smthrs/canonical`.
-2. Hash the canonical UTF-8 document with injected SHA-256 from
-   `@smthrs/crypto`.
-3. Prefix the lowercase digest with `key1_`.
+```ts
+const DerivedKey: Schema.Codec<KeyV1, unknown>
+```
 
-## Parse a stored key
+The same derivation as a schema transformation, for composing inside a decode.
 
-Use `StoredKey` whenever a key crosses persistence, RPC, journal, or
-external-input boundaries. Validation returns the same text and requires no
-crypto service.
+- Decoding derives a fresh key from whatever it is given. Decoding the text
+  `key1_...` hashes that text into a different key; it does not parse it. Use
+  `StoredKey` for that.
+- Encoding is forbidden and reports
+  `A key cannot be converted back into its input`.
+- Operational failures become `SchemaError` issues whose message is
+  `[<code>] <message>`. The typed `KeyDerivationError` is retained on the
+  failing issue's annotations as `cause`, next to the stable `code`.
+- The schema pins `parseOptions: { reportInput: false }`, so no schema issue
+  retains the input value even when an enclosing caller requests input
+  reporting.
+- Annotated with the identifier `@smthrs/keys/Key`.
 
-```typescript
+```ts
+import { DerivedKey } from "@smthrs/keys"
+import * as Schema from "effect/Schema"
+
+const program = Schema.decodeUnknownEffect(DerivedKey)({ domain: "example/compile", version: 1 })
+```
+
+See [Derive a key inside a schema](./guides/derive-a-key-inside-a-schema.md).
+
+## Validation
+
+Validation returns the input text unchanged, performs no hashing, and requires
+no `Crypto` service.
+
+### StoredKey
+
+```ts
+const StoredKey: typeof KeyV1
+type StoredKey = typeof StoredKey.Type
+```
+
+Every stored-key representation this release understands. It is intentionally
+equal to `KeyV1` today and is a separate export because its meaning is
+different: `KeyV1` names one format, `StoredKey` names what the running release
+can validate. Use `StoredKey` at persistence, RPC, journal, and
+external-input boundaries.
+
+A future format joins this schema only when its complete representation and
+derivation are supported. Unknown `key<n>_` prefixes are rejected rather than
+guessed.
+
+```ts
 import { StoredKey } from "@smthrs/keys"
-import { Schema } from "effect"
+import * as Schema from "effect/Schema"
 
 const key = Schema.decodeUnknownSync(StoredKey)(persistedText)
 ```
 
-`KeyV1` validates the exact current representation. `StoredKey` is the union of
-all representations this release supports and is currently equal to `KeyV1`.
-The package does not speculate about future payload lengths, algorithms, or
-encodings: `key2_` is invalid until a complete version-two contract is added.
+### KeyV1
 
-## Compatibility schema
+```ts
+const KeyV1: Schema.Codec<KeyV1, string>
+type KeyV1 = typeof KeyV1.Type
+```
 
-`Key` remains the one-way schema transformation used by existing callers.
-Decoding through it always derives a fresh key. Passing `key1_...` as its input
-hashes that text; it does not validate and return it. Its attached
-`Key.derive`, `Key.digest`, `Key.StoredKey`, and `Key.KeyV1` properties mirror the named
-exports.
+The exact persisted representation produced by the version-one derivation:
+`key1_` followed by 64 lowercase hexadecimal characters, 69 characters in
+total. Branded as `@smthrs/keys/Key`, so the type is only obtainable by
+decoding.
 
-Prefer `deriveKey` for ordinary Effect code because it exposes typed failures.
-Use `Key` where schema composition is the useful boundary. Encoding `Key` in
-reverse always fails because a digest cannot reconstruct its input.
+Rejected input includes `key2_`, `key0_`, `key01_`, an uppercase digest, a
+payload that is not exactly 64 hexadecimal characters, the empty string, and
+any non-string. The rejection message is
+`Expected key1_ followed by a 64-character lowercase hexadecimal SHA-256 digest`.
 
-## Version and ownership policy
+Unlike `DerivedKey`, this schema does not suppress input reporting: a caller
+that decodes with `{ reportInput: true }` gets the rejected text back in the
+message.
 
-Treat every key as opaque. Only this package owns the `key<n>_...` wire form.
-A new version requires an explicit schema, derivation, golden vectors, host
-parity coverage, and addition to `StoredKey`. Existing versions remain explicit
-union members; a permissive version regex is not compatibility.
+### digest
 
-Canonicalization rules belong to
-[`@smthrs/canonical`](/api/canonical), and SHA-256 input and host rules belong
-to [`@smthrs/crypto`](/api/crypto). Callers own their domain material. Include a
-stable domain and material-schema version, for example
-`{ domain: "engine/action", version: 1, ... }`, whenever two protocols must not
-share an identity namespace.
+```ts
+const digest: (key: StoredKey) => Digest
+```
 
-## Input and resource policy
+Returns the validated SHA-256 payload of a stored key: the 64 lowercase
+hexadecimal characters after the prefix. `Digest` is the branded digest type
+from [`@smthrs/crypto`](/api/crypto).
 
-Derivation accepts exactly what `Canonical` can serialize and inherits its
-erasures. For example, negative zero canonicalizes as zero, an undefined object
-member is omitted, and an undefined array element canonicalizes as null. Encode
-distinctions explicitly when they matter to identity.
+The function takes an already-validated `StoredKey` and does not re-check it.
+It exists so that prefix knowledge stays in this package instead of spreading
+into `slice` calls and delimiter searches at every call site.
 
-JavaScript object serialization is not an untrusted-code sandbox. Accessors,
-proxy traps, or `toJSON` methods may execute while a live object is inspected.
-Decode external JSON into inert data before deriving a key; do not pass hostile
-live objects.
+```ts
+import { digest, StoredKey } from "@smthrs/keys"
+import * as Schema from "effect/Schema"
 
-The operation is one-shot and holds the input, canonical document, and hash
-snapshot in memory. This package adds no byte-size or nesting-depth limit.
-External boundaries must impose limits appropriate to their protocol before
-derivation.
+const payload = digest(Schema.decodeUnknownSync(StoredKey)(persistedText))
+// 74a286a394e4b0619c05801dd4e7315deeb83b8203cd3c3ee7cd6033ec55c683
+```
 
-## Failure policy
+## Errors
 
-`deriveKey` fails with `KeyDerivationError`. Its `code` is stable, its message
-does not include key material, and `cause` preserves the underlying schema or
-crypto error.
+### KeyDerivationError
+
+```ts
+class KeyDerivationError extends Schema.TaggedError<KeyDerivationError>()(
+  "@smthrs/keys/KeyDerivationError",
+  { code: KeyDerivationErrorCode, message: Schema.String, cause: Schema.Unknown }
+) {}
+```
+
+The only failure `deriveKey` reports.
+
+- `code`: stable, for control flow.
+- `message`: one of two fixed sentences,
+  `Key input could not be canonicalized` or
+  `Canonical key material could not be hashed`. It never contains the input.
+- `cause`: the original schema or crypto failure, retained for diagnostics. A
+  canonicalization cause names the JSON path of the offending value, which
+  includes object property names. See
+  [Handle a derivation failure](./guides/handle-a-derivation-failure.md).
+
+### KeyDerivationErrorCode
+
+```ts
+const KeyDerivationErrorCode: Schema.Literals<["canonicalization_failed", "digest_failed"]>
+type KeyDerivationErrorCode = typeof KeyDerivationErrorCode.Type
+```
 
 | Code                      | Meaning                                                              |
 | ------------------------- | -------------------------------------------------------------------- |
 | `canonicalization_failed` | The input has no accepted canonical form.                            |
 | `digest_failed`           | The injected SHA-256 operation failed or returned an invalid digest. |
 
-A missing `Crypto.Crypto` service remains an unsatisfied Effect requirement and
-is a configuration defect. The compatibility `Key` schema maps operational
-failures to redacted `SchemaError` issues while retaining the typed error as an
-issue annotation. Invalid `StoredKey` and `KeyV1` text produce an ordinary
-`SchemaError`.
+A missing `Crypto.Crypto` service is deliberately not a member. It remains an
+unsatisfied Effect requirement, which is a configuration defect rather than a
+provided host failing an operation.
+
+## Ownership
+
+Only this package owns the `key<n>_` wire form; treat a key as opaque
+everywhere else. Canonicalization rules belong to
+[`@smthrs/canonical`](/api/canonical), and SHA-256 input and host rules belong
+to [`@smthrs/crypto`](/api/crypto). Domain material belongs to each caller: see
+[Separate identity namespaces](./guides/separate-identity-namespaces.md).
+
+Adding a version requires an explicit schema, a complete derivation, frozen
+wire vectors, host parity coverage, and addition to the `StoredKey` union.
+Existing versions remain explicit union members; a permissive version pattern
+is not compatibility. See [the wire format](./concepts/wire-format.md).

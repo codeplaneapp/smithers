@@ -88,7 +88,7 @@ const trellis = MemoryTrellis.make({
 })
 ```
 
-The graph is the plain trellis graph, node for node. When you drive the plan yourself with `Trellis.run` rather than calling the declared flow, take the scoped author and leaf from `MemoryTrellis.parts`; calling the originals instead loses the policy. For the trellis itself, see the [`@smthrs/patterns` delegation guide](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/patterns/docs/delegation.md).
+The graph is the plain trellis graph, node for node. When you drive the plan yourself with `Trellis.run` rather than calling the declared flow, take the scoped author and leaf from `MemoryTrellis.parts`; calling the originals instead loses the policy. For the trellis itself, see the [`@smthrs/patterns` delegation guide](https://patterns.smithers.sh/delegation/).
 
 ## Next steps
 

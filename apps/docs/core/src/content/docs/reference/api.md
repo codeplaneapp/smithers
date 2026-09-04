@@ -1,198 +1,1259 @@
 ---
 title: "API reference"
-description: "Flow and Node builders: the pure plan-time data model of the Smithers harness"
+description: "Every public export of @smthrs/core: the Flow and Node builders, the Graph planner, effect declarations, placement, annotations, key material, Markdown lowering, Digest, and the TestRuntime evaluator."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/core/docs/api.md"
 ---
 
-A flow is a schema-described declaration. A node is an inert, pipeable value
-that records an AST. Production code in this package executes no steps:
-`Graph.build` evaluates pure flow bodies and pure `Node.andThen` builders exactly once
-against symbolic predecessor values so the complete static topology is visible
-before the first step executes.
+`@smthrs/core` exports ten modules from its root entry point, and each is also
+importable from `@smthrs/core/<Module>`:
 
-```typescript
-import { Flow, Graph, Node, Placement } from "@smthrs/core"
-import { Schema } from "effect"
-
-const greeting = Flow.make({
-  name: "greeting",
-  input: Schema.Struct({ name: Schema.String }),
-  output: Schema.String,
-  body: ({ name }) => Node.succeed(`Hello, ${name}`)
-}).pipe(Flow.within(Placement.sandbox()))
-
-const graph = Graph.build(greeting, { name: "world" })
-const material = Graph.keyMaterial(graph)
+```ts
+import { Effects, Flow, Graph, Node } from "@smthrs/core"
+// or
+import * as Flow from "@smthrs/core/Flow"
 ```
 
-## Testing declarations
+`@smthrs/core/internal/*` and `@smthrs/core/*/index` are not public.
+`@smthrs/core/package.json` is exported.
 
-`TestRuntime.evaluate` is a pure, synchronous test helper that executes the
-deferred maps, continuations, and recovery arms stored in one in-memory Node
-AST. Dynamic nodes and flow-call leaves cross an explicit deterministic
-resolver. `evaluateInline` additionally enters called flows that carry an
-in-memory body.
+Every value this package constructs is inert. Nothing here executes a step,
+resolves a registry name, or touches a host. `TestRuntime` is the one
+deliberate exception, and it is a test helper. For the model behind these
+signatures, see [Plan time](/concepts/plan-time/),
+[Identity and key material](/concepts/identity/), and
+[Effect envelopes](/concepts/effects/).
 
-It intentionally does not model capabilities, persistence, scheduling,
-retries, cache, concurrency, or output-schema enforcement. Higher-order
-builder packages use it for declaration behavior; durable-engine integration
-tests remain responsible for host semantics.
+## Flow
 
-## Identity and caching
+Callable, schema-described flow declarations and their immutable combinators.
+Calling a flow constructs a `FlowCall` node; it never evaluates the body.
 
-`Graph.keyMaterial` is the digest-free projection `@smthrs/plan` compiles into
-step keys. Two declarations that produce the same key material are the same
-step, so what enters that projection is the package's most consequential
-contract.
+### Flow.Flow
 
-Functions are the subtle part. An unannotated mapper, continuation, or flow
-body receives a _process-local_ `sha256-source-ephemeral/v4` identity, because
-JavaScript cannot inspect closure state: two runs of the same program give the
-same body two different digests. Only `Node.capture` produces the
-cross-process-stable `sha256-source-captures/v4` identity, by folding the
-canonicalized inert values a function closes over into its digest. A step whose
-result must survive a restart therefore has to declare its captures.
-
-```typescript
-const scaled = Node.capture({ factor: 3 }, (value: number) => value * 3)
+```ts
+interface Flow<in out I extends Schema.Top, out O extends Schema.Top, out E = never> extends Pipeable {
+  (input: I["Type"]): Node.Node<O["Type"], E>
+  readonly input: I
+  readonly output: O
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly capabilities: ReadonlyArray<string>
+  readonly effects: Effects.Declaration | undefined
+  readonly model?: Seat | undefined
+  readonly flows?: ReadonlyArray<Reference> | undefined
+  readonly prompt?: string | undefined
+  readonly annotations: Context.Context<never>
+  readonly body: ((input: I["Type"]) => Node.Node<O["Type"], E>) | undefined
+  readonly implementation: Implementation | undefined
+}
 ```
 
-Capture data must be finite, inert, plain data. Accessors, cycles, non-finite
-numbers, symbols, functions, and non-plain prototypes are rejected rather than
-hashed incompletely, and accepted capture data is deeply frozen. Captures are
-compared by structural value: two references to one shared object digest
-identically to two structurally equal copies, so aliasing is not identity.
+The input schema is invariant because it participates in both decoding and
+encoding. Output schemas and errors are covariant. `model`, `flows`, and
+`prompt` are advisory metadata a host reads; they also form the declaration
+recorded beside the flow's implementation identity.
 
-Plan values follow the same rule from the other direction. `Node.succeed`,
-`Node.fail`, and a flow call retain the caller's value by reference and read it
-when the graph is built, so mutating a value between construction and
-`Graph.build` changes the recorded identity.
+### Flow.Any
 
-The symbolic placeholder handed to a `Node.andThen` or `Node.catch` builder
-reserves the member name `then`: reading it yields `undefined` so the
-placeholder is never mistaken for a thenable. A legitimate `then` field must be
-renamed, or read inside the step that produces it.
+```ts
+interface Any {
+  readonly [TypeId]: object
+  readonly input: Schema.Top
+  readonly output: Schema.Top
+}
+```
 
-## Failure behavior
+The marker-only existential type, for a heterogeneous collection of flows.
 
-Two distinct mechanisms, deliberately:
+### Flow.Reference
 
-- Construction failures throw. `Flow.make` and a flow call raise `FlowError`;
-  `Node.all`, `Node.priority`, and continuation elaboration raise
-  `NodeBuildError`; `Node.capture` raises a `TypeError`, and a capture-data
-  failure names the offending path in its `Node.capture:`-prefixed message; the
-  Markdown loaders return a `Result` carrying `MarkdownError` rather than
-  throwing.
-- Declaration failures are recorded. `Graph.build` returns a graph even when a
-  declaration is invalid and lists the problems in `Graph.diagnostics`, so an
-  invalid plan stays inspectable.
+```ts
+type Reference = Any | string
+```
 
-`Graph.keyMaterial` is where the two meet: it refuses a graph carrying a fatal
-diagnostic, returning that diagnostic unchanged, so a declaration the builder
-called invalid can never become a durable step key.
+A callable flow reference accepted by a dynamic flow. Module-authored flows
+pass callable flow values; markdown loaders pass unresolved registry names,
+which the harness resolves before execution.
 
-## Limits
+### Flow.Seat
 
-`Graph.build` walks author-controlled and agent-generated structure, so it
-enforces documented bounds instead of failing with a host stack overflow or
-exhausting memory. `Graph.maximumGraphDepth` bounds nested node structure and
-`Graph.maximumPayloadDepth` bounds a reflected plan value; both refuse with
-`plan_too_deep` or `payload_too_deep` naming the offending node.
-`Graph.maximumGraphNodes`, `Graph.maximumGraphEdges`, and
-`Graph.maximumGraphConflicts` bound plan width, counting synthesized lane
-merges and the edges the write-conflict pass adds, and refuse with
-`plan_too_large` naming the node whose admission crossed the limit.
-`Graph.maximumPayloadMembers` bounds the members one plan value expands to
-across every level (object keys, array items and holes, map entries, set and
-chunk values, and bytes) and refuses with `payload_too_large` naming the
-offending value path. A flow call's input and a declaration body are budgeted
-separately, and the effect paths of a flow placed inside a plan value count as
-its members.
+```ts
+type Seat = string & {}
+```
 
-`Graph.maximumEffectPaths` bounds the read and write paths, summed, of one
-effect declaration. Every declaration the graph carries obeys it: an
-annotation, a dynamic node's own envelope, a called flow's envelope, and a
-synthesized lane merge, whose reads and writes both name the overlap it
-merges. `Graph.maximumPlanEffectPaths` bounds the paths admitted across the
-plan, counting a declaration where it is declared and again at every work
-node that inherits it as its effective envelope, because each such node is a
-writer the conflict pass compares. Both refuse with `plan_too_large` naming
-the node that declared or inherited the paths, before a path is copied:
-declared and inherited envelopes are admitted while the plan is visited,
-before the write-conflict pass runs, and a lane merge as it is synthesized.
+The name of a model seat a flow may run on. A seat is referred to by name,
+never by provider model id, and never by credential.
 
-Every limit is checked before the structure it guards is allocated. An
-array-backed declaration is refused by its lengths without reading a member;
-a caller-assembled iterable, which has no length to refuse by, is copied one
-path at a time and refused as soon as it exceeds the limit.
+### Flow.BodyDeclaration
 
-`Graph.maximumEffectPathLength` bounds one effect path at 4096 UTF-16 code
-units, `PATH_MAX` on Linux, so no path that names a file a supported host can
-open is refused. `Graph.maximumEffectGlobs` bounds the patterns, entries
-ending in `*`, one read list or one write list may carry at 128, enough for a
-subtree per package of a large monorepo. Both refuse with `plan_too_large`
-naming the node, or with `payload_too_large` naming the value path when the
-declaration belongs to a flow placed inside a plan value. Both are read as the
-path is admitted, from its length and from its last character, before any
-character of it is scanned and before the write-conflict pass compares any
-pair, so an over-long path or a pattern past the limit costs one property
-read.
+```ts
+interface BodyDeclaration {
+  readonly model?: Seat | undefined
+  readonly flows?: ReadonlyArray<Reference> | undefined
+  readonly prompt?: string | undefined
+}
+```
 
-Inside the limits the cost of a build is bounded on every axis an author or
-an agent controls. Each distinct path is scanned once for a dot segment and
-sorted once, so the character work of a build is at most
-`maximumPlanEffectPaths` paths of `maximumEffectPathLength` code units plus
-the comparisons that sort them; 64 writers of 1024 such paths sharing a
-4000-character prefix build in about one second on an idle developer machine
-(a loaded one takes two to three times longer; the bound, not the figure, is
-the contract). A pattern's prefix is located
-once by binary search, patterns nested under another collapse into the
-outermost before the paths they cover are enumerated, and every match after
-that is an integer comparison, so `Effects.overlaps` costs the two
-declarations plus their matches however many patterns nest: two declarations
-of 1024 nested patterns overlap in milliseconds, and 16 writers of the widest
-nested declaration the limits admit, 128 nested patterns over 896 literal
-paths, build in well under a second. An envelope is prepared once, its exact
-entries in a set and its covering patterns collapsed to disjoint sorted
-prefixes, and every node it encloses is checked against the prepared form, so
-`Effects.narrow` inside a build costs the envelope once plus one lookup and
-one binary search per enclosed path; an envelope of 1024 longest paths
-narrowed by 4095 nodes builds in well under a second. The write-conflict pass
-marks candidate pairs from one index of every writer's paths, so disjoint
-literal writers cost linear time and the overlap of a pair is computed at
-most once per recorded conflict. Its pattern term is one step per path a
-pattern covers per writer holding that path, at most `maximumGraphNodes`
-times `maximumPlanEffectPaths` steps for a plan of universal writers, about
-two seconds before the conflict limit refuses it. The widest shared-literal
-conflict set the limits admit, 362 writers sharing 181 paths under
-`onConflict: "fail"`, builds in about two seconds including its 65,341
-diagnostics.
+The seat, collaborator, and prompt declaration a body-backed flow records
+beside its body digest, so a decorator that changes the declared seat changes
+the flow's key material instead of disappearing from it. A flow declaring none
+of the three records no declaration.
 
-## Agent Skills validation
+### Flow.Implementation
 
-`Markdown.parseSkill` parses frontmatter with the failsafe YAML schema and then
-enforces the intrinsic rules of the Agent Skills specification: a `name` of 1
-to 64 lowercase ASCII letters, digits, or single hyphens that does not start or
-end with a hyphen, a `description` of 1 to 1024 characters counted in code
-points, a scalar space-separated `allowed-tools`, a scalar `license`, a
-`compatibility` of 1 to 500 characters, and `metadata` mapping string keys to
-scalar values. Each field reports its own stable `MarkdownError` code, and an
-invalid value is never echoed into the message.
-`Markdown.validateSkillFrontmatter` applies the same rules to already-parsed
-frontmatter. The one rule that needs the file system, that `name` equals the
-skill directory name, stays with `@smthrs/registry`.
+```ts
+type Implementation =
+  | {
+    readonly _tag: "Body"
+    readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4"
+    readonly digest: string
+    readonly declaration?: BodyDeclaration | undefined
+  }
+  | {
+    readonly _tag: "Dynamic"
+    readonly model: Seat | undefined
+    readonly flows: ReadonlyArray<Reference>
+    readonly prompt: string | undefined
+  }
+```
 
-## Mutability
+Implementation identity. An unannotated body receives process-local
+`sha256-source-ephemeral/v4` identity because JavaScript cannot inspect closure
+state; [`Node.capture`](#nodecapture) produces the cross-process-stable
+`sha256-source-captures/v4` identity.
 
-A built graph is frozen. `Graph.nodes`, `Graph.edges`, `Graph.conflicts`, and
-`Graph.diagnostics` return the graph's own frozen values, so an observer cannot
-edit the plan it is reading. Caller-supplied plan values are not frozen; they
-are read by reference as described above.
+### Flow.MakeOptions
 
-## Lanes
+```ts
+interface MakeOptions<Input extends Schema.Top, Output extends Schema.Top, E> {
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly input?: Input | undefined
+  readonly output?: Output | undefined
+  readonly capabilities?: ReadonlyArray<string> | undefined
+  readonly effects?: Effects.Declaration | undefined
+  readonly model?: Seat | undefined
+  readonly flows?: ReadonlyArray<Reference> | undefined
+  readonly prompt?: string | undefined
+  readonly body?: ((input: Input["Type"]) => Node.Node<Output["Type"], E>) | undefined
+}
+```
 
-`Node.lane`, `Annotations.Lane`, and the `LaneMerge` node this package
-synthesizes when two conflicting writers declare `onConflict: "lane"` are
-plan-time vocabulary. No runtime in this release executes a lane, and the
-elaboration deliberately does not cross into `@smthrs/flow`. Treat a lane as a
-declaration a future scheduler may honor, not as a scheduling guarantee.
+`input` defaults to `Schema.Void` and `output` to `Schema.Unknown`.
+`capabilities` is deduplicated and sorted.
+
+### Flow.make
+
+```ts
+const make: <
+  Input extends Schema.Top = typeof Schema.Void,
+  Output extends Schema.Top = typeof Schema.Unknown,
+  E = never
+>(
+  config: MakeOptions<Input, Output, E>
+) => Flow<Input, Output, E>
+```
+
+Creates a callable flow. With a `body`, the flow's implementation is `Body` and
+`model`, `flows`, and `prompt` form its `BodyDeclaration`. With no body but a
+`model` or `flows`, the same fields form a `Dynamic` implementation and the
+body defaults to one dynamic node. With none of the three, the flow is
+declaration-only and throws [`FlowError`](#flowflowerror) with code
+`missing_body` when called or built.
+
+### Flow.agent
+
+```ts
+const agent: typeof make
+```
+
+An alias for `make`. An agent flow is an ordinary flow whose omitted body is
+filled by its model or collaborator declaration.
+
+### Flow.isFlow
+
+```ts
+const isFlow: (value: unknown) => value is Any
+```
+
+Returns `true` when a value is a flow.
+
+### Flow.withCapabilities
+
+```ts
+const withCapabilities: {
+  (capabilities: ReadonlyArray<string>): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>, capabilities: ReadonlyArray<string>): Flow<I, O, E>
+}
+```
+
+Adds capabilities, returning a fresh flow whose capabilities are sorted and
+duplicate-free.
+
+### Flow.within
+
+```ts
+const within: {
+  (placement: Placement.Placement): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>, placement: Placement.Placement): Flow<I, O, E>
+}
+```
+
+Places a flow within a host directive, returning a fresh flow. The
+placement-shaped special case of [`annotate`](#flowannotate).
+
+### Flow.annotate
+
+```ts
+const annotate: {
+  <I2, S>(key: Context.Key<I2, S>, value: S): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E, I2, S>(self: Flow<I, O, E>, key: Context.Key<I2, S>, value: S): Flow<I, O, E>
+}
+```
+
+Attaches one typed annotation, returning a fresh flow. Annotations are metadata
+a host or a decorator reads; they do not change the flow's implementation
+digest.
+
+### Flow.withFlows
+
+```ts
+const withFlows: {
+  (flows: ReadonlyArray<Reference>): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>, flows: ReadonlyArray<Reference>): Flow<I, O, E>
+}
+```
+
+Replaces the collaborators a flow declares, returning a fresh flow that keeps
+its name, schemas, capabilities, effects, and annotations. For a body-backed
+flow the body is untouched and the new collaborators replace the `Body`
+implementation's declaration. For a body-less dynamic flow, both the default
+body and the `Dynamic` implementation are rebuilt.
+
+### Flow.withEffects
+
+```ts
+const withEffects: {
+  (declaration: Effects.Declaration): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>, declaration: Effects.Declaration): Flow<I, O, E>
+}
+```
+
+Replaces a flow's effect declaration, returning a fresh flow.
+
+### Flow.sealed
+
+```ts
+const sealed: {
+  (): <I, O, E>(self: Flow<I, O, E>) => Flow<I, O, E>
+  <I, O, E>(self: Flow<I, O, E>): Flow<I, O, E>
+}
+```
+
+Returns a fresh flow whose declaration is `hermetic` and `sealed`. A flow with
+no declaration gets an empty one with those two values.
+
+### Flow.FlowError
+
+```ts
+class FlowError extends Schema.TaggedError<FlowError>()("flows/core/FlowError", {
+  code: FlowErrorCode,
+  message: Schema.String
+}) {}
+```
+
+Thrown by a flow call and by `Graph.build`. `FlowErrorCode` is the literal
+schema of its one code, `"missing_body"`.
+
+### Flow.Input, Flow.Output, Flow.Error
+
+```ts
+type Input<F> = F extends { readonly input: infer I extends Schema.Top } ? I["Type"] : never
+type Output<F> = F extends { readonly output: infer O extends Schema.Top } ? O["Type"] : never
+type Error<F> = F extends Flow<infer _I, infer _O, infer E> ? E : never
+```
+
+Extract a flow's decoded input type, decoded output type, and error type.
+
+### Flow.TypeId
+
+```ts
+const TypeId: TypeId = "~flows/core/Flow"
+type TypeId = "~flows/core/Flow"
+```
+
+The runtime type identifier carried by flow values.
+
+## Node
+
+Pipeable, pure-data nodes describing a flow graph. Constructing and combining
+them records an inspectable AST.
+
+### Node.Node
+
+```ts
+interface Node<out A, out E = never> extends Pipeable.Pipeable {
+  readonly ast: Ast
+}
+```
+
+`Ast` is the recorded AST type. Its shape is internal; read a plan through
+[`Graph`](#graph) rather than through the AST.
+
+### Node.Any, Node.Success, Node.Error
+
+```ts
+type Any = Node<unknown, unknown>
+type Success<N> = N extends Node<infer A, infer _E> ? A : never
+type Error<N> = N extends Node<infer _A, infer E> ? E : never
+```
+
+### Node.isNode
+
+```ts
+const isNode: (value: unknown) => value is Any
+```
+
+### Node.succeed
+
+```ts
+const succeed: <A>(value: A) => Node<A>
+```
+
+A node that succeeds with a constant value. The value is retained by reference
+and read when `Graph.build` runs, so mutating it in between changes the
+recorded identity.
+
+### Node.fail
+
+```ts
+const fail: <E>(error: E) => Node<never, E>
+```
+
+A node that always fails with the given typed error, for re-raising inside a
+recovery arm. The error enters key material, so two failures carrying different
+data are two declarations. It is retained by reference, like a success value.
+
+### Node.all
+
+```ts
+const all: <const R extends Readonly<Record<string, Any>>>(
+  nodes: R
+) => Node<Simplify<{ readonly [K in keyof R]: Success<R[K]> }>, Error<R[keyof R]>>
+```
+
+Combines a record of independent child nodes. A member that is not a node
+raises [`NodeBuildError`](#nodenodebuilderror) with code `invalid_all_member`,
+naming the member.
+
+### Node.dynamic
+
+```ts
+function dynamic<A>(options: DynamicOptions & { readonly output?: { readonly Type: A } }): Node<A>
+function dynamic(options: DynamicOptions): Node<unknown>
+```
+
+An unelaborated dynamic model node. Passing an `output` schema types the
+node's success channel. `Dynamic` is the only node kind that participates in
+write-conflict analysis.
+
+### Node.DynamicOptions
+
+```ts
+interface DynamicOptions {
+  readonly model?: string | undefined
+  readonly flows?: ReadonlyArray<string | { readonly "~flows/core/Flow": object }> | undefined
+  readonly output?: unknown
+  readonly prompt?: string | undefined
+  readonly effects?: Effects.Declaration | undefined
+}
+```
+
+### Node.map
+
+```ts
+const map: {
+  <A, B>(f: (a: A) => B): <E>(self: Node<A, E>) => Node<B, E>
+  <A, E, B>(self: Node<A, E>, f: (a: A) => B): Node<B, E>
+}
+```
+
+Records a deferred pure function to apply to the eventual success value.
+`Graph.build` never calls it; only its identity enters the plan.
+
+### Node.andThen
+
+```ts
+const andThen: {
+  <A, B, E2>(f: (a: A) => Node<B, E2>): <E>(self: Node<A, E>) => Node<B, E | E2>
+  <B, E2>(next: Node<B, E2>): <A, E>(self: Node<A, E>) => Node<B, E | E2>
+  <A, E, B, E2>(self: Node<A, E>, f: (a: A) => Node<B, E2>): Node<B, E | E2>
+  <A, E, B, E2>(self: Node<A, E>, next: Node<B, E2>): Node<B, E | E2>
+}
+```
+
+Sequences a pure node-producing builder after a node, or a node directly when
+the first success value is not needed. `Graph.build` evaluates the builder once
+against a symbolic placeholder, so the downstream topology and its input
+references are known before execution.
+
+The placeholder is a name, not a value. Reading a member records an input
+reference and is the intended use. Arithmetic and string interpolation coerce
+it to the literal text `[planned:<path>]`, a conditional on it always takes the
+truthy branch, and neither produces a diagnostic. Its `then` member is reserved
+and reads as `undefined`, so the placeholder is never mistaken for a thenable.
+
+### Node.catch
+
+```ts
+const catch: {
+  <Handled, B, E2>(
+    options: CatchOptions<unknown, B, E2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): <A, E>(self: Node<A, E>) => Node<A | B, Exclude<E, Handled> | E2>
+  <E, B, E2>(
+    options: CatchOptions<E, B, E2> & { readonly error?: undefined }
+  ): <A>(self: Node<A, E>) => Node<A | B, E2>
+  <A, E, Handled, B, E2>(
+    self: Node<A, E>,
+    options: CatchOptions<E, B, E2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): Node<A | B, Exclude<E, Handled> | E2>
+  <A, E, B, E2>(
+    self: Node<A, E>,
+    options: CatchOptions<E, B, E2> & { readonly error?: undefined }
+  ): Node<A | B, E2>
+}
+```
+
+Recovers a node's typed failures with a statically planned arm, built once at
+plan time against a symbolic error naming the protected node. With no schema
+the whole typed error channel is handled; with one, the remainder stays in the
+error type. The symbolic error carries the same placeholder rules as
+[`andThen`](#nodeandthen).
+
+### Node.CatchOptions
+
+```ts
+interface CatchOptions<E, B, E2, Handled = E> {
+  readonly error?: Schema.Schema<Handled> | undefined
+  readonly onFailure: (error: Handled) => Node<B, E2>
+}
+```
+
+### Node.capture
+
+```ts
+const capture: <Args extends ReadonlyArray<unknown>, A>(
+  captures: Readonly<Record<string, unknown>>,
+  operation: (...args: Args) => A
+) => (...args: Args) => A
+```
+
+Declares the inert values a plan-time function closes over, so its identity
+folds the source text with the canonical capture data instead of a per-process
+nonce. Capture data must be finite, inert, plain data; anything else raises a
+`TypeError` naming the offending path. Accepted data is deeply frozen and
+compared structurally, so aliasing is not identity. Capture composes: capturing
+an already-captured function nests the two capture sets.
+
+### Node.within
+
+```ts
+const within: {
+  (placement: Placement.Placement): <A, E>(self: Node<A, E>) => Node<A, E>
+  <A, E>(self: Node<A, E>, placement: Placement.Placement): Node<A, E>
+}
+```
+
+Adds a placement annotation without changing the original node.
+
+### Node.priority
+
+```ts
+const priority: {
+  (value: number): <A, E>(self: Node<A, E>) => Node<A, E>
+  <A, E>(self: Node<A, E>, value: number): Node<A, E>
+}
+```
+
+Adds a scheduling priority annotation. A scheduler runs ready work with a
+higher number first, and children inherit the value lexically. Priority never
+enters key material. A value that is not a safe integer raises
+`NodeBuildError` with code `invalid_priority`.
+
+### Node.lane
+
+```ts
+const lane: {
+  (options: Annotations.LaneOptions): <A, E>(self: Node<A, E>) => Node<A, E>
+  <A, E>(self: Node<A, E>, options: Annotations.LaneOptions): Node<A, E>
+}
+```
+
+Adds a worktree lane annotation. Lanes are plan-time vocabulary; no runtime in
+this release executes one.
+
+### Node.withEffects
+
+```ts
+const withEffects: {
+  (declaration: Effects.Declaration): <A, E>(self: Node<A, E>) => Node<A, E>
+  <A, E>(self: Node<A, E>, declaration: Effects.Declaration): Node<A, E>
+}
+```
+
+Adds an effect declaration annotation. On a non-work node the declaration
+narrows the envelope its children inherit and enters that container's identity;
+containers are not counted a second time against their own children.
+
+### Node.NodeBuildError
+
+```ts
+class NodeBuildError extends Schema.TaggedError<NodeBuildError>()("flows/core/NodeBuildError", {
+  code: NodeBuildErrorCode,
+  member: Schema.String,
+  message: Schema.String
+}) {}
+```
+
+`NodeBuildErrorCode` is the literal schema of its four codes:
+`invalid_all_member`, `invalid_continuation`, `invalid_priority`, and
+`unrepresentable_value`.
+
+### Node.TypeId
+
+```ts
+const TypeId: TypeId
+type TypeId = "~flows/core/Node"
+```
+
+## Graph
+
+Pure graph introspection for flow declarations.
+
+### Graph.build
+
+```ts
+const build: (flowOrNode: Flow.Any | Node.Any, input?: unknown, options?: BuildOptions) => Graph
+```
+
+Builds a graph by evaluating declared flow bodies and pure `Node.andThen`
+builders exactly once against symbolic predecessor values, revealing the
+complete static topology without running a node, an Effect, a `Node.map` value
+transformation, or a dynamic elaboration. `input` is the flow's input and is
+ignored for a node.
+
+Values supplied to `Node.succeed`, `Node.fail`, and flow calls are retained by
+reference and read here.
+
+Throws [`Flow.FlowError`](#flowflowerror) for a body-less flow,
+[`Node.NodeBuildError`](#nodenodebuilderror) for a malformed continuation, and
+[`GraphBuildError`](#graphgraphbuilderror) with a limit code for an oversized
+plan. Declaration problems are recorded in [`diagnostics`](#graphdiagnostics)
+instead.
+
+### Graph.BuildOptions
+
+```ts
+interface BuildOptions {
+  readonly resolveLayers?: ((request: LayerRequest) => Iterable<string>) | undefined
+}
+```
+
+`resolveLayers` is invoked independently for each node and must be pure. It
+returns resolved host, model, and permission implementation identities as
+strings, not Effect layers or runtime handles, and the result becomes the
+node's `layers` key material.
+
+### Graph.LayerRequest
+
+```ts
+interface LayerRequest {
+  readonly nodeId: string
+  readonly kind: NodeAst["_tag"] | "LaneMerge"
+  readonly model: string | undefined
+  readonly capabilities: ReadonlyArray<string>
+  readonly effects: Effects.Declaration | undefined
+  readonly placement: Placement.Placement | undefined
+}
+```
+
+### Graph.Graph
+
+```ts
+type Graph
+```
+
+An immutable, observation-only flow graph. `build` deep-freezes everything it
+constructs, so the getters hand back the graph's own values rather than copies.
+Read a graph through [`nodes`](#graphnodes), [`edges`](#graphedges),
+[`effects`](#grapheffects), [`placements`](#graphplacements),
+[`conflicts`](#graphconflicts), [`diagnostics`](#graphdiagnostics), and
+[`keyMaterial`](#graphkeymaterial); the storage fields behind those getters are
+not part of the published shape.
+
+### Graph.nodes
+
+```ts
+const nodes: (graph: Graph) => ReadonlyArray<GraphNode>
+```
+
+Returns the graph's nodes in structural preorder.
+
+### Graph.GraphNode
+
+```ts
+interface GraphNode {
+  readonly id: string
+  readonly kind: NodeAst["_tag"] | "LaneMerge"
+  readonly dependencies: ReadonlyArray<string>
+  readonly declaredEffects: Effects.Declaration | undefined
+  readonly effectiveEffects: Effects.Declaration | undefined
+  readonly placement: Placement.Placement | undefined
+  readonly lane: Annotations.LaneOptions | undefined
+  readonly priority: number | undefined
+  readonly capabilities: ReadonlyArray<string>
+  readonly annotations: AnnotationsProjection
+  readonly keyMaterial: KeyMaterial.KeyMaterial
+}
+```
+
+`id` is the node's structural position, such as `root.andThen.all.api`. It is
+traversal data and never reaches a step key. `kind` is the AST tag, or
+`LaneMerge` for a merge node this package synthesized. `effectiveEffects` is
+populated for work nodes only.
+
+### Graph.AnnotationsProjection
+
+```ts
+interface AnnotationsProjection {
+  readonly placement: Placement.Placement | undefined
+  readonly effects: Effects.Declaration | undefined
+  readonly lane: Annotations.LaneOptions | undefined
+  readonly priority: number | undefined
+}
+```
+
+A serializable projection of the four annotations this package resolves.
+
+### Graph.edges
+
+```ts
+const edges: (graph: Graph) => ReadonlyArray<Edge>
+```
+
+Returns dependency edges in structural preorder.
+
+### Graph.Edge and Graph.EdgeReason
+
+```ts
+interface Edge {
+  readonly from: string
+  readonly to: string
+  readonly reason: EdgeReason
+}
+
+type EdgeReason = "value" | "continuation" | "conflict" | "lane-merge"
+```
+
+`value` is a structural dependency, `continuation` is a statically planned
+`andThen` or `catch` arm, `conflict` is an ordering edge the write-conflict
+pass added, and `lane-merge` joins two laned writers to their merge node.
+
+### Graph.effects
+
+```ts
+const effects: (graph: Graph) => ReadonlyArray<EffectEntry>
+```
+
+Returns declared and inherited effect data for the nodes that carry either.
+
+### Graph.EffectEntry
+
+```ts
+interface EffectEntry {
+  readonly nodeId: string
+  readonly declared: Effects.Declaration | undefined
+  readonly effective: Effects.Declaration | undefined
+}
+```
+
+### Graph.placements
+
+```ts
+const placements: (graph: Graph) => ReadonlyArray<PlacementEntry>
+```
+
+Returns resolved placement data in structural preorder, skipping nodes that
+resolved none.
+
+### Graph.PlacementEntry
+
+```ts
+interface PlacementEntry {
+  readonly nodeId: string
+  readonly placement: Placement.Placement
+}
+```
+
+### Graph.conflicts
+
+```ts
+const conflicts: (graph: Graph) => ReadonlyArray<Conflict>
+```
+
+Returns overlapping-write conflict data.
+
+### Graph.Conflict
+
+```ts
+interface Conflict {
+  readonly nodes: readonly [string, string]
+  readonly paths: ReadonlyArray<string>
+  readonly strategy: "serialize" | "lane" | "fail"
+  readonly mergeNodeId?: string | undefined
+}
+```
+
+`strategy` is the stricter of the two declarations' `onConflict` values: `fail`
+beats `lane`, and `lane` beats `serialize`. `mergeNodeId` is set only for a
+`lane` conflict.
+
+### Graph.diagnostics
+
+```ts
+const diagnostics: (graph: Graph) => ReadonlyArray<GraphBuildError>
+```
+
+Returns build diagnostics without throwing.
+
+### Graph.GraphBuildError
+
+```ts
+class GraphBuildError extends Schema.TaggedError<GraphBuildError>()("flows/core/GraphBuildError", {
+  code: GraphBuildErrorCode,
+  paths: Schema.Array(Schema.String),
+  nodeId: Schema.optional(Schema.String),
+  nodes: Schema.optional(Schema.Tuple([Schema.String, Schema.String]))
+}) {}
+```
+
+`GraphBuildErrorCode` is the literal schema of twelve codes:
+
+| Code                       | Meaning                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `effect_outside_envelope`  | A step declared a path its envelope does not cover. `paths` names them. |
+| `effect_mode_widening`     | A `hermetic` envelope with an `expected` step.                          |
+| `effect_tier_widening`     | A step whose tier is less reversible than its envelope's.               |
+| `write_conflict`           | Two work nodes overlap under `onConflict: "fail"`. `nodes` names both.  |
+| `capability_outside_grant` | A called flow declares a capability the grant excludes. Advisory.       |
+| `duplicate_node_id`        | Two nodes claim one structural id.                                      |
+| `missing_key_material`     | A node reached `keyMaterial` without any.                               |
+| `invalid_node`             | A malformed node AST. Thrown, not recorded.                             |
+| `plan_too_deep`            | Nesting past `maximumGraphDepth`. Thrown.                               |
+| `plan_too_large`           | A node, edge, conflict, or effect-path limit crossed. Thrown.           |
+| `payload_too_deep`         | Nesting past `maximumPayloadDepth` inside one plan value. Thrown.       |
+| `payload_too_large`        | Members past `maximumPayloadMembers` inside one plan value. Thrown.     |
+
+`nodeId` is populated for the three effect codes, `missing_key_material`,
+`duplicate_node_id`, `capability_outside_grant`, `invalid_node`, and the four
+limit codes. For `plan_too_large` it names the node whose admission crossed the
+limit. `nodes` is populated for `write_conflict`. `paths` carries the offending
+value path for `payload_too_large`.
+
+### Graph.isFatalDiagnostic
+
+```ts
+const isFatalDiagnostic: (diagnostic: GraphBuildError) => boolean
+```
+
+Reports whether a diagnostic blocks [`keyMaterial`](#graphkeymaterial). Every
+code except `capability_outside_grant` is fatal. The five thrown codes are
+listed as fatal so a future caller that records one cannot compile it.
+
+### Graph.keyMaterial
+
+```ts
+const keyMaterial: (graph: Graph) => Result.Result<ReadonlyArray<KeyMaterial.Entry>, GraphBuildError>
+```
+
+Returns node-associated, digest-free key material in topological dependency
+order, or fails with the first fatal diagnostic the graph carries, unchanged.
+The graph-local node id is outside the material `@smthrs/keys` hashes.
+
+### Graph limits
+
+Every bound is exported so a test can assert on it and a generator can stay
+inside it. See [Build limits](/concepts/limits/) for the reasoning.
+
+| Constant                  | Value   | Bounds                                                        |
+| ------------------------- | ------- | ------------------------------------------------------------- |
+| `maximumGraphDepth`       | 512     | Nested node structure.                                        |
+| `maximumPayloadDepth`     | 128     | Nesting inside one reflected plan value.                      |
+| `maximumGraphNodes`       | 4,096   | Nodes, synthesized lane merges included.                      |
+| `maximumGraphEdges`       | 65,536  | Edges, conflict and lane-merge edges included.                |
+| `maximumGraphConflicts`   | 65,536  | Recorded write conflicts.                                     |
+| `maximumPayloadMembers`   | 100,000 | Members one plan value expands to, summed across every level. |
+| `maximumEffectPaths`      | 1,024   | Read and write paths, summed, in one declaration.             |
+| `maximumPlanEffectPaths`  | 65,536  | Effect paths admitted across the plan.                        |
+| `maximumEffectPathLength` | 4,096   | UTF-16 code units in one effect path.                         |
+| `maximumEffectGlobs`      | 128     | Patterns, entries ending in `*`, in one read or write list.   |
+
+## Effects
+
+Pure effect declarations describing read and write envelopes.
+
+### Effects.Declaration
+
+```ts
+interface Declaration {
+  readonly reads: ReadonlyArray<string>
+  readonly writes: ReadonlyArray<string>
+  readonly mode: "hermetic" | "expected"
+  readonly onConflict: "serialize" | "lane" | "fail"
+  readonly tier?: "sealed" | "compensable" | "irreversible" | undefined
+}
+```
+
+`mode` says whether the declaration is complete (`hermetic`) or partial
+(`expected`). `onConflict` says what the planner should do about another writer
+of the same path. `tier` says how reversible the effect is, and an omitted tier
+reads as `sealed`.
+
+### Effects.make
+
+```ts
+const make: (input: MakeOptions) => Declaration
+```
+
+Constructs a deterministic declaration. `MakeOptions` takes `Iterable<string>`
+for `reads` and `writes` and is otherwise identical to `Declaration`.
+Normalization is sorting and deduplication only: no separator rewriting and no
+dot-segment resolution is performed, so hand it paths that are already
+normalized.
+
+### Effects.covers
+
+```ts
+const covers: (envelope: string, path: string) => boolean
+```
+
+Whether one envelope entry covers one path. The grammar is exhaustive and
+intentionally not full minimatch: an exact path matches itself, `*` and `**`
+match everything, `prefix*` matches by string prefix, and `prefix/**` matches
+`prefix/` and everything below it but not the bare path `prefix`. A path
+containing a whole `.` or `..` segment is never covered.
+
+### Effects.narrow
+
+```ts
+const narrow: (envelope: Declaration, step: Declaration) => NarrowResult
+```
+
+Verifies that a step declaration stays within an enclosing envelope. Read and
+write paths must be covered independently, `expected` may tighten to
+`hermetic` but not the reverse, and the tier may narrow from `irreversible` to
+`compensable` to `sealed`.
+
+### Effects.NarrowResult
+
+```ts
+type NarrowResult =
+  | { readonly ok: true }
+  | {
+    readonly ok: false
+    readonly code: "effect_outside_envelope" | "effect_mode_widening" | "effect_tier_widening"
+    readonly paths: ReadonlyArray<string>
+  }
+```
+
+`paths` is populated for `effect_outside_envelope` and empty for the other two.
+
+### Effects.overlaps
+
+```ts
+const overlaps: (a: Declaration, b: Declaration) => ReadonlyArray<string>
+```
+
+Returns the concrete or narrower write declarations two declarations share,
+sorted and duplicate-free. Two declarations of the same literal path always
+overlap, including a path `covers` refuses to match because it carries a `.` or
+`..` segment: glob coverage stays strict, but two writers naming the same
+unnormalized path are still writing the same resource.
+
+### Effects.sealed
+
+```ts
+const sealed: (declaration: Declaration) => Declaration
+```
+
+Returns a `hermetic`, `sealed` copy of a declaration.
+
+## Placement
+
+Serializable placement annotations for flow graph values.
+
+### Placement.Placement
+
+```ts
+type Placement = Data.TaggedEnum<{
+  readonly "flows/core/Placement/Local": Readonly<Record<never, never>>
+  readonly "flows/core/Placement/Client": Readonly<Record<never, never>>
+  readonly "flows/core/Placement/Sandbox": Options
+  readonly "flows/core/Placement/Remote": Options
+}>
+```
+
+A serializable directive describing where a flow node should run.
+
+### Placement.Options
+
+```ts
+interface Options {
+  readonly image?: string | undefined
+  readonly profile?: string | undefined
+  readonly target?: string | undefined
+}
+```
+
+Host-selection details. These fields identify a host profile; they never
+contain a host implementation, credentials, or any other runtime handle.
+
+### Placement constructors
+
+```ts
+const local: () => Placement
+const client: () => Placement
+const sandbox: (options?: Options) => Placement
+const remote: (options?: Options) => Placement
+```
+
+`local` is the local process host, `client` is the viewer's browser host,
+`sandbox` is an isolated sandbox host, and `remote` is a remote control-plane
+host.
+
+## Annotations
+
+Typed immutable annotations attached to flow graph values. The bag is an Effect
+`Context`, so a decorator may define its own key.
+
+### Annotations.empty, add, merge, getOption
+
+```ts
+const empty: Context.Context<never>
+const add: typeof Context.add
+const merge: (parent: Context.Context<never>, child: Context.Context<never>) => Context.Context<never>
+const getOption: <I, S>(context: Context.Context<never>, key: Context.Key<I, S>) => Option.Option<S>
+```
+
+`add` sets or replaces one annotation without changing the original. `merge`
+combines a parent and a child bag, with the child's values winning.
+`getOption` returns `Option.none()` when the key is absent.
+
+### The four keys
+
+```ts
+const Placement: Context.Service<PlacementModel.Placement>
+const Effects: Context.Service<EffectsModel.Declaration>
+const Lane: Context.Service<LaneOptions>
+const Priority: Context.Service<number>
+```
+
+These are the four keys `Graph.build` projects onto each node. `Priority` is a
+signed integer ordering ready work; it is never part of step identity, so
+raising it never invalidates a cached step.
+
+### Annotations.LaneOptions
+
+```ts
+interface LaneOptions {
+  readonly id: string
+  readonly landing?: "merge-queue" | "manual" | undefined
+}
+```
+
+## KeyMaterial
+
+The digest-free input to [`@smthrs/keys`](https://keys.smithers.sh/reference/api/). Types only; this module
+exports no runtime values.
+
+### KeyMaterial.KeyMaterial
+
+```ts
+interface KeyMaterial {
+  readonly version: "flows/key-material/v2"
+  readonly kind: "sealed" | "compensable" | "irreversible"
+  readonly body: unknown
+  readonly inputs: ReadonlyArray<InputRef>
+  readonly layers: ReadonlyArray<string>
+  readonly capabilities: ReadonlyArray<string>
+  readonly effects: Effects.Declaration | undefined
+  readonly placement: Placement.Placement | undefined
+}
+```
+
+`kind` is the effective declaration's tier, defaulting to `sealed`. `body` is
+the node's own declaration projected into inert data: a `FlowCall` records the
+called flow's schema identity, capabilities, effects, and implementation, never
+its name.
+
+### KeyMaterial.InputRef
+
+```ts
+type InputRef =
+  | { readonly _tag: "Literal"; readonly value: unknown }
+  | { readonly _tag: "Ref"; readonly from: string; readonly path: ReadonlyArray<string> }
+  | { readonly _tag: "Pending"; readonly from: string }
+```
+
+A declared input used to identify a planned node. A `Ref` records a placeholder
+member read: the node it came from and the path read from it. Graph-local ids
+occur only inside these references, and the key compiler replaces them with
+dependency digests before hashing.
+
+### KeyMaterial.Entry
+
+```ts
+interface Entry {
+  readonly nodeId: string
+  readonly material: KeyMaterial
+}
+```
+
+`nodeId` is traversal data and is never part of the material handed to the key
+compiler.
+
+## Markdown
+
+Parses Agent Skills documents and lowers markdown prompts into ordinary flows.
+General markdown discovery, and the one specification rule that needs the file
+system, belong to [`@smthrs/registry`](https://registry.smithers.sh/reference/api/).
+
+### Markdown.parseSkill
+
+```ts
+const parseSkill: (text: string) => Result.Result<SkillDocument, MarkdownError>
+```
+
+Parses an Agent Skills document with failsafe-schema YAML semantics and
+validates its frontmatter with
+[`validateSkillFrontmatter`](#markdownvalidateskillfrontmatter).
+
+### Markdown.SkillDocument and Markdown.SkillFrontmatter
+
+```ts
+interface SkillFrontmatter {
+  readonly name: string
+  readonly description: string
+  readonly allowedTools: ReadonlyArray<string>
+  readonly extra: Record<string, unknown>
+}
+
+interface SkillDocument extends SkillFrontmatter {
+  readonly body: string
+}
+```
+
+`allowedTools` is the specification's space-separated `allowed-tools` scalar
+split into tool names. `extra` holds every other field, including the validated
+optional `license`, `compatibility`, and `metadata`, as a frozen
+null-prototype record.
+
+### Markdown.validateSkillFrontmatter
+
+```ts
+const validateSkillFrontmatter: (
+  fields: Record<string, unknown>
+) => Result.Result<SkillFrontmatter, MarkdownError>
+```
+
+Checks already-parsed frontmatter against the specification's intrinsic rules:
+`name` is 1 to 64 lowercase ASCII letters, digits, or single hyphens and cannot
+start or end with a hyphen; `description` is 1 to 1024 characters counted in
+code points; `allowed-tools` and `license` are scalars; `compatibility` is 1 to
+500 characters; `metadata` maps string keys to scalar values. A field that is
+absent reports a `missing` code, and a field that is present but malformed
+reports its own `invalid` code without echoing the offending value.
+
+### Markdown.lowerSkill
+
+```ts
+const lowerSkill: (text: string) => Result.Result<Flow.Flow<typeof input, typeof output, never>, MarkdownError>
+```
+
+Parses and lowers an Agent Skills document to an ordinary flow whose input is
+`{ args: string }` and whose output is `string`. Only `name`, `description`,
+and `allowed-tools` are lowered; every other field stays in `parseSkill`'s
+`extra` record.
+
+### Markdown.lowerMarkdown
+
+```ts
+const lowerMarkdown: (
+  frontmatter: MarkdownFrontmatter,
+  body: string
+) => Flow.Flow<typeof input, typeof output, never>
+```
+
+Lowers already-typed markdown metadata and a body to an ordinary flow. The
+prompt is the markdown body; harnesses append non-empty runtime `args` when
+rendering it. Flow names remain declarations at this layer, and no
+implementation is resolved. The `smart` seat is the explicit fallback when the
+frontmatter declares no `model`.
+
+### Markdown.MarkdownFrontmatter
+
+```ts
+interface MarkdownFrontmatter {
+  readonly name?: string | undefined
+  readonly description?: string | undefined
+  readonly model?: string | undefined
+  readonly flows?: ReadonlyArray<string> | undefined
+  readonly capabilities?: ReadonlyArray<string> | undefined
+  readonly effects?: {
+    readonly reads?: ReadonlyArray<string> | undefined
+    readonly writes?: ReadonlyArray<string> | undefined
+    readonly mode?: "hermetic" | "expected" | undefined
+    readonly onConflict?: "serialize" | "lane" | "fail" | undefined
+    readonly tier?: "sealed" | "compensable" | "irreversible" | undefined
+  } | undefined
+  readonly placement?: "sandbox" | "remote" | "client" | "local" | undefined
+}
+```
+
+An omitted `effects.reads` or `effects.writes` becomes empty, an omitted `mode`
+becomes `hermetic`, and an omitted `onConflict` becomes `serialize`.
+
+### Markdown.MarkdownError
+
+```ts
+class MarkdownError extends Schema.TaggedError<MarkdownError>()("flows/core/MarkdownError", {
+  code: MarkdownErrorCode,
+  message: Schema.String
+}) {}
+```
+
+`MarkdownErrorCode` is the literal schema of ten codes:
+`skill_missing_frontmatter`, `skill_invalid_frontmatter`, `skill_missing_name`,
+`skill_invalid_name`, `skill_missing_description`,
+`skill_invalid_description`, `skill_invalid_allowed_tools`,
+`skill_invalid_compatibility`, `skill_invalid_metadata`, and
+`skill_invalid_license`.
+
+## Digest
+
+Synchronous identity construction, for the pure constructors that compute a
+content fingerprint without suspending. The digest is the same digest an
+Effect-shaped derivation produces: the same canonical bytes, the same hash, and
+the same hexadecimal encoding.
+
+### Digest.digest
+
+```ts
+const digest: (input: string | Uint8Array) => string
+```
+
+The full lowercase SHA-256 digest of UTF-8 string or byte input.
+
+### Digest.canonical
+
+```ts
+const canonical: (value: unknown) => string
+```
+
+The RFC 8785 canonical JSON serialization of a value. A function, symbol,
+`bigint`, cyclic object, non-finite number, or top-level `undefined` has no
+canonical JSON representation; for those values this throws the `SchemaError`
+from `effect/Schema` raised through `Effect.runSync`, unwrapped.
+
+### Digest.provideSync
+
+```ts
+const provideSync: <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) => Effect.Effect<A, E>
+```
+
+Provides the synchronous SHA-256 service to an Effect-shaped derivation, so a
+pure constructor can run one without a platform layer.
+
+## TestRuntime
+
+Pure, synchronous execution support for tests of node-building libraries. It
+evaluates the deferred callbacks an in-memory node AST stores. It models no
+capabilities, persistence, scheduling, retries, cache, concurrency, or
+output-schema enforcement, and it is not a substitute for the durable engine.
+
+### TestRuntime.evaluate
+
+```ts
+const evaluate: <A, E, E2 = EvaluationError>(
+  node: Node.Node<A, E>,
+  resolver?: Resolver<E2>
+) => Result.Result<A, E | E2 | EvaluationError>
+```
+
+Evaluates a node's in-memory declaration with a deterministic leaf resolver. A
+declaration nested more than 1,024 levels is refused before unbounded
+recursion. With no resolver, reaching a leaf fails with code
+`unresolved_node`.
+
+### TestRuntime.evaluateInline
+
+```ts
+const evaluateInline: <A, E, E2 = EvaluationError>(
+  node: Node.Node<A, E>,
+  resolver?: Resolver<E2>
+) => Result.Result<A, E | E2 | EvaluationError>
+```
+
+Evaluates a node while recursively entering every called flow that carries an
+in-memory body. Body-less model or adapter flows still cross the resolver.
+
+### TestRuntime.Resolver
+
+```ts
+type Resolver<E = never> = (request: Request) => Result.Result<unknown, E>
+
+type Request = DynamicRequest | FlowCallRequest
+
+interface DynamicRequest {
+  readonly _tag: "Dynamic"
+  readonly model?: string | undefined
+  readonly flows: ReadonlyArray<unknown>
+  readonly output?: unknown
+  readonly prompt?: string | undefined
+  readonly effects?: unknown
+}
+
+interface FlowCallRequest {
+  readonly _tag: "FlowCall"
+  readonly flow: unknown
+  readonly target: unknown
+  readonly input: unknown
+}
+```
+
+Supplies deterministic values or typed failures for the execution leaves a pure
+evaluator cannot invent. The resolver's error type flows into the result's
+error channel.
+
+### TestRuntime.EvaluationError
+
+```ts
+class EvaluationError extends Error {
+  readonly code: EvaluationErrorCode
+  override readonly cause: unknown
+}
+
+type EvaluationErrorCode =
+  | "callback_threw"
+  | "depth_exceeded"
+  | "invalid_continuation"
+  | "invalid_schema"
+  | "missing_flow"
+  | "missing_operation"
+  | "resolver_threw"
+  | "unresolved_node"
+```
+
+A malformed or unresolved declaration encountered by the evaluator. `cause`
+carries the original thrown value where one exists. For what each code means,
+see [Test a declaration without a host](/guides/test-a-declaration/).

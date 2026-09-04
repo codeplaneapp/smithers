@@ -1,0 +1,293 @@
+---
+title: "Troubleshooting"
+description: "The refusals a gateway answers with, grouped by where they come from: the bind, the ingress guard, the read path, a subscription, and the data a projection can and cannot see."
+---
+
+Every refusal this package produces is a `GatewayError` carrying one of seven
+stable codes. Find the symptom, then the code, then the change.
+
+## The gateway will not bind
+
+### Refusing non-loopback gateway bind
+
+**Symptom**
+
+```text
+Refusing non-loopback gateway bind 0.0.0.0 without an explicit --listen opt-in
+Refusing non-loopback gateway bind 0.0.0.0 without a bearer credential
+```
+
+**Cause** The bind policy, which fails closed. A host other than `127.0.0.1`,
+`::1`, or `localhost` needs both an explicit `listen` opt-in and a bearer
+credential.
+
+**Fix** Supply both, or bind loopback. See
+[Serve beyond loopback](./guides/serve-beyond-loopback.md).
+
+### A setting must be a positive safe integer
+
+**Symptom**
+
+```text
+The gateway keepalive cadence must be a positive safe integer, not 0
+The gateway request body limit must be a positive safe integer, not -1
+```
+
+**Cause** `heartbeatMillis` or `maxRequestBodyBytes` is zero, negative,
+fractional, or outside the safe-integer range. A cadence of zero turns the
+keepalive into a tight loop and a body limit of zero refuses every request, so
+the composition is refused before it binds rather than after it is serving.
+
+**Fix** Pass a positive integer, or omit the field and take the default: 30,000
+milliseconds and 1,048,576 bytes.
+
+### The gateway socket could not be bound
+
+**Symptom** A `bind_failed` `GatewayError` whose message is
+`The gateway socket could not be bound`.
+
+**Cause** The operating system refused the listen: the port is already in use,
+the address is not local, or the port is privileged.
+
+**Fix** Check what already holds the port. A gateway already serving this
+workspace answers `GET /health` with the workspace hash, which is how a
+supervisor decides whether to keep it. The original operating-system failure is
+deliberately not on the error, because that error reaches every bearer holder;
+it is in the server log.
+
+## The gateway is up but a request is refused
+
+### 401 on /projections or /sync, but /rpc answers something else
+
+**Symptom** `POST /projections`, or any protected socket upgrade, answers HTTP
+401 with this body, while `POST /rpc` with the same missing credential answers
+HTTP 200 carrying a `/control/Unauthorized` in the RPC frame.
+
+```json
+{
+  "_tag": "flows/gateway/GatewayError",
+  "code": "unauthorized",
+  "message": "A valid bearer credential is required"
+}
+```
+
+**Cause** Not a bug. `/rpc` authenticates in band so that a caller sees the
+control plane's own typed refusal, exactly as it would against a control server
+hosting the same procedures. Every other RPC path is checked at the edge,
+because a socket cannot be refused after it is open.
+
+**Fix** Send `Authorization: Bearer <token>` on both. Handle the two shapes:
+`@smthrs/control` `ControlError.Unauthorized` from `/rpc`, and a `GatewayError`
+body under a 401 from the rest. The reasoning is in
+[the trust boundary](./concepts/trust-boundary.md#edge-authentication-and-where-it-deliberately-stops).
+
+### 400 malformed_request: carries no RPC request message
+
+**Symptom**
+
+```json
+{
+  "_tag": "flows/gateway/GatewayError",
+  "code": "malformed_request",
+  "message": "POST /projections carries no RPC request message"
+}
+```
+
+**Cause** The body decoded to something that is not a tagged RPC message:
+`{}`, `[]`, prose, or nothing at all.
+
+**Fix** Send the framed envelope, one JSON object per line:
+
+```text
+{"_tag":"Request","id":1,"tag":"Projection.Snapshot","payload":{"selector":{"_tag":"workspace-runs"}},"headers":[]}
+```
+
+A body naming a procedure that does not exist is _not_ this error. It reaches
+the mount and the RPC protocol reports the defect itself.
+
+### 413 request_too_large
+
+**Symptom** `POST /rpc exceeds the 1048576-byte request limit`.
+
+**Cause** The body is over `maxRequestBodyBytes`, or its declared
+`content-length` is.
+
+**Fix** Send less, or raise the limit at the bind. A declared length over the
+limit is refused without reading the body, so a client that lies low in
+`content-length` is still measured as the body is read.
+
+### 400 malformed_request: a body the server could not read
+
+**Symptom** `POST /rpc carries a body the server could not read`.
+
+**Cause** The read failed for a reason that is not size: a truncated body, a
+reset transport. This is deliberately not 413, because the request cannot be
+retried smaller.
+
+**Fix** Retry the request. If it repeats, look at the client's framing and at
+whatever sits between it and the gateway.
+
+### 404 on a path that looks like a mount
+
+**Symptom** `/rpc%2f`, `/%2frpc`, `/rpc%3Bp`, and `/rpc%20` answer 404.
+
+**Cause** A reserved character left percent-encoded is not a separator, to the
+router or to the ingress guard. Those spellings name no mount, exactly as they
+name none to `HttpRouter`.
+
+**Fix** Post to `/rpc`. Aliases the router does resolve, including `/rpc/`,
+`//rpc`, `/RPC`, and `/rpc;p`, are recognized by the guard too, so they are
+authenticated and size-limited rather than slipping past.
+
+## A read is refused
+
+### run_not_found for a run you can see
+
+**Symptom** Every run-scoped selector answers
+`{ "code": "run_not_found", "message": "No run <id>" }`.
+
+**Cause** The control plane does not list that run. The gateway never opens the
+engine database, so a run that exists only there is invisible here. The same
+code answers a run with no events, because reading events alone cannot tell the
+two apart.
+
+**Fix** Confirm the run with `Control.list`, or [`smthrs ps`](/cli/ps). If the
+run is in the engine database but not the control plane, the launch never
+reached the control plane and the gateway is reporting that correctly.
+
+### resource_limit
+
+**Symptom** A `resource_limit` `GatewayError` on a snapshot or a delta.
+
+**Cause** One run's history passed a bound: 10,000 events, or 4 MiB of encoded
+events, or 4 MiB of encoded projected rows.
+
+**Fix** Narrow the selector. `node-output` for one node, or `run-summary`
+rather than `run-events`, folds far less than the whole journal. The fold fails
+at the first value past the bound rather than retaining the rest of a hostile
+or corrupt stream, so this is a refusal to read, not a partial answer.
+
+### run_unavailable with a cause that says almost nothing
+
+**Symptom**
+
+```json
+{
+  "code": "run_unavailable",
+  "message": "Listing runs failed",
+  "cause": { "_tag": "/control/Unavailable", "code": "unavailable" }
+}
+```
+
+**Cause** A control-plane read failed. The cause carries only the failure's tag
+and stable code.
+
+**Fix** Read the server log, which has the whole cause. The redaction is
+deliberate: this error is the RPC error schema, so anything left on it is
+serialized to every bearer holder and forwarded to a browser by the relay, and
+a `PersistenceError` carries SQL and file paths.
+
+## A subscription misbehaves
+
+### malformed_request when resuming from a cursor
+
+**Symptom** One of:
+
+```text
+A cursor for the run-tree projection cannot resume a run-summary subscription
+A cursor can resume only the exact selector that issued it
+A cursor for run run-2 cannot resume a subscription to run run-1
+A workspace-runs subscription has no resumable cursor, because control journal sequences belong to per-run partitions
+Cursor 12:0 was not issued by run run-1
+Cursor 99:0 cannot resume run run-1 past its last position 12:0
+```
+
+**Cause** The cursor does not belong to this subscription, or names a position
+this run never reached.
+
+**Fix** Send back the cursor exactly as it arrived, from the same selector.
+For a workspace projection there is no resume at all: re-subscribe without
+`after` and take the snapshot again.
+
+### The connection drops after a few minutes of quiet
+
+**Symptom** A follower on a quiet run disconnects and reconnects on a cycle,
+with no error from the gateway.
+
+**Cause** Something between the client and the gateway cuts idle connections
+sooner than the keepalive cadence. The default is one frame every 30 seconds,
+sized for a relay that cuts at 600 seconds.
+
+**Fix** Shorten the cadence at the bind with `heartbeatMillis`, or with
+`Projections.layerWith({ heartbeatMillis })` for the read path alone.
+
+### A followed Watch delivers events nothing emitted
+
+**Symptom** `/rpc/ws` `Watch` frames arrive with kind
+`control.gateway.heartbeat` and a `null` payload, repeating the last sequence.
+
+**Cause** That is the gateway's keepalive. `ControlRpcs.Watch` answers
+`ControlEvent` and has no frame of its own for one, so the keepalive is
+published as an event whose kind no emitter uses.
+
+**Fix** Ignore the kind, as every fold in this package does with an unknown
+kind. It repeats the last delivered sequence on purpose, so resuming from the
+last sequence you saw does not rewind.
+
+## A projection is missing something you expected
+
+### The run tree has no nodes, though the run did work
+
+**Cause** `run-tree` folds agent cell calls, from
+`control.agent.cell-call-started` and `control.agent.cell-call-settled`. The
+durable engine's own `flows.engine.*` records live in a different database with
+a different journal, and `Control.watch` reads one run's partition of the
+control journal alone.
+
+**Fix** Nothing to change here. What an engine step did reaches a client as the
+agent call that made it. A run driven by an executor that journals no agent
+events has no tree, correctly.
+
+### The approvals inbox is empty though a run is waiting
+
+**Cause** The unscoped `approvals` selector asks the control plane for runs
+whose status is `waiting-approval` and then keeps only those with a pending
+gate. A run parked for another reason, or one whose gate was already decided,
+is not in the inbox.
+
+**Fix** Use the run-scoped form, `{ _tag: "approvals", runId }`, which lists
+that run's gates including the decided ones. That is what a run card renders.
+
+### The workspace listing stops at 500 runs
+
+**Cause** `Projections.maxWorkspaceRuns` is 500, matching
+`ControlSchema.maxPageSize` so the control plane can answer the whole allowance
+in one page.
+
+**Fix** Read the runs you care about individually with `run-summary`. There is
+no paging on the workspace projection: a workspace with more runs is answered
+as its first 500.
+
+## Recovery
+
+### An abandoned run is never resumed
+
+**Cause** `SuperviseRuntime` is a declared host seam, not an installed feature.
+This release ships `make`, `makeNoop`, and `layerNoop` only, and no production
+host installs it: scanning returns no candidates and resuming performs no work
+unless a host overrides them.
+
+**Fix** Recovery is a reclaim rather than a supervisor. A run becomes
+reclaimable once the heartbeat its owner stopped renewing is older than 30
+seconds, and any running process with the flow registered takes it over. Bring
+up a host composition running the durable engine driver with the relevant flows
+registered, or recover the run explicitly.
+
+### /health answers but every projection fails
+
+**Cause** Startup is deliberately not blocked by a subsystem that failed to
+recover. A gateway whose read path cannot read still comes up, because a
+supervisor still has to be able to ask which workspace this process is.
+
+**Fix** Read the server log for the read path's own failure. The identity
+answer is correct and is not evidence that the rest is healthy.

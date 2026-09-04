@@ -1,0 +1,214 @@
+---
+title: "Quickstart"
+description: "Scaffold a project, plan a flow, approve the plan, run it, and read the run back, using the smthrs command line end to end."
+sidebar:
+  order: 2
+---
+
+This quickstart takes one directory from empty to a settled run. Every command
+here is a real `smthrs` process against one real project, which is how
+`packages/smithers/test/EndToEnd.test.ts` exercises the same loop.
+
+By the end you will have a project with `.flows/control.db` and
+`.flows/engine.db` on disk, one flow discovered from `flows/`, and one durable
+run you can list, read, and delete.
+
+## Before you start
+
+Install the CLI and check the machine, as described in
+[Installation](./installation.md):
+
+```bash
+mkdir hello-smithers && cd hello-smithers
+smthrs doctor
+```
+
+`doctor` runs nothing. It reports the project root it resolved, both database
+files, the Node version against the 22.19.0 floor, whether `jj` is on the
+`PATH`, and which provider keys are set. A `fail` line is a fact that will stop
+the next command you run; fix those first.
+
+## Scaffold a flow
+
+```bash
+smthrs init hello
+```
+
+`init` writes `flows/hello/flow.mdx` and creates the empty `.flows/` state
+directory, which is what anchors every later command on this project. It also
+adds `.flows/` to `.gitignore` when the directory is a repository. An existing
+flow file is left exactly as it is, so a second `init` destroys nothing.
+
+The scaffold declares a model seat chosen from the provider credentials this
+environment sets, in the order `doctor` reports them:
+
+```text
+---
+name: "hello"
+description: A starter Smithers flow.
+model: anthropic:claude-sonnet-4-5
+---
+```
+
+If no provider key was set when `init` ran, the line names the default seat and
+the variable to set for it. Set that variable now, because a launch with no
+resolvable seat is refused rather than run:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Confirm the flow is discoverable:
+
+```bash
+smthrs ls
+```
+
+```text
+{
+  "_tag": "flows",
+  "items": [
+    {
+      "description": "A starter Smithers flow.",
+      "flowId": "hello"
+    }
+  ]
+}
+```
+
+Members are ordered by UTF-16 code unit in every document the CLI prints, which
+is why `description` comes before `flowId`.
+
+## Plan the flow
+
+```bash
+smthrs plan hello
+```
+
+`plan` creates no run. It asks the control plane to plan the flow and prints
+the plan card: the plan id, the content digest, the canonical summary of the
+input, the capability envelope, the node graph, and an `approval` member. That
+`approval` member is the payload `approve`, `deny`, and `run` accept unchanged.
+
+Capture it for the next two steps:
+
+```bash
+approval="$(smthrs --json plan hello | jq -c '.approval')"
+```
+
+## Submit it, and watch it park
+
+```bash
+smthrs run "$approval"
+echo "exit: $?"
+```
+
+```text
+{"_tag":"Parked","planId":"<plan-id>","receiptId":"<receipt-id>","status":"waiting-approval"}
+exit: 3
+```
+
+The plan carries no grant yet, so the control plane parks it instead of
+launching. Exit 3 is the one outcome a caller cannot read from the payload
+alone: the run did not fail, it is waiting for a decision.
+
+## Approve it, then run it
+
+```bash
+smthrs approve "$approval" --scope run
+```
+
+```text
+{"_tag":"Accepted","receiptId":"approve:plan-1"}
+```
+
+`approve` records the grant. It does not launch: the receipt carries no
+`runId`, and `smthrs ps` still lists nothing. Submit the same payload again,
+and this time the grant is there:
+
+```bash
+smthrs run "$approval"
+echo "exit: $?"
+```
+
+`--scope run` grants this launch and the whole run it starts, which is the same
+grant `smthrs up` makes for itself. `once` grants a single ask, and
+`remembered` grants every later run.
+
+Because this process owns the executor, `run` stays attached after the receipt
+is accepted, waits for the run to settle, and reports the run's outcome as its
+own exit status: 0 for `completed`, 1 for `failed`, 130 for `cancelled`, 3 if
+it parks again on an in-run ask.
+
+With no resolvable provider credential the launch is refused rather than left
+hanging, and the run row settles `failed`:
+
+```text
+LaunchFailed: Set OPENAI_API_KEY to run the openai:gpt-5.6-sol seat
+```
+
+## Read the run back
+
+```bash
+smthrs ps
+```
+
+`ps` lists durable runs with their status, and `--status` filters on the seven
+statuses the release pins: `accepted`, `running`, `parked`,
+`waiting-approval`, `cancelled`, `completed`, and `failed`. An eighth value is
+a usage error, not an empty list.
+
+Take the run id from that listing and read what happened:
+
+```bash
+smthrs status <run-id>     # the diagnosis card: what it did, and what to do next
+smthrs logs <run-id>       # the transcript; --json is the raw event stream
+smthrs output <run-id>     # every registered node output
+```
+
+`logs --follow` streams events as they land instead of rendering a transcript.
+`output <run-id> <node-id>` prints one node's output; a node id the run does
+not have is a usage error naming the run, not an empty document.
+
+## Do it in one command next time
+
+The plan, approve, run sequence collapses into one verb when the plan needs no
+human review:
+
+```bash
+smthrs up hello --data '{"topic":"durable runs"}'
+```
+
+`up` plans the flow, grants the plan's own approval at `run` scope, and submits
+it. Attached, it waits for the run to settle and exits with the run's status.
+With `-d` it launches a child process that outlives it and prints the run id
+and log path instead. See [Launch a detached run](./guides/launch-a-detached-run.md).
+
+## Clean up
+
+```bash
+smthrs down                            # cancel every non-terminal run
+smthrs gc --older-than 1s --dry-run    # report what retention would delete
+smthrs gc --older-than 1s              # delete it
+```
+
+`down` is a list followed by a cancel, so running it twice is a no-op rather
+than an error. `gc` refuses `--older-than 0s`: deleting everything is not a
+retention policy, and it is the easiest value to type by accident.
+
+## What just happened
+
+One project directory anchored every command on the same two SQLite files, so
+the run `run` started is the run `ps` listed and `gc` deleted. The approval you
+passed to `run` and `approve` was the same serialized payload `plan` printed,
+which is why the decision is portable: another process, or an agent over MCP,
+can decide a park this shell created.
+
+## Next steps
+
+- [Script the CLI](./guides/script-the-cli.md): `--json`, exit codes, and the
+  idempotency keys that make a retried command safe.
+- [Diagnose a run](./guides/diagnose-a-run.md): what `status`, `logs`, and
+  `output` each answer, and how to file a bug with a run digest attached.
+- [Output and exit codes](./concepts/output-and-exit-codes.md): the rendering
+  rules and the status vocabulary a script branches on.

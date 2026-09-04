@@ -570,7 +570,7 @@ The root entry point exports these namespaces, and each is also importable from
 
 Every export of every one of them, with a one-line summary, is generated from
 this package's own JSDoc onto
-[the API page](https://smithers.sh/docs/reference/api/agent#exports). That page is the list;
+[the API page](https://agent.smithers.sh/reference/api/#exports). That page is the list;
 this README is the composition guide. `docs/README.md` explains how the two are
 generated and kept in step.
 

@@ -1,0 +1,94 @@
+---
+title: "What the cache admits"
+description: "The boundary every cache argument crosses: the key grammar, the bounded inert JSON budget, detachment and freezing, and why a cached result is never redacted."
+sidebar:
+  order: 2
+---
+
+A cached result is executable state. A hit is handed back to a flow as the
+step's own result, so the store must return exactly the value the step
+produced, and must never be talked into storing something it cannot return. The
+admission boundary is where both promises are kept.
+
+Every input is checked before a statement or a request is issued, and the SQL
+tier and the HTTP tier run the same checks, so an input one refuses is not
+accepted by the other.
+
+## The rules
+
+| Rule                              | Value                                                                                            |
+| --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                  |
+| `result` and `meta` size          | `maximumJsonBytes`, 4 MiB, which also bounds any single string                                   |
+| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                 |
+| Object keys                       | 16 KiB each                                                                                      |
+| `recordedRunId`                   | non-empty, NUL-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
+| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                       |
+
+## Why the key grammar is that narrow
+
+The cache key is accepted at two boundaries: it becomes a bound SQL parameter,
+and it becomes a URL path segment under a shared tier's `/ac/` namespace.
+Restricting it to URL-safe letters, digits, underscores, and hyphens makes `.`,
+`..`, path separators, control characters, and ill-formed Unicode
+unrepresentable before either boundary is touched. A key can neither escape the
+remote namespace nor reach SQL as anything but one opaque token, and the
+grammar is the reason rather than an escaping pass that has to be right
+everywhere.
+
+## Bounded, inert JSON
+
+Admission copies each `result` and `meta` tree rather than trusting the object
+it was handed. The copy invokes no getter and no `toJSON` hook, walks property
+descriptors instead of reading properties, and freezes what it produces. A
+hostile or merely mutable argument therefore cannot change value between
+validation and the write, and cannot run caller code inside the store.
+
+The copy refuses, with `invalid_cache` and a complaint naming the field:
+
+- values JSON cannot represent, including `undefined`, functions, symbols, and
+  non-finite numbers;
+- cycles;
+- sparse arrays, accessor array members, and enumerable non-index array
+  members;
+- non-plain objects, accessors, and enumerable symbol keys;
+- text with lone surrogates;
+- anything past the byte, depth, node, or member budget.
+
+The byte count matches what the canonical encoder actually emits, escape for
+escape, so a value whose encoded form fits the budget is never refused for
+being over it.
+
+`snapshotEntry` applies the same discipline to the entry shell itself. It reads
+the six expected fields through their descriptors, refuses any other enumerable
+own property, and freezes the decoded result. `CombinedCacheStore` takes that
+snapshot once, before either tier is called: forwarding the caller's object let
+a mutation between the two writes persist one value locally and publish a
+different one under the same digest, with `Inserted` answered for both.
+
+## Cached results are never redacted
+
+Journal payloads are redacted; the stores that hold resumable state are not. A
+redactor that replaced a field because its name ended in `token` or `secret`
+would hand the flow a `"[REDACTED]"` string where it expected its own value,
+and a non-string value replaced by a placeholder string breaks schema decoding
+on resume. `result` and `meta` round-trip through canonical JSON and come back
+as the values the step produced.
+
+## Reusing the boundary
+
+The checks are exported, so an adapter implementing this contract elsewhere,
+for example a shared-tier server, refuses exactly what the store refuses:
+`validateKey`, `validateRecordedBy`, `validateFence`, `validateAge`,
+`snapshotEntry`, and `encodeCanonical`, alongside the `KeyDigest`,
+`RecordedRunId`, `RecordedBy`, and `CacheEntry` schemas. Their signatures are
+on the [API reference](../api.md).
+
+## Related
+
+- [The head and the ledger](./head-and-ledger.md): why canonical form decides a
+  recording's outcome.
+- [Implement a shared cache server](../guides/implement-a-shared-tier.md): the
+  same boundary on the wire.
+- [Troubleshooting](../troubleshooting.md): the complaint text each refusal
+  carries.

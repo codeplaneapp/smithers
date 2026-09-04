@@ -1,16 +1,26 @@
+---
+title: "API reference"
+description: "Every public export of @smthrs/capability: the Capability value and its glob pattern, the closed action vocabulary, effect tiers, policy rules and evaluate, and the three typed permission failures."
+---
+
+`@smthrs/capability` exports two modules from its root entry point, and each is
+also importable from `@smthrs/capability/<Module>`:
+
 ```ts
 import { Capability, Permission } from "@smthrs/capability"
-
-const rule = new Permission.Rule({
-  effect: "allow",
-  pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: "/workspace/**" })
-})
+// or
+import * as Capability from "@smthrs/capability/Capability"
+import * as Permission from "@smthrs/capability/Permission"
 ```
 
-Enforcement, the `GrantStore`, the decorating layers, and the journal live in
-[`@smthrs/kernel`](/api/kernel). This package depends on `effect` alone, so both
-the kernel and `@smthrs/jj` can depend on it without a cycle and a protected
-service names permission failures in its own interface.
+`@smthrs/capability/internal/*` and `@smthrs/capability/*/index` are not
+public. `@smthrs/capability/package.json` is exported.
+
+Every export is a value, a schema, or a pure function. Enforcement, the
+`GrantStore`, the decorating layers, and the journal live in
+[`@smthrs/kernel`](/api/kernel). This package depends on `effect` alone, so
+both the kernel and [`@smthrs/jj`](/api/jj) can depend on it without a cycle,
+and a protected service names permission failures in its own interface.
 
 :::danger
 Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenied`, and the rest) are digested into step keys and round-trip through the grant journal. Renaming one invalidates recorded runs.
@@ -24,110 +34,515 @@ Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenie
 | `@smthrs/capability/Capability` | [src/Capability.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/src/Capability.ts) | any      |
 | `@smthrs/capability/Permission` | [src/Permission.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/src/Permission.ts) | any      |
 
-## Actions and tiers
+## Capability
 
-`Capability.Action` is the closed vocabulary: `fs:read`, `fs:write`, `net:get`,
-`net:post`, `model:call`, `proc:spawn`, and the jj slot's `jj:status`,
-`jj:diff`, `jj:snapshot`, `jj:restore`, `jj:workspace-add`,
-`jj:workspace-forget`, `jj:root`, and `jj:revert`. Actions are durable identity:
-never repurpose one, add one. `Capability.PatternAction` adds the namespace
-selectors `fs:*`, `net:*`, `model:*`, `proc:*`, `jj:*`, and the whole-authority
-`*`. Both are exported as schema values, so a consumer can validate a bare
-selector at an RPC, config, or persistence boundary instead of copying the list.
+Capability values, wildcard patterns, the text form both render into, matching,
+and effect tiers.
 
-`Capability.tierOf` classifies a capability. Reads are `sealed` (`fs:read`,
-`net:get`, `model:call`, `jj:status`, `jj:diff`, `jj:root`). Undoable writes are
-`compensable` (`jj:snapshot`, `jj:restore`, `jj:workspace-add`,
-`jj:workspace-forget`, `jj:revert`, and an `fs:write` inside the workspace
-root). The rest are `irreversible` (`net:post`, `proc:spawn`, and an `fs:write`
-that escapes the workspace), and only those require an idempotency key to retry.
+### Capability.Action
 
-Workspace containment is lexical, so `tierOf` cannot see symlinks: a caller that
-materializes snapshots resolves real paths before classifying a write. A
-`workspaceRoot` that normalizes to `.` or the empty string has no lexical
-boundary and fails closed to `irreversible`, so pass an absolute root.
+```ts
+type Action =
+  | "fs:read"
+  | "fs:write"
+  | "net:get"
+  | "net:post"
+  | "model:call"
+  | "proc:spawn"
+  | "jj:status"
+  | "jj:diff"
+  | "jj:snapshot"
+  | "jj:restore"
+  | "jj:workspace-add"
+  | "jj:workspace-forget"
+  | "jj:root"
+  | "jj:revert"
 
-## Resource globs
+const Action: Schema.Literals<[...]>
+```
 
-A `Capability` carries an exact resource. A `CapabilityPattern` carries a glob
-matched against the whole resource:
+The closed vocabulary of host operations the permission kernel can authorize.
+Exported as both a type and a schema value, so a consumer can validate a bare
+selector at an RPC, config, or persistence boundary instead of copying the
+list. Actions are durable identity: add one when the kernel learns a new
+operation, never repurpose one.
 
-| Form                        | Meaning                                                                                                                                     |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `*`                         | any run of UTF-16 code units, path separators and newlines included                                                                         |
-| `?`                         | exactly one UTF-16 code unit, so an astral character such as an emoji needs two                                                             |
-| a space then `*` at the end | also matches the bare resource without its trailing argument text, which is what makes the `proc:spawn` grant `npm *` also grant bare `npm` |
-| `**`                        | the only form `Capability.subsumes` can prove                                                                                               |
+### Capability.PatternAction
 
-Three consequences the grammar does not make obvious.
+```ts
+type PatternAction = Action | "fs:*" | "net:*" | "model:*" | "proc:*" | "jj:*" | "*"
 
-There is no escape. A resource that genuinely contains `*` or `?` cannot be
-granted exactly, so an operator writing `net:get:https://api.test/v1?k=1`
-believes they wrote an exact resource and has written a one-character wildcard.
-Never build a pattern by concatenating agent-supplied text; derive it with
-`Capability.patternFromCapability`, which returns `Option.none()` for a resource
-the grammar cannot express exactly or one longer than
-`Capability.maxResourceLength`.
+const PatternAction: Schema.Literals<[...]>
+```
 
-Matching compares the pattern against the whole resource byte-exactly over
-UTF-16 code units. It performs no path normalization and no case folding, so
-`\` is an ordinary character that never matches `/`, and `A:/x` never matches
-`a:/X`.
+Every action selector a pattern may carry: an exact action, a namespace family,
+or the whole-authority `*`.
 
-Matching costs O(pattern length times resource length) in the worst case. Exact
-and pattern resources are both bounded at `Capability.maxResourceLength`
-UTF-16 code units and reject anything longer at construction, parsing, and
-decode. Adapters reject or summarize larger host values before authorization.
-`Capability.maxMatchWork` remains a fail-closed guard for unchecked structural
-inputs. `Capability.withinMatchBudget` reports that case and
-`Permission.evaluate` denies it.
+### Capability.Capability
 
-`Capability.format` renders a capability or a pattern as `action:resource`, and
-it is the durable identity a grant envelope is deduplicated and sorted by.
-`Capability.parse` reads back an exact capability and `Capability.parsePattern`
-reads back a pattern, including the whole-authority `*:**` and its bare `*`
-sentinel form, the string markdown discovery emits for a flow that declares no
-capabilities and plans persist in durable key material, which parses to
-`*:**`. Apart from that one sentinel, both return `Option.none()` rather than
-guessing: a missing resource is a rejection, not a default.
+```ts
+class Capability extends Schema.Class<Capability>("@smthrs/capability/Capability")({
+  action: Action,
+  resource: Schema.String // at most maxResourceLength UTF-16 code units
+}) {}
+```
 
-## Permission failures
+One exact adapter request subject to authorization. Construction, parsing, and
+decoding all reject a resource longer than
+[`maxResourceLength`](#capabilitymaxresourcelength).
 
-`Permission.PermissionRequired`, `Permission.PermissionDenied`, and
-`Permission.GrantStoreError` are the three failures a guarded Host call can add,
-and `Permission.PermissionError` is exported as both their union type and a
-schema value. `Permission.isPermissionError` validates the exact enumerable
-shape rather than the `_tag` alone, because the package ships dual cjs and esm
-and class identity is not stable for a dual-package consumer. Unknown fields
-and overlong nested capabilities are rejected.
+### Capability.CapabilityPattern
 
-`Permission.PermissionRequired.meta` is journal-safe context: only
-JSON-representable values are accepted, undefined-valued object properties are
-dropped, construction takes a cycle-safe deep-frozen snapshot, and the caller's
-object is never retained. Undefined array elements remain invalid because
-serializing them would change them to null. Permission failures defensively copy
-caller capabilities; the copied action and resource and the outer `capability`
-and `meta` slots are non-writable. A value the journal could not encode fails at
-the construction site with a decode error naming the key, not later at the
-persistence boundary.
+```ts
+class CapabilityPattern extends Schema.Class<CapabilityPattern>("@smthrs/capability/CapabilityPattern")({
+  action: PatternAction,
+  resource: Schema.String // at most maxResourceLength UTF-16 code units
+}) {}
+```
 
-`Permission.formatError` renders one line for a log or an unattended report. It
-escapes C0 and C1 controls and caps each field at
-`Permission.maxDisplayFieldLength`, so an agent-chosen resource cannot inject
-extra lines into an operator's log.
+An action selector and a resource glob, naming a family of capabilities. The
+grammar and its edges are in [Resource globs](./concepts/resource-globs.md).
 
-## The `PlatformError` projection
+### Capability.make
 
-Effect owns the `FileSystem` and `ChildProcessSpawner` tags and their error
-channels are fixed to `PlatformError`. Rather than mint a second tag whose only
-difference is a wider error type, the kernel decorates those tags in place and
-maps its failures through `Permission.toPlatformError`: the normalized reason is
-always `PermissionDenied`, `description` carries the `Permission.formatError`
-rendering, and `cause` carries the structured failure itself.
-`Permission.fromPlatformError` recovers it, so an attended surface can still
-reply to a `PermissionRequired` request and an unattended report can still name
-the capability. It unwraps only a `PermissionDenied` reason, so a foreign
-platform error's `cause` never reaches the refinement.
+```ts
+const make: (action: Action, resource: string) => Capability
+```
 
-See the [kernel reference](/api/kernel) for the decorating layers and grant
-handling.
+Constructs an exact capability. Throws when the resource exceeds
+`maxResourceLength`.
+
+### Capability.format
+
+```ts
+const format: (
+  capability: { readonly action: Action | PatternAction; readonly resource: string }
+) => string
+```
+
+Renders a capability or a pattern as `action:resource`. One renderer serves
+both, because they are structurally identical records and these bytes are
+durable identity: they are what a grant envelope is deduplicated and sorted by,
+and what reaches journal payloads.
+
+Throws an `Error` naming the action when it is outside the closed vocabulary,
+so an invalid structural input cannot collide with a valid durable identity.
+
+```ts
+Capability.format(Capability.make("net:get", "example.test:8443/api:v1"))
+// "net:get:example.test:8443/api:v1"
+```
+
+### Capability.parse
+
+```ts
+const parse: (input: string) => Option.Option<Capability>
+```
+
+Reads back an exact capability. The action is the first two colon-separated
+components; every remaining character, colons included, is the resource.
+Returns `Option.none()` for a missing component, an unknown action, or an
+overlong resource. An empty resource is legal (`fs:read:`); a missing one is
+not (`fs:read`).
+
+### Capability.parsePattern
+
+```ts
+const parsePattern: (input: string) => Option.Option<CapabilityPattern>
+```
+
+Reads back a pattern, with one single-token exception. The whole-authority
+action `*` occupies the first component alone, so the bare string `*` parses to
+`{ action: "*", resource: "**" }`. That is the sentinel
+[`@smthrs/registry`](/api/registry) markdown discovery emits for a flow whose
+frontmatter declares no `capabilities:`, and plans persist it in durable key
+material. The resource is `**` rather than `*` because only `**` can be proven
+to cover anything. Every other missing component is a rejection, not a default.
+
+```ts
+Capability.parsePattern("*")
+// Option.some(CapabilityPattern { action: "*", resource: "**" })
+Capability.parsePattern("fs:read")
+// Option.none()
+```
+
+### Capability.patternFromCapability
+
+```ts
+const patternFromCapability: (capability: Capability) => Option.Option<CapabilityPattern>
+```
+
+Derives the exact pattern for a request. Returns `Option.none()` when the
+resource is overlong or contains `*` or `?`, because the grammar has no escape
+for those characters and any pattern returned would silently widen the grant.
+Quotes, spaces, and newlines are accepted. The derived pattern matches that
+resource and nothing else. This is the only safe conversion from a request to a
+grant; see [Grant a capability safely](./guides/grant-a-capability-safely.md).
+
+### Capability.matches
+
+```ts
+const matches: (pattern: CapabilityPattern, capability: Capability) => boolean
+```
+
+Tests whether a pattern selects an exact capability. The action must match
+exactly, by namespace family, or by `*`, and the resource glob is matched
+against the whole resource byte-exactly over UTF-16 code units, with no path
+normalization and no case folding.
+
+Returns `false` rather than throwing when the pattern-length times
+resource-length product exceeds [`maxMatchWork`](#capabilitymaxmatchwork),
+because a grant must never widen.
+
+### Capability.subsumes
+
+```ts
+const subsumes: (left: CapabilityPattern, right: CapabilityPattern) => boolean
+```
+
+Conservatively determines whether every capability selected by `right` is also
+selected by `left`. Returns `false` for any relationship its syntactic checks
+cannot prove.
+
+An action is subsumed when `left` is `*`, the two are equal, or `left` is a
+namespace family covering `right`. A resource is subsumed when the two are
+equal, `left` is `**`, or `left` ends in `/**` and `right` starts with that
+prefix and a separator. A single `*` is not provable, so an envelope entry that
+must prove coverage is written `**`.
+
+### Capability.withinMatchBudget
+
+```ts
+const withinMatchBudget: (pattern: CapabilityPattern, capability: Capability) => boolean
+```
+
+Reports whether `matches` can decide this pair inside `maxMatchWork`. An action
+mismatch is decidable without any resource work. Use it to tell "not granted"
+apart from "undecidable" when `Permission.evaluate` returns `deny`.
+
+### Capability.maxResourceLength
+
+```ts
+const maxResourceLength = 4096
+```
+
+The maximum UTF-16 length of an exact or patterned resource. Exact requests and
+authored patterns share the bound, so permission failures, journal payloads,
+matching work, and exact-pattern derivation all have one finite input contract.
+An adapter must reject or summarize a larger host value before constructing a
+capability.
+
+### Capability.maxMatchWork
+
+```ts
+const maxMatchWork = maxResourceLength * maxResourceLength
+```
+
+The maximum pattern-length times resource-length work one match may perform,
+the square of `maxResourceLength`. An ordinary short grant such as
+`/workspace/**` still decides a resource well over a million units long, so the
+budget only bites on a structural input that evaded the length check.
+
+### Capability.EffectTier
+
+```ts
+type EffectTier = "sealed" | "compensable" | "irreversible"
+
+const EffectTier: Schema.Literals<["sealed", "compensable", "irreversible"]>
+```
+
+The durability and retry semantics of an effect. See
+[Effect tiers](./concepts/effect-tiers.md).
+
+### Capability.TierOptions
+
+```ts
+interface TierOptions {
+  readonly workspaceRoot: string
+}
+```
+
+`workspaceRoot` is the lexical boundary used to classify file writes. A root
+that normalizes to `.` or the empty string has no boundary and fails closed to
+`irreversible`, so pass an absolute root.
+
+### Capability.tierOf
+
+```ts
+const tierOf: (capability: Capability, options: TierOptions) => EffectTier
+```
+
+Classifies an exact capability.
+
+| Tier           | Actions                                                                                                                     |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `sealed`       | `fs:read`, `net:get`, `model:call`, `jj:status`, `jj:diff`, `jj:root`                                                       |
+| `compensable`  | `jj:snapshot`, `jj:restore`, `jj:workspace-add`, `jj:workspace-forget`, `jj:revert`, and an `fs:write` inside the workspace |
+| `irreversible` | `net:post`, `proc:spawn`, and an `fs:write` that escapes the workspace                                                      |
+
+Workspace containment is lexical, so symlinks are invisible: a caller that
+materializes workspace snapshots resolves real paths before classifying a
+write.
+
+### Capability.requiresIdempotencyKey
+
+```ts
+const requiresIdempotencyKey: (tier: EffectTier) => boolean
+```
+
+Reports whether retrying an effect requires an idempotency key. Only
+`irreversible` does.
+
+## Permission
+
+Typed permission failures, policy rules, and the `PlatformError` projection.
+
+### Permission.RuleEffect
+
+```ts
+type RuleEffect = "allow" | "deny" | "ask"
+
+const RuleEffect: Schema.Literals<["allow", "deny", "ask"]>
+```
+
+The decision a matching rule applies.
+
+### Permission.Rule
+
+```ts
+class Rule extends Schema.Class<Rule>("@smthrs/capability/Rule")({
+  effect: RuleEffect,
+  pattern: CapabilityPattern
+}) {}
+```
+
+A capability pattern and the decision it applies.
+
+### Permission.evaluate
+
+```ts
+const evaluate: (
+  rulesets: ReadonlyArray<ReadonlyArray<Rule>>,
+  capability: Capability
+) => RuleEffect
+```
+
+Reduces ordered rulesets to one decision for one exact capability.
+
+Matching rules are last-match-wins across all rulesets, and the default is
+`ask`. `rulesets[0]` is the configured policy ruleset: it is first reduced with
+the same last-match rule, and its effective denial is then a hard veto, so a
+configured `deny` superseded by a later configured `allow` or `ask` is not a
+veto.
+
+A rule the matcher cannot decide within `Capability.maxMatchWork` vetoes the
+decision and `evaluate` returns `deny`, because skipping it could let an
+undecidable `deny` fall through to a later `allow`. The kernel turns that
+`deny` into a `PermissionDenied`.
+
+The kernel supplies four rulesets in this order: configured policy, the plan
+envelope, the grants this run holds, and the grants a person chose to remember.
+See [The authorization model](./concepts/authorization-model.md).
+
+### Permission.PermissionRequired
+
+```ts
+class PermissionRequired extends Schema.TaggedError<PermissionRequired>()(
+  "@smthrs/capability/PermissionRequired",
+  {
+    code: Schema.Literal("permission_required"),
+    requestId: Schema.String,
+    runId: Schema.optional(Schema.String),
+    capability: Capability,
+    tier: EffectTier,
+    meta: Schema.Record(Schema.String, Schema.Json)
+  }
+) {}
+```
+
+A permission request that must be resolved by an attended surface. The
+operation did not happen.
+
+| Field        | Meaning                                            |
+| ------------ | -------------------------------------------------- |
+| `requestId`  | The identity a surface resolves the request by.    |
+| `runId`      | The run the request belongs to, when there is one. |
+| `capability` | The exact adapter request. Never a wildcard.       |
+| `tier`       | What performing the operation would cost to undo.  |
+| `meta`       | Journal-safe context for the person answering.     |
+
+`meta` accepts only JSON-representable values. Construction takes a cycle-safe,
+deep-frozen snapshot and does not retain the caller's object; an
+`undefined` object property is dropped, mirroring `JSON.stringify`, while an
+`undefined` array element is rejected because serialization would change it to
+`null`. A value the journal could not encode fails at the construction site
+naming the key. The error retains a defensive copy of the capability, and its
+`capability` and `meta` slots are non-writable.
+
+### Permission.PermissionDenied
+
+```ts
+class PermissionDenied extends Schema.TaggedError<PermissionDenied>()(
+  "@smthrs/capability/PermissionDenied",
+  {
+    code: Schema.Literal("permission_denied"),
+    capability: Capability,
+    reason: Schema.String
+  }
+) {}
+```
+
+A capability rejected by policy or by the current capability ceiling. `reason`
+says which. Like `PermissionRequired`, it retains a defensive copy of the
+capability in a non-writable slot.
+
+### Permission.GrantStoreErrorCode
+
+```ts
+type GrantStoreErrorCode =
+  | "duplicate_request"
+  | "request_not_found"
+  | "journal_failed"
+  | "store_closed"
+  | "invalid_resolution"
+
+const GrantStoreErrorCode: Schema.Literals<[...]>
+```
+
+The stable grant-store failure codes callers branch on.
+
+### Permission.GrantStoreError
+
+```ts
+class GrantStoreError extends Schema.TaggedError<GrantStoreError>()(
+  "@smthrs/capability/GrantStoreError",
+  {
+    code: GrantStoreErrorCode,
+    message: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect())
+  }
+) {}
+```
+
+A failure to register, persist, or resolve a grant request. Treat it as
+unavailable rather than as a denial. `message` and `cause` are optional
+operation context for persistence adapters; branch on `code`.
+
+### Permission.PermissionError
+
+```ts
+type PermissionError = PermissionRequired | PermissionDenied | GrantStoreError
+
+const PermissionError: Schema.Union<[...]>
+```
+
+Every failure the capability kernel can add to a guarded host call, as both a
+union type and a schema value. A protected service names it in its own
+interface, so a caller that holds the service cannot forget that an operation
+may be suspended, denied, or left undecided by a broken grant store.
+
+### Permission.permissionRequired
+
+```ts
+const permissionRequired: (options: {
+  readonly requestId: string
+  readonly runId?: string | undefined
+  readonly capability: Capability
+  readonly tier: EffectTier
+  readonly meta?: Readonly<Record<string, unknown>> | undefined
+}) => PermissionRequired
+```
+
+Constructs a permission request for an exact capability. `meta` defaults to
+`{}`.
+
+### Permission.permissionDenied
+
+```ts
+const permissionDenied: (capability: Capability, reason: string) => PermissionDenied
+```
+
+Constructs a denied permission failure.
+
+### Permission.isPermissionError
+
+```ts
+const isPermissionError: (input: unknown) => input is PermissionError
+```
+
+Refines an unknown value to a kernel permission failure. It validates the whole
+enumerable shape rather than the `_tag` alone, because the package ships dual
+CommonJS and ESM and class identity is not stable for a dual-package consumer.
+It accepts a structurally valid failure produced by another copy of the package
+and rejects an excess field, a wrong-typed field, a missing `meta`, non-JSON
+metadata, an unknown grant-store code, or an overlong nested capability
+resource.
+
+### Permission.maxDisplayFieldLength
+
+```ts
+const maxDisplayFieldLength = 256
+```
+
+The maximum UTF-16 length of one field in a permission-error rendering, marker
+included. It bounds unattended log output while preserving ordinary Unicode.
+
+### Permission.formatError
+
+```ts
+const formatError: (error: PermissionError) => string
+```
+
+Renders a permission failure as the one-line `description` a `SystemError`
+carries, which is the string a log line or an unattended report shows:
+
+```text
+permission_required: <action:resource> (tier <tier>, request <requestId>)
+permission_denied: <action:resource>: <reason>
+grant store <code>: <message>
+```
+
+Every field escapes C0 and C1 controls, is limited to `maxDisplayFieldLength`
+UTF-16 code units, and ends with a visible `…[truncated]` marker when cut, so
+an agent-chosen resource cannot forge extra log lines. Ordinary non-ASCII text
+is unchanged.
+
+### Permission.toPlatformError
+
+```ts
+const toPlatformError: (options: {
+  readonly module: string
+  readonly method: string
+  readonly pathOrDescriptor?: string | number | undefined
+  readonly error: PermissionError
+}) => PlatformError
+```
+
+Projects a permission failure into Effect's `PlatformError` channel. Effect
+owns `FileSystem` and `ChildProcessSpawner`, and their tags fix the error
+channel to `PlatformError`, so the kernel decorates those tags in place rather
+than minting a second tag whose only difference is a wider error type.
+
+Nothing is lost. The normalized reason is always `PermissionDenied`, meaning
+the operation did not happen because the capability kernel refused, suspended,
+or could not decide it; `description` carries the `formatError` rendering; and
+`cause` carries the structured failure itself.
+
+### Permission.fromPlatformError
+
+```ts
+const fromPlatformError: (error: PlatformError) => Option.Option<PermissionError>
+```
+
+Recovers the structured failure a `toPlatformError` projection carries, so an
+attended surface can still reply to the request and an unattended report can
+still name the capability. It unwraps only a `PermissionDenied` reason and
+validates the cause with `isPermissionError`, so a foreign platform error's
+`cause` never reaches the refinement.
+
+## Related
+
+- [The `@smthrs/kernel` reference](/api/kernel): the grant store, the
+  decorating layers, and grant handling.
+- [Handle a permission failure](./guides/handle-a-permission-failure.md): the
+  procedure these three failures are built for.

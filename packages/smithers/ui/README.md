@@ -13,13 +13,13 @@ workspace.
 Import it by its scoped name, `@smthrs/ui`; the unscoped `smthrs` package
 publishes only a deprecation notice whose module throws on import.
 
-Styling ships as CSS-in-TS (`smithersUiCss`) because the bundler this package
-is built for drops `.css` imports. Render `<SmithersUiStyles />` once at the
-root; every component also self-injects the composed sheet plus its lane CSS
-fragment as a fallback. All classes are namespaced `sui-*`.
+Styling ships as CSS-in-TS (`smithersUiCss`) because the bundler this package is
+built for drops `.css` imports. Render `<SmithersUiStyles />` once at the root;
+every component also self-injects the composed sheet plus its lane CSS fragment
+as a fallback. All classes are namespaced `sui-*`.
 
 ```tsx
-import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
+import { Button, SmithersUiStyles, StatusPill } from "@smthrs/ui";
 ```
 
 ## Families
@@ -48,14 +48,14 @@ import { SmithersUiStyles, Button, StatusPill } from "@smthrs/ui";
 - Coding artifacts: `Artifact`, `Snippet`, `PackageInfo`, `SchemaDisplay`,
   `StackTrace`, `TestResults`, `Commit`, `ChangeSummary`,
   `EnvironmentVariables`, `SecretField`.
-- Sandbox previews: `Sandbox`/`SandboxHeader`/`SandboxStatus`/`SandboxActions`/`SandboxContent`
-  (also exported as `AgentSandbox*` for back-compat), `WebPreview`, `JSXPreview`.
+- Sandbox previews: `Sandbox`/`SandboxHeader`/`SandboxStatus`/`SandboxActions`/`SandboxContent`,
+  `WebPreview`, `JSXPreview`.
 - Workflow canvas: `WorkflowCanvas` node/edge/controls/panel/toolbar/minimap
   anatomy.
 - Vault: `BacklinksPanel`, `OutlineView`, the `wikilinks` and `graphModel`
   helpers, and the `createAutosaveDoc` / `useAutosaveDoc` autosave machine.
 - Time: `RelativeTime`, `useRelativeTime`, `formatRelativeTime`.
-- Calendar: `Calendar` with month, week, and day views.
+- Calendar: `Calendar` with month, week, and agenda views.
 
 Heavy renderers stay behind `@smthrs/ui/adapters/*` subpaths so the base barrel
 tree-shakes clean: `pierre-diff-view`, `code-view`, `terminal`, `markdown-editor`,
@@ -64,14 +64,27 @@ out of `src/index.ts`.
 
 ## Documentation
 
-- [`docs/architecture.md`](./docs/architecture.md) — layering, file layout, the
-  adapters rule, and the styling gotchas.
-- [`docs/contracts.md`](./docs/contracts.md) — failure codes, resource limits,
-  and the object-URL ownership rule.
-- [`CHANGELOG.md`](./CHANGELOG.md) — release history.
-- JSDoc on each exported symbol in `src/` is the API reference. There is no
-  page for this package under `docs/pages` while it stays private; see
-  [`docs/README.md`](./docs/README.md).
+The published site at https://ui.smithers.sh is built from `docs/`.
+
+- [`docs/README.md`](./docs/README.md) - the overview and the family index.
+- [`docs/installation.md`](./docs/installation.md) - entry points and peer
+  requirements.
+- [`docs/quickstart.md`](./docs/quickstart.md) - one surface, end to end.
+- [`docs/concepts/`](./docs/concepts/styling.md) - how styling ships, theme
+  tokens, component anatomy, and the adapters boundary.
+- [`docs/guides/`](./docs/guides/style-a-host-application.md) - task-shaped
+  how-tos.
+- [`docs/api.md`](./docs/api.md) - every public export.
+- [`docs/reference/contracts.md`](./docs/reference/contracts.md) - failure
+  codes, resource limits, and the object-URL ownership rule.
+- [`docs/troubleshooting.md`](./docs/troubleshooting.md) - symptoms, causes,
+  and fixes.
+- [`CHANGELOG.md`](./CHANGELOG.md) - release history.
+
+JSDoc on each exported symbol in `src/` is the per-symbol source of truth. The
+pages above are hand-written; no generator produces them.
+`tests/docs-links.test.ts` is the gate over them: every relative link has to
+resolve, and no file in this package may name the unscoped specifier.
 
 ## Gates
 

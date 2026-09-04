@@ -1,0 +1,127 @@
+---
+title: "Choose a provider"
+description: "Pick one of the nine bundled machine providers by what you need from it, construct it, and select one by name at runtime with Sandbox.selectProvider."
+sidebar:
+  order: 3
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/sandbox/docs/guides/choose-a-provider.md"
+---
+
+All nine providers implement `Sandbox.Provider`, so the composition around them
+is identical and only the construction differs. Choose on four questions: what
+boundary you need, whether output has to be byte exact, whether you need to
+stop a running command, and what the provider costs to run.
+
+## The nine, side by side
+
+| Provider              | A machine is                                                         | Needs                                            | Byte-exact command output | Declares `kill` |
+| --------------------- | -------------------------------------------------------------------- | ------------------------------------------------ | ------------------------- | --------------- |
+| `DirectorySandbox`    | one host directory                                                   | nothing beyond host services                     | yes                       | yes             |
+| `JustBashSandbox`     | one directory in a shared virtual filesystem, interpreted in process | a just-bash instance                             | yes                       | no              |
+| `ContainerSandbox`    | one container held on `sleep infinity`                               | a Docker-compatible CLI                          | yes                       | yes             |
+| `KubernetesSandbox`   | one Pod held on `sleep infinity`                                     | `kubectl` and a cluster                          | yes                       | yes             |
+| `MicrosandboxSandbox` | one local microVM                                                    | a Microsandbox host                              | yes                       | no              |
+| `VercelSandbox`       | one persistent Vercel sandbox                                        | Vercel credentials                               | no                        | no              |
+| `DaytonaSandbox`      | one named Daytona sandbox                                            | a Daytona client                                 | no                        | no              |
+| `AwsSandbox`          | one Fargate task                                                     | ECS, the `aws` CLI, and `session-manager-plugin` | no                        | yes             |
+| `CloudflareSandbox`   | one Sandbox Durable Object                                           | a Worker binding                                 | no                        | no              |
+
+"Byte-exact command output" is about a command's own `stdout` and `stderr`.
+File transfer is byte exact on all nine, so a caller that needs bytes out of a
+command has the command write a file and reads that back with `readFile`.
+
+A provider without `kill` cannot stop one command without tearing down the
+session. Closing the session's scope still ends the machine, and every command
+in it with the machine.
+
+For what each boundary actually is, read
+[What a sandbox does and does not prevent](/concepts/isolation/). For the
+per-provider mechanics (reattachment, environment delivery, signal design, and
+the honest limits of each transport), read the provider sections of the
+[API reference](/reference/api/).
+
+## Construct one
+
+Each provider takes its dependencies as values, so the package never reaches
+for an ambient host.
+
+```ts
+import { ContainerSandbox, DirectorySandbox, MicrosandboxSandbox } from "@smthrs/sandbox"
+import * as Microsandbox from "microsandbox"
+
+const local = DirectorySandbox.make({ fs, spawner, root: "/var/tmp/smithers" })
+
+const contained = ContainerSandbox.make({
+  spawner,
+  image: "node:22",
+  network: "none"
+})
+
+const microVm = MicrosandboxSandbox.make({
+  sdk: Microsandbox,
+  image: "oven/bun:1",
+  persistence: "sticky",
+  cpus: 2,
+  memoryMib: 2048,
+  disableNetwork: true
+})
+```
+
+`fs` and `spawner` are Effect's `FileSystem` and `ChildProcessSpawner`, taken
+from the host that composes the provider.
+
+## Select one by name
+
+A host that lets a flow or an operator name a provider registers what it can
+actually boot and resolves the name once:
+
+```ts
+import { Sandbox } from "@smthrs/sandbox"
+
+const registry: Sandbox.ProviderRegistry = { directory: local, container: contained }
+
+const provider = yield* Sandbox.selectProvider(registry, requested)
+```
+
+`requested` is a `Sandbox.ProviderName` or `undefined`. When it is
+`undefined`, `Sandbox.defaultProviderName` is used, which is `"microsandbox"`:
+a microVM is the only bundled backend that can hold the workspace's declared
+Nix environment.
+
+A name the registry does not hold, the default included, fails with
+`ProviderError.code === "unavailable"` listing what is registered. Nothing
+falls back to a weaker sandbox silently, because a run that asked for a microVM
+and quietly got a host directory has lost the only property it asked for.
+
+The full name set is `"microsandbox"`, `"directory"`, `"container"`,
+`"kubernetes"`, `"just-bash"`, `"vercel"`, `"daytona"`, `"aws"`, and
+`"cloudflare"`.
+
+## Run the workspace's Nix environment in the microVM
+
+`MicrosandboxSandbox` accepts the flake text rather than a path, because this
+package reads no host files. The host composing the provider reads the files
+its workspace declaration names:
+
+```ts
+const provider = MicrosandboxSandbox.make({
+  sdk: Microsandbox,
+  persistence: "sticky",
+  environment: { flake: flakeText, lock: lockText, attr: "ci" }
+})
+```
+
+With an environment and no `image`, the microVM boots `nixos/nix`. `acquire`
+writes the two files into the workspace, realises the closure once with
+`nix develop ... --command true` before handing the session out, and then runs
+every command under it. A flake that does not evaluate fails the acquire with
+`unavailable`, carrying `nix develop`'s exit code and stderr, and the booted
+machine is stopped.
+
+Boot stays fast through the store: a `sticky` session keeps the realised
+closure across acquires, and a snapshot taken after the warm boots with it
+already realised.
+
+## Read next
+
+- [Place a flow body on a machine](/guides/place-a-flow-body-on-a-machine/).
+- [Limits](/limits/): where a provider buffers whole, and what that costs.

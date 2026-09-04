@@ -1,16 +1,127 @@
-# Colocated documentation
+---
+title: "@smthrs/crypto"
+description: "Strict SHA-256 hashing for Smithers: one branded digest representation, an injected Effect entry point, a synchronous entry point, and a written statement of what the package does not defend against."
+---
 
-This directory, `docs/Manifest.ts`, and the public JSDoc in `src/` own the published
-contract for `@smthrs/crypto`. Generated pages under `docs/pages` are outputs.
+`@smthrs/crypto` computes SHA-256 digests and gives them exactly one
+representation: 64 lowercase hexadecimal characters, branded as `Digest`.
 
-`scripts/docs.mjs` builds `docs/pages/api/crypto.md`, injects the package-owned
-contract and testing fragments into broader pages, and verifies the reference
-list declared by `docs/Manifest.ts` still points readers to `/api/crypto`.
+It is the package every other Smithers package hashes through. The content
+addresses in [`@smthrs/artifacts`](/api/artifacts), the flow keys in
+[`@smthrs/keys`](/api/keys), the execution ids in [`@smthrs/flow`](/api/flow),
+and the plan card digests in [`@smthrs/plan`](/api/plan) are all this digest,
+so one input policy and one wire format hold across the whole repository.
 
-The `//packages/smithers/flows/crypto:docsPages` target writes or drift-checks those outputs.
-After editing, run:
+Hashing is host access, so the cryptographic operation goes through Effect's
+`Crypto` service: a Node process, a Bun process, a browser, or a test supplies
+the implementation. One entry point deliberately does not. `digestSync` uses
+the package-owned FIPS 180-4 implementation, so a pure synchronous constructor
+can compute an identity without suspending.
 
-```sh
-node packages/smithers/flows/crypto/scripts/docs.mjs
-pnpm -C apps/site sync:docs
+## What SHA-256 gives you here, and what it does not
+
+SHA-256 is a collision-resistant hash function. It is not a message
+authentication code, not a key derivation function, and not a password hash.
+This package adds no key, no salt, and no iteration count, so it defends
+against nothing that SHA-256 by itself does not.
+
+Read [the contract](./contract.md) before you make a digest a security
+boundary. It states every guarantee in full and names the attacks this package
+does not stop, including length extension, brute-force recovery of a
+low-entropy input, and a `Crypto` service that returns bytes of its own
+choosing.
+
+## Who uses this package
+
+Package authors inside Smithers use `digest` and `digestSync` to derive
+identities: a content address, a step key, an execution id, a cache key.
+Application authors use `Digest` to validate a digest that came back out of
+storage, and `Sha256` where the natural boundary is a schema rather than a
+function call.
+
+## Install
+
+```bash
+pnpm add @smthrs/crypto@next
 ```
+
+For the runtime requirements, the import forms, and the `Crypto` services you
+can provide, see [Installation](./installation.md).
+
+## The smallest real example
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { digest, digestSync } from "@smthrs/crypto"
+import { Effect } from "effect"
+
+const injected = await Effect.runPromise(
+  digest("hello").pipe(Effect.provide(NodeCrypto.layer))
+)
+const synchronous = digestSync("hello")
+
+// Both are:
+// 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+```
+
+The two entry points agree on every input they both accept, which is a
+property the package's own suite asserts over arbitrary text and byte views.
+The [Quickstart](./quickstart.md) takes one value through hashing, storage,
+and validation on the way back.
+
+## The package at a glance
+
+The root entry point exports every name below. Each is also importable from
+`@smthrs/crypto/Sha256`.
+
+| Export                           | What it is                                                                                             |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `digest`                         | Hashes text or bytes through the injected `Crypto` service. Fails with `Sha256Error`.                  |
+| `digestSync`                     | Hashes text or bytes with the package's own implementation. Throws `Sha256Error`.                      |
+| `Digest`                         | The schema and brand for a digest: 64 lowercase hexadecimal characters. It validates and never hashes. |
+| `Sha256`                         | The one-way schema transformation from text or bytes to `Digest`.                                      |
+| `Sha256Error`, `Sha256ErrorCode` | The typed boundary failure and its five stable codes.                                                  |
+| `syncCrypto`                     | A SHA-256-only `Crypto` service backed by the synchronous implementation. It refuses randomness.       |
+
+Every export, with its signature and its failure modes, is on the
+[API reference](./api.md).
+
+## What the package guarantees
+
+- **One representation.** A digest is 64 lowercase hexadecimal characters or
+  it is not a `Digest`. Uppercase, truncated, padded, and non-hexadecimal
+  values are rejected by the schema.
+- **The host sees a snapshot.** `digest` copies byte input when its Effect
+  begins, before the host is called, and `digestSync` copies during the call.
+  Mutating your array afterwards cannot change the operation in flight.
+- **The result is a copy.** Host output is copied before it is encoded, so a
+  host that reuses one output buffer cannot rewrite a digest you already hold.
+- **Malformed text is refused, not replaced.** A string containing an unpaired
+  UTF-16 surrogate fails with `invalid_text` instead of being encoded as a
+  replacement character, so two different broken strings never collide on one
+  digest.
+- **The input never reaches an error.** Every `Sha256Error` message is safe to
+  log, and the `Sha256` schema turns off input reporting even when a caller
+  asked for it.
+
+[The injected boundary](./concepts/injected-hashing.md) and
+[what a digest covers](./concepts/what-a-digest-covers.md) explain why each of
+those holds.
+
+## Where to go next
+
+- [Installation](./installation.md): runtime requirements, import forms, and
+  the `Crypto` services you can provide.
+- [Quickstart](./quickstart.md): hash a value, store the digest, and validate
+  it on the way back.
+- [The contract](./contract.md): the full guarantee list and the attacks this
+  package does not defend against.
+- Concepts: [the injected hashing boundary](./concepts/injected-hashing.md)
+  and [what a digest covers](./concepts/what-a-digest-covers.md).
+- Guides: [hash inside synchronous code](./guides/hash-in-synchronous-code.md),
+  [validate a digest read from storage](./guides/validate-a-stored-digest.md),
+  and [hash a structured value](./guides/hash-a-structured-value.md).
+- [Testing](./testing.md): how to test code that hashes, and what this
+  package's own suite pins.
+- [Troubleshooting](./troubleshooting.md): every failure this package reports,
+  what causes it, and what to change.

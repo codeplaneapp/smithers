@@ -101,6 +101,11 @@ store does not adjudicate the caller's timeline, so an attempt whose
 redacted, because rewriting a field whose name resembles a credential would
 corrupt the run rather than protect it.
 
-See the generated [run-store reference](https://smithers.sh/docs/reference/api/run-store),
-[concurrency model](https://smithers.sh/docs/concepts/ownership), and
-[journal model](https://smithers.sh/docs/concepts/durable-execution).
+The full documentation is at [run-store.smithers.sh](https://run-store.smithers.sh):
+the [API reference](https://run-store.smithers.sh/reference/api/),
+[fencing and ownership](https://run-store.smithers.sh/concepts/fencing/),
+[the heartbeat lease](https://run-store.smithers.sh/concepts/leases/),
+[liveness evidence](https://run-store.smithers.sh/concepts/liveness-evidence/),
+and [troubleshooting](https://run-store.smithers.sh/troubleshooting/). For the
+history half of durability, see
+[journal.smithers.sh](https://journal.smithers.sh).

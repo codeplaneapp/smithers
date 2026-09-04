@@ -1,3 +1,12 @@
+---
+title: "API reference"
+description: "Every public export of @smthrs/sandbox: the two provider seams, the derived host surfaces, health and supervision, both conformance suites, and all nine bundled machine providers."
+---
+
+`@smthrs/sandbox` adapts a provider a caller hands it onto Effect's host
+services. The smallest composition adapts a spawn-only provider onto
+`ChildProcessSpawner`:
+
 ```ts
 import { RemoteChildProcessSpawner } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -63,7 +72,7 @@ Unsupported semantics are declared rather than dropped. Each of these fails with
 
 `stdin: "pipe"`, `"ignore"`, and `"overlapped"` are accepted and all three mean the command reads no input, which is what they mean locally. A provider that declares `stdin: true` receives the command's input as one complete byte blob in `RemoteOptions.stdin`, never as a live pipe: collection is bounded at 16 MiB and the count runs as the bytes arrive, so an endless producer is refused at the bound rather than after it finishes. The handle's own `stdin` sink always fails, because there is no interactive channel either way. Output `pipe`, `ignore`, and `inherit` options and output sinks are applied by the adapter.
 
-:::warning[Two divergences the error channel cannot report]
+:::caution[Two divergences the error channel cannot report]
 `extendEnv` is ignored, because the remote session's ambient environment never crosses the seam and `extendEnv: false` cannot clear an environment this side never held. `isRunning` answers from what this side has observed, so it turns `false` when a caller observes `exitCode` rather than when the remote process actually ends. Both are stated in the module header.
 :::
 
@@ -404,10 +413,29 @@ The Worker binding is the credential and the infrastructure handle. `acquire` re
 
 This provider does not create infrastructure. The Durable Object namespace, its container image, and the Worker that holds the binding are deployed by the caller, and the binding is the credential; there is nothing to configure here beyond it. Output arrives after the command completes in both modes, so there is no streaming and no `kill`; the exec options carry no input channel at 0.12.9, so standard input is staged as a workspace file and redirected. The finalizer destroys the object, so a normal release discards its files; only a crash-left object is found again by id. There is no real-backend suite; both execution modes are proven against a fake binding that runs every command through a real shell against real files.
 
+## Limits
+
+Two operations here are bounded and the rest is sized by the host's heap.
+[Limits](./limits.md) states which is which, per operation and per provider,
+and names the providers whose command output is not byte exact.
+
 ## Browser support
 
 `@smthrs/sandbox` is gated as a browser entry point by `scripts/browser-check.mjs` (`pnpm run browser`, and one CI step). The probe only runs the effect a provider hands it, and host access stays behind the provider layer. Nothing under `src/` reads a host global; the conformance fixture's per-process uniqueness comes from Web Crypto rather than a process id, because the bundling gate cannot catch a free identifier that survives into the bundle.
 
 ## Reading next
+
+Task-shaped walkthroughs of everything above:
+[place a flow body on a machine](./guides/place-a-flow-body-on-a-machine.md),
+[run commands through a transport](./guides/run-commands-through-a-transport.md),
+[choose a provider](./guides/choose-a-provider.md),
+[supervise a session](./guides/supervise-a-session.md),
+[write a provider](./guides/write-a-provider.md),
+[prove a provider](./guides/prove-a-provider.md), and
+[test against a scripted machine](./guides/testing.md). The model behind them
+is in [the two provider seams](./concepts/seams.md),
+[sessions and their keys](./concepts/sessions.md),
+[what a sandbox does and does not prevent](./concepts/isolation.md), and
+[how a remote command differs from a local one](./concepts/remote-commands.md).
 
 [`@smthrs/kernel`](/api/kernel) owns the closed host list this satisfies a slot of, and the `proc:spawn` check written against the same rendered command line the provider receives. [`@smthrs/run-store`](/api/run-store) owns the run-ownership heartbeat that detects a dead engine owner rather than a dead sandbox. See also [Capabilities and the host kernel](/docs/concepts/kernel/) and [Retries and interruption](/docs/concepts/retries/).

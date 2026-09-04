@@ -17,8 +17,8 @@ declaration names.
 `FlowBinding.make` takes a flow declaration and a handler:
 
 ```ts
-import { Effect, Schema } from "effect"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
+import { Effect, Schema } from "effect"
 
 const echo = FlowBinding.make({
   flow: {

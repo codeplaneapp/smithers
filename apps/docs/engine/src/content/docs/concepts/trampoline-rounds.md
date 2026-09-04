@@ -1,0 +1,87 @@
+---
+title: "Trampoline rounds and lineages"
+description: "How a handoff opens the next round of a lineage, why the next round's execution id is derived rather than allocated, what maxRounds counts, and the two different ids this package calls a lineage."
+sidebar:
+  order: 6
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/engine/docs/concepts/trampoline-rounds.md"
+---
+
+A flow body can settle by naming the next round instead of returning a value.
+That settlement is a handoff, and the chain of round executions it starts is a
+lineage.
+
+The lineage is the unit a user recognizes as "the run": a UI attaches to it, a
+budget bounds it, and time travel addresses it. A round is one fully planned
+graph inside it, with its own execution id and its own journal.
+
+## Following a handoff is the caller's job
+
+When a round settles as a handoff, the engine does not answer the caller with
+it. It resolves the named target, decodes the handoff payload through that
+target's own payload schema, derives the next round's execution id, and runs
+it. One `execute` call therefore answers with the LINEAGE's value, and every
+round underneath keeps its own identity.
+
+Two consequences follow from resolving the target by tag:
+
+- The target must be registered with this engine. A handoff to an unregistered
+  flow dies with `FlowNotRegistered`, naming both flows. The round itself is
+  durable, so the lineage is not lost; what is wrong is the caller's wiring.
+- The budget belongs to the lineage originator. A handoff to a flow with a
+  different `maxRounds` cannot reset or replace the bound the lineage started
+  with.
+
+## The next round's id is derived, not allocated
+
+Round 0's execution id is the one the caller executed, and it is also the
+lineage id. Every later round's id is derived from the pair
+`(lineageId, ordinal)` through SHA-256.
+
+Deriving rather than allocating is what makes the handoff at-most-once. A
+process that dies between settling round N and opening round N+1 re-derives the
+same id when it comes back, so the re-drive lands on the round that already
+exists instead of starting a second copy of it.
+
+Those derived ids are persisted as run rows, so their preimage is frozen by
+golden vectors in this package's test suite. Changing it is a durable-identity
+break, not a refactor.
+
+## maxRounds counts rounds
+
+`maxRounds` is declared on the flow and is a budget, not loop detection:
+identical consecutive rounds are legal, and a runaway lineage is stopped by
+counting rather than comparing.
+
+It counts ROUNDS. A lineage bounded at `n` may open ordinals 0 through `n - 1`,
+and the request for ordinal `n` is the one refused with
+`Flow.MaxRoundsExceeded`. That makes `maxRounds: 1` mean "no handoff at all"
+rather than "one handoff", which is what a reader of the number expects.
+
+An absent budget is unbounded, which is the right default for a lineage whose
+exit condition is its own branch. A budget that is not a positive safe integer
+is refused with `InvalidRound`, as is a malformed lineage id or ordinal.
+
+## Two ids are called a lineage
+
+The word appears twice in this package, and they are different spaces.
+
+| Name               | What it is                                                                                                                                                                         | Shape                      |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| Trampoline lineage | Round 0's execution id, naming the chain of round executions one `execute` call follows. `Round` carries it as `lineageId`.                                                        | A bare execution id.       |
+| Journal lineage    | A run's position in its journal: the run id followed by the node path from the run root. `Lineage` mints it, and every durable record a run writes carries it as `meta.lineageId`. | A versioned encoded tuple. |
+
+The shapes differ, so a value from one space is never an address in the other,
+and `meta.lineageId` on an engine record always means the journal one.
+
+A subflow is a separate run with its own journal, so nesting is a lineage EDGE
+rather than a longer id: the node path only ever grows inside one run, and no
+engine node contributes a segment today. `Lineage.make` takes a path parameter
+so a nested-node lineage lands in one place when one appears, rather than being
+invented at a call site.
+
+## Related
+
+- [Execution identity](/concepts/execution-identity/): why every round is a separate
+  execution id, and what joining one means.
+- [The API reference](/reference/api/) for `Round.initial`, `Round.next`,
+  `Round.executionId`, `Lineage.root`, and `Lineage.make`.

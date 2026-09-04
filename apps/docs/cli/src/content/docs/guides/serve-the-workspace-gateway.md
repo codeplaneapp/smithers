@@ -1,0 +1,113 @@
+---
+title: "Serve the workspace gateway"
+description: "Host this project's control plane over HTTP with smthrs serve, understand the loopback bind rule, and connect a client to the routes it mounts."
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/docs/guides/serve-the-workspace-gateway.md"
+---
+
+`smthrs serve` hosts this project's control plane over HTTP, for the product
+UI, for another `smthrs --remote`, and for any client that is not this process.
+It is the other side of [Local and remote control planes](/concepts/local-and-remote/).
+
+`smthrs gateway` is an alias of the same verb.
+
+## Serve on loopback
+
+```bash
+smthrs serve
+```
+
+```text
+smthrs serve listening on http://127.0.0.1:3000
+  /rpc              http://127.0.0.1:3000/rpc              control rpc
+  /rpc/ws           ws://127.0.0.1:3000/rpc/ws             control rpc, including watch
+  /projections      http://127.0.0.1:3000/projections      projection snapshots
+  /projections/ws   ws://127.0.0.1:3000/projections/ws     projection subscriptions
+  /sync             http://127.0.0.1:3000/sync             journal sync
+  /sync/ws          ws://127.0.0.1:3000/sync/ws            journal sync stream
+  /health           http://127.0.0.1:3000/health           workspace identity
+  auth  none (loopback only)
+```
+
+The default bind is `127.0.0.1:3000`. `--host` and `--port` change it. The
+banner is rendered from `Serve.mounts`, the same list the composition is built
+from, so it cannot advertise a route that answers 404. The server lives exactly
+as long as the command.
+
+Point a client at it:
+
+```bash
+smthrs --remote http://127.0.0.1:3000 ps
+```
+
+## The bind rule
+
+Loopback needs nothing. `Serve.loopbackHosts` is `127.0.0.1`, `::1`, and
+`localhost`.
+
+Anything else needs both an explicit `--listen` and a bearer token:
+
+```bash
+smthrs serve --host 0.0.0.0 --port 3000 --listen --credential "$SMITHERS_API_KEY"
+```
+
+Omitting either one is refused before the server is built:
+
+```text
+Refusing to bind 0.0.0.0: pass --listen to serve on a non-loopback address.
+Refusing to bind 0.0.0.0 without a Bearer [REDACTED_TOKEN]: pass --credential or set SMITHERS_API_KEY.
+```
+
+The second sentence is written as "without a bearer token" in `Serve.refuse`.
+The redaction pass every stderr line takes rewrites that phrase, so the message
+an operator reads is the one above.
+
+The rule is strict because the failure it prevents is silent: an
+unauthenticated control plane on a laptop's LAN address can launch agents with
+the operator's credentials, and nothing about that looks wrong from the
+outside. `--credential` falls back to `SMITHERS_API_KEY`.
+
+Read the [control-plane guide](https://smithers.sh/docs/guides/control-plane/)
+before opting into a non-loopback bind.
+
+## Identifying a gateway
+
+`GET /health` is the one unauthenticated route. It answers the workspace this
+gateway belongs to:
+
+```bash
+curl -s http://127.0.0.1:3000/health
+```
+
+```json
+{
+  "workspaceHash": "<16 hex characters>",
+  "gatewayId": "cli-<pid>",
+  "protocolVersion": "1",
+  "version": "1.0.0-rc.0"
+}
+```
+
+`workspaceHash` is the first 16 hex characters of the SHA-256 of the resolved
+project root. A supervisor that finds a gateway already on a port asks
+`/health` whether it is this workspace's before deciding to keep it or replace
+it. The path itself is never published, because it names directories on the
+operator's machine.
+
+## Two removed subcommands
+
+`gateway status` and `gateway stop` were removed. The bare `gateway` verb
+survives as the `serve` alias, which is why `gateway` is registered as a
+command group rather than an alias: an alias has no subcommands, and
+`gateway status` would otherwise reach the parser as a stray positional
+argument and exit 2 with `serve`'s usage text, telling an operator migrating a
+script nothing.
+
+Both now exit 1 with a sentence naming the replacement and a link to the
+migration page.
+
+## See also
+
+- [`smthrs serve`](https://smithers.sh/docs/reference/cli/serve/): the per-verb reference.
+- [Local and remote control planes](/concepts/local-and-remote/): what a
+  `--remote` client can and cannot do.
+- [`@smthrs/gateway`](https://gateway.smithers.sh/reference/api/): the server this verb hosts.

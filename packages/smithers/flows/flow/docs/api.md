@@ -1,3 +1,8 @@
+---
+title: "API reference"
+description: "The complete public surface of @smthrs/flow: flows, actions, durable primitives, step identity, retry policy, and the runtime port, and how the pieces fit together."
+---
+
 The flow authoring model: typed flow and action definitions, durable primitives, step identity, retry policy, and the runtime port they execute against. The whole package bundles for the browser; durability comes from whichever runtime you provide.
 
 An `Action` carries an implementation, attached separately as a layer. A `Flow` carries a required pure `body`, and `Interpreter.layer` drives it.
@@ -35,7 +40,7 @@ const layer = Layer.mergeAll(
 
 This page is the public API reference for the flow authoring model: typed flows, recorded actions, durable deferreds, clocks and queues, the system timer and wait point, polling, human tasks, plan-time graph building, the body interpreter, retry policy, step identity, and the runtime port those APIs execute against. It contains no engine implementation: that is [`@smthrs/engine`](/api/engine).
 
-The export tables at the end of the page are generated from the package sources, so every documented declaration appears there. The sections below say how the pieces fit together.
+The [export reference](./reference/flow.md) lists every exported symbol with its signature, its defaults, and the errors it raises. The sections below say how the pieces fit together. For task-shaped instructions, start from the [guides](./README.md#where-to-go-next).
 
 ## `Flow`
 
@@ -288,3 +293,11 @@ A `RetryPolicy` is a plain value, so the next retry delay is derived from a pers
 | `CancelRequestFailed`   | a durable runtime could not record a cancellation, with `cancel_request_failed` for a storage failure and `unsafe_interrupt_unsupported` for `interruptUnsafe`, which the durable engine does not implement |
 
 No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a runtime that wants to preempt a suspension when a completion lands in the read-to-park window; a completion wakes a parked run through `FlowRuntime.resume` today.
+
+## See also
+
+- [Flows and actions](./concepts/flows-and-actions.md), [bodies are plans](./concepts/bodies-and-plans.md), [execution identity](./concepts/execution-identity.md), [suspension and replay](./concepts/suspension-and-replay.md), [trampoline rounds](./concepts/trampoline-rounds.md), and [the runtime port](./concepts/the-runtime-port.md): the model behind this surface.
+- [Export reference](./reference/flow.md): every symbol, with types and defaults read from source.
+- [Troubleshooting](./troubleshooting.md): the same failures, sorted by symptom.
+- [`@smthrs/engine`](/api/engine) implements the `FlowRuntime` port, and [`@smthrs/engine-store`](/api/engine-store) makes it durable.
+- [`@smthrs/plan`](/api/plan) owns the `Node` and `FileSet` vocabulary a body is written in.

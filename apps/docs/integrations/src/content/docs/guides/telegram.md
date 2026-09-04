@@ -182,8 +182,7 @@ replays the recorded message ids instead of sending the text twice.
 ```ts
 import { Telegram } from "@smthrs/integrations"
 
-const body = (input: typeof Telegram.Actions.SendMessagePayload.Type) =>
-  Telegram.Actions.SendMessage.call(input)
+const body = (input: typeof Telegram.Actions.SendMessagePayload.Type) => Telegram.Actions.SendMessage.call(input)
 ```
 
 `chatId` is a string in the payload, because Telegram uses both numeric ids

@@ -1,4 +1,7 @@
-# Durability
+---
+title: "Durability"
+description: "What the score store guarantees across a restart: the rows it refuses, how a job claim stays atomic, how a long history pages, and what nothing prunes."
+---
 
 `SqlScoreStore.layer` runs this package's migrations when it is built and then
 serves `ScoreStore` over the shared SQLite database. It owns three tables:
@@ -101,3 +104,11 @@ them and no automatic expiry. A deployment that scores every step of a
 long-running flow owns that growth. Both tables are keyed by strings the caller
 supplies, so bounding identity and key length is the caller's job as well as
 this package's.
+
+## See also
+
+- [Record a score exactly once](./guides/record-a-score-once.md): the caller
+  side of the job claim.
+- [Read scores back](./guides/read-scores-back.md): paging a long history and
+  reading an aggregate.
+- [Observations](./concepts/observations.md): what each kind of row means.

@@ -5,20 +5,20 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/bui
 ---
 
 Expands one conventional TypeScript package into `lib`, `check`, `test`,
-`lint`, `fmt`, `docs`, and `circular`.
+`lint`, `fmt`, `docs`, `circular`, and `docsFiles`.
 
 `StandardPackage` is a **macro**, not a target. It has no id, no attrs schema, no
 node in the graph, and no label. It calls [TsBuild](/reference/targets/ts-build/),
 [Typecheck](/reference/targets/typecheck/), [Vitest](/reference/targets/vitest/), [EsLint](/reference/targets/es-lint/),
-[Dprint](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/docs/reference/targets/dprint.md), [DocsParity](/reference/targets/docs-parity/), and [NodeTest](/reference/targets/node-test/) and returns their
-targets.
+[Dprint](/reference/targets/dprint/), [DocsParity](/reference/targets/docs-parity/), [Filegroup](/reference/targets/filegroup/), and
+[NodeTest](/reference/targets/node-test/) and returns their targets.
 
 ```ts
 // packages/smithers/flows/plan/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../../../../../PACKAGE.ts"
 
-export const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
+export const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
   packageManager,
   deps: [],
   cwd: "packages/smithers/flows/plan"
@@ -56,6 +56,7 @@ interface StandardTargets {
   readonly fmt: ReturnType<typeof Dprint>
   readonly docs: ReturnType<typeof DocsParity>
   readonly circular: ReturnType<typeof NodeTest>
+  readonly docsFiles: ReturnType<typeof Filegroup>
 }
 ```
 
@@ -68,6 +69,7 @@ interface StandardTargets {
 | `fmt`      | `Dprint`     | `sources: [sources, glob("test/**/*.ts")]`, `deps: []`, `config: dprintConfig`, `fix: false`, `cwd`                                            |
 | `docs`     | `DocsParity` | `readme`, `deps: []`, `cwd`                                                                                                                    |
 | `circular` | `NodeTest`   | `runtime: packageManager.runtime`, `runner: entrypoint(circularScript)`, `srcs: [sources]`, `deps: []`, `cwd`                                  |
+| `docsFiles`| `Filegroup`  | `srcs: [glob("docs/**/*.md"), readme, file("package.json")]`, `cwd`                                                                            |
 
 Every emitted target call also receives `packageManager: options.packageManager`.
 
@@ -82,6 +84,12 @@ Notes on the edges and the lint scope:
   test files, and ESLint 9 fails on a pattern whose matches are all
   unconfigured. A package whose config does cover tests should call `EsLint`
   directly with both globs.
+- `docsFiles` joins no verb. It is the package's documentation named as a
+  label, so a generator in another package that reads those files lists it in
+  `data`. A glob never expands across a package boundary, so
+  `glob("//packages/smithers/flows/plan/docs/**/*.md")` declared from
+  `apps/site` matches nothing and the edge would be silently vacuous; the label
+  is the edge. See [Globs are package scoped](/concepts/inputs/#globs-are-package-scoped).
 
 ## As a default-target macro
 
@@ -103,11 +111,12 @@ See [Default targets](/extending/default-rules/).
 ## Status
 
 Not a target, so it has no kinds, no cacheability, and no execution status of its
-own. The six targets it emits each carry their own; all six execute today.
+own. The targets it emits each carry their own; all of them execute today, and
+`docsFiles` is a `Filegroup`, so it only names files.
 
 ## See also
 
 - [Writing macros](/extending/writing-macros/)
 - [TsBuild](/reference/targets/ts-build/), [Typecheck](/reference/targets/typecheck/), [Vitest](/reference/targets/vitest/),
-  [EsLint](/reference/targets/es-lint/), [Dprint](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/docs/reference/targets/dprint.md), [DocsParity](/reference/targets/docs-parity/),
-  [NodeTest](/reference/targets/node-test/)
+  [EsLint](/reference/targets/es-lint/), [Dprint](/reference/targets/dprint/), [DocsParity](/reference/targets/docs-parity/),
+  [Filegroup](/reference/targets/filegroup/), [NodeTest](/reference/targets/node-test/)

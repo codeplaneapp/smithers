@@ -8,7 +8,7 @@ The assembled workspace gateway: one HTTP surface carrying the control plane, th
 npm install @smthrs/gateway
 ```
 
-The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://smithers.sh/docs/reference/api/gateway). This file lists what the package exports and shows how a host composes it.
+The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://gateway.smithers.sh/reference/api/). Start from [the quickstart](https://gateway.smithers.sh/quickstart/) to serve a workspace and read it back, or [Host the gateway in your own process](https://gateway.smithers.sh/guides/host-the-gateway/) to compose it yourself. This file lists what the package exports and shows how a host composes it.
 
 ## Public API
 
@@ -35,7 +35,7 @@ The root entry point exports these namespaces; local modules are also importable
 ```ts
 import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
 
-// The composition a `smithers serve` verb hosts. The caller supplies
+// The composition a `smthrs serve` verb hosts. The caller supplies
 // `Control`, `Projections`, `SyncServer`, and the `SyncAuth` middleware.
 const gateway = NodeGateway.layer(
   { workspaceHash: "…", gatewayId: "…", protocolVersion: "1", version: "1.0.0-rc.0" },
@@ -54,7 +54,7 @@ const refusal = NodeGateway.bindRefusal({ host: "0.0.0.0", port: 7331 })
 
 The package ships no production supervision layer. `makeNoop` and `layerNoop` are closed stubs: unless overridden, scanning returns no candidates and resuming performs no work. Nothing wires this port to the durable engine's run-driver sweep, so a run abandoned through the gateway is not automatically discovered, reclaimed, or resumed.
 
-Recovery is a reclaim rather than a supervisor. A run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smithers` process with the flow registered takes it over. Nothing outside such a process watches for dead owners, so an operator either brings up a host composition running the durable engine driver with the relevant flows registered, or recovers the run explicitly.
+Recovery is a reclaim rather than a supervisor. A run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smthrs` process with the flow registered takes it over. Nothing outside such a process watches for dead owners, so an operator either brings up a host composition running the durable engine driver with the relevant flows registered, or recovers the run explicitly.
 
 ```ts
 import { SuperviseRuntime } from "@smthrs/gateway"

@@ -1,8 +1,35 @@
 ---
 title: "API reference"
-description: "The persisted flows plan: a keyed action graph, its append-only store, and its diff"
+description: "Every public export of @smthrs/plan: the authoring AST, the planned placeholder, key material, the step-key compiler, the plan value, its diff, its append-only store, and its migrations."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/plan/docs/api.md"
 ---
+
+`@smthrs/plan` exports ten modules from its root entry point, and each is also
+importable from `@smthrs/plan/<Module>`:
+
+```ts
+import { FileSet, Node, Plan, PlanStore } from "@smthrs/plan"
+// or
+import * as Plan from "@smthrs/plan/Plan"
+```
+
+`@smthrs/plan/internal/*` and `@smthrs/plan/*/index` are not public.
+`@smthrs/plan/package.json` is exported.
+
+| Namespace         | What it is                                                                                                |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `Node`            | The pure, pipeable authoring AST: `succeed`, `all`, `map`, `andThen`, `branch`, `catch`, `priority`.      |
+| `Planned`         | The strict placeholder a body sees where a step result will be, and the reference it records.             |
+| `GraphBuildError` | The refusals a plan-time build raises instead of producing a wrong plan.                                  |
+| `FileSet`         | The static filesystem vocabulary: patterns, globs, tree artifacts, filegroups, and overlap.               |
+| `KeyMaterial`     | What a planner declares about a node: body, tagged input references, layers, capabilities, effects.       |
+| `StepKey`         | The compiler that turns material plus resolved dependency digests into a [`@smthrs/keys`](https://keys.smithers.sh/reference/api/) key. |
+| `Plan`            | `compile`, `append`, the node and conflict schemas, and the digest an approval binds to.                  |
+| `PlanDiff`        | A plan comparison as a value: added, removed, re-keyed with attribution, unchanged.                       |
+| `PlanStore`       | Append-only SQL persistence, enforced by triggers rather than by convention.                              |
+| `Migrations`      | The namespaced migration set that owns the three plan tables in id block `4000`.                          |
+
+The shortest composition that reaches every layer:
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -46,7 +73,7 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(NodeCrypto.layer))
 ```
 
-Compiling needs Effect's `Crypto` service and nothing else. Recording additionally needs `PlanStore.layer` over a `DurableWriter` and a `SqlClient`. The package depends on [`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/), `@smthrs/database`, [`@smthrs/keys`](https://keys.smithers.sh/reference/api/), and `effect`, and is browser-safe.
+Compiling needs Effect's `Crypto` service and nothing else. Recording additionally needs `PlanStore.layer` over a `DurableWriter` and a `SqlClient`. The package depends on [`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/), [`@smthrs/database`](https://database.smithers.sh/reference/api/), [`@smthrs/keys`](https://keys.smithers.sh/reference/api/), and `effect`, and is browser-safe.
 
 ## Entry point
 
@@ -64,6 +91,51 @@ What a planner declares about one node, handed to the compiler: a `version`, a t
 
 `dependencies` is the single derivation of a node's edge set, so a hashed reference and an edge can never disagree. `StepKey` canonically serializes `effects` and `placement` and never interprets them, which keeps the key compiler independent of whatever the flow builder decides an effect declaration looks like. `Plan.compile` is stricter: it decodes `NodeDraft.effects` through `NodeEffects` and writes the result into `material.effects`, replacing anything a caller put there. That makes the draft declaration the single derivation point for effect identity, so a node's key cannot disagree with the effects its conflict annotations and approval payload were computed from.
 
+### KeyMaterial.InputRef
+
+```ts
+type InputRef =
+  | { readonly _tag: "Literal"; readonly value: unknown }
+  | { readonly _tag: "Ref"; readonly from: string; readonly path: ReadonlyArray<string> }
+  | { readonly _tag: "Pending"; readonly from: string }
+```
+
+One declared input. `Literal` is hashed inline. `Ref` names an upstream node and the property path read off its result. `Pending` names an upstream node without consuming its value, which is an ordering reference. `from` is a non-empty string. Exported as both a schema and a type.
+
+### KeyMaterial.KeyMaterial
+
+```ts
+const KeyMaterial: Schema.Struct<{
+  version: Schema.Literal<"flows/key-material/v2">
+  kind: Schema.Literals<["sealed", "compensable", "irreversible"]>
+  nondeterministic: Schema.optional<Schema.Literal<true>>
+  body: Schema.Unknown
+  inputs: Schema.Array$<typeof InputRef>
+  layers: Schema.Array$<Schema.String>
+  capabilities: Schema.Array$<Schema.String>
+  effects: Schema.optional<Schema.Unknown>
+  placement: Schema.optional<Schema.Unknown>
+}>
+```
+
+Everything that can change a node's result. Exported as both a schema and a type.
+
+### KeyMaterial.version
+
+```ts
+const version: "flows/key-material/v2"
+```
+
+The material version, folded into every hashed body so a bump re-keys every node derived from it.
+
+### KeyMaterial.dependencies
+
+```ts
+const dependencies: (material: KeyMaterial) => ReadonlyArray<string>
+```
+
+The graph-local dependencies a material names, in declaration order and without duplicates. `Literal` inputs contribute nothing. `Plan.compile` uses the result as the node's edge set.
+
 ## StepKey
 
 [src/StepKey.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/StepKey.ts)
@@ -78,9 +150,194 @@ The brand behind `digestInput` is private, so a plain object that merely has a `
 
 `project` is the one projection semantics for the value channel. It resolves only own data properties, so a path segment that is missing, inherited, or an accessor yields `undefined` and no getter runs during key derivation.
 
-`KeyMaterialError` carries `invalid_environment`, `missing_dependency`, or `non_content_material`.
-
 A `DigestMemo` shares one in-flight projected-value digest between concurrent callers. A waiter never inherits the leader's interruption: if the leader's fiber is cancelled, the waiter recomputes as the new leader.
+
+### StepKey.StepKey
+
+```ts
+type StepKey = StoredKey
+```
+
+A computed step key: `key1_` plus a SHA-256 digest of the canonical serialization of the material. Identical in representation to every other flow key, which is what lets the engine dispatch under it.
+
+### StepKey.ContentIdentity
+
+```ts
+interface ContentIdentity {
+  readonly body: unknown
+  readonly inputs: Readonly<Record<string, unknown | DigestInput>>
+  readonly layers: ReadonlyArray<string>
+  readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+  readonly environment?: EnvironmentIdentity | undefined
+  readonly hermetic?: {
+    readonly readSet: ReadonlyArray<{ readonly path: string; readonly digest: string }>
+    readonly writeSet: ReadonlyArray<FileSet.Entry>
+    readonly removes?: ReadonlyArray<string> | undefined
+    readonly boundaryMode: "hard" | "expected"
+  } | undefined
+}
+```
+
+Material describing a sealed or hermetic content-addressed step. `layers` and each capability group are set-normalized before hashing; `hermetic.readSet` is sorted and deduplicated by path and digest, and `hermetic.writeSet` by entry.
+
+### StepKey.OrdinalIdentity
+
+```ts
+interface OrdinalIdentity {
+  readonly runId: string
+  readonly parentScope?: string | undefined
+  readonly ordinal: number
+  readonly tier: "compensable" | "irreversible" | "unsealed"
+}
+```
+
+Material describing the run-local identity of a non-cacheable step.
+
+### StepKey.EnvironmentIdentity
+
+```ts
+type EnvironmentIdentity =
+  | {
+    readonly declared: true
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope?: undefined
+  }
+  | {
+    readonly declared: false
+    readonly layers: ReadonlyArray<string>
+    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
+    readonly runScope: string
+  }
+```
+
+The engine-resolved execution environment a content key is computed under. The union enforces the `runScope` rule for typed callers, and both `content` and `dispatchIdentity` enforce it again at run time.
+
+### StepKey.DigestInput
+
+```ts
+interface DigestInput {
+  readonly digest: string
+  readonly reference?: "ref" | "pending" | "ref-projected"
+  readonly path?: ReadonlyArray<string>
+}
+```
+
+A precomputed digest supplied as a step input rather than a literal value. It also carries a private brand, which is the whole point: only `digestInput` can produce one.
+
+### StepKey.digestInput
+
+```ts
+const digestInput: (
+  digest: string,
+  reference?: {
+    readonly reference: "ref" | "pending" | "ref-projected"
+    readonly path?: ReadonlyArray<string>
+  }
+) => DigestInput
+```
+
+Nominally tags a precomputed digest so it is hashed as a digest reference rather than a literal value.
+
+### StepKey.isDigestInput
+
+```ts
+const isDigestInput: (value: unknown) => value is DigestInput
+```
+
+Type guard for values produced by `digestInput`. It reads the private brand, so a plain `{digest: "..."}` answers `false`.
+
+### StepKey.DigestMemo
+
+```ts
+interface DigestMemo {
+  readonly digest: (
+    from: string,
+    path: ReadonlyArray<string>,
+    compute: Effect.Effect<StepKey, Schema.SchemaError, Crypto.Crypto>
+  ) => Effect.Effect<StepKey, Schema.SchemaError, Crypto.Crypto>
+}
+```
+
+Caller-owned memoization context for projected dependency-value digests, addressed by the JSON-encoded `[from, path]` tuple. Entries are sound only while each settled `from` value is immutable, so create a fresh memo when those values can change.
+
+### StepKey.makeDigestMemo
+
+```ts
+const makeDigestMemo: () => DigestMemo
+```
+
+Creates an empty memo.
+
+### StepKey.content
+
+```ts
+const content: (
+  identity: ContentIdentity
+) => Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+Produces a cross-run reusable key. Set-like declarations are normalized before serialization; write declarations remain part of the identity even when the step writes nothing.
+
+### StepKey.ordinal
+
+```ts
+const ordinal: (
+  identity: OrdinalIdentity
+) => Effect.Effect<StepKey, Schema.SchemaError, Crypto.Crypto>
+```
+
+Produces a run-local key for compensable, irreversible, or unsealed work. These keys intentionally cannot be reused across runs.
+
+### StepKey.fromKeyMaterial
+
+```ts
+const fromKeyMaterial: (
+  material: KeyMaterial.KeyMaterial,
+  dependencyDigests: Readonly<Record<string, string>>
+) => Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+The plan key: resolves graph-local references against `dependencyDigests`, which must hold an own string-valued property for every node the material names, then builds a content key. Fails `non_content_material` unless `material.kind` is `sealed`.
+
+### StepKey.dispatchIdentity
+
+```ts
+const dispatchIdentity: (options: {
+  readonly material: KeyMaterial.KeyMaterial
+  readonly results: Readonly<Record<string, unknown>>
+  readonly hermetic: NonNullable<ContentIdentity["hermetic"]>
+  readonly environment?: EnvironmentIdentity | undefined
+  readonly digestMemo?: DigestMemo | undefined
+}) => Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+The key a dispatch is _cached_ under, as distinct from the plan key a node is _identified_ by.
+
+A plan key folds the resolved keys of every upstream node, transitively, so an edit anywhere upstream re-keys everything below it, even when the edited node's output value is byte for byte what it was before. This derivation folds the node's own material and never an upstream key. Each input contributes content instead: a `Literal` its value, a `Ref` the digest of the settled result of `from` projected along `path`, and a `Pending` nothing beyond its tag. The measured hermetic boundary is folded unchanged.
+
+`results` must hold every dependency the material names. The scheduler's halt rule guarantees it: a dependent of failed or skipped work never dispatches, so a `Ref` always resolves against a success.
+
+### StepKey.project
+
+```ts
+const project: (value: unknown, path: ReadonlyArray<string>) => unknown
+```
+
+Projects a settled result along a `Ref` path. Only own data properties resolve, so a missing, inherited, or accessor segment yields `undefined` without invoking a getter. A projection that walks off the end of a result is a fact about the graph, not a failure: `undefined` drops out of the canonical form, so it hashes distinctly from every JSON value including `null`.
+
+This is exported because it is the one projection semantics for the value channel. Every consumer that resolves a `Ref` at execution time must resolve it this way, or two inputs that key identically could be consumed differently.
+
+### StepKey.KeyMaterialError
+
+```ts
+class KeyMaterialError extends Schema.TaggedError<KeyMaterialError>()("@smthrs/plan/KeyMaterialError", {
+  code: Schema.Literals(["invalid_environment", "missing_dependency", "non_content_material"])
+  message: Schema.String
+})
+```
+
+Stable failures while resolving graph-local dependency references.
 
 ## Plan
 
@@ -98,7 +355,158 @@ A plan grows and is never rewritten. `append` leaves the nodes already in it wit
 
 A compiled plan is a deep-frozen snapshot of the drafts it was given. Material is stored as the inert JSON mirror its key already covers, so a `Date`, a `URL`, or any value with a data-valued callable `toJSON` is stored as the value it serializes to, and mutating a caller's draft after compiling cannot change the plan, its keys, or its digest. A material accessor, or a prototype with no JSON representation, is refused as `invalid_node` naming the node and the payload path rather than stored by reference. A `Planned` placeholder is left intact so canonical serialization still refuses it.
 
-`PlanError` is a closed set of seven codes.
+### Plan.NodeEffects
+
+```ts
+const NodeEffects: Schema.Struct<{
+  reads: Schema.Array$<typeof FileSet.ReadDeclaration>
+  writes: Schema.Array$<typeof FileSet.Declaration>
+  removes: Schema.optional<Schema.Array$<typeof FileSet.Pattern>>
+  boundaryMode: Schema.Literals<["hard", "expected"]>
+}>
+```
+
+What a node does to the world, declared as paths. Exported as both a schema and a type.
+
+### Plan.PairStrategy
+
+```ts
+type PairStrategy = "serialize" | "lane" | "fail"
+```
+
+The plan-time verdict for one overlapping pair of writers. Exported as both a schema and a type.
+
+### Plan.RuntimeStrategy
+
+```ts
+type RuntimeStrategy = "delay-rebase" | "stop-merge"
+```
+
+What the scheduler does when a predicted overlap actually bites. Exported as both a schema and a type.
+
+### Plan.ConflictAnnotation
+
+```ts
+const ConflictAnnotation: Schema.Struct<{
+  with: Schema.NonEmptyString
+  paths: Schema.Array$<Schema.String>
+  strategy: typeof PairStrategy
+  runtime: typeof RuntimeStrategy
+}>
+```
+
+One resolved overlap between two writers that no dependency path already orders. Conflict is a property of the pair, not of one declaration. Exported as both a schema and a type.
+
+### Plan.PlanNode
+
+```ts
+const PlanNode: Schema.Struct<{
+  id: Schema.NonEmptyString
+  kind: Schema.Literals<["step", "agent", "merge"]>
+  key: typeof StoredKey
+  material: typeof KeyMaterial.KeyMaterial
+  effects: typeof NodeEffects
+  dependsOn: Schema.Array$<Schema.NonEmptyString>
+  conflicts: Schema.Array$<typeof ConflictAnnotation>
+  strategy: typeof PairStrategy
+  runtime: typeof RuntimeStrategy
+  priority: Schema.Int
+  generation: Schema.Int
+}>
+```
+
+A keyed node of the plan. `strategy` and `runtime` are this declaration's own preferences, recorded so a later elaboration can resolve a pair against them without re-reading the flow source. Exported as both a schema and a type.
+
+### Plan.Plan
+
+```ts
+const Plan: Schema.Struct<{
+  planId: Schema.NonEmptyString
+  flow: Schema.NonEmptyString
+  generation: Schema.Int
+  baseDigest: typeof StoredKey
+  digest: typeof StoredKey
+  nodes: Schema.Array$<typeof PlanNode>
+}>
+```
+
+The whole keyed graph plus the digest an approval binds to. Exported as both a schema and a type.
+
+### Plan.NodeDraft
+
+```ts
+interface NodeDraft {
+  readonly id: string
+  readonly material: KeyMaterial.KeyMaterial
+  readonly effects: NodeEffects
+  readonly kind?: PlanNode["kind"] | undefined
+  readonly priority?: number | undefined
+  readonly conflictStrategy?: PairStrategy | undefined
+  readonly runtimeStrategy?: RuntimeStrategy | undefined
+}
+```
+
+What a planner hands `compile`: a node without its key. `kind` defaults to `step`, `priority` to 0, `conflictStrategy` to `serialize`, and `runtimeStrategy` to `delay-rebase`.
+
+### Plan.compile
+
+```ts
+const compile: (options: {
+  readonly planId: string
+  readonly flow: string
+  readonly nodes: ReadonlyArray<NodeDraft>
+}) => Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+Compiles drafts into a plan: topological order, dependency-digest substitution, overlap annotation, reader-after-writer ordering, and the plan digest. No I/O. The options are snapshotted before anything else happens, and the result is deep-frozen at generation 0 with `baseDigest` equal to `digest`.
+
+Traversal uses explicit stacks. Because the conflict and reader-after-writer passes consider a quadratic number of node pairs, plans are bounded by `maximumPlanNodes` and fail with `graph_too_large` above that limit.
+
+### Plan.append
+
+```ts
+const append: (
+  plan: Plan,
+  drafts: ReadonlyArray<NodeDraft>
+) => Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+Appends an elaborated subgraph at the next generation. Nodes already in the plan keep their id, key, edges, and generation byte for byte, and the new nodes arrive pre-keyed against them. `baseDigest` does not move; `digest` does. An append with no drafts fails as `invalid_node`.
+
+### Plan.generationNodes
+
+```ts
+const generationNodes: (plan: Plan) => ReadonlyArray<PlanNode>
+```
+
+The nodes added by the newest generation: what `PlanStore.append` inserts and what the `subgraph-appended` journal record names.
+
+### Plan.maximumPlanNodes
+
+```ts
+const maximumPlanNodes: 10_000
+```
+
+Maximum number of nodes retained by one compiled plan. Conflict analysis is quadratic in node count, so an explicit ceiling keeps untrusted declarations from turning planning into an unbounded CPU task.
+
+### Plan.PlanError
+
+```ts
+class PlanError extends Schema.TaggedError<PlanError>()("@smthrs/plan/PlanError", {
+  code: Schema.Literals([
+    "cycle",
+    "unknown_dependency",
+    "duplicate_node",
+    "overlap_forbidden",
+    "invalid_effects",
+    "invalid_node",
+    "graph_too_large"
+  ])
+  message: Schema.String
+})
+```
+
+A graph the compiler refuses. The code set is closed, so a caller may switch on it.
 
 | `code`               | Meaning                                                                                                                                                                                                                                            |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -136,9 +544,247 @@ A payload is stored as its inert JSON mirror. A data-valued callable `toJSON` is
 
 `isNode` recognizes a node this package built by registration at construction, and a rehydrated node, an object sharing the node prototype whose own `ast` is a well-formed AST, by that shape, because `@smthrs/flow` hands an AST that crossed a serialization boundary back as a node. The `TypeId` marker is a public string any object can carry and counts for nothing on its own. Every combinator that admits a node reads its `ast` as trusted topology, so an object carrying the marker on any other prototype, one inheriting it from a node, and one whose `ast` is missing, malformed, or cyclic are all refused with the same `GraphBuildError` as any other non-node. A proxy is judged by the shape it forwards.
 
-The functions an author writes, a mapper, a continuation, a branch predicate, live in `WeakMap`s keyed by the AST node they belong to, and the AST keeps only a `FunctionIdentity` digest of the function's exact source. Exact source matters, because whitespace inside a string literal is behavior. A function whose inert captures were declared with `capture` digests those captures; every other function additionally carries process-local, per-function entropy, so indistinguishable closure sources fail closed instead of sharing a cache key. `capture` refuses a capture record nested past 256 levels with a path-bearing error rather than overflowing the native stack.
+### Node.Node
 
-The `@category engine` members of this module, `flowCall`, `actionCall`, `declaration`, `continuation`, `mapper`, `predicate`, `catchFilter`, and `functionIdentity`, exist for [`@smthrs/flow`](https://flow.smithers.sh/reference/api/). They are supported names, not authoring API.
+```ts
+interface Node<out A, out E = never, out R = never> extends Pipeable.Pipeable {
+  readonly [TypeId]: {
+    readonly _A: Types.Covariant<A>
+    readonly _E: Types.Covariant<E>
+    readonly _R: Types.Covariant<R>
+  }
+  readonly ast: Ast
+}
+```
+
+A pure graph-building value. `R` is Effect's requirement channel and it is phantom here: nothing at plan time reads it, so building a plan stays requirement-free while the type still states which implementations executing it will need.
+
+`Node.Any` is `Node<unknown, unknown, any>`. `Node.Success<N>`, `Node.Error<N>`, and `Node.Services<N>` extract the three parameters.
+
+### Node.Ast
+
+```ts
+type Ast = Succeed | All | Map | AndThen | Branch | Catch | FlowCall | ActionCall
+```
+
+The inspectable AST a node stores: closure-free, and JSON serializable for every JSON payload an author puts in it. Every variant carries an optional `priority`.
+
+### Node.TypeId
+
+```ts
+const TypeId: "~@smthrs/plan/Node"
+```
+
+The runtime type identifier carried by every node, and its own type. It is a public string, so it is a hint and never a capability.
+
+### Node.FunctionIdentity
+
+```ts
+type FunctionIdentity = {
+  readonly _tag: "FunctionIdentity"
+  readonly algorithm: "sha256-source-ephemeral/v4" | "sha256-source-captures/v4" | "static-node/v1"
+  readonly digest: string
+}
+```
+
+The serializable stand-in an AST keeps for a plan-time function: a digest of its normalized source, hashed in place of a closure that could not be shipped, stored, or compared.
+
+### Node.isNode
+
+```ts
+const isNode: (value: unknown) => value is Any
+```
+
+Checks whether a value is a node, by construction registration or by the shape a rehydrated node forwards.
+
+### Node.succeed
+
+```ts
+const succeed: <A>(value: A) => Node<A>
+```
+
+A node that succeeds with a constant.
+
+### Node.all
+
+```ts
+const all: <const Nodes extends Readonly<Record<string, Any>>>(
+  nodes: Nodes
+) => Node<
+  Types.Simplify<{ readonly [K in keyof Nodes]: Success<Nodes[K]> }>,
+  Error<Nodes[keyof Nodes]>,
+  Services<Nodes[keyof Nodes]>
+>
+```
+
+Combines independent children into one node, keyed by name. Width is fixed at plan time. A non-node member throws `invalid_all_member` naming that member.
+
+### Node.map
+
+```ts
+const map: {
+  <A, B>(f: (a: A) => B): <E, R>(self: Node<A, E, R>) => Node<B, E, R>
+  <A, E, R, B>(self: Node<A, E, R>, f: (a: A) => B): Node<B, E, R>
+}
+```
+
+Transforms an eventual success value with a deferred pure function. The function is digested, not run: it executes later, on the real value. A `map` that decides what happens next is a `branch` written wrongly.
+
+### Node.andThen
+
+```ts
+const andThen: {
+  <A, B, E2, R2>(f: (a: Planned.Planned<A>) => Node<B, E2, R2>): <E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
+  <B, E2, R2>(next: Node<B, E2, R2>): <A, E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
+  <A, E, R, B, E2, R2>(self: Node<A, E, R>, f: (a: Planned.Planned<A>) => Node<B, E2, R2>): Node<B, E | E2, R | R2>
+  <A, E, R, B, E2, R2>(self: Node<A, E, R>, next: Node<B, E2, R2>): Node<B, E | E2, R | R2>
+}
+```
+
+Sequences a builder, or a node, after this one. Supply a node directly when the first result is not needed. A builder is evaluated once, against a placeholder, when the graph is built. A direct continuation that is neither throws `invalid_continuation`.
+
+### Node.BranchOptions
+
+```ts
+interface BranchOptions<A, B1, E1, R1, B2, E2, R2> {
+  readonly if: (value: A) => boolean
+  readonly then: (value: Planned.Planned<A>) => Node<B1, E1, R1>
+  readonly else: (value: Planned.Planned<A>) => Node<B2, E2, R2>
+}
+```
+
+`if` runs at run time on the real value. `then` and `else` run at plan time, once each, against a `Planned` placeholder.
+
+### Node.branch
+
+```ts
+const branch: {
+  <A, B1, E1, R1, B2, E2, R2>(
+    options: BranchOptions<A, B1, E1, R1, B2, E2, R2>
+  ): <E, R>(self: Node<A, E, R>) => Node<B1 | B2, E | E1 | E2, R | R1 | R2>
+  <A, E, R, B1, E1, R1, B2, E2, R2>(
+    self: Node<A, E, R>,
+    options: BranchOptions<A, B1, E1, R1, B2, E2, R2>
+  ): Node<B1 | B2, E | E1 | E2, R | R1 | R2>
+}
+```
+
+Decides between two arms, both of them static topology. Both arms contribute their requirements, because a run has to be able to take either. An arm that does not return a node throws `invalid_continuation`.
+
+### Node.CatchOptions
+
+```ts
+interface CatchOptions<E, B, E2, R2 = never, Handled = E> {
+  readonly error?: Schema.Schema<Handled> | undefined
+  readonly onFailure: (error: Planned.Planned<Handled>) => Node<B, E2, R2>
+}
+```
+
+The statically planned recovery arm and the optional schema selecting which typed failures it handles.
+
+### Node.catch
+
+```ts
+const catch: {
+  <Handled, B, E2, R2>(
+    options: CatchOptions<unknown, B, E2, R2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): <A, E, R>(self: Node<A, E, R>) => Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  <E, B, E2, R2>(
+    options: CatchOptions<E, B, E2, R2> & { readonly error?: undefined }
+  ): <A, R>(self: Node<A, E, R>) => Node<A | B, E2, R | R2>
+  <A, E, R, Handled, B, E2, R2>(
+    self: Node<A, E, R>,
+    options: CatchOptions<E, B, E2, R2, Handled> & { readonly error: Schema.Schema<Handled> }
+  ): Node<A | B, Exclude<E, Handled> | E2, R | R2>
+  <A, E, R, B, E2, R2>(
+    self: Node<A, E, R>,
+    options: CatchOptions<E, B, E2, R2> & { readonly error?: undefined }
+  ): Node<A | B, E2, R | R2>
+}
+```
+
+Recovers from matching typed failures with static failure topology. With no schema the whole typed error channel is handled; a schema handles only the values it accepts and preserves the remainder in the resulting error type.
+
+### Node.priority
+
+```ts
+const priority: {
+  (value: number): <A, E, R>(self: Node<A, E, R>) => Node<A, E, R>
+  <A, E, R>(self: Node<A, E, R>, value: number): Node<A, E, R>
+}
+```
+
+Attaches a scheduling priority, leaving the original node unchanged. Higher runs first among ready work, so a priority changes latency and nothing else. It never enters key material. Children inherit the value lexically when the graph is built, and a child that states its own keeps it. A value that is not a safe integer throws `invalid_priority`.
+
+### Node.declaredPriority
+
+```ts
+const declaredPriority: (ast: Ast) => number | undefined
+```
+
+Reads the priority a node carries, or `undefined` when it states none and inherits from whatever encloses it.
+
+### Node.capture
+
+```ts
+const capture: <Args extends ReadonlyArray<unknown>, A>(
+  captures: Readonly<Record<string, unknown>>,
+  operation: (...args: Args) => A
+) => (...args: Args) => A
+```
+
+Declares the inert values a plan-time function closes over, which gives that function deterministic identity instead of process-local entropy. The capture record is canonicalized into function identity and deeply frozen immediately. Unsupported values, accessors, exotic prototypes, symbols, cycles, and member nesting beyond 256 levels throw a `TypeError` naming the path, instead of producing an identity that cannot describe the function's behavior.
+
+### Node.plannedReference
+
+```ts
+const plannedReference: (value: unknown) => {
+  readonly _tag: "PlannedReference"
+  readonly node: string
+  readonly path: ReadonlyArray<string>
+} | undefined
+```
+
+Reads the inert AST reference created for a planned value. Structural lookalikes remain ordinary payload data: the marker is private to the AST cloner, so this accessor is the only recognition path.
+
+### Node.branchSubject and Node.catchSubject
+
+```ts
+const branchSubject: "branch/subject"
+const catchSubject: "catch/subject"
+```
+
+The node reference a branch arm's symbolic subject carries, and the prefix each `catch` mints its own token under. Arms are built before the graph assigns ids, so every reference an arm records names one of these placeholders, and graph building rewrites it to the node the arm belongs to.
+
+### Engine members
+
+`flowCall`, `actionCall`, `declaration`, `continuation`, `mapper`, `predicate`, `catchFilter`, and `functionIdentity` exist for [`@smthrs/flow`](https://flow.smithers.sh/reference/api/), which owns flow and action authoring. They are supported names, not authoring API.
+
+```ts
+const flowCall: <A = unknown, E = never, R = never>(
+  declaration: unknown,
+  flow: string,
+  mode: "inline" | "boundary" | "handoff",
+  payload: unknown
+) => Node<A, E, R>
+
+const actionCall: <A = unknown, E = never, R = never>(
+  declaration: unknown,
+  action: string,
+  payload: unknown
+) => Node<A, E, R>
+
+const declaration: (ast: Extract<Ast, { readonly _tag: "ActionCall" | "FlowCall" }>) => unknown
+const continuation: (
+  ast: Extract<Ast, { readonly _tag: "AndThen" }>
+) => ((value: Planned.Planned<unknown>) => unknown) | undefined
+const mapper: (ast: Ast) => ((value: unknown) => unknown) | undefined
+const predicate: (ast: Ast) => ((value: unknown) => boolean) | undefined
+const catchFilter: (ast: Ast) => Schema.Top | undefined
+const functionIdentity: (operation: unknown) => FunctionIdentity
+```
+
+`flowCall` and `actionCall` validate nothing: an unknown tag becomes a call node the graph keeps as a leaf. `declaration`, `continuation`, `mapper`, `predicate`, and `catchFilter` answer `undefined` for the wrong variant and for an AST rehydrated from JSON, whose side tables did not survive serialization. `functionIdentity` throws a `TypeError` when handed anything but a function.
 
 ## Planned
 
@@ -150,9 +796,66 @@ A planned value may be passed into a payload field, into a branch, or into a map
 A planned value may never be computed on.
 :::
 
-Misuse fails twice. The type is branded, so arithmetic and template interpolation are compile errors; and the proxy's `Symbol.toPrimitive`, `valueOf`, `toString`, `toJSON`, application, `in`, and enumeration traps throw rather than let a plan be built around `NaN` or `"[object Object]"`. JavaScript exposes no trap for `Boolean(value)` or strict identity, so those cannot be refused at run time; they reveal only proxy truthiness or identity and never the planned result.
+Misuse fails twice. The type is branded, so arithmetic on a planned value is a compile error; and the proxy's `Symbol.toPrimitive`, `valueOf`, `toString`, `toJSON`, application, `in`, and enumeration traps throw rather than let a plan be built around `NaN` or `"[object Object]"`, which catches template interpolation, `String(value)`, and `JSON.stringify` of a payload holding one. JavaScript exposes no trap for `Boolean(value)` or strict identity, so those cannot be refused at run time; they reveal only proxy truthiness or identity and never the planned result.
 
 The `TypeId` symbol is interned, so a value that crossed a module boundary is still recognised. Interning is a recognition aid rather than a capability, so `reference` returns a reference only when the value stored under that symbol has the complete `{node, path}` shape.
+
+### Planned.Planned
+
+```ts
+type Planned<T> =
+  & { readonly [TypeId]: Identity<T> }
+  & ([T] extends [object] ? { readonly [K in keyof T]: Planned<T[K]> } : unknown)
+```
+
+A step result that has not been produced yet. The mapped half keeps field access typed, so `result.files` is a `Planned` of the field.
+
+### Planned.Reference and Planned.Identity
+
+```ts
+interface Reference {
+  readonly node: string
+  readonly path: ReadonlyArray<string>
+}
+
+interface Identity<out T> extends Reference {
+  readonly _T: Types.Covariant<T>
+}
+```
+
+What a planned value points at: the node that will produce the result, and the property path read from it. `path` is empty for the result itself.
+
+### Planned.TypeId
+
+```ts
+const TypeId: unique symbol // Symbol.for("@smthrs/plan/Planned")
+```
+
+The brand carried by every planned value, and the key its reference is read from.
+
+### Planned.make
+
+```ts
+const make: <T>(node: string) => Planned<T>
+```
+
+Creates the strict placeholder standing for a node's result. Planning hands one to every builder that consumes an upstream value, then reads the `Reference` back off whatever the builder passed it into.
+
+### Planned.reference
+
+```ts
+const reference: (value: unknown) => Reference | undefined
+```
+
+Reads the reference a planned value records, or `undefined` for anything else. A forged carrier is accepted only when its node and path have the complete reference shape. This is how a payload is scanned for the upstream results it consumes.
+
+### Planned.isPlanned
+
+```ts
+const isPlanned: (value: unknown) => value is Planned<unknown>
+```
+
+Checks whether a value is a planned placeholder.
 
 ## FileSet
 
@@ -164,11 +867,102 @@ The static filesystem declaration vocabulary shared by planning and execution: a
 
 `overlaps` is conservative: `true` may over-serialize, while `false` proves that no path can belong to both declarations.
 
+### The declaration types
+
+```ts
+const Pattern: Schema.String // workspace-relative, with `*` and `**`
+const Glob: Schema.TaggedStruct<"Glob", { include: NonEmptyArray<Pattern>; exclude?: Array<Pattern> }>
+const TreeArtifact: Schema.TaggedStruct<"TreeArtifact", { path: Pattern }>
+const Filegroup: Schema.TaggedStruct<"Filegroup", { name: NonEmptyString; entries: Array<Entry> }>
+const ReadFilegroup: Schema.TaggedStruct<"Filegroup", { name: NonEmptyString; entries: Array<ReadEntry> }>
+
+type Entry = Pattern | Glob | TreeArtifact
+type ReadEntry = Pattern | Glob
+type Declaration = Entry | Filegroup
+type ReadDeclaration = ReadEntry | ReadFilegroup
+```
+
+Each is exported as both a schema and a type. `Declaration` is what a write set accepts and `ReadDeclaration` what a read set accepts, which is how a tree artifact is kept out of a read set: a read set names what a node consumes, and a directory output is not that.
+
+### FileSet.canonical
+
+```ts
+const canonical: (path: string) => string
+```
+
+The canonical spelling of a declared path or pattern: every separator is `/`, and Unicode is normalized to NFC.
+
+### FileSet.workspaceRelative
+
+```ts
+const workspaceRelative: (pattern: string) => boolean
+```
+
+Whether a declared path stays inside the workspace and names it one way only. Refuses absolute paths (POSIX and drive-letter), upward traversal, the aliasing forms (`.` segments, empty segments), C0 controls, and DEL.
+
+### FileSet.makeFilegroup
+
+```ts
+const makeFilegroup: (name: string, entries: ReadonlyArray<Entry>) => Filegroup
+```
+
+Creates a named filegroup.
+
+### FileSet.expand and FileSet.expandReads
+
+```ts
+const expand: (declarations: ReadonlyArray<Declaration>) => ReadonlyArray<Entry>
+const expandReads: (declarations: ReadonlyArray<ReadDeclaration>) => ReadonlyArray<ReadEntry>
+```
+
+Expands filegroups deterministically, preserving declaration order. Both plan passes expand before they compare anything.
+
+### FileSet.isGlob and FileSet.isTreeArtifact
+
+```ts
+const isGlob: (value: unknown) => value is Glob
+const isTreeArtifact: (value: unknown) => value is TreeArtifact
+```
+
+Which variant an entry is.
+
+### FileSet.matchesPattern and FileSet.matchesGlob
+
+```ts
+const matchesPattern: (pattern: string, path: string) => boolean
+const matchesGlob: (glob: Glob, path: string) => boolean
+```
+
+Bazel's `*` and `**` path semantics without permitting traversal: `*` matches within one segment, `**` matches segments, and a trailing `**` matches the rest of the path. `matchesGlob` honours the glob's `exclude` list.
+
+### FileSet.overlaps
+
+```ts
+const overlaps: (left: Entry, right: Entry) => boolean
+```
+
+Conservative static overlap. Exact paths compare in canonical separator and NFC form. Two globs always overlap, and so do a glob and a tree artifact. A tree artifact overlaps any path beneath it. A glob tests the path bytes it is handed, so canonicalizing a measured path before matching is the caller's decision.
+
 ## GraphBuildError
 
 [src/GraphBuildError.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/GraphBuildError.ts)
 
 The refusals a plan-time build raises instead of producing a wrong plan. Each carries the site, `node` plus the recorded property `path`, and states the fix in `message`, because the author reading it is mid-body.
+
+### GraphBuildError.GraphBuildError
+
+```ts
+class GraphBuildError extends Schema.TaggedError<GraphBuildError>()("@smthrs/plan/GraphBuildError", {
+  code: typeof GraphBuildErrorCode
+  node: Schema.String
+  path: Schema.Array$<Schema.String>
+  message: Schema.String
+})
+```
+
+`node` is the node reference the failure belongs to: a planned value's origin node, an `all` member name, or a branch arm. `path` is the property path recorded on a planned value before it was misused, and the payload path for a payload refusal. It is empty for every other code.
+
+### GraphBuildError.GraphBuildErrorCode
 
 | `code`                        | Meaning                                                                                        |
 | ----------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -184,7 +978,7 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 | `invalid_priority`            | `Node.priority` received a value that is not a safe integer                                    |
 | `invalid_payload`             | a payload member cannot be captured as inert JSON without executing code or losing identity    |
 
-`GraphBuildErrorCode` is a closed schema literal, so a caller may switch on it and a new refusal is a deliberate addition rather than a new free-form string.
+`GraphBuildErrorCode` is a closed schema literal, so a caller may switch on it and a new refusal is a deliberate addition rather than a new free-form string. This package raises `planned_value_computed`, `invalid_all_member`, `invalid_continuation`, `invalid_priority`, `invalid_payload`, and `cyclic_payload`; the rest come from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)'s graph walk, which shares the vocabulary.
 
 ## PlanDiff
 
@@ -193,6 +987,40 @@ The refusals a plan-time build raises instead of producing a wrong plan. Each ca
 The verdict is the key: two nodes with the same id and the same key are the same step. The attribution, `changed: ["body", "input[1]"]`, is a report for a human, derived by comparing declarations field by field, and is deliberately part of no digest. Labels mirror the fields the hashed material body folds: `body`, `layers`, `capabilities`, `effects`, `version`, `nondeterministic`, `placement`, and `input[n]`, including `input[n]` entries whose declaration is unchanged but whose referenced node itself re-keyed. A node re-keyed purely by an upstream edit is therefore attributed to the input position that references it, even behind an unprojected `Pending`, rather than reported as nothing changed.
 
 Each compared field is projected through the same JSON mirror the keys are derived from, so two `Date` bodies a generation apart attribute to `body` rather than to nothing. The projection runs no accessor, and a field it refuses compares by an identity token scoped to that node and field, so `diff` stays a total function even for a value canonical serialization would reject.
+
+### PlanDiff.PlanDiff
+
+```ts
+interface PlanDiff {
+  readonly added: ReadonlyArray<string>
+  readonly removed: ReadonlyArray<string>
+  readonly rekeyed: ReadonlyArray<Rekeyed>
+  readonly unchanged: ReadonlyArray<string>
+}
+```
+
+What changed between two plans of the same flow, as node ids.
+
+### PlanDiff.Rekeyed
+
+```ts
+interface Rekeyed {
+  readonly id: string
+  readonly from: string
+  readonly to: string
+  readonly changed: ReadonlyArray<string>
+}
+```
+
+A node whose key moved, with the field labels that moved it. `changed` is empty only when none of the compared fields moved.
+
+### PlanDiff.diff
+
+```ts
+const diff: (previous: Plan.Plan, next: Plan.Plan) => PlanDiff
+```
+
+Compares a plan against the last plan for the same flow. Pure, total, and free of requirements.
 
 ## PlanStore
 
@@ -204,6 +1032,76 @@ Each compared field is projected through the same JSON mirror the keys are deriv
 
 Every failure is a `PlanStoreError` whose `code` is one of `invalid_plan`, `constraint`, `decode_failed`, `persistence_failed`, or `unknown`.
 
+### PlanStore.Service
+
+```ts
+interface Service {
+  /** Records generation 0 of a plan. */
+  readonly record: (plan: Plan.Plan, createdAtMs: number) => Effect.Effect<RecordResult, PlanStoreError>
+  /** Appends the newest generation's nodes and edges and advances the digest. */
+  readonly append: (plan: Plan.Plan) => Effect.Effect<void, PlanStoreError>
+  /** Reads the whole plan back, nodes in recorded order. */
+  readonly get: (planId: string) => Effect.Effect<Option.Option<Plan.Plan>, PlanStoreError>
+}
+```
+
+`createdAtMs` is the caller's clock, because this package performs no I/O of its own.
+
+### PlanStore.RecordResult
+
+```ts
+type RecordResult =
+  | { readonly _tag: "Recorded" }
+  | { readonly _tag: "ExistingSame" }
+  | { readonly _tag: "Conflict"; readonly digest: string }
+```
+
+`Conflict.digest` is the digest already stored under that plan id. Nothing was written.
+
+### PlanStore.PlanStore
+
+```ts
+class PlanStore extends Context.Service<PlanStore, Service>()("@smthrs/plan/PlanStore") {}
+```
+
+The service tag.
+
+### PlanStore.make
+
+```ts
+const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlClient>
+```
+
+Builds the SQL-backed store.
+
+### PlanStore.layer
+
+```ts
+const layer: Layer.Layer<PlanStore, never, DurableWriter | SqlClient.SqlClient>
+```
+
+Provides `make`.
+
+### PlanStore.PlanStoreError
+
+```ts
+class PlanStoreError extends Schema.TaggedError<PlanStoreError>()("@smthrs/plan/PlanStoreError", {
+  code: typeof PlanStoreErrorCode
+  message: Schema.String
+  cause: Schema.optional<Schema.Unknown>
+})
+```
+
+| `code`               | Meaning                                                                                   |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `invalid_plan`       | the plan does not satisfy what the operation requires, or a node is not encodable         |
+| `constraint`         | the compare-and-swap matched nothing, the persisted prefix diverged, or SQL refused a row |
+| `decode_failed`      | a stored row did not decode                                                               |
+| `persistence_failed` | the SQL layer failed for a reason that is not a constraint violation                      |
+| `unknown`            | anything else, with `cause` carrying the original                                         |
+
+`PlanStoreErrorCode` is exported as both a schema and a type.
+
 ## Migrations
 
 [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/Migrations.ts)
@@ -212,4 +1110,29 @@ The namespaced set owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges
 
 The ordered steps live under `src/internal/migrations`, which the export map blocks, so `set` is the only way to reach them; a step imported on its own would run outside the namespaced ordering `Migrator` relies on.
 
-Append-only is enforced in SQL rather than by convention. `0001_initial` creates the tables, the `flows_plan_nodes_order` index, and triggers that raise on any UPDATE or DELETE of `flows_plan_nodes` and `flows_plan_edges` and on any backward move of a `flows_plans` row. `0002_append_only_hardening` forbids deleting a plan row, extends the forward-only trigger to pin `flow` and `created_at_ms`, and makes `(plan_id, ordinal)` unique so recorded node order is deterministic.
+### Migrations.set
+
+```ts
+const set: DatabaseMigrations.MigrationSet // namespace "plan", idOffset 4000
+```
+
+The namespaced migration set, for composition with the other storage packages.
+
+### Migrations.run and Migrations.layer
+
+```ts
+const run: Effect.Effect<void, ..., SqlClient.SqlClient>
+const layer: Layer.Layer<never, ..., SqlClient.SqlClient>
+```
+
+`run` creates the plan schema. `layer` runs the migrations before exposing the database to the plan store, which is what a standalone composition uses.
+
+### The migrations
+
+Append-only is enforced in SQL rather than by convention.
+
+| Step                         | What it does                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0001_initial`               | Creates the three tables, the `flows_plan_nodes_order` index, and triggers that raise on any UPDATE or DELETE of a node or edge row and on any backward move of a plan row.     |
+| `0002_append_only_hardening` | Forbids deleting a plan row, extends the forward-only trigger to pin `flow` and `created_at_ms`, and makes `(plan_id, ordinal)` unique so recorded node order is deterministic. |
+| `0003_forward_only_identity` | Recreates the forward-only trigger with `plan_id` pinned, so a forward UPDATE cannot rename a plan and strand its immortal node and edge rows under the old id.                 |

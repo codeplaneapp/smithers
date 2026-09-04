@@ -66,7 +66,7 @@ additionally needs `PlanStore.layer` over a `DurableWriter` and a `SqlClient`.
 | `KeyMaterial`     | What a planner declares about a node: body, tagged input references, layers, capabilities, effects                                                   |
 | `StepKey`         | The compiler that turns material plus resolved dependency digests into an `@smthrs/keys` `Key`                                                       |
 | `Plan`            | `compile`, `append`, the node/edge/conflict schemas, and the digest an approval binds to                                                             |
-| `PlanDiff`        | `smithers plan --diff` as a value: added, removed, re-keyed (with attribution), unchanged                                                            |
+| `PlanDiff`        | A plan comparison as a value: added, removed, re-keyed (with attribution), unchanged                                                                 |
 | `PlanStore`       | Append-only SQL persistence, migration block `4000`, enforced by triggers rather than by convention                                                  |
 | `Migrations`      | The namespaced migration set, composed by `@smthrs/engine-store`'s `Migrations.sets`; its ordered steps live under `internal` and are not importable |
 
@@ -207,4 +207,4 @@ unchanged key.
 Browser-safe. The package resolves no `node:` built-in; `pnpm run browser` at the
 repository root executes that claim.
 
-Full API reference: [smithers.sh/api/plan](https://smithers.sh/docs/reference/api/plan).
+Full API reference: [plan.smithers.sh](https://plan.smithers.sh/reference/api/).

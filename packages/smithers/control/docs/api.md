@@ -1,350 +1,607 @@
-## Service
+---
+title: "API reference"
+description: "Every public export of @smthrs/control, module by module: the Control service and its ten operations, the wire schemas, the typed failures, the two ports, the RPC boundary, the projections, and the credential surface."
+---
 
-`Control` exports `plan`, `run`, `approve`, `deny`, `steer`, `signal`,
-`cancel`, `resume`, `list`, and `watch`. There is no `pause`: the frozen
-1.0.0-rc.0 contract removed it, and an operator park is written through
-`ControlRuntime.writeStatus(runId, fence, "parked")`. `ControlLive.layer`
-implements the service over `ControlRuntime`, `Journal`, `NotificationQueue`,
-and `Registry`. `SqlControlRuntime.layer` is the durable runtime;
-`ControlRuntime.layerMemory` is the deterministic in-memory one, and both are
-held to the shared contract in `packages/smithers/control/test/ControlContract.ts`.
-
-`run` takes either an approved plan or a run to restart, and the restart is the
-same operation `resume` performs: one terminality read before the idempotency
-replay, one claim scoped to runs this plane launched, and one
-`control.run.resume` entry carrying the authenticated principal and the stated
-reason.
-
-## Receipts and failures
-
-Every mutation answers a `Receipt`; `plan` returns a `PlanCard` instead. The
-typed error identifies the failed resource, so a plan that never became a run
-does not report a run failure.
-
-Before its first wait, each mutation copies only bounded JSON own data fields
-and schema-decodes that detached value. Its durable fingerprint is a canonical
-SHA-256 digest, and an authenticated request namespaces its idempotency key by
-the principal's stable `kind` and `id`, not the changing server timestamp.
-Accessors, `toJSON`, sparse arrays, cycles, and non-JSON objects are refused
-with `InvalidInput` before any collaborator sees them. The identity boundary
-accepts at most 4 MiB, 128 levels, 100,000 values and members, and a 1 to 1,024
-character idempotency key.
-
-| Verb                       | Receipts                                             | Typed failures                                                                                                                                         |
-| -------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `plan`                     | returns a `PlanCard`, not a receipt                  | `FlowNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                      |
-| `run` (`Plan`)             | `Accepted`, `AlreadyApplied`, `Conflict`, `Parked`   | `PlanNotFound`, `PlanDenied`, `PlanDigestMismatch`, `EnvelopeMismatch`, `ClaimLost`, `InvalidInput`, `LaunchFailed`, `PersistenceError`, `Unavailable` |
-| `run` (`Resume`), `resume` | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
-| `approve`, `deny`          | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `PlanDigestMismatch`, `EnvelopeMismatch`, `AlreadyResolved`, `PlanNotFound`, `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`          |
-| `steer`                    | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                                       |
-| `signal`                   | `Accepted`, `AlreadyApplied`, `Conflict`, `Terminal` | `RunNotFound`, `NoMatchingWait`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                     |
-| `cancel`                   | `Accepted`, `Terminal`                               | `RunNotFound`, `ClaimLost`, `InvalidInput`, `PersistenceError`, `Unavailable`                                                                          |
-| `list`, `watch`            | a page or a stream                                   | every member of `ControlError`                                                                                                                         |
-
-`PlanNotFound` carries `code: "plan_not_found"`; `PlanDenied` carries
-`code: "plan_denied"`. Their `planId` identifies the plan the operator must
-create or replace.
-
-A listing is bounded. `limit` is a positive integer no larger than
-`ControlSchema.maxPageSize` (500) and defaults to
-`ControlSchema.defaultPageSize` (100); a limit outside that range, and a cursor
-the listing did not issue, are refused with `InvalidInput` rather than answered
-with a plausible page. `filters.principalId` is refused for the same reason:
-rc.0 records no launch principal on a run summary, so the filter cannot be
-applied and a listing that ignored it would answer a tenant restriction with
-every run.
-
-## Run lineage
-
-A run's ancestry is recorded by whoever created it. `RunSummary` reports all of
-it under one vocabulary:
-
-| Field          | Source                                                              | Meaning                                                                                                   |
-| -------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `parentRunId`  | `flows_runs.parent_run_id`, else the `flows_run_parents` spawn edge | The run this one branched from: its spawner, the run it was forked off, or the previous trampoline round. |
-| `lineageId`    | `flows_runs.lineage_id`                                             | The trampoline lineage this run is a round of.                                                            |
-| `roundOrdinal` | `flows_runs.round_ordinal`                                          | Which round. Absent means a lineage of one, read as round 0 of itself.                                    |
-| `origin`       | derived                                                             | `child`, `fork`, or `continuation`.                                                                       |
-
-The engine records the two relationships in two places, so the projection reads
-both. `parent_run_id` is the trampoline chain: the round before this one. A run
-that another run SPAWNED writes nothing in its own row: the edge lives in the
-`flows_run_parents` DAG that cycle detection walks, so a projection that read
-the column alone would report every child of every run as an orphan. The column
-wins when a row has both, which is the case for round 1 of a run that was
-itself spawned: its nearest ancestor is the round before it.
-
-`Lineage.originOf` is the derivation, and it is pure: a run with a
-`fork-created` marker on its journal is a `fork`, a run past round 0 is a
-`continuation`, any other run with a parent is a `child`, and a run with no
-parent has no origin. A rewind is deliberately absent from the vocabulary. It
-truncates a run in place and creates none, so it is a thing that happened to a
-run, not a reason a run exists.
-
-`list` selects on the same fields:
+Every module is importable from the root entry point as a namespace and from
+its own subpath:
 
 ```ts
-const children = yield * control.list({
-  _tag: "runs",
-  filters: { parentRunId: "run-17" }
-})
-
-const rounds = yield * control.list({
-  _tag: "runs",
-  filters: { lineageId: "run-17" }
-})
+import { Control, ControlLive, Monitor } from "@smthrs/control"
+import * as ControlSchema from "@smthrs/control/ControlSchema"
 ```
 
-The durable listing covers every row in `flows_runs`, not only the runs the
-control plane launched itself. A child, a fork, and a later trampoline round
-are all created by the engine straight into the run store, and a control plane
-that listed only its own launches could not answer what a run spawned. Runs the
-plane launched keep launch order; the rest follow in creation order. A run
-whose `state_json` is not a control summary, an engine-created run, is
-projected from the run row's own columns instead, with the engine's `flowName`
-as its `flowId`.
+`@smthrs/control/internal/*`, `@smthrs/control/migrations/*`, and every nested
+`*/index` are blocked in the export map. `@smthrs/control/package.json` is
+exported, and so is `@smthrs/control/test/TestControl`.
 
-A listing reads the fork markers, the spawn edges, the waiting reasons, and the
-cancellation evidence of every row, because it projects every row. Reading ONE
-run, which is what every mutation does before it writes, reads the run and
-its ancestor chain and nothing else, so the cost of steering or cancelling a
-run does not grow with the size of the database. Cascade attribution needs the
-ancestors and stops there; the chain is one recursive read over `parent_run_id`
-plus one spawn-edge read per nesting level.
+Signatures in this reference use the usual shorthand: `Effect<A, E, R>` for
+`Effect.Effect`, `Stream<A, E>` for `Stream.Stream`, `Layer<A, E, R>` for
+`Layer.Layer`, and `Redacted<A>` for `Redacted.Redacted`.
 
-## Watch and lineage deltas
+## Control
 
-`watch` streams committed journal entries as `ControlEvent` values, and expands
-three of them into an extra `control.run.lineage` delta:
+The transport-independent control vtable. Every implementation in this package
+and every client projects onto this one interface.
 
-| Entry                                                                              | Producer               | Delta                                                                     |
-| ---------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------- |
-| `flows.engine.run-decision` with `decision: "created"` at round 0 or with no round | `@smthrs/engine-store` | `{ runId, parentRunId, origin: "child" }`                                 |
-| `flows.engine.run-decision` with `decision: "handed-off"`                          | `@smthrs/engine-store` | `{ runId, parentRunId, lineageId, roundOrdinal, origin: "continuation" }` |
-| `flows.time-travel.fork-created`                                                   | `@smthrs/time-travel`  | `{ runId, parentRunId, origin: "fork" }`                                  |
+| Export      | Kind      | Signature                                                                                                                                 |
+| ----------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `Control`   | class     | `Context.Service<Control, Service>` at key `/control/Control`                                                                             |
+| `Service`   | interface | The ten operations in the following table                                                                                                 |
+| `make`      | function  | `(implementation: Service) => Service`                                                                                                    |
+| `layerNoop` | layer     | `Layer<Control>`. Every operation fails `Unavailable`, naming the verb as `feature` and `control-runtime-engine-integration` as `ticket`. |
 
-The handoff is what carries a trampoline, and a continuation round's own
-`created` decision is skipped. The engine journals both in one transaction: it
-creates the next round with `{decision: "created", lineageId, roundOrdinal,
-parentExecutionId}` and records `{decision: "handed-off", nextExecutionId}` on
-the round that finished. Both name the same pair, so deriving from both would
-report one run as a `child` of its predecessor on one entry and a
-`continuation` of it on the other. The handoff is the one kept, because it
-reaches a consumer watching the run that hands off, which is the run an
-operator is already following when a trampoline advances. Exactly one delta
-therefore names each continuation round, whichever round of the lineage the
-consumer is watching.
+### Service
 
-The delta carries the sequence of the entry it was derived from, so a consumer
-resuming at a cursor on that run sees it exactly once. `afterSequence` is a
-cursor into ONE run's journal partition, and `watch` refuses it without a
-`runId`: sequences are partition-local, so the plan partition and every run
-partition each start at 0, and one scalar applied to all of them skipped every
-lower unseen sequence in every partition but the cursor's own. Expansion runs
-after the follow
-stream's deduplication, so a derived event never competes with its own entry
-for a `(runId, sequence)` key. A `created` decision that names no parent
-discloses no ancestry and derives nothing.
+| Operation | Signature                                                                                                                                                                                                   | Returns                                                                                              |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `plan`    | `(input: PlanInput) => Effect<PlanCard, FlowNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                   | The reviewable card, whether or not this call created it.                                            |
+| `run`     | `(input: RunInput) => Effect<Receipt, RunNotFound \| PlanNotFound \| PlanDenied \| PlanDigestMismatch \| EnvelopeMismatch \| ClaimLost \| InvalidInput \| LaunchFailed \| PersistenceError \| Unavailable>` | `Accepted`, `AlreadyApplied`, `Conflict`, or `Parked` for a plan; a resume answers as `resume` does. |
+| `approve` | `(input: ApprovalInput) => Effect<Receipt, PlanDigestMismatch \| EnvelopeMismatch \| AlreadyResolved \| PlanNotFound \| RunNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `deny`    | same as `approve`                                                                                                                                                                                           | same as `approve`.                                                                                   |
+| `steer`   | `(input: SteerInput) => Effect<Receipt, RunNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `signal`  | `(input: SignalInput) => Effect<Receipt, RunNotFound \| NoMatchingWait \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `cancel`  | `(input: RunMutationInput) => Effect<Receipt, RunNotFound \| ClaimLost \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted` or `Terminal`. Never replays its recorded receipt.                                        |
+| `resume`  | same as `cancel`                                                                                                                                                                                            | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `list`    | `(input: ListRequest) => Effect<ListResponse, ControlError>`                                                                                                                                                | A bounded page of flows or runs.                                                                     |
+| `watch`   | `(filter: WatchFilter) => Stream<ControlEvent, ControlError>`                                                                                                                                               | Committed journal entries, plus the deltas the plane derives.                                        |
 
-`Lineage.derive` and `Lineage.expand` are the projection, exported so a client
-that reads the journal directly reaches the same conclusions the server does.
+There is no `pause`. The frozen 1.0.0-rc.0 contract removed it, and an operator
+park is written through `ControlRuntime.writeStatus(runId, fence, "parked")`.
 
-## Live steering
+### Inputs
 
-`steer` writes one durable item into the notification queue and journals the
-enqueue beside it. `SteerMessage` is a union, because an operator steers a run
-for four different reasons and only one of them is something to tell the model:
+| Type               | Shape                                                                                                                                                                                   |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlanInput`        | `{ flowId: FlowId; input: unknown; idempotencyKey?: IdempotencyKey }`. `input` is `unknown` so the runtime can decode its own flow's schema before anything crosses a transport.        |
+| `RunInput`         | `ControlSchema.RunInputSchema.Type & { principal?: Principal }`, so either `{ _tag: "Plan", planId, digest, envelope, idempotencyKey }` or `{ _tag: "Resume", runId, idempotencyKey }`. |
+| `ApprovalInput`    | `ApprovalPayload & { principal?: Principal }`: `{ target, scope, idempotencyKey }`.                                                                                                     |
+| `SteerInput`       | `{ runId: RunId; message: SteerMessage; idempotencyKey: IdempotencyKey }`.                                                                                                              |
+| `SignalInput`      | `{ runId: RunId; signal: SignalPayload; idempotencyKey: IdempotencyKey; principal?: Principal }`.                                                                                       |
+| `RunMutationInput` | `{ runId: RunId; idempotencyKey: IdempotencyKey; reason?: string; principal?: Principal }`. `reason` is recorded on the journal entry the mutation writes.                              |
 
-| Variant                                                     | Payload     | What the next turn does               |
-| ----------------------------------------------------------- | ----------- | ------------------------------------- |
-| `Message` (the default, and what a `body` alone decodes as) | `body`      | Inserts the body into the transcript. |
-| `Seat`                                                      | `seat`      | Runs the turn on that model seat.     |
-| `Thinking`                                                  | `thinking`  | Runs the turn at that thinking level. |
-| `Tools`                                                     | `toolNames` | Adds those tools to the active set.   |
+`ApprovalTarget` is re-exported from `ControlSchema` for convenience.
 
-`ControlSchema.steerItem` strips the control envelope: who asked, when, for
-which run, and returns the `@smthrs/notifications` `SteerPayload` the harness
-reads back. `Notifications.make` in `@smthrs/harness` maps each payload onto
-the matching `Steering.Item`, so a seat steer changes the seat instead of
-spending a turn announcing it.
+`principal` is present on the local contracts because a runtime stamps it. The
+RPC schemas that exclude it do so on purpose: an authenticated server names the
+identity, and a remote client cannot claim another.
 
-A steer has two durable moments and two writers:
+## ControlSchema
 
-| Event                     | Writer                                                                             | Payload                          |
-| ------------------------- | ---------------------------------------------------------------------------------- | -------------------------------- |
-| `control.steer.enqueued`  | `Control.steer`                                                                    | `{ runId, messageId, kind }`     |
-| `control.steer.delivered` | derived by `Steering.derive` from the queue's `flows/notifications/Promoted` entry | `{ runId, messageId, boundary }` |
+The serializable values both halves of the wire decode. Every entry has a
+schema constant and a type of the same name unless noted.
 
-Delivery is derived rather than recorded, because the boundary that delivered
-the steer runs in the agent process and not in the control plane. A control
-plane that wrote its own delivery record would be asserting a fact it did not
-observe. One promotion entry names a batch, so it derives one delta per message
-id, each carrying the sequence of the entry it came from; a consumer resuming
-at a cursor on that run sees the batch exactly once.
+### Identifiers and identity
 
-`RunSummary.steering.pending` counts what has been admitted and not yet
-promoted, read from the queue rather than from a column, because the queue owns
-both halves. A queue that cannot answer leaves the field absent.
+| Export                              | Shape                                                                               |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `RunId`, `FlowId`, `IdempotencyKey` | `Schema.String` aliases that name what a string is.                                 |
+| `Principal`                         | `{ id: string; kind: string; stampedAt: number }`. Stamped at the control boundary. |
 
-### Waking a parked run
+### Authority
 
-A steer to a parked run resumes it when the park is one a message can end:
+| Export            | Shape                                                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Envelope`        | `{ capabilities: string[]; flows: string[]; budget: { tokens?: number; milliseconds?: number }; host?: string }`. |
+| `GrantScope`      | `"once" \| "run" \| "remembered"`.                                                                                |
+| `ApprovalTarget`  | `{ _tag: "Plan", planId, digest, envelope }` or `{ _tag: "Node", runId, requestId, digest, envelope }`.           |
+| `ApprovalPayload` | `{ target: ApprovalTarget; scope: GrantScope; idempotencyKey: IdempotencyKey }`.                                  |
 
-| `waitingReason`              | Steered                                                                                                                                  |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `event`                      | Resumed. The run is waiting for something to arrive, and a steer is something arriving.                                                  |
-| `released`                   | Resumed. A sweep took the run away from a dead owner, and nothing is coming to claim it.                                                 |
-| `approval`, `timer`, `quota` | Left parked. The run is waiting for a decision, a clock, or a budget that a message does not supply.                                     |
-| absent                       | Left parked. A park with no reason is an operator's own park, and a message queued behind it is queued for when the operator resumes it. |
+### Plans
 
-`RunSummary.waitingReason` is the run row's `waiting_reason`, which the engine
-writes when it parks a run and clears on the wake. The control plane reads it
-and never writes it, so an operator park written through
-`ControlRuntime.writeStatus(runId, fence, "parked")` leaves the column empty,
-and an empty column is how an operator park is told apart from an engine park.
-A reason this table does not name is left parked too: a control plane that
-cannot explain a park should not end it.
+| Export           | Shape                                                                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `PlanNodeStatus` | `"cached" \| "run"`. The two outcomes a step key already decides. `release` belongs to orphan reconciliation and is deliberately not part of a card.                                 |
+| `PlanNode`       | The persisted plan node's fields plus `status`. `key` is the step key [`@smthrs/plan`](/api/plan) compiled, so a node named here and a node in the persisted plan are the same node. |
+| `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.                        |
 
-A steer whose `message.runId` names a different run than the call does is
-refused with `InvalidInput`. The notification would be admitted to the call's
-run while the stored message claimed another, so an operator reading it later
-would be told it belongs somewhere it was never delivered.
+### Runs
 
-A steer to a run that already reached `cancelled`, `completed`, or `failed`
-returns a `Terminal` receipt and stores nothing. Storing it anyway would leave
-an operator watching a message with no boundary left to deliver it.
+| Export         | Shape                                                                                                                                                                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RunStatus`    | `"accepted" \| "running" \| "parked" \| "waiting-approval" \| "cancelled" \| "completed" \| "failed"`.                                                                                                                                                                              |
+| `RunOrigin`    | `Lineage.Origin`, re-exported so a serializable projection needs one import.                                                                                                                                                                                                        |
+| `CancelSource` | `"control" \| "engine" \| "cascade"`.                                                                                                                                                                                                                                               |
+| `Cancellation` | `{ requestedAt; source; principal?; reason?; cascadedFrom? }`. See [cancellation attribution](./concepts/cancellation.md).                                                                                                                                                          |
+| `RunSummary`   | The projection every listing returns. Required: `runId`, `flowId`, `status`, `createdAt`, `updatedAt`. Optional: `planId`, `planDigest`, `ownerId`, `parentRunId`, `lineageId`, `roundOrdinal`, `origin`, `waitingReason`, `steering`, `pendingResume`, `parkedBy`, `cancellation`. |
 
-## Cancellation attribution
+`waitingReason` is the run row's own column, written by the engine and only
+read here. The CLI's `ps` and `status` listings also render `executor` in that
+position for a run that has sat at `accepted` with no owner past the launch
+handoff window; that value is computed at render time and never stored, so a
+reader going through the RPC, the gateway, or a plugin sees the field absent on
+the same run.
 
-A durable cancellation is anonymous on its own: `flows_runs.cancel_requested_at_ms`
-records that somebody asked and when, and nothing else. `RunSummary.cancellation`
-is the attribution the journal adds back.
+### Steering
 
-| Field          | Meaning                                                                   |
-| -------------- | ------------------------------------------------------------------------- |
-| `requestedAt`  | When the cancellation was asked for.                                      |
-| `source`       | `control`, `cascade`, or `engine`.                                        |
-| `principal`    | Who asked. Present on a `control` source and on the `cascade` it started. |
-| `reason`       | Why, as the operator stated it.                                           |
-| `cascadedFrom` | The cancelled ancestor this run was swept up with.                        |
+| Export          | Shape                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `MessageSteer`  | The envelope plus `kind?: "Message"` and `body: string`.                                                            |
+| `SeatSteer`     | The envelope plus the notification package's seat payload fields.                                                   |
+| `ThinkingSteer` | The envelope plus its thinking payload fields.                                                                      |
+| `ToolsSteer`    | The envelope plus its tools payload fields.                                                                         |
+| `SteerMessage`  | The union of those four. The shared envelope is `{ messageId, runId, principal, createdAt }`.                       |
+| `steerItem`     | `(message: SteerMessage) => SteerPayload`. Strips the control envelope and returns the item the harness reads back. |
 
-`cancel` takes the reason and the principal:
+### Signals and events
 
-```ts
-yield * control.cancel({
-  runId: "run-17",
-  reason: "budget",
-  idempotencyKey: "cancel:run-17"
-})
-```
+| Export          | Shape                                                                                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SignalPayload` | `{ name: string; payload: Json }`.                                                                                                                                            |
+| `WatchFilter`   | `{ runId?: RunId; afterSequence?: number; follow?: boolean }`. `afterSequence` requires `runId`. Omitting `follow` keeps the live stream; `false` requests a finite snapshot. |
+| `ControlEvent`  | `{ sequence: number; kind: string; runId?: RunId; occurredAt: number; payload: Json }`.                                                                                       |
 
-The reason and the principal are written onto the `control.run.cancel-requested`
-entry inside the mutation's own transaction, so a cancellation cannot commit
-anonymously. `resume` records the same pair on its `control.run.resume` entry.
+### Listing
 
-A cancel whose executor reports that the engine row has already settled writes
-no attribution, because nobody cancelled anything, and reconciles the control
-row onto the engine's own status. Leaving the two rows disagreeing was
-permanent: no verb converged it, `smthrs ps` listed the run as live, and `gc`
-skipped it forever.
+| Export            | Shape                                                                                                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultPageSize` | `100`.                                                                                                                                                                 |
+| `maxPageSize`     | `500`.                                                                                                                                                                 |
+| `PageLimit`       | An integer between 1 and `maxPageSize`.                                                                                                                                |
+| `ListRequest`     | `{ _tag: "flows", filters?, cursor?, limit? }` or `{ _tag: "runs", filters?: { runId?, flowId?, status?, principalId?, parentRunId?, lineageId? }, cursor?, limit? }`. |
+| `ListResponse`    | `{ _tag: "flows", items, warnings?, nextCursor? }` or `{ _tag: "runs", items: RunSummary[], nextCursor? }`.                                                            |
 
-The `Cancel` RPC carries the reason and refuses a caller-named principal: the
-server stamps the identity it authenticated, so a remote operator states why
-and never states who. The principal's `stampedAt` is a record of when that
-authentication happened: evidence about an external event, never a value any
-decision is replayed from.
+`principalId` stays on the wire and is refused by `Control.list`. Deleting the
+field would move the same overbroad answer one layer out, because struct
+decoding strips a property the schema does not declare and the server would
+never see it.
 
-`Cancellation.attribute` is the fold, and it is pure and scope-independent: it
-reads whatever evidence it is handed and never issues a query. A listing folds
-the whole database; reading one run folds that run and its ancestor chain,
-which is the smallest scope that can still answer the question. Cascade is a
-fact about a run's ancestors, so it cannot be decided one row at a time: the
-request that cancelled a child may be several rounds up the chain. Three
-sources rank in the order a run's own evidence outranks its ancestors':
+### Receipts
 
-1. A `control.run.cancel-requested` entry names the run. It says who and why.
-2. A cancelled ancestor exists. The run reports `cascade`, names the ancestor,
-   and inherits that ancestor's principal and reason, because the honest answer
-   to "who cancelled this child" is the operator who cancelled its parent.
-3. Neither. The engine cancelled the run on its own account, and there is no
-   principal to report.
+`Receipt` is the union every mutation answers:
 
-Evidence that a run was cancelled at all is any of: the run store's
-`cancel_requested_at_ms`, the engine's `flows.engine.interrupted` record with
-outcome `cancelled`, or an attributed request naming the run. The last one
-matters because a control plane cancelling a run it owns interrupts the fiber
-rather than writing the request column, and its journal entry is the whole
-record.
+| Member           | Fields                                                              |
+| ---------------- | ------------------------------------------------------------------- |
+| `Accepted`       | `{ receiptId: string; runId?: RunId }`                              |
+| `AlreadyApplied` | `{ receiptId: string; runId?: RunId }`                              |
+| `Parked`         | `{ receiptId: string; planId: string; status: "waiting-approval" }` |
+| `Conflict`       | `{ message: string }`                                               |
+| `Terminal`       | `{ runId: RunId; status: RunStatus }`                               |
+
+### RPC request schemas
+
+`PlanInputSchema`, `RunInputSchema`, `ApprovalInputSchema`,
+`SteerInputSchema`, `SignalInputSchema`, `RunMutationInputSchema`,
+`ReasonedMutationInputSchema`, and `CancelInputSchema` are the wire forms.
+`PlanInputSchema` takes `Schema.Json` where the local contract takes `unknown`.
+`ReasonedMutationInputSchema` adds `reason` and omits `principal`, because the
+server stamps the identity it authenticated. `CancelInputSchema` is a named
+alias of it, so cancellation's public contract stays explicit.
+
+## ControlError
+
+Every stable failure the plane emits. Each class carries a constant `code` a
+client may branch on.
+
+| Class                | `code`                 | Fields                                   | Meaning                                                     |
+| -------------------- | ---------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| `RunNotFound`        | `run_not_found`        | `runId`                                  | No run with this id exists.                                 |
+| `PlanNotFound`       | `plan_not_found`       | `planId`                                 | No plan with this id. Carries an operator-facing `message`. |
+| `PlanDenied`         | `plan_denied`          | `planId`                                 | The plan was denied. Carries an operator-facing `message`.  |
+| `FlowNotFound`       | `flow_not_found`       | `flowId`                                 | No flow with this id is registered.                         |
+| `PlanDigestMismatch` | `plan_digest_mismatch` | `planId`, `expected`, `actual`           | The submitted plan does not hash to the declared digest.    |
+| `EnvelopeMismatch`   | `envelope_mismatch`    | `planId`, `expected`, `actual`           | The plan's effect envelope differs from the declared one.   |
+| `ClaimLost`          | `claim_lost`           | `runId`                                  | The caller's claim lapsed or was fenced by a newer owner.   |
+| `AlreadyResolved`    | `already_resolved`     | `requestId`                              | This request was already answered.                          |
+| `InvalidInput`       | `invalid_input`        | `issue`                                  | The request missed its schema or a stated precondition.     |
+| `Unauthorized`       | `unauthorized`         | `message`                                | No usable credential for this operation.                    |
+| `Unavailable`        | `unavailable`          | `feature`, `ticket`                      | Not implemented in this deployment.                         |
+| `TransportError`     | `transport_error`      | `message`, `retryable`, `cause?`         | The request failed before a declared response arrived.      |
+| `PersistenceError`   | `persistence_failed`   | `operation`, `message`, `cause?`         | A store operation failed.                                   |
+| `LaunchFailed`       | `launch_failed`        | `runId`, `message`, `cause?`             | The executor refused or could not start the run.            |
+| `NoMatchingWait`     | `no_matching_wait`     | `runId`, `waitName`                      | A signal named a wait point the run does not have open.     |
+| `CredentialConflict` | `credential_conflict`  | `id`, `expectedVersion`, `actualVersion` | A credential write lost a compare-and-set race.             |
+
+| Export               | Kind   | Meaning                                                                                                              |
+| -------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
+| `ControlErrorSchema` | schema | The single membership list. `ControlClient.isControlError` is `Schema.is` of it, so a class added here reaches both. |
+| `ControlError`       | type   | `typeof ControlErrorSchema.Type`.                                                                                    |
+
+`NoMatchingWait` spells its field `waitName` rather than `name`, because a
+field named `name` on an `Error` subclass shadows `Error.prototype.name`, which
+every renderer in the tree reads.
+
+`TransportError.retryable` classifies the transport phase alone. Resend a
+retryable mutation only when its idempotency key makes replay safe; a keyless
+request can have reached the server even when its response was lost.
+
+## ControlLive
+
+| Export  | Signature                                                                           |
+| ------- | ----------------------------------------------------------------------------------- |
+| `layer` | `Layer<Control, never, ControlRuntime \| Journal \| NotificationQueue \| Registry>` |
+
+Writes delegate to `ControlRuntime`; journal events are observational records
+committed with the state they describe. `watch` only replays and follows
+committed entries. `ControlExecutor` is read optionally, so a composition
+without one records but starts nothing.
+
+## ControlRuntime
+
+The persistence port `ControlLive` writes through, and its deterministic
+in-memory implementation. A production adapter fences every owner-sensitive
+write, implements resume as join-or-claim, releases claims on every waiting or
+terminal transition, and translates conflicts into typed failures.
+
+| Export           | Kind     | Signature                                                                   |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| `ControlRuntime` | class    | `Context.Service<ControlRuntime, Service>` at key `/control/ControlRuntime` |
+| `make`           | function | `(implementation: Service) => Service`                                      |
+| `layerMemory`    | layer    | `(options?: MemoryOptions) => Layer<ControlRuntime, never, Crypto>`         |
+
+### Service
+
+| Group             | Members                                                                                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plans             | `plan(input: PlanInput) => Effect<PlanOutcome, FlowNotFound \| InvalidInput \| PersistenceError>`, `getPlan(planId)`, `listPlanIds`                                    |
+| Approvals         | `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal)`, `grants`          |
+| Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                              |
+| Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                      |
+| Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                        |
+| Ownership         | `registerFiber(runId, fiber)`, `interrupt(runId)`, `resume(runId, options?)`, `claimFence(runId)`, `releasePending(runId, fence)`, `writeStatus(runId, fence, status)` |
+| Identity          | `stampPrincipal(submitted?)`, `lookupMutation(key, fingerprint)`, `recordMutation(key, fingerprint, receipt)`                                                          |
+
+`resume` takes `{ scope?: "launched" \| "any" }`. `"launched"` restricts the
+claim to runs this plane launched, which every steer wake and every
+approval-driven restart passes. An explicit `Control.resume` omits it.
+
+`registerApproval` is idempotent and returns the token with its current
+`resolved` state, so a resumed attempt reads the decision instead of parking
+again. A registration that disagrees with the stored digest or envelope is
+refused exactly as `lookupApproval` refuses it.
+
+`requestResume` returns the durable sequence `clearResume` checks, so a resume
+requested while one is being taken up is not lost with it.
+
+### Models
+
+| Type             | Shape                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                     |
+| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget; resolved: boolean; decisionPrincipal?: Principal }`                                                                |
+| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                              |
+| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                           |
+| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                 |
+| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                    |
+| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                    |
+| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely. |
+| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt"> }`                                                                       |
+
+`layerMemory` models the production fence and approval ordering seams but keeps
+everything in a `Map`. Nothing it decides survives the process.
+
+## SqlControlRuntime
+
+The durable `ControlRuntime` over a SQL database and the fenced run store from
+[`@smthrs/run-store`](/api/run-store).
+
+| Export           | Kind      | Signature                                                                                                          |
+| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
+| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                |
+| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt"> }`                   |
+| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                      |
+| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`       |
+| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>` |
+| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                          |
+
+Omitting `owner` mints one synthetic identity for this runtime only, so
+separately constructed runtimes cannot cross each other's fences. Hosts that
+can report a real process identity should supply it.
+
+The run lifecycle is not reimplemented here. `RunStore` owns it, and every
+ownership move is a single SQL compare-and-swap. See
+[Ownership, fences, and claims](./concepts/ownership.md) for the status
+mapping.
+
+## ControlExecutor
+
+The acceptance port from the control plane into a real run executor.
+
+| Export            | Kind     | Signature                                                                                          |
+| ----------------- | -------- | -------------------------------------------------------------------------------------------------- |
+| `ControlExecutor` | class    | `Context.Service<ControlExecutor, Service>` at key `/control/ControlExecutor`                      |
+| `make`            | function | `(implementation: Service) => Service`                                                             |
+| `makeNoop`        | function | `(overrides?: Partial<Service>) => Service`. Accepts every launch as `pending` and starts nothing. |
+| `layer`           | layer    | `(implementation: Service) => Layer<ControlExecutor>`                                              |
+| `layerNoop`       | layer    | `(overrides?: Partial<Service>) => Layer<ControlExecutor>`                                         |
+
+### Service
+
+| Method                | Signature                                                          |
+| --------------------- | ------------------------------------------------------------------ |
+| `launch`              | `(input: Launch) => Effect<Acceptance, LaunchFailed>`              |
+| `requestCancel`       | `(input: CancelRequest) => Effect<CancelRecord, PersistenceError>` |
+| `deliverSignal`       | `(input: Signal) => Effect<SignalDelivery, PersistenceError>`      |
+| `resumeRun`           | `(input: ResumeRequest) => Effect<ResumeUptake, PersistenceError>` |
+| `settleCancelledPark` | `(input: CancelRequest) => Effect<void, PersistenceError>`         |
+
+### Models
+
+| Type                             | Shape                                                                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Launch`                         | `{ plan: StoredPlan; run: RunSummary }`. `run.runId` is the execution id the executor must start.                                    |
+| `Acceptance`                     | `"accepted"` (taken now) or `"pending"` (queued).                                                                                    |
+| `CancelRequest`, `ResumeRequest` | `{ runId: RunId }`                                                                                                                   |
+| `CancelTerminal`                 | `{ _tag: "Terminal"; status: "completed" \| "failed" \| "cancelled" }`. The engine's own status, which the plane cannot read itself. |
+| `CancelRecord`                   | `"recorded" \| "already-requested" \| "unknown" \| CancelTerminal`                                                                   |
+| `ResumeUptake`                   | `"resuming" \| "unknown"`                                                                                                            |
+| `Signal`                         | `{ runId: RunId; signal: SignalPayload }`                                                                                            |
+| `SignalDelivery`                 | `"delivered" \| "no-match" \| "unknown"`                                                                                             |
+
+`settleCancelledPark` is called after the cancel mutation commits, never inside
+it: driving a run re-enters the engine, whose writes would wait on the writer
+the transaction holds.
+
+## ControlRpcs
+
+The schema-backed RPC projection of the service.
+
+| Export                | Kind      | Meaning                                                                                                                                                           |
+| --------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ControlRpcs`         | group     | Ten procedures: `Plan`, `Run`, `Approve`, `Deny`, `Steer`, `Signal`, `Cancel`, `Resume`, `List`, and the streaming `Watch`. Carries the `ControlAuth` middleware. |
+| `ControlPrincipal`    | class     | The authenticated principal, provided to every handler. Key `/control/ControlPrincipal`.                                                                          |
+| `ControlAuth`         | class     | The middleware boundary. Key `/control/ControlAuth`, error `Unauthorized`.                                                                                        |
+| `Authenticator`       | interface | `{ authenticate: (headers: Record<string, string>) => Effect<Principal, Unauthorized> }`                                                                          |
+| `BearerAuthOptions`   | interface | `{ token: string; principal: Omit<Principal, "stampedAt">; now?: () => number }`                                                                                  |
+| `bearerAuthenticator` | function  | `(options: BearerAuthOptions) => Authenticator`. Constant-time comparison; missing, malformed, empty, and incorrect credentials all fail closed identically.      |
+| `layerAuth`           | layer     | `(authenticator: Authenticator) => Layer<ControlAuth>`                                                                                                            |
+| `layerBearerAuth`     | layer     | `(options: BearerAuthOptions) => Layer<ControlAuth>`                                                                                                              |
+| `layerNoopAuth`       | layer     | `(principal?: Principal) => Layer<ControlAuth>`. Authenticates nothing.                                                                                           |
+
+`List` and `Watch` declare the whole `ControlError` union rather than restating
+its members.
+
+## ControlServer
+
+| Export      | Meaning                                                                                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layer`     | The handlers, delegating to `Control`. Every mutation that records who asked reads `ControlPrincipal` and stamps it rather than forwarding what the client sent. |
+| `layerHttp` | Mounts both protocols on the ambient `HttpRouter`: unary procedures over `POST /rpc`, and `watch` over `WebSocket /rpc/ws`.                                      |
+
+## ControlClient
+
+| Export           | Kind       | Signature                                                                                                     |
+| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------- |
+| `ClientConfig`   | interface  | `{ url: string; credential?: string }`. `credential` is attached as a bearer token on every HTTP RPC request. |
+| `layer`          | layer      | `(config: ClientConfig) => Layer<Control, ...>`                                                               |
+| `isControlError` | refinement | `(value: unknown) => value is ControlError`, derived from `ControlErrorSchema`.                               |
+
+Unary procedures use HTTP at `url`; `watch` uses the abstract WebSocket the
+platform layer supplies. Declared control failures cross the wire as
+themselves; everything else becomes a `TransportError` whose `retryable` flag
+classifies the transport phase.
+
+## Lineage
+
+Run ancestry as the control plane reads it. See
+[Run lineage](./concepts/lineage.md).
+
+| Export                 | Kind            | Signature                                                                                                           |
+| ---------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `Origin`               | schema and type | `"child" \| "fork" \| "continuation"`                                                                               |
+| `Ancestry`             | interface       | `{ parentRunId?: string; roundOrdinal?: number; forked?: boolean }`                                                 |
+| `runDecisionEventType` | constant        | `"flows.engine.run-decision"`                                                                                       |
+| `forkCreatedEventType` | constant        | `"flows.time-travel.fork-created"`                                                                                  |
+| `lineageEventType`     | constant        | `"control.run.lineage"`                                                                                             |
+| `originOf`             | function        | `(ancestry: Ancestry) => Origin \| undefined`. A fork wins over a plain child, because a fork records a parent too. |
+| `derive`               | function        | `(event: ControlEvent) => ControlEvent \| undefined`. The ancestry delta one entry discloses, if it discloses one.  |
+| `expand`               | function        | `(event: ControlEvent) => ReadonlyArray<ControlEvent>`. The entry plus any delta.                                   |
+
+## Cancellation
+
+Cancellation attribution as the plane reads it back. See
+[Cancellation attribution](./concepts/cancellation.md).
+
+| Export                 | Kind      | Signature                                                                                                                        |
+| ---------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `requestedEventType`   | constant  | `"control.run.cancel-requested"`                                                                                                 |
+| `interruptedEventType` | constant  | `"flows.engine.interrupted"`                                                                                                     |
+| `Request`              | interface | `{ requestedAt: number; principal?: Principal; reason?: string }`                                                                |
+| `Evidence`             | interface | `{ runId: string; parentRunId?: string; cancelRequestedAt?: number; cancelledAt?: number }`                                      |
+| `Input`                | interface | `{ runs: ReadonlyArray<Evidence>; requests: ReadonlyMap<string, Request> }`                                                      |
+| `attribute`            | function  | `(input: Input) => ReadonlyMap<string, Cancellation>`. Pure and scope-independent: it reads what it is handed and never queries. |
+
+## Steering
+
+The steer lifecycle as the plane reads it back. See
+[Steer a running agent](./guides/steer-a-run.md).
+
+| Export               | Kind     | Signature                                                                                                                                        |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `enqueuedEventType`  | constant | `"control.steer.enqueued"`, written by `Control.steer`.                                                                                          |
+| `promotedEventType`  | constant | `"flows/notifications/Promoted"`, written by the queue.                                                                                          |
+| `deliveredEventType` | constant | `"control.steer.delivered"`, derived.                                                                                                            |
+| `derive`             | function | `(event: ControlEvent) => ReadonlyArray<ControlEvent>`. One delta per message a promotion named. A promotion that named nothing derives nothing. |
+| `expand`             | function | `(event: ControlEvent) => ReadonlyArray<ControlEvent>`                                                                                           |
 
 ## Monitor
 
-`Monitor` answers the question after "what is this run doing": is that all
-right, and if not, what now. `classify` is pure, so the vocabulary an operator
-reads on a dashboard is the one a heal loop branches on:
+Run health over the control plane. See
+[Monitor a run and heal it](./guides/monitor-runs.md).
 
-| Condition                                     | Health           | Because                                        |
-| --------------------------------------------- | ---------------- | ---------------------------------------------- |
-| No summary                                    | `unknown`        | Nothing to say, and nothing to do.             |
-| `failed`                                      | `failing`        | The run itself reported the failure.           |
-| `completed`, `cancelled`                      | `healthy`        | A finished run needs nothing.                  |
-| `waiting-approval`, or parked on `approval`   | `awaiting-human` | A human owes it an answer.                     |
-| `roundOrdinal` at or past `roundBound`        | `runaway-loop`   | The lineage loops without converging.          |
-| The last settled attempt failed               | `failing`        | The run is alive and its work is not landing.  |
-| No progress for `stallBeats`, an attempt open | `wedged-node`    | One attempt started and never settled.         |
-| No progress for `stallBeats`                  | `stalled`        | Nothing is happening and nothing is in flight. |
-| Anything else                                 | `healthy`        | Entries are still arriving.                    |
+| Export                     | Kind            | Signature                                                                                                                              |
+| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `Health`                   | schema and type | `"healthy" \| "stalled" \| "wedged-node" \| "runaway-loop" \| "awaiting-human" \| "failing" \| "unknown"`                              |
+| `Observation`              | interface       | `{ summary?: RunSummary; events: ReadonlyArray<ControlEvent>; beatsWithoutProgress: number; stallBeats: number; roundBound?: number }` |
+| `classify`                 | function        | `(observation: Observation) => Health`. Pure.                                                                                          |
+| `Remedy`                   | type            | `"resume" \| "cancel" \| "none"`                                                                                                       |
+| `remedyFor`                | function        | `(health: Health) => Remedy`                                                                                                           |
+| `Beat`                     | interface       | `{ beat: number; health: Health; sequence: number; healed?: Remedy; receipt?: Receipt }`                                               |
+| `Report`                   | interface       | `{ runId: RunId; beats: ReadonlyArray<Beat>; health: Health }`                                                                         |
+| `Options`                  | interface       | `{ runId; monitorId?; intervalMs?; maxChecks?; stallBeats?; roundBound?; autoHeal?; heal? }`                                           |
+| `run`                      | function        | `(options: Options) => Effect<Report, ControlError, Control \| Journal>`                                                               |
+| `attemptStartedEventType`  | constant        | `"flows.engine.attempt-started"`                                                                                                       |
+| `attemptFinishedEventType` | constant        | `"flows.engine.attempt-finished"`                                                                                                      |
+| `beatEventType`            | constant        | `"control.monitor.beat"`                                                                                                               |
+| `healedEventType`          | constant        | `"control.monitor.healed"`                                                                                                             |
 
-`awaiting-human` outranks `failing` on purpose. A run parked for approval after
-a failed attempt is waiting for a person, and resuming or cancelling it would
-take the decision away from them.
+Defaults: `monitorId` is `default`, `intervalMs` is 1,000, `maxChecks` is 10,
+`stallBeats` is 3, `roundBound` is 32, and `autoHeal` is empty.
 
-Progress is measured from `flows.engine.attempt-started` and
-`flows.engine.attempt-finished`, which the engine journals as a pair: an excess
-of starts is an attempt still in flight. The classification reads durable
-evidence only, never an in-process fiber, which is what lets a monitor watch a
-run in another process.
+## Channels
 
-`Monitor.run` beats over `Control`:
+Verified ingress. A channel verifies opaque transport data before it decodes or
+maps it, and dispatches the result through `Control`.
 
-```ts
-const report = yield * Monitor.run({
-  runId: "run-17",
-  monitorId: "oncall-supervisor",
-  intervalMs: 5_000,
-  maxChecks: 60,
-  stallBeats: 3,
-  autoHeal: ["stalled", "wedged-node"]
-})
-```
+| Export               | Kind              | Signature                                                                                            |
+| -------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `Channels`           | interface and tag | `{ register; lookup; ingest; project }` at key `/control/Channels`                                   |
+| `Channel<A>`         | interface         | `{ name; schema; fingerprintHeaders?; verify; decode; map; project }`                                |
+| `RawInbound`         | interface         | `{ body: Uint8Array; headers: Record<string, string \| undefined>; idempotencyKey: IdempotencyKey }` |
+| `InboundResult`      | type              | `{ _tag: "Start"; flowId; input }` or `{ _tag: "Signal"; runId; signal }`                            |
+| `IngestRequest`      | interface         | `{ channel: string; raw: RawInbound }`                                                               |
+| `ProjectRequest`     | interface         | `{ channel: string; run: RunSummary }`                                                               |
+| `Delivery`           | interface         | `{ cursor: string; messageId?: string }`                                                             |
+| `DeliveryProjection` | interface         | `{ cursor; messageId?; operation: "post" \| "edit" \| "noop"; message: unknown }`                    |
+| `make`               | effect            | Builds the coordinator over `ControlRuntime`'s durable mutation store.                               |
+| `makeMemory`         | effect            | Builds a process-local coordinator for adapter unit tests.                                           |
+| `layer`              | layer             | `Layer<Channels, never, ControlRuntime \| Control>`                                                  |
+| `layerMemory`        | layer             | `Layer<Channels, never, Control>`                                                                    |
 
-Each beat lists the run, replays its journal, classifies, and records
-`control.monitor.beat`, carrying the `remedy` it is about to attempt, before
-applying any remedy, so a monitor that crashes mid-heal leaves the evidence of
-what it decided. The remedy is a second record, `control.monitor.healed`,
-written only once the heal returned an `Accepted` or `AlreadyApplied` receipt:
-a heal that failed, was refused as a `Conflict`, or found the run already
-`Terminal` must not leave a durable record saying the run was healed, and only
-an applied remedy resets the stall evidence. A `Terminal` receipt ends the loop,
-because there is nothing left to remedy. Both are excluded from the
-progress measurement, because a monitor that counted its own bookkeeping as
-progress could never observe a stall.
+`verify` inspects only opaque bytes and headers, and always precedes `decode`,
+which is what keeps an untrusted public request from reaching planning.
+`decode` and `map` must be deterministic and side-effect free; a retry may
+evaluate either again. `fingerprintHeaders` names only the non-secret headers
+that change the decoded command.
 
-`monitorId` defaults to `default` and names the writer: it is the source of
-every record the monitor writes (`/control/monitor/<monitorId>`) and the
-`monitorId` field in each payload. Nothing on the control plane leases a run to
-one watcher, so two monitors on one run both beat and both remedy. The
-identity is what makes their evidence tellable apart and their default remedies
-distinct: the built-in `resume` and `cancel` keys are
-`monitor:<monitorId>:<remedy>:<runId>:<beat>`. A remedy must be idempotent on
-the control plane; a custom `heal` owes the same property.
+## WebhookChannel
 
-`remedyFor` maps a health onto an action: `stalled` and `wedged-node` resume,
-`failing` and `runaway-loop` cancel, everything else does nothing, and
-`autoHeal` decides which of them the monitor may actually apply. It is empty by
-default, because a monitor that healed by default would cancel a run the first
-time it looked at one. A remedy resets the stall count, so one stall produces
-one resume rather than one per beat. The loop stops early on a terminal run.
+| Export              | Kind      | Signature                                                                                             |
+| ------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
+| `SignatureVerifier` | type      | `(raw: RawInbound, credential: Redacted<CredentialRef>) => Effect<void, Unauthorized>`                |
+| `Config<A>`         | interface | `{ name; schema; credential; fingerprintHeaders?; verify; map; project }`                             |
+| `make`              | function  | `<A>(config: Config<A>) => Channel<A>`                                                                |
+| `maximumBodyBytes`  | constant  | `1048576`, the default body ceiling for one mount.                                                    |
+| `HandlerOptions`    | interface | `{ maximumBodyBytes?: number }`                                                                       |
+| `handler`           | function  | `(channel: string, idempotencyKey: IdempotencyKey, options?: HandlerOptions) => Effect<Receipt, ...>` |
 
-See [Time travel](/docs/concepts/time-travel/),
-[Compose child flows](/docs/guides/child-flows/), and
-[Operate the control plane](/docs/guides/control-plane/).
+The body is bounded twice: a `content-length` over the limit is refused before
+the body is read, and the measured length is checked again afterwards. Both
+refusals are `InvalidInput` naming the two byte counts and no body content.
+
+## Credential
+
+The credential boundary. Only a `CredentialRef` crosses it. See
+[Store and resolve a credential](./guides/store-credentials.md).
+
+| Export          | Kind              | Signature                                                                                                                                |
+| --------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `CredentialRef` | interface         | `{ id: string; name: string }`                                                                                                           |
+| `Operation`     | type              | `"list" \| "get" \| "create" \| "resolve" \| "rotate" \| "revoke"`                                                                       |
+| `Credential`    | interface and tag | The six operations, at key `/control/Credential`                                                                                         |
+| `Options`       | interface         | `{ store: CredentialStore.Service; cipher: CredentialCipher.Service; authorize?: (operation, reference) => Effect<void, Unauthorized> }` |
+| `make`          | function          | `(options: Options) => Credential`                                                                                                       |
+| `layer`         | layer             | `(options?: { authorize? }) => Layer<Credential, never, CredentialStore \| CredentialCipher>`                                            |
+| `makeNoop`      | function          | `() => Credential`. Every operation fails `Unavailable`.                                                                                 |
+| `layerNoop`     | layer             | `Layer<Credential>`                                                                                                                      |
+
+| Operation | Signature                                                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `list`    | `() => Effect<ReadonlyArray<CredentialRef>, Unavailable \| Unauthorized>`                                                          |
+| `get`     | `(id: string) => Effect<CredentialRef, Unavailable \| Unauthorized>`                                                               |
+| `create`  | `({ id, name, secret: Redacted<string> }) => Effect<CredentialRef, Unavailable \| Unauthorized \| CredentialConflict>`             |
+| `resolve` | `(reference: CredentialRef) => Effect<Redacted<string>, Unavailable \| Unauthorized>`                                              |
+| `rotate`  | `(reference: CredentialRef, secret: Redacted<string>) => Effect<CredentialRef, Unavailable \| Unauthorized \| CredentialConflict>` |
+| `revoke`  | `(reference: CredentialRef) => Effect<void, Unavailable \| Unauthorized>`                                                          |
+
+`authorize` defaults to allowing every operation, which is correct for a
+single-principal local process. A reference is authenticated on every
+operation, so a forged or stale one is refused.
+
+## CredentialStore
+
+| Export                  | Kind            | Signature                                                      |
+| ----------------------- | --------------- | -------------------------------------------------------------- |
+| `SealedRecord`          | interface       | `{ id; name; ciphertext; nonce; version; updatedAtMs }`        |
+| `Service`               | interface       | `{ list(); read(id); write(record); remove(id) }`              |
+| `CredentialStore`       | class           | Key `/control/CredentialStore`                                 |
+| `make`                  | function        | `(implementation: Service) => Service`                         |
+| `makeMemory`            | function        | `() => Service`. Process-local and browser-safe.               |
+| `layerMemory`           | layer           | `Layer<CredentialStore>`                                       |
+| `makeNoop`, `layerNoop` | function, layer | Every operation fails `Unavailable`. Accept partial overrides. |
+
+`write` commits `record` only if the stored version is `record.version - 1`,
+and fails `CredentialConflict` otherwise. Plaintext never reaches this
+boundary.
+
+## CredentialCipher
+
+| Export                  | Kind            | Signature                                                                          |
+| ----------------------- | --------------- | ---------------------------------------------------------------------------------- |
+| `Sealed`                | interface       | `{ ciphertext: string; nonce: string }`, both base64.                              |
+| `Context`               | interface       | `{ id: string; name: string; version: number }`, the authenticated data.           |
+| `Service`               | interface       | `{ seal(plaintext, context); open(sealed, context) }`                              |
+| `CredentialCipher`      | class           | Key `/control/CredentialCipher`                                                    |
+| `make`                  | function        | `(implementation: Service) => Service`                                             |
+| `unavailable`           | function        | `() => Unavailable`, the typed failure a host reports with no secure key material. |
+| `makeNoop`, `layerNoop` | function, layer | Every operation fails `Unavailable`. Accept partial overrides.                     |
+
+## SqlCredentialStore
+
+| Export    | Kind   | Signature                                                                        |
+| --------- | ------ | -------------------------------------------------------------------------------- |
+| `migrate` | effect | `Effect<void, Unavailable, SqlClient>`. Creates `control_credentials` if absent. |
+| `make`    | effect | `Effect<CredentialStore.Service, Unavailable, DurableWriter \| SqlClient>`       |
+| `layer`   | layer  | `Layer<CredentialStore, Unavailable, DurableWriter \| SqlClient>`                |
+
+The read and the compare-and-set write run in one transaction, so two
+concurrent rotations serialize.
+
+## WebCryptoCipher
+
+| Export    | Kind      | Signature                                                             |
+| --------- | --------- | --------------------------------------------------------------------- |
+| `Options` | interface | `{ key: Redacted<string> }`, 32 raw bytes base64-encoded.             |
+| `make`    | effect    | `(options: Options) => Effect<CredentialCipher.Service, Unavailable>` |
+| `layer`   | layer     | `(options: Options) => Layer<CredentialCipher, Unavailable>`          |
+
+AES-256-GCM over the Web Crypto API, which serves both Node and the browser.
+The key is imported as a non-extractable `CryptoKey` and never reaches
+`CredentialStore`. A host without Web Crypto, or a key that is not 32 bytes,
+fails with `Unavailable` rather than a defect.
+
+## Migrations
+
+| Export  | Kind          | Signature                                                             |
+| ------- | ------------- | --------------------------------------------------------------------- |
+| `set`   | migration set | Namespace `control`, at the migration id block after time travel.     |
+| `run`   | effect        | Creates every durable control-plane and credential table.             |
+| `layer` | layer         | Runs the migrations before exposing the database to control services. |
+
+Hosts compose this set with the journal and run-store sets before opening a
+shared control database. See
+[Store control state in a database](./guides/durable-storage.md).
+
+## SystemFlows
+
+The reserved command-line verb to flow-id map the CLI projects.
+
+| Export            | Kind      | Signature                                                                                                                                                       |
+| ----------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SystemFlowEntry` | interface | `{ verb: string; flowId: "system/" template literal; projection: "procedure" \| "systemFlow"; deployClass: boolean; planBearing: boolean; plannable: boolean }` |
+| `catalog`         | constant  | Every reserved verb, including the ones a runtime may not plan.                                                                                                 |
+| `plannable`       | constant  | The entries a control runtime may offer as flows.                                                                                                               |
+
+`plannable: false` means the row is command-line metadata and nothing else: the
+verb is named so the binary can refuse it by name. `system/replay` is the case
+that matters. The frozen rc.0 contract removed the verb, yet every runtime
+turned the whole catalog into plannable flows, so planning it returned a real
+approval card and only a later `run` failed.
+
+Both runtimes default their flow catalog to `plannable`, so a composition that
+builds its own map and the runtimes' defaults cannot disagree about which
+reserved ids exist.
+
+## test/TestControl
+
+Importable only from `@smthrs/control/test/TestControl`.
+
+| Export  | Signature                                                                                    |
+| ------- | -------------------------------------------------------------------------------------------- |
+| `layer` | `(options?: ControlRuntime.MemoryOptions, executor?: ControlExecutor.Service) => Layer<...>` |
+
+Provides `Control` together with every collaborator it built: the deterministic
+runtime, the in-memory journal bundle, a notification queue over that journal,
+the executor (`ControlExecutor.makeNoop()` by default), and an empty registry.
+Runtime flow metadata falls back to the reserved system catalog. See
+[Test against the control plane](./guides/testing.md).

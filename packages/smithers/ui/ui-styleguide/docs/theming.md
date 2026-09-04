@@ -1,113 +1,109 @@
-# Theming
+---
+title: "Theming"
+description: "The two orthogonal selection axes, the rules the emitter produces in order, and why source order rather than specificity decides which palette wins."
+---
+
+A themed document makes two independent choices: which palette, and light or
+dark. Understanding how those two axes are expressed in CSS is what lets you
+override the result without breaking it.
 
 ## Two orthogonal axes
 
-A document picks a **palette** and a **mode**, independently.
+**Palette** is `data-palette="<key>"` on `<html>`, one of the eight registered
+keys. `apps/ui` stamps the user's choice there. [`@smthrs/ui`](/api/ui) reads it
+back through `resolvePalette`, which accepts only registered keys and falls back
+to the default. An unrecognized value is not an error; it simply does not match
+any override rule, so the default palette's tokens stand.
 
-- Palette: `data-palette="<key>"` on `<html>`, one of the eight registered keys.
-  `apps/ui` stamps a user choice there; `@smthrs/ui` resolves it through
-  `resolvePalette`, accepting only registered keys.
-- Mode: `prefers-color-scheme` by default, overridden by `data-theme="light"` or
-  `data-theme="dark"`.
+**Mode** is `prefers-color-scheme` by default, overridden by
+`data-theme="light"` or `data-theme="dark"` on the same element. The stamp
+always wins over the media query, in both directions: `data-theme="light"`
+holds a light document open on a dark operating system.
 
-`paletteThemeCss` emits, in this order:
+Neither axis knows about the other. Eight palettes times two modes is 16 token
+sets, and every one of them is reachable.
 
-1. `:root { ... }` with the default palette's light tokens, the shared
+## The rules the emitter produces
+
+`themeCss()` and the sheet behind `standaloneThemeCss()` both come from
+[`paletteThemeCss`](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/src/paletteThemeCss.ts), which emits exactly this, in
+this order:
+
+1. `:root { ... }` with the default palette's light tokens, the 61
    theme-invariant tokens, and the one font block.
 2. `@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) { ... } }`
-3. `:root[data-theme='dark'] { ... }`
-4. For every other palette: the same three shapes, prefixed with
-   `[data-palette='<key>']`.
+   with the default palette's dark tokens.
+3. `:root[data-theme='dark'] { ... }` with the same dark tokens.
+4. For every other palette, the same three shapes with a
+   `[data-palette='<key>']` prefix added to each selector.
+
+That is 3 rules plus 3 per additional palette: 24 for the full registry. The
+two entry points differ in one detail only, the attribute-selector quoting:
+`themeCss()` and `workflowUiThemeCss` use `'`, and `standaloneThemeCss()` uses
+`"`. `tests/standaloneThemeCss.test.ts` asserts the token declarations
+themselves are identical.
 
 ## Source order is the cascade
 
-`:root[data-palette='<key>']` and `:root[data-theme='dark']` both compute to
-specificity **(0,2,0)**. Nothing but source order stops the default palette's
-dark tokens from overriding a selected palette's light tokens, so the default
-rules must come first and every palette rule after. `tests/index.test.ts` pins
-that order; do not reorder the emitter.
+`:root[data-palette='gruvbox']` and `:root[data-theme='dark']` both compute to
+specificity **(0,2,0)**. They are tied. Nothing but source order decides which
+one wins.
 
-The same arithmetic is the reason `serializeThemeVariant` defaults
-`fonts: false`. When the font block rode along with every light variant, all
-eight `:root` rules declared `--font-sans`, and a consumer writing its own
-overrides on bare `:root` (0,1,0) lost them the moment a palette was selected.
-`packages/smithers/create-app/template/aomi/src/shell/theme.ts` is exactly that consumer.
+That is why every palette override must come after the default palette's dark
+rules. Put them first and the default's dark tokens would override a selected
+palette's light tokens, and a Gruvbox document on a dark operating system would
+paint half Night Owl. `tests/index.test.ts` pins the order; do not reorder the
+emitter.
 
-## The WCAG AA discipline
+A palette override in dark mode is one step higher again:
+`:root[data-palette='gruvbox'][data-theme='dark']` is **(0,3,0)**, and so is the
+`prefers-color-scheme` form. (0,3,0) is the ceiling this sheet reaches, and it
+is the number any override of yours has to answer. See
+[Override a token](./guides/override-a-token.md) for the recipes that clear it.
 
-The package's central claim is that any palette a user can select is accessible.
-`tests/paintedPairs.ts` is that claim written down: a table of every
-(foreground, background) pair the shipped stylesheets paint, checked at 4.5:1
-across all eight palettes in both modes, with palettes that still fail
-enumerated in [Recorded upstream gaps](#recorded-upstream-gaps) below.
+## Why the font block is opt in
 
-Backgrounds are resolved to **exact unrounded channels**, because `mixColors`
-rounds and a browser evaluating `color-mix(in srgb, ...)` does not.
+`serializeThemeVariant` takes a `fonts` option that defaults to `false`, and
+only the base `:root` rule passes `fonts: true`. The reason is the same
+specificity arithmetic read from the other side.
 
-Two rules follow from the table:
+When the font block rode along with every light variant, all eight `:root`
+rules declared `--font-sans` at (0,2,0). A consumer declaring its own font on a
+bare `:root`, which is (0,1,0), lost the moment any palette was selected.
+`packages/smithers/create-app/template/aomi/src/shell/theme.ts` is exactly that
+consumer. Emitting the fonts once, in the one rule whose specificity a consumer
+can actually beat, is what makes a font override possible at all.
 
-- A tinted fill that carries text in the same semantic color is capped at
-  `SOFT_TINT_AMOUNT` (10%). Above that, the darkest shipped seeds fall below AA.
-  This is why hover and press on `.button.primary` and `.button.danger` move the
-  border and the elevation rather than deepening the fill, and why they restate
-  that fill: the generic `.button:hover` and `.button:active` rules match them
-  too and out-rank the base rule. `tests/cascade.test.ts` resolves the sheet and
-  pins what each state actually paints. The four control shapes are `.button`,
-  `.primary`, `.secondary`, and `.danger`, and all four share the base,
-  `:focus-visible`, and `:disabled` rules, so a bare `<button class="danger">`
-  dims when disabled and takes a focus ring exactly like a bare `.primary`.
-- Every fill under text must be a pair the table can name. The muted chips and
-  inline code sit on the opaque `--surface-2` rather than the translucent
-  `--hover-subtle` and `--inline-code-bg`, so their pair does not depend on the
-  parent surface. `.top,.topbar` is the one translucent text background left,
-  and the table composites it over `--bg` twice: once plain, for browsers
-  without `backdrop-filter`, and once over a backdrop put through the rule's own
-  `saturate(180%)`, which is what supported browsers paint.
-- The sheet sets no `::selection` rule. A brand wash leaves the foreground
-  inherited, so it lands under all nine foregrounds this sheet paints; even an
-  8% wash misses 4.5:1 in 29 (foreground, palette, mode) combinations, and the
-  0.x value was 24%. Pinning a foreground instead is worse: `::selection` is
-  global, and a downstream sheet that overrides only the selection background
-  inherits the pinned color (`@smthrs/ui`'s markdown editor does exactly that).
-  The user agent's own selection colors are contrast-guaranteed.
-- New rules add their pair to the table. A background expression that appears in
-  a rule but not in `PAINTED_PAIRS` is an unaudited surface.
+## The alias layer
 
-### Recorded upstream gaps
+63 of the 92 custom properties in the base `:root` rule never change with the
+palette or the mode. Two are the font stacks. The other 61 are either
+expressions over the per-variant tokens or fixed geometry, so neither axis has
+anything to redeclare.
 
-`KNOWN_CONTRAST_GAPS`, `KNOWN_TERMINAL_GAPS`, `KNOWN_RAMP_COLLAPSES`, and
-`KNOWN_ROLE_COLLISIONS` enumerate the pairs that still fail, all in generated
-palettes. Every one traces to `packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts`:
+- **Aliases** map older names onto canonical tokens: `--panel` is `--surface`,
+  `--line` is `--border-solid`, `--muted` is `--text-muted`, `--ok` is
+  `--success`. Workflow UIs rely on them, so they stay.
+- **Tints and borders** are `color-mix` recipes over the semantic colors:
+  `--brand-soft`, `--danger-border`, `--ring`. Use them instead of hand rolling
+  a percentage, because the percentages are audited. See
+  [The contrast budget](./concepts/contrast-budget.md).
+- **Geometry** is the spacing scale, type scale, radii, line heights, and
+  control heights.
 
-- It takes `editor.foreground` raw for `--text` and for the terminal
-  `foreground`, applying its contrast ratchet only to the three secondary text
-  tokens. `solarized` therefore ships body text at 4.13:1 on its own `--bg`.
-- Its `secondaryText()` loop gives up silently at `amount === 1`, where
-  `mix(text, bg, 1) === text`, so `solarized` collapses `--text`,
-  `--text-muted`, `--text-faint`, and `--text-placeholder` onto one color in
-  both modes and `one` dark collapses the first two.
-- Its `contrast()` runs on rounded channels, so the ratchet stops one step early.
-- `rose-pine` gives `success` and `info` the same hex in both modes.
+Because a tint is `color-mix(in srgb, var(--brand) 10%, var(--surface))` and not
+a literal, redefining `--brand` alone re-derives `--brand-soft`, `--ring`, and
+every brand border with no extra rule.
 
-Every recorded contrast gap is a `solarized` neutral-token failure. Removing the
-rule that paints a listed pair would hide the token failure rather than fix it.
-The token values themselves can only be changed in the generator.
+One trap: this page vocabulary's `--accent` is the brand color, while
+`@smthrs/ui`'s `tokens.accent` is the hover fill. The two names are not
+interchangeable.
 
-`src/themes/*.ts` are byte-for-byte generator output, guarded by
-`tests/generatedThemes.test.ts`, so closing these means changing the generator
-and regenerating. The suite asserts both directions: nothing outside the lists
-may fail, and nothing inside them may pass, so a fix upstream forces the entry
-out instead of leaving a stale exemption behind.
+## Where to go next
 
-`fucory` is hand-written and therefore fixed in place rather than recorded:
-both `textPlaceholder` values were raised, its dark `brand` was nudged
-`#8b78e6` -> `#8e7ce8` to clear `--surface-3`, and its light code block is light
-like every other palette's so `.livelog-event` and `.livelog-node` are legible
-on it.
-
-## Aliases
-
-`--panel`, `--card`, `--line`, `--muted`, `--ok`, `--err`, and the rest map
-0.x names onto the canonical tokens. Trap: this page vocabulary's `--accent` is
-the brand color, while `@smthrs/ui`'s `tokens.accent` is the hover fill. They
-are not interchangeable.
+- [Token reference](./reference/tokens.md): every custom property, what it
+  means, and which of the two groups it belongs to.
+- [The contrast budget](./concepts/contrast-budget.md): the accessibility
+  claim these tokens are shaped by.
+- [Where the palettes come from](./concepts/palette-sources.md): seven
+  generated, one hand written, and what that means for changing one.

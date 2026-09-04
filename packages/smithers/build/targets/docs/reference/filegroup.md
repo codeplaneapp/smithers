@@ -22,9 +22,9 @@ export const Package = Smithers.Package({ targets: { protos } })
 
 The attrs schema declares two fields:
 
-| Name   | Type                                               | Default    | Description                                                                                                                                         |
-| ------ | -------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `srcs` | `Array<Input.File \| Input.Glob \| Target.Target>` | `required` | The files, globs, and targets the group names, in read order. A target that is not a group contributes no files.                                     |
+| Name   | Type                                               | Default    | Description                                                                                                                                             |
+| ------ | -------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `srcs` | `Array<Input.File \| Input.Glob \| Target.Target>` | `required` | The files, globs, and targets the group names, in read order. A target that is not a group contributes no files.                                        |
 | `cwd`  | `string`                                           | `"."`      | Package directory the declared paths and patterns resolve from. The default is the declaring `PACKAGE.ts` package; another value is workspace relative. |
 
 ## Behavior
@@ -39,21 +39,21 @@ The declared files and globs inside `srcs` are collected by `Target.make` as dec
 
 The declaration passes these channel schemas:
 
-| Channel | Type                                                                                                       |
-| ------- | ------------------------------------------------------------------------------------------------------------ |
+| Channel | Type                                                                                                            |
+| ------- | --------------------------------------------------------------------------------------------------------------- |
 | Success | `Filegroup.Files`, an array of `{ path, digest }` entries sorted by path, with a null digest for a missing file |
-| Error   | `Filegroup.FilegroupError`, a tagged error with a `message` field, raised on a filesystem error                |
+| Error   | `Filegroup.FilegroupError`, a tagged error with a `message` field, raised on a filesystem error                 |
 
 ## Status
 
 The catalog row and the `Target.make` call state:
 
-| Property         | Value                                                     |
-| ---------------- | --------------------------------------------------------- |
-| Kinds            | none                                                      |
-| Cacheable        | yes                                                       |
-| Declares outputs | no                                                        |
-| Route            | flow body                                                 |
+| Property         | Value                                                        |
+| ---------------- | ------------------------------------------------------------ |
+| Kinds            | none                                                         |
+| Cacheable        | yes                                                          |
+| Declares outputs | no                                                           |
+| Route            | flow body                                                    |
 | Executes         | Yes, through `ExpandFilegroupLive`, and only as a dependency |
 
 ## Example

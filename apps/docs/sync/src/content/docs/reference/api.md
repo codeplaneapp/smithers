@@ -1,6 +1,6 @@
 ---
 title: "API reference"
-description: "Workspace read-path sync protocol, server, and client for flows"
+description: "Every public export of @smthrs/sync: the wire protocol, the read-path RPC group, the fail-closed server, the replay-then-follow client, the run catalog, the two capability authorities, and the branch collaboration modules."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/sync/docs/api.md"
 ---
 

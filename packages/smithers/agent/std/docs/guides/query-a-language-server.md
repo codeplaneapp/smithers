@@ -1,0 +1,109 @@
+---
+title: "Query a language server"
+description: "Run the ten LSP operations through the lsp flow, spawn a server with NodeLanguageServer, and understand the 1-based coordinates and the pass-through result."
+sidebar:
+  order: 8
+---
+
+`lsp` is one flow with ten operations. It answers the questions a text search
+cannot: where a symbol is defined, who calls it, what type it has.
+
+## Spawn a server
+
+`NodeLanguageServer` speaks framed JSON-RPC over ordinary stdio pipes, spawned
+through [`@smthrs/kernel`](/api/kernel)'s `ChildProcessSpawner`. No terminal is
+involved.
+
+```ts
+import * as NodeLanguageServer from "@smthrs/std/NodeLanguageServer"
+
+const server = NodeLanguageServer.layer({
+  command: "typescript-language-server",
+  args: ["--stdio"],
+  cwd: "/workspace",
+  environment: { NODE_ENV: "development" },
+  timeoutMs: 30_000
+})
+```
+
+The layer sends `initialize` with `cwd` as the root URI and then `initialized`,
+so the service is ready when it resolves. `timeoutMs` defaults to 30 seconds and
+bounds every request as well as every write to the server's standard input.
+
+A host with no server binds `LanguageServer.layerNoop`, and every operation
+fails with `unsupported`.
+
+## Run a query
+
+```ts
+import * as Lsp from "@smthrs/std/Lsp"
+
+const definition = Lsp.run({
+  operation: "definition",
+  path: "/workspace/src/widen.ts",
+  line: 12,
+  character: 17
+})
+// definition.result is the server's own answer, passed through unchanged
+```
+
+| Operation               | What it takes               |
+| ----------------------- | --------------------------- |
+| `hover`                 | `path`, `line`, `character` |
+| `definition`            | `path`, `line`, `character` |
+| `references`            | `path`, `line`, `character` |
+| `implementation`        | `path`, `line`, `character` |
+| `prepareCallHierarchy`  | `path`, `line`, `character` |
+| `callHierarchyIncoming` | `path`, `line`, `character` |
+| `callHierarchyOutgoing` | `path`, `line`, `character` |
+| `documentSymbols`       | `path`                      |
+| `diagnostics`           | `path`                      |
+| `workspaceSymbols`      | `query`                     |
+
+`line` and `character` are **1-based**, which is how `read` and `grep` report
+them, so a hit from a search is a position you can pass straight in. The flow
+converts to the protocol's 0-based coordinates for you.
+
+`path` must be a normalized absolute path. A relative path, or a missing one for
+any operation except `workspaceSymbols`, fails with `invalid_input`, as does a
+position operation missing `line` or `character`.
+
+`references` includes the declaration. The two call-hierarchy directions run
+`prepareCallHierarchy` first and return an empty array when the server prepares
+no item, so a position that is not a callable is an empty answer rather than a
+failure.
+
+## The result is not a schema
+
+`Output` is `{ result: unknown }`. The server's answer is passed through in the
+server's own shape, because LSP responses vary by server and by version, and
+narrowing them here would be a second, staler schema. Decode it on the caller's
+side against what the server you bound actually returns.
+
+## Bounds a server cannot exceed
+
+The client refuses a malformed or oversized stream rather than growing without
+limit:
+
+| Bound                                     | Value                                               |
+| ----------------------------------------- | --------------------------------------------------- |
+| One JSON-RPC frame body                   | 8 MiB                                               |
+| One frame's headers                       | 8 KiB                                               |
+| `NodeLanguageServer.MAX_QUEUED_FRAMES`    | 256 frames buffered for the server's standard input |
+| `NodeLanguageServer.MAX_PENDING_REQUESTS` | 512 concurrent in-flight requests                   |
+
+Every queued write uses the request timeout, so a server that stops reading
+produces a typed `timeout` rather than an unbounded queue or a new hang. Process
+exit or a closed stdout fails every pending request.
+
+## Bring your own server
+
+`LanguageServer` is an ordinary service interface with ten methods, each taking
+a `Position` (`path`, `line`, `character`) or a string. A host with its own
+client, in-process index, or remote service implements those ten methods and
+binds them with `LanguageServer.make`. Nothing above the service knows which one
+answered.
+
+One detail to implement against: a `Position` reaching the service is already
+**0-based**. The 1-based to 0-based conversion happens in the flow, so the
+service speaks the protocol's own coordinates.

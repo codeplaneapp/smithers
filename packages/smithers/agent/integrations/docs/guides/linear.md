@@ -127,8 +127,7 @@ replays the recorded issue instead of filing a second one.
 ```ts
 import { Linear } from "@smthrs/integrations"
 
-const body = (input: typeof Linear.Actions.CreateIssuePayload.Type) =>
-  Linear.Actions.CreateIssue.call(input)
+const body = (input: typeof Linear.Actions.CreateIssuePayload.Type) => Linear.Actions.CreateIssue.call(input)
 ```
 
 The payload schema carries `title` plus optional `teamKey`, `teamId`,

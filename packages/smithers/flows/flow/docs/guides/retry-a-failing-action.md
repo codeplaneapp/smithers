@@ -1,0 +1,159 @@
+---
+title: "Retry a failing action"
+description: "Declare a retry policy, understand where the engine makes its retry decision, keep integrity failures unretried, and read the two terminal defects."
+sidebar:
+  order: 3
+---
+
+A `RetryPolicy` is plain data, not a `Schedule`. That is deliberate: the next
+delay is derived from a **persisted** attempt count rather than from fiber-local
+state, so a backoff ladder survives a park, a resume, and the death of the
+process that started it.
+
+## Declare a policy
+
+```ts
+import { RetryPolicy } from "@smthrs/flow"
+
+const policy = RetryPolicy.make({
+  initialMs: 200,
+  factor: 2,
+  maxMs: 10_000,
+  maxAttempts: 5,
+  expirationMs: 5 * 60_000,
+  jitterRatio: 0.2,
+  nonRetryable: ["payments/ChargeDeclined"]
+})
+```
+
+`RetryPolicy.make` checks every bound and throws a `RangeError` naming the field
+that is wrong: `initialMs` finite and not negative, `factor` finite and positive,
+`maxMs` finite and not below `initialMs`, `maxAttempts` a safe integer of at
+least one, `expirationMs` finite and positive, and `jitterRatio` finite and
+within zero and one inclusive. `jitterRatio: 0` disables jitter. The
+`nonRetryable` array is copied and frozen, so mutating your array later cannot
+change what a parked policy means.
+
+`RetryPolicy.defaultRetryPolicy` is `{ initialMs: 200, factor: 1.5, maxMs: 30000 }`.
+It declares neither `maxAttempts` nor `expirationMs`, so it never gives up. Bound
+a long-lived retry with `expirationMs` when a wall-clock give-up is required.
+
+## Attach it to the work
+
+The engine reads `action.retryPolicy` at dispatch, and the **inline** form of
+`Action.make` is where that field lives:
+
+```ts
+import { Action } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+
+const settle = Action.make({
+  name: "payments/Settle",
+  success: Schema.String,
+  error: Schema.String,
+  tier: "irreversible",
+  idempotencyKey: "settle:checkout-v1",
+  retryPolicy: policy,
+  execute: Effect.suspend(() => callProvider())
+})
+```
+
+A **declared** action, the kind a body names, takes no `retryPolicy` option. Give
+one retry behavior in either of two ways:
+
+- Dispatch an inline action carrying the policy from inside the declared action's
+  implementation. The engine records it as a durable step of its own, with its
+  own attempt sequence.
+- Wrap the work in `Action.retry`, which is `Effect.retry` with the durable
+  attempt context threaded through it.
+
+```ts
+const attempts = Action.retry(settle, { times: 3 })
+```
+
+`Action.retry` updates `Action.CurrentAttempt` on each attempt and pins ordinals
+per allocation scope, so every attempt of one sequence reuses its own action's
+ordinals instead of drawing new step keys. A nested block shares the enclosing
+block's pinned slot, so a completed inner dispatch replays rather than
+re-executing.
+
+## What the engine decides, and when
+
+`RetryPolicy.decide` is the engine's single retry decision point, and
+non-retryable classification happens there and nowhere else. On a failing
+attempt the engine asks the policy, passing the current attempt, the error, and
+the elapsed time since the first attempt:
+
+| Decision                 | What happens                                                                                                                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RetryAfter(delayMs)`    | The engine sleeps and dispatches attempt `n + 1`. An irreversible action with no `idempotencyKey` dies with `IrreversibleRetryRequiresIdempotencyKey` instead. |
+| `GiveUp("nonRetryable")` | The original typed failure propagates unchanged.                                                                                                               |
+| `GiveUp("exhausted")`    | The dispatch dies with `RetryPolicy.RetryAttemptsExhausted`.                                                                                                   |
+| `GiveUp("expired")`      | The dispatch dies with `RetryPolicy.RetryPolicyExpired`.                                                                                                       |
+
+Both terminal outcomes are defects, not typed failures. A body cannot catch
+them with `Node.catch`, because a spent policy is a statement that the work
+cannot proceed rather than an outcome the caller was told to expect.
+
+A durable engine persists the first attempt's start time and the attempt
+sequence, so `expirationMs` is measured from the true first attempt and a
+resumed run does not re-sleep the ladder from attempt one.
+
+## Failures that are never retried
+
+`RetryPolicy.defaultNonRetryable` lists error tags that are non-retryable under
+**every** policy, with no per-callsite opt-out. They are integrity verdicts from
+[`@smthrs/engine-store`](/api/engine-store), and they must reach the driver
+without an action-level retry hiding the first detection.
+
+Your own tags go in `nonRetryable`. `RetryPolicy.errorTag` is how a tag is read
+off an error: an own string `_tag` when present, otherwise the first own `name`
+descriptor found while walking a bounded prototype chain.
+
+## Infrastructure interrupts
+
+An engine raises `Action.InfraInterrupt` when an action is interrupted by host
+loss or rebalancing rather than by user cancellation. It is not an ordinary
+failure and the retry policy does not see it. Only an inline action's
+`interruptRetryPolicy`, an Effect `Schedule`, retries one:
+
+```ts
+import * as Schedule from "effect/Schedule"
+
+const resilient = Action.make({
+  name: "payments/Settle",
+  success: Schema.String,
+  error: Schema.String,
+  interruptRetryPolicy: Schedule.recurs(3),
+  execute: Effect.suspend(() => callProvider())
+})
+```
+
+Spending that schedule without reaching an ordinary success or failure dies with
+`Action.InfraInterruptRetriesExhausted`, carrying the action name, the attempt
+count, and the final interrupt.
+
+## Deciding without an engine
+
+The policy functions are pure and exported, so a host can ask the same questions
+the engine asks:
+
+```ts
+RetryPolicy.nextDelay(policy, 2) // Option<number>; None means give up
+RetryPolicy.isNonRetryable(policy, error)
+RetryPolicy.decide(policy, { attempt: 2, error })
+```
+
+`nextDelay` is total even for a policy decoded from a persisted row: a
+non-finite attempt, elapsed time, bound, or computed delay answers `None` rather
+than handing a caller a negative or `NaN` duration. `RetryPolicy.nextDelayEffect`
+and `RetryPolicy.decideEffect` are the variants that sample the `Random` service
+for jitter.
+
+## Related pages
+
+- [Attach an implementation to an action](./implement-an-action.md): the tiers a
+  retry has to respect.
+- [Suspension and replay](../concepts/suspension-and-replay.md): why
+  `suspendedRetryPolicy` on a flow is a different thing entirely.

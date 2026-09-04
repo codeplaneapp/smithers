@@ -8,11 +8,12 @@
  * regression there is a wrong route table in every app cut from this checkout.
  *
  * `cwd` anchors every emitted tool run in this package directory. There is no
- * documentation-generation target: the package is private at 1.0.0-rc.0 and
- * owns no page under `docs/pages`, so its prose lives in `docs/` and is
- * published by hand review rather than by a generator. `docs/README.md`
- * records what to add when that changes, and `test/docsParity.test.ts` is what
- * keeps the hand-written page honest until then.
+ * documentation-generation target: the prose in `docs/` is written by hand and
+ * published to create-app.smithers.sh by `apps/docs/create-app`, whose
+ * `contentSync` target reads the `docsFiles` filegroup below. Nothing in that
+ * pipeline reads the source, so `test/docsParity.test.ts` is what holds the
+ * reference page to the export map, the bin's flags, and the pages that
+ * exist.
  */
 import { Smithers } from "@smthrs/targets"
 

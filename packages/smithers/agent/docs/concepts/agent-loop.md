@@ -60,7 +60,7 @@ descriptor to another implementation.
 ## One loop, two adapters
 
 Everything about how a frame is built, sealed, and replayed lives in `Agent`.
-The two adapters decide what a run *is*:
+The two adapters decide what a run _is_:
 
 - **`AgentSession`**: a run is a whole control-plane launch. The agent is the
   flow: a markdown prompt body, a declared seat, an operator steering and

@@ -80,6 +80,14 @@ deterministically when it stitches the site.
   `https://engine.smithers.sh/reference/api/`. Your own slug stays on your
   own site. Never hand-write `https://<slug>.smithers.sh/...` in prose; the
   `/api/<slug>` form is the contract and it survives domain changes.
+- **Any other page of another package's site.** `/pkg/<slug>/<path>`:
+  `[the delegation guide](/pkg/patterns/delegation)` becomes
+  `https://patterns.smithers.sh/delegation/`, and `/pkg/patterns` becomes that
+  site's landing page. `<path>` is the target's route on that site, which is
+  its path under `docs/` without the `.md` (so `docs/guides/loops.md` is
+  `/pkg/patterns/guides/loops`). Use it whenever you mean a guide or concept
+  rather than an API page; a relative `../../other-package/docs/x.md` reaches
+  a file on GitHub, not a page, and fails the smithers.sh link gate.
 - **CLI verbs.** `/cli/<verb>`: `[smithers up](/cli/up)`. Sync sends it to
   the CLI reference on smithers.sh.
 - **Guides, concepts, and every other smithers.sh page.** `/docs/<rest>`:
@@ -121,11 +129,18 @@ sidebar:
 From the repo root, with your slug:
 
 ```bash
+pnpm exec dprint fmt 'docs/**/*.md' 'README.md'  # from the SOURCE package directory
 pnpm --filter @smithers/docs-flow sync:docs     # stitch your docs into the site
 pnpm --filter @smithers/docs-flow build         # astro build must pass
 pnpm --filter @smithers/docs-flow check         # astro check must pass
 pnpm --filter @smithers/docs-flow check:docs    # the committed copy matches your sources
 ```
+
+Format first, and in that order. Each package's `dprint.json` includes
+`**/*.md`, and its `lint` script runs `dprint check`, so an unformatted docs
+page fails `pnpm lint` and the `//packages/...` gate in CI, in the package
+rather than in the site. Formatting after syncing leaves the committed copy
+stale, which then fails `check:docs`.
 
 The whole fleet at once: `pnpm run docs:sync`, then `pnpm run docs:build`.
 `pnpm run docs:check` is the drift gate lint runs.

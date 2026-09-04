@@ -4,7 +4,7 @@
  * This is the authoritative subject for the core conformance operations:
  * identity, replay, race, and interruption run against the production engine,
  * not a test-only model. Governing design:
- * `packages/testing/docs/concepts.md`, "The engine subject seam". Smithers capabilities absent from the production
+ * `packages/testing/docs/concepts/engine-subject.md`. Smithers capabilities absent from the production
  * contract are recorded as parity gaps rather than simulated. The adapter
  * registers each `FlowSpec` as a real `Flow` whose execute function
  * runs every step as an `Action`:

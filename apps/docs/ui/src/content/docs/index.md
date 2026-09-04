@@ -1,34 +1,108 @@
 ---
 title: "@smthrs/ui"
-description: "Shared shadcn-anatomy component library for Smithers UIs. Radix primitives + CVA variant APIs styled with the ui-styleguide theme tokens, shipped as CSS-in-TS strings so components bundle through the gateway's Bun.build and follow light/dark (prefers-color-scheme and data-theme) with zero configuration."
+description: "The shared component library for Smithers UIs: shadcn anatomy on Radix behavior, styled entirely through theme tokens, with every heavy renderer behind its own package subpath."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/ui/docs/README.md"
 ---
 
-Every published sentence about this package has exactly one source, and that
-source lives inside the package:
+`@smthrs/ui` is the component library every Smithers browser UI renders. It is
+shadcn/ui anatomy (compound slots, `data-slot` attributes, CVA variant APIs,
+`asChild`) over Radix behavior, styled exclusively through the
+[`@smthrs/ui-styleguide`](https://ui-styleguide.smithers.sh/reference/api/) theme tokens.
 
-- **API surface and behavior** — JSDoc on the exported symbol in `src/`. The
-  wildcard-free `exports` map in `package.json` is the public API; anything
-  reachable only through a relative path carries no promise.
-- **Package narrative** — `../README.md`, the single entry point. It links here
-  rather than restating anything.
-- **Layering and file layout** — [`architecture.md`](/architecture/).
-- **Failure codes and resource limits** — [`contracts.md`](/contracts/).
-- **Release history** — `../CHANGELOG.md`.
+Two decisions shape everything else about it:
 
-`tests/docs-links.test.ts` is the gate over these files: every relative link
-here has to resolve, and nothing in the package may name the unscoped
-`smthrs` specifier.
+- **Styles travel as a JavaScript string.** There is no `.css` file to import.
+  You render `<SmithersUiStyles />` once, and every component also injects the
+  sheet itself in a browser as a fallback. The bundler this package targets
+  drops CSS artifacts, so a string is the only delivery that survives.
+- **Heavy renderers live behind their own subpaths.** Charts, terminals, syntax
+  highlighting, and the markdown editor ship from `@smthrs/ui/adapters/*` and
+  are never re-exported from the base barrel. A consumer who wants a `Button`
+  does not pay for Shiki.
 
-There is no page for this package under `docs/pages`, and there is no docs
-generator target in `PACKAGE.ts`. `@smthrs/ui` is `private: true` and has no
-registry consumer, so publishing an API page for it on the documentation site
-would describe a package nobody can install. If the package becomes public,
-add the generator following the
-`packages/smithers/flows/crypto` recipe (`Package.ts` + `scripts/docs.mjs` + a
-`Smithers.Generate` target; `scripts/check-docs.mjs` discovers the generator on
-disk and needs no line of its own) and this note goes away.
+Because every color is a token expression rather than a literal, a component is
+correct in light and dark with no dark-mode code, honors
+`prefers-reduced-motion`, and follows whichever of the eight palettes the
+document selects.
 
-`src/README.md` used to hold a second copy of the layering notes and drifted
-from the root README independently. It is gone; `architecture.md` is the one
-copy.
+## Who uses this package
+
+`apps/ui` and `apps/review` consume it through the workspace, and the
+`create-app` templates render it in generated applications. It is
+`private: true` at `1.0.0-rc.0` and published to no registry.
+
+## Install
+
+```json
+{ "dependencies": { "@smthrs/ui": "workspace:*" } }
+```
+
+React 19 is a peer dependency. See [Installation](/installation/) for the
+entry points and the peer requirements.
+
+## The shortest real example
+
+```tsx
+import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "@smthrs/ui"
+
+export function App() {
+  return (
+    <>
+      <SmithersUiStyles withTheme />
+      <Card>
+        <CardHeader>
+          <CardTitle>Runs</CardTitle>
+          <StatusPill status="running" />
+        </CardHeader>
+        <Button onClick={() => launch()}>Launch</Button>
+      </Card>
+    </>
+  )
+}
+```
+
+No color is named, no stylesheet is imported, and no dark-mode branch exists.
+For the same surface built up end to end, see the
+[Quickstart](/quickstart/).
+
+## The package at a glance
+
+| Family                     | What it covers                                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Base primitives            | `Button`, `Badge`, `Card`, `Input`, `Label`, `Alert`, `Table`, `Tabs`, `Dialog`, `Tooltip`, `Select`, `Progress`, `Separator`, `Skeleton`, `Spinner` |
+| House compositions         | `StatusPill`, `EmptyState`, `SectionHeader`, `RowButton`, `KpiStat`, `StageStrip`, `CollapsiblePanel`, `FileTree`, `Markdown`, `DiffHunks` |
+| Conversation               | `Message`, `MessageBranch`, `Bubble`, `MessageScroller`, `ChatMessage`, `ChatTranscript`, `ChatComposer`, `CompactGroup`, `ConversationCheckpoint`, `Marker`, `Shimmer` |
+| Prompt and attachments     | The `PromptInput` family with `usePromptInputAttachments`, and the `Attachment` compound                           |
+| Reasoning and tools        | `Reasoning`, `ChainOfThought`, `ToolCall`, `CodeBlock`, `AgentOutput`, `MessageResponse`, `parseAgentOutput`, `formatPartialJson` |
+| Plans, tasks, and queues   | `Plan`, `TaskItem`, `AgentTask`, `Queue`, `ActivityTimeline`                                                        |
+| Approvals and checkpoints  | `Confirmation`, `ApprovalCard`, `Checkpoint`                                                                        |
+| Sources and citations      | `Sources`, `InlineCitation`, `Suggestion`, `OpenInChat`                                                             |
+| Agents and context         | `AgentDefinition`, `AgentCard`, `ModelSelector`, `ModelBadge`, `ProviderBadge`, `ContextUsage`                       |
+| Coding artifacts           | `Artifact`, `Snippet`, `PackageInfo`, `SchemaDisplay`, `StackTrace`, `TestResults`, `Commit`, `ChangeSummary`, `EnvironmentVariables`, `SecretField` |
+| Sandbox previews           | `Sandbox`, `WebPreview`, `JSXPreview`                                                                               |
+| Workflow canvas            | `WorkflowCanvas` with its node, edge, controls, panel, toolbar, and minimap anatomy                                 |
+| Vault                      | `BacklinksPanel`, `OutlineView`, the `wikilinks` and `graphModel` helpers, and the autosave machine                 |
+| Time and calendar          | `RelativeTime`, `useRelativeTime`, `formatRelativeTime`, and `Calendar` with month, week, and agenda views          |
+| Adapters                   | `PierreDiffView`, `CodeFileView`, `Terminal`, `MarkdownEditor`, `ChartContainer`, `KnowledgeGraph`, each behind its own subpath |
+
+Every export of every family, with signatures, is on the
+[API reference](/reference/api/).
+
+## Where to go next
+
+- [Installation](/installation/): the entry points, the peer requirements,
+  and the one style element every host renders.
+- [Quickstart](/quickstart/): build a run panel end to end.
+- Concepts: [how styling ships](/concepts/styling/),
+  [theme tokens](/concepts/theming/),
+  [component anatomy](/concepts/component-anatomy/), and
+  [the adapters boundary](/concepts/adapters/).
+- Guides: [style a host application](/guides/style-a-host-application/),
+  [use a heavy renderer](/guides/use-a-heavy-renderer/),
+  [render a run status](/guides/render-run-status/),
+  [collect a prompt with attachments](/guides/collect-a-prompt/),
+  [render agent output](/guides/render-agent-output/), and
+  [test a component](/guides/test-a-component/).
+- Reference: [API](/reference/api/) and
+  [failure codes and limits](/reference/contracts/).
+- [Troubleshooting](/troubleshooting/): symptoms, causes, and fixes.

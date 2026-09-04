@@ -12,7 +12,7 @@
     "operatorPosition": "maintain",
     "arrowFunction.useParentheses": "force"
   },
-  "excludes": ["**/dist", "**/build", "**/coverage", ".smithers", "docs/reference.md"],
+  "excludes": ["**/dist", "**/build", "**/coverage", ".smithers"],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.93.4.wasm",
     "https://plugins.dprint.dev/markdown-0.20.0.wasm",

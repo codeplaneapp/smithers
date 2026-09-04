@@ -1,13 +1,12 @@
 ---
-title: "Exports"
-description: "Flow-native scoring, durable observations, and asynchronous score runners for flows"
+title: "Exported members"
+description: "Every categorized member reachable through the root namespaces of @smthrs/scorers, with its kind, category, and one-line summary."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/scorers/docs/exports.md"
 ---
 
 <!-- Hand-maintained. `scripts/docs.mjs` wrote this file from packages/smithers/agent/scorers/src
      until the rc.0 docs-tooling dissolution removed it. Add the row when you add
      the member. -->
-
 
 Every categorized member reachable through the root namespaces, in source
 order. `test/docs.test.ts` drift-checks the table against the `@category`

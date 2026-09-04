@@ -4,7 +4,7 @@ description: "Higher-order flow patterns and decorators for flows. It composes @
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/patterns/docs/teams.md"
 ---
 
-This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [`@smthrs/patterns`](https://smithers.sh/docs/concepts/subflows/).
+This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [the API reference](/reference/api/).
 
 Every module here follows the two-surface shape the package uses everywhere:
 

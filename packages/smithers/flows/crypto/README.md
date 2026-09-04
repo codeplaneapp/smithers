@@ -3,8 +3,8 @@
 **Documentation:** https://crypto.smithers.sh
 
 Strict SHA-256 hashing for Smithers. The package accepts well-formed JavaScript
-text or `Uint8Array`, hashes a byte snapshot, and returns one branded wire form:
-64 lowercase hexadecimal characters.
+text or a `Uint8Array`, hashes a byte snapshot, and returns one branded wire
+form: 64 lowercase hexadecimal characters.
 
 ```typescript
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -31,6 +31,16 @@ const synchronous = digestSync("hello")
   `Sha256.digestSync` remain attached for compatibility.
 - `syncCrypto` adapts the synchronous implementation to Effect `Crypto`. It
   accepts only `SHA-256` and deliberately refuses randomness.
+
+## What SHA-256 gives you here, and what it does not
+
+SHA-256 is a collision-resistant hash function. It is not a message
+authentication code, not a key derivation function, and not a password hash.
+This package adds no key, no salt, and no iteration count, so it defends
+against nothing that SHA-256 alone does not: not length extension, not
+brute-force recovery of a low-entropy input, and not a `Crypto` service that
+returns bytes of its own choosing. The full statement, with the guarantees the
+package does make, is at https://crypto.smithers.sh/contract/.
 
 ## Input contract
 
@@ -68,15 +78,16 @@ the snapshot in memory.
 | `invalid_digest`       | The host result is not a copyable 32-byte array.            |
 
 `digest` fails in the Effect error channel; `digestSync` throws the same typed
-error. Invalid values passed to `Digest` and unsupported values passed through
-the `Sha256` input schema are ordinary `SchemaError` validation failures.
-Operational failures preserve their original `cause`, use input-safe messages,
-and do not attach the value being hashed to schema diagnostics. A missing
-`Crypto` service is an unsatisfied Effect requirement and therefore a
-configuration defect, not a `Sha256Error`. Encoding `Sha256` in reverse fails with
+error, and only the first three codes, because it consults no host. Invalid
+values passed to `Digest` and unsupported values passed through the `Sha256`
+input schema are ordinary `SchemaError` validation failures. Operational
+failures preserve their original `cause`, use input-safe messages, and do not
+attach the value being hashed to schema diagnostics. A missing `Crypto` service
+is an unsatisfied Effect requirement and therefore a configuration defect, not a
+`Sha256Error`. Encoding `Sha256` in reverse fails with
 `A digest cannot be converted back into its source bytes`.
 
 Canonical value serialization belongs to
-[`@smthrs/canonical`](https://smithers.sh/docs/reference/api/canonical). Domain-specific key
-formats belong to [`@smthrs/keys`](https://smithers.sh/docs/reference/api/keys). Full API
-documentation is at [smithers.sh/api/crypto](https://smithers.sh/docs/reference/api/crypto).
+[`@smthrs/canonical`](https://canonical.smithers.sh). Domain-specific key
+formats belong to [`@smthrs/keys`](https://keys.smithers.sh). Full API
+documentation is at https://crypto.smithers.sh/reference/api/.

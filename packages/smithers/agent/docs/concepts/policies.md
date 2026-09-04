@@ -87,7 +87,7 @@ call); what makes it trustworthy is where its numbers come from.
 
 The declared schema is rendered into the run's teaching and enforced against
 its final answer, and a decode miss spends a correction slot. The interesting
-part is what a correction *is*: a whole new cell run under its own session and
+part is what a correction _is_: a whole new cell run under its own session and
 its own prompt. That choice buys three properties:
 
 - Its model call is a distinct sealed step with its own content key and its own

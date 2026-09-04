@@ -96,7 +96,7 @@ const trellis = MemoryTrellis.make({
 
 The graph is the plain trellis graph, node for node. `MemoryTrellis.parts` returns the scoped author and leaf on their own, for a caller that drives the plan with `Trellis.run` rather than calling the declared flow: calling the originals instead loses the policy.
 
-See the [`@smthrs/patterns` reference](/api/patterns) and its colocated [delegation guide](../../../flows/patterns/docs/delegation.md) for the trellis itself.
+See the [`@smthrs/patterns` reference](/api/patterns) and its [delegation guide](/pkg/patterns/delegation) for the trellis itself.
 
 ## Store behaviors worth knowing
 

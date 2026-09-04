@@ -6,7 +6,7 @@
  * package: Vitest cancellation is converted to fiber interruption at the edge
  * (`Fiber.interrupt`), never threaded through Effect code.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "The vitest
+ * Governing design: `packages/testing/docs/concepts/test-tiers.md`, "The runner
  * boundary".
  *
  * @since 0.0.0

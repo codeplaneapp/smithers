@@ -36,12 +36,12 @@ pnpm add effect@4.0.0-rc.108
 
 The `exports` map publishes these subpaths:
 
-| Import | What it is |
-| --- | --- |
-| `@smthrs/harness` | The root barrel: 26 namespaces, each re-exporting one module. |
-| `@smthrs/harness/<Module>` | Any top-level module directly, for example `@smthrs/harness/CellTurn`. |
+| Import                           | What it is                                                                                                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@smthrs/harness`                | The root barrel: 26 namespaces, each re-exporting one module.                                                                                                        |
+| `@smthrs/harness/<Module>`       | Any top-level module directly, for example `@smthrs/harness/CellTurn`.                                                                                               |
 | `@smthrs/harness/QuickJSSandbox` | The QuickJS-WASM `Sandbox` binding. Deliberately not re-exported from the root, because it carries an embedded WebAssembly build; only hosts that want it import it. |
-| `@smthrs/harness/package.json` | The package manifest. |
+| `@smthrs/harness/package.json`   | The package manifest.                                                                                                                                                |
 
 The `./internal/*` and `./*/index` subpaths map to `null` and do not resolve.
 Nothing under `src/internal/` is public.

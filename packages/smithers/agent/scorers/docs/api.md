@@ -1,9 +1,12 @@
-# Public API
+---
+title: "API reference"
+description: "Every public export of @smthrs/scorers: the scorer declaration contract, the sampling vocabulary, the durable store, the runners, and the eight stable failure codes."
+---
 
 `@smthrs/scorers` declares scorers, attaches them to target flows, decides
 replay-stable sampling, and persists the resulting observations. It does not
-decide what to score or when: `@smthrs/evals` does that and is the only
-consumer in the tree.
+decide what to score or when: [`@smthrs/evals`](/api/evals) does that and is
+the only consumer in the tree.
 
 The root entry point re-exports every module as a namespace. Top-level modules
 are also importable directly as `@smthrs/scorers/<Module>`. `internal/*` and
@@ -12,12 +15,14 @@ only through the root `Migrations` namespace. The four `migrations/*` modules
 are blocked as well; each exports its migration effect as the named binding
 `migration`, and `Migrations` imports every one of them by name. None has a
 default export, because the CommonJS build reads a default import of a sibling
-module as the whole interop wrapper rather than the effect.
+module as the whole interop wrapper rather than the effect. For the import
+forms, see [Installation](./installation.md#import-forms).
 
-Every declaration carrying `@category` is listed in the generated
-[`exports.md`](./exports.md) index. `//packages/smithers/agent/scorers:docsPages` drift-checks
-that projection, while `test/docs.test.ts` also keeps the curated contract table
-at the end of this page synchronized by public export name.
+Every declaration carrying `@category` is listed in the
+[Exported members](./exports.md) index. `test/docs.test.ts` drift-checks that
+index against the `@category` tags in `src/`, and keeps the curated contract
+table at the end of this page synchronized by public export name, so a member
+added without its rows fails the package's `test` target.
 
 ```typescript
 import { Runner, RunnerLive, Scorer, ScoreStore, SqlScoreStore } from "@smthrs/scorers"
@@ -44,6 +49,9 @@ const live = RunnerLive.layer({ concurrency: 4 }).pipe(Layer.provide(SqlScoreSto
 const inert = RunnerLive.layer().pipe(Layer.provide(ScoreStore.layerNoop))
 ```
 
+For a runnable composition including the database layers, see the
+[Quickstart](./quickstart.md).
+
 ## A scorer is a declaration, not a flow body
 
 `Scorer.make` returns a flow value carrying `Input` and `Result` as its declared
@@ -51,6 +59,12 @@ schemas, plus `score` and `scorerKey`. `score` is the only implementation:
 `MakeOptions` omits `input`, `output`, and `body`, so a scorer cannot declare
 two implementations that disagree, and calling the flow itself raises
 `FlowError{code: "missing_body"}` as any body-less flow does.
+
+`scorerKey` is `sha256(canonical({id, version, config}))`, 64 lowercase hex
+characters, and it is the durable identity written into every stored
+observation. The `score` closure does not participate, so refactoring an
+implementation leaves stored observations attributable. For what that identity
+covers, see [Scorer identity](./concepts/scorer-identity.md).
 
 `make` is a plan-time constructor and it throws. Every throw is a `ScorerError`
 with code `invalid_declaration`:
@@ -75,6 +89,12 @@ The dropped-member rule exists because `scorerKey` is
 `JSON.stringify`. Without it, `{rubric: fn}` and `{}` would be one scorer
 forever in the store.
 
+`Scorer.Input` carries `input`, `output`, and the optional `groundTruth`,
+`context`, and `latencyMs`. `Scorer.Result` carries a finite `score` in the
+inclusive `[0, 1]` range plus an optional `reason` and `meta`.
+`Scorer.validate` decodes a result against that contract and fails with
+`invalid_score`, naming the offending score without retaining the whole result.
+
 ## Sampling
 
 `Sampling` is `"all"`, `"none"`, or `{ratio, seed}` with `ratio` in the **open**
@@ -90,6 +110,14 @@ UTF-8 bytes. Both rules are load-bearing and are frozen by golden vectors in
 character in a 1024-code-point block onto one value, and joining components
 with `":"` gave `("a:b", "c", "d")` and `("a", "b:c", "d")` one decision.
 Changing either moves every sampling decision already taken downstream.
+
+## Bindings
+
+`Binding.make` attaches a scorer to a target flow with an optional
+`groundTruth`, an optional `context`, and a sampling policy that defaults to
+`"all"`. The target value is retained unchanged, so binding never alters its
+step key. Nothing in this package calls `Sampling.decide` on a binding's
+behalf; a host does, once per candidate step.
 
 ## Failures
 
@@ -107,6 +135,8 @@ offending field.
 | `inconclusive`        | Carried on an inconclusive observation whose scorer neither scored nor was interrupted. |
 | `constraint`          | A database refusal that retrying cannot fix.                                            |
 | `store`               | Any other persistence failure, including transient ones.                                |
+
+Each code's symptom and fix is in [Troubleshooting](./troubleshooting.md).
 
 ## Runners
 
@@ -129,7 +159,33 @@ observation is the one already in the store.
 
 `RunnerLive.layer` coerces a `concurrency` or `capacity` that is not a positive
 safe integer to its default (1 and 1024) rather than failing, because the
-layer's error channel is `never`.
+layer's error channel is `never`. The layer is scoped: it forks its workers
+into the scope that builds it, so a job still queued when that scope closes is
+never scored.
+
+`Runner.layerNoop` and `ScoreStore.layerNoop` are the explicit absences.
+Neither fails; the runner accepts every job and runs nothing, and the store
+accepts every write and reads back nothing.
+
+## Stores
+
+`ScoreStore.Service` has four methods. `record` appends an observation.
+`recordOnce(identity, observation)` claims the identity and appends in one
+transaction. `observations(targetStepKey, scorerKey?, page?)` reads a bounded
+page ordered by `(at, insertion)`. `aggregate(targetStepKey, scorerKey?)`
+reports `{count, mean, min, inconclusive}` over that target, or `undefined`
+when it has no observations of either kind.
+
+Four documented bounds govern the write and read paths, each exported as a
+constant: an observation `reason` is at most `maxReasonBytes` (1,024) UTF-8
+bytes, encoded `meta` at most `maxMetadataBytes` (65,536), a job identity at
+most `maxIdentityBytes` (512), and an observation page at most
+`maxObservations` (1,000) rows, which is also its default.
+
+`SqlScoreStore.layer` implements the service over the SQL client and durable
+writer from [`@smthrs/database`](/api/database), and applies this package's
+four migrations when it is built. What it guarantees across a restart is in
+[Durability](./durability.md).
 
 ## Snapshotting
 
@@ -160,6 +216,14 @@ blank identity used to make every observation after the first vanish silently.
 The claim must report exactly zero or one affected row. Zero is a duplicate;
 one proceeds to the observation insert; any other driver result fails and rolls
 the transaction back.
+
+## Migrations
+
+`Migrations.run` applies all four score-store migrations against the provided
+SQL client, recording them in this package's own ledger table
+`flows_scorers_migrations`. `Migrations.layer` applies them when the layer is
+constructed. `SqlScoreStore.make` already runs them, so a composition that
+builds the store needs neither.
 
 ## Reference
 

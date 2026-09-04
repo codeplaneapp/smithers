@@ -8,16 +8,16 @@ else. It owns `flows_journal_events` and `flows_journal_checkpoints` above
 channel accepts, and the records consumed by engine-store and sync.
 
 Run and attempt state live in
-[`@smthrs/run-store`](https://smithers.sh/docs/reference/api/run-store), sealed step results in
-[`@smthrs/step-cache`](https://smithers.sh/docs/reference/api/step-cache), and the durable
+[`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/), sealed step results in
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/), and the durable
 deferred/clock tables in
-[`@smthrs/engine-store`](https://smithers.sh/docs/reference/api/engine-store).
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/).
 
 The journal is Smithers' own **logical (domain) write-ahead log**, intended to
 become the authoritative state history. The SQLite WAL beneath it is only the
 storage durability substrate and is never consumed as the application event API.
 PostgreSQL and PGlite are unsupported at 1.0.0-rc.0; see
-[the support matrix](https://smithers.sh/docs/migration/compatibility). Lifecycle
+[databases](https://smithers.sh/docs/migration/1.0/#databases). Lifecycle
 evidence takes `emitDurable`, which commits before it returns, and a durable
 boundary must not advance a run or expose its result before that commit.
 `emitLossy` is the telemetry channel: bounded, optimistic, lossy by
@@ -35,7 +35,7 @@ pnpm add @smthrs/journal
 
 The root exports these namespaces, also available from matching
 `@smthrs/journal/*` subpaths. The generated
-[API reference](https://smithers.sh/docs/reference/api/journal) lists every export with its
+[API reference](https://journal.smithers.sh/reference/api/) lists every export with its
 one-line summary.
 
 | Namespace        | Public exports                                                                                                                                                                                                                                                                                                       |
@@ -66,33 +66,60 @@ both alone; an application that also needs run, cache, or engine tables composes
 `Migrations`, which is what `@smthrs/engine-store/Migrations` already does.
 
 ```ts
+import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { Journal, JournalEvent, Migrations, SqlJournal } from "@smthrs/journal"
 import { Effect, Layer } from "effect"
 
-const database = NodeDatabase.layer({ filename: "flows.db" })
+const database = Layer.provideMerge(
+  DurableWriter.layer(),
+  NodeDatabase.layer({ filename: "flows.db" })
+)
 const journalLayer = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
   Layer.provide(Layer.provideMerge(Migrations.layer, database))
 )
 
-const owner = { hostId: "host-1", pid: process.pid, nonce: "run-1-claim" }
-
 const program = Effect.gen(function*() {
   const journal = yield* Journal.Journal
-  return yield* journal.emitDurable({
+  return yield* journal.emitDurableUnfenced({
     runId: "run-1" as JournalEvent.RunId,
     sourceId: "engine" as JournalEvent.SourceId,
     eventType: "run.created",
     payload: { version: 1 }
-  }, owner)
+  })
 }).pipe(Effect.provide(journalLayer))
+```
+
+`SqlJournal.layer` needs both database services: `SqlClient` to read through and
+`DurableWriter` to write through.
+
+That example takes `emitDurableUnfenced` because it owns no run and the
+composition installs only this package's migrations. `emitDurable` is the fenced
+lifecycle write an engine makes:
+
+```ts
+const owner = { hostId: "host-1", pid: process.pid, nonce: "run-1-claim" }
+
+const started = Effect.gen(function*() {
+  const journal = yield* Journal.Journal
+  return yield* journal.emitDurable({
+    runId: "run-1" as JournalEvent.RunId,
+    sourceId: "engine" as JournalEvent.SourceId,
+    eventType: "run.started",
+    payload: { attempt: 1 }
+  }, owner)
+})
 ```
 
 `emitDurable` requires that fence: the insert lands only while `flows_runs`
 still records `owner` as the running run's owner, and otherwise fails
-`fence_lost`. `emitDurableUnfenced` is the sanctioned path for a genuinely
-ownerless admission, for example an import or a repair tool. Reaching for it to
-dodge `fence_lost` writes exactly the zombie entry the fence exists to reject.
+`fence_lost`. `flows_runs` belongs to `@smthrs/run-store`, so a composition that
+installs only the journal's migrations fails every fenced call with
+`sink_failed` and `no such table: flows_runs`; install `RunStoreMigrations.set`
+alongside this package's set, or take `@smthrs/engine-store/Migrations`'s
+`sets`. `emitDurableUnfenced` is the sanctioned path for a genuinely ownerless
+admission, for example an import or a repair tool. Reaching for it to dodge
+`fence_lost` writes exactly the zombie entry the fence exists to reject.
 
 `Seq` is canonical per-run replay order; `SourceSeq` identifies producer
 retries. Rejected and dropped admissions may consume either sequence, so gaps
@@ -161,8 +188,7 @@ consistent across the package boundary: it runs a state projection and the
 `emitDurable` calls describing it in ONE write transaction, because the stores
 write through the same `DurableWriter` and their writes join it as savepoints,
 and it defers publication until that transaction commits. Either a transition
-and its lifecycle entry are both durable, or neither is. See
-[implementation status](https://smithers.sh/docs/migration/compatibility).
+and its lifecycle entry are both durable, or neither is.
 
 One coupling outlives the split at the SQL level: a fenced `emitDurable` gates
 its insert on a `flows_runs` row still naming the given owner, so the journal
@@ -170,6 +196,7 @@ reads a table `@smthrs/run-store` owns. `test/JournalFence.test.ts` pins that
 contract here against a fixture of the columns the fence reads;
 `@smthrs/engine-store` pins it against the real migrated schema.
 
-See the [journal reference](https://smithers.sh/docs/reference/api/journal) and
-[journal concepts](https://smithers.sh/docs/concepts/durable-execution). The
-journal reference documents checkpoints and compaction.
+See the [API reference](https://journal.smithers.sh/reference/api/),
+[the owner fence](https://journal.smithers.sh/concepts/owner-fence/),
+[checkpoints and compaction](https://journal.smithers.sh/concepts/compaction/),
+and [troubleshooting](https://journal.smithers.sh/troubleshooting/).

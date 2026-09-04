@@ -94,16 +94,16 @@ Four rules decide what a comparison reports, and none of them are obvious:
 
 `EvalError.code` is the stable branch point.
 
-| Code                  | Raised when                                                                                                                              | Who fixes it              |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Code                  | Raised when                                                                                                                                | Who fixes it              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
 | `invalid_suite`       | The suite declaration is wrong: a name, a case, a concurrency, a fixture line, non-cloneable case data, or an undecidable sampling policy. | The suite author          |
-| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                  | The caller                |
-| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                    | Regenerate the baseline   |
-| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                              | The caller                |
-| `executor`            | The target flow failed for a case, or no executor was available.                                                                         | The target or the wiring  |
-| `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                   | The suite or batch runner |
-| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.             | The batch runner          |
-| `scorer_unavailable`  | No batch runner was available to score with.                                                                                             | The wiring                |
+| `invalid_run_options` | `Runner.run`'s own options are wrong: an empty `runId`, or an `at` that is not a canonical UTC instant.                                    | The caller                |
+| `invalid_baseline`    | The committed baseline is unreadable, holds a record the schema rejects, or belongs to another suite.                                      | Regenerate the baseline   |
+| `invalid_tolerance`   | A comparison tolerance is not a finite non-negative number.                                                                                | The caller                |
+| `executor`            | The target flow failed for a case, or no executor was available.                                                                           | The target or the wiring  |
+| `ambiguous_score_job` | Two jobs share a step key and scorer, so an order-only runner cannot attribute their results to cases.                                     | The suite or batch runner |
+| `scorer_protocol`     | A batch runner returned the wrong number of observations, or observations identifying jobs other than the ones it was given.               | The batch runner          |
+| `scorer_unavailable`  | No batch runner was available to score with.                                                                                               | The wiring                |
 
 Most failures carry a `path` locating the offending value: `cases[1].input`,
 `records[3].score`, `options.at`, `runBatch[0]`. A case whose target failed keeps

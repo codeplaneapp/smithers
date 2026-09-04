@@ -1,5 +1,5 @@
 /**
- * `smithers plan --diff`, as a value.
+ * A plan comparison, as a value.
  *
  * A plan diff answers "which steps changed key (and _which input_
  * changed them), what entered the envelope, what joined the release set —

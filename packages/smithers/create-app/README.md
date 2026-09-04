@@ -5,19 +5,19 @@
 Declare a Smithers app in one `PACKAGE.ts`. Everything else is named by where
 it sits: pages, panes, flows, and the three layer files a flow inherits.
 
-This package is private at 1.0.0-rc.0 and is not published, so there is nothing
-to install from a registry. An app is scaffolded from a source checkout:
+This package is private and is not published, so there is nothing to install
+from a registry. An app is scaffolded from a source checkout:
 
 ```sh
 pnpm exec smithers-build create-app my-app
 ```
 
-`smithers-build` is the binary of `@smthrs/build-cli`, a second private package;
-`create-app` is one of its verbs. The scaffold rewrites every `@smthrs/*`
-specifier in the copied template to a `link:` path into the checkout it was cut
-from, which is how those specifiers resolve. `package.json` carries a full
-`publishConfig` with a dist-based export map: it is retained for a future
-publish decision and has no effect while the package is private.
+`smithers-build` is the binary of `@smthrs/build-cli`, a second private
+package; `create-app` is one of its verbs. The scaffold rewrites every
+`@smthrs/*` specifier in the copied template to a `link:` path into the
+checkout it was cut from, which is how those specifiers resolve. `package.json`
+carries a full `publishConfig` with a dist-based export map: it is retained for
+a future publish decision and has no effect while the package is private.
 
 ## The authoring surface
 
@@ -60,17 +60,17 @@ A flow never names a model. Its seat comes from the resolved `AGENT.ts`.
 
 ## Public API
 
-| Import                         | Runtime                | What it holds                                                                                                                                                        |
-| ------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@smthrs/create-app`           | Node                   | Both halves, flat: `CreateApp` plus everything in `./app`.                                                                                                           |
-| `@smthrs/create-app/app`       | browser, workerd, Node | `defineAgent`, `defineSandbox`, `defineTools`, `defineFlow`, the spec and manifest types, `defaultDirs`, `defaultCallLimit`, `defaultMaxFrames`.                     |
-| `@smthrs/create-app/ui`        | browser, workerd, Node | `definePane`, `PaneRegistry`, `PaneContext`, the card schemas, `AppCard`, and `TurnFrame`.                                                                           |
-| `@smthrs/create-app/runtime`   | browser, workerd, Node | `materializeFlow`, `layerFor`, `emptyRegistry`, `LayerError`, `LayerErrorCode`, `SeatProvider`, `LayerOptions`, `MaterializedFlow`.                                  |
-| `@smthrs/create-app/package`   | Node                   | `CreateApp` over `@smthrs/targets`, `CreateAppOptions`, `AppTargets`.                                                                                                |
-| `@smthrs/create-app/router`    | Node                   | `discover`, `render`, `renderUi`, `renderAll`, `writeRoutes`, `resolveLayer`, `RouterError`, `RouterErrorCode`, `RouterOptions`, `RoutesFileStatus`, `RoutesReport`. |
-| `@smthrs/create-app/vite`      | Node                   | `createApp` (the plugin), `brandCss`, `loadManifest`, `brandModuleId`, `manifestModuleId`, `CreateAppPlugin`, `CreateAppPluginOptions`.                              |
-| `@smthrs/create-app/testing`   | Node                   | `cachedModelTest`, `runCachedModelTest`, `recordModel`, `replayModelError`, `recording`, `preparedRequest`, `RoutedFlow`, `CachedModelTestOptions`.                  |
-| `@smthrs/create-app/routesBin` | Node                   | `runRoutesBin` and `usage`: the body of the `smithers-routes` executable.                                                                                            |
+| Import                         | Runtime                | What it holds                                                                                               |
+| ------------------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `@smthrs/create-app`           | Node                   | Both halves, flat: `CreateApp` plus everything in `./app`.                                                  |
+| `@smthrs/create-app/app`       | browser, workerd, Node | The layer, flow, and manifest constructors and types, plus the route-name grammar.                          |
+| `@smthrs/create-app/ui`        | browser, workerd, Node | `definePane`, `PaneRegistry`, `PaneContext`, the card schemas, `AppCard`, and `TurnFrame`.                  |
+| `@smthrs/create-app/runtime`   | browser, workerd, Node | `materializeFlow`, `layerFor`, `emptyRegistry`, `LayerError`, `SeatProvider`.                               |
+| `@smthrs/create-app/package`   | Node                   | `CreateApp` over `@smthrs/targets`, `CreateAppOptions`, `AppTargets`.                                       |
+| `@smthrs/create-app/router`    | Node                   | `discover`, `render`, `renderUi`, `renderAll`, `writeRoutes`, `resolveLayer`, `RouterError`.                |
+| `@smthrs/create-app/vite`      | Node                   | `createApp` (the plugin), `brandCss`, `loadManifest`, `brandModuleId`, `manifestModuleId`.                  |
+| `@smthrs/create-app/testing`   | Node                   | `cachedModelTest`, `runCachedModelTest`, `recordModel`, `replayModelError`, `recording`, `preparedRequest`. |
+| `@smthrs/create-app/routesBin` | Node                   | `runRoutesBin` and `usage`: the body of the `smithers-routes` executable.                                   |
 
 `./app`, `./ui`, and `./runtime` are what a scaffolded app ships: `routes.gen.ts`
 pulls `./app` and `./runtime` into the Worker bundle, `routes.ui.gen.ts` pulls
@@ -83,9 +83,9 @@ inventory.
 
 `smithers-routes` writes two files at the app root and never anything else.
 
-- `routes.gen.ts` — every flow with its three resolved layers, plus the pane
+- `routes.gen.ts`: every flow with its three resolved layers, plus the pane
   names. No React import, so the Worker and a plain vitest run load it.
-- `routes.ui.gen.ts` — the layout, the pages, and the pane components.
+- `routes.ui.gen.ts`: the layout, the pages, and the pane components.
 
 ```sh
 smithers-routes           # write; exit 2 on a flag given no value
@@ -116,3 +116,19 @@ cachedModelTest("chat answers a balance question", {
 
 Replay is the default: no network, no key. `SMTHRS_RECORD=1` records against
 the live seat named by `options.live` and rewrites the fixture.
+
+## Templates
+
+Two templates ship in `template/`. `default` is the smallest app that routes,
+runs, tests, and deploys, and leaves the agent host to you. `aomi` is the
+reference layout: two flows on two seats, six panes, twelve pages, three tool
+sources, and a full Cloudflare Worker.
+
+```sh
+pnpm exec smithers-build create-app my-app --template aomi
+```
+
+## Documentation
+
+The full documentation is at https://create-app.smithers.sh and its source is
+this package's `docs/` directory.

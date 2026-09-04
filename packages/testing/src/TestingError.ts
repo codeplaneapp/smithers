@@ -5,8 +5,7 @@
  * consumers can match on codes without parsing messages. The per-error code
  * schemas and the combined {@link Code} union are exported.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Errors are typed
- * values, not string conventions".
+ * Governing design: `packages/testing/docs/concepts/typed-failures.md`.
  *
  * Every literal uses `snake_case`.
  *

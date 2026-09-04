@@ -89,6 +89,17 @@ export const seat = "suggest"
 export const maxFrames = 40
 
 /**
+ * The wall clock one implementation gets, in milliseconds.
+ *
+ * Named once because both ceilings read it: the sandbox's {@link limits} and
+ * the model {@link budget}. Every field of `Sandbox.Limits` is optional, so
+ * reading the number back off `limits` types as `number | undefined`; the
+ * constant is what makes "the same wall clock" a fact the compiler can see
+ * rather than a sentence in a comment.
+ */
+const totalMs = 1_800_000
+
+/**
  * The sandbox budget every cell runs under.
  *
  * @category constants
@@ -99,7 +110,7 @@ export const limits: Sandbox.Limits = {
   memoryBytes: 256 * 1024 * 1024,
   steps: 50_000_000,
   callMs: 600_000,
-  totalMs: 1_800_000
+  totalMs
 }
 
 /**
@@ -241,7 +252,7 @@ const hostFor = (root: string): Layer.Layer<AgentAction.Host> => {
  */
 export const budget: Budget.Policy = {
   tokens: { max: 400_000, onExceeded: "fail" },
-  latency: { maxMillis: limits.totalMs, onExceeded: "fail" }
+  latency: { maxMillis: totalMs, onExceeded: "fail" }
 }
 
 const agentPolicy = Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layer(budget))

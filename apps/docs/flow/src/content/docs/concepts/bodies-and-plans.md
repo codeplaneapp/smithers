@@ -1,0 +1,135 @@
+---
+title: "Bodies are plans"
+description: "Why a flow body runs at plan time, what a planned value is and the one rule it obeys, and how branches, fan-out, and recovery stay static topology."
+sidebar:
+  order: 2
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/flow/docs/concepts/bodies-and-plans.md"
+---
+
+A flow's `body` is a pure function from the decoded payload to a
+[`Node`](https://plan.smithers.sh/reference/api/). Calling it builds topology. It runs nothing, reads nothing,
+and returns a description that `Graph.build` can walk without dispatching a
+single step.
+
+That is the property everything durable in this package rests on. A plan built
+twice from the same declaration and the same payload is the same plan, with the
+same node addresses, so a re-driven round lands on the steps it already settled
+instead of on new ones.
+
+## What a body may not do
+
+The body's source digest enters the flow's content identity, so the body must not
+depend on anything the digest cannot observe. In practice:
+
+- No mutable module state, clocks, random values, services, or environment
+  values captured outside `payload`.
+- No conditionals on a step result written as ordinary JavaScript. A decision
+  between two continuations is `Node.branch`, which stores both arms.
+- No work that genuinely wants opaque code. That work is an action, and its
+  implementation attaches as a layer.
+
+`Flow.make` cannot enforce purity, but the failure mode is loud rather than
+silent: a body that reads something the digest cannot see plans one way under one
+wiring and another way under another, and the recorded keys stop matching.
+
+## Planned values
+
+The payload a body receives is real data. Every step result inside it is a value
+that does not exist yet, and the body sees it as a `Planned` placeholder.
+
+A planned value obeys one rule: **pass it, never compute on it.** Passing it into
+a payload field, into a branch, or into a `map` is fine, and field access is
+allowed because it records a reference path rather than reading anything.
+
+```ts
+import { Node } from "@smthrs/plan"
+
+// Allowed: the placeholder is passed on, and `report.summary` records a path.
+Build.call({ target: "site" }).pipe(
+  Node.andThen((report) => Publish.call({ summary: report.summary }))
+)
+```
+
+Misuse fails twice, and both failures are deliberate. `Planned` is branded, so
+arithmetic and template interpolation are compile errors. At run time the
+placeholder is a strict proxy whose `Symbol.toPrimitive`, `valueOf`, `toString`,
+`toJSON`, and call traps throw a `GraphBuildError` with the code
+`planned_value_computed`, rather than let a plan be built around `NaN` or
+`"[object Object]"`.
+
+Two operations JavaScript exposes no trap for, `Boolean(value)` and strict
+identity, cannot be refused at run time. They reveal only the proxy's truthiness
+or identity, never the result. Decide on real values with `Node.branch`.
+
+## The node vocabulary
+
+A body is written in [`@smthrs/plan`](https://plan.smithers.sh/reference/api/)'s `Node` combinators, and each
+one has a job:
+
+| Combinator                                | What it is for                                                                                                         |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `Node.succeed(value)`                     | A constant, for a body that settles without a step.                                                                    |
+| `Node.all({ ... })`                       | Independent children, settled concurrently, keyed by name. Width is fixed here, at plan time.                          |
+| `Node.map(node, f)`                       | Computation on a step result. The function is digested, not run; it executes later on the real value.                  |
+| `Node.andThen(node, build)`               | Sequencing. The builder is evaluated once against a placeholder, so the downstream topology is known before execution. |
+| `Node.branch(node, { if, then, else })`   | A decision. Both arms are built once at plan time and both are stored.                                                 |
+| `Node.catch(node, { onFailure, error? })` | Recovery. The failure arm is topology too, and a schema narrows which failures it handles.                             |
+| `Node.priority(node, n)`                  | Scheduling order for ready work. It never enters key material, so raising it cannot invalidate a recorded result.      |
+
+A `map` that decides what happens next is a `branch` written wrongly. Both a
+branch's arms and a catch's failure arm contribute their requirements to the
+node, because both are topology the plan carries: a run takes one of them, but
+which one is not known until the predicate sees the real value.
+
+## Fixed width, and what to do instead
+
+`Node.all` settles its members concurrently with no bound, and the member set is
+fixed when the plan is built. Fanning out over something a step discovered is not
+this. End the round and carry the list in the next flow's payload, where it is
+real data. See [Trampoline rounds](/concepts/trampoline-rounds/).
+
+Bounding concurrency is the same move at a smaller scale: one `Node.all` per
+batch, where each batch takes the previous batch's results as payload. The
+reference is what sequences them, and an operator reading the plan sees exactly
+how many steps can be in flight.
+
+## What the build refuses
+
+`Graph.build` reports what it can and throws what it cannot. Recoverable topology
+issues land in `Graph.diagnostics(graph)`, and a graph carrying diagnostics is
+inspectable but deliberately not compilable, so an incomplete body is reported
+rather than half-driven.
+
+Fatal refusals throw a `GraphBuildError` naming the site and the fix. The ones an
+author meets are:
+
+| Code                                                   | What happened                                                                                                          |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `planned_value_computed`                               | A body computed on a step result.                                                                                      |
+| `invalid_all_member`, `invalid_continuation`           | An `all` member or a branch arm was not a node.                                                                        |
+| `recursion_requires_boundary`                          | A flow called itself inline. Use `flow.to` or `flow.child`.                                                            |
+| `placement_requires_boundary`                          | An inline callee declares a placement the caller cannot satisfy. Use `flow.child`.                                     |
+| `duplicate_node`                                       | Two structural addresses resolved to one durable node id, which would let a later settlement overwrite an earlier one. |
+| `graph_too_deep`, `payload_too_deep`, `cyclic_payload` | Topology or payload past the build bound, or a payload that contains itself.                                           |
+| `invalid_priority`, `invalid_payload`                  | A priority that is not a safe integer, or a payload member that cannot be captured as inert JSON.                      |
+
+The two depth refusals exist because the build walks with an explicit stack and
+refuses at a bound, rather than recursing until the native stack overflows
+without a typed error.
+
+## The walk
+
+`Interpreter.interpret` builds the graph in full and then drives it, demand
+driven from the root rather than as a sweep over the node list. Dependency order
+puts both branch arms before the branch that chooses between them, and executing
+an arm to discover it was not taken is exactly what static topology exists to
+avoid.
+
+## Related pages
+
+- [Compose a body from branches and fan-out](/guides/build-a-body/): the same
+  vocabulary as worked code.
+- [Inspect the plan a body builds](/guides/inspect-the-plan/): read nodes,
+  edges, and diagnostics before anything runs.
+- [Execution identity](/concepts/execution-identity/): how a node address becomes a
+  durable step key.

@@ -132,10 +132,10 @@ back dead on arrival.
 
 `onExceeded` is the composition's choice, defaulting to `fail`:
 
-| Setting | Behavior |
-| --- | --- |
-| `fail` | The step fails with `BudgetExceeded { scope, used, max, next }`. |
-| `warn` | A `flows.agent.budget-warning.v1` record is written and the call proceeds. |
+| Setting          | Behavior                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `fail`           | The step fails with `BudgetExceeded { scope, used, max, next }`.                                       |
+| `warn`           | A `flows.agent.budget-warning.v1` record is written and the call proceeds.                             |
 | `skip-remaining` | The budget latches. Every later model call in the run fails typed `skipped` without asking a provider. |
 
 A latched refusal is its own failure, `Budget.Skipped`, carrying the

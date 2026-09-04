@@ -1,264 +1,617 @@
 ---
 title: "API reference"
-description: "Effect service for the flows content-addressed step result cache"
+description: "Every public export of @smthrs/step-cache: the CacheStore service, its schemas, limits and validators, the metric handles, the combined and HTTP tiers, the migration set, and the in-memory test layer."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/step-cache/docs/api.md"
 ---
 
-It is deliberately a _cache_. Entries may be evicted, a stale entry is a miss
-rather than a corruption, and the same admission gate serves normal execution,
-replay, and speculation validation alike. It was split out of
-[`@smthrs/journal`](https://journal.smithers.sh/reference/api/) and shares nothing with it beyond the
-database underneath. It depends on two packages:
-[`@smthrs/database`](https://database.smithers.sh/reference/api/) for the driver-neutral write boundary, and
-[`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/) for RFC 8785 JSON. Canonical form is
-load-bearing rather than cosmetic: `put` decides `ExistingSame` against
-`Conflict` by comparing stored text, so two structurally equal results built in
-different key orders must encode identically or a run fails over a divergence
-that does not exist.
-
-```ts
-import { CacheStore, Migrations } from "@smthrs/step-cache"
-import * as Layer from "effect/Layer"
-
-const layer = CacheStore.layer.pipe(Layer.provideMerge(Migrations.layer))
-```
+`@smthrs/step-cache` stores sealed step results by content digest. One service
+contract, `CacheStore.Service`, has three implementations in this package: the
+SQL store, the HTTP client for a shared tier, and the composition of the two.
+For the model behind the two tables, see
+[the head and the ledger](/concepts/head-and-ledger/).
 
 ## Entry points
 
-| Import                                   | Source                                                                                                                                       | Platform |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `@smthrs/step-cache`                     | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/step-cache/src/index.ts)                             | any      |
-| `@smthrs/step-cache/test/TestCacheStore` | [src/test/TestCacheStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/step-cache/src/test/TestCacheStore.ts) | Node     |
+| Import                                   | Exports                                                                                                 | Platform |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/step-cache`                     | `CacheStore`, `CacheStoreMetrics`, `CombinedCacheStore`, `Migrations`, `RemoteCacheStore` as namespaces | any      |
+| `@smthrs/step-cache/CacheStore`          | the service, its schemas, its validators, and its layers                                                | any      |
+| `@smthrs/step-cache/CacheStoreMetrics`   | the lookup and recording counters                                                                       | any      |
+| `@smthrs/step-cache/CombinedCacheStore`  | the two-tier composition                                                                                | any      |
+| `@smthrs/step-cache/RemoteCacheStore`    | the HTTP action-cache client                                                                            | any      |
+| `@smthrs/step-cache/Migrations`          | the namespaced migration set                                                                            | any      |
+| `@smthrs/step-cache/test/TestCacheStore` | the migrated in-memory store                                                                            | Node     |
 
-The root is written against the driver-neutral `@smthrs/database` service and
-bundles for the browser (`pnpm run browser`). The test double binds a Node
-SQLite database and is therefore imported from its own subpath. Migration
-implementation modules are not exported: only `Migrations.set` composes them.
-See [platform support](https://smithers.sh/docs/reference/api/#platform-support).
+The root is written against the driver-neutral
+[`@smthrs/database`](https://database.smithers.sh/reference/api/) contract and bundles for the browser. The
+test double binds a Node SQLite database, so it lives at its own subpath.
+`@smthrs/step-cache/internal/*`, `@smthrs/step-cache/migrations/*`, and
+`@smthrs/step-cache/*/index` are blocked by the export map. See
+[platform support](https://smithers.sh/docs/reference/api/#platform-support).
 
-## The durable contract
+## CacheStore
 
-A `CacheEntry` is `keyDigest`, `result`, `meta`, `createdAtMs`,
-`recordedRunId`, and `recordedEventSeq`. `result` and `meta` are stored as
-values, not as pre-encoded strings: the store canonicalizes them on the way in
-and hands them back decoded.
+Durable content-addressed step result storage. The store receives digests and
+results that a caller already computed; it never interprets a step layer, a
+capability, or result metadata.
 
-Every input is checked before a statement or a request is issued, and the same
-checks run at both tiers, so an input the SQL store refuses is not accepted by
-the HTTP one:
+### CacheStore
 
-| Rule                              | Value                                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `keyDigest` grammar               | `[A-Za-z0-9_-]`, 1 to `maximumKeyDigestLength` (256) characters                                  |
-| `result` and `meta` size          | `maximumJsonBytes`, four MiB                                                                     |
-| `result` and `meta` shape         | `maximumJsonDepth` 128, `maximumJsonNodes` 100,000, `maximumJsonMembers` 100,000                 |
-| `recordedRunId`                   | non-empty, NUL-free, well-formed text of at most `maximumRecordedRunIdLength` (1,024) code units |
-| `createdAtMs`, `recordedEventSeq` | non-negative safe integers                                                                       |
+```ts
+class CacheStore extends Context.Service<CacheStore, Service>()("@smthrs/step-cache/CacheStore") {}
+```
 
-The key grammar is the reason the digest is safe at both boundaries: `.`, `..`,
-path separators, control characters, and lone surrogates are unrepresentable,
-so a key can neither escape the remote `/ac/` namespace nor reach SQL as
-something other than one opaque token.
+The service tag. `yield* CacheStore.CacheStore` resolves the store. The
+identity string equals the defining module path, so a persisted digest that
+folds in service identity keeps naming this module.
 
-Admission copies each tree without invoking a getter or a `toJSON` hook and
-freezes the copy, so a hostile or merely mutable argument cannot change value
-between validation and the write. Values JSON cannot represent, sparse arrays,
-accessor members, and cycles are refused with `invalid_cache` rather than
-throwing.
+### Service
 
-`CacheStoreError.code` is one of `invalid_cache`, `constraint`,
-`decode_failed`, `persistence_failed`, or `unknown`. Boundary diagnostics name
-the offending field and never retain the rejected payload.
+```ts
+interface Service {
+  readonly get: (
+    keyDigest: string,
+    options?: GetOptions
+  ) => Effect.Effect<Option.Option<CacheEntry>, CacheStoreError>
+  readonly put: (entry: CacheEntry) => Effect.Effect<PutResult, CacheStoreError>
+  readonly evict: (
+    keyDigest: string,
+    options?: EvictOptions
+  ) => Effect.Effect<boolean, CacheStoreError>
+  readonly sweepExpired: (olderThanMs: number) => Effect.Effect<number, CacheStoreError>
+}
+```
 
-The package also exports the pieces of that boundary for adapters implementing
-the same contract elsewhere: the `KeyDigest`, `RecordedRunId`, `RecordedBy`,
-and `CacheEntry` schemas, and the `validateKey`, `validateRecordedBy`,
-`validateFence`, `validateAge`, `snapshotEntry`, and `encodeCanonical`
-operations.
+| Method         | Answers                                                                                                                                                         |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get`          | The entry under `keyDigest`: the mutable head by default, the version a named provenance recorded when `options.recordedBy` is set, `Option.none()` for a miss. |
+| `put`          | `Inserted`, `ExistingSame`, or `Conflict`. One call writes the head row and the provenance row in a single transaction.                                         |
+| `evict`        | `true` when a row was deleted, `false` when none matched. With `options.ifRecordedBy` the delete is one fenced compare-and-swap.                                |
+| `sweepExpired` | How many head rows were deleted. Rows recorded strictly before the floor go; a row recorded exactly at it stays. The ledger is never swept.                     |
 
-### Lookups, provenance, and age bounds
+`get` and `evict` validate their arguments before any statement is issued, so a
+malformed key, provenance, or age bound fails with `invalid_cache` rather than
+reading as an ordinary miss. See
+[read the result one event recorded](/guides/read-a-recorded-result/) and
+[evict a poisoned entry](/guides/evict-a-poisoned-entry/).
 
-`CacheStore` exposes `get`, `put`, `evict`, and `sweepExpired`. `put` returns
-`Inserted`, `ExistingSame`, or `Conflict` and lands two rows: the mutable head
-in `flows_step_cache` and an immutable record in the append-only
-`flows_step_cache_recorded` ledger, keyed by
-`(keyDigest, recordedRunId, recordedEventSeq)`. A second `put` under a
-provenance the ledger already holds is `Conflict` unless its `result`, `meta`,
-and `createdAtMs` are identical, so an evicted head can be restored from the
-same bytes but never rewritten with different ones. Under a provenance the
-ledger has never seen, the head is arbitrated on the canonical `result` alone:
-a second run recording the same result is `ExistingSame` though its `meta`,
-`createdAtMs`, and run identity all differ, because `Conflict` is reserved for
-two runs disagreeing about what a step produced. Whether the insert
-conflicted and whether a fenced delete hit are read through
-[`DurableWriter.affectedRows`](https://database.smithers.sh/reference/api/#affected-row-counts) rather than a
-driver-specific `changes` cast, so the outcomes hold on every backend (issue
-#134).
+### CacheEntry
 
-`get(keyDigest, { recordedBy })` reads that exact ledger row, falling back to
-the head only when the ledger holds nothing for that provenance. Replay reads
-through this fence, which is what keeps an old frame's projection a function of
-durable state.
+```ts
+const CacheEntry: Schema.Struct<{
+  keyDigest: typeof KeyDigest
+  result: Schema.Unknown
+  meta: Schema.Unknown
+  createdAtMs: Schema.Int
+  recordedRunId: typeof RecordedRunId
+  recordedEventSeq: Schema.Int
+}>
+type CacheEntry = typeof CacheEntry.Type
+```
 
-`get(keyDigest, { maxAgeMs })` refuses a row whose `createdAtMs` is more than
-`maxAgeMs` before the current clock reading and counts the lookup as a miss,
-which is how a caller-declared time to live reaches the store. The bound
-applies to the recorded ledger and to the head alike, and one lookup resolves
-the floor once so a row cannot be fresh for one read and stale for the other.
-It is a read policy, never a deletion: the row stays on disk, so a second
-caller declaring a longer bound still reads it.
+The durable data recorded for one cache key.
 
-The two options compose in one direction only. A lookup that names a provenance
-the ledger holds and the bound refuses answers a miss; it never falls through
-to the head, because the head may carry a result a later run recorded and a
-replay of that event must read that event's row or nothing. The head fallback
-stays for the case it was built for: a provenance the ledger holds no row for
-at all.
+| Field              | Meaning                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `keyDigest`        | The content address. One `KeyDigest` token.                                                                   |
+| `result`           | The step's result, stored as a value. The store canonicalizes it on the way in and decodes it on the way out. |
+| `meta`             | Result metadata, admitted and stored under the same rules as `result`. The store never interprets it.         |
+| `createdAtMs`      | When the result was recorded, in epoch milliseconds. Age bounds and sweeps measure from this field.           |
+| `recordedRunId`    | The run whose journal recorded the result.                                                                    |
+| `recordedEventSeq` | The event within that run. With `recordedRunId` it is the provenance a replay reads through.                  |
 
-### Eviction, sweeps, and what reclaims the ledger
+`createdAtMs` and `recordedEventSeq` are non-negative safe integers. For what
+`result` and `meta` may contain, see
+[what the cache admits](/concepts/admission/).
 
-`evict(keyDigest, { ifRecordedBy })` deletes only while the row still carries
-that `(runId, eventSeq)` pair, both halves, since sequence numbers are per-run
-and collide across runs routinely. The predicate rides inside the `DELETE`, so
-a fresher row recorded by another process between a caller's lookup and its
-eviction is never dropped with the poison (issue #119).
+### GetOptions
 
-`sweepExpired(olderThanMs)` is the collection half of `maxAgeMs`. It deletes
-head rows recorded strictly before the floor, keeps a row recorded exactly at
-it, and answers how many it deleted. `CombinedCacheStore` sweeps the local tier
-only, for the same reason it evicts locally only, and
-`RemoteCacheStore.sweepExpired` validates its argument and answers `0`: the
+```ts
+type GetOptions = {
+  readonly recordedBy?: RecordedBy
+  readonly maxAgeMs?: number
+}
+```
+
+`recordedBy` prefers the append-only ledger row that exact `(runId, eventSeq)`
+pair landed, falling back to the mutable head only when the ledger holds no row
+for that provenance.
+
+`maxAgeMs` refuses an entry recorded more than that many milliseconds before
+the current clock reading, and counts the lookup as a miss. It bounds the
+ledger read and the head read alike, and one lookup resolves its age floor
+once, so a row cannot be fresh for one read and stale for the other. The bound
+is a read policy, never a deletion: the row stays on disk, so a second caller
+declaring a longer bound still reads it.
+
+The two compose in one direction only. A lookup naming a provenance the ledger
+holds and the bound refuses answers a miss; it never falls through to the head.
+
+### EvictOptions
+
+```ts
+type EvictOptions = {
+  readonly ifRecordedBy?: RecordedBy
+}
+```
+
+Deletes the row only while it still carries that `(runId, eventSeq)` pair, both
+halves. Omitting the predicate deletes unconditionally. The predicate rides
+inside the `DELETE`, so a fresher row another process recorded between a
+caller's lookup and its eviction is never dropped with the poison.
+
+### PutResult
+
+```ts
+type PutResult =
+  | { readonly _tag: "Inserted" }
+  | { readonly _tag: "ExistingSame" }
+  | { readonly _tag: "Conflict" }
+```
+
+`Inserted` created the head row. `ExistingSame` found a row that does not
+disagree. `Conflict` found one that does: two runs recorded different results
+under one digest. How the two stages arbitrate is in
+[the head and the ledger](/concepts/head-and-ledger/).
+
+### RecordedBy
+
+```ts
+const RecordedBy: Schema.Struct<{ runId: typeof RecordedRunId; eventSeq: Schema.Int }>
+type RecordedBy = typeof RecordedBy.Type
+```
+
+The exact journal event that recorded a cache result. Sequence numbers are per
+run and collide across runs routinely, so both halves are load bearing.
+
+### KeyDigest
+
+```ts
+const KeyDigest: Schema.String
+type KeyDigest = typeof KeyDigest.Type
+```
+
+One URL-segment-safe cache-key digest: 1 to `maximumKeyDigestLength`
+characters matching `[A-Za-z0-9_-]`. The grammar makes `.`, `..`, path
+separators, control characters, and lone surrogates unrepresentable, so a key
+can neither escape the shared tier's `/ac/` namespace nor reach SQL as anything
+but one opaque token.
+
+### RecordedRunId
+
+```ts
+const RecordedRunId: Schema.NonEmptyString
+```
+
+The run id carried by a provenance record: non-empty, NUL-free, well-formed
+text of at most `maximumRecordedRunIdLength` UTF-16 code units. Other control
+characters are admitted deliberately. The id is opaque here, it reaches SQL as
+a bound parameter and the wire as a percent-encoded query value, and every
+stored ledger row is read back through this schema, so narrowing it would make
+a row an earlier build persisted undecodable.
+
+### CacheStoreError
+
+```ts
+class CacheStoreError extends Schema.TaggedError<CacheStoreError>()(
+  "@smthrs/step-cache/CacheStoreError",
+  { code: CacheStoreErrorCode, message: Schema.String, cause: Schema.optional(Schema.Unknown) }
+) {}
+```
+
+The one error every operation of every tier fails with. Boundary diagnostics
+name the offending field and never retain the rejected payload.
+
+### CacheStoreErrorCode
+
+```ts
+const CacheStoreErrorCode: Schema.Literals<
+  readonly ["invalid_cache", "constraint", "decode_failed", "persistence_failed", "unknown"]
+>
+type CacheStoreErrorCode = typeof CacheStoreErrorCode.Type
+```
+
+| Code                 | Raised when                                                                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `invalid_cache`      | An argument violated the boundary: the key grammar, the provenance contract, an age bound, the JSON budget, or a shell the store cannot read as inert data. |
+| `constraint`         | The database refused the write with a constraint or unique violation.                                                                                       |
+| `decode_failed`      | A stored row, or a shared tier's response, could not be decoded back into a `CacheEntry`.                                                                   |
+| `persistence_failed` | The database or the shared tier failed: a transport refusal, an unexpected HTTP status, an oversized body, or a request that passed its deadline.           |
+| `unknown`            | A row the store had just written was missing inside its own transaction, or a `makeNoop` method no test supplied was called.                                |
+
+See [troubleshooting](/troubleshooting/) for the message text each one
+carries and what to change.
+
+### maximumKeyDigestLength
+
+```ts
+const maximumKeyDigestLength = 256
+```
+
+Maximum characters accepted in one cache-key digest.
+
+### maximumRecordedRunIdLength
+
+```ts
+const maximumRecordedRunIdLength = 1024
+```
+
+Maximum UTF-16 code units accepted in a recording run id.
+
+### maximumJsonBytes
+
+```ts
+const maximumJsonBytes: number
+```
+
+Maximum encoded bytes admitted for one `result` or `meta` tree: 4 MiB. It also
+bounds a single string inside a tree, and a stored row longer than it is
+refused before it is parsed.
+
+### maximumJsonDepth
+
+```ts
+const maximumJsonDepth = 128
+```
+
+Maximum nesting admitted for one cache JSON tree.
+
+### maximumJsonNodes
+
+```ts
+const maximumJsonNodes = 100000
+```
+
+Maximum values admitted for one cache JSON tree.
+
+### maximumJsonMembers
+
+```ts
+const maximumJsonMembers = 100000
+```
+
+Maximum members admitted by one cache JSON array or object.
+
+### make
+
+```ts
+const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlClient>
+```
+
+Builds the SQL-backed store over the context's write boundary and SQL client.
+Use it when a composition needs the service as a value, for example as one tier
+of `CombinedCacheStore.make`.
+
+### layer
+
+```ts
+const layer: Layer.Layer<CacheStore, never, DurableWriter | SqlClient.SqlClient>
+```
+
+Provides the SQL-backed store. Compose the migrations beneath it so the tables
+exist before the service is exposed. See
+[compose a durable step cache](/guides/compose-a-store/).
+
+### makeNoop
+
+```ts
+const makeNoop: (overrides?: Partial<Service>) => Service
+```
+
+A store whose every operation fails with `unknown` and a message naming the
+method, with optional per-method overrides. A test that reaches an operation it
+did not supply is told which one, instead of reading a silent miss.
+
+### layerNoop
+
+```ts
+const layerNoop: (overrides?: Partial<Service>) => Layer.Layer<CacheStore>
+```
+
+Provides `makeNoop`. See [test against the step cache](/guides/test-with-the-cache/).
+
+### encodeCanonical
+
+```ts
+const encodeCanonical: (value: unknown, field: string) => Effect.Effect<string, CacheStoreError>
+```
+
+Admits `value` under the JSON budget and encodes it as RFC 8785 canonical JSON
+through [`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/), failing `invalid_cache` with
+`field` named in the message. Canonical form is what makes `put`'s text
+comparison a structural one: two results built in different key orders encode
+identically.
+
+### validateKey
+
+```ts
+const validateKey: (keyDigest: string) => Effect.Effect<void, CacheStoreError>
+```
+
+Refuses a digest that violates the `KeyDigest` grammar before any statement or
+request is issued.
+
+### validateRecordedBy
+
+```ts
+const validateRecordedBy: (
+  recordedBy: RecordedBy | undefined,
+  field?: string
+) => Effect.Effect<RecordedBy | undefined, CacheStoreError>
+```
+
+Decodes a provenance selector and returns the detached copy, or `undefined`.
+Returning the decoded value lets an operation read a caller-owned accessor once
+and never again.
+
+### validateFence
+
+```ts
+const validateFence: (
+  fence: EvictOptions["ifRecordedBy"]
+) => Effect.Effect<RecordedBy | undefined, CacheStoreError>
+```
+
+`validateRecordedBy` with the field named `eviction fence`. A fence naming an
+empty run or an impossible sequence number is a compare-and-swap no row could
+satisfy, so running it would misreport a caller mistake as "nothing matched".
+
+### validateAge
+
+```ts
+const validateAge: (
+  field: string,
+  value: number | undefined
+) => Effect.Effect<number | undefined, CacheStoreError>
+```
+
+Refuses an age bound that is not a non-negative safe integer, and returns the
+checked primitive so an operation computes its floor from the value it
+validated.
+
+### snapshotEntry
+
+```ts
+const snapshotEntry: (input: CacheEntry) => Effect.Effect<CacheEntry, CacheStoreError>
+```
+
+Takes an inert, detached, frozen snapshot of a candidate entry at effect start,
+then decodes it against `CacheEntry`. Accessors, symbol keys, extra enumerable
+members, and non-plain shells are refused with `invalid_cache` without running
+caller code.
+
+## CacheStoreMetrics
+
+The metric handles the SQL store updates. This module defines them and nothing
+else; no exporter ships here. Provide one, for example
+[`@smthrs/observability`](https://observability.smithers.sh/reference/api/), and the counters appear in it.
+See [observe cache outcomes](/guides/observe-cache-outcomes/).
+
+### lookups
+
+```ts
+const lookups: Metric.Counter<number>
+```
+
+Counter over cache lookups, dimensioned by `outcome`, named
+`flows_step_cache_lookups`. Every update carries the attribute, so this bare
+handle aggregates nothing and always reads zero. Read `hit` and `miss`.
+
+### hit
+
+```ts
+const hit: Metric.Metric<number, Metric.CounterState<number>>
+```
+
+The `lookups` view counting hits: a row existed for the key digest and the
+caller's bounds accepted it.
+
+### miss
+
+```ts
+const miss: Metric.Metric<number, Metric.CounterState<number>>
+```
+
+The `lookups` view counting misses. That covers a digest with no row at all and
+a row a `maxAgeMs` bound refused, which is a miss rather than a stale hit.
+
+### puts
+
+```ts
+const puts: Metric.Counter<number>
+```
+
+Counter over cache recordings, dimensioned by `outcome`, named
+`flows_step_cache_puts`. Read the views on `put`; the bare handle always reads
+zero.
+
+### put
+
+```ts
+const put: {
+  readonly [Tag in "Inserted" | "ExistingSame" | "Conflict"]: Metric.Metric<
+    number,
+    Metric.CounterState<number>
+  >
+}
+```
+
+The `puts` views keyed by the `PutResult` tag the recording resolved to. Their
+`outcome` attributes are `inserted`, `existing_same`, and `conflict`. A
+`conflict` is the signal an inconsistency receiver acts on.
+
+## CombinedCacheStore
+
+Two tiers composed into one `CacheStore.Service`: local first, shared second,
+with write-back into the local store. The shape is Bazel's
+`CombinedCache.downloadActionResult`. See
+[local and shared tiers](/concepts/tiers/).
+
+### Options
+
+```ts
+interface Options {
+  readonly local: CacheStore.Service
+  readonly remote: CacheStore.Service
+  readonly publication?: "inline" | "deferred" | undefined
+}
+```
+
+| Field         | Meaning                                                                                                                                             |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`       | The machine-local, durable tier. Every lookup tries this one first.                                                                                 |
+| `remote`      | The shared tier. Consulted only on a local miss, and written through on `put`.                                                                      |
+| `publication` | `"inline"` (the default) writes both tiers before `put` returns. `"deferred"` writes the local tier only and leaves the shared write to the caller. |
+
+Take `"deferred"` whenever the `put` runs inside a write transaction: an inline
+publication would hold a network round trip inside it and roll the local row
+back whenever the shared tier is unreachable. Lookups stay read-through in both
+modes.
+
+### make
+
+```ts
+const make: (options: Options) => CacheStore.Service
+```
+
+Composes the two tiers. `get` reads local, then remote, and writes a remote hit
+back locally. `put` records locally and, in `"inline"` mode, publishes; the
+local outcome is always the answer. `evict` and `sweepExpired` are local only.
+
+### layer
+
+```ts
+const layer: <EL, RL, ER, RR>(options: {
+  readonly local: Effect.Effect<CacheStore.Service, EL, RL>
+  readonly remote: Effect.Effect<CacheStore.Service, ER, RR>
+  readonly publication?: Options["publication"]
+}) => Layer.Layer<CacheStore.CacheStore, EL | ER, RL | RR>
+```
+
+Provides the composition under the `CacheStore` tag. Both tiers arrive as
+effects rather than layers because they inhabit the same tag: merging two
+`Layer<CacheStore>` values would shadow one with the other.
+
+## RemoteCacheStore
+
+The same `CacheStore.Service` contract spoken over HTTP: `GET`, `PUT`, and
+`DELETE` on `/ac/{keyDigest}` carrying the `CacheEntry` JSON. This is the
+action-cache half of Bazel's dumb-HTTP remote cache protocol. To stand one up,
+see [implement a shared cache server](/guides/implement-a-shared-tier/).
+
+### Options
+
+```ts
+interface Options {
+  readonly endpoint: string
+  readonly headers?: Readonly<Record<string, string>> | undefined
+  readonly requestTimeout?: Duration.Input | undefined
+  readonly maxResponseBytes?: number | undefined
+}
+```
+
+| Field              | Meaning                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`         | The cache root, for example `https://cache.example.com`. `/ac/{keyDigest}` resolves beneath it and a trailing slash is ignored.         |
+| `headers`          | Headers sent with every request. This is the credential seam. The record is copied and frozen when the store is built.                  |
+| `requestTimeout`   | One deadline for a whole operation: its request, its response body, and the decoding between them. Defaults to `defaultRequestTimeout`. |
+| `maxResponseBytes` | Largest cache-entry response accepted. Defaults to `maximumEntryBytes`, and may not exceed it.                                          |
+
+The endpoint must be HTTPS unless its host is loopback, and it may carry no
+userinfo, query, or fragment. Anything else fails `make` with `invalid_cache`.
+The endpoint and its credentials are a capability, never an input: they are not
+hashed into a step key and never journaled.
+
+### defaultRequestTimeout
+
+```ts
+const defaultRequestTimeout: Duration.Duration
+```
+
+The default deadline for one whole remote operation: 60 seconds.
+
+### maximumEntryBytes
+
+```ts
+const maximumEntryBytes: number
+```
+
+The default and absolute maximum encoded cache-entry size, equal to
+`CacheStore.maximumJsonBytes`.
+
+### make
+
+```ts
+const make: (
+  options: Options
+) => Effect.Effect<CacheStore.Service, CacheStore.CacheStoreError, HttpClient.HttpClient>
+```
+
+Builds the client over Effect's `HttpClient`, validating `options` first.
+
+Status mapping for `put`, the one operation with a three-way outcome: `201` is
+`Inserted`, any other 2xx is `ExistingSame`, and `409` is `Conflict`. A lookup
+maps `404` to a miss, and an eviction maps `404` to `false`. Every other
+non-2xx status fails with `persistence_failed`.
+
+`sweepExpired` validates its argument, issues no request, and answers `0`: the
 shared tier owns its own retention.
 
-No verb in this package deletes a ledger row. Whole-run reclamation belongs to
-[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), whose retention pass erases a
-terminal run's ledger rows by `recorded_run_id` together with the journal that
-could have replayed them, so the evidence and the frames that would read it go
-at the same time.
+### layer
 
-:::warning
-A ledger row whose `recorded_run_id` names no run on this host is never
-reclaimed by anything. That is every row `CombinedCacheStore`'s write-back
-lands from a shared tier, because the recording run lives on another machine.
-A host composing a shared tier accepts `flows_step_cache_recorded` growth
-proportional to the remote entries it has read.
-:::
+```ts
+const layer: (
+  options: Options
+) => Layer.Layer<CacheStore.CacheStore, CacheStore.CacheStoreError, HttpClient.HttpClient>
+```
 
-### Declared cache policy
-
-A caller-facing `CachePolicy` annotation, `{ ttlMs?, scope? }`, is declared by
-[`@smthrs/flow`](https://flow.smithers.sh/reference/api/) and by [`@smthrs/patterns`](https://patterns.smithers.sh/reference/api/), and read
-at dispatch by [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), which owns what it
-means and journals the decision it takes. Those pages are the contract for it.
-
-What belongs here is the boundary between the two. `maxAgeMs` on
-`CacheStore.get` is the store-level read policy: it re-derives its answer from a
-fresh clock on every lookup, which is exactly why the dispatch path does not use
-it for a declared `ttlMs`. A replay must reach the verdict the first execution
-reached, so that decision is journalled rather than recomputed here.
-
-A cache hit _is_ the step's result, so cached rows are never redacted: a
-name-suffix redactor there would hand the flow a `"[REDACTED]"` string where it
-expected its own value (issue #72). `CacheStore.layer` round-trips `result` and
-`meta` through canonical JSON and returns the same values the step produced.
-
-## The shared tier
-
-`RemoteCacheStore` is the same `Service` contract spoken over HTTP:
-`GET`, `PUT`, and `DELETE` on `/ac/{keyDigest}` carrying the `CacheEntry` JSON,
-mirroring the action-cache half of Bazel's dumb-HTTP remote cache. The endpoint
-and its headers are construction options: a capability, never an input, and
-never part of a step key. The endpoint must be HTTPS unless it is loopback, may
-carry no userinfo, query, or fragment, and its credential headers are
-snapshotted and frozen when the store is built, so a later mutation of the
-caller's object cannot change what a request sends.
-
-Every operation is finite. `requestTimeout` is one budget for the whole
-operation, its request and its response body together, defaulting to
-`defaultRequestTimeout` (60 seconds), and `maxResponseBytes` bounds the body at
-`maximumEntryBytes` (four MiB) or less. A lookup answered with an entry
-recorded under a different key is refused: a tier answering with someone else's
-entry would hand the caller a result under the wrong key.
-
-### Server contract
-
-A conforming tier owes three verbs, two of which carry an extension plain Bazel
-HTTP does not define:
-
-| Request                                              | Conforming answer                                                                      |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `GET /ac/{keyDigest}`                                | `200` with the entry JSON, or `404` for a miss                                         |
-| `GET` with `recordedRunId` and `recordedEventSeq`    | the entry that provenance recorded if still held, otherwise the head                   |
-| `PUT /ac/{keyDigest}`                                | `201` for a first write, another 2xx when nothing disagrees, `409` when something does |
-| `DELETE /ac/{keyDigest}`                             | 2xx when it removed the entry, `404` when it did not                                   |
-| `DELETE` with `recordedRunId` and `recordedEventSeq` | remove only while the entry still carries that provenance, `404` on a mismatch         |
-
-:::danger
-Against a tier that ignores query parameters both extensions degrade silently.
-A fenced eviction becomes an unconditional `DELETE`, which is the poison-drop
-the fence exists to prevent, and a fenced lookup becomes a head read. The
-client cannot tell the difference, because a conforming tier answers a fenced
-lookup with its head whenever it holds no row for that provenance, so an entry
-carrying different provenance is accepted as that documented fallback.
-Provenance-fenced reads and evictions require a conforming server.
-:::
-
-Arbitrate `PUT` in the two stages the SQL tier arbitrates it in. A publication
-reusing a `(keyDigest, recordedRunId, recordedEventSeq)` the tier already
-recorded is `409` unless its `result`, `meta`, and `createdAtMs` all match,
-because that provenance record is immutable. Every other publication is
-arbitrated on the canonical `result` alone, as the head is: a second run
-recording the same result under its own provenance is not a conflict, and
-answering `409` there makes `CombinedCacheStore` count cross-host divergence
-that has not happened.
-
-### Combining tiers
-
-`CombinedCacheStore` composes a local and a remote tier: local first, remote
-second, writing the shared entry back into the local SQL store so the next
-lookup is local. The caller's `GetOptions` travel to both tiers and to the
-re-read after a lost write-back. A local `Conflict` is never published upward.
-Eviction and sweeps are deliberately local-only: every engine eviction is a
-"this host observed this row to be poison" judgement, and none of those
-observations generalize to a tier where another machine may still hold the
-artifacts this one lost.
-
-**Publication order is the caller's job.** A cache entry must never be
-observable in the shared tier while an artifact it references is missing from
-the shared artifact tier; `@smthrs/engine-store`'s `ArtifactSync` enforces that
-around `put`. _When_ the shared copy is written is the caller's too:
-`publication: "deferred"` makes `put` write the local tier only, so a caller
-holding a write transaction can publish afterwards rather than hold a network
-round trip across it. That is the mode the engine composes, publishing through
-its own `CacheSync` seam. See [`@smthrs/artifacts`](https://artifacts.smithers.sh/reference/api/).
-
-:::danger
-A write transaction must never span a host call. A caller holding one wants
-`"deferred"`.
-:::
-
-## Metrics
-
-`CacheStoreMetrics` defines the handles; `CacheStore` updates them. Read the
-attributed views, `hit`, `miss`, and `put.*`: every update carries an `outcome`
-attribute, so the bare `lookups` and `puts` handles aggregate nothing and
-always read zero.
-
-They are one host's durable-tier counts. `RemoteCacheStore` updates no
-counters, so a lookup `CombinedCacheStore` serves from the shared tier
-registers one `miss` plus the write-back's put outcome, and a two-tier hit rate
-measures what this machine already held rather than what was reused. The one
-count the composition adds itself is a `conflict` when the shared tier answers
-a publication with `409`, which is cross-host divergence that reaches an
-operator nowhere else.
+Provides the client under the `CacheStore` tag. Composing it alone makes every
+lookup a network round trip and leaves the machine with no durable record; the
+intended production shape is `CombinedCacheStore` with this as its remote tier.
 
 ## Migrations
 
-`Migrations.set` is this package's namespaced migration set for
-`flows_step_cache` and `flows_step_cache_recorded`, and it reserves migration
-id block `2000`. `Migrations.run` and `Migrations.layer` install it alone;
-`@smthrs/engine-store/Migrations` composes it with the journal's, the run
-store's, and the engine's. See [`@smthrs/database`](https://database.smithers.sh/reference/api/) for the
-composition rules, and the
-[`@smthrs/engine-store` reference](https://engine-store.smithers.sh/reference/api/) for how a dispatch uses
-this store.
+This package owns two tables and nothing else: the mutable `flows_step_cache`
+head and the append-only `flows_step_cache_recorded` ledger.
+
+### set
+
+```ts
+const set: DatabaseMigrations.MigrationSet
+```
+
+The namespaced migration set, namespace `step-cache`, reserving migration id
+block `2000` so its ids can never collide with the journal's or the run
+store's. [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) composes it with the other
+storage sets in dependency order.
+
+### run
+
+```ts
+const run: Effect.Effect<
+  ReadonlyArray<readonly [id: number, name: string]>,
+  SqlError | Migrator.MigrationError,
+  SqlClient.SqlClient
+>
+```
+
+Creates the step cache schema, answering the migrations it applied.
+
+### layer
+
+```ts
+const layer: Layer.Layer<never, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
+```
+
+Runs the migrations before the database is exposed to the cache service.
+Compose it beneath `CacheStore.layer`.
+
+## TestCacheStore
+
+```ts
+const layer: Layer.Layer<CacheStore.CacheStore, SqlError | Migrator.MigrationError, never>
+```
+
+Imported from `@smthrs/step-cache/test/TestCacheStore`. The production SQLite
+store over an in-memory database, with migrations already run. Node only. It is
+the store the [quickstart](/quickstart/) uses.

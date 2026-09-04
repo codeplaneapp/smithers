@@ -3,8 +3,8 @@
 **Documentation:** https://engine.smithers.sh
 
 The runtime that executes `@smthrs/flow` flows, plus the transport
-projections that expose them. It implements `FlowRuntime` — the port
-`@smthrs/flow` declares — over a low-level encoded contract, and ships a
+projections that expose them. It implements `FlowRuntime`, the port
+`@smthrs/flow` declares, over a low-level encoded contract, and ships a
 volatile in-memory implementation of it; `@smthrs/engine-store` supplies
 durable persistence over the same seam.
 
@@ -15,7 +15,7 @@ pnpm add @smthrs/engine @smthrs/flow
 ## Mental model
 
 A `Flow` is the durable program and `Action` values are its recorded
-operations — both defined in `@smthrs/flow`. This package is what runs them.
+operations, both defined in `@smthrs/flow`. This package is what runs them.
 
 ```text
 @smthrs/flow                    @smthrs/engine
@@ -28,6 +28,11 @@ operations — both defined in `@smthrs/flow`. This package is what runs them.
                                   durable in engine-store)
 ```
 
+Everything that decides behavior lives above the seam, in `makeUnsafe`: step
+identity, the retry decision, trampoline rounds, and the suspended-resume loop.
+Everything below it decides only where state lives. That is what makes
+`layerMemory` a real engine rather than a mock.
+
 | Source               | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FlowEngine/`        | Interprets flows, executes actions, stores outcomes, and resumes suspended executions. `Encoded.ts` is the low-level seam, `make.ts` adapts it to the typed port, `layerMemory.ts` is the in-memory implementation, `ActionKey.ts` derives step identity, `FlowInstance.ts` builds per-execution state, `Lineage.ts` and `Round.ts` mint journal and trampoline identity, `Errors.ts` holds the coded refusals, and `SnapshotBoundary.ts` is the compensable host hook. |
@@ -35,87 +40,71 @@ operations — both defined in `@smthrs/flow`. This package is what runs them.
 | `FlowProxyServer.ts` | Connects those definitions to the actual flows and engine.                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `index.ts`           | Exposes the public namespaces.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
+## The shortest program
+
+```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+const Compile = Action.make("build/Compile", {
+  payload: { target: Schema.String },
+  success: Schema.String
+})
+
+const Build = Flow.make("build/Build", {
+  payload: { target: Schema.String },
+  success: Schema.String,
+  body: (payload) => Compile.call(payload)
+})
+
+const BuildLayer = Layer.mergeAll(
+  Compile.toLayer(({ target }) => Effect.succeed(`${target}.js`)),
+  Interpreter.layer(Build)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
+const built: Effect.Effect<string> = Build.execute(
+  { target: "app" },
+  { executionId: "build-app-1" }
+).pipe(Effect.orDie, Effect.provide(BuildLayer))
+```
+
+Submitting the same `executionId` again returns the recorded result and never
+calls `Compile` a second time.
+
 ## Public API
 
 The root exports these namespaces, also available from matching
 `@smthrs/engine/*` subpaths. The flow-authoring namespaces live in
-[`@smthrs/flow`](https://www.npmjs.com/package/@smthrs/flow).
+[`@smthrs/flow`](https://flow.smithers.sh).
 
-| Namespace         | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine`      | Implementation boundary `Encoded` and `ActionExecuteOptions`; `makeUnsafe`, which adapts an `Encoded` implementation into `@smthrs/flow`'s `FlowRuntime`; in-memory `layerMemory`; per-run state constructor `makeInstance`; journal `Lineage` (`root`, `make`, `JournalLineageId`); trampoline `Round` (`initial`, `next`, `executionId`, `Round`, `InvalidRound`); the coded refusals `FlowNotRegistered`, `ExecutionIdentityConflict`, `SuspendedResumeGaveUp`, and `SnapshotBoundaryRequired`; compensable-step `SnapshotBoundaryOptions` and `SnapshotBoundary`. |
-| `FlowProxy`       | `toRpcGroup` / `ConvertRpcs` and `toHttpApiGroup` / `ConvertHttpApi` derive execute, discard, and resume transports from flows. `operationAddresses` / `OperationAddresses` name the three wire operations one flow owns, `assertNoCollisions` refuses an ambiguous flow set with `FlowProxyCollision`, and `InvalidFlowTag` refuses a tag with no route encoding.                                                                                                                                                                                                    |
-| `FlowProxyServer` | `layerRpcHandlers`, `layerHttpApi`, `ExecutionIdScope`, and `RpcHandlers` implement the derived transports.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Namespace         | What it is                                                                                                                                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FlowEngine`      | The `Encoded` seam a store implements, the `makeUnsafe` adapter, in-memory `layerMemory`, per-run state `makeInstance`, journal `Lineage`, trampoline `Round`, the compensable `SnapshotBoundary`, and the coded refusals. |
+| `FlowProxy`       | Derives an Effect `RpcGroup` or `HttpApiGroup` from a list of flows: execute, discard, and resume per flow.                                                                                                                |
+| `FlowProxyServer` | Binds those derived definitions to a running engine.                                                                                                                                                                       |
 
-## Reference implementation
+Full signatures: <https://engine.smithers.sh/reference/api/>.
 
-The walkthrough below exercises the entire public API, namespace by
-namespace.
+## Documentation
 
-### FlowEngine — the engine contract
-
-```ts
-import { FlowEngine } from "@smthrs/engine"
-import { FlowRuntime } from "@smthrs/flow"
-import { Effect } from "effect"
-
-// FlowRuntime.FlowRuntime is the service the flow/action/deferred/clock/queue
-// APIs talk to, and this package implements it. layerMemory is the in-memory
-// implementation; @smthrs/engine-store provides the durable one. makeUnsafe
-// builds one from an Encoded implementation (the persistence boundary).
-const program = Effect.gen(function*() {
-  const engine = yield* FlowRuntime.FlowRuntime
-  // register, execute, poll, interrupt, interruptUnsafe, resume,
-  // actionExecute (ActionExecuteOptions), deferredResult,
-  // deferredDone, deferredDoneIfWaiting, scheduleClock
-}).pipe(Effect.provide(FlowEngine.layerMemory))
-
-// Per-execution state is created with FlowEngine.makeInstance. Compensable actions need a SnapshotBoundary
-// (SnapshotBoundaryOptions) in context. Registering a flow that executes
-// itself transitively fails with FlowCycleDetected.
-```
-
-### FlowProxy / FlowProxyServer — derived transports
-
-```ts
-import { FlowProxy, FlowProxyServer } from "@smthrs/engine"
-import { Flow } from "@smthrs/flow"
-import { Layer } from "effect"
-import { HttpApi } from "effect/unstable/httpapi"
-import { RpcServer } from "effect/unstable/rpc"
-
-declare const Review: Flow.Any
-
-// Each flow derives Execute / Discard / Resume endpoints
-// (ConvertRpcs / ConvertHttpApi describe the derived types).
-const ReviewRpcs = FlowProxy.toRpcGroup([Review], { prefix: "flows_" })
-const ReviewApi = HttpApi.make("api").add(
-  FlowProxy.toHttpApiGroup("flows", [Review])
-)
-
-// FlowProxyServer implements them against the running engine
-// (RpcHandlers names the handler set).
-const RpcLayer = RpcServer.layer(ReviewRpcs).pipe(
-  Layer.provide(FlowProxyServer.layerRpcHandlers([Review], { prefix: "flows_" }))
-)
-const HttpLayer = FlowProxyServer.layerHttpApi(ReviewApi, "flows", [Review])
-```
-
-`FlowProxy.operationAddresses` is the single source of the three wire names one
-flow owns, and every group builder and server layer derives from it.
-`assertNoCollisions` runs first, so proxy construction refuses duplicate or
-suffix-ambiguous operation names before a group or handler map exists. HTTP
-routes encode a flow tag as one opaque URL-safe segment, preserving case,
-reserved characters, Unicode normalization, and operation identity. Both server
-layers log a defect from a served body through `Effect.logError`, annotated with
-the module and the wire operation name.
-
-Both server layers drive the served bodies, so both require what those bodies
-require: `Flow.Requirements` of every flow, on top of the schema services
-`Flow.RequirementsHandler` names. Serving a flow is executing it, and a
-forgotten `Action.toLayer` is a compile error on this side of the boundary
-too. The client side is unaffected — it encodes a payload and decodes a result,
-and requires no implementation at all.
+| Page                                                                           | What it covers                                                   |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| [Quickstart](https://engine.smithers.sh/quickstart/)                           | Run a flow, then prove the second submission replays.            |
+| [The port and the seam](https://engine.smithers.sh/concepts/port-and-seam/)    | Why the engine is two layers, and what crosses the seam encoded. |
+| [Execution identity](https://engine.smithers.sh/concepts/execution-identity/)  | Caller-supplied execution ids, joins, and refused reuses.        |
+| [Step identity](https://engine.smithers.sh/concepts/step-identity/)            | Cache keys, invocation keys, and the keyless-dispatch guard.     |
+| [Retries and attempts](https://engine.smithers.sh/concepts/retries/)           | The single retry decision point and the durable attempt counter. |
+| [Suspension and cancellation](https://engine.smithers.sh/concepts/suspension/) | Parking, the caller's budget, and interrupt semantics.           |
+| [Trampoline rounds](https://engine.smithers.sh/concepts/trampoline-rounds/)    | Handoffs, derived round ids, and `maxRounds`.                    |
+| [Troubleshooting](https://engine.smithers.sh/troubleshooting/)                 | Every refusal and warning, with the fix.                         |
 
 ## In-memory lifetime
 

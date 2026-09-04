@@ -67,10 +67,10 @@ point and the per-provider subpaths export the same names:
 ```ts
 import { Core, GitHub, Linear, Telegram } from "@smthrs/integrations"
 // or only what you use:
+import * as Core from "@smthrs/integrations/core"
 import * as GitHub from "@smthrs/integrations/github"
 import * as Linear from "@smthrs/integrations/linear"
 import * as Telegram from "@smthrs/integrations/telegram"
-import * as Core from "@smthrs/integrations/core"
 ```
 
 ## The smallest working example

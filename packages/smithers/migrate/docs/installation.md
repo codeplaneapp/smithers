@@ -1,0 +1,138 @@
+---
+title: "Installation"
+description: "Three ways to run the migration tool, the two install shapes it has, its Node and package requirements, and the import forms of its scanner API."
+sidebar:
+  order: 1
+---
+
+## Run it without installing anything
+
+The tool has to run inside a project that does not have Smithers 1.0 yet, so
+the first command needs no install:
+
+```bash
+npx @smthrs/migrate
+```
+
+The package ships one executable, `smithers-migrate`, and `npx` runs it. With
+no flags the mode is `plan`: it reads the project, plans the units, and writes
+the report.
+
+## Install it as a project dependency
+
+Install the package when you want the scanner API in your own script, or when
+you want the tool pinned in the project you are migrating:
+
+```bash
+pnpm add -D @smthrs/migrate
+```
+
+The package requires Node.js 22.19.0 or later, and ships as both ESM and
+CommonJS with TypeScript declarations.
+
+## Run it as a CLI verb
+
+Once the project is on 1.0, the same entry point is reachable as a verb of the
+Smithers CLI:
+
+```bash
+pnpm add -D @smthrs/cli
+smthrs migrate --scan
+```
+
+`@smthrs/cli` is the one package you install by hand for the migration. The
+tool installs everything else the migrated project needs: its `dependencies`
+unit adds the `@smthrs/*` packages and `effect` to your manifests, and its
+final `project` unit removes the 0.x packages once nothing depends on them. Do
+not remove the old packages yourself before you run it. The scanners decide
+what a dependency is from the manifests, so a manifest you have already emptied
+is a project the tool can no longer read correctly.
+
+[`smthrs migrate`](/cli/migrate) and `smithers-migrate` share one entry point
+and take the same flags, with two differences. The CLI names the project as a
+positional path argument, defaulting to the 0.x project root found by walking
+up from the working directory; the bin names it with `--root <path>`,
+defaulting to the working directory itself. And the CLI refuses up front, with exit 1
+and no flag to release it, a project whose 0.x database still holds runs that
+have not finished.
+
+The flag reference for both is [the `smthrs migrate` page](/cli/migrate).
+
+## The two install shapes
+
+The package has a read-only half and an editing half, and they need different
+things.
+
+`scan` and `plan` need `effect`, `@effect/platform-node`, and `typescript`, and
+nothing else. Every scanner module imports only those and Node built-ins, and a
+test reads the real source to keep that boundary from drifting.
+
+`apply` runs the migration flow and its registry discovery check, so it also
+needs the flow-lane packages: `@smthrs/agent`, `@smthrs/core`,
+`@smthrs/engine`, `@smthrs/flow`, `@smthrs/flows`, `@smthrs/harness`,
+`@smthrs/kernel`, `@smthrs/model`, `@smthrs/patterns`, `@smthrs/plan`,
+`@smthrs/platform-node`, `@smthrs/registry`, and `@smthrs/std`. They are
+declared as `optionalDependencies`, so a package manager installs them by
+default and `--no-optional` leaves them out:
+
+```bash
+pnpm add -D @smthrs/migrate --no-optional
+```
+
+That is the install a scan-only user wants. `Checks.discovery` imports
+`@smthrs/registry` at call time, so importing `@smthrs/migrate` never loads the
+runtime even when the optional packages are present.
+
+## Provider credentials
+
+`apply` runs a model-backed rewrite, so it needs a seat and a key. Name the
+seat with `--seat provider:model`, and put the provider's key in the
+environment:
+
+| Provider     | Variable             |
+| ------------ | -------------------- |
+| `anthropic`  | `ANTHROPIC_API_KEY`  |
+| `openai`     | `OPENAI_API_KEY`     |
+| `openrouter` | `OPENROUTER_API_KEY` |
+
+```bash
+ANTHROPIC_API_KEY=... npx @smthrs/migrate --apply --seat anthropic:<model>
+```
+
+No model id is hard coded anywhere in this package, so the seat resolver
+refuses by name rather than guessing: with a key but no `--seat` it names the
+provider it found a key for, and with neither it names the three variables.
+Either way the unit fails with that refusal in its report entry. `scan` and
+`plan` need no credentials at all.
+
+## Import forms
+
+The root entry point re-exports the scanner modules as namespaces:
+
+```ts
+import { Constructs, Detect, Inventory, Mapping, Report, RunState, Scan, Units } from "@smthrs/migrate"
+```
+
+Each module is also importable from its own subpath, which is the form the
+[API reference](./api.md) uses:
+
+```ts
+import * as Report from "@smthrs/migrate/Report"
+import * as Scan from "@smthrs/migrate/Scan"
+```
+
+The editing half lives under `@smthrs/migrate/flow/`:
+
+```ts
+import * as Command from "@smthrs/migrate/flow/Command"
+```
+
+`Contract`, `Gate`, and `Options` are the three flow modules the root entry
+point also exports, because they describe a run rather than execute one.
+`@smthrs/migrate/internal/*`, `@smthrs/migrate/flow/internal/*`, and
+`@smthrs/migrate/*/index` are not public; all three are blocked in the export
+map. `@smthrs/migrate/package.json` is exported.
+
+## Next step
+
+Migrate one project end to end in the [Quickstart](./quickstart.md).

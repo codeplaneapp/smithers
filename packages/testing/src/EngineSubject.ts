@@ -8,8 +8,7 @@
  * the seam the built-in harness *consumes*. The two are never interchangeable
  * and no longer share a name.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "The engine subject
- * seam".
+ * Governing design: `packages/testing/docs/concepts/engine-subject.md`.
  *
  * @since 0.0.0
  */

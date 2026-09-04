@@ -53,14 +53,14 @@ applied the write and lost the answer. If you know your endpoint is
 idempotent, opt into repeating writes per call:
 
 ```ts
-yield* client.request("POST", path, body, { retryUnsafeWrites: true })
+yield * client.request("POST", path, body, { retryUnsafeWrites: true })
 ```
 
 To walk a list endpoint, use `paginate`, which follows `Link: rel="next"`
 inside a page budget and tells you when the budget ran out:
 
 ```ts
-const page = yield* client.paginate("/repos/OWNER/REPO/issues", { perPage: 100, maxPages: 10 })
+const page = yield * client.paginate("/repos/OWNER/REPO/issues", { perPage: 100, maxPages: 10 })
 if (page.truncated) {
   // `page.items` is a prefix, not the whole resource. Narrow the query or
   // raise maxPages (at most 1000) before reconciling against it.
@@ -78,8 +78,8 @@ different GitHub endpoint on the same origin. `repositoryPath` validates each
 segment against GitHub's naming rules and only then encodes it:
 
 ```ts
-const repository = yield* GitHub.Repository.requireRepositoryPath(owner, repo)
-yield* client.request("GET", `/repos/${repository}`)
+const repository = yield * GitHub.Repository.requireRepositoryPath(owner, repo)
+yield * client.request("GET", `/repos/${repository}`)
 ```
 
 The throwing form, `GitHub.Repository.repositoryPath`, raises an
@@ -193,9 +193,9 @@ Then apply, and only then allow deletes:
 
 ```ts
 // Create and update hooks to match the declaration.
-yield* GitHub.ListenerRegistry.reconcile({ apply: true })
+yield * GitHub.ListenerRegistry.reconcile({ apply: true })
 // Also delete owned hooks the declaration no longer names.
-yield* GitHub.ListenerRegistry.reconcile({ apply: true, allowDelete: true })
+yield * GitHub.ListenerRegistry.reconcile({ apply: true, allowDelete: true })
 ```
 
 The token needs fine-grained Webhooks read/write permission or classic

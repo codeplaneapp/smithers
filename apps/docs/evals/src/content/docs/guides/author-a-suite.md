@@ -57,12 +57,12 @@ and copying them would break the identity match.
 `Suite.make` fails with `invalid_suite` when the declaration is wrong, and
 each failure locates the offending value in `path`:
 
-| Failure | Path |
-| --- | --- |
-| Suite name is empty or holds a control character | `name` |
-| No cases, or more than `limits.cases` cases | `cases` |
-| Concurrency is not a safe integer in [1, `limits.concurrency`] | `concurrency` |
-| Case name is empty, holds a control character, or duplicates another case | `cases[N].name` |
+| Failure                                                                                  | Path                                                                                                            |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Suite name is empty or holds a control character                                         | `name`                                                                                                          |
+| No cases, or more than `limits.cases` cases                                              | `cases`                                                                                                         |
+| Concurrency is not a safe integer in [1, `limits.concurrency`]                           | `concurrency`                                                                                                   |
+| Case name is empty, holds a control character, or duplicates another case                | `cases[N].name`                                                                                                 |
 | Case or binding data is not structured-cloneable, such as a function or a class instance | `cases[N].input`, `cases[N].expected`, `bindings[N].sampling`, `bindings[N].groundTruth`, `bindings[N].context` |
 
 The clone check doubles as the suite's immutability guarantee: the copy is
@@ -101,10 +101,10 @@ line 2` at `line[2]`, or `Invalid suite case on line 1` at `line[1]`.
 mistake fails at construction with a sentence instead of exhausting memory in
 a runner:
 
-| Limit | Value | Bounds |
-| --- | --- | --- |
-| `concurrency` | 1024 | The fibers a run may hold open |
-| `cases` | 10000 | The cases in one suite |
+| Limit           | Value   | Bounds                                          |
+| --------------- | ------- | ----------------------------------------------- |
+| `concurrency`   | 1024    | The fibers a run may hold open                  |
+| `cases`         | 10000   | The cases in one suite                          |
 | `fixtureLength` | 8388608 | The UTF-16 code units in one JSON Lines fixture |
 
 A fixture larger than `fixtureLength` is rejected before any of it is parsed.

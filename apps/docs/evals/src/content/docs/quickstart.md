@@ -30,8 +30,7 @@ const polite = Scorer.make({
   id: "quickstart/polite",
   version: "1",
   name: "polite",
-  score: ({ output }) =>
-    Effect.succeed({ score: String(output).startsWith("Hello") ? 1 : 0 })
+  score: ({ output }) => Effect.succeed({ score: String(output).startsWith("Hello") ? 1 : 0 })
 })
 ```
 
@@ -155,8 +154,7 @@ const polite = Scorer.make({
   id: "quickstart/polite",
   version: "1",
   name: "polite",
-  score: ({ output }) =>
-    Effect.succeed({ score: String(output).startsWith("Hello") ? 1 : 0 })
+  score: ({ output }) => Effect.succeed({ score: String(output).startsWith("Hello") ? 1 : 0 })
 })
 
 const executor = CaseExecutor.make((suiteCase) =>

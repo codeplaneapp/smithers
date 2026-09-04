@@ -43,9 +43,9 @@ The default export must satisfy `isFlow` from
 requires the platform `FileSystem` and `Path` services:
 
 ```ts
-import { FileRouter } from "@smthrs/fs"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
+import { FileRouter } from "@smthrs/fs"
 import { Effect, Layer } from "effect"
 import { resolve } from "node:path"
 
@@ -76,17 +76,16 @@ through the flow's Effect schema, invokes through `FlowInvoker`, and encodes
 the output:
 
 ```ts
-import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
+import { Command, FileRouter, FlowInvoker } from "@smthrs/fs"
 import { Effect, Layer } from "effect"
 import { resolve } from "node:path"
 
 const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
 
 const invoker = FlowInvoker.make({
-  invoke: ({ input }) =>
-    Effect.succeed({ accepted: true, number: (input as { readonly number: number }).number })
+  invoke: ({ input }) => Effect.succeed({ accepted: true, number: (input as { readonly number: number }).number })
 })
 
 const program = Effect.gen(function*() {

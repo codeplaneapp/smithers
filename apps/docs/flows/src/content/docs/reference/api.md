@@ -1,133 +1,414 @@
 ---
 title: "API reference"
-description: "Barrel package re-exporting the whole @smthrs durable flow engine"
+description: "Every public export of @smthrs/flows: the barrel's namespaces and flat authoring names, the NodeRuntime composition roots and their options, and the SandboxedFlow runner with its errors, limits, and schemas."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/docs/api.md"
 ---
 
-The aggregate entry point re-exports every durable-engine package without
-flattening neighboring constructors. [`@smthrs/flow`](https://flow.smithers.sh/reference/api/) authoring
-names are flat, and `TimeTravel` is a flat service key; infrastructure packages
-remain namespaces.
+`@smthrs/flows` has three public entry points.
 
-```sh
+| Entry point                   | Contents                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------- |
+| `@smthrs/flows`               | The barrel: nineteen engine packages re-exported, plus `namespaces`. Browser-safe. |
+| `@smthrs/flows/NodeRuntime`   | The durable runtime compositions for Node and local SQLite. Node-only.             |
+| `@smthrs/flows/SandboxedFlow` | Running a child flow's own code inside a provisioned machine. Node-only.           |
+
+```bash
 pnpm add @smthrs/flows@next
 ```
 
 ```ts
 import { Action, Flow, Kernel, RunStore } from "@smthrs/flows"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as SandboxedFlow from "@smthrs/flows/SandboxedFlow"
 ```
 
-The root entry point bundles for browsers, but rc.0 durable execution is
-supported only on Node.js >= 22.19.0 with local SQLite. Browser and edge
-runtimes may author and inspect declarations; supplying another SQL client does
-not make them supported durable hosts.
+`@smthrs/flows/internal/*` and `@smthrs/flows/*/index` are blocked in the export
+map and are not public.
 
-## Aggregate exports
+Durable execution is supported on Node.js 22.19.0 or later with local SQLite.
+The root entry point bundles for browsers, which buys authoring and inspection;
+it does not make a browser a durable host, and supplying another SQL client does
+not change that.
 
-<!-- generated:namespaces -->
+## The barrel
 
-Platform bundles are deliberately absent. A program chooses
-`@smthrs/platform-node`, `@smthrs/platform-bun`, or
-`@smthrs/platform-browser` directly.
+### Namespace exports
 
-The `Capability` namespace re-exports `@smthrs/capability`; its exact-resource
-bounds, pattern grammar, and permission failures are documented in the
-[capability API](https://capability.smithers.sh/reference/api/).
+Each engine package is re-exported as a namespace, so a package's own module is
+one level below it (`Journal.SqlJournal.layer`).
 
-The `Plan` namespace re-exports [`@smthrs/plan`](https://plan.smithers.sh/reference/api/), which owns step
-identity, graph compilation, static effect declarations, and plan storage.
+| Namespace       | Package                                       |
+| --------------- | --------------------------------------------- |
+| `Artifacts`     | [`@smthrs/artifacts`](https://artifacts.smithers.sh/reference/api/)         |
+| `Canonical`     | [`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/)         |
+| `Capability`    | [`@smthrs/capability`](https://capability.smithers.sh/reference/api/)       |
+| `Crypto`        | [`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/)               |
+| `Database`      | [`@smthrs/database`](https://database.smithers.sh/reference/api/)           |
+| `Engine`        | [`@smthrs/engine`](https://engine.smithers.sh/reference/api/)               |
+| `EngineStore`   | [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/)   |
+| `Jj`            | [`@smthrs/jj`](https://jj.smithers.sh/reference/api/)                       |
+| `Journal`       | [`@smthrs/journal`](https://journal.smithers.sh/reference/api/)             |
+| `Kernel`        | [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)               |
+| `Keys`          | [`@smthrs/keys`](https://keys.smithers.sh/reference/api/)                   |
+| `Observability` | [`@smthrs/observability`](https://observability.smithers.sh/reference/api/) |
+| `Plan`          | [`@smthrs/plan`](https://plan.smithers.sh/reference/api/)                   |
+| `RunStore`      | [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/)         |
+| `Sandbox`       | [`@smthrs/sandbox`](https://sandbox.smithers.sh/reference/api/)             |
+| `StepCache`     | [`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/)       |
+| `Sync`          | [`@smthrs/sync`](https://sync.smithers.sh/reference/api/)                   |
 
-The `Journal` namespace re-exports [`@smthrs/journal`](https://journal.smithers.sh/reference/api/), which owns
-the append-only event record every durable run is replayed from, and the
-redaction rules that keep a credential out of both a committed row and a log
-line.
+Namespacing is what preserves constructors like
+`Kernel.ChildProcessSpawner.layerNoop` and `RunStore.RunStore.layer`. The
+`Capability` namespace owns exact-resource bounds, the pattern grammar, and
+permission failures; `Plan` owns step identity, graph compilation, static effect
+declarations, and plan storage; `Journal` owns the append-only event record
+every durable run replays from and the redaction rules that keep a credential
+out of both a committed row and a log line.
+
+### Flat exports
+
+[`@smthrs/flow`](https://flow.smithers.sh/reference/api/) is re-exported flat, so all fourteen authoring names
+sit at the top level: `Action`, `DurableClock`, `DurableDeferred`,
+`DurableQueue`, `Flow`, `FlowRuntime`, `Graph`, `HumanTask`, `Interpreter`,
+`Poll`, `RetryPolicy`, `Sleep`, `StepIdentity`, and `WaitFor`.
+
+`TimeTravel` from [`@smthrs/time-travel`](https://time-travel.smithers.sh/reference/api/) is the second flat
+export, and it is a service key rather than a namespace:
+
+```ts
+import { TimeTravel } from "@smthrs/flows"
+
+const program = Effect.gen(function*() {
+  const timeTravel = yield* TimeTravel
+})
+```
+
+`TimeTravel.layer` provides it. The rest of that package, including `Frame`,
+`TimeTravelStore`, and `EffectBoundary`, is reached through
+`@smthrs/time-travel` directly.
+
+The `@smthrs/platform-*` bundles are deliberately absent. A program chooses
+[`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/),
+[`@smthrs/platform-bun`](https://platform-bun.smithers.sh/reference/api/), or
+[`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/) directly.
+
+### `namespaces`
+
+```ts
+const namespaces: ReadonlyArray<string>
+```
+
+The sorted list of every name this barrel exports, covering both the per-package
+namespaces and the flat authoring names. It is the package's one runtime value,
+and a test pins it against the packages on disk, so a new engine package cannot
+enter the repository without entering this list.
 
 ## NodeRuntime
 
-`@smthrs/flows/NodeRuntime` is the only supported durable-runtime subpath in
-rc.0. `layer` leaves host services, the step boundary, and workspace sandbox to
-the caller. `layerHost` supplies the contained Node host, guarded action
-surface, storage, engine, liveness probe, and bounded signal shutdown.
-
 ```ts
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
-
-const runtime = NodeRuntime.layerHost(
-  {
-    filename: ".flows/engine.db",
-    workspaceRoot: ".",
-    owner: { hostId: "local-worker" }
-  },
-  registerFlows
-)
 ```
 
-The journal queue has capacity 1,024 and rejects overflow. Artifacts live next
-to the database under `.flows/objects`. Engine snapshot bookkeeping uses a
-private Jj service; `HostOptions.rules` controls only action-facing authority.
-Signals are validated and deduplicated before installation, and
-`shutdownTimeoutMs` must be an integer from 0 through 2,147,483,647.
+The supported Node composition. Importing this module opens `node:sqlite`
+through `@smthrs/database/node/NodeDatabase`, which is why the browser-safe root
+does not re-export it.
 
-<!-- generated:node-runtime -->
+Construction is ordered by layer dependency: the SQLite parent directory is
+created before the database opens, migrations finish before any store is built,
+the engine is built over those stores, and `registerFlows` finishes before the
+resulting services are exposed. A persisted run therefore cannot resume through
+a composition before its flow has been registered.
+
+### `Options`
+
+Configuration for `make` and `layer`.
+
+| Field           | Type                      | Meaning                                                                                                                                                                                                                                    |
+| --------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `filename`      | `string`                  | SQLite database filename. Resolved to an absolute path at the call; its parent directory is created recursively.                                                                                                                           |
+| `workspaceRoot` | `string`                  | The workspace file actions may read or mutate. Resolved to an absolute path at the call.                                                                                                                                                   |
+| `owner`         | `{ hostId: string }`      | Stable identity of this engine host.                                                                                                                                                                                                       |
+| `isAlive`       | `Ownership.LivenessCheck` | Whether a previously recorded owner is still alive. Required, and a stub is not an answer: a check that returns `false` without asking makes the engine steal runs out of live processes. Receives the claim context as well as the owner. |
+
+`Ownership.sameHostPidProbe` from [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/) asks this
+machine's process table and never declares another host's owner dead. A
+multi-process deployment answers from its supervisor or lease system instead.
+
+### `RuntimeConfigurationError`
+
+```ts
+class RuntimeConfigurationError extends Schema.TaggedError("@smthrs/flows/RuntimeConfigurationError")({
+  code: "invalid_runtime_configuration"
+  field: string
+  message: string
+})
+```
+
+Thrown synchronously by `storage`, `make`, `layer`, and `layerHost` for invalid
+construction input. `field` names the single option that was wrong, so an
+embedder can distinguish an empty `filename` from an empty `owner.hostId`
+without parsing the message. Nothing is created before it is thrown: no database
+is opened and no signal listener is installed.
+
+### `storage`
+
+```ts
+const storage: (filename: string, workspaceRoot?: string) => Layer<...>
+```
+
+Provides the migrated database, the durable stores (`SqlJournal`, `RunStore`,
+`AttemptStore`, `CacheStore`, `DurableEngineState`), the `OwnerIdentity` minter,
+the `Workspace`, and a filesystem `ArtifactStore`, and constructs no engine.
+
+`workspaceRoot` defaults to the database file's own directory. The journal queue
+is created with capacity 1,024 and `overflow: "reject"`. Artifacts live beside
+the database under `objects/`, so a database at `<root>/.flows/engine.db` stores
+blobs in `<root>/.flows/objects`.
+
+This is the lower-level seam for an integration that builds another
+engine-backed service over the same storage context. Application entry points
+normally use `layer` or `layerHost`.
+
+### `make`
+
+```ts
+const make: (
+  options: Options,
+  stepBoundary: Layer<StepBoundary.Service, E1, R1>,
+  workspaceSandbox: Layer<WorkspaceSandbox.Service, E2, R2>,
+  registerFlows: Layer<A, E3, R3>,
+  registry?: Layer<A4, E4, R4>
+) => Effect<Context<...>, ..., Crypto | FileSystem | Jj | Scope>
+```
+
+Builds the production service context in the current scope and returns it. The
+caller selects the filesystem boundary and workspace sandbox layers and supplies
+a registration layer, typically a merge of action implementation layers and
+`Interpreter.layer(flow)`. `Jj`, Effect's `FileSystem`, and Effect's `Crypto`
+remain requirements. Closing the surrounding scope closes the database, the
+journal writer, the sweeper, and the active engine fibers through their existing
+finalizers.
+
+### `layer`
+
+```ts
+const layer: (
+  options: Options,
+  stepBoundary: Layer<StepBoundary.Service, E1, R1>,
+  workspaceSandbox: Layer<WorkspaceSandbox.Service, E2, R2>,
+  registerFlows: Layer<A, E3, R3>,
+  registry?: Layer<A4, E4, R4>
+) => Layer<..., ..., Crypto | FileSystem | Jj>
+```
+
+The same composition as a scoped `Layer`. `registerFlows` is the final startup
+phase rather than a layer merged beside the engine, which serializes the
+durability-sensitive order. Shutdown is scope closure; this function installs no
+process or signal handlers.
+
+`registry` is the optional catalog the registration phase reads from. A host that
+discovers its flows rather than listing them passes
+[`@smthrs/registry`](https://registry.smithers.sh/reference/api/)'s `Executable.layerProject({ root })`, and
+builds `registerFlows` from `Executable.layer(...)`. The registry is provided
+beneath registration and above the engine, so every discovered flow is
+registered before the runtime accepts a launch. Omitting it is exactly the
+registry-free behavior.
+
+`make` and `layer` are overloaded on the registry argument rather than defaulting
+it, because a default cannot honor a caller-chosen registry type. Naming a
+registry type without passing its layer does not compile.
+
+### `HostOptions`
+
+Configuration for `layerHost`. Only `filename`, `workspaceRoot`, and `owner` are
+required.
+
+| Field               | Type                                               | Default                            | Meaning                                                                                                                                                                                              |
+| ------------------- | -------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `filename`          | `string`                                           | required                           | SQLite database filename. Its parent directory is created recursively.                                                                                                                               |
+| `workspaceRoot`     | `string`                                           | required                           | The project workspace, resolved once while the host is constructed. Every Jj operation stays bound to that root.                                                                                     |
+| `owner`             | `{ hostId: string }`                               | required                           | Stable identity of this engine host.                                                                                                                                                                 |
+| `isAlive`           | `Ownership.LivenessCheck`                          | `HostLiveness.isAlive({ hostId })` | Whether a recorded owner is still alive. The default answers from this machine's process table and never declares another host's owner dead.                                                         |
+| `rules`             | `GrantStore.MakeOptions["rules"]`                  | none                               | The capability rules this host grants without asking. The grant store is unattended, so a capability no rule allows is denied rather than escalated. Accepts a flat rule list or a list of rulesets. |
+| `signals`           | `ReadonlyArray<NodeJS.Signals>`                    | `["SIGINT", "SIGTERM"]`            | The signals that shut the runtime down. An empty list installs no handler at all.                                                                                                                    |
+| `shutdownTimeoutMs` | `number`                                           | `defaultShutdownTimeoutMs`         | How long a graceful shutdown may take before the host leaves with the signal's own exit code.                                                                                                        |
+| `containment`       | `ContainedSpawner.Options & ProcessReaper.Options` | none                               | Process containment and reaping options for the host spawner.                                                                                                                                        |
+
+Every option is validated and snapshotted at the call. Rule arrays, rule
+objects, signal lists, and containment callbacks are all copied, and relative
+paths are resolved against the working directory as it stood at the call, so
+mutating the options object afterward changes nothing.
+
+### `defaultShutdownTimeoutMs`
+
+```ts
+const defaultShutdownTimeoutMs: 30_000
+```
+
+How long a graceful shutdown may take before the host leaves anyway.
+
+### `maximumShutdownTimeoutMs`
+
+```ts
+const maximumShutdownTimeoutMs: 2_147_483_647
+```
+
+The largest delay Node accepts without truncating it to a one-millisecond timer,
+and the upper bound `shutdownTimeoutMs` is validated against.
+
+### `signalExitCode`
+
+```ts
+const signalExitCode: (signal: NodeJS.Signals) => number
+```
+
+The status a process ended by `signal` exits with, which is 128 plus the
+signal number: `130` for `SIGINT`, `143` for `SIGTERM`. A host that installs a handler
+owes its supervisor the answer the default behavior would have given.
+
+### `layerHost`
+
+```ts
+const layerHost: (
+  options: HostOptions,
+  registerFlows: Layer<A, E, R>,
+  registry?: Layer<A2, E2, R2>
+) => Layer<...>
+```
+
+Provides the whole Node host, storage, kernel, and engine from one call. The
+returned layer has no requirements of its own; the registration and registry
+arguments may still declare theirs.
+
+What it adds over `layer`:
+
+- The complete Node host from [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) with
+  process containment on. A spawned process gets its own process group, is
+  signalled and then killed when its action's scope closes, and is recorded in
+  the `ProcessLedger` so the next incarnation of this host reaps whatever a
+  crash left running.
+- The kernel's guarded `Host` surface over an unattended `GrantStore`, so an
+  action reaches the host through the capability check rather than around it.
+  Engine snapshot bookkeeping uses a distinct private `Jj` service, so it grants
+  no repository authority to the action context.
+- The default `StepBoundary` and the filesystem `WorkspaceSandbox`, the pairing
+  that makes a sealed action's result eligible for the step cache.
+- Signal handling. `SIGINT` or `SIGTERM` closes the runtime scope, releasing
+  every run this host owns for another host to reclaim. A second signal, or a
+  shutdown that outlasts `shutdownTimeoutMs`, leaves with the signal's own exit
+  code instead of waiting on a finalizer that is not coming back.
+
+A program that needs a different host, a different policy, or no signals at all
+composes `layer` itself; nothing here is reachable only through this function.
+
+### `CompositionRootsAreComplete`
+
+```ts
+type CompositionRootsAreComplete
+```
+
+A compile-time assertion type that pins each composition root to its documented
+host boundary: `make` requires `Crypto | FileSystem | Jj | Scope`, `layer`
+requires `Crypto | FileSystem | Jj`, and `layerHost` requires nothing. It exists
+to fail the build if one of those boundaries drifts.
 
 ## SandboxedFlow
 
-`@smthrs/flows/SandboxedFlow` runs a child flow's OWN CODE inside a machine a
-`Sandbox.Provider` provisions. `Sandbox.layerHost` places a body's side effects
-on a machine while its TypeScript keeps running in the engine host; this
-subpath is the tier above it, the 0.x `<Sandbox workflow={child}>` component
-rebuilt on the 1.0 seams. It is Node-only: it bundles with esbuild and it
-starts a guest runtime.
-
 ```ts
 import * as SandboxedFlow from "@smthrs/flows/SandboxedFlow"
-
-const result = yield* SandboxedFlow.execute(Child, { n: 31 }, {
-  provider,
-  session: `child:${executionId}`,
-  entry: new URL("./child.ts", import.meta.url),
-  runtime: "node",
-  collectDiff: true
-})
-// result.output is Child's success value, decoded through Child's own schema.
-// result.diff is the files the guest created, as { path, bytes } data.
 ```
 
-Two 0.x mistakes stay out. `provider` is a `Sandbox.Provider` value passed in;
-there is no string registry, no lookup by name, and no environment-variable
+Runs a child flow's own code inside a machine a `Sandbox.Provider` provisions.
+`Sandbox.layerHost` from [`@smthrs/sandbox`](https://sandbox.smithers.sh/reference/api/) places a body's side
+effects on a machine while its TypeScript keeps running in the engine host; this
+module is the tier above that, where the child's own code executes in the guest.
+It is Node-only: it bundles with esbuild and it starts a guest runtime.
+
+```ts
+const run = Effect.gen(function*() {
+  const result = yield* SandboxedFlow.execute(Child, { n: 31 }, {
+    provider,
+    session: `child:${executionId}`,
+    entry: new URL("./child.ts", import.meta.url),
+    runtime: "node",
+    collectDiff: true
+  })
+  // result.output is Child's success value, decoded through Child's own schema.
+  // result.diff is the files the guest created, as { path, bytes } data.
+  return result
+})
+```
+
+Two 0.x mistakes stay out. `provider` is a `Sandbox.Provider` value passed in:
+there is no string registry, no lookup by name, and no environment variable
 default. And the authoring is `Flow.make` and `Action.make`; there is no
 component to place.
 
-### The runner protocol
+The runner protocol, the guest composition, the image requirements, and the
+session key's exclusivity are on
+[The sandboxed runner protocol](/concepts/runner-protocol/).
 
-| Step    | What happens                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| bundle  | esbuild bundles `entry` (`platform: "node"`, ESM) with the guest runner into one `.smithers-sandbox/bundle.mjs` under the session workdir.                                                                                                                                                                                                                                                                                   |
-| request | `.smithers-sandbox/request.json` holds `{ flow, executionId, payload }`: the flow's tag, the session key as the guest execution id, and the payload encoded through `Schema.toCodecJson` of the flow's payload schema.                                                                                                                                                                                                       |
-| run     | The guest runtime (`node` by default, `bun`, or any command line) runs the bundle with the workdir as its working directory and `SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH` set, the 0.x variable names.                                                                                                                                                                                              |
-| guest   | The runner finds the flow by tag among the entry's exports, decodes the payload, runs the flow under `FlowEngine.layerMemory` with `Interpreter.layer`, `Action.layerImplementations`, the entry's `layer`, and a WebCrypto `Crypto`, and writes `.smithers-sandbox/result.json`: `{ status: "finished", output }` with the success value encoded through the success schema's JSON codec, or `{ status: "failed", error }`. |
-| result  | The host refuses a non-zero exit, a missing or unparseable result, and a result over the limits, then decodes `output` through the same codec. Every refusal is a typed `SandboxedFlowError` whose `code` names it and whose message quotes the guest's stdout and stderr.                                                                                                                                                   |
-| diff    | With `collectDiff`, the host lists the workspace before and after the run and reads back every file the guest created or resized, under the limits.                                                                                                                                                                                                                                                                          |
+### `SandboxedFlowError`
 
-The entry module exports the flow under any name, and may export `layer`, an
-Effect `Layer` providing the implementations of the actions the flow's body
-names and the `Interpreter.layer` registration of any flow it calls as
-`.child()`. The in-memory engine is the guest composition because the child
-completes inside one guest process and the parent journals the whole
-execution as one durable action; an in-guest SQLite journal would put
-`node:sqlite`, the migration ladder, and a `Jj` stub into every bundle without
-changing the durability the parent can observe.
+```ts
+class SandboxedFlowError extends Schema.TaggedError("@smthrs/flows/SandboxedFlowError")({
+  code:
+    | "bundle_failed"
+    | "session_failed"
+    | "guest_failed"
+    | "flow_failed"
+    | "result_unreadable"
+    | "result_invalid"
+    | "result_overflow"
+    | "diff_overflow"
+    | "deadline_exceeded"
+  message: string
+  cause?: unknown
+})
+```
 
-### Image requirements
+The one failure type every refusal in this module raises.
 
-The guest image must contain the runtime the bundle is started with: `node`
-22 or later, or `bun`, on the guest's `PATH`. Nothing is installed. A missing
-runtime is a `guest_failed` failure that names it (`node:22-alpine` has one;
-`alpine` does not). The entry's imports of `effect`, `@smthrs/flow`, and
-`@smthrs/engine` must resolve to the installation the host's `@smthrs/flows`
-uses, which the single-version rule already guarantees in a workspace.
+| `code`              | Meaning                                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------------------------------- |
+| `bundle_failed`     | The entry module could not be bundled.                                                                   |
+| `session_failed`    | The provider could not acquire the machine, or a file or process operation on it failed.                 |
+| `guest_failed`      | The guest runtime exited non-zero, including exit 126 or 127 for a runtime the image does not contain.   |
+| `flow_failed`       | The child flow ran and reported a failure, including an entry that exports no flow of the requested tag. |
+| `result_unreadable` | The guest exited 0 but wrote no result, or wrote one that is not the protocol's JSON.                    |
+| `result_invalid`    | The result's `output` does not decode through the flow's success schema.                                 |
+| `result_overflow`   | The result file exceeds `Limits.resultBytes`.                                                            |
+| `diff_overflow`     | The workspace diff exceeds `Limits.files` or `Limits.diffBytes`.                                         |
+| `deadline_exceeded` | The whole session outlived `ExecuteOptions.timeout`.                                                     |
 
-### Limits
+Messages quote the tail of the guest's stdout and stderr where they help, cut at
+4 KiB and marked when they were cut. A child's typed error arrives as its tag and
+its own fields, not as a stack trace into the bundle.
+
+### `Limits` and `ResolvedLimits`
+
+```ts
+interface Limits {
+  readonly resultBytes?: number | undefined
+  readonly diffBytes?: number | undefined
+  readonly files?: number | undefined
+}
+
+interface ResolvedLimits {
+  readonly resultBytes: number
+  readonly diffBytes: number
+  readonly files: number
+}
+```
+
+Bounds on what comes back from the guest. An omitted or `undefined` bound keeps
+its default.
+
+### `defaultLimits`
+
+```ts
+const defaultLimits: ResolvedLimits
+```
 
 | Bound         | Default | 0.x counterpart         |
 | ------------- | ------- | ----------------------- |
@@ -135,51 +416,140 @@ uses, which the single-version rule already guarantees in a workspace.
 | `diffBytes`   | 100 MiB | the 100 MB bundle total |
 | `files`       | 1,000   | the 1,000 patch files   |
 
-`timeout` is a wall-clock budget for the whole session, ten minutes by
-default, measured on the platform timer so it fires under a frozen test clock.
+### `ExecuteOptions`
 
-### The diff is data, not an applied change
+| Field         | Type               | Default         | Meaning                                                                                                                                                                                                                        |
+| ------------- | ------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `provider`    | `Sandbox.Provider` | required        | The provider that provisions the machine. A value, never a name.                                                                                                                                                               |
+| `session`     | `string`           | required        | The session key the machine is acquired under. An exclusive claim: two live executions with one key share a machine, and the first to finish tears it down under the other. Reusing a key is what resume looks like.           |
+| `entry`       | `URL \| string`    | required        | The module to bundle: a `file:` URL or an absolute path. It must export the flow being executed, under any name, and may export `layer`, an Effect `Layer` providing the implementations of the actions the flow's body names. |
+| `runtime`     | `string`           | `"node"`        | The guest command that runs the bundle. `"bun"` or any command line the guest shell resolves also works; the bundle path is appended, quoted.                                                                                  |
+| `collectDiff` | `boolean`          | `false`         | Whether to collect the files the guest created or resized.                                                                                                                                                                     |
+| `limits`      | `Limits`           | `defaultLimits` | Bounds on the result and the diff.                                                                                                                                                                                             |
+| `timeout`     | `Duration.Input`   | 10 minutes      | The wall-clock budget for the whole session, acquisition through result readback. Measured on the platform timer, so it fires under a frozen test clock too.                                                                   |
 
-`result.diff` is `{ path, bytes }` per created or resized file, path relative
-to the workdir. Change detection compares sizes by path against a snapshot
-taken before the run: a file rewritten in place at its previous size on a
-reattached workspace is the one edit it misses, and a fresh workspace holds
-nothing but the protocol's own files. Applying the diff on the host is the
-caller's; the 0.x `reviewDiffs` gate, which held changed bundles until a
-person accepted them, is the recorded follow-up of this pass and does not
-ship here.
-
-### One durable action for the parent
-
-`action(flow)` declares an `Action` over the child's payload schema whose
-success is `{ output, diff }` and whose error is `SandboxedFlowError`, and
-`toLayer(action, flow, options)` implements it with `execute`. The parent's
-body calls it like any action, the engine journals one attempt, and the
-session key can derive from the parent execution:
+### `DiffEntry`, `Diff`, and `Result`
 
 ```ts
-const RunChild = SandboxedFlow.action(Child)
+interface DiffEntry {
+  /** The path relative to the session workdir. */
+  readonly path: string
+  readonly bytes: Uint8Array
+}
 
-const Parent = Flow.make("app/Parent", {
-  payload: { n: Schema.Number },
-  success: SandboxedFlow.resultSchema(Schema.Number),
-  error: SandboxedFlow.SandboxedFlowError,
-  body: (payload) => RunChild.call(payload)
-})
+interface Result<A> {
+  readonly output: A
+  readonly diff: ReadonlyArray<DiffEntry>
+}
 
-const implementation = SandboxedFlow.toLayer(RunChild, Child, ({ executionId }) => ({
+const DiffEntry: Schema.Struct<{ path: Schema.String; bytes: Schema.Uint8Array }>
+const Diff: Schema.Array<typeof DiffEntry>
+```
+
+One `DiffEntry` per file the guest created or resized, as it stood when the guest
+exited. The schemas are JSON-encodable for the journal: the bytes serialize as
+base64.
+
+### `resultSchema` and `ResultSchema`
+
+```ts
+type ResultSchema<Success extends Schema.Top> = Schema.Struct<{
+  readonly output: Success
+  readonly diff: typeof Diff
+}>
+
+const resultSchema: <Success extends Schema.Top>(success: Success) => ResultSchema<Success>
+```
+
+Builds the `Result` schema over a flow's success schema. This is what a parent
+flow declares as its own `success` when its body is one sandboxed call.
+
+### `execute`
+
+```ts
+const execute: <Tag, Payload, Success, Error, Requires>(
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  payload: Payload["Type"],
+  options: ExecuteOptions
+) => Effect<Result<Success["Type"]>, SandboxedFlowError>
+```
+
+Runs `flow` with `payload` inside a machine `options.provider` provisions. The
+session is acquired for the duration of the call and released when it returns,
+so a normal completion tears the machine down and only a host crash leaves one
+behind for a later execution with the same session key to reattach.
+
+`payload` is the decoded payload, encoded through the flow's payload schema for
+the wire. A value the schema's own JSON codec refuses is a programmer error and
+dies, the same posture `Flow.executionId` takes.
+
+Diff change detection compares sizes by path against a snapshot taken before the
+guest ran. A created file and a file whose size changed are collected; a file
+rewritten in place at its previous size on a reattached workspace is the one edit
+it misses. A fresh workspace holds nothing but the protocol's own files, so every
+file the child writes there is a creation.
+
+### `SandboxedAction` and `action`
+
+```ts
+type SandboxedAction<Tag, Payload, Success> = Action.Declared<
+  Tag,
+  Payload,
+  ResultSchema<Success>,
+  typeof SandboxedFlowError
+>
+
+const action: <Tag, Payload, Success, Error, Requires>(
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  options?: { readonly name?: string | undefined }
+) => SandboxedAction<string, Payload, Success>
+```
+
+Declares the durable action a parent flow calls to run `flow` in a sandbox. Its
+payload schema is the flow's, its success schema is `resultSchema` over the
+flow's, and its error schema is `SandboxedFlowError`. The tag is
+`<flow tag>/sandboxed` unless `options.name` says otherwise.
+
+From the parent's point of view the whole sandboxed execution is one action: the
+engine journals one attempt, applies one retry policy, and replays one recorded
+result.
+
+### `ExecuteContext`
+
+```ts
+interface ExecuteContext<Payload> {
+  readonly payload: Payload
+  readonly executionId: string
+}
+```
+
+What `toLayer` hands an options function: the decoded payload of the call and
+the parent execution's id, which is the natural material for a session key that
+is exclusive per execution and stable across a resume.
+
+### `toLayer`
+
+```ts
+const toLayer: <ActionTag, Tag, Payload, Success, Error, Requires>(
+  declared: SandboxedAction<ActionTag, Payload, Success>,
+  flow: Flow.Flow<Tag, Payload, Success, Error, Requires>,
+  options: ExecuteOptions | ((context: ExecuteContext<Payload["Type"]>) => ExecuteOptions)
+) => Layer<Action.Requirement<ActionTag>, never, FlowRuntime | ...>
+```
+
+Implements an `action` declaration with `execute`. `options` is either the
+placement itself or a function of the call's `ExecuteContext`:
+
+```ts
+SandboxedFlow.toLayer(RunChild, Child, ({ executionId }) => ({
   provider,
   session: `child:${executionId}`,
   entry: new URL("./child.ts", import.meta.url)
 }))
 ```
 
-A session key is an exclusive claim: two live executions with one key share a
-machine and the first to finish tears it down under the other. Reusing a key
-is what resume looks like, because a crash that left the machine behind is
-reattached, workspace included, by the next execution with the same key.
+Compose the returned layer beside `Interpreter.layer(parent)` over one
+`Action.layerImplementations`, exactly as any other action implementation.
 
-<!-- generated:sandboxed-flow -->
-
-Use individual `@smthrs/*` packages when a smaller dependency surface is
-preferable.
+Use individual `@smthrs/*` packages instead of this barrel when a smaller
+dependency surface is preferable.

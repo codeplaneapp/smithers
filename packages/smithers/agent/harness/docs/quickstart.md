@@ -20,10 +20,10 @@ need Node.js 22.19.0 or later.
 Save this as `quickstart.ts`:
 
 ```ts
-import { Effect, Option } from "effect"
 import * as Cell from "@smthrs/harness/Cell"
 import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 import * as Sandbox from "@smthrs/harness/Sandbox"
+import { Effect, Option } from "effect"
 
 // The catalog the realm discloses to cells, as ctx.flows.
 const flows = {

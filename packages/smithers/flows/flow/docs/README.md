@@ -1,47 +1,127 @@
-# Package-owned documentation
+---
+title: "@smthrs/flow"
+description: "The flow authoring model: typed flows whose bodies are plans, actions whose implementations attach as layers, durable waits, retry policy, and the runtime port they all execute against."
+---
 
-Everything the documentation site publishes about `@smthrs/flow` is written
-here or in the package sources, never in `docs/pages`.
+`@smthrs/flow` is the vocabulary you write a durable program in. It defines two
+nouns and the port they run against, and it executes nothing itself.
 
-| Source                                                | What it becomes                                         |
-| ----------------------------------------------------- | ------------------------------------------------------- |
-| `package.json` `description`                          | the frontmatter description of `docs/pages/api/flow.md` |
-| `docs/api.md`                                         | the narrative body of that page                         |
-| JSDoc carrying `@category` on an exported declaration | one row of the generated export tables                  |
-| `src/index.ts` namespace JSDoc                        | the one-line summary above each namespace table         |
-| `docs/testing.md`                                     | the `flow-testing` region of `docs/pages/api-tests.md`  |
+- An **action** is one recorded operation. `Action.make("payments/Charge", ...)`
+  declares its name and schemas; `Charge.toLayer(...)` attaches the code
+  separately. A declaration is pure data that travels anywhere, so the compiler
+  can tell you an implementation is missing before a run reaches it.
+- A **flow** is a durable program. `Flow.make("payments/Checkout", ...)` takes a
+  required pure `body`, and that body names actions rather than calling them.
+  Building the plan a body describes runs nothing, so the whole shape of a round
+  is known before its first step.
+- A **runtime** records, suspends, and resumes. `FlowRuntime` is the service tag
+  this package is written against. [`@smthrs/engine`](/api/engine) implements it,
+  and [`@smthrs/engine-store`](/api/engine-store) makes that implementation
+  durable.
 
-`scripts/docs.mjs` stitches those together. Run it from the repository root:
+The split is what makes a crash survivable. Because the body is a plan and every
+step has a stable key, a re-driven execution rebuilds the same keys, replays the
+results already recorded, and reaches the unsettled step deterministically.
 
-```sh
-node packages/smithers/flows/flow/scripts/docs.mjs          # write the page
-node packages/smithers/flows/flow/scripts/docs.mjs --check  # fail when the committed page has drifted
+## Who uses this package
+
+Workflow authors declare flows and actions with it. Host and engine authors
+implement `FlowRuntime` against it. Nothing here binds to Node: the whole package
+bundles for the browser, and durability comes from whichever runtime you provide.
+
+## Install
+
+```bash
+pnpm add @smthrs/flow
 ```
 
-`PACKAGE.ts` declares the same script as the `docsPages` target, so
-`smithers-build run //packages/smithers/flows/flow:docsPages` writes the page and
-`smithers-build lint //packages/smithers/flows/flow:docsPages` drift-checks it. The recursive
-CI pattern `smithers-build ci '//packages/...'` includes the lint form, so a
-JSDoc edit that changes the published page fails CI until the page is
-regenerated.
+For the peer version of `effect`, the import forms, and the packages a runnable
+composition adds, see [Installation](./installation.md).
 
-Two rules the generator enforces:
+## The smallest complete program
 
-- Generated content carries no em-dash. `pnpm -C apps/site check:docs` forbids one
-  anywhere in the site, so a summary that reaches for one fails the build at
-  the source instead of in review.
-- Only exports carrying `@category` reach a table. An export without one is
-  invisible to readers of the site, which is why `eslint.jsdoc.js` requires the
-  tag on the public surface.
+An action declared without code, a flow whose body names it, and the layer that
+attaches the two:
 
-Fragments projected into shared pages work the way `packages/smithers/flows/crypto/docs`
-projects `contract.md` into `docs/pages/architecture.md`: a region marker in the
-target page and one entry in `docs/Manifest.ts` `snippets`. `docs/testing.md` is the
-one this package publishes today, into `docs/pages/api-tests.md`.
+```ts
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
-That page's inventory table is shared with every package and dprint aligns its
-columns, so the generator does not own the `@smthrs/flow` row. It gates it
-instead: the suite count in the row has to equal the `test/*.test.ts` files on
-disk, and `--check` fails when it does not. The row's prose stays hand-written.
-`docs/pages/architecture.md` has no flow region yet; adding one takes the same
-two steps.
+const Greet = Action.make("examples/Greet", {
+  payload: { name: Schema.String },
+  success: Schema.String
+})
+
+const Greeting = Flow.make("examples/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
+
+export const layer = Layer.mergeAll(
+  Greet.toLayer(({ name }) => Effect.succeed(`Hello, ${name}.`)),
+  Interpreter.layer(Greeting)
+).pipe(Layer.provideMerge(Action.layerImplementations))
+```
+
+`Greet.call(payload)` records one plan node and executes nothing. `Greet.toLayer`
+provides the requirement that call put in the body's type, so a composition that
+forgot an implementation does not compile. Provide an engine and a crypto
+service beneath this layer and `Greeting.execute` runs. The
+[Quickstart](./quickstart.md) does exactly that, end to end.
+
+## The package at a glance
+
+The root entry point exports these namespaces, and each is also importable from
+`@smthrs/flow/<Namespace>`:
+
+| Namespace         | What it is                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `Flow`            | Typed durable flow declarations: `make`, the execution lifecycle, results, and the trampoline outcome vocabulary.               |
+| `Action`          | Durable action declarations, tiers, idempotency identity, file boundaries, cache policy, and the implementation table.          |
+| `Interpreter`     | The drive: `Interpreter.layer(flow)` registers a flow and installs the handler that walks its body.                             |
+| `Graph`           | Plan-time graph building. `Graph.build` turns a body and a payload into nodes, edges, and diagnostics without running anything. |
+| `Sleep`           | The declared `system/sleep` step: a wait for time to pass, as an ordinary keyed plan node.                                      |
+| `WaitFor`         | The declared `system/wait-for` step: a rendezvous with something outside the run.                                               |
+| `Poll`            | The durable poller: attempts as rounds, waits as durable timers.                                                                |
+| `HumanTask`       | Asking a person something: typed answers, re-asking, and a deadline.                                                            |
+| `DurableClock`    | A timer whose completion is persisted, so a wait outlives the process holding it.                                               |
+| `DurableDeferred` | A persisted promise, and the tokens another process completes it through.                                                       |
+| `DurableQueue`    | Sending work to a persisted worker and awaiting its result.                                                                     |
+| `RetryPolicy`     | Retry as plain data, so the next delay is derived from a persisted attempt count.                                               |
+| `StepIdentity`    | The one canonical derivation of ordinal step identity.                                                                          |
+| `FlowRuntime`     | The execution port this package declares and depends on nothing to implement.                                                   |
+
+Every export, with its signature and defaults, is on the
+[export reference](./reference/flow.md). The
+[API reference](./api.md) explains how the pieces fit together.
+
+## Where to go next
+
+- [Installation](./installation.md): requirements, import forms, and the packages
+  a runnable composition adds.
+- [Quickstart](./quickstart.md): declare a flow, run it on the in-memory engine,
+  and read a typed result.
+- Concepts: [flows and actions](./concepts/flows-and-actions.md),
+  [bodies are plans](./concepts/bodies-and-plans.md),
+  [execution identity](./concepts/execution-identity.md),
+  [suspension and replay](./concepts/suspension-and-replay.md),
+  [trampoline rounds](./concepts/trampoline-rounds.md), and
+  [the runtime port](./concepts/the-runtime-port.md).
+- Guides: [implement an action](./guides/implement-an-action.md),
+  [build a body](./guides/build-a-body.md),
+  [retry a failing action](./guides/retry-a-failing-action.md),
+  [wait for a deadline](./guides/wait-for-a-deadline.md),
+  [wait for an external signal](./guides/wait-for-an-external-signal.md),
+  [ask a person](./guides/ask-a-person.md),
+  [poll until ready](./guides/poll-until-ready.md),
+  [run a child flow](./guides/run-a-child-flow.md),
+  [cancel and roll back](./guides/cancel-and-roll-back.md),
+  [queue work to a worker](./guides/queue-work-to-a-worker.md),
+  [inspect the plan](./guides/inspect-the-plan.md), and
+  [reuse a recorded result](./guides/reuse-a-recorded-result.md).
+- [Testing](./testing.md): run a flow in a test without a durable engine.
+- [Troubleshooting](./troubleshooting.md): the refusals this package raises, what
+  causes each one, and what to change.

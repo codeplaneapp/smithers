@@ -74,7 +74,7 @@ observation with them, so two runs over the same inputs produce identical
 observations:
 
 ```ts
-const run = yield* Runner.run(suite, {
+const run = yield * Runner.run(suite, {
   runId: "nightly-2026-01-01",
   at: "2026-01-01T00:00:00.000Z"
 })

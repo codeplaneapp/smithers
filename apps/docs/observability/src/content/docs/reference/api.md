@@ -1,134 +1,646 @@
 ---
 title: "API reference"
-description: "Observability for flows: default OTLP export wiring plus Effect-native logger, metric, and OpenTelemetry SDK layers"
+description: "Every public export of @smthrs/observability: the Otlp exporter layers, endpoint and resource validation, the logger layers, the journal forwarder and its durable schema, the runtime metric handles, and the three OpenTelemetry SDK bridges."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/observability/docs/api.md"
 ---
 
-## Runtime and platform contract
+`@smthrs/observability` exports seven modules from its root entry point, and
+each is also importable from `@smthrs/observability/<Module>`:
 
-The package is tested with `effect@4.0.0-rc.108`. `Otlp`, `Endpoint`, `Logger`,
-`JournalLogger`, `Metric`, `Otel`, and `Resource` are reachable from the root
-barrel. `Otlp.layerFetch` uses Effect's HTTP exporter and the host's global
-`fetch`, so that subpath is browser-safe and does not require an OpenTelemetry
-SDK.
+```ts
+import { Endpoint, JournalLogger, Logger, Metric, Otel, Otlp, Resource } from "@smthrs/observability"
+// or
+import * as Otlp from "@smthrs/observability/Otlp"
+```
 
-The package as a whole is not Effect-only. `Otel` and `Resource` bridge the
-OpenTelemetry API, while `NodeOtel` and `BrowserOtel` use the SDK packages
-declared in this package's manifest. `NodeOtel` resolves Node-only host modules,
-including the bare `async_hooks` specifier that `@opentelemetry/sdk-trace-node`
-reaches through `@opentelemetry/context-async-hooks`, so it does not bundle for
-a browser and must not enter a browser graph. `BrowserOtel` accepts processors
-and readers created by the application and contains no Node module.
+Two more modules are subpath-only, because each binds a host-specific
+OpenTelemetry SDK. `@smthrs/observability/package.json` is exported.
 
-## Resource validation
+| Import                              | Source                                                                                                                          | Platform |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/observability`             | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/src/index.ts)             | any      |
+| `@smthrs/observability/NodeOtel`    | [src/NodeOtel.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/src/NodeOtel.ts)       | Node     |
+| `@smthrs/observability/BrowserOtel` | [src/BrowserOtel.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/src/BrowserOtel.ts) | browser  |
 
-Every public OTEL builder uses the same `Resource.Configuration` decoder.
-Invalid input fails layer acquisition with `InvalidResourceConfiguration`,
-code `invalid_resource_configuration`, and a stable issue path. Rejected
-values are not retained in the error.
+The package is tested with `effect@4.0.0-rc.108`. Layers, services, and schemas
+are Effect constructs: a `Layer` provides services, a scoped layer releases on
+scope close, and a schema decodes to an `Effect`.
 
-- Service name and version are non-empty, well-formed strings of at most 1,024
-  UTF-16 code units.
-- There may be at most 256 resource attributes. Keys are non-empty,
-  well-formed strings of at most 1,024 code units.
-- Values are finite numbers, booleans, strings of at most 65,536 code units,
-  or homogeneous arrays of one of those scalar types.
-- NUL and unpaired UTF-16 surrogates are refused. Valid astral Unicode is
-  preserved.
+## Otlp
 
-## Collector endpoints
+The default exporter. `Otlp` composes `effect/unstable/observability/Otlp` and
+nothing else, so it allocates no OpenTelemetry SDK and never resolves a `node:`
+built-in. All three signals are JSON-serialized and posted below the configured
+base URL at `/v1/logs`, `/v1/metrics`, and `/v1/traces`.
 
-`Otlp.layer`, `Otlp.layerFetch`, and `NodeOtel.layerOtel` decode their collector
-endpoint the same way they decode a resource. It must be an absolute `http:` or
-`https:` URL of at most 2,048 characters carrying no userinfo. Anything else
-fails layer acquisition with `Endpoint.InvalidExporterEndpoint`, code
-`invalid_exporter_endpoint`, and the name of the option it arrived on:
-`baseUrl` for `Otlp`, `endpoint` for `NodeOtel`. The rejected value is not
-retained in the error.
+### Otlp.Options
 
-Acquisition is the only place this can be reported. Export failure is absorbed
-by design, so a layer built against an unusable endpoint would otherwise look
-exactly like a working one and simply never deliver.
+```ts
+interface Options {
+  readonly baseUrl: string
+  readonly serviceName?: string | undefined
+  readonly serviceVersion?: string | undefined
+  readonly attributes?: Record<string, unknown> | undefined
+  readonly headers?: Headers.Input | undefined
+  readonly exportInterval?: Duration.Input | undefined
+  readonly shutdownTimeout?: Duration.Input | undefined
+}
+```
 
-Repeated trailing separators are normalized away, so `http://host//` and
-`http://host` both post to `http://host/v1/traces`.
+- `baseUrl`: the collector base URL, for example `http://localhost:4318`. It
+  must be an absolute `http:` or `https:` URL without credentials and free of
+  spaces and control characters; anything else fails layer acquisition with
+  `Endpoint.InvalidExporterEndpoint` on path `baseUrl`.
+- `serviceName`, `serviceVersion`: the `service.name` and `service.version`
+  resource attributes. Default to `defaultServiceName` and
+  `defaultServiceVersion`.
+- `attributes`: additional resource attributes attached to every exported
+  signal, decoded by `Resource.Attributes`.
+- `headers`: sent with every export request, which is where vendor
+  authentication goes.
+- `exportInterval`: the export cadence applied to all three signals. Omitted,
+  each signal keeps Effect's own default.
+- `shutdownTimeout`: upper bound on the flush performed when the layer's scope
+  closes.
 
-A value carrying a space or any C0 control is refused rather than repaired.
-`new URL` strips leading and trailing padding and removes tab, newline, and
-carriage return from anywhere in its input, so an endpoint read from a file
-with a trailing newline, or pasted with a leading space, parses cleanly while
-the untrimmed original is what the exporter would post to. Trim the value
-before handing it to a builder.
+### Otlp.layer
 
-## Journal forwarding
+```ts
+const layer: (options: Options) => Layer.Layer<
+  never,
+  Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint,
+  HttpClient.HttpClient
+>
+```
 
-`JournalLogger.layerJournalForwarding` snapshots, bounds, and redacts a log
-record synchronously before placing it on an asynchronous queue. Caller
-mutation after the log call cannot change the queued record. The runtime schema
-`TelemetryLog` preserves ordered failure, defect, and interruption reasons.
-The durable journal allocates `sourceSeq`, so rebuilding or concurrently
-running logger layers for one run cannot reuse an identity.
+Installs the OTLP logs, metrics, and traces exporters with the flows resource
+defaults filled in. It requires an Effect `HttpClient`, which is how it stays
+platform-neutral: a Node host may provide Undici, a browser or a test provides
+something else. Both configuration inputs are decoded during acquisition, so
+the returned layer either exports or refuses.
 
-The queue defaults to 256 records and accepts a configured capacity from 1
-through 65,536. A snapshot accepts at most 1 MiB of encoded data, 4,096
-container members, and 64 container edges. Unreadable values become
-`[Unrenderable]`; values past a ceiling become `[Truncated]`; deep values become
-`[Deep]`. Container-shaped fields keep their shape: annotations whose snapshot
-spent the budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than as a
-scalar. A projection that still fails `TelemetryLog` degrades to a total record
-with an empty cause, so every durable `telemetry.log` row decodes with the
-exported schema. Text is bounded in one pass that never cuts a surrogate pair.
-The same journal redaction rules used for durable events run before queue
-admission.
+### Otlp.layerFetch
 
-The callback never blocks. A full queue drops the new record. A journal
-delivery failure is reported as a warning annotated with the run id, and a
-defect raised by a journal implementation is reported the same way and the
-worker keeps draining; interruption still ends it. Each of those three losses
-advances `Metric.droppedLogRecords`. Reporting is safe because the worker is
-forked before the logger it feeds is installed, so its ambient logger set never
-contains that logger. Closing the layer interrupts the worker and can drop
-records queued behind an in-flight write. Invalid run ids or capacities fail
-layer acquisition with `InvalidJournalLoggerOptions`; they are never routed
-through the lossy worker.
+```ts
+const layerFetch: (options: Options) => Layer.Layer<
+  never,
+  Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint
+>
+```
 
-The layer replaces the ambient logger set unless `mergeWithExisting` is `true`.
-It provides `References.MinimumLogLevel` only when `minimumLogLevel` is given,
-so an application that chose a level elsewhere keeps it and Effect's own `Info`
-default applies otherwise.
+`layer` with `FetchHttpClient.layer` already provided, which binds the host's
+global `fetch`. This is the default wiring on Node 22 and the only one that is
+browser-safe by construction.
 
-## Logger layers
+```ts
+const Telemetry = Otlp.layerFetch({ baseUrl: "http://localhost:4318" })
+```
 
-`Logger.layerPrettyDev`, `Logger.layerStructuredJson`, and `Logger.layer` follow
-the same two rules. `mergeWithExisting` defaults to `false`, matching Effect's
-own `Logger.layer`, so installing one of them replaces the ambient logger set.
-`minimumLogLevel` is applied only when the caller names it. `Logger.layerNoop`
-is the exception: silencing is its purpose, so it pins `None` unless the caller
-names another level.
+### Otlp.layerNoop
 
-## Runtime metrics
+```ts
+const layerNoop: Layer.Layer<never>
+```
 
-`Metric` exports three cross-package runtime signals and one of its own.
-`runThroughput` advances only after `RunStore.transitionOwned` commits a
-terminal transition. `activeSeats` is a gauge held for the lifetime of a
-production `Agent.run` stream and released on success, failure, or
-interruption. `quotaParks` advances when the sealed quota decision is first
-executed, not when that decision is replayed after a wake or process restart.
-`droppedLogRecords` counts operational log records lost before durable
-delivery, one per queue overflow, per journal delivery failure, and per defect
-the forwarding worker recovers from.
+Provides nothing and exports nothing. The explicit stand-in for a host with no
+collector, so wiring code switches layers rather than branching.
 
-Step-cache lookup and write counters remain owned by `@smthrs/step-cache`.
-This package does not duplicate those handles.
+### Otlp.defaultServiceName
 
-## OTLP delivery
+```ts
+const defaultServiceName: string // "flows"
+```
 
-`Otlp.layer` requires an Effect `HttpClient`; `layerFetch` supplies the global
-fetch implementation. Both install JSON exporters for `/v1/logs`,
-`/v1/metrics`, and `/v1/traces`. Effect's exporter retries transient failure
-three times, then temporarily disables delivery. Export failure does not fail
-the application effect. `shutdownTimeout` bounds the final flush.
+The `service.name` attribute installed when the caller supplies none.
 
-`NodeOtel.layerOtel` creates OTLP/HTTP trace, metric, and log exporters only
-when its scoped layer is built. `BrowserOtel.layerOtel` and `Otel.layerOtel`
-instead consume application-created providers, processors, and readers.
+### Otlp.defaultServiceVersion
+
+```ts
+const defaultServiceVersion: string // "1.0.0-rc.0"
+```
+
+The `service.version` attribute installed when the caller supplies none. It
+mirrors this package's release version. A published package cannot read its own
+manifest on every runtime it supports, so the version is a literal that the
+release script rewrites and checks for drift.
+
+### Delivery behavior
+
+Effect's exporter retries a transient failure three times, honoring a
+`retry-after` response header when one is present, then disables that exporter
+for 60 seconds and logs a `Debug` record. Export failure never fails the
+application effect and never surfaces as an unhandled rejection. Closing the
+layer's scope performs the final flush, bounded by `shutdownTimeout`.
+
+## Endpoint
+
+Validated collector endpoints, shared by every OTLP builder. The endpoint is
+the field an operator most often gets wrong, and a wrong one is invisible after
+acquisition, so it is decoded before any exporter exists.
+
+### Endpoint.Endpoint
+
+```ts
+const Endpoint: Schema.String.check(...)
+```
+
+Runtime schema for an absolute `http:` or `https:` collector endpoint of at
+most `maximumEndpointLength` characters that carries no credentials, no spaces,
+and no control characters. A value the WHATWG URL parser would repair rather
+than parse as written is refused, because the repaired URL is not the one the
+exporter would post to.
+
+### Endpoint.maximumEndpointLength
+
+```ts
+const maximumEndpointLength: number // 2048
+```
+
+Largest collector endpoint accepted by a builder.
+
+### Endpoint.decode
+
+```ts
+const decode: (endpoint: unknown, path: string) => Effect.Effect<string, InvalidExporterEndpoint>
+```
+
+Decodes one endpoint into its normalized form. `path` names the option the
+endpoint arrived on, so the refusal points at the caller's own field rather
+than at a shared internal name. The rejected value is not retained in the
+error.
+
+### Endpoint.InvalidExporterEndpoint
+
+```ts
+class InvalidExporterEndpoint {
+  readonly code: "invalid_exporter_endpoint"
+  readonly path: string
+  readonly message: string
+}
+```
+
+The stable exporter-endpoint refusal shared by `Otlp.layer`,
+`Otlp.layerFetch` (`path` is `baseUrl`), and `NodeOtel.layerOtel` (`path` is
+`endpoint`).
+
+### Endpoint.normalize
+
+```ts
+const normalize: (endpoint: string) => string
+```
+
+Removes repeated trailing separators, so `http://host//` and `http://host` both
+produce one signal URL.
+
+### Endpoint.signalUrl
+
+```ts
+const signalUrl: (endpoint: string, signal: "traces" | "metrics" | "logs") => string
+```
+
+Builds the OTLP/HTTP URL one signal is posted to below a decoded endpoint:
+`signalUrl("http://host", "traces")` is `http://host/v1/traces`.
+
+## Resource
+
+Explicit, validated OpenTelemetry resource metadata. Every public OTEL builder
+in this package decodes the same `Configuration`, and no builder reads an
+environment variable: every attribute is one the caller passed.
+
+### Resource.Configuration
+
+```ts
+const Configuration: Schema.Struct<{
+  serviceName: Schema.String
+  serviceVersion: Schema.optional<Schema.String>
+  attributes: Schema.optional<typeof Attributes>
+}>
+type Configuration = typeof Configuration.Type
+```
+
+The service identity attached to exported telemetry. `serviceName` and
+`serviceVersion` are non-empty, well formed, and at most
+`maximumIdentityLength` UTF-16 code units.
+
+### Resource.Attributes and Resource.AttributeValue
+
+```ts
+const AttributeValue: Schema.Union<[...]>
+const Attributes: Schema.Record<Schema.String, typeof AttributeValue>
+```
+
+`AttributeValue` accepts a string of at most `maximumAttributeStringLength`
+code units, a finite number, a boolean, or a homogeneous array of one of those
+scalar types. `Attributes` bounds the record at `maximumAttributes` entries
+with non-empty, well formed keys of at most `maximumAttributeKeyLength` code
+units. NUL and unpaired UTF-16 surrogates are refused in keys and in values;
+valid astral Unicode is preserved.
+
+### Resource constants
+
+```ts
+const maximumIdentityLength: number // 1024
+const maximumAttributeKeyLength: number // 1024
+const maximumAttributeStringLength: number // 65536
+const maximumAttributes: number // 256
+```
+
+### Resource.decode
+
+```ts
+const decode: (configuration: unknown) => Effect.Effect<Configuration, InvalidResourceConfiguration>
+```
+
+Decodes one resource configuration without retaining rejected values.
+
+### Resource.decodeSync
+
+```ts
+const decodeSync: (configuration: unknown) => Configuration
+```
+
+The same decoding for the package's pure projection API. Throws
+`InvalidResourceConfiguration` rather than failing an effect.
+
+### Resource.InvalidResourceConfiguration
+
+```ts
+class InvalidResourceConfiguration {
+  readonly code: "invalid_resource_configuration"
+  readonly path: string
+  readonly message: string
+}
+```
+
+The stable resource refusal shared by every layer here. `path` is a dotted
+route into the offending field, such as `serviceName` or `attributes.region`,
+and is the bare `resource` when the whole configuration was malformed.
+
+### Resource.toOpenTelemetryConfiguration
+
+```ts
+const toOpenTelemetryConfiguration: (configuration: Configuration) => {
+  readonly serviceName: string
+  readonly serviceVersion?: string
+  readonly attributes?: Attributes
+}
+```
+
+Projects a decoded resource into the exact optional-property shape the
+OpenTelemetry SDK expects, omitting absent optional fields rather than setting
+them to `undefined`.
+
+### Resource.configToAttributes
+
+```ts
+const configToAttributes: (configuration: Configuration) => Attributes
+```
+
+Converts explicit service metadata into OpenTelemetry resource attributes.
+Invalid metadata throws the same typed `InvalidResourceConfiguration` a layer
+returns during acquisition.
+
+### Resource.layer
+
+```ts
+const layer: (configuration: Configuration) => Layer.Layer<Resource, InvalidResourceConfiguration>
+```
+
+Provides an explicitly validated OpenTelemetry resource, for a composition that
+assembles the rest of the SDK itself.
+
+### Resource.Resource
+
+The OpenTelemetry resource service tag, re-exported from
+`@effect/opentelemetry/Resource`.
+
+## Logger
+
+Effect logger layers. All four follow two rules: `mergeWithExisting` defaults
+to `false`, so installing one replaces the ambient logger set, and
+`minimumLogLevel` is applied only when the caller names it.
+
+### Logger.Options
+
+```ts
+interface Options {
+  readonly minimumLogLevel?: LogLevel.LogLevel | undefined
+  readonly mergeWithExisting?: boolean | undefined
+}
+```
+
+- `minimumLogLevel`: pins `References.MinimumLogLevel` for the whole
+  application. Omitted, the layer leaves that reference alone and Effect's own
+  `Info` default applies.
+- `mergeWithExisting`: keeps the ambient loggers alongside this one. Defaults
+  to `false`.
+
+### Logger.layerPrettyDev
+
+```ts
+const layerPrettyDev: (options?: Options) => Layer.Layer<never>
+```
+
+A human-readable development logger, with colors and mode chosen from the
+output it finds.
+
+### Logger.layerStructuredJson
+
+```ts
+const layerStructuredJson: (options?: Options) => Layer.Layer<never>
+```
+
+One structured JSON object per log line.
+
+### Logger.layerNoop
+
+```ts
+const layerNoop: (options?: Pick<Options, "minimumLogLevel">) => Layer.Layer<never>
+```
+
+Removes the active logger set. This is the one exception to the second rule:
+silencing is its purpose, so it pins `None` unless the caller names another
+level.
+
+### Logger.layer
+
+```ts
+const layer: (logger: Logger.Logger<unknown, unknown>, options?: Options) => Layer.Layer<never>
+```
+
+Installs a caller-supplied logger under the same two rules.
+
+## JournalLogger
+
+Non-blocking forwarding of bounded operational logs to the durable journal. The
+callback snapshots and redacts a bounded record synchronously, then performs
+only queue admission; a forked worker drains the queue into the journal.
+
+### JournalLogger.Options
+
+```ts
+interface Options {
+  readonly runId: JournalEvent.RunId
+  readonly capacity?: number | undefined
+  readonly minimumLogLevel?: LogLevel.LogLevel | undefined
+  readonly mergeWithExisting?: boolean | undefined
+}
+```
+
+- `runId`: the run every forwarded record is attributed to.
+- `capacity`: queue depth, 1 through `maximumCapacity`. Defaults to 256.
+- `minimumLogLevel` and `mergeWithExisting`: as on `Logger.Options`.
+
+### JournalLogger.layerJournalForwarding
+
+```ts
+const layerJournalForwarding: (
+  options: Options
+) => Layer.Layer<never, InvalidJournalLoggerOptions, Journal.Journal>
+```
+
+Installs a bounded, drop-on-overflow forwarder for one explicit run.
+Configuration is decoded before a worker starts, so an invalid run id or
+capacity fails acquisition rather than being routed through the lossy worker.
+
+Each record becomes one journal entry on the lossy channel, with `eventType`
+`telemetry.log`, source `flows/observability/logger`, and a `TelemetryLog`
+payload. The durable journal allocates the per-source sequence, so a rebuilt or
+concurrently running layer for one run cannot reuse an identity.
+
+Overflow, journal delivery failures, and journal defects are telemetry losses
+rather than application failures. Each advances `Metric.droppedLogRecords`; the
+two failure paths also log a warning annotated with the run id, and the worker
+keeps draining. Interruption stays fatal, and closing the scope may drop
+records queued behind an in-flight write.
+
+### JournalLogger.TelemetryLog
+
+```ts
+const TelemetryLog: Schema.Struct<{
+  version: Schema.Literal<1>
+  level: Schema.Literals<["All", "Fatal", "Error", "Warn", "Info", "Debug", "Trace", "None"]>
+  message: Schema.Unknown
+  annotations: Schema.Record<Schema.String, Schema.Unknown>
+  cause: typeof TelemetryCause
+  fiberId: Schema.Int
+  traceId: Schema.optionalKey<Schema.String>
+  spanId: Schema.optionalKey<Schema.String>
+  timestamp: Schema.String
+}>
+type TelemetryLog = typeof TelemetryLog.Type
+```
+
+The durable wire shape of one forwarded log record. `traceId` and `spanId` are
+present only when a span was active. `timestamp` is ISO-8601. Every persisted
+`telemetry.log` payload decodes with this schema: a projection that would not
+degrades to a total record with an empty cause rather than to a payload
+consumers throw on.
+
+### JournalLogger.TelemetryCause
+
+```ts
+const TelemetryCause: Schema.Struct<{
+  version: Schema.Literal<1>
+  reasons: Schema.Array<typeof TelemetryCauseReason>
+}>
+type TelemetryCause = typeof TelemetryCause.Type
+```
+
+A versioned structural Effect cause. Effect stores composed failures as an
+ordered reason list, and the projection preserves that order and each
+discriminator.
+
+### JournalLogger.TelemetryCauseReason
+
+```ts
+const TelemetryCauseReason: Schema.Union<[
+  typeof TelemetryFail,
+  typeof TelemetryDie,
+  typeof TelemetryInterrupt
+]>
+type TelemetryCauseReason = typeof TelemetryCauseReason.Type
+```
+
+One reason in a persisted cause. `TelemetryFail` carries `error`,
+`TelemetryDie` carries `defect`, and `TelemetryInterrupt` carries a
+non-negative `fiberId` or `null`. All three are exported individually.
+
+### JournalLogger.InvalidJournalLoggerOptions
+
+```ts
+class InvalidJournalLoggerOptions {
+  readonly code: "invalid_journal_logger_options"
+  readonly path: string
+  readonly message: string
+}
+```
+
+The stable logger-configuration refusal, raised during layer acquisition.
+
+### JournalLogger constants
+
+```ts
+const maximumCapacity: number // 65536
+const maximumSnapshotBytes: number // 1048576
+const maximumSnapshotMembers: number // 4096
+const maximumSnapshotDepth: number // 64
+const unrenderableMarker: string // "[Unrenderable]"
+const truncatedMarker: string // "[Truncated]"
+```
+
+A snapshot admits at most `maximumSnapshotBytes` of encoded data,
+`maximumSnapshotMembers` container members, and `maximumSnapshotDepth`
+container edges. Unreadable values become `unrenderableMarker`, values past a
+ceiling become `truncatedMarker`, and deeper values become the journal's
+`[Deep]` marker. Container-shaped fields keep their shape, so annotations that
+spent the whole budget arrive as `{ "[Truncated]": "[Truncated]" }` rather than
+as a scalar. Text is bounded in one pass that never cuts a surrogate pair, and
+the journal's own redaction rules run before queue admission.
+
+## Metric
+
+The runtime signals that cross package boundaries. Producers live in the
+packages that know when to advance them; this module owns only the identifiers
+and the handles.
+
+### Metric handles
+
+```ts
+const runThroughput: Metric.Counter // "flows/run/throughput"
+const activeSeats: Metric.Gauge // "flows/seat/active"
+const quotaParks: Metric.Counter // "flows/quota/park"
+const droppedLogRecords: Metric.Counter // "flows/observability/log/dropped"
+```
+
+- `runThroughput` advances after a terminal run transition commits in
+  [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/).
+- `activeSeats` is held for the lifetime of a production `Agent.run` stream in
+  [`@smthrs/agent`](https://agent.smithers.sh/reference/api/) and released on success, failure, or
+  interruption.
+- `quotaParks` advances when a sealed quota decision is first executed, not
+  when it is replayed after a wake or a process restart.
+- `droppedLogRecords` advances once per record lost by `JournalLogger`.
+
+Step-cache lookup and write counters remain owned by
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/); this package does not duplicate those
+handles.
+
+### Metric.registry
+
+```ts
+const registry: {
+  readonly runThroughput: typeof runThroughput
+  readonly activeSeats: typeof activeSeats
+  readonly quotaParks: typeof quotaParks
+  readonly droppedLogRecords: typeof droppedLogRecords
+}
+```
+
+All four handles as one object, for a host that enumerates them. The four
+series names are the dashboard contract and are pinned by a test.
+
+## Otel
+
+Provider-neutral composition for OpenTelemetry providers the application
+already built. This module allocates no exporter.
+
+### Otel.Options
+
+```ts
+interface Options {
+  readonly resource: Resource.Configuration
+  readonly tracerProvider?: Api.TracerProvider | undefined
+  readonly loggerProvider?: LoggerProvider | undefined
+  readonly metricReader?: MetricReader | ReadonlyArray<MetricReader> | undefined
+  readonly loggerMergeWithExisting?: boolean | undefined
+  readonly metricTemporality?: OtelMetrics.TemporalityPreference | undefined
+}
+```
+
+`metricTemporality` is `"cumulative"` or `"delta"`.
+
+### Otel.layerOtel
+
+```ts
+const layerOtel: (options: Options) => Layer.Layer<never, Resource.InvalidResourceConfiguration>
+```
+
+Bridges Effect's tracer, logger, and metrics onto the supplied providers and
+readers, over the validated resource. Each bridge is installed only when its
+provider is supplied, and an empty `metricReader` array is treated as no
+metrics at all.
+
+### Otel.layerNoop
+
+```ts
+const layerNoop: Layer.Layer<never>
+```
+
+A no-op OTEL layer, for callers that want an explicit optional slot.
+
+## NodeOtel
+
+Node-only OTLP/HTTP OpenTelemetry SDK setup. Import it from
+`@smthrs/observability/NodeOtel`; it is not re-exported from the root, because
+it resolves Node-only host modules and would break the root's browser bundle.
+
+### NodeOtel.Options
+
+```ts
+interface Options {
+  readonly endpoint: string
+  readonly resource: Resource.Configuration
+  readonly shutdownTimeout?: Duration.Input | undefined
+  readonly exportIntervalMillis?: number | undefined
+}
+```
+
+`endpoint` is decoded exactly as `Otlp.Options.baseUrl` is, and a refusal names
+the path `endpoint`.
+
+### NodeOtel.layerOtel
+
+```ts
+const layerOtel: (options: Options) => Layer.Layer<
+  never,
+  Resource.InvalidResourceConfiguration | Endpoint.InvalidExporterEndpoint
+>
+```
+
+Builds a scoped Node OTLP/HTTP layer for all three signals: a
+`BatchSpanProcessor`, a `BatchLogRecordProcessor`, and a
+`PeriodicExportingMetricReader`, each behind its own OTLP exporter. Exporter
+objects are created only when the layer is built. Closing the scope
+force-flushes both batch processors and collects the metric reader once, so
+release rather than the interval is the deterministic flush.
+
+## BrowserOtel
+
+Browser OpenTelemetry SDK setup with explicitly injected processors. Import it
+from `@smthrs/observability/BrowserOtel`.
+
+### BrowserOtel.Options
+
+```ts
+interface Options {
+  readonly resource: Resource.Configuration
+  readonly spanProcessor?: SpanProcessor | ReadonlyArray<SpanProcessor> | undefined
+  readonly logRecordProcessor?: LogRecordProcessor | ReadonlyArray<LogRecordProcessor> | undefined
+  readonly metricReader?: MetricReader | ReadonlyArray<MetricReader> | undefined
+  readonly loggerMergeWithExisting?: boolean | undefined
+}
+```
+
+Processors and readers are created by the caller, which keeps this module free
+of Node imports and free of browser exporter policy.
+
+### BrowserOtel.layerOtel
+
+```ts
+const layerOtel: (options: Options) => Layer.Layer<never, Resource.InvalidResourceConfiguration>
+```
+
+Builds a scoped browser OpenTelemetry layer over the validated resource. A
+layer with no processors at all still builds; it provides the resource and
+bridges nothing.

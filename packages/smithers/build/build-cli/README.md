@@ -9,7 +9,7 @@ they never contain per-command scripts.
 
 ```sh
 smithers-build install --workspace /path/to/smithers
-smithers-build build //packages/...
+smithers-build ci //packages/...
 smithers-build test //packages/smithers/flows/flow:test
 smithers-build lint //packages/smithers/flows/flow:lint
 smithers-build query 'deps(//packages/smithers/flows/flow:lib)'
@@ -21,26 +21,37 @@ Verbs execute by default. `--plan` prints the inert plan instead, `--no-cache`
 bypasses cache reads, and `--jobs` bounds concurrency. `install` runs the
 install Flow under the declared package manager.
 
-Two authoring surfaces are supported and discovery picks between them: a
-workspace of `PACKAGE.ts` modules, or the routed `WORKSPACE.ts` plus one
-`PACKAGE.ts` per package. Both go through the same planner, the same cache, and
-the same execution boundary.
+The CLI loads `.smithers/WORKSPACE.ts` (or a root `WORKSPACE.ts`) and every
+`PACKAGE.ts` in the tree. The workspace declaration names the shared services:
+runtimes, package managers, toolchains, sandbox mechanisms, and caching. Each
+package exports exactly one `S.Package({ targets })`, selected through
+Bazel-style labels.
 
 This package is private. It is the implementation behind the `smithers-build`
 binary, not a library anyone installs.
 
 ## Documentation
 
-Prose lives beside the code it describes, in [`docs/`](./docs/README.md):
+The full site is at https://build-cli.smithers.sh, generated from
+[`docs/`](./docs/README.md):
 
-- [Commands](./docs/cli.md) — every command, argument, and option.
-- [Build system](./docs/build-system.md) — `WORKSPACE.ts` and `PACKAGE.ts`
-  discovery, the verbs it supports, and what it refuses.
-- [Caching](./docs/caching.md) — the cache directory, the content-addressed
-  store, and the remote cache's endpoint, credentials, and trust domain.
-- [Execution](./docs/execution.md) — write-set confinement and rollback,
-  sandboxing and where it is enforced, services, and the resource ceilings.
+- [Installation](./docs/installation.md) and
+  [Quickstart](./docs/quickstart.md).
+- [Commands](./docs/cli.md): every command, argument, option, exit code, and
+  environment variable.
+- Concepts: [the invocation pipeline](./docs/concepts/invocation.md),
+  [workspace discovery](./docs/concepts/discovery.md),
+  [output and renderers](./docs/concepts/output.md),
+  [caching](./docs/concepts/caching.md), and
+  [target execution](./docs/concepts/execution.md).
+- Guides: [selecting targets](./docs/guides/select-targets.md),
+  [inspecting a workspace](./docs/guides/inspect-a-workspace.md),
+  [remote caching](./docs/guides/share-a-remote-cache.md),
+  [scaffolding an app](./docs/guides/scaffold-an-app.md), and
+  [embedding the CLI](./docs/guides/embed-the-cli.md).
+- [Troubleshooting](./docs/troubleshooting.md) and the
+  [API reference](./docs/api.md).
 
-The API reference is the JSDoc on the exported declarations in `src/`; the
-package's lint configuration requires a description, a `@category`, and a
-`@since` on each one.
+The API reference is derived from the JSDoc on the exported declarations in
+`src/`; the package's lint configuration requires a description, a
+`@category`, and a `@since` on each one.

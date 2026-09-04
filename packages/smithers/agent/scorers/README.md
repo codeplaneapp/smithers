@@ -6,11 +6,15 @@ Flow-native scoring, deterministic sampling, durable observations, and asynchron
 
 The package is workspace-private at `0.1.0`, versioned independently of the published `1.0.0-rc.0` names, and is not published to npm. Its one consumer is `@smthrs/evals`, which supplies the evaluator this package deliberately does not: `evals` filters bindings by target, calls `Sampling.decide` per candidate step, and hands the selected work to a `Runner`.
 
-The contract lives beside the code:
+The site at [scorers.smithers.sh](https://scorers.smithers.sh) is built from `docs/`, which is where the contract lives:
 
+- [`docs/README.md`](./docs/README.md): what the package is and where to start.
+- [`docs/installation.md`](./docs/installation.md) and [`docs/quickstart.md`](./docs/quickstart.md): the workspace dependency, and one end-to-end scoring run.
 - [`docs/api.md`](./docs/api.md): the public surface, the failure vocabulary, sampling, and the runner rules.
 - [`docs/durability.md`](./docs/durability.md): what the store persists, what it refuses, idempotency, paging, and retention.
-- [`docs/exports.md`](./docs/exports.md): generated categorized members from source JSDoc.
+- [`docs/exports.md`](./docs/exports.md): the categorized member index, drift-checked against source JSDoc.
+- [`docs/concepts/`](./docs/concepts/scorer-identity.md) and [`docs/guides/`](./docs/guides/declare-a-scorer.md): the model behind the package, and one page per task.
+- [`docs/troubleshooting.md`](./docs/troubleshooting.md): each failure code, its cause, and the fix.
 
 ```ts
 import { Runner, RunnerLive, Scorer, ScoreStore } from "@smthrs/scorers"

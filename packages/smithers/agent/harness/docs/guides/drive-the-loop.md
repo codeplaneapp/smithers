@@ -20,8 +20,8 @@ custom host or implementing the engine port yourself.
 `CellTurn.make` constructs the serializable controller state:
 
 ```ts
-import { Option } from "effect"
 import * as CellTurn from "@smthrs/harness/CellTurn"
+import { Option } from "effect"
 
 const state = CellTurn.make({
   session: "session-1",
@@ -38,18 +38,18 @@ The required declarations are `session`, `seat`, `modelParams`, `layers`,
 `capabilityEnvelope`, `placement`, and `contextWindow`. Everything else is a
 budget with a default; every budget's zero disarms it:
 
-| Option | Default | What it bounds |
-| --- | --- | --- |
-| `maxFrames` | 100 (`CellTurn.defaultMaxFrames`) | Frames one admitted task may spend. |
-| `readOnlyCap` | 0 | Consecutive read-only frames before the controller intervenes; at twice the cap the run stops. A run that is only meant to read omits it. |
-| `modelCallMs` | 300,000 (`CellTurn.defaultModelCallMs`) | Wall-clock one model call may spend. |
-| `repeatCap` | 4 (`CellTurn.defaultRepeatFrames`) | Consecutive repeat-observation frames. |
-| `narrowingCap` | 1 (`CellTurn.defaultNarrowingDemands`) | Completions bounced for narrowed evidence. |
-| `unmovedCap` | 1 (`CellTurn.defaultUnmovedDemands`) | Completions bounced for an unmoved tree. |
-| `unresolvedCap` | 1 (`CellTurn.defaultUnresolvedDemands`) | Completions bounced for a displaced failing check. |
-| `revalidations` | 1 (`CellTurn.defaultRevalidations`) | In-frame answers to an unparseable cell. |
-| `checkpointCap` | 8 (`CellTurn.defaultMaxCheckpoints`) | Trees one run may pin with `ctx.checkpoint()`. |
-| `approvalChannel` | `false` | Whether a human can answer this run; `false` refuses a `park` and answers it in-frame. |
+| Option            | Default                                 | What it bounds                                                                                                                            |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxFrames`       | 100 (`CellTurn.defaultMaxFrames`)       | Frames one admitted task may spend.                                                                                                       |
+| `readOnlyCap`     | 0                                       | Consecutive read-only frames before the controller intervenes; at twice the cap the run stops. A run that is only meant to read omits it. |
+| `modelCallMs`     | 300,000 (`CellTurn.defaultModelCallMs`) | Wall-clock one model call may spend.                                                                                                      |
+| `repeatCap`       | 4 (`CellTurn.defaultRepeatFrames`)      | Consecutive repeat-observation frames.                                                                                                    |
+| `narrowingCap`    | 1 (`CellTurn.defaultNarrowingDemands`)  | Completions bounced for narrowed evidence.                                                                                                |
+| `unmovedCap`      | 1 (`CellTurn.defaultUnmovedDemands`)    | Completions bounced for an unmoved tree.                                                                                                  |
+| `unresolvedCap`   | 1 (`CellTurn.defaultUnresolvedDemands`) | Completions bounced for a displaced failing check.                                                                                        |
+| `revalidations`   | 1 (`CellTurn.defaultRevalidations`)     | In-frame answers to an unparseable cell.                                                                                                  |
+| `checkpointCap`   | 8 (`CellTurn.defaultMaxCheckpoints`)    | Trees one run may pin with `ctx.checkpoint()`.                                                                                            |
+| `approvalChannel` | `false`                                 | Whether a human can answer this run; `false` refuses a `park` and answers it in-frame.                                                    |
 
 The state is a schema class: it serializes into the journal, and a resumed run
 rebuilds from it.
@@ -109,15 +109,15 @@ the service from an implementation; `EngineLike.makeNoop(overrides)` builds a
 stub whose operations fail as unavailable, with `observe` and `capture`
 answering `Option.none()` instead, for tests and partial hosts. The members:
 
-| Member | Signature | Contract |
-| --- | --- | --- |
-| `sealStep` | `(step: SealedModelStep) => Stream<ModelEvent, ModelFailure \| HarnessError>` | Runs one sealed model step. The implementation resolves the route, prepares the request, and digests the credential-free prepared request with the declared key material before executing; credentials sign on after the digest and never enter it. |
-| `call` | `(call: Cell.Call) => Effect<Cell.CallResult, HarnessError>` | Runs one flow call from inside a cell as a keyed, journaled activity at the tier the flow declares, keyed by `call.identity` so a settled boundary replays instead of re-running. A flow failure settles as a `failure` result; a permission requirement, an abort, or an engine failure travels in the error channel. |
-| `record` | `<A>(boundary: RecordBoundary<A>) => Effect<A, HarnessError>` | Journals one nondeterministic controller read under the key `(name, identity)` together, and serves the recorded value to any re-execution of the same frame. Keying on `identity` alone serves one frame's opening measurement as its closing one. |
-| `observe` | `Effect<Option<Observation>, HarnessError>` | Measures the workspace as it stands. `Option.none()` is the honest answer for a host with nothing to measure, and the controller falls back to declared writes. |
-| `capture` | `(request: CaptureRequest) => Effect<Option<Snapshot>, HarnessError>` | Pins the workspace under the caller's id. `Option.none()` answers a host with no store, and the cell gets a catchable `checkpoint_unavailable`. |
-| `suspend` | `(reason: SuspendReason) => Effect<never, HarnessError>` | Parks the current engine frame durably. |
-| `splice` | `(batch: Plan.Batch) => Stream<Plan.SpliceEvent, HarnessError>` | Turns a batch of child plans into running children and streams their progress back. The harness translates and never schedules. |
+| Member     | Signature                                                                     | Contract                                                                                                                                                                                                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sealStep` | `(step: SealedModelStep) => Stream<ModelEvent, ModelFailure \| HarnessError>` | Runs one sealed model step. The implementation resolves the route, prepares the request, and digests the credential-free prepared request with the declared key material before executing; credentials sign on after the digest and never enter it.                                                                    |
+| `call`     | `(call: Cell.Call) => Effect<Cell.CallResult, HarnessError>`                  | Runs one flow call from inside a cell as a keyed, journaled activity at the tier the flow declares, keyed by `call.identity` so a settled boundary replays instead of re-running. A flow failure settles as a `failure` result; a permission requirement, an abort, or an engine failure travels in the error channel. |
+| `record`   | `<A>(boundary: RecordBoundary<A>) => Effect<A, HarnessError>`                 | Journals one nondeterministic controller read under the key `(name, identity)` together, and serves the recorded value to any re-execution of the same frame. Keying on `identity` alone serves one frame's opening measurement as its closing one.                                                                    |
+| `observe`  | `Effect<Option<Observation>, HarnessError>`                                   | Measures the workspace as it stands. `Option.none()` is the honest answer for a host with nothing to measure, and the controller falls back to declared writes.                                                                                                                                                        |
+| `capture`  | `(request: CaptureRequest) => Effect<Option<Snapshot>, HarnessError>`         | Pins the workspace under the caller's id. `Option.none()` answers a host with no store, and the cell gets a catchable `checkpoint_unavailable`.                                                                                                                                                                        |
+| `suspend`  | `(reason: SuspendReason) => Effect<never, HarnessError>`                      | Parks the current engine frame durably.                                                                                                                                                                                                                                                                                |
+| `splice`   | `(batch: Plan.Batch) => Stream<Plan.SpliceEvent, HarnessError>`               | Turns a batch of child plans into running children and streams their progress back. The harness translates and never schedules.                                                                                                                                                                                        |
 
 Two members carry the loop's determinism, so their contracts bear repeating:
 

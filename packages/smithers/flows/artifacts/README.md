@@ -5,10 +5,42 @@
 The content-addressed artifact store: bytes addressed by their own SHA-256
 digest.
 
-This is the byte half of the cache. [`@smthrs/step-cache`](https://smithers.sh/docs/reference/api/step-cache)
+This is the byte half of the cache. [`@smthrs/step-cache`](https://step-cache.smithers.sh)
 maps a step key to a recorded result; large outputs are referenced **by digest**
 and live here. The package depends on `effect` and `@smthrs/crypto`, owns no
 SQL, and bundles for the browser.
+
+```bash
+pnpm add @smthrs/artifacts@next
+```
+
+```ts
+import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as Effect from "effect/Effect"
+
+const program = Effect.gen(function*() {
+  const store = yield* ArtifactStore.ArtifactStore
+  const digest = yield* store.put(new TextEncoder().encode("dist/server.js"))
+  return yield* store.get(digest)
+})
+```
+
+## Documentation
+
+The full documentation site is [artifacts.smithers.sh](https://artifacts.smithers.sh).
+Start with the [quickstart](https://artifacts.smithers.sh/quickstart/), then
+[content addressing](https://artifacts.smithers.sh/concepts/content-addressing/),
+[the three tiers](https://artifacts.smithers.sh/concepts/tiers/), and
+[coordination between processes](https://artifacts.smithers.sh/concepts/coordination/).
+The task guides cover
+[sharing artifacts across machines](https://artifacts.smithers.sh/guides/share-artifacts-across-machines/),
+[serving the artifact protocol](https://artifacts.smithers.sh/guides/serve-the-artifact-protocol/),
+[reclaiming disk space](https://artifacts.smithers.sh/guides/reclaim-disk-space/),
+[fencing a backup](https://artifacts.smithers.sh/guides/fence-a-backup/), and
+[testing](https://artifacts.smithers.sh/guides/test-against-an-artifact-store/).
+Every export is on the [API reference](https://artifacts.smithers.sh/reference/api/),
+and every typed failure is in
+[troubleshooting](https://artifacts.smithers.sh/troubleshooting/).
 
 ## Public API
 
@@ -16,7 +48,7 @@ SQL, and bundles for the browser.
 | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `ArtifactStore.ArtifactStore`                                              | The service tag. Identity `@smthrs/artifacts/ArtifactStore`                                                                             |
 | `ArtifactStore.Service`                                                    | `put(bytes)`, `get(digest)`, `has(digest)`, `findMissing(digests)`                                                                      |
-| `ArtifactStore.ArtifactMissing`                                            | The typed miss — the answer a read-through composition acts on                                                                          |
+| `ArtifactStore.ArtifactMissing`                                            | The typed miss: the answer a read-through composition acts on                                                                           |
 | `ArtifactStore.ArtifactCorruption`                                         | Bytes at an address no longer hash to it                                                                                                |
 | `ArtifactStore.ArtifactStoreError`                                         | Typed digest, configuration, host, crypto, and transport failures                                                                       |
 | `ArtifactStore.Digest`                                                     | Schema and branded type for exactly 64 lowercase hexadecimal SHA-256 characters                                                         |
@@ -30,7 +62,7 @@ SQL, and bundles for the browser.
 | `ArtifactStore.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
 | `ArtifactBackupLease.withLease`, `.unlessActive`                           | Cross-process exclusion between a filesystem backup and sweep deletion                                                                  |
 | `ArtifactSweep.ArtifactSweep`                                              | The sweep tag. Identity `@smthrs/artifacts/ArtifactSweep`                                                                               |
-| `ArtifactSweep.Service`                                                    | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })` — host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc` |
+| `ArtifactSweep.Service`                                                    | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })`: host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc`  |
 | `ArtifactSweep.makeFileSystem`, `.layerFileSystem`                         | Over the same objects directory the store publishes into                                                                                |
 | `ArtifactSweep.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
 | `RemoteArtifacts.make`, `.layer`                                           | The shared tier over Effect's `HttpClient` tag, with `chunkBytes` for resumable `Content-Range` uploads                                 |
@@ -101,7 +133,7 @@ const layer = CombinedArtifacts.layer({
 ## Prior art
 
 The contract's ergonomics follow Effect's own `KeyValueStore`
-(`effect/unstable/persistence/KeyValueStore`) — one small set of total
+(`effect/unstable/persistence/KeyValueStore`): one small set of total
 operations over one address space, so memory, filesystem, and network
 implementations are the same shape.
 
@@ -114,8 +146,8 @@ Everything else follows Bazel's remote-cache Java classes:
 | [`http/HttpCacheClient.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/http/HttpCacheClient.java)               | The wire protocol: CAS blobs under `/cas/base16-key`, `PUT` to upload, `GET` to download                                          |
 | [`CombinedCache.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java) (230-303)                   | Local first, remote second, write back what the remote returned                                                                   |
 
-**Deviations.** Bazel's HTTP client has no `findMissingDigests` at all — it
-answers "everything is missing" and re-uploads — so `POST /cas/findMissing` and
+**Deviations.** Bazel's HTTP client has no `findMissingDigests` at all: it
+answers "everything is missing" and re-uploads, so `POST /cas/findMissing` and
 `HEAD /cas/{digest}` are ours. Bazel's disk `findMissingDigests` likewise
 returns its whole input; ours probes for real, because our combined store uses
 the local answer to decide what to fetch. And Bazel threads a per-request
@@ -130,10 +162,10 @@ Reclaiming published artifacts is an explicit operation, never a side effect of
 a store call. The `.tmp-*` sweep in `layerFileSystem` reclaims crash orphans
 only; `ArtifactSweep` is the deletion surface, and the mark phase that decides
 what is live belongs to `@smthrs/engine-store`'s
-[`ArtifactGc`](https://smithers.sh/artifact-gc).
+[`ArtifactGc`](https://engine-store.smithers.sh/reference/api/).
 
 Chunked and resumable transfer is `RemoteArtifacts.Options.chunkBytes`, and the
 `RemoteOutputChecker` analogue is `RemoteArtifacts.Options.downloadPolicy`
 (`all` | `toplevel` | `minimal`), honored by `CombinedArtifacts.get` and by
-[`@smthrs/engine-store`](https://smithers.sh/docs/reference/api/engine-store)'s
+[`@smthrs/engine-store`](https://engine-store.smithers.sh)'s
 `ArtifactSync.hydrate`.

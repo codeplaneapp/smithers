@@ -16,8 +16,8 @@ inconclusive ones: a baseline records what was measured, and an inconclusive
 observation measured nothing.
 
 ```ts
-const baseline = yield* Baseline.fromRun(run)
-yield* Effect.promise(() => writeFile("baseline.json", Baseline.write(baseline)))
+const baseline = yield * Baseline.fromRun(run)
+yield * Effect.promise(() => writeFile("baseline.json", Baseline.write(baseline)))
 ```
 
 `Baseline.write` serializes canonical JSON: object keys sorted recursively,
@@ -32,7 +32,7 @@ ratifies the absence of a measurement:
 ```ts
 const failures = run.cases.filter((result) => result.error !== undefined)
 if (failures.length > 0) {
-  return yield* Effect.fail(
+  return yield * Effect.fail(
     new EvalError.EvalError({
       code: "executor",
       message: `Refusing to record a baseline: ${failures.length} case(s) did not finish`

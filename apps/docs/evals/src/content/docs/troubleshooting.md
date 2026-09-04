@@ -12,20 +12,20 @@ written for a CI log, and usually a `path` locating the offending value. The
 
 The suite declaration is wrong. The suite author fixes it.
 
-| Symptom in the message | Path | Cause |
-| --- | --- | --- |
-| `Suite name must not be empty`, or names a control character | `name` | The suite name is blank or holds a character below U+0020, or U+007F |
-| `Suite must contain at least one case` | `cases` | The `cases` array is empty |
-| `Suite must contain at most 10000 cases` | `cases` | The suite exceeds `Suite.limits.cases` |
-| `Suite concurrency must be a positive safe integer` | `concurrency` | Zero, negative, fractional, or `NaN` concurrency |
-| `Suite concurrency must be at most 1024` | `concurrency` | The suite exceeds `Suite.limits.concurrency` |
-| `Suite case name must not be empty`, or names a control character | `cases[N].name` | A case name is blank or holds a control character |
-| `Duplicate suite case` | `cases[N].name` | Two cases share a name |
-| `Suite data must be structured-cloneable` | `cases[N].input`, `cases[N].expected`, `bindings[N].sampling`, `bindings[N].groundTruth`, `bindings[N].context` | The value holds a function, a class instance, or anything else `structuredClone` rejects |
-| `JSON Lines fixture must be at most 8388608 characters` | `text` | The fixture exceeds `Suite.limits.fixtureLength`; it was rejected before parsing |
-| `Invalid JSON on line N` | `line[N]` | The 1-based fixture line is not JSON |
-| `Invalid suite case on line N` | `line[N]` | The fixture line is not a `{ name, input, expected? }` case |
-| `Invalid sampling policy for scorer` | `bindings[N].sampling` | The scorers package cannot decide the policy; see the [scorers API](https://scorers.smithers.sh/reference/api/) |
+| Symptom in the message                                            | Path                                                                                                            | Cause                                                                                    |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Suite name must not be empty`, or names a control character      | `name`                                                                                                          | The suite name is blank or holds a character below U+0020, or U+007F                     |
+| `Suite must contain at least one case`                            | `cases`                                                                                                         | The `cases` array is empty                                                               |
+| `Suite must contain at most 10000 cases`                          | `cases`                                                                                                         | The suite exceeds `Suite.limits.cases`                                                   |
+| `Suite concurrency must be a positive safe integer`               | `concurrency`                                                                                                   | Zero, negative, fractional, or `NaN` concurrency                                         |
+| `Suite concurrency must be at most 1024`                          | `concurrency`                                                                                                   | The suite exceeds `Suite.limits.concurrency`                                             |
+| `Suite case name must not be empty`, or names a control character | `cases[N].name`                                                                                                 | A case name is blank or holds a control character                                        |
+| `Duplicate suite case`                                            | `cases[N].name`                                                                                                 | Two cases share a name                                                                   |
+| `Suite data must be structured-cloneable`                         | `cases[N].input`, `cases[N].expected`, `bindings[N].sampling`, `bindings[N].groundTruth`, `bindings[N].context` | The value holds a function, a class instance, or anything else `structuredClone` rejects |
+| `JSON Lines fixture must be at most 8388608 characters`           | `text`                                                                                                          | The fixture exceeds `Suite.limits.fixtureLength`; it was rejected before parsing         |
+| `Invalid JSON on line N`                                          | `line[N]`                                                                                                       | The 1-based fixture line is not JSON                                                     |
+| `Invalid suite case on line N`                                    | `line[N]`                                                                                                       | The fixture line is not a `{ name, input, expected? }` case                              |
+| `Invalid sampling policy for scorer`                              | `bindings[N].sampling`                                                                                          | The scorers package cannot decide the policy; see the [scorers API](https://scorers.smithers.sh/reference/api/)        |
 
 ## invalid_run_options
 

@@ -15,7 +15,7 @@ into an exit code.
 and reports what moved:
 
 ```ts
-const comparison = yield* Regression.compare(baseline, run, {
+const comparison = yield * Regression.compare(baseline, run, {
   absolute: 0.05,
   relative: 0.1
 })
@@ -49,7 +49,7 @@ secrets must not print the report where the log is readable.
 [@smthrs/testing](/api/testing):
 
 ```ts
-const verdict = yield* Gate.check(comparison, {
+const verdict = yield * Gate.check(comparison, {
   mean: 0.9,
   min: 0.5,
   perCase: { "adds numbers": 0.8 }
@@ -72,7 +72,7 @@ a `ScoreGateError`, code `invalid_threshold`. Catch it and report it rather
 than crashing the CI job:
 
 ```ts
-const graded = yield* Gate.check(comparison, { mean: 1 }).pipe(
+const graded = yield * Gate.check(comparison, { mean: 1 }).pipe(
   Effect.map(Gate.ciGrade),
   Effect.catch((error) =>
     Effect.succeed({
@@ -87,11 +87,11 @@ const graded = yield* Gate.check(comparison, { mean: 1 }).pipe(
 
 `Gate.ciGrade` maps the verdict to the shared CI convention:
 
-| Exit code | Meaning |
-| --- | --- |
-| 0 | Passed: every gate met, nothing unresolved |
-| 1 | Failed: a threshold breach, a regression, or nondeterminism |
-| 5 | Inconclusive: the gate could not decide, or passed with unresolved observations |
+| Exit code | Meaning                                                                         |
+| --------- | ------------------------------------------------------------------------------- |
+| 0         | Passed: every gate met, nothing unresolved                                      |
+| 1         | Failed: a threshold breach, a regression, or nondeterminism                     |
+| 5         | Inconclusive: the gate could not decide, or passed with unresolved observations |
 
 Exit code 5 names an unusable harness, not a result: repair the scorer, the
 executor, or the wiring instead of reading the red. A pass that carries

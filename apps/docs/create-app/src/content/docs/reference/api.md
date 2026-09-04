@@ -1,6 +1,8 @@
 ---
 title: "API reference"
-description: "Declare a Smithers app in one PACKAGE.ts: file-routed flows, panes, and Cloudflare targets"
+description: "Every public export of @smthrs/create-app, subpath by subpath: the authoring constructors, the file router, the Vite plugin, the runtime composition, and the replay test harness."
+sidebar:
+  order: 3
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/create-app/docs/api.md"
 ---
 
@@ -8,51 +10,16 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/cre
 else is named by where it sits: pages, panes, flows, and the three layer files
 a flow inherits.
 
-The package is private at 1.0.0-rc.0. An app is scaffolded from a source
-checkout with `pnpm exec smithers-build create-app my-app`, a verb of the
-private `@smthrs/build-cli`, and the scaffold rewrites every `@smthrs/*`
-specifier in the copied template to a `link:` path into that checkout.
-
-## The manifest
-
-```ts
-// PACKAGE.ts
-import { CreateApp } from "@smthrs/create-app"
-
-export const App = CreateApp({
-  name: "ledger",
-  brand: { name: "Ledger", tokens: { accent: "#5288c2" } },
-  deploy: { cloudflare: { workerName: "ledger", domain: "ledger.example.com" } }
-})
-```
-
-`App` carries the serializable manifest the Vite plugin serves as
-`virtual:smthrs-app/manifest`, plus four targets: `routes` regenerates the route
-tables, `dev` serves, `build` bundles, and `deploy` ships. Put them in the
-package's target map and `smithers-build` addresses them as `//:routes`,
-`//:dev`, `//:build`, and `//:deploy`.
-
-## The four kinds of file
-
-| File                   | Export    | Constructor       |
-| ---------------------- | --------- | ----------------- |
-| `AGENT.ts`             | `Agent`   | `defineAgent`     |
-| `SANDBOX.ts`           | `Sandbox` | `defineSandbox`   |
-| `TOOLS.ts`             | `Tools`   | `defineTools`     |
-| `flows/<id>/flow.ts`   | `Flow`    | `defineFlow`      |
-| `app/panes/<name>.tsx` | `Pane`    | `definePane`      |
-| `app/**/page.tsx`      | default   | a React component |
-| `app/layout.tsx`       | default   | a React component |
-
-A flow never names a model. Its seat comes from the resolved `AGENT.ts`, which
-is why moving one directory's `AGENT.ts` moves every flow below it to another
-seat without touching a flow file. `routing.md` holds the full resolution rule
-and the name grammar.
+The package is private and is not published to a registry. An app is scaffolded
+from a source checkout with `pnpm exec smithers-build create-app my-app`, a
+verb of the private `@smthrs/build-cli`, and the scaffold rewrites every
+`@smthrs/*` specifier in the copied template to a `link:` path into that
+checkout. See [Installation](/installation/).
 
 ## Runtime class of each subpath
 
 A scaffolded app splits this package across three hosts, so each subpath has a
-runtime class and `test/bundle.test.ts` holds it to that class by bundling it.
+runtime class, and `test/bundle.test.ts` holds it to that class by bundling it.
 
 | Import                         | Runtime                |
 | ------------------------------ | ---------------------- |
@@ -67,41 +34,385 @@ runtime class and `test/bundle.test.ts` holds it to that class by bundling it.
 | `@smthrs/create-app/routesBin` | Node                   |
 
 `routes.gen.ts` pulls `./app` and `./runtime` into the Worker bundle and
-`routes.ui.gen.ts` pulls `./ui` into the browser bundle, so those three carry no
-`node:` import. The rest are build and test tooling and reach the filesystem.
+`routes.ui.gen.ts` pulls `./ui` into the browser bundle, so those three carry
+no `node:` import. The rest are build and test tooling and reach the
+filesystem.
 
-## Generated files
+The root entry point re-exports `./app` and `./package` flat, rather than as
+namespaces, because it is an authoring API rather than a service API: an app
+writes `defineFlow`, not `App.defineFlow`.
 
-`smithers-routes` writes exactly two files at the app root:
+## @smthrs/create-app/package
 
-- `routes.gen.ts`: every flow with its three resolved layers, plus the pane
-  names. It imports no React and no virtual module, so the Worker bundle and a
-  plain vitest run both load it without Vite.
-- `routes.ui.gen.ts`: the shell layout, the pages, and the pane components.
+### CreateApp
 
-```sh
-smithers-routes           # write; exit 2 on a flag given no value
-smithers-routes --check   # write nothing, exit 1 on drift
+```ts
+const CreateApp: (options: CreateAppOptions) => AppTargets
 ```
 
-`--check` is a standalone convenience that both templates expose as
-`pnpm routes:check`. The build graph checks drift a different way:
-`smithers-build lint '//:routes'` runs the generator in write mode and compares
-the declared `changes`. A bare `smithers-build '//:routes'` is the write form
-and checks nothing.
+Declares an app. Returns the serializable manifest plus four
+[`@smthrs/targets`](https://targets.smithers.sh/reference/api/) rules.
 
-Import bindings in both generated files are numbered by position, and every
-specifier is a JSON string literal. No derivation from a route name is
-injective, so `flow_a_b` once served the two distinct flows `a-b` and `a/b` and
-the generated module failed to parse while the generator reported success.
+```ts
+import { CreateApp } from "@smthrs/create-app"
 
-The Vite plugin regenerates both files when the config resolves and whenever a
-routed file appears or disappears, so `pnpm dev` never serves a stale table. A
-refused tree while the server is running is reported rather than thrown: the
-watcher listener runs inside chokidar's emit, where a throw would take the dev
-server down instead of raising an overlay.
+export const App = CreateApp({
+  name: "ledger",
+  brand: { name: "Ledger", tokens: { accent: "#5288c2" } },
+  deploy: { cloudflare: { workerName: "ledger", domain: "ledger.example.com" } }
+})
+```
 
-## Testing a flow
+`CreateAppOptions`:
+
+| Field               | Type                      | Meaning                                               |
+| ------------------- | ------------------------- | ----------------------------------------------------- |
+| `name`              | `string`                  | The app's name                                        |
+| `brand`             | `Brand`                   | Identity: wordmark, theme, fonts, and token overrides |
+| `nav`               | `ReadonlyArray<NavGroup>` | Sidebar groups. Defaults to empty                     |
+| `dirs`              | `Partial<AppDirs>`        | Source layout. Defaults to `app`, `flows`, `tools`    |
+| `deploy.cloudflare` | `CloudflareDeploy`        | Worker name, custom domain, and wrangler config path  |
+
+`AppTargets`:
+
+| Field      | What it is                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| `manifest` | The `AppManifest` the Vite plugin serves as `virtual:smthrs-app/manifest`                                          |
+| `routes`   | Regenerates the two route tables. Keyed on every file the router reads                                             |
+| `dev`      | `vite` on port 5173, with the network on                                                                           |
+| `build`    | `vite build`, writing `dist`                                                                                       |
+| `deploy`   | `wrangler deploy`, gated on `build`, approval required, with the Cloudflare credentials declared as scoped secrets |
+
+`CloudflareDeploy.config` defaults to `worker/wrangler.jsonc`.
+
+## @smthrs/create-app/app
+
+The browser-safe half: types and plain data constructors only.
+
+### Constructors
+
+| Export          | Signature                                                                                                         |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `defineAgent`   | `(options: Omit<AgentSpec, "_tag">) => AgentSpec`                                                                 |
+| `defineSandbox` | `(options: Omit<SandboxSpec, "_tag">) => SandboxSpec`                                                             |
+| `defineTools`   | `(options: Omit<ToolsSpec, "_tag" \| "grant"> & { grant?: ReadonlyArray<ToolsGrant> }) => ToolsSpec`              |
+| `defineFlow`    | `<P extends Schema.Struct.Fields, O extends Schema.Top>(options: Omit<FlowSpec<P, O>, "_tag">) => FlowSpec<P, O>` |
+
+`defineTools` defaults `grant` to `[{ action: "*", resource: "*" }]`, the
+appliance grant. The field is required on `ToolsSpec` itself, so a spec built
+by hand states its envelope rather than inheriting one silently.
+
+### Specs
+
+| Type             | Fields                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------- |
+| `AgentSpec`      | `seat: string`, `system: ReadonlyArray<string>`, `limits?: { calls?: number }`, `maxFrames?: number` |
+| `SandboxSpec`    | `limits: { heapBytes?: number; interruptChecks?: number; wallClockMs?: number }`                     |
+| `ToolsSpec`      | `sources: ReadonlyArray<FlowBinding.Source>`, `grant: ReadonlyArray<ToolsGrant>`                     |
+| `ToolsGrant`     | `action: Capability.PatternAction`, `resource: string`                                               |
+| `FlowSpec<P, O>` | `description`, `payload: P`, `output: O`, `prompt: (payload) => string`, `system?`, `chat?`          |
+| `AnyFlowSpec`    | `FlowSpec` with its payload type erased, which is what a route table holds                           |
+
+`AnyFlowSpec.prompt` takes `never` rather than the erased payload: `prompt` is
+contravariant in its payload, so any other erasure would refuse every concrete
+flow.
+
+`chat` is routing metadata and nothing else. Nothing in
+`@smthrs/create-app/runtime` reads it.
+
+### Brand and navigation
+
+| Type         | Fields                                                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `Brand`      | `name`, `wordmark?`, `theme?: "light" \| "dark" \| "system"`, `fonts?: BrandFonts`, `tokens: Partial<Record<BrandToken, string>>` |
+| `BrandFonts` | `display?`, `body?`, `mono?`, `wordmark?`, `googleFonts?: ReadonlyArray<string>`                                                  |
+| `BrandToken` | The 33 token names a brand may override                                                                                           |
+| `NavItem`    | `label`, `href`, `icon?`                                                                                                          |
+| `NavGroup`   | `label`, `items: ReadonlyArray<NavItem>`                                                                                          |
+
+The token names and the CSS custom properties each one sets are listed in
+[Brand an app](/guides/brand-an-app/).
+
+### Routes and the manifest
+
+| Type               | Fields                                                   |
+| ------------------ | -------------------------------------------------------- |
+| `PageRoute`        | `route`, `file`                                          |
+| `PaneRoute`        | `name`, `file`                                           |
+| `FlowRoute`        | `id`, `file`, `agent`, `sandbox`, `tools`                |
+| `AppRoutes`        | `layout: string \| undefined`, `pages`, `panes`, `flows` |
+| `AppDirs`          | `app`, `flows`, `tools`                                  |
+| `CloudflareDeploy` | `workerName`, `domain`, `config?`                        |
+| `AppManifest`      | `name`, `brand`, `nav`, `dirs`, `deploy`                 |
+
+### Values
+
+| Export                | Type                         | Value                                            |
+| --------------------- | ---------------------------- | ------------------------------------------------ |
+| `defaultDirs`         | `AppDirs`                    | `{ app: "app", flows: "flows", tools: "tools" }` |
+| `defaultCallLimit`    | `number`                     | `16`                                             |
+| `defaultMaxFrames`    | `number`                     | `8`                                              |
+| `routeSegmentGrammar` | `string`                     | `/^[a-z][a-z0-9-]*$/` as text                    |
+| `isRouteSegment`      | `(value: string) => boolean` | Whether a value may be one route segment         |
+
+`isRouteSegment` lives in the browser-safe half because code that predicts what
+the router will accept often cannot import a filesystem walk. The `aomi`
+template's promote tool runs inside a Worker and uses it to refuse a flow id
+the router would refuse, before writing the file.
+
+## @smthrs/create-app/ui
+
+### definePane
+
+```ts
+const definePane: <P>(options: {
+  props: Schema.Codec<P, unknown>
+  title?: string
+  fullscreen?: boolean
+  render: (props: P, context: PaneContext) => ReactNode
+}) => PaneDefinition<P>
+```
+
+`fullscreen` defaults to `false`. The returned definition carries both
+`render`, over decoded props, and `renderUnknown`, which decodes wire props
+with the schema and throws the schema's own error when they are rejected.
+
+| Type                | What it is                                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `PaneContext`       | `fullscreen`, `maximize()`, `restore()`: what the shell tells a pane about its presentation           |
+| `PaneDefinition<P>` | One pane with its props type                                                                          |
+| `AnyPaneDefinition` | The erased half a registry holds: `title?`, `fullscreen`, `renderUnknown`                             |
+| `PaneRegistry`      | `Readonly<Partial<Record<string, AnyPaneDefinition>>>`. An unrouted name is `undefined`, not an error |
+
+### Cards and frames
+
+| Schema          | Shape                                                                                    |
+| --------------- | ---------------------------------------------------------------------------------------- |
+| `PaneCard`      | `kind: "pane"`, `id`, `name`, `title?`, `props`, `fullscreen`                            |
+| `HtmlCard`      | `kind: "html"`, `id`, `title?`, `html`                                                   |
+| `FlowRunCard`   | `kind: "flow-run"`, `id`, `flowId`, `executionId`, `phase`, `steps`, `result?`, `error?` |
+| `FlowSavedCard` | `kind: "flow-saved"`, `id`, `flowId`, `description`, `files`                             |
+| `AppCard`       | The union of the four                                                                    |
+| `TurnFrame`     | One frame of a turn's NDJSON stream                                                      |
+
+`TurnFrame` members: `delta` is assistant text, `cell` is a code cell the agent
+ran, `call` is one host call with its outcome, `card` and `card.update` carry
+the transcript's cards, `park` suspends the run for a human, and `done` or
+`error` ends it. Each schema is also exported as a type of the same name.
+
+## @smthrs/create-app/runtime
+
+### materializeFlow
+
+```ts
+const materializeFlow: (id: string, spec: AnyFlowSpec, agent: AgentSpec) => MaterializedFlow
+```
+
+Binds one flow declaration to the agent layer resolved for it. Returns `id`, an
+`action` named `app/<id>/agent`, and a `flow` named `app/<id>` whose body is one
+call to that action. The action's system teaching is the agent layer's lines
+followed by the flow's own, in that order.
+
+### layerFor
+
+```ts
+const layerFor: (options: LayerOptions) => Layer.Layer<...>
+```
+
+The full host for one flow: the agent host, the seat resolver, the agent loop,
+the sandbox and steering defaults, the action implementations, an in-memory
+flow engine, and the caller's crypto. It requires no service in return, which
+the package asserts at compile time through the exported type
+`CompositionRootsAreComplete`.
+
+| `LayerOptions` field | Type                         |
+| -------------------- | ---------------------------- |
+| `agent`              | `AgentSpec`                  |
+| `sandbox`            | `SandboxSpec`                |
+| `tools`              | `ToolsSpec`                  |
+| `seats`              | `SeatProvider`               |
+| `crypto`             | `Layer.Layer<Crypto.Crypto>` |
+
+`SeatProvider` is one method:
+
+```ts
+interface SeatProvider {
+  readonly resolve: (seatId: string) => Effect.Effect<
+    { readonly model: Model.Model; readonly route: Seat.Seat["route"] },
+    Seat.SeatUnresolved
+  >
+}
+```
+
+A resolved seat is given a 200,000 token context window. Quota refusals park
+under the default policy, and the run has no spend ceiling, because this
+boundary has no approved envelope from which to derive one.
+
+### emptyRegistry
+
+```ts
+const emptyRegistry: () => Registry.Registry
+```
+
+The catalog a routed app's cells are shown: nothing. A routed app reaches its
+tools through the `TOOLS.ts` binding sources, which the agent host composes
+into every cell, so an empty registry is the honest declaration rather than a
+placeholder.
+
+### LayerError
+
+```ts
+class LayerError extends Error {
+  readonly name: "LayerError"
+  readonly code: LayerErrorCode
+}
+type LayerErrorCode = "invalid_grant"
+```
+
+Thrown rather than returned, because every caller wants the host build to stop.
+`invalid_grant` is a `TOOLS.ts` grant whose action is not one the kernel knows,
+or whose resource is longer than 4096 characters. The message names the grant's
+index and the field.
+
+## @smthrs/create-app/router
+
+### discover
+
+```ts
+const discover: (options: RouterOptions) => AppRoutes
+```
+
+Walks an app root and returns everything the two generated files are rendered
+from. `RouterOptions` is `{ root: string; dirs: AppDirs }`.
+
+```ts
+import { defaultDirs } from "@smthrs/create-app/app"
+import { discover } from "@smthrs/create-app/router"
+
+const routes = discover({ root: process.cwd(), dirs: defaultDirs })
+```
+
+### resolveLayer
+
+```ts
+const resolveLayer: (
+  root: string,
+  dir: string,
+  kind: "AGENT.ts" | "SANDBOX.ts" | "TOOLS.ts",
+  files: ReadonlySet<string>
+) => string
+```
+
+The nearest file of one layer kind at `dir` or any ancestor up to and including
+`root`. Both paths are normalized before the walk, and `dir` must sit inside
+`root`.
+
+### Renderers
+
+| Export      | Signature                                                 | What it renders                             |
+| ----------- | --------------------------------------------------------- | ------------------------------------------- |
+| `render`    | `(routes: AppRoutes) => string`                           | `routes.gen.ts`                             |
+| `renderUi`  | `(routes: AppRoutes) => string`                           | `routes.ui.gen.ts`                          |
+| `renderAll` | `(routes: AppRoutes) => Readonly<Record<string, string>>` | Both, keyed by their app-root relative path |
+
+### writeRoutes
+
+```ts
+const writeRoutes: (options: RouterOptions & { check?: boolean }) => RoutesReport
+```
+
+Discovers an app root and writes both files, or reports their drift when
+`check` is set. This is the whole body of the `smithers-routes` executable and
+of the Vite plugin's regeneration step, so drift checking and writing cannot
+diverge.
+
+```ts
+interface RoutesReport {
+  readonly files: Readonly<Record<string, RoutesFileStatus>>
+  readonly stale: ReadonlyArray<string>
+  readonly counts: { readonly pages: number; readonly panes: number; readonly flows: number }
+}
+type RoutesFileStatus = "written" | "clean" | "stale"
+```
+
+### RouterError
+
+```ts
+class RouterError extends Error {
+  readonly name: "RouterError"
+  readonly code: RouterErrorCode
+}
+type RouterErrorCode = "missing_layer" | "duplicate_name" | "invalid_name"
+```
+
+`missing_layer` is a flow with no ancestor layer file of some kind,
+`duplicate_name` is two files claiming one route, and `invalid_name` is a pane,
+page segment, or flow segment that is not lowercase kebab-case.
+
+## @smthrs/create-app/vite
+
+### createApp
+
+```ts
+const createApp: (options?: CreateAppPluginOptions) => CreateAppPlugin
+```
+
+The plugin. It regenerates both route tables when the config resolves and
+whenever a routed file appears or disappears, and serves the brand and the
+manifest as virtual modules.
+
+| `CreateAppPluginOptions` field | Default                                 |
+| ------------------------------ | --------------------------------------- |
+| `root`                         | Vite's resolved root                    |
+| `manifest`                     | `loadManifest` over `<root>/PACKAGE.ts` |
+| `onRouterError`                | Report the refusal on stderr            |
+
+`configResolved` is deliberately not routed through `onRouterError`: Vite
+awaits that hook, so a refused tree at startup fails the startup.
+
+`CreateAppPlugin` is typed by what the plugin actually uses rather than by
+Vite's full hook signatures, so a host or a test can drive it directly:
+`name`, `configResolved`, `configureServer`, `resolveId`, and `load`.
+
+### The virtual modules
+
+| Export             | Value                          | What it serves                          |
+| ------------------ | ------------------------------ | --------------------------------------- |
+| `brandModuleId`    | `virtual:smthrs-app/brand.css` | The brand as CSS custom properties      |
+| `manifestModuleId` | `virtual:smthrs-app/manifest`  | The `AppManifest` as the default export |
+
+### brandCss
+
+```ts
+const brandCss: (brand: Brand) => string
+```
+
+Renders a brand as one CSS rule of custom properties, scoped to
+`:root, [data-theme]`. A token the brand did not declare is not emitted, so the
+styleguide default survives. Google Fonts `@import` rules come first, because
+CSS ignores an `@import` that follows a rule.
+
+### loadManifest
+
+```ts
+const loadManifest: (root: string) => Promise<AppManifest>
+```
+
+Loads an app's manifest by evaluating its `PACKAGE.ts` through `tsx`. The
+config process is not a TypeScript process and `PACKAGE.ts` imports
+`@smthrs/targets`, so the manifest cannot simply be imported. `tsx` is an
+optional peer for exactly this reason: an app that passes
+`CreateAppPluginOptions.manifest` never needs it.
+
+## @smthrs/create-app/testing
+
+### cachedModelTest
+
+```ts
+const cachedModelTest: <P, O>(name: string, options: CachedModelTestOptions<P, O>) => void
+```
+
+Registers one Vitest test that runs a routed flow on a cached model.
 
 ```ts
 cachedModelTest("chat answers a balance question", {
@@ -114,15 +425,84 @@ cachedModelTest("chat answers a balance question", {
 })
 ```
 
-Replay is the default: the fixture is decoded with `@smthrs/testing`'s `Fixture`
-schema and served by `RecordedModel`, with no network and no API key.
-`SMTHRS_RECORD=1` builds the live model from `options.live`, captures every
-request and event, and rewrites the fixture after a run that reached its
-assertions. A recording that failed leaves the committed fixture untouched, and
-the write goes through a temporary file and a rename, so an interrupted process
-cannot truncate it.
+| `CachedModelTestOptions` field | Default                       | Meaning                                                    |
+| ------------------------------ | ----------------------------- | ---------------------------------------------------------- |
+| `fixture`                      | required                      | `URL` of the recorded transcript                           |
+| `flow`                         | required                      | The routed flow id                                         |
+| `payload`                      | required                      | The flow's payload                                         |
+| `expect`                       | required                      | Assertions over the decoded output                         |
+| `live`                         | none                          | Builds the live model used when `SMTHRS_RECORD=1`          |
+| `routes`                       | re-run the router over `root` | Loads the routed flows this test may run                   |
+| `dirs`                         | `defaultDirs`                 | Source directories, when the app does not use the defaults |
+| `root`                         | `process.cwd()`               | The app root the default loader walks                      |
+
+Replay is the default: the fixture is decoded with
+[`@smthrs/testing`](https://testing.smithers.sh/reference/api/)'s `Fixture` schema and served by
+`RecordedModel`, with no network and no API key. `SMTHRS_RECORD=1` builds the
+live model from `live`, captures every request and event, and rewrites the
+fixture after a run that reached its assertions. A recording that failed leaves
+the committed fixture untouched, and the write goes through a temporary file
+and a rename, so an interrupted process cannot truncate it.
 
 A recorded provider refusal is stored whole, retry metadata included, and
 reconstructed field for field on replay. A kernel permission decision is not
 recorded: it is not a provider response, and replaying it would hand the code
 under test a refusal the provider never made.
+
+The default loader re-runs the router and imports only the named flow and its
+three layer files. `routes.gen.ts` is deliberately not used: it statically
+imports every page and the shell layout, which pull in React and a virtual
+module that exists only while Vite is running.
+
+### The rest
+
+| Export               | Signature                                                                      | What it is                                                                        |
+| -------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `runCachedModelTest` | `<P, O>(name: string, options: CachedModelTestOptions<P, O>) => Promise<void>` | The body `cachedModelTest` puts inside `test()`, for a harness that is not Vitest |
+| `recording`          | `() => boolean`                                                                | Whether `SMTHRS_RECORD` is `1`                                                    |
+| `recordModel`        | `(live: Model, sink: (call: RecordedCall) => void) => Model`                   | Wraps a live model so every request and its events are appended to `sink`         |
+| `replayModelError`   | `(error: ModelLikeError) => ModelError`                                        | Rebuilds the `ModelError` a fixture recorded                                      |
+| `preparedRequest`    | `Route.PreparedRequest`                                                        | The credential-free route every test seat resolves to                             |
+| `RoutedFlow`         | interface                                                                      | One routed flow: `id`, `file`, `spec`, `agent`, `sandbox`, `tools`                |
+
+## @smthrs/create-app/routesBin
+
+The body of the `smithers-routes` executable, kept out of `bin/routes.mjs` so a
+coverage provider can instrument it and so the bin stays a shim.
+
+```ts
+const runRoutesBin: (argv: ReadonlyArray<string>, options: RoutesBinOptions) => number
+const usage: string
+```
+
+`runRoutesBin` returns the process exit code: 0 is a written or clean tree, 1 is
+drift under `--check` or a refused tree, and 2 is a flag given without a value.
+
+| `RoutesBinOptions` field | Default         | Meaning                                                                                            |
+| ------------------------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| `io`                     | required        | `{ out, err }`, one line at a time. The bin binds these to `console.log` and `console.error`       |
+| `cwd`                    | `process.cwd()` | The directory `--root` defaults to                                                                 |
+| `write`                  | `writeRoutes`   | The router entry point, so a caller can observe a failure the filesystem cannot be made to produce |
+
+The flags are `--check`, `--root`, `--app`, `--flows`, and `--tools`, each
+accepting either `--root <dir>` or `--root=<dir>`. The full command reference,
+including exit codes and the shim's entry-point choice, is in
+[Command reference](/reference/cli/).
+
+## Generated files
+
+`smithers-routes` writes two files at the app root and never anything else.
+`routes.gen.ts` holds every flow with its three resolved layers plus the pane
+names, and imports no React and no virtual module. `routes.ui.gen.ts` holds the
+shell layout, the pages, and the pane components.
+
+```bash
+smithers-routes           # write; exit 2 on a flag given no value
+smithers-routes --check   # write nothing, exit 1 on drift
+```
+
+Import bindings in both generated files are numbered by position, and every
+specifier is a JSON string literal. No derivation from a route name is
+injective, so `flow_a_b` once served the two distinct flows `a-b` and `a/b` and
+the generated module failed to parse while the generator reported success. See
+[The generated route tables](/concepts/generated-routes/).

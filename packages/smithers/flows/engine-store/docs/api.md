@@ -1,4 +1,14 @@
-The durable `FlowEngine`. It claims a run before driving it, fences every write against the current owner, and persists attempts, waits, and terminal results through [`@smthrs/journal`](/api/journal), [`@smthrs/run-store`](/api/run-store), and [`@smthrs/step-cache`](/api/step-cache). It owns the durable deferred/clock tables and composes every package's migration set.
+---
+title: "API reference"
+description: "Every public export of @smthrs/engine-store, grouped by namespace: services, layers, constructors, options, schemas, constants, and the stable error codes."
+---
+
+The durable `FlowEngine`. It claims a run before driving it, fences every write
+against the current owner, and persists attempts, waits, and terminal results
+through [`@smthrs/journal`](/api/journal),
+[`@smthrs/run-store`](/api/run-store), and
+[`@smthrs/step-cache`](/api/step-cache). It owns the durable deferred and clock
+tables and composes every package's migration set.
 
 ```ts
 import { EngineStore, StepBoundary } from "@smthrs/engine-store"
@@ -9,295 +19,1006 @@ const engine = EngineStore.layer({
 })
 ```
 
-This entry point bundles for the browser. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the [`OwnerIdentity`](#bundles-for-the-browser) service.
-
-:::warning[Bundling is not running]
-The only `DurableWriter` backing shipped here is `node:sqlite`.
-:::
-
 ## Entry point
 
 | Import                 | Source                                                                                                             | Platform         |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------- |
 | `@smthrs/engine-store` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/index.ts) | Node and browser |
 
+Every namespace below is also importable from `@smthrs/engine-store/<Module>`.
+`@smthrs/engine-store/internal/*`, `@smthrs/engine-store/migrations/*`, and
+`@smthrs/engine-store/*/index` are blocked in the export map.
+
+### Bundling is not running
+
+This entry point is a browser entry point, and the repository's browser gate
+treats it as one: `pnpm run browser` bundles it and fails the build if that
+regresses. The two host reads it once made directly, `process.pid` and
+`randomUUID` from `node:crypto`, moved behind the injectable
+[`OwnerIdentity`](#owneridentity) service, and everything it composes,
+`@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`, `@smthrs/run-store`,
+`@smthrs/step-cache`, `@smthrs/database`, `@smthrs/kernel`, and
+`@smthrs/engine`, is browser-bundleable too.
+
+The only `DurableWriter` backing shipped here is `node:sqlite`, so a browser
+composition can import the types and the in-memory helpers but cannot execute
+durable flows. See [platform support](/docs/reference/api/#platform-support).
+
 ## EngineStore
 
 [src/EngineStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/EngineStore.ts)
 
-Required services: `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, Effect's `Crypto`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, [`OwnerIdentity`](#bundles-for-the-browser), and a `Scope`. [`WorkspaceSandbox`](#workspacesandbox) and its `EffectDispatcher` are optional; when present, `make` resolves them here and re-provides them onto the engine's own fiber, which does not carry the store's layer context.
+The production durable composition.
 
-`clockFireRetryPolicy` is optional and defaults to exponential from 100ms capped at 30s, forever, which is the same option shape as the engine's `suspendedRetryPolicy`.
+| Export                  | Signature                                                                                                           | Meaning                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `Options`               | interface                                                                                                           | Construction options. See below.                                                                       |
+| `make`                  | `(options: Options) => Effect<FlowRuntime["Service"], never, Requirements>`                                         | Builds the `FlowRuntime` service the port in [`@smthrs/flow`](/api/flow) declares.                     |
+| `layer`                 | `(options: Options) => Layer<SnapshotBoundary \| FlowRuntime, never, Requirements>`                                 | Provides both, using the ambient `Jj` for action bodies and engine bookkeeping.                        |
+| `layerWithPrivilegedJj` | `(options: Options, privilegedJj: Layer<Jj, E, R>) => Layer<SnapshotBoundary \| FlowRuntime, E, Requirements \| R>` | The same, with a private repository for engine bookkeeping while ambient `Jj` stays for action bodies. |
 
-## API reference
+### EngineStore.Options
 
-This page is the public API reference for the journal-backed `FlowEngine` composition, deferred/clock state contract, and hermetic boundary contract. The composition bundles anywhere; the shipped storage beneath it is still SQLite-on-Node.
+| Field                  | Type                                    | Meaning                                                                                                                                                                                |
+| ---------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner.hostId`         | `string`                                | This engine's stable host identity. Which host a store speaks for is a composition decision, not a host fact.                                                                          |
+| `journalSource`        | `string`                                | The source id every record this engine writes carries.                                                                                                                                 |
+| `isAlive`              | `Ownership.LivenessCheck` (optional)    | Liveness arbitration consulted before stealing a run whose lease expired. Answering `true` refuses the takeover. Defaults to `Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`. |
+| `clockFireRetryPolicy` | `Schedule<unknown, unknown>` (optional) | Redispatch policy for a durable clock whose fire failed. Defaults to exponential from 100ms capped at 30s, forever, the same option shape as the engine's `suspendedRetryPolicy`.      |
 
-### Bundles for the browser
+### Required services
 
-`@smthrs/engine-store` is a **browser entry point**, and the repository's browser gate treats it as one. The two host reads it once made directly, `process.pid` and `randomUUID` from `node:crypto`, moved behind the injectable `OwnerIdentity` service (`packages/smithers/flows/engine-store/src/OwnerIdentity.ts`), which closed issue #114: the default reads a process id off `globalThis` where the platform has one and draws an incarnation number from `Random` where it does not, and `layerConstant` pins the whole token. Everything it composes, `@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`, `@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/database`, `@smthrs/kernel`, and `@smthrs/engine`, is browser-bundleable too. Bundling is still not running: the only `DurableWriter` backing shipped here is `node:sqlite`, so do not describe the durable engine as browser-_ready_ until a browser SQL client layer exists. `pnpm run browser` bundles this entry point and fails the build if it regresses. See [platform support](/docs/reference/api/#platform-support).
+`Journal`, `RunStore`, `AttemptStore`, `CacheStore`, Effect's `Crypto`,
+`DurableEngineState`, kernel `Jj`, `StepBoundary`, `OwnerIdentity`, and a
+`Scope`. A composition failure is an unmet `Requirements` type at compile time,
+so there is no run-time composition error to handle.
 
-### `EngineStore`
+[`WorkspaceSandbox`](#workspacesandbox) and its `EffectDispatcher` are optional
+and are resolved at construction, because `actionExecute` runs on the engine's
+own fiber, which does not carry the store's layer context. `StepSandbox`,
+`WakeBus`, `ArtifactSync`, `CacheSync`, `Inconsistency`, `Reconciliation`, and
+`Selection` are optional in the same way.
 
-```ts
-const layer = EngineStore.layer({
-  owner: { hostId: "worker-a" },
-  journalSource: "engine-a"
-})
-```
+### Behavior
 
-`Options` contains `owner.hostId`, `journalSource`, and the optional `isAlive` and `clockFireRetryPolicy`. `clockFireRetryPolicy` is the redispatch `Schedule` for a durable clock whose fire failed, defaulting to exponential from 100ms capped at 30s, forever. It is the same option shape as the engine's `suspendedRetryPolicy`: the built-in behavior is the default, and a deployment supplies its own rather than patching the store. `make(options)` returns a `FlowRuntime` service, the port `@smthrs/flow` declares. `layer(options)` provides both `FlowRuntime` and `FlowEngine.SnapshotBoundary`.
+The engine stores a versioned state envelope in each run row, fences run and
+attempt ownership, replays encoded exits, and writes engine decisions to the
+journal. Cache addresses are the injected `Sha256` transformation of the step
+key, not the raw `key1_...` value.
 
-#### Liveness and reclaim
+Durable cancellation is observed, not just recorded: while a run executes, the
+driver polls `cancel_requested_at_ms` on the heartbeat cadence and cancels the
+run when another process has called `RunStore.requestCancel`. Terminal
+transitions are additionally guarded with `{ cancelRequested: "absent" }` inside
+the ownership compare-and-swap.
 
-`isAlive` decides whether a run whose lease has expired may be stolen. Answering `true` refuses the takeover. The default is `Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`: the owner counts as alive while its persisted `heartbeat_at_ms` is younger than the staleness cutoff, and gone once it is not. That is the only evidence every host has, and it is what lets a fresh process reclaim the runs of an owner killed with SIGKILL without any application code. The steal it admits carries `lease-expired` evidence, which `RunStore.steal` re-checks against the row inside the same write, so a claimant that lies about the lease loses the compare-and-swap.
+The driver's periodic sweep re-drives three durable shapes on the heartbeat
+cadence: parked runs whose cancellation was durably requested, runs parked with
+reason `released`, and stale `running` rows left by a hard-killed owner. Each
+re-enters the ordinary claim, steal, and activate path. A wake for a flow the
+sweeping process has not registered logs a once-per-run structured warning and
+leaves the durable waiting row parked.
 
-A deployment that knows more supplies its own check and refuses the takeover for longer. Such a check is a `process.kill(pid, 0)` probe on the owner's host, or an orchestrator that reports pod liveness. Guard a pid read with `Ownership.sameHostIncarnation(owner, claimant)`: a pid names a process only in its own host's namespace. A supplied check receives the recorded owner and a `LivenessContext` of `{ claimant, heartbeatAtMs, nowMs }`.
+Every lifecycle journal write, run decisions, attempt started and finished, hard
+violations, snapshot identity, cache provenance, deferred completions, clock
+schedules, interruption records, and the `Inconsistency` cache-conflict record,
+takes the journal's durable channel (`emitDurable`), so a saturated lossy queue
+can never drop one. Attempt lifecycle writes additionally pass the owner: a
+reclaimed owner fails with `fence_lost` and self-interrupts instead of
+appending.
 
-The journal says which answer was used. A refusal records `steal-refused-owner-alive` with `evidence: "lease-fresh"` (the lease was still inside the window) or `evidence: "probe"` (the supplied check answered for the owner); a takeover records `stolen-and-activated` with the evidence kind it wrote: `lease-expired`, `same-host-pid-dead`, or `cross-host-unreachable-stale`.
+Full model: [Ownership and fencing](./concepts/ownership-and-fencing.md) and
+[Attempts and replay](./concepts/attempts-and-replay.md).
 
-A refusal is journaled once, not once per sweep tick. The record is addressed by the run, the refused owner, the lease it was refused against, and the evidence that refused it, and it carries source sequence 0, so the journal's first-writer admission collapses every repeat about an unchanged lease into the one record. The evidence is part of the address because one lease can be refused twice for different reasons: a wake arriving while the owner is still pulsing is refused by the lease (`lease-fresh`), and the same owner, alive but stalled past the window, is refused by the probe (`probe`). Both records stand.
+## DurableEngineState
 
-The driver also stops re-probing a run it was just refused. Each refusal defers the run for two heartbeat ticks, doubling per consecutive refusal against the same lease up to `heartbeatStaleAfter`, and the stale-running sweep reads past exactly the rows it is going to skip so its batch of 64 keeps advancing. Without that, the oldest stale rows sort first every second and a run behind them is never arbitrated at all. A deferral is forgotten as soon as its row leaves the stale window, when the owner resumed heartbeating, the run was stolen, or the run settled, so a fresh stall under a new lease is probed on the first tick that sees it rather than waiting out a backoff it did not earn.
+[src/DurableEngineState.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/DurableEngineState.ts)
 
-Required services are `Journal`, `RunStore`, `AttemptStore`, `CacheStore`, Effect's `Crypto`, `DurableEngineState`, kernel `Jj`, `StepBoundary`, `OwnerIdentity`, and `Scope`. A composition failure is an unmet `Requirements` type at compile time, so there is no runtime composition error to handle.
+Durable deferreds, clocks, waiting rows, and the run parent DAG. A successful
+mutation means the row is durable, so callers may journal and schedule a wake
+only after the mutation returns.
 
-The engine stores a versioned state envelope in each run row, fences run and attempt ownership, replays encoded exits, and writes engine decisions to the journal. Cache addresses are the injected `Sha256` transformation of the step key, not the raw `key1_…` value.
+| Export                           | Signature                                                      | Meaning                                                                       |
+| -------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `DurableEngineState`             | `Context.Service<Service>`                                     | Service tag.                                                                  |
+| `Service`                        | interface                                                      | The operations below.                                                         |
+| `make`                           | `Effect<Service, never, DurableWriter \| SqlClient>`           | The SQL implementation.                                                       |
+| `layer`                          | `Layer<DurableEngineState, never, DurableWriter \| SqlClient>` | Provides it.                                                                  |
+| `makeMemory`                     | `(options?: MemoryOptions) => Service`                         | Deterministic in-memory implementation.                                       |
+| `layerMemory`                    | `Layer<DurableEngineState>`                                    | Provides it.                                                                  |
+| `MemoryOptions`, `MemoryRunView` | interfaces                                                     | Optional `runs` lookup so the memory twin enforces the same ownership fences. |
 
-Durable cancellation is observed, not just recorded: while a run executes, the driver polls `cancel_requested_at_ms` on the heartbeat cadence and cancels the run (interrupting the flow fiber) when another process has called `RunStore.requestCancel`. Terminal transitions are additionally guarded with `{ cancelRequested: "absent" }` inside the ownership CAS, so a request that races past the last poll turns finalize into a cancellation instead of a `completed`/`failed` write.
+### Service members
 
-The driver's periodic sweep (heartbeat cadence) re-drives three durable shapes: parked runs whose cancellation was durably requested, runs parked with reason `released` (interrupt-released by shutdown, issue #39), and stale-running rows left by a hard-killed owner (issue #53): each re-enters the ordinary claim/steal/activate path. A wake for a flow the sweeping process has not registered is not dropped silently: the driver logs a once-per-run structured warning (run id + flow name) and leaves the durable waiting row parked, so any process that registers the flow still reclaims the run (issue #62).
+| Member                   | Signature                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `deferred`               | `(address: DeferredAddress) => Effect<Option<DeferredRow>>`                                  |
+| `completeDeferred`       | `(row: DeferredRow) => Effect<CompleteDeferredOutcome>`                                      |
+| `clock`                  | `(address: ClockAddress) => Effect<Option<ClockRow>>`                                        |
+| `scheduleClock`          | `(row: ClockRow, owner?: OwnerId) => Effect<ScheduleClockOutcome>`                           |
+| `completeClock`          | `(address: ClockAddress, completedAtMs: number) => Effect<CompleteClockOutcome>`             |
+| `dueClocks`              | `(nowMs: number) => Effect<ReadonlyArray<ClockRow>>`                                         |
+| `completeRunClocks`      | `(executionId: string, completedAtMs: number) => Effect<void>`                               |
+| `pendingClocks`          | `(scope: { executionId?: string; flowName?: string }) => Effect<ReadonlyArray<ClockRow>>`    |
+| `completedDeferreds`     | `(flowName: string) => Effect<ReadonlyArray<DeferredAddress>>`                               |
+| `park`                   | `(runId: string, waiting: Waiting, owner: OwnerId) => Effect<ParkOutcome>`                   |
+| `wake`                   | `(runId: string) => Effect<WakeOutcome>`                                                     |
+| `waiting`                | `(runId: string) => Effect<Option<WaitingRow>>`                                              |
+| `waitingRuns`            | `(filter?: WaitingRunsFilter) => Effect<ReadonlyArray<WaitingRow>>`                          |
+| `staleRunningRuns`       | `(staleBeforeMs: number, limit?: number) => Effect<ReadonlyArray<string>>`                   |
+| `attemptSurvivors`       | `((runId: string, stepKeyDigest: string) => Effect<Option<AttemptSurvivors>>)` (optional)    |
+| `recordRunParent`        | `(childId: string, parentId: string) => Effect<RecordRunParentOutcome, RunParentCycleError>` |
+| `removeRunParentsForRun` | `(runId: string) => Effect<void>`                                                            |
+| `runParents`             | `(childId: string) => Effect<ReadonlyArray<RunParentEdge>>`                                  |
+| `runChildren`            | `(parentId: string) => Effect<ReadonlyArray<RunParentEdge>>`                                 |
+| `transaction`            | `<A, E, R>(effect: Effect<A, E, R>) => Effect<A, E, R>`                                      |
 
-Every engine-store lifecycle journal write, run decisions, attempt started/finished, hard violations, snapshot identity, cache provenance, deferred completions, clock schedules, interruption records, and the `Inconsistency` cache-conflict record, takes the journal's durable channel (`emitDurable`), so a saturated lossy queue can never drop one. Attempt lifecycle writes additionally pass the owner, fencing the append on the run's persisted ownership: a reclaimed (zombie) owner fails with `fence_lost` and self-interrupts instead of appending.
+`completeRunClocks` closes every uncompleted clock row of one run in a single
+statement, which a terminal transition does in its own transaction.
+`pendingClocks` and `completedDeferreds` never list a row whose run has settled,
+so a registration sweep re-arms timers and replays completions for runs that can
+still make progress and for no others. `attemptSurvivors` is optional because
+only storage that can range-scan `flows_attempts` implements it; when absent the
+engine falls back to per-attempt point reads against `AttemptStore`.
 
-### `DurableEngineState`
+`recordRunParent` performs its cycle check inside the same write transaction as
+the insert, so a rejected edge leaves no durable trace and, of two concurrent
+writers whose edges jointly close a cycle, exactly one fails. `transaction`
+makes several store operations atomic; nested store writes become savepoints.
+Serialized write transactions are a documented requirement of the
+`DurableWriter.write` contract, not a SQLite artifact: a Postgres-backed
+implementation must use `SERIALIZABLE`. The in-memory twin runs the effect
+directly, having no crash windows to close.
 
-The service addresses deferreds by flow/execution/deferred name and clocks by flow/execution/clock name. It exposes:
+### Addresses, rows, and outcomes
 
-- `deferred` and first-writer-wins `completeDeferred`
-- `clock`, first-writer-wins `scheduleClock`, and `completeClock`
-- `dueClocks(nowMs)`
-- owner-fenced `park`, idempotent `wake`, `waiting`, and sweeper-ordered `waitingRuns`: the `WaitingRunsFilter` supports `reason`, `dueBeforeMs`, and a `cancelRequested` predicate over `flows_runs.cancel_requested_at_ms`, so sweepers fetch only actionable rows instead of scanning every parked run (issue #68)
-- `staleRunningRuns(staleBeforeMs)`: run ids still `running` whose heartbeat froze before the horizon; the driver's periodic sweep re-drives these through the claim/steal path so a hard-killed owner (SIGKILL, OOM) cannot strand a run (issue #53)
-- `recordRunParent(childId, parentId)`, durably records a parent edge in the run DAG (`flows_run_parents`), first-writer-wins per pair. The cycle check is **inside the same write transaction** as the insert: the child→parent chain is walked over the durable edges and on a hit the transaction rolls back and the call fails with the typed `RunParentCycleError`, so a rejected edge leaves no durable trace, and of two concurrent writers whose edges jointly close a cycle exactly one fails (issues #29/#40/#54/#55/#56). The driver maps this error to `FlowCycleDetected` and records the edge before creating the run row, so no `state_json` `parentExecutionId` can outlive a rejected edge. Edge insert and run-row creation run inside **one** storage transaction (`DurableEngineState.transaction`), so a crash between them cannot leave a durable orphan edge for a run that was never created (issue #80). Serialized write transactions are a documented requirement of the `DurableWriter.write` contract, not a SQLite artifact, a Postgres-backed implementation must use `SERIALIZABLE` (issue #74)
-- `runParents(childId)`: the recorded edges, oldest first (`seq` is ordering-only)
-- `removeRunParentsForRun(runId)`: deletes every edge naming the run as child **or** parent, for lanes that clear edges without deleting the run row. Because `flows_run_parents` deliberately has no FK to `flows_runs`, GC is additionally enforced in the database: an `AFTER DELETE` trigger on `flows_runs` prunes the deleted run's edges in the same transaction, so a lane that never calls this hook still cannot leave ghost edges in a future cycle walk (issues #66/#81)
+| Export                    | Shape                                                                                                |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `DeferredAddress`         | `{ flowName, executionId, deferredName }`                                                            |
+| `DeferredRow`             | the address plus `exit: unknown` and optional `metadata`                                             |
+| `ClockAddress`            | `{ flowName, executionId, clockName }`                                                               |
+| `ClockRow`                | the address plus `deferredName`, an absolute due time, and `completedAtMs: number \| null`           |
+| `Waiting`                 | `{ reason, wakeAt?, token? }`                                                                        |
+| `WaitingRow`              | `{ runId, reason, wakeAt: number \| null, token: string \| null }`                                   |
+| `WaitingReason`           | a non-empty string; the open taxonomy the driver writes (`timer`, `event`, `released`, `quarantine`) |
+| `WaitingRunsFilter`       | `{ reason?, dueBeforeMs?, cancelRequested? }`                                                        |
+| `RunParentEdge`           | `{ childId, parentId, seq }`, where `seq` is ordering only                                           |
+| `AttemptSurvivors`        | `{ earliestAttempt, earliestStartedAtMs, latest }`                                                   |
+| `CompleteDeferredOutcome` | `Completed` or `Existing`                                                                            |
+| `ScheduleClockOutcome`    | `Scheduled` or `Existing`                                                                            |
+| `CompleteClockOutcome`    | `Completed`, `AlreadyCompleted`, or `NotFound`                                                       |
+| `ParkOutcome`             | `Parked` or `NotFound`                                                                               |
+| `WakeOutcome`             | `Woken`, `NotWaiting`, or `NotFound`                                                                 |
+| `RecordRunParentOutcome`  | `Recorded` or `Existing`                                                                             |
+| `RunParentCycleError`     | tagged error carrying `path`, the execution ids from the child back to itself                        |
 
-The run driver populates the waiting taxonomy on the execution path: a run
-that suspends parks before its `suspended` transition: reason `timer` with
-the earliest pending clock deadline as `wakeAt` when a durable clock is
-outstanding, reason `event` otherwise, and every resume wakes (clears) the
-waiting payload when the run re-enters `running`. `waitingRuns` and the
-waiting-row partial index therefore match real suspensions, not only
-rows written through the store API directly.
+Both implementations are pinned by one shared contract suite,
+[test/contract/DurableEngineStateContract.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/test/contract/DurableEngineStateContract.ts).
 
-Outcome unions distinguish newly written, existing, completed, and missing
-rows. `make` and `layer` provide SQL persistence through `DurableWriter` and Effect's `SqlClient`;
-`makeMemory(options?)` and `layerMemory` are deterministic in-memory
-implementations that, given a `runs` lookup, enforce the same
-`park`/`wake`/`scheduleClock` ownership fences as the SQL layer: both are
-pinned by one shared contract suite
-(`packages/smithers/flows/engine-store/test/contract/DurableEngineStateContract.ts`).
-Clock creation is fenced against the active run owner. Deferred and clock
-completion use first-writer and compare-and-set admission before the existing
-claim-gated wake path. A durable clock whose fire fails transiently is
-redispatched with capped exponential backoff (Temporal timer-queue
-semantics) rather than being lost until process restart.
+Full model: [Durable waits](./concepts/durable-waits.md).
 
-### `StepBoundary`
+## StepBoundary
 
-<a id="stepboundary"></a>
+[src/StepBoundary.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/StepBoundary.ts)
 
-`FileBoundary` from `@smthrs/flow`'s `Action` namespace contains `readSet`, `writeSet`, and `boundaryMode` (`hard` or `expected`). A service implements:
+The declared read and write sets of a step, measured before and after it runs.
+The declaration itself, `FileBoundary` with `readSet`, `writeSet`, `removes`,
+and `boundaryMode` of `hard` or `expected`, lives in
+[`@smthrs/flow`](/api/flow)'s `Action` namespace.
 
 ```ts
 interface Service {
-  prepare(descriptor: FileBoundary): Effect<PreparedBoundary, UnsupportedBoundary, Crypto>
-  settle(prepared: PreparedBoundary): Effect<BoundaryEvidence, UndeclaredWrite | UnsupportedBoundary>
-  replayOutputs(evidence: BoundaryEvidence): Effect<void, UnsupportedBoundary | BoundaryCorruption | MissingArtifact>
+  readonly prepare: (descriptor: FileBoundary) => Effect<PreparedBoundary, UnsupportedBoundary, Crypto>
+  readonly settle: (prepared: PreparedBoundary) => Effect<
+    BoundaryEvidence,
+    UndeclaredWrite | MissingDeclaredOutput | SurvivingDeclaredRemoval | UnsupportedBoundary | BoundaryCorruption,
+    Crypto
+  >
+  readonly replayOutputs: (evidence: BoundaryEvidence) => Effect<
+    void,
+    UnsupportedBoundary | BoundaryCorruption | MissingArtifact,
+    Crypto
+  >
 }
 ```
 
-`BoundaryEvidence` contains declared outputs, a diff identity, optional expected-set deviation, and optional `wholeTreeWritesVerified: true`. A hard undeclared write fails with `UndeclaredWrite`; expected mode records a deviation. Cross-run cache admission requires the explicit whole-tree proof.
+| Export              | Signature                                                                                    | Meaning                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `StepBoundary`      | `Context.Service<Service>`                                                                   | Service tag.                                                                                                           |
+| `make`              | `(service: Service) => Service`                                                              | Brands an implementation, so a wrong shape is reported where it is written.                                            |
+| `makeFileSystem`    | `(fs: FileSystem, artifacts: ArtifactStore.Service, options?: FileSystemOptions) => Service` | The production boundary.                                                                                               |
+| `layer`             | `Layer<Service, never, FileSystem \| ArtifactStore>`                                         | Provides it.                                                                                                           |
+| `layerTest`         | `(options?: TestOptions) => Layer<Service>`                                                  | Deterministic in-memory boundary.                                                                                      |
+| `exactReads`        | `(descriptor: FileBoundary) => ReadonlyArray<FileInput>`                                     | Exact read inputs, ignoring declarations that still need expansion.                                                    |
+| `readSetMatches`    | `(prepared: PreparedBoundary) => boolean`                                                    | Whether the measured snapshot still matches the declaration.                                                           |
+| `referencedDigests` | `(evidence: BoundaryEvidence) => ReadonlyArray<ArtifactStore.Digest>`                        | The digests the evidence references rather than inlines. Evidence from a foreign implementation yields the empty list. |
 
-`MissingArtifact` is the one replay refusal a shared artifact tier can repair, the bytes are simply not on this host, so it is a distinct tag from a corrupt address or a host that refused outright. `referencedDigests(evidence)` names the digests evidence references rather than inlines; that is the set `ArtifactSync` publishes and fetches.
+### Schemas
 
-`make(service)` wraps an implementation. `layer` is the filesystem-backed production boundary over the kernel `FileSystem` seam and the `@smthrs/artifacts` `ArtifactStore`, which owns the blob mechanics (content addressing, atomic publication, digest verification, dedupe); what stays here is the policy that decides which outputs become blobs at all, the `maxInlineBytes` / `maxTotalInlineBytes` inline-versus-spill budgets. Concretely: `prepare` measures the declared read set's real digests, `settle` detects declared reads mutated outside the declared write set and captures the write set's post-state as materializable outputs, and `replayOutputs` re-materializes them. It cannot detect writes elsewhere in the tree, so it never claims the whole-tree proof itself, that claim now comes from running the body somewhere else, which is [`WorkspaceSandbox`](#workspacesandbox). A composition with a boundary but no sandbox keeps the old, honest outcome: run-local results only. `layerTest(options?)` is deterministic and supports changed-path/deviation/replay/`readSnapshot` assertions, but it does not enforce a real sandbox.
+| Export                      | Shape                                                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PreparedBoundary`          | `{ descriptor, readSnapshot }`. The snapshot is what the host actually measured, and is the evidence the declared digests still describe reality. |
+| `BoundaryEvidence`          | `{ declaredOutputs, diffIdentity, wholeTreeWritesVerified?, hermeticReadsVerified?, deviation? }`                                                 |
+| `ExpectedSetDeviation`      | `{ paths, diffIdentity }`, writes outside the declared write set                                                                                  |
+| `MissingOutputDeviation`    | `{ paths, diffIdentity }`, declared writes never produced                                                                                         |
+| `SurvivingRemovalDeviation` | `{ paths, diffIdentity }`, declared removals left in place                                                                                        |
+| `BoundaryDeviation`         | the union of the three                                                                                                                            |
 
-### `WorkspaceSandbox`
+### FileSystemOptions
 
-<a id="workspacesandbox"></a>
+| Field                 | Default | Meaning                                                                                                                      |
+| --------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `maxInlineBytes`      | 1 MiB   | The largest single output inlined into the evidence. Anything larger is stored by digest reference.                          |
+| `maxTotalInlineBytes` | 8 MiB   | The largest aggregate inline payload one settle may fold in. Past it, an output is spilled even though it individually fits. |
 
-The functional workspace transaction: a sealed action's body runs in an isolated workspace and _returns_ its writes rather than performing them.
+### TestOptions
+
+`changedPaths`, `missingOutputs`, `survivingRemovals`, `readSnapshot`,
+`declaredOutputs`, `diffIdentity`, `supported`, `wholeTreeWriteDetection`,
+`hermeticReadDetection`, and `onReplay`. Defaults describe a well-behaved,
+fully-supported host. `wholeTreeWriteDetection` defaults to `true`, which is a
+fixture claim rather than a proof: the real whole-tree observation comes from
+[`WorkspaceSandbox`](#workspacesandbox).
+
+### Errors
+
+| Error                      | `code`                       | Fields                                     |
+| -------------------------- | ---------------------------- | ------------------------------------------ |
+| `UndeclaredWrite`          | `undeclared_write`           | `paths`, `diffIdentity`                    |
+| `MissingDeclaredOutput`    | `missing_declared_output`    | `paths`, `diffIdentity`                    |
+| `SurvivingDeclaredRemoval` | `surviving_declared_removal` | `paths`, `diffIdentity`                    |
+| `UnsupportedBoundary`      | `unsupported_boundary`       | `message`, optional `cause` carried whole  |
+| `BoundaryCorruption`       | `boundary_corruption`        | `path`, `recordedDigest`, `measuredDigest` |
+| `MissingArtifact`          | `missing_artifact`           | `path`, `digest`                           |
+
+Full model: [Step boundaries](./concepts/step-boundaries.md).
+
+## StepSandbox
+
+[src/StepSandbox.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/StepSandbox.ts)
+
+Scope-safe acquisition of one isolated workspace per step.
+
+| Export           | Signature                                                                  | Meaning                                                                  |
+| ---------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `StepSandbox`    | `Context.Service<Service>`                                                 | Service tag.                                                             |
+| `Service`        | `{ open: Effect<WorkspaceSandbox.Service, UnsupportedBoundary> }`          | Acquires the workspace.                                                  |
+| `make`           | `(workspace: WorkspaceSandbox.Service) => Service`                         | Wraps a transaction backend.                                             |
+| `layer`          | `Layer<Service, never, FileSystem \| ArtifactStore \| Workspace>`          | The filesystem-backed sandbox.                                           |
+| `layerTest`      | `(initialFiles?: InitialFiles) => Layer<Service, WorkspaceError, Crypto>`  | Deterministic in-memory sandbox.                                         |
+| `layerNoop`      | `Layer<Service>`                                                           | Fails closed with `UnsupportedBoundary`, for a host that cannot sandbox. |
+| `UndeclaredRead` | tagged error, `code: "undeclared_read"`, fields `paths` and `diffIdentity` | A hermetic body read outside its declared read set.                      |
+
+## WorkspaceSandbox
+
+[src/WorkspaceSandbox.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/WorkspaceSandbox.ts)
+
+The functional workspace transaction: a sealed action's body runs in an isolated
+workspace and returns its writes rather than performing them.
 
 ```ts
 interface Service {
-  execute<Output, Error>(
+  readonly execute: <Output, Error>(
     execution: Execution<Output, Error>
-  ): Effect<ExecutionResult<Output>, Error | WorkspaceError, Crypto>
-  materialize<Output>(accepted: Accepted<Output>): Effect<void, MaterializationConflict | WorkspaceError, Crypto>
+  ) => Effect<ExecutionResult<Output>, Error | WorkspaceError, Crypto>
+  readonly materialize: <Output>(
+    accepted: Accepted<Output>
+  ) => Effect<void, MaterializationConflict | WorkspaceError, Crypto>
 }
 ```
 
-`execute` is speculative and never touches the host. It seeds the transaction with exactly the declared read set, an undeclared file is simply not there, which is the strong enforcement tier, serves it through both the `Workspace` tag and a re-rooted Effect `FileSystem`, and diffs the whole map at settlement. An execution whose observations contradict its declaration is `Invalidated` in hard mode, and that shape carries provenance and violations _only_: there is no accessor for the candidate output, files, or queued effects.
+| Export                      | Signature                                                                                                                          | Meaning                                                                                                                     |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `WorkspaceSandbox`          | `Context.Service<Service>`                                                                                                         | Service tag.                                                                                                                |
+| `make`                      | `(service: Service) => Service`                                                                                                    | Brands an implementation.                                                                                                   |
+| `layer`                     | `(service: Service) => Layer<Service>`                                                                                             | Provides one.                                                                                                               |
+| `makeHosted`                | `(host: Host) => Service`                                                                                                          | The transaction itself, over a `Host`.                                                                                      |
+| `makeMemory`                | `(initialFiles?: InitialFiles) => Effect<MemorySandbox, WorkspaceError, Crypto>`                                                   | Deterministic, browser-safe, and the conformance implementation. Seeds the whole tree, so an undeclared read is observable. |
+| `makeFileSystem`            | `(fs: FileSystem, artifacts: ArtifactStore.Service, workspaceRoot: string, options?: FileSystemOptions) => Service`                | The production host.                                                                                                        |
+| `layerFileSystem`           | `(options?: FileSystemOptions) => Layer<Service, never, FileSystem \| ArtifactStore \| Workspace>`                                 | Provides it, taking the root from the kernel `Workspace`.                                                                   |
+| `Workspace`                 | `Context.Service<Workspace>`                                                                                                       | The in-transaction filesystem and effect outbox, available only inside `execute`.                                           |
+| `EffectDispatcher`          | `Context.Service<Dispatcher>`                                                                                                      | The post-copy-back dispatch stage. Optional.                                                                                |
+| `layerDispatcher`           | `(dispatcher: Dispatcher) => Layer<Dispatcher>`                                                                                    | Provides one.                                                                                                               |
+| `violations`                | `(descriptor: FileBoundary, base: ReadonlyMap<string, Uint8Array>, provenance: Provenance) => ReadonlyArray<DeclarationViolation>` | Everything the declaration failed to predict, deduplicated.                                                                 |
+| `isMaterializationConflict` | `(error: unknown) => boolean`                                                                                                      | Recognizes both the live class and the persisted schema form.                                                               |
 
-`materialize` is the single host write and is all-or-nothing: every `FileChange.beforeDigest` is compared against the live host before a byte lands, so a bundle whose base moved is refused whole with `MaterializationConflict` and `ActionPersistence` rebases a bounded number of times. `beforeDigest` describes what is really on the host, including for a declared output the body never declared as a read: the `Host.baseline` seam is what supplies it, because "absent from the seed" is not "absent from the host".
+### Models
 
-`QueuedEffect`s are deliberately not dispatched inside the transaction: a speculative send has already reached the world when its execution turns out invalid, and reaches it twice when a copy-back loses a race. The optional `EffectDispatcher` stage runs after copy-back settles, deduplicated by idempotency key. The journal records `diff-bundle-captured` and `copy-back-settled`.
+| Export                     | Shape                                                                                                              |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `Resource`                 | `{ kind, id }`. This implementation records `kind: "file"`.                                                        |
+| `InputObservation`         | `{ resource, digest }`                                                                                             |
+| `OutputObservation`        | `{ resource, operation: "write" \| "remove", digest }`                                                             |
+| `Provenance`               | `{ baseRevision, inputs, outputs }`                                                                                |
+| `FileChange`               | `{ path, beforeDigest, afterDigest, after? }`. `beforeDigest` is a materialization precondition, not a hint.       |
+| `QueuedEffect`             | `{ protocol, idempotencyKey, payload }`                                                                            |
+| `WorkflowResult<Output>`   | `{ output, files, provenance, effects }`                                                                           |
+| `Execution<Output, Error>` | `{ descriptor, cacheKey?, workflow }`                                                                              |
+| `DeclarationViolation`     | `{ kind: "undeclared-read" \| "undeclared-write", resource }`                                                      |
+| `CacheOutcome`             | `disabled`, `miss`, or `hit`. A run-local memo, not the cross-run cache.                                           |
+| `Accepted<Output>`         | `{ _tag: "Accepted", result, cache, violations }`                                                                  |
+| `Invalidated`              | `{ _tag: "Invalidated", provenance, violations }`. No accessor for the candidate output, files, or queued effects. |
+| `ExecutionResult<Output>`  | `Accepted<Output> \| Invalidated`                                                                                  |
+| `Host`                     | `{ snapshot, baseline, retain, commit, root }`                                                                     |
+| `MemorySandbox`            | `{ service, files }`, where `files` observes host state, changed only by `materialize`                             |
+| `HostFile`                 | `{ path, content }`                                                                                                |
+| `InitialFiles`             | `Readonly<Record<string, string \| Uint8Array>>`                                                                   |
+| `FileSystemOptions`        | `{ maxInlineBytes? }`, defaulting to 1 MiB and matching `StepBoundary`'s evidence bound                            |
 
-`makeMemory` is the deterministic, browser-safe conformance implementation (it seeds the whole tree, so an undeclared read is observable); `makeFileSystem` / `layerFileSystem` back the transaction with the kernel `FileSystem`, the kernel `Workspace` root, and `@smthrs/artifacts` for products too large to carry inline. Both are `makeHosted` over one `Host`, so the transaction, the diff, the violation check, and the provenance cannot drift between them.
+### Errors
 
-It is a **deterministic transaction model, not a security boundary**. A body reaching the host through a service the transaction does not seed is outside it; denying that ambient access is the VM/`SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The human diff-review gate is not implemented and a settled bundle is applied without it (a known limitation of this release), and the transaction's `FileSystem` surface is deliberately partial.
+| Error                     | Fields                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `WorkspaceError`          | `code` of `invalid_path`, `not_found`, `host_unavailable`, or `path_escapes_workspace`; `message`; optional `cause` carried whole |
+| `MaterializationConflict` | `paths` (at most 1,024, each at most 4,096 characters) and `message`                                                              |
 
-### `PlanScheduler`
+It is a deterministic transaction model, not a security boundary. A body
+reaching the host through a service the transaction does not seed is outside it;
+denying that ambient access is the VM and `SandboxProvider` story in
+[`@smthrs/sandbox`](/api/sandbox). The human diff-review gate is not implemented
+and a settled bundle is applied without it, a known limitation of this release,
+and the transaction's `FileSystem` surface is deliberately partial.
 
-<a id="planscheduler"></a>
+Full model: [Workspace transactions](./concepts/workspace-transactions.md).
 
-The node scheduler: it drives a persisted [`@smthrs/plan`](/api/plan) `Plan` to completion. `record` persists generation 0 and journals `plan-recorded`, `append` persists the newest generation and journals `subgraph-appended`, and `run` walks the graph.
+## PlanScheduler
+
+[src/PlanScheduler.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/PlanScheduler.ts)
+
+Drives a persisted [`@smthrs/plan`](/api/plan) plan to completion.
 
 ```ts
 interface Service {
-  record(plan: Plan): Effect<RecordResult, SchedulerError, PlanStore | Journal>
-  append(plan: Plan): Effect<void, SchedulerError, PlanStore | Journal>
-  run(plan: Plan): Effect<Report, SchedulerError, Requirements>
+  readonly record: (plan: Plan) => Effect<PlanStore.RecordResult, SchedulerError, PlanStore | Journal>
+  readonly append: (plan: Plan) => Effect<void, SchedulerError, PlanStore | Journal>
+  readonly run: (plan: Plan) => Effect<Report, SchedulerError, Requirements>
 }
 ```
 
-Ready nodes dispatch through the same `internal/ActionPersistence` seam every action uses, so the shared step cache, [`WorkspaceSandbox`](#workspacesandbox)'s execute→materialize transaction, attempt rows, and the fenced journal all apply unchanged. The dispatch key folds the plan-time node key together with the boundary the host measured immediately before dispatch: two runs whose input files differ declare the same graph, and serving one the other's result is exactly the staleness the boundary exists to prevent.
+| Export          | Signature                                                                    | Meaning                                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `PlanScheduler` | `Context.Service<Service>`                                                   | Service tag.                                                                                                                  |
+| `make`          | `(options: Options) => Service`                                              | Builds a scheduler bound to one run.                                                                                          |
+| `layer`         | `(options: Options) => Layer<PlanScheduler>`                                 | Provides it.                                                                                                                  |
+| `NodeExecutor`  | `Context.Service<Executor>`                                                  | The DI seam that turns a node into work.                                                                                      |
+| `layerExecutor` | `(executor: Executor) => Layer<NodeExecutor>`                                | Provides one.                                                                                                                 |
+| `recertify`     | `(input: { plan, deferringRunId, options }) => Effect<RecertifyResult, ...>` | Re-drives a plan guess-free under a fresh run, then reports remaining debt.                                                   |
+| `Requirements`  | type                                                                         | `AttemptStore`, `CacheStore`, `Crypto`, `Jj`, `Journal`, `NodeExecutor`, `PlanStore`, `RunStore`, and `StepBoundary.Service`. |
 
-Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate deviations. There is **no reverse-dependency index and no invalidating node visitor**, because a node is dirty iff the key it would dispatch under moved and the dispatch-time recheck already computes that. And dependency discovery is a **wavefront** rather than Skyframe's restart-based discovery, because the plan declares its edges before anything runs.
+### Options
 
-Each node settles as one of four outcomes, `built`, `clean` (the shared cache served it and nothing ran), `failed`, and `skipped` (its cone failed, or `stop-merge` stopped it), journaled as `node-settled`. Admission is the middle limit only: `concurrency.steps` caps leaf execution and `concurrency.agents` caps the agent subset within it. Both default to unbounded and both floor at one, because a cap of zero admits nothing and a round that admits nothing settles nothing. Ready work is ordered by declared `priority` plus one point per round waited, so priority changes latency without permitting starvation.
+| Field                | Meaning                                                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `runId`              | The run this scheduler drives.                                                                                                |
+| `owner`              | The `OwnerId` its writes are fenced with.                                                                                     |
+| `sourceId`           | The journal source id.                                                                                                        |
+| `environment`        | The engine-resolved execution environment each dispatch is keyed under. Omitting it preserves the existing dispatch identity. |
+| `concurrency.steps`  | Caps leaf execution. Defaults to unbounded, floors at one.                                                                    |
+| `concurrency.agents` | Caps the agent subset within it. Same defaults.                                                                               |
+| `rebaseLimit`        | How many times a `delay-rebase` node may re-measure and re-key before reconciliation is asked.                                |
+| `selection.changed`  | Changed paths the belief edges are matched against.                                                                           |
+| `selection.beliefs`  | The `BeliefSnapshot` pinned before planning.                                                                                  |
+| `selection.policy`   | Deferral policy; `deferBelow` defaults to zero, which defers nothing.                                                         |
+| `selection.full`     | Treat every verdict as `Admit`, journaled.                                                                                    |
 
-Source paths, read by the plan, written by nothing in it, are measured **once** before the first dispatch and pinned for the whole run; produced paths are measured after their producer settles. That is the torn-run rule: a rebase re-observes our own outputs, never the world.
+Both concurrency caps must be positive safe integers and `rebaseLimit` a
+non-negative one; invalid bounds are rejected at construction.
 
-The runtime conflict strategies ride the plan's pair annotations. **delay/rebase** holds the dependents and re-executes against the newly recorded base, the re-measure re-keys, so it is a new attempt rather than a retry of one identity, journaled as `node-invalidated`, bounded by `rebaseLimit`. **stop/merge** stops the loser and appends a merge node to the _same_ plan as an ordinary elaboration, with no rebase budget of its own, because a lane that loses a landing race restarts or fails rather than rebasing. A conflict neither absorbs goes to [`Reconciliation`](#reconciliation).
+### Models
 
-`NodeExecutor` is the DI seam that turns a `NodeInput` into work: the scheduler owns identity, admission, caching, and journaling, and deliberately owns nothing about what a node _means_.
+| Export            | Shape                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `Outcome`         | `built`, `clean`, `failed`, `skipped`, or `deferred`                                          |
+| `ResolvedInput`   | `{ from, path, value }`, the settled output of `from` projected along `path`                  |
+| `NodeInput`       | `{ node, attempt, boundary, inputs }`                                                         |
+| `Executor`        | `{ execute: (input: NodeInput) => Effect<unknown, unknown> }`                                 |
+| `Settlement`      | `{ nodeId, planKey, dispatchKey, outcome, attempts, rebases }`                                |
+| `Report`          | `{ planId, digest, settlements, results, verdicts, appended }`                                |
+| `RecertifyResult` | `{ runId, report, remaining }`                                                                |
+| `SchedulerError`  | `code` of `boundary_unavailable`, `key_uncomputable`, `elaboration_failed`, or `store_failed` |
 
-### `Reconciliation`
+Ready nodes dispatch through the same `internal/ActionPersistence` seam every
+action uses, so the shared step cache,
+[`WorkspaceSandbox`](#workspacesandbox)'s execute-then-materialize transaction,
+attempt rows, and the fenced journal all apply unchanged. The dispatch key folds
+the plan-time node key together with the boundary the host measured immediately
+before dispatch, because two runs whose input files differ can declare the same
+graph.
 
-<a id="reconciliation"></a>
+Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate
+deviations. There is no reverse-dependency index and no invalidating node
+visitor, because a node is dirty exactly when the key it would dispatch under
+moved and the dispatch-time recheck already computes that. And dependency
+discovery is a wavefront rather than restart-based discovery, because the plan
+declares its edges before anything runs.
 
-The pluggable seam for when the world disagrees with the declaration. It is the **first consumer** `flows.engine.expected-set-deviation` has ever had: the emitters shipped with isolated execution and nothing read them.
+Source paths, read by the plan and written by nothing in it, are measured once
+before the first dispatch and pinned for the whole run; produced paths are
+measured after their producer settles. That is the torn-run rule: a rebase
+re-observes our own outputs, never the world. Ready work is ordered by declared
+`priority` plus one point per round waited, so priority changes latency without
+permitting starvation.
+
+Full guide: [Drive a plan to completion](./guides/drive-a-plan.md).
+
+## Reconciliation
+
+[src/Reconciliation.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Reconciliation.ts)
+
+The pluggable seam for when the world disagrees with the declaration. It is the
+first consumer `flows.engine.expected-set-deviation` has had.
 
 ```ts
 interface Service {
-  onDeviation(deviation: Deviation): Effect<Verdict>
-  onConflict(conflict: Conflict): Effect<Verdict>
+  readonly onDeviation: (deviation: Deviation) => Effect<Verdict>
+  readonly onConflict: (conflict: Conflict) => Effect<Verdict>
 }
 ```
 
-Pluggability is dependency injection at the owning seam, per the repository's extension doctrine; there is no hook kernel. `layerDefault` installs a deterministic verdict function in the vault's order of preference: **`Reorder`** when every undeclared path is one another plan node declares it writes (a real dependency the declaration missed, made explicit), **`FactorOut`** when another node in the same run deviated on exactly the same paths (content addressing collapses two identical extracted steps to one key by itself, so the verdict is a record and a hint), and **`Fail`** otherwise, because a deviation nothing explains is the case the vault calls genuinely wrong. A conflict the runtime strategy could not absorb always fails here: choosing a winner between two landings is a semantic judgement this default does not have the material to make.
+| Export                  | Signature                                     | Meaning                             |
+| ----------------------- | --------------------------------------------- | ----------------------------------- |
+| `Reconciliation`        | `Context.Service<Service>`                    | Service tag.                        |
+| `make`                  | `(service: Service) => Service`               | Names an implementation.            |
+| `layer`                 | `(service: Service) => Layer<Reconciliation>` | Installs one.                       |
+| `makeDefault`           | `() => Service`                               | The deterministic verdict function. |
+| `layerDefault`          | `Layer<Reconciliation>`                       | Installs it.                        |
+| `Deviation`, `Conflict` | schemas                                       | What the scheduler reports.         |
+| `Verdict`               | schema                                        | `Fail`, `Reorder`, or `FactorOut`.  |
 
-The scheduler attributes every deviation on a journal page before judging any of it, so two steps that produced the same undeclared paths both see each other: deviating identically is a symmetric fact, and which of the pair the journal happened to list first must not decide the verdict.
+`layerDefault` answers in one order of preference: `Reorder` when every
+undeclared path is one another plan node declares it writes, `FactorOut` when
+another node in the same run deviated on exactly the same paths, and `Fail`
+otherwise. A conflict the runtime strategy could not absorb always fails, because
+choosing a winner between two landings is a semantic judgement this default does
+not have the material to make.
 
-A model-backed reconciler is a different `Layer`. It lives in the agent packages; this package has no model dependency and must not grow one.
+The scheduler attributes every deviation on a journal page before judging any of
+it, so two steps that produced the same undeclared paths both see each other.
+Pluggability is dependency injection at the owning seam; there is no hook
+kernel. A model-backed reconciler is a different `Layer` and lives in the agent
+packages: this package has no model dependency and must not grow one.
 
-### `Selection`
+## Selection
 
-<a id="selection"></a>
+[src/Selection.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Selection.ts)
 
-The advisory scheduler seam. `Selection.select` may return `Admit`, `Defer`, or `Propose` verdicts for sink candidates and missing flows; it never changes a step key, cache row, or correctness decision. `SuspectedEdge` is the belief shape (`scope`, `affects`, `confidence`, `validFromMs`, `evidence`), and `BeliefSnapshot` pins the edge set at plan time.
+The advisory scheduler seam. It may return `Admit`, `Defer`, or `Propose`
+verdicts for sink candidates and missing flows, and never changes a step key, a
+cache row, or a correctness decision.
 
-`layerNoop` admits everything. `layerHeuristic` is pure glob matching over live edges (`validFromMs <= pinnedAtMs`): a matching edge supplies likelihood, a sink can defer only when a live edge names it, and a `Candidate.stats` failure ratio raises likelihood so flaky sinks stay inline. Stats alone never defer. A model-backed layer is out of scope because `engine-store` must not depend on a model.
+| Export                             | Signature                                                                                  | Meaning                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `Selection`                        | `Context.Service<Service>`                                                                 | Service tag.                                |
+| `Service`                          | `{ select: (input: Input) => Effect<ReadonlyArray<Selected>> }`                            | One verdict per candidate.                  |
+| `make`                             | `(service: Service) => Service`                                                            | Names an implementation.                    |
+| `layer`                            | `(service: Service) => Layer<Selection>`                                                   | Installs one.                               |
+| `makeNoop` / `layerNoop`           |                                                                                            | Admits everything. The behavioral default.  |
+| `makeHeuristic` / `layerHeuristic` |                                                                                            | Pure glob matching over live edges.         |
+| `debt`                             | `(runId: string, options?: DebtOptions) => Effect<ReadonlyArray<DebtEntry>, ..., Journal>` | Folds the journal for unpaid deferrals.     |
+| `risk`                             | `(input: { changed, beliefs }) => Risk`                                                    | A pure annotation, never a gate.            |
+| `card`                             | `(input: CardInput) => ReadonlyArray<string>`                                              | Renders the plan card, one string per line. |
+| `proposeReadSet`                   | `(input: { beliefs, flow, paths }) => ReadonlyArray<string>`                               | The `boundaryMode: "expected"` feeder.      |
 
-`Selection.debt(runId)` is the v1 same-run fold: `selection-deferred` opens by plan key, and `node-settled` with `built`, `clean`, or `failed` closes; `skipped` does not. `Selection.debt(runId, { repaidBy })` widens only the close side, accepting matching settlements from explicitly named repaying runs while leaving omitted options byte-identical to v1. `PlanScheduler.recertify(input)` re-drives the compiled plan through `PlanScheduler` under the caller's fresh run id with full-selection override, then returns that repayer and the remaining debt computed with `repaidBy`.
+### Schemas and models
 
-`Selection.card(input)` is a pure plan-card renderer for `cached`, `run`, `deferred`, `proposed`, and optional `risk` rows; its row strings are test-pinned. `Selection.risk({ changed, beliefs })` is a pure annotation, never a gate: `high` at confidence `>= 0.7`, `medium` at `>= 0.4`, otherwise `low`, with reasons named `<scope> -> <affects> (<confidence>)`. `Selection.proposeReadSet({ beliefs, flow, paths })` returns matching workspace paths for live edges whose `affects` names the flow, deduped in input order; wiring that into agent steps is out of scope.
+| Export               | Shape                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `SuspectedEdge`      | `{ scope, affects, confidence, validFromMs, evidence }`                                   |
+| `BeliefSnapshot`     | `{ pinnedAtMs, edges }`                                                                   |
+| `Verdict`            | `Admit`, `Defer { edge, likelihood }`, or `Propose { flow, edge, confidence }`            |
+| `Policy`             | `{ deferBelow }`. Zero defers nothing; a likelihood exactly at the threshold is admitted. |
+| `Candidate`          | `{ nodeId, planKey, stats? }`                                                             |
+| `Input`              | `{ changed, sinks, present, beliefs, policy }`                                            |
+| `Selected`           | `{ nodeId, verdict }`                                                                     |
+| `DebtEntry`          | `{ planId, nodeId, planKey, edge, likelihood, seq }`                                      |
+| `DebtOptions`        | `{ repaidBy? }`                                                                           |
+| `Risk`               | `{ level: "low" \| "medium" \| "high", reasons }`                                         |
+| `CardInput`          | `{ settlements, deferrals, proposals, cadence, risk? }`                                   |
+| `NonNegativeSafeInt` | the epoch and counter schema both public schemas and SQLite accept                        |
 
-Still out of scope: CLI verbs because no CLI package exists here, approval routing because approval machinery is not in this package, auto-appending proposals because the design needs human review, and scheduled recertification cadence because cadence is a product/system-flow concern rather than the store primitive.
+`layerHeuristic` matches live edges (`validFromMs <= pinnedAtMs`): a matching
+edge supplies the likelihood, a sink can defer only when a live edge names it,
+and a `Candidate.stats` failure ratio raises the likelihood so flaky sinks stay
+inline. Stats alone never defer. A model-backed layer is out of scope, because
+`engine-store` must not depend on a model.
 
-### `SelectionStore`
+`risk` returns `high` at confidence at or above 0.7, `medium` at or above 0.4,
+otherwise `low`, with each reason named `<scope> -> <affects> (<confidence>)`.
+`card` row strings are test-pinned: `clean` renders as `cached` and `built` as
+`run`.
 
-<a id="selectionstore"></a>
+Out of scope here: CLI verbs, approval routing, auto-appending proposals, and
+the recertification cadence, which is a product concern rather than a store
+primitive.
 
-The durable suspected-edge store, tagged `@smthrs/engine-store/SelectionStore`. `make` and `layer` follow the sibling store idiom and install through this package's `MigrationSet`.
+Full guide: [Defer work with selection beliefs](./guides/defer-work-with-selection.md).
 
-`upsert(edges)` inserts or replaces by `(scope, affects)`, `list()` returns every edge, and `snapshot()` returns a `BeliefSnapshot` pinned at the injected clock's current time, never `Date.now()`. `train(observations)` updates only matching edges in one transaction, ignores unknown pairs, appends every observation to evidence, and uses the asymmetric rule: hit -> `confidence + 0.05 * (1 - confidence)`; miss -> `confidence * 0.5`. Training never creates edges and never writes journal records.
+## SelectionStore
 
-### `ArtifactSync`
+[src/SelectionStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/SelectionStore.ts)
 
-<a id="artifactsync"></a>
+The durable suspected-edge store, tagged `@smthrs/engine-store/SelectionStore`.
 
-The two-tier artifact protocol, and the seam a shared-cache composition injects into. `makeLocal()` is the default when the tag is absent: publish is a no-op and hydrate reports nothing arrived, so a purely local engine pays nothing. `make({ local, remote })`, or `layer(remote)`, which takes the local tier from the `ArtifactStore` tag, implements the real thing:
+| Export                | Signature                                                                                                          | Meaning                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| `SelectionStore`      | `Context.Service<Service>`                                                                                         | Service tag.                                    |
+| `make`                | `Effect<Service, never, DurableWriter \| SqlClient>`                                                               | Builds it through this package's migration set. |
+| `layer`               | `Layer<SelectionStore, never, DurableWriter \| SqlClient>`                                                         | Provides it.                                    |
+| `maxEvidenceEntries`  | `128`                                                                                                              | Newest evidence entries retained per edge.      |
+| `TrainingOutcome`     | `"hit" \| "miss"`                                                                                                  |                                                 |
+| `TrainingObservation` | `{ scope, affects, outcome }`                                                                                      |                                                 |
+| `SelectionStoreError` | `code` of `invalid_input`, `decode_failed`, or `persistence_failed`, plus optional `scope`, `affects`, and `cause` |                                                 |
 
-- `publish(digests)` runs `findMissing` on the shared tier, uploads what is missing, and re-probes to confirm. `ActionPersistence` calls it immediately **before** the transaction that records the cache entry, and never inside it. This is Bazel's REAPI ordering constraint (`UploadManifest.java:630-633`): an action result is uploaded after every blob it refers to, because a result accessed before its blobs are present cannot be validated. A publication that cannot make the artifacts durable fails with `ArtifactPublicationFailed`, and the **shared** entry is withheld.
-- `hydrate(digests)` establishes that this host can resolve every referenced artifact, reporting whether the replay is now worth retrying. It never fails a run: a shared tier that is down must not stop work that can simply be done. How eagerly it materializes is the `downloadPolicy` option on `make` and `layer`.
+`upsert(edges)` inserts or replaces by `(scope, affects)`. `list()` returns
+every edge. `snapshot()` pins the injected clock's current time, never
+`Date.now()`. `train(observations)` updates only matching edges in one
+transaction, ignores unknown pairs, appends every observation to evidence, and
+applies the asymmetric rule: a hit becomes `confidence + 0.05 * (1 -
+confidence)`, a miss becomes `confidence * 0.5`. Training never creates edges
+and never writes journal records.
 
-### `ArtifactGc`
+## ArtifactSync
 
-Collection never runs automatically. `gc()` is an explicit verb, and the mark is fail-safe: a root row carrying boundary evidence this build cannot decode aborts the collection rather than contributing nothing. Attempt checkpoints are also live roots, with digest-shaped strings retained conservatively. See [Sweep unreferenced artifacts](/docs/guides/retention/#4-sweep-unreferenced-artifacts) for the algorithm and its concurrency argument.
+[src/ArtifactSync.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/ArtifactSync.ts)
 
-### `CacheSync`
+The two-tier artifact protocol, and the seam a shared-cache composition injects
+into.
 
-<a id="cachesync"></a>
+| Export                      | Signature                                                                                               | Meaning                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `ArtifactSync`              | `Context.Service<Service>`                                                                              | Service tag.                                                                             |
+| `makeLocal`                 | `() => Service`                                                                                         | Publish is a no-op; hydrate reports nothing arrived. The default when the tag is absent. |
+| `layerLocal`                | `Layer<ArtifactSync>`                                                                                   | Provides it.                                                                             |
+| `make`                      | `(options: { local, remote, downloadPolicy? }) => Service`                                              | The two-tier protocol.                                                                   |
+| `layer`                     | `(remote: Effect<ArtifactStore.Service, E, R>, options?) => Layer<ArtifactSync, E, ArtifactStore \| R>` | Takes the local tier from the `ArtifactStore` tag and the shared tier from the effect.   |
+| `DownloadPolicy`            | `RemoteArtifacts.DownloadPolicy`                                                                        | `all`, `toplevel`, or `minimal`.                                                         |
+| `ArtifactPublicationFailed` | `code: "artifact_publication_failed"`, fields `digests`, `message`, optional `cause`                    |                                                                                          |
 
-The second half of the ordering constraint: the shared step-result tier's `put`, run **after** the transaction that made the local row durable. `makeLocal()` is the default when the tag is absent. `make({ remote })`, or `layer(remote)`, publishes to a remote `CacheStore`, typically `RemoteCacheStore`.
+`publish(digests)` runs `findMissing` on the shared tier, uploads what is
+missing, and re-probes to confirm. `ActionPersistence` calls it immediately
+before the transaction that records the cache entry, and never inside it: this
+is Bazel's REAPI ordering constraint, because a result accessed before its blobs
+are present cannot be validated. A publication that cannot make the artifacts
+durable fails and the shared entry is withheld.
 
-It is a separate seam from the `CacheStore` tag because of _where_ the local row is written. `ActionPersistence` commits the cache row and the journal record explaining it in one `DurableWriter` transaction, and nothing that is not storage work may be held across one: a `CacheStore` whose `put` also wrote a shared HTTP tier would put a network round trip inside that transaction, blocking every other writer for its duration and rolling the local row back whenever a _shared cache_ was unreachable. So the local put stays inside and the shared put becomes this service. Compose it with `CombinedCacheStore` in `"deferred"` publication mode, which is the mode that leaves the shared write here; lookups stay read-through either way.
+`hydrate(digests)` establishes that this host can resolve every referenced
+artifact and reports whether the replay is now worth retrying. It never fails a
+run: a shared tier that is down must not stop work that can simply be done.
 
-Neither publication step can fail a run. Both run after `attempts.finish`, so the result is already durably recorded on this host, and failing a completed run because an optional accelerator is unreachable trades a real result for an unavailable one. A refusal withholds the shared copy, never the local row, and journals a `cache-provenance` record with `action: "unpublished"` carrying the stage (`artifacts` or `entry`) and the reason. That is the same "visible, not silent" treatment an unverified read set gets (issue #106); a missing shared entry is explainable from the journal rather than inferred from its absence.
+The two tiers cannot both be layers, because they inhabit the same tag and
+composing them would shadow one with the other.
 
-#### `ArtifactSync.DownloadPolicy`
+### DownloadPolicy
 
-How eagerly a replay materializes the artifacts it references. Bazel's `RemoteOutputChecker` dial at the seam that owns the decision.
-
-The policy is declared on the shared tier as `RemoteArtifacts.Options.downloadPolicy` and `ArtifactSync.make` reads it from the store it was handed, so one deployment setting reaches both seams. An explicit `downloadPolicy` on `make` or `layer` overrides it.
+Declared on the shared tier as `RemoteArtifacts.Options.downloadPolicy` and read
+from the store `make` was handed, so one deployment setting reaches both seams.
+An explicit `downloadPolicy` on `make` or `layer` overrides it.
 
 | Policy          | `hydrate` behavior                                                                                                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `all` (default) | Downloads every referenced artifact into this host's store while admitting the replay. Every later read is local, and a shared tier that goes down afterwards costs nothing.                    |
 | `toplevel`      | Downloads nothing. One batched `findMissing` establishes that the shared tier can serve what is missing, and `CombinedArtifacts.get` fetches and writes back the blobs a reader actually reads. |
-| `minimal`       | The same probe and the same zero downloads here; `CombinedArtifacts.get` then serves without writing back, so this host never accumulates other machines' artifacts.                            |
+| `minimal`       | The same probe and the same zero downloads; `CombinedArtifacts.get` then serves without writing back, so this host never accumulates other machines' artifacts.                                 |
 
-The two lazy policies are only sound when the store the replay reads through can reach the shared tier, which means `CombinedArtifacts` with the same remote tier. Under a purely local `ArtifactStore` an admitted lazy replay would later read an artifact this host never fetched. A tier that refuses the probe is indistinguishable from one that holds nothing, so the replay is refused either way and the step executes.
+The two lazy policies are sound only when the store the replay reads through can
+reach the shared tier, which means `CombinedArtifacts` with the same remote
+tier. A tier that refuses the probe is indistinguishable from one that holds
+nothing, so the replay is refused either way and the step executes.
 
-### Cache admission
+## CacheSync
 
-EngineStore admits a cache record only when the action is sealed, the boundary is hard, no deviation occurred, and the evidence explicitly carries `wholeTreeWritesVerified: true`. Older evidence and boundaries that observe declared paths only are conservatively refused. Under the production composition that proof comes from [`WorkspaceSandbox`](#workspacesandbox): the body ran in an isolated workspace, so a write outside the declared set is a map comparison rather than an inference, and `ActionPersistence` sets the flag itself, or, when the whole-tree diff shows a deviation the declared-read scan would have missed, records that deviation and withholds the entry. Only a content-key record has an address another run can reproduce; an ordinal-key record remains run-local. A cache hit is verified before it is served (issue #90): the store calls `prepare` and compares the descriptor's declared `readSet` against the `readSnapshot` the host measured. Reuse happens only when every declared read still matches, reads the host reports but the declaration never claimed are ignored, while a declared path that is missing or has a different digest refuses the hit, journals a `cache-provenance` record with `action: "stale_read_set"`, and falls through to a real execution. That is Skyframe's dirty-check invariant; the key alone only detects a _changed declaration_, not a stale one. A verified hit calls `replayOutputs` before returning the stored result. When that refuses with `MissingArtifact`, the normal first answer for a row recorded on a machine whose artifacts this one has never seen, the dispatch hydrates from the shared tier and retries the replay exactly **once** before falling through to a real execution; a second failure means the tier cannot serve it either, and executing is strictly better than looping.
+[src/CacheSync.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/CacheSync.ts)
 
-Replaying a succeeded attempt row also converges the cache: if a crash landed between `attempts.finish` and `cache.put`, the restarted executor re-records the sealed completion (with fresh cache-provenance) instead of leaving the cache permanently behind the journal. A divergent first-recorded row still surfaces through the `Inconsistency` receiver, strict by default.
+The second half of the ordering constraint: the shared step-result tier's `put`,
+run after the transaction that made the local row durable.
 
-A persisted `failed` attempt row replays by rethrowing the persisted domain failure, never by readmission, so `AttemptAdmissionRejected` marks only genuinely mid-flight (`running`) rows. The `Fail` errors were schema-encoded before persistence, so their `_tag` survives the JSON round trip and `RetryPolicy` non-retryable matching applies on replay (issue #59). The composition also implements the engine's `actionLatestAttempt` (attempt counter resumes from the persisted sequence) and degrades `actionRetryOrigin` to the earliest surviving attempt row when a retention job pruned attempt 1 (issue #69).
+| Export       | Signature                                                                                        | Meaning                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `CacheSync`  | `Context.Service<Service>`                                                                       | Service tag.                                                        |
+| `Service`    | `{ publishEntry: (entry: CacheStore.CacheEntry) => Effect<Option<CacheStore.CacheStoreError>> }` | `none` means shared, `some(error)` means not, and why.              |
+| `makeLocal`  | `() => Service`                                                                                  | The single-tier implementation. The default when the tag is absent. |
+| `layerLocal` | `Layer<CacheSync>`                                                                               | Provides it.                                                        |
+| `make`       | `(options: { remote: CacheStore.Service }) => Service`                                           | Publishes to a shared store, typically `RemoteCacheStore`.          |
+| `layer`      | `(remote: Effect<CacheStore.Service, E, R>) => Layer<CacheSync, E, R>`                           | Provides it.                                                        |
 
-See [Run durably over SQLite](/docs/tutorials/first-flow/#6-run-durably-over-sqlite) and [Content addressing](/docs/concepts/content-addressing/).
+It is a separate seam from the `CacheStore` tag because of where the local row
+is written. `ActionPersistence` commits the cache row and the journal record
+explaining it in one `DurableWriter` transaction, and nothing that is not
+storage work may be held across one: a `CacheStore` whose `put` also wrote a
+shared HTTP tier would put a network round trip inside that transaction,
+blocking every other writer for its duration and rolling the local row back
+whenever a shared cache was unreachable. Compose it with `CombinedCacheStore` in
+`"deferred"` publication mode; lookups stay read-through either way.
 
-### Stable errors
+A `Conflict` from the shared tier is not reported: it means another machine
+recorded the key first, which is the first-writer-wins outcome the shared tier
+exists to arbitrate.
 
-Every `code` literal exported through `Errors` is part of the public API. Consumers may switch on `code` or `_tag`.
+Neither publication step can fail a run. Both run after `attempts.finish`, so
+the result is already durably recorded on this host. A refusal withholds the
+shared copy, never the local row, and journals a `cache-provenance` record with
+`action: "unpublished"` carrying the stage (`artifacts` or `entry`) and the
+reason.
 
-### Migrations and internal scheduling
+## ArtifactGc
+
+[src/ArtifactGc.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/ArtifactGc.ts)
+
+Explicit mark and sweep collection of unreferenced blobs. Collection never runs
+automatically.
+
+| Export             | Signature                                                                         | Meaning                                                 |
+| ------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `ArtifactGc`       | `Context.Service<Service>`                                                        | Service tag.                                            |
+| `Service`          | `{ gc: (options?: GcOptions) => Effect<GcReport, ArtifactGcError> }`              | Marks the live set from the durable roots, then sweeps. |
+| `make`             | `(options?: MakeOptions) => Effect<Service, never, SqlClient \| ArtifactSweep>`   | Builds the collector.                                   |
+| `layer`            | `(options?: MakeOptions) => Layer<ArtifactGc, never, SqlClient \| ArtifactSweep>` | Provides it.                                            |
+| `ArtifactGcPolicy` | `Context.Service<Policy>`                                                         | The opt-in collection policy.                           |
+| `layerPolicy`      | `(policy: Policy) => Layer<ArtifactGcPolicy>`                                     | Installs it.                                            |
+| `defaultGraceMs`   | 14 days                                                                           | Git's `gc.pruneExpire` default.                         |
+| `ArtifactGcError`  | `code` of `invalid_options`, `mark_failed`, or `sweep_failed`                     |                                                         |
+
+| Type          | Fields                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `MakeOptions` | `pageSize`, rows per mark-phase page. Defaults to 500.                                                             |
+| `Policy`      | `graceMs?`, and `pins?` as an `Effect<ReadonlyArray<string>>` resolved fresh on every collection.                  |
+| `GcOptions`   | `graceMs?`, `pins?`, `dryRun?`. Explicit options override the installed policy; the policy overrides the defaults. |
+| `GcReport`    | `scannedBlobs`, `liveDigests`, `sweptDigests`, `reclaimedBytes`, `keptByGrace`, `dryRun`                           |
+
+The mark is fail-safe: a root row carrying boundary evidence this build cannot
+decode aborts the collection rather than contributing nothing. Attempt
+checkpoints are also live roots, with digest-shaped strings retained
+conservatively. The live set is computed before the inventory, so a root
+recorded during the sweep can only be missed, never half seen, and the blob such
+a root references is protected by the mtime fence anyway.
+
+Full guide: [Collect unreferenced artifacts](./guides/collect-unreferenced-artifacts.md).
+
+## Retention
+
+[src/Retention.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Retention.ts)
+
+Explicit deletion of finished run state. Nothing schedules any of it.
+
+| Export             | Signature                                                                                      | Meaning                                                                  |
+| ------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `Retention`        | `Context.Service<Service>`                                                                     | Service tag.                                                             |
+| `Service`          | `{ retain: (options: RetainOptions) => Effect<RetainReport, RetentionError \| JournalError> }` | One bounded pass inside one `journal.transact`.                          |
+| `make`             | `Effect<Service, never, SqlClient \| Journal>`                                                 | Builds it.                                                               |
+| `layer`            | `Layer<Retention, never, SqlClient \| Journal>`                                                | Provides it.                                                             |
+| `collect`          | `(options: Options) => Effect<Report, SqlError \| RetentionError, SqlClient>`                  | The host-facing pass, over one database file.                            |
+| `eligible`         | `(olderThanMs: number, limit?: number) => Effect<ReadonlyArray<string>, SqlError, SqlClient>`  | The candidate run ids, oldest first.                                     |
+| `defaultLimit`     | `1000`                                                                                         | Runs deleted by one pass when the caller names no bound.                 |
+| `terminalStatuses` | `["completed", "failed", "cancelled"]`                                                         | The statuses a run can never leave.                                      |
+| `runScopedTables`  | `ReadonlyArray<RunScopedTable>`                                                                | Every table a deleted run leaves rows in, and the column naming the run. |
+| `RetentionError`   | `code` of `scan_failed` or `delete_failed`                                                     |                                                                          |
+
+| Type                      | Fields                                                                                                                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RetainOptions`           | `olderThanMs` (a duration: how long a run must have been finished), `limit?`, `dryRun?`. A negative value in either number is read as zero.                                                                                           |
+| `RetainReport`            | `cutoffMs`, `runIds`, `retainedForLiveDescendants`, `retainedForLiveAncestors`, `runs`, `attempts`, `clockDeadlines`, `deferredCompletions`, `journalEntries`, `journalCheckpoints`, `archiveEntries`, `timeTravelReceipts`, `dryRun` |
+| `Options` (for `collect`) | `olderThanMs` (an absolute epoch millisecond threshold), `dryRun?`, `database?`, `limit?`                                                                                                                                             |
+| `Report` (from `collect`) | `database`, `olderThanMs`, `runs`, `deleted` (empty under a dry run), `dryRun`                                                                                                                                                        |
+
+A run is a candidate only when its status is terminal and it finished before the
+cutoff, and it is retained whenever a live run stands above or below it in the
+lineage, over both the `flows_run_parents` edge a spawned child records and the
+`parent_run_id` column a trampoline lineage is chained through. `collect` runs
+the same deletion and the same guard, and drops the edge-table half of the walk
+for a database that does not carry it, such as the control plane's.
+
+`collect` is the pass [`smthrs gc`](/cli/gc) runs over one database file.
+
+Full guide: [Delete old run history](./guides/delete-old-run-history.md).
+
+## RunCatalogRead
+
+[src/RunCatalogRead.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/RunCatalogRead.ts)
+
+The workspace's run set, for a [`@smthrs/sync`](/api/sync) `RunCatalog`.
+
+| Export            | Signature                                                                                   | Meaning                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `RunCatalogRead`  | `Context.Service<Service>`                                                                  | Service tag.                                                    |
+| `Service`         | `{ listRunIds: (options?: ListOptions) => Effect<ReadonlyArray<string>, RunCatalogError> }` | Every run the workspace has, oldest first, bounded by the read. |
+| `make`            | `() => Effect<Service, never, SqlClient>`                                                   | Builds it over `flows_runs`.                                    |
+| `layer`           | `Layer<RunCatalogRead, never, SqlClient>`                                                   | Provides it.                                                    |
+| `ListOptions`     | `{ limit? }`                                                                                | Defaults to `defaultLimit`.                                     |
+| `defaultLimit`    | `10000`                                                                                     |                                                                 |
+| `RunCatalogError` | `code` of `invalid_options` or `list_failed`                                                |                                                                 |
+
+It reads a set rather than a cursor tail, so retention of a run removes it from
+a follower's view. Rows come back newest first by rowid and are returned oldest
+first. Nothing here polls: the interval belongs to `RunCatalog.makePolling`.
+
+## DisasterRecovery
+
+[src/DisasterRecovery.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/DisasterRecovery.ts)
+
+Hot backup, verification, restore, and restore-time fencing.
+
+| Export            | Signature                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `backup`          | `(options: BackupOptions<R, E>) => Effect<BackupManifest, DisasterRecoveryError \| E, SqlClient \| FileSystem \| Crypto \| R>`  |
+| `verify`          | `(backupDirectory: string, options?: FileSizeOptions) => Effect<BackupManifest, DisasterRecoveryError, FileSystem \| Crypto>`   |
+| `restore`         | `(options: RestoreOptions) => Effect<RestoredStore, DisasterRecoveryError, FileSystem \| Crypto>`                               |
+| `fence`           | `(manifest: BackupManifest) => Effect<FenceSummary, DisasterRecoveryError, SqlClient \| DurableWriter>`                         |
+| `restoreAndFence` | `(options: RestoreAndFenceOptions<R, E>) => Effect<FencedRestoredStore, DisasterRecoveryError \| E, FileSystem \| Crypto \| R>` |
+
+| Constant                  | Value                                                                  |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `databaseFileName`        | `store.sqlite3`                                                        |
+| `manifestFileName`        | `manifest.json`, written last, so its presence marks a complete backup |
+| `objectsDirectoryName`    | `objects`                                                              |
+| `restoredMarkerFileName`  | `restored.json`                                                        |
+| `defaultMaxFileSizeBytes` | 512 MiB                                                                |
+
+| Type                           | Fields                                                                                                                                                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FileSizeOptions`              | `maxFileSizeBytes?`, a finite non-negative safe integer                                                                                                                                                            |
+| `BackupOptions<R, E>`          | `directory`, `objectsDirectory?`, `snapshotDatabaseLayer`, plus `FileSizeOptions`                                                                                                                                  |
+| `RestoreOptions`               | `backupDirectory`, `targetDirectory`, plus `FileSizeOptions`                                                                                                                                                       |
+| `RestoreAndFenceOptions<R, E>` | `RestoreOptions` plus `databaseLayer`                                                                                                                                                                              |
+| `RestoredStore`                | `{ databaseFile, objectsDirectory, manifest }`                                                                                                                                                                     |
+| `FencedRestoredStore`          | `RestoredStore` plus `fence: FenceSummary`                                                                                                                                                                         |
+| `FenceSummary`                 | `{ clearedClaims, suspendedRuns }`                                                                                                                                                                                 |
+| `BackupManifest`               | `{ formatVersion: 1, createdAtMs, database: { file, sha256, sizeBytes, migrations }, artifacts }`                                                                                                                  |
+| `AppliedMigration`             | `{ migrationId, name }`                                                                                                                                                                                            |
+| `ArtifactEntry`                | `{ digest, sizeBytes }`                                                                                                                                                                                            |
+| `DisasterRecoveryError`        | `code` of `invalid_options`, `not_empty`, `invalid_manifest`, `missing_file`, `digest_mismatch`, `artifact_corruption`, `snapshot_incomplete`, `schema_mismatch`, `io`, or `sql`, plus the `method` that raised it |
+
+The database is snapshotted with `VACUUM INTO`, a read transaction under WAL, so
+live writers are never blocked. The artifact walk runs after it, because results
+reference artifacts only after publication. With an `objectsDirectory` the whole
+capture holds the cross-process artifact backup lease; without one no lease is
+taken, and a frozen snapshot that references any artifact digest fails with
+`snapshot_incomplete` instead of reporting success.
+
+Host access arrives through Effect's `FileSystem` and `SqlClient` tags and
+hashing through the injected `Crypto` service, so the module carries no platform
+binding. The SQL dialect is SQLite; a non-SQLite backend fails with the `sql`
+code rather than pretending to snapshot.
+
+Full guide: [Back up and restore the store](./guides/back-up-and-restore.md).
+
+## Inconsistency
+
+[src/Inconsistency.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Inconsistency.ts)
+
+The receiver for cache conflicts and corrupt evidence.
+
+```ts
+interface Service {
+  readonly note: (event: CacheConflict) => Effect<InconsistencyVerdict, JournalError>
+  readonly noteCorruption: (event: BlobCorruption) => Effect<InconsistencyVerdict, JournalError>
+}
+```
+
+| Export          | Signature                                                            | Meaning                                                                                     |
+| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `Inconsistency` | `Context.Service<Service>`                                           | Service tag.                                                                                |
+| `make`          | `(options: MakeOptions) => Service`                                  | Journals every conflict under the run that attempted the write and returns a fixed verdict. |
+| `makeNoop`      | `(overrides?: Partial<Service>) => Service`                          | Notes nothing and tolerates.                                                                |
+| `layerNoop`     | `(overrides?: Partial<Service>) => Layer<Inconsistency>`             | Provides it.                                                                                |
+| `layerStrict`   | `(owner: Ownership.OwnerId) => Layer<Inconsistency, never, Journal>` | Journals and fails. The default for engine wiring.                                          |
+| `layerTolerant` | `(owner: Ownership.OwnerId) => Layer<Inconsistency, never, Journal>` | Journals and continues, preserving the first-recorded row.                                  |
+
+| Type                   | Fields                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- |
+| `InconsistencyVerdict` | `"fail"` or `"tolerate"`                                                                                |
+| `MakeOptions`          | `{ journal, verdict, owner }`. The owner is required: every composer of this receiver is a run's owner. |
+| `CacheConflict`        | `{ key, existing, attempted }`                                                                          |
+| `BlobCorruption`       | `{ runId, keyDigest, path, recordedDigest, measuredDigest, recordedRunId?, recordedEventSeq? }`         |
+
+The record goes through the journal's durable channel, so a `tolerate` verdict
+cannot silently drop its only record. For `noteCorruption`, `"fail"` fails the
+dispatch and `"tolerate"` lets it fall back to a real execution, which
+re-captures and heals the corrupt address.
+
+## OwnerIdentity
+
+[src/OwnerIdentity.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/OwnerIdentity.ts)
+
+Mints the `OwnerId` an incarnation fences its writes with.
+
+| Export            | Signature                                               | Meaning                                                             |
+| ----------------- | ------------------------------------------------------- | ------------------------------------------------------------------- |
+| `OwnerIdentity`   | `Context.Service<Service>`                              | Service tag.                                                        |
+| `Service`         | `{ ownerId: (hostId: string) => Effect<OwnerId> }`      | The host supplies the incarnation; the caller supplies the host id. |
+| `make`            | `(service: Service) => Service`                         | Brands an implementation.                                           |
+| `makeIncarnation` | `(pid: number \| undefined, crypto: Crypto) => Service` | The standard source over an explicitly supplied process id.         |
+| `layer`           | `Layer<OwnerIdentity, never, Crypto>`                   | The platform default.                                               |
+| `layerConstant`   | `(owner: OwnerId) => Layer<OwnerIdentity>`              | Pins the whole token.                                               |
+
+The process id is read off `globalThis` rather than through a bare `process`
+reference, so the module carries no Node binding: a browser bundle sees
+`undefined` and draws an incarnation number from `Random` instead. The read
+happens at layer construction, so importing the module touches nothing. The
+nonce is a UUIDv4 from the injected `Crypto` service.
+
+## WakeBus
+
+[src/WakeBus.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/WakeBus.ts)
+
+Edge-triggered in-process wakes, with durable polling as the miss-tolerant
+fallback.
+
+| Export       | Signature                                          | Meaning                                     |
+| ------------ | -------------------------------------------------- | ------------------------------------------- |
+| `WakeBus`    | `Context.Service<Service>`                         | Service tag.                                |
+| `Service`    | `{ wake, awaitWake, waiters }`                     | See below.                                  |
+| `makeUnsafe` | `() => Service`                                    | Constructs a bus. Nothing is durable.       |
+| `make`       | `Effect<Service>`                                  | The same, as an effect.                     |
+| `layer`      | `Layer<WakeBus>`                                   | Provides a fresh bus.                       |
+| `makeNoop`   | `(overrides?: Partial<Service>) => Service`        | Wakes are dropped and waiters park forever. |
+| `layerNoop`  | `(overrides?: Partial<Service>) => Layer<WakeBus>` | Provides it.                                |
+
+`wake(executionId)` resumes every waiter parked on that execution; with no
+waiters the wake is dropped. `awaitWake(executionId)` parks until the next one,
+and registration is removed when the waiting fiber is interrupted, so an
+abandoned wait leaks nothing. The wait is keyed by execution id alone, because
+execution ids are unique across flows. `waiters(executionId)` is observability
+for tests and diagnostics, not a coordination primitive.
+
+An engine composition resolves the bus optionally, so providing `layer` is how a
+host shares one bus between the engine and its own wake sources. Cross-process
+delivery stays store-driven.
+
+## EngineStoreMetrics
+
+[src/EngineStoreMetrics.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/EngineStoreMetrics.ts)
+
+Metric handles and observation combinators for the engine hot paths. Exporters
+remain host-owned.
+
+| Export                                                                  | Kind                                                                                                                          |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `ExitTag`                                                               | `"Success" \| "Failure" \| "Interrupt"`                                                                                       |
+| `exitTag`                                                               | `<A, E>(exit: Exit<A, E>) => ExitTag`                                                                                         |
+| `observe`                                                               | `(instruments: { timer, counter }) => <A, E, R>(effect: Effect<A, E, R>) => Effect<A, E, R>`                                  |
+| `dispatches`, `dispatchDuration`, `dispatch`                            | counter, timer, and views keyed by `ExitTag`                                                                                  |
+| `schedulerAdmissions`, `schedulerDispatchDuration`                      | counter and timer                                                                                                             |
+| `schedulerNodes`, `node`                                                | counter and views keyed by `PlanScheduler.Outcome`                                                                            |
+| `sandboxExecutions`, `sandboxExecutionDuration`, `sandboxExecution`     | counter, timer, and views keyed by `ExitTag`                                                                                  |
+| `sandboxMaterializations`, `materializationDuration`, `materialization` | counter, timer, and views keyed by `ExitTag`                                                                                  |
+| `materializationConflicts`                                              | counter                                                                                                                       |
+| `boundarySettlements`, `boundarySettlement`                             | counter and views keyed by `Clean`, `Deviation`, `Violation`, `Refused`                                                       |
+| `stepCacheDecisions`, `stepCacheDecision`                               | counter and views keyed by `VerifiedHit`, `Miss`, `UnverifiableEvidence`, `Unmeasurable`, `StaleReadSet`, `ReplayFailed`      |
+| `claims`, `claim`                                                       | counter and views keyed by `Activated`, `Terminal`, `HeartbeatFresh`, `StealRefusedOwnerAlive`, `ClaimLost`, `ActivationLost` |
+
+Outcome tags are rewritten as snake case attribute values, so `HeartbeatFresh`
+is recorded as `heartbeat_fresh`. `observe` composes `Effect.trackDuration` with
+an exit counter update and a span annotation, and propagates the instrumented
+effect's exit byte-identically.
+
+Full guide: [Observe engine metrics](./guides/observe-engine-metrics.md).
+
+## Migrations
+
+[src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Migrations.ts)
+
+| Export  | Signature                     | Meaning                                                                                                                    |
+| ------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `set`   | `MigrationSet`                | This package's own set, namespace `engine-store`, migration id block `3000`.                                               |
+| `sets`  | `ReadonlyArray<MigrationSet>` | The complete durable engine schema in dependency order: journal, run store, step cache, this package, then the plan store. |
+| `run`   | the migration effect          |                                                                                                                            |
+| `layer` | `Layer`                       | Installs the complete schema before exposing the database to any durable service.                                          |
 
 `@smthrs/engine-store` owns `flows_deferred_completions` and
-`flows_clock_deadlines`: the persisted `DurableDeferred`/`DurableClock` state
-`internal/DeferredPersistence` operates and no other package reads, and
-reserves migration id block `3000`. Because it composes every storage package,
-`Migrations.sets` is also the complete durable engine schema in dependency
-order (journal, run store, step cache, then its own) and `Migrations.layer`
-installs all of it. See [`@smthrs/database`](/api/database) for how the
-namespaced sets compose without colliding.
+`flows_clock_deadlines`: the persisted `DurableDeferred` and `DurableClock`
+state `internal/DeferredPersistence` operates and no other package reads. The
+plan set comes last because its id block (`4000`) is the highest, and the
+migrator decides what to run from a single high-water mark, so a set whose ids
+sit below an already-applied one would be assumed done and skipped. See
+[`@smthrs/database`](/api/database) for how namespaced sets compose without
+colliding.
 
-`internal/RunCoordinator` lives here rather than in a storage package because
-it is in-memory scheduling, not persistence: `make({ drain })` deduplicates
-in-process work by key and exposes `active`, `run`, `wake`, and `interrupt`
-around scoped fibers. `RunDriver` is its only consumer. It is not distributed
-ownership; that is [`@smthrs/run-store`](/api/run-store)'s `RunStore`. The shape
-is adapted from opencode's `packages/smithers/flows/core/src/session/run-coordinator.ts`,
-which also lives in the session layer.
+## RunState
 
-### Test compositions
+[src/RunState.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/RunState.ts)
 
-`test/TestStores` builds every durable engine service over one database, with
-this package's composed migration set already installed. `layer` uses a private
-in-memory database and keeps `SqlClient` to itself, which is what a case that
-only needs an engine wants. `layerAt(filename)` takes the database by name and
-re-exports the connection alongside `DurableEngineState`, which two other
-shapes need:
+The versioned state envelope stored in each run row.
 
-- adding another SQL-backed service (a control runtime, say) over the same
-  database as the engine, and
-- pointing two independently constructed bundles at one FILE. That gives two
-  connections, two engines, and no shared object graph, which is what a second
-  process actually has. `:memory:` gives each connection its own private
-  database, so it cannot prove anything durable across compositions.
+| Export         | Shape                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| `RunState`     | `{ version: 1, flowName, payload, parentExecutionId?, onParentExit?, maxRounds?, result?, cancellation? }` |
+| `OnParentExit` | `"cancel"` or `"detach"`                                                                                   |
+
+`parentExecutionId` is present only on a child run, and `onParentExit` travels
+with it: the parent's terminal transition reads it to decide whether the child
+ends with it. The policy is recorded on the child rather than on the edge,
+because it is a property of how the child was started and because a child with
+two parents must answer the question once.
+
+## Errors
+
+[src/Errors.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/Errors.ts)
+
+The stable error contract. Every `code` literal here is public API: consumers
+may switch on `code` or `_tag`, and the strings will not change without a major
+version. The classes are declared next to the logic that raises them; this
+module is the barrel so `internal/` is never imported by a consumer.
+
+| Export                                    | `code`                                                       | Fields                                                             |
+| ----------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `AttemptSuspended`                        | `attempt_suspended`                                          | `runId`, `keyDigest`, `attempt`                                    |
+| `AttemptAdmissionRejected`                | `attempt_admission_rejected`                                 | `keyDigest`, `outcome`                                             |
+| `AttemptEvidenceQuarantined`              | `attempt_evidence_quarantined`                               | `keyDigest`, `attempt`, `path`, `recordedDigest`, `measuredDigest` |
+| `CacheConflictDetected`                   | `cache_conflict_detected`                                    | `keyDigest`, `recordedRunId`                                       |
+| `CacheCorruptionDetected`                 | `cache_corruption_detected`                                  | `keyDigest`, `path`, `recordedDigest`, `measuredDigest`            |
+| `RetentionError`, `RetentionErrorCode`    | `scan_failed`, `delete_failed`                               |                                                                    |
+| `RunCatalogError`, `RunCatalogErrorCode`  | `invalid_options`, `list_failed`                             |                                                                    |
+| `IrreversibleRetryRequiresIdempotencyKey` | re-exported from [`@smthrs/flow`](/api/flow)'s `Action`      |                                                                    |
+| `FlowCycleDetected`                       | re-exported from [`@smthrs/flow`](/api/flow)'s `FlowRuntime` |                                                                    |
+
+Each failure, with its cause and its fix, is in
+[Troubleshooting](./troubleshooting.md).
+
+## test/TestStores
+
+[src/test/TestStores.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/test/TestStores.ts)
+
+Every durable engine service over one database, migrated.
+
+| Export              | Signature                                                       | Meaning                                                                                                                                |
+| ------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `layer`             | `(options?: TestStoresOptions) => Layer<...>`                   | The private in-memory bundle: journal, run, attempt, cache, and plan stores plus `OwnerIdentity.layer`, keeping `SqlClient` to itself. |
+| `layerAt`           | `(filename: string, options?: TestStoresOptions) => Layer<...>` | The same over a named database, with the connection and `DurableEngineState` re-exported.                                              |
+| `database`          | `Layer`                                                         | The migrated in-memory database alone, as `SqlClient` and `DurableWriter`.                                                             |
+| `databaseAt`        | `(filename: string) => Layer`                                   | The same over a named file.                                                                                                            |
+| `TestStoresOptions` | `{ capacity?, overflow?, batchSize? }`                          | Forwarded to the journal.                                                                                                              |
+
+Use `layerAt` with a real file to point two independently constructed bundles at
+one database: two connections, two engines, no shared object graph, which is
+what a second process actually has. `:memory:` gives each connection its own
+private database, so it cannot prove anything durable across compositions.
+
+Full guide: [Test against a durable store](./guides/testing.md).
+
+## Cache admission
+
+The engine admits a cache record only when the action is sealed, the boundary is
+hard, no deviation occurred, and the evidence explicitly carries
+`wholeTreeWritesVerified: true`. Older evidence and boundaries that observe
+declared paths only are conservatively refused. Only a content-key record has an
+address another run can reproduce; an ordinal-key record remains run-local.
+
+A cache hit is verified before it is served: the store calls `prepare` and
+compares the descriptor's declared `readSet` against the `readSnapshot` the host
+measured. Reuse happens only when every declared read still matches. Reads the
+host reports but the declaration never claimed are ignored, while a declared
+path that is missing or has a different digest refuses the hit, journals a
+`cache-provenance` record with `action: "stale_read_set"`, and falls through to a
+real execution. That is Skyframe's dirty-check invariant: the key alone detects a
+changed declaration, not a stale one.
+
+A verified hit calls `replayOutputs` before returning the stored result. When
+that refuses with `MissingArtifact`, the dispatch hydrates from the shared tier
+and retries the replay exactly once before falling through to a real execution.
+
+Replaying a succeeded attempt row also converges the cache: if a crash landed
+between `attempts.finish` and `cache.put`, the restarted executor re-records the
+sealed completion with fresh cache provenance. A divergent first-recorded row
+surfaces through the [`Inconsistency`](#inconsistency) receiver, strict by
+default.
+
+A persisted `failed` attempt row replays by rethrowing the persisted domain
+failure, never by readmission, so `AttemptAdmissionRejected` marks only
+genuinely mid-flight rows. The `Fail` errors were schema-encoded before
+persistence, so their `_tag` survives the JSON round trip and `RetryPolicy`
+non-retryable matching applies on replay. The composition also implements the
+engine's `actionLatestAttempt` and degrades `actionRetryOrigin` to the earliest
+surviving attempt row when a retention job pruned attempt 1.
+
+Full model: [Cache admission](./concepts/cache-admission.md). See also
+[Run durably over SQLite](/docs/tutorials/first-flow/#6-run-durably-over-sqlite)
+and [Content addressing](/docs/concepts/content-addressing/).
+
+## Internal scheduling
+
+`internal/RunCoordinator` lives in this package rather than in a storage package
+because it is in-memory scheduling, not persistence: `make({ drain })`
+deduplicates in-process work by key and exposes `active`, `run`, `wake`, and
+`interrupt` around scoped fibers. `RunDriver` is its only consumer. It is not
+distributed ownership; that is
+[`@smthrs/run-store`](/api/run-store)'s `RunStore`.

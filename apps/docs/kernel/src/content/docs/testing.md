@@ -1,15 +1,99 @@
 ---
 title: "Testing"
-description: "Capability kernel: effect tiers, monotone capability sets, grant store, and permission-decorating layers over the Host services"
+description: "What @smthrs/kernel ships for tests: the three grant-store doubles, the deterministic host bundle, the shared host contract suite, and what the package's own suite already covers."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/testing.md"
 ---
 
-The package-owned [`@smthrs/kernel` suite](/reference/api/) covers capability-set
-intersection, bounded and immutable grant state, journal replay and envelope
-limits, canonical filesystem resources and descriptor identity, command
-snapshots, process containment and ledger recovery, HTTP method/origin and
-redirect authorization, Jujutsu resources, browser-safe imports, and every
-supported and refused host operation. Its public
-`@smthrs/kernel/test/contract` matrix is also run by the Node, Bun, browser,
-test, and unsupported host bundles, including observable process liveness and
-multi-leg pipelines.
+The kernel ships three public test subpaths. They are published code, not
+dev-only files, so a consumer testing against a guarded host uses the same
+doubles the package tests itself with.
+
+## Pick a grant-store double
+
+`@smthrs/kernel/test/TestGrantStore` gives you three layers, and none of them
+needs a `Workspace`:
+
+```ts
+import * as TestGrantStore from "@smthrs/kernel/test/TestGrantStore"
+
+TestGrantStore.layerAllow // every check passes
+TestGrantStore.layerDeny("denied by test") // every check fails permission_denied
+TestGrantStore.layerScripted(["once", "deny"]) // a deterministic sequence
+```
+
+`layerScripted` consumes one reply per check, in order. `once`, `run`, and
+`remembered` allow the check; `deny` rejects it; exhausting the script rejects
+every further check with the reason
+`"permission reply script exhausted"`. Use it to assert **which** operations a
+subject attempts and in what order, which a blanket allow or deny cannot show.
+
+For a test about policy rather than about the subject, build a real store with
+`GrantStore.layer({ attended: false, rules })` instead. It exercises the actual
+evaluation path, and it needs a `Workspace`.
+
+## Run against the deterministic host
+
+`@smthrs/kernel/test/TestHost` is the whole host surface with every source of
+nondeterminism pinned: a `Map`-backed filesystem, a scripted interpreter,
+`TestClock` so time moves only when a test moves it, and a seeded PRNG.
+
+```ts
+import * as TestHost from "@smthrs/kernel/test/TestHost"
+
+const host = TestHost.layer({
+  files: { "/workspace/README.md": "# hello" },
+  commands: { "npm test": { stdout: "1 passing\n", exitCode: 0 } },
+  seed: 42
+})
+```
+
+`TestHost.TestHost` is the zero-config bundle: empty filesystem, no scripted
+commands, seed 42.
+
+Three details are worth knowing. The filesystem is the very same
+`BrowserFileSystem` adapter the browser runs, over a `Map`-backed volume, so a
+bug in the adapter shows up in tests instead of hiding behind a second
+implementation. The spawner is provided **over** the filesystem and path
+layers, exactly as `NodeChildProcessSpawner` is, so the interpreter and the
+`FileSystem` service agree about what exists. And a command that is not in
+`commands` fails the way a real shell reports a missing binary, so a test
+cannot accidentally depend on a host tool being installed.
+
+`Jj` is the package's ticket-failing browser layer, so a test that reaches for
+the repository fails loudly rather than touching the real machine, and
+`HttpClient` is the unavailable stub.
+
+The module is Node-only: `effect/testing`'s `TestClock` reaches for
+`node:assert`.
+
+## Run the shared host contract
+
+`@smthrs/kernel/test/contract` exports `runHostContract`, the behavioral
+contract every host bundle must satisfy: the complete filesystem, process, Jj,
+and HTTP capability matrices, including observable process liveness and
+multi-leg pipelines. The Node, Bun, browser, test, and deliberately
+unsupported bundles all run it.
+
+It registers Vitest cases, so it requires the declared peers
+(`@effect/vitest@4.0.0-rc.108` and `vitest@4.1.9`) and Node process and
+temporary-directory fixtures. See
+[Adapt a new host platform](/guides/adapt-a-new-host-platform/) for how to
+declare your bundle's capabilities to it.
+
+## What the package already proves
+
+The kernel's own suite covers capability-set intersection and equality;
+bounded, immutable grant state; journal replay and its envelope limits;
+canonical filesystem resources and descriptor identity; command snapshots;
+process containment and ledger recovery; HTTP method, origin, and redirect
+authorization; Jujutsu resources; browser-safe imports; and every supported and
+refused host operation.
+
+If you are testing a subject that reaches the host, you rarely need to re-prove
+any of that. Test what your subject does with the refusal.
+
+## Related
+
+- [Quickstart](/quickstart/): the doubles in a working composition.
+- [Handle a permission failure](https://capability.smithers.sh/guides/handle-a-permission-failure/):
+  reading the typed error a refusal carries.

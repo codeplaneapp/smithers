@@ -1,4 +1,4 @@
-This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [`@smthrs/patterns`](/concepts/subflows).
+This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [the API reference](./api.md).
 
 Every module here follows the two-surface shape the package uses everywhere:
 

@@ -45,11 +45,11 @@ replaces both for a host whose flows are laid out differently.
 `FlowStore` is the one contract a checkout, a browser host, and a test all
 satisfy:
 
-| Layer | Where files go |
-| --- | --- |
-| `FlowStore.layerFileSystem(root)` | `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`, through Effect's `FileSystem`. |
-| `FlowStore.layerMemory(map)` | A caller-owned `Map<string, string>` keyed by path, so a test reads the bytes back without a filesystem. |
-| `FlowStore.layerNoop()` | Nowhere: refuses with `FlowStoreError { code: "unsupported" }` and a message the model can read. |
+| Layer                             | Where files go                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `FlowStore.layerFileSystem(root)` | `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`, through Effect's `FileSystem`.             |
+| `FlowStore.layerMemory(map)`      | A caller-owned `Map<string, string>` keyed by path, so a test reads the bytes back without a filesystem. |
+| `FlowStore.layerNoop()`           | Nowhere: refuses with `FlowStoreError { code: "unsupported" }` and a message the model can read.         |
 
 Every message a store returns is written for the model that will read it back
 as a call failure, because the cell that asked to save a flow is the only thing

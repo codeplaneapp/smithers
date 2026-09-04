@@ -1,8 +1,11 @@
+---
+title: "Exported members"
+description: "Every categorized member reachable through the root namespaces of @smthrs/scorers, with its kind, category, and one-line summary."
+---
+
 <!-- Hand-maintained. `scripts/docs.mjs` wrote this file from packages/smithers/agent/scorers/src
      until the rc.0 docs-tooling dissolution removed it. Add the row when you add
      the member. -->
-
-# Exported members
 
 Every categorized member reachable through the root namespaces, in source
 order. `test/docs.test.ts` drift-checks the table against the `@category`

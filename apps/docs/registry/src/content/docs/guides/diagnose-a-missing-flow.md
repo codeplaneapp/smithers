@@ -1,0 +1,119 @@
+---
+title: "Diagnose a flow that did not appear"
+description: "Read registry.warnings() to find out why a flow file produced no entry, or produced one with the wrong name, authority, or visibility. Every discovery warning code, grouped by what it says."
+sidebar:
+  order: 2
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/registry/docs/guides/diagnose-a-missing-flow.md"
+---
+
+A scan never fails because one entry is wrong. `flows/` is a directory a person
+edits, so at any moment one file in it is mid-edit or malformed, and refusing
+the whole catalog for it would take every unrelated command down too. Anything
+a scan can survive becomes a `DiscoveryWarning` instead, and the warnings are
+the answer to "why is my flow not there".
+
+## Read the warnings
+
+```ts
+import * as Registry from "@smthrs/registry/Registry"
+import * as Effect from "effect/Effect"
+
+const diagnose = Effect.gen(function*() {
+  const catalog = yield* Registry.Registry
+  for (const warning of yield* catalog.warnings()) {
+    console.log(`${warning.code} ${warning.path}${warning.name ? ` (${warning.name})` : ""}`)
+    console.log(`  ${warning.message}`)
+  }
+})
+```
+
+Each warning carries a stable `code`, the `path` of the file it is about, the
+flow `name` when one was derived, a human `message`, and a `cause` when a host
+error produced it. Warnings are sorted by path, then code, then message, so two
+scans of the same tree report them in the same order.
+
+[`smthrs doctor`](https://smithers.sh/docs/reference/cli/doctor/) prints the same list.
+
+## The flow produced no entry at all
+
+Four codes mean a file contributed nothing. Everything else leaves an entry
+behind, possibly a different one than the author expected.
+
+| Code                  | What happened                                                                                                                                                                                                              | What to change                                                                                                         |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `missing_description` | A markdown flow has no non-empty frontmatter `description`, or a module flow's default `Flow.make` value has no literal `description`. Discovery needs one, because it is what a model and an autocomplete list are shown. | Add a one-line description. In a module, write it as a string literal; discovery reads it without evaluating the file. |
+| `root_level_entry`    | An entry file sits directly in the root of a path-named source, so there are no directory segments to name it.                                                                                                             | Move it into a subdirectory: `flows/review/flow.mdx`, not `flows/flow.mdx`.                                            |
+| `entry_too_large`     | The file is past `Discovery.entrySizeLimit`, 4 MiB. The message reports the byte count.                                                                                                                                    | Check for a build artifact or generated file under the source root.                                                    |
+| `unreadable`          | A directory or file could not be read or inspected. `cause` carries the host error.                                                                                                                                        | Fix the permission or the broken link.                                                                                 |
+
+Two more stop the walk rather than one entry:
+
+| Code                 | What happened                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `symlink_cycle`      | A directory resolves to one already visited. The message names both. Everything below it is skipped. |
+| `max_depth_exceeded` | The walk passed `Discovery.maximumTraversalDepth`, 32 entry-name segments.                           |
+
+## The flow appeared under the wrong name
+
+| Code                      | What happened                                                                                                                                            |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name_field_ignored`      | The source is path-named, so a `name` key in the file has no effect. The directory path below the root is the name.                                      |
+| `missing_name`            | A frontmatter-named source has no `name` key. The directory name was used.                                                                               |
+| `invalid_name`            | The `name` is not 1 to 64 lowercase ASCII letters, numbers, and single hyphens with no edge hyphens. The directory name was used.                        |
+| `directory_name_mismatch` | The `name` is valid but is not the directory's name. The declared name was used.                                                                         |
+| `duplicate_name`          | Two sources, or two directories, produced the same name. The message names the file that kept it. Order your sources so the winner is the one you meant. |
+| `shadowed`                | Two packs define the same name. The `local` pack wins whatever order the host listed them in. See [Load workflow packs](/guides/load-packs/).                |
+| `multiple_entry_files`    | One directory holds more than one of `flow.ts`, `flow.mdx`, and `SKILL.md`. The message names the one used.                                              |
+
+## The flow appeared with authority it did not declare
+
+These are the codes that explain a flow showing up as `tier: "irreversible"`
+with wildcard reads and writes. [Declared authority](/concepts/authority/)
+explains why each fallback is the conservative one.
+
+| Code                          | What happened                                                                                                                                                                                                         |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unprojectable_authority`     | A markdown flow declared no `capabilities`, or it names collaborator `flows` whose authority discovery cannot read. The wildcard was used.                                                                            |
+| `invalid_capabilities`        | A markdown `capabilities` value is not a string array. A space-separated string is accepted with this warning; anything else falls back to the wildcard.                                                              |
+| `invalid_effect_declaration`  | `effects` is not an object, or `effects.reads`, `effects.writes`, `effects.mode`, or `effects.onConflict` is not a value the schema allows. The conservative reading was used.                                        |
+| `invalid_effect_tier`         | A declared `effects.tier` under-classifies the authority the capabilities imply, or is not one of the three tiers. The conservative tier was used.                                                                    |
+| `unsupported_module_metadata` | A module declaration could not be read statically: a non-literal `capabilities` or `effects`, an object spread, a computed property, an unreadable default export, or an invalid `placement`. The message says which. |
+
+## The declaration had a key discovery did not use
+
+| Code                       | What happened                                                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unknown_frontmatter_key`  | A frontmatter key outside the accepted set. Check it against the [flow.mdx reference](https://smithers.sh/docs/reference/flow-mdx/); a typo is the usual cause.                                                  |
+| `invalid_allowed_tools`    | `flows` or `allowed-tools` is neither a string array nor a space-separated string. It was ignored, so the flow now delegates to the agent.                                                    |
+| `invalid_model_invocation` | `disable-model-invocation` is not a boolean or the strings `"true"` or `"false"`. It was ignored, so the flow stays model-invocable.                                                          |
+| `invalid_budget`           | `budget` is not an object, a ceiling is not a positive safe integer, or the object holds a key that is not `tokens` or `milliseconds`. The unreadable part was dropped rather than tightened. |
+| `invalid_license`          | `license` is not a string.                                                                                                                                                                    |
+| `invalid_compatibility`    | `compatibility` is not a string of at most 500 characters.                                                                                                                                    |
+| `invalid_metadata`         | `metadata` is not a string-to-string mapping.                                                                                                                                                 |
+| `invalid_description`      | The description is longer than the 1024-character Agent Skills limit. The entry is still produced.                                                                                            |
+| `unsupported_input_schema` | A markdown flow declared `input` or `schema`. A markdown flow's input is always `{ args: string }` and its output is always a string.                                                         |
+| `unknown_pack_key`         | A `pack.json` holds a key outside `name`, `version`, `flows`, `skills`, and `requires`. A misspelled `requires` would otherwise disable the compatibility gate in silence.                    |
+
+## The frontmatter could not be parsed
+
+| Code                           | What happened                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `frontmatter_parse_error`      | The YAML did not parse. The message carries a bounded line-and-column summary and at most three issues. |
+| `non_serializable_frontmatter` | A value could not be represented as JSON. It was replaced with `null` and reported once.                |
+
+The offending source line is never quoted, and the raw parser error is not
+attached. Unknown frontmatter is retained verbatim on the descriptor and may
+hold a secret, so the diagnostic says where the problem is without repeating
+what is there.
+
+Frontmatter is parsed with YAML's failsafe schema, so every scalar is a string.
+Every mapping is built with a null prototype and frozen, which is why a
+`__proto__`, `constructor`, or `prototype` key is retained as an ordinary own
+key and can never install inherited metadata a descriptor's digest cannot see.
+
+## The flow exists but a model never calls it
+
+A flow that declared `disable-model-invocation: true` is discovered, listed by
+`list()`, and excluded from `visible()` and from `Disclosure.toXml`. That is
+the flow behaving as declared, not a warning. See
+[Show a catalog to a model](/guides/show-flows-to-a-model/).

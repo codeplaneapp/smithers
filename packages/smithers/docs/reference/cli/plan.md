@@ -64,7 +64,6 @@ by the plan id, because the command line supplies none of its own.
 
 `--quiet` suppresses the document itself, not only the stderr notices its own
 description names.
-<!-- verify: --quiet is described as "Drop the banners and notices commands write to stderr", but Command.ts `render` skips the stdout Console.log when it is set. Which is the intended contract? -->
 
 Notices go to stderr before the document. Each `SMITHERS_POSTGRES_*` or
 `SMITHERS_TEST_PG_URL` name that carries a value prints

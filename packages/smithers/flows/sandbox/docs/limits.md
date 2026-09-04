@@ -1,3 +1,8 @@
+---
+title: "Limits"
+description: "What @smthrs/sandbox bounds and what it buffers whole, per operation and per provider, and which providers keep a command's output byte exact."
+---
+
 Two things here are bounded and the rest is sized by the host's heap. A caller
 placing an agent's file tools on a machine should know which is which.
 
@@ -20,3 +25,10 @@ to stdout comes back changed. `AwsSandbox` reframes output through a
 pseudo-terminal, which normalizes line endings and interleaves standard error.
 File transfer is byte-exact on all nine, so a caller that needs bytes out of a
 command has it write a file and reads that back with `readFile`.
+
+## Read next
+
+- [What a sandbox does and does not prevent](./concepts/isolation.md): the
+  package adds no resource ceiling of its own beyond the two bounds above.
+- [How a remote command differs from a local one](./concepts/remote-commands.md):
+  why standard input crosses whole rather than as a pipe.

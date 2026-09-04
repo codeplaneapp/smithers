@@ -25,8 +25,8 @@ const seats = SeatResolver.layer({
     Effect.succeed(
       Seat.make({
         id,
-        model,               // a live Model.Model
-        route,               // a FlowEngineLike.RouteResolver
+        model, // a live Model.Model
+        route, // a FlowEngineLike.RouteResolver
         contextWindowTokens: 200_000
       })
     )
@@ -46,14 +46,14 @@ A resolved seat carries three things, and they arrive together:
 `SeatResolver.contextWindowTokensFor` is the catalog for known model ids, with
 a conservative floor of 128,000 for models it has not met:
 
-| Model id | Tokens |
-| --- | --- |
-| `claude` | 200,000 |
-| `gpt-5` | 400,000 |
-| `gpt-4.1` | 1,000,000 |
-| `gpt-4o` | 128,000 |
-| `o1`, `o3`, `o4` | 200,000 |
-| anything else | 128,000 |
+| Model id         | Tokens    |
+| ---------------- | --------- |
+| `claude`         | 200,000   |
+| `gpt-5`          | 400,000   |
+| `gpt-4.1`        | 1,000,000 |
+| `gpt-4o`         | 128,000   |
+| `o1`, `o3`, `o4` | 200,000   |
+| anything else    | 128,000   |
 
 ## Refuse honestly
 
@@ -61,10 +61,11 @@ A seat the host cannot serve is a typed `Seat.SeatUnresolved`, not a run that
 fails halfway through:
 
 ```ts
-resolve: (id) =>
+resolve: ;
+;((id) =>
   keyFor(id) === undefined
     ? Effect.fail(new Seat.SeatUnresolved({ seat: id, message: `No API key is configured for ${id}` }))
-    : Effect.succeed(/* ... */)
+    : Effect.succeed()) /* ... */
 ```
 
 `AgentSession` resolves the declared seat at launch, so a missing key refuses

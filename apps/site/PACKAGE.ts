@@ -12,6 +12,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 import { Package as examplesPackage } from "../../examples/PACKAGE.ts"
+import { Package as errorsPackage } from "../../packages/errors/PACKAGE.ts"
 import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
 import { Package as agentPackage } from "../../packages/smithers/agent/PACKAGE.ts"
 import { Package as chainPackage } from "../../packages/smithers/agent/chain/PACKAGE.ts"
@@ -162,6 +163,7 @@ const apiPackages = {
   crypto: cryptoPackage,
   database: databasePackage,
   "engine-store": engineStorePackage,
+  errors: errorsPackage,
   evals: evalsPackage,
   flows: flowsPackage,
   fs: fsPackage,

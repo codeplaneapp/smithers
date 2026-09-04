@@ -1,0 +1,123 @@
+---
+title: "Submit an approval from a client"
+description: "Read a pending gate from the approvals projection, submit the decision with Approval.Submit, and handle the eight failures the mutation can answer with."
+sidebar:
+  order: 4
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/gateway/docs/guides/submit-an-approval.md"
+---
+
+`Approval.Submit` is the one mutation this package declares. Every other
+mutation a client makes is [`@smthrs/control`](https://control.smithers.sh/reference/api/) `ControlRpcs`,
+mounted unchanged on `/rpc`, so there is exactly one wire definition of `Plan`,
+`Run`, `Approve`, `Deny`, `Cancel`, `Signal`, `Steer`, `Resume`, `List`, and
+`Watch`.
+
+This one exists because a decision is a composite act a product client cannot
+assemble safely on its own: the grant has to be recorded and the parked run
+delegated to resume, atomically. Control owns that as a single domain command.
+The gateway is a transport adapter over it and composes no second mutation.
+
+## Read the gate
+
+The payload a decision needs is published by the `approvals` projection. Do not
+build it:
+
+```ts
+import { Projections } from "@smthrs/gateway/Projections"
+import { Effect } from "effect"
+
+const pending = Effect.gen(function*() {
+  const projections = yield* Projections
+  // No runId: the workspace inbox, which lists only gates a human still owes
+  // an answer to.
+  const snapshot = yield* projections.snapshot({ _tag: "approvals" })
+  return snapshot.rows
+})
+```
+
+Each `GatewayProjection.ApprovalRow` carries:
+
+| Field         | Holds                                                                 |
+| ------------- | --------------------------------------------------------------------- |
+| `runId`       | the run parked on this gate                                           |
+| `requestId`   | the gate's own id                                                     |
+| `title`       | the question, as the run asked it                                     |
+| `request`     | the whole journaled request payload, for rendering                    |
+| `payload`     | the `ControlSchema.ApprovalPayload` a decision submits back unchanged |
+| `requestedAt` | when the gate opened                                                  |
+| `status`      | `pending`, `approved`, or `denied`                                    |
+
+`payload` is the point. It is the exact `ApprovalTarget.Node` envelope the run
+published, carrying the target, the grant scope, and the idempotency key. A
+client submits it back byte for byte, so no client reconstructs authority for
+itself.
+
+## Submit the decision
+
+`GatewayRpcs.SubmitApprovalInput` is that payload plus one field:
+
+```json
+{
+  "_tag": "Request",
+  "id": 1,
+  "tag": "Approval.Submit",
+  "payload": {
+    "target": {
+      "_tag": "Node",
+      "runId": "run-1",
+      "requestId": "gate",
+      "digest": "gate-digest",
+      "envelope": { "capabilities": ["model:call"], "flows": ["ask"], "budget": {} }
+    },
+    "scope": "run",
+    "idempotencyKey": "approve:gate",
+    "decision": "approve"
+  },
+  "headers": []
+}
+```
+
+Post it to `/projections`, or send it on `/projections/ws`. `decision` is
+`"approve"` or `"deny"`; everything else is the row's `payload` spread in
+place.
+
+The answer is `GatewayRpcs.SubmitApprovalOutput`: one field, `decision`, the
+`ControlSchema.Receipt` that is the receipt for the grant or the refusal. There
+is no second call. Approving a parked node delegates its durable resume in the
+same command, and denying it records the refusal the same way.
+
+## Who the decision is journaled as
+
+The handler reads the principal the shared `ControlAuth` middleware
+authenticated and passes it through, exactly as `ControlServer` stamps it on
+`Approve` and `Deny`. This mount is the same decision under a different
+payload, so it is answerable to the same operator. A decision journaled under
+the composition's default operator would name the wrong one.
+
+## The failures
+
+`Approval.Submit` answers with exactly the union `Control.approve` and
+`Control.deny` declare, because the handler adds no failure of its own. A
+member neither command raises would be a recovery branch no client's code could
+ever reach.
+
+| Failure              | Means                                                    | What to do                                                   |
+| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------ |
+| `PlanDigestMismatch` | the plan changed since the gate was published            | re-read the gate and show the new plan before deciding again |
+| `EnvelopeMismatch`   | the capability envelope is not the one that was approved | re-read the gate; do not widen the envelope client-side      |
+| `AlreadyResolved`    | someone already decided this gate                        | refresh the row; the decision stands                         |
+| `PlanNotFound`       | the plan the target names is gone                        | re-plan                                                      |
+| `RunNotFound`        | the run the target names is gone                         | drop the gate from the inbox                                 |
+| `InvalidInput`       | the payload is not a decidable approval payload          | submit the row's `payload` unchanged                         |
+| `PersistenceError`   | the control plane could not write the decision           | retry with the same `idempotencyKey`                         |
+| `Unavailable`        | the control plane is not serving this operation          | retry later                                                  |
+
+Retrying is safe. The payload carries an `idempotencyKey`, so a second
+submission of the same decision lands one effect.
+
+## From the command line
+
+The same decision from a terminal is [`smthrs approve`](https://smithers.sh/docs/reference/cli/approve/) and
+[`smthrs deny`](https://smithers.sh/docs/reference/cli/deny/), which take the same payload the projection
+publishes. For the domain semantics behind both, see
+[Approvals](https://control.smithers.sh/guides/approvals/).

@@ -1,3 +1,8 @@
+---
+title: "API reference"
+description: "Every public export of @smthrs/sync: the wire protocol, the read-path RPC group, the fail-closed server, the replay-then-follow client, the run catalog, the two capability authorities, and the branch collaboration modules."
+---
+
 ```ts
 import { RunCatalog, SyncClient, SyncServer } from "@smthrs/sync"
 import { Effect, Layer } from "effect"

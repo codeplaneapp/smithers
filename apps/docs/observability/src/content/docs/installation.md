@@ -1,0 +1,89 @@
+---
+title: "Installation"
+description: "Install @smthrs/observability, its runtime requirements and Effect version, its import forms, and the rule that keeps the root entry point bundling for a browser."
+sidebar:
+  order: 1
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/observability/docs/installation.md"
+---
+
+## Install the package
+
+```bash
+pnpm add @smthrs/observability
+```
+
+The package requires Node.js 22.19.0 or later and ships as both ESM and
+CommonJS with TypeScript declarations.
+
+## Pin the same Effect release
+
+Effect services are identified by module identity, so a composition that
+resolves two copies of `effect` splits its context and a provided layer stops
+satisfying a requirement. Install the release this package is tested against:
+
+```bash
+pnpm add @smthrs/observability effect@4.0.0-rc.108
+```
+
+`Otlp` is written entirely against `effect`, including its HTTP client and its
+`effect/unstable/observability/Otlp` exporters. The OpenTelemetry SDK packages
+in this package's manifest install with it and are used only by `Otel`,
+`Resource`, `NodeOtel`, and `BrowserOtel`.
+
+## Import forms
+
+The root entry point re-exports seven modules as namespaces:
+
+```ts
+import { Endpoint, JournalLogger, Logger, Metric, Otel, Otlp, Resource } from "@smthrs/observability"
+```
+
+Each is also importable from its own subpath, which is the form the
+[API reference](/reference/api/) uses:
+
+```ts
+import * as JournalLogger from "@smthrs/observability/JournalLogger"
+import * as Otlp from "@smthrs/observability/Otlp"
+```
+
+`@smthrs/observability/package.json` is exported.
+
+## The two subpath-only modules
+
+`NodeOtel` and `BrowserOtel` are not re-exported from the root, and importing
+them by subpath is the only way to reach them:
+
+```ts
+import * as BrowserOtel from "@smthrs/observability/BrowserOtel"
+import * as NodeOtel from "@smthrs/observability/NodeOtel"
+```
+
+`NodeOtel` resolves Node-only host modules: `@effect/opentelemetry/NodeSdk` and
+`@opentelemetry/sdk-trace-node`, which reaches the bare `async_hooks` specifier
+through `@opentelemetry/context-async-hooks`. Re-exporting it from the root
+would put a module a browser bundler cannot resolve in the entry point, and
+break the browser bundle the root guarantees. A test bundles `src/index.ts` for
+the browser and fails on any `node:` import, so the guarantee is checked rather
+than asserted.
+
+Import `NodeOtel` only from code that runs on Node, and `BrowserOtel` only from
+code that runs in a browser. `Otlp` is safe in both, because it exports over
+Effect's `HttpClient` and never touches a `node:` built-in.
+
+## What a real composition adds
+
+The exporter alone needs nothing else. Two features have a dependency:
+
+- `Otlp.layer` requires an Effect `HttpClient` from
+  `effect/unstable/http/HttpClient`. `Otlp.layerFetch` supplies the host's
+  global `fetch` and is the usual choice; a Node host that wants Undici instead
+  provides `NodeHttpClient.layerUndici`, re-exported by
+  [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) as `NodeHost.NodeHttpClient`.
+- `JournalLogger.layerJournalForwarding` requires a `Journal.Journal` service
+  from [`@smthrs/journal`](https://journal.smithers.sh/reference/api/). A durable engine composition already
+  provides one.
+
+## Next step
+
+Export your first trace, log record, and metric series in the
+[Quickstart](/quickstart/).

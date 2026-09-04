@@ -19,10 +19,10 @@ A worker names its build with the `.wasm` module its bundler compiled:
 ```ts
 import wasmfile from "@jitl/quickjs-wasmfile-release-sync"
 import wasmModule from "@jitl/quickjs-wasmfile-release-sync/wasm"
+import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 import { Layer } from "effect"
 import type { QuickJSSyncVariant } from "quickjs-emscripten-core"
 import { newVariant } from "quickjs-emscripten-core"
-import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 
 const base = wasmfile as unknown as QuickJSSyncVariant
 

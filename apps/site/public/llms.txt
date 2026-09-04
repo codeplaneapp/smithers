@@ -83,6 +83,7 @@
 - [@smthrs/crypto](https://smithers.sh/docs/reference/api/crypto/): Strict SHA-256 hashing with injected and synchronous Effect entry points
 - [@smthrs/database](https://smithers.sh/docs/reference/api/database/): A driver-neutral SQL contract with a bounded write-retry seam, plus the composed migration ladder
 - [@smthrs/engine-store](https://smithers.sh/docs/reference/api/engine-store/): Effect services for durable engine action persistence and replay boundaries
+- [@smthrs/errors](https://smithers.sh/docs/reference/api/errors/): SmithersError and the error codes the integration adapters raise
 - [@smthrs/evals](https://smithers.sh/docs/reference/api/evals/): Fixed-suite evaluation, baselines, regression reports, and score gates for flows
 - [@smthrs/flows](https://smithers.sh/docs/reference/api/flows/): Barrel package re-exporting the whole @smthrs durable flow engine
 - [@smthrs/fs](https://smithers.sh/docs/reference/api/fs/): Private metadata routing and schema-checked command projections for Smithers flows

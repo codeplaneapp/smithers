@@ -27,7 +27,7 @@ step with `SeatUnresolved` in its `AgentFailure` union. See
 **What happened.** A control-plane launch named a prompt flow whose frontmatter
 has no `model:` line. No agent host can ever run one, so the launch is refused
 rather than left pending. The refusal message says to add the line and run
-`smithers doctor` to see which provider keys the project has.
+`smthrs doctor` to see which provider keys the project has.
 
 **What to change.** Add `model: PROVIDER:MODEL_ID` to the flow's frontmatter.
 A flow with a module body is a different case: it stays `pending`, because only

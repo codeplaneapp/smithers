@@ -31,8 +31,9 @@
  *   node ../shared/sync-content.mjs [--check]   (from apps/docs/<slug>)
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { basename, dirname, join, posix, relative } from "node:path"
+import { basename, dirname, join, posix, relative, resolve } from "node:path"
 import { bySlug, docsRoot, repoRoot, sites } from "./manifest.mjs"
+import { fileURLToPath } from "node:url"
 
 const checkMode = process.argv.includes("--check")
 const allMode = process.argv.includes("--all")
@@ -138,6 +139,9 @@ const rewriteTarget = (target, ctx) => {
   let m = target.match(/^\/api\/([a-z0-9-]+)\/?(#[\s\S]*)?$/i)
   if (m) return siblingApi(m[1], m[2], ctx)
   if (/^\/api\/?$/i.test(target)) return "https://smithers.sh/docs/reference/api/"
+  // 3b. /pkg/<slug>/<path>: any page of a package's site.
+  m = target.match(/^\/pkg\/([a-z0-9-]+)((?:\/[^#]*)?)(#[\s\S]*)?$/i)
+  if (m) return siblingPage(m[1], m[2], m[3], ctx)
   // 4. /cli verbs live on smithers.sh.
   m = target.match(/^\/cli\/([a-z0-9-]+)\/?(#[\s\S]*)?$/i)
   if (m) return cliRef(m[1], m[2])
@@ -168,11 +172,44 @@ const rewriteTarget = (target, ctx) => {
   return rewriteRelative(target, ctx, srcRel, warnings)
 }
 
-/** /api/<slug> -> the sibling package's site, or this site's own API page. */
+/**
+ * /api/<slug> -> the sibling package's site, or this site's own API page.
+ *
+ * An unknown slug is warned about rather than rewritten silently. The rewrite
+ * mints a hostname, so a typo (`/api/step_cache`, `/api/build`) would produce
+ * a link to a subdomain that does not exist and would never 404 at build time.
+ * Checking against the manifest is the only thing standing between a misspelt
+ * slug and a dead link on a published page.
+ */
 const siblingApi = (seg, frag, ctx) => {
   const slug = seg.toLowerCase()
   if (slug === ctx.entry.slug) return `/reference/api/${frag ?? ""}`
+  if (!bySlug.has(slug)) {
+    ctx.warnings.push(`/api/ link names no package site: /api/${seg}`)
+  }
   return `https://${slug}.smithers.sh/reference/api/${frag ?? ""}`
+}
+
+/**
+ * /pkg/<slug>/<path> -> any page of a sibling package's site, the general
+ * form that /api/<slug> is the common shortcut for. It exists because the
+ * fleet cross-links guides and concepts, not only API pages: without it an
+ * author reaching for another package's delegation guide either drops to its
+ * API page or hand-writes a hostname, and a hand-written hostname is the one
+ * link form a domain change cannot fix.
+ *
+ * A link to this site's own slug stays a local route, so a page moving
+ * between packages keeps working.
+ */
+const siblingPage = (seg, rest, frag, ctx) => {
+  const slug = seg.toLowerCase()
+  const path = (rest ?? "").replace(/^\/+|\/+$/g, "")
+  const route = path === "" ? "/" : `/${path}/`
+  if (!bySlug.has(slug)) {
+    ctx.warnings.push(`/pkg/ link names no package site: /pkg/${seg}`)
+  }
+  if (slug === ctx.entry.slug) return `${route}${frag ?? ""}`
+  return `https://${slug}.smithers.sh${route}${frag ?? ""}`
 }
 
 /** /cli/<verb> -> the CLI reference on smithers.sh. */
@@ -186,7 +223,29 @@ const rewriteRelative = (target, ctx, srcRel, warnings) => {
   const { entry } = ctx
   const [path, ...fragParts] = target.split("#")
   const frag = fragParts.length > 0 ? `#${fragParts.join("#")}` : ""
-  if (!/\.md$/i.test(path)) return target // images and other assets are the author's to host
+  // Media is the author's to host: AUTHORING.md says assets are not synced, so
+  // a relative image keeps whatever the author wrote rather than becoming a
+  // GitHub blob page, which would not render as an image.
+  if (/\.(png|jpe?g|gif|svg|webp|avif|mp4|webm|ico)$/i.test(path)) return target
+  // Any other relative non-Markdown link names a repository file: prose about
+  // `./PACKAGE.ts`, or a pointer into `../src`. Left alone it would ship as a
+  // site-relative URL to a route that does not exist, which is a broken link on
+  // a published page rather than a visible build failure. Send it to GitHub,
+  // where the file actually is, and warn when it does not exist at all.
+  if (!/\.md$/i.test(path)) {
+    const fromDirRaw = posix.dirname(srcRel)
+    const repoRel = posix.normalize(
+      posix.join(entry.dir, "docs", fromDirRaw === "." ? "" : fromDirRaw, path)
+    )
+    if (repoRel.startsWith("../")) {
+      warnings.push(`relative link escapes the repository: ${target}`)
+      return target
+    }
+    if (!existsSync(join(repoRoot, repoRel))) {
+      warnings.push(`link target does not exist: ${target} -> ${repoRel}`)
+    }
+    return `https://github.com/smithersai/smithers/blob/main/${repoRel}${frag}`
+  }
   const fromDir = posix.dirname(srcRel)
   // "./docs/x.md" names a file in the package's docs directory as a file on
   // GitHub: prose about the docs files themselves, never a site route.
@@ -328,14 +387,26 @@ const inferSlug = () => {
   process.exit(1)
 }
 
-const selected = allMode ? sites.map((site) => site.slug) : [inferSlug()]
-let totalDrift = 0
-for (const slug of selected) {
-  const drift = syncSite(bySlug.get(slug))
-  totalDrift += drift
-  console.log(`${checkMode ? "checked" : "synced"} ${slug}: ${drift === 0 ? "clean" : `${drift} drifted`}`)
-}
-if (checkMode && totalDrift > 0) {
-  console.error(`sync-content: ${totalDrift} file(s) out of date; run node apps/docs/shared/sync-content.mjs${allMode ? " --all" : ""}`)
-  process.exit(1)
+/**
+ * The CLI runs only when this file is the process entry point. It is also
+ * imported as a module: apps/site/scripts/sync-api-docs.mjs reuses
+ * `outputRelFor` and `routeFor` so an api.md link that names a sibling page
+ * resolves to the same route on smithers.sh that it does on the package's own
+ * site. Without this guard that import would run the whole sync and exit.
+ */
+const isEntryPoint = process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+
+if (isEntryPoint) {
+  const selected = allMode ? sites.map((site) => site.slug) : [inferSlug()]
+  let totalDrift = 0
+  for (const slug of selected) {
+    const drift = syncSite(bySlug.get(slug))
+    totalDrift += drift
+    console.log(`${checkMode ? "checked" : "synced"} ${slug}: ${drift === 0 ? "clean" : `${drift} drifted`}`)
+  }
+  if (checkMode && totalDrift > 0) {
+    console.error(`sync-content: ${totalDrift} file(s) out of date; run node apps/docs/shared/sync-content.mjs${allMode ? " --all" : ""}`)
+    process.exit(1)
+  }
 }

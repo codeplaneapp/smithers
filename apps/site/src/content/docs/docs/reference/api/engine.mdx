@@ -27,12 +27,12 @@ pnpm add @smthrs/engine @smthrs/flow
 
 Each subpath in the package `exports` map resolves to one source module:
 
-| Import | Source | Platform |
-| --- | --- | --- |
-| `@smthrs/engine` | `src/index.ts` | any |
-| `@smthrs/engine/FlowEngine` | `src/FlowEngine/index.ts` | any |
-| `@smthrs/engine/FlowProxy` | `src/FlowProxy.ts` | any |
-| `@smthrs/engine/FlowProxyServer` | `src/FlowProxyServer.ts` | any |
+| Import                           | Source                    | Platform |
+| -------------------------------- | ------------------------- | -------- |
+| `@smthrs/engine`                 | `src/index.ts`            | any      |
+| `@smthrs/engine/FlowEngine`      | `src/FlowEngine/index.ts` | any      |
+| `@smthrs/engine/FlowProxy`       | `src/FlowProxy.ts`        | any      |
+| `@smthrs/engine/FlowProxyServer` | `src/FlowProxyServer.ts`  | any      |
 
 `./FlowEngine/*`, `./internal/*`, and `./*/index` are `null` in the `exports` map, so no deeper subpath resolves.
 
@@ -40,10 +40,10 @@ Each subpath in the package `exports` map resolves to one source module:
 
 The root re-exports three namespaces, in this order:
 
-| Namespace | Summary |
-| --- | --- |
-| `FlowEngine` | Flow execution services. |
-| `FlowProxy` | Client-side flow proxies. |
+| Namespace         | Summary                          |
+| ----------------- | -------------------------------- |
+| `FlowEngine`      | Flow execution services.         |
+| `FlowProxy`       | Client-side flow proxies.        |
 | `FlowProxyServer` | Server-side flow proxy handling. |
 
 ## FlowEngine
@@ -58,14 +58,14 @@ The identity and boundary information an `Encoded` implementation receives for o
 
 The fields:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `action` | `Action.Any` | The action declaration being dispatched. |
-| `attempt` | `number` | The attempt number, starting at `1`. A value above `1` marks a retry. |
-| `key` | `string` | The persisted step identity the attempt is recorded under. |
-| `tier` | `Action.Tier` | The action's durability tier, copied from the declaration. |
+| Field              | Type                | Description                                                                               |
+| ------------------ | ------------------- | ----------------------------------------------------------------------------------------- |
+| `action`           | `Action.Any`        | The action declaration being dispatched.                                                  |
+| `attempt`          | `number`            | The attempt number, starting at `1`. A value above `1` marks a retry.                     |
+| `key`              | `string`            | The persisted step identity the attempt is recorded under.                                |
+| `tier`             | `Action.Tier`       | The action's durability tier, copied from the declaration.                                |
 | `nondeterministic` | `true \| undefined` | Optional. Present when a cache put race may retain the first row without failing the run. |
-| `metadata` | `unknown` | The action declaration's metadata, passed through unread. |
+| `metadata`         | `unknown`           | The action declaration's metadata, passed through unread.                                 |
 
 ### `FlowEngine.Encoded`
 
@@ -77,22 +77,22 @@ The low-level flow engine contract a durable store implements. A store implement
 
 The members and the value each one carries across the seam:
 
-| Member | Optional | Value crossing the seam |
-| --- | --- | --- |
-| `register` | no | None. |
-| `execute` | no | A decoded `Flow.Result`, which the implementation decodes through `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`. |
-| `poll` | no | A decoded `Flow.Result`, decoded the same way. |
-| `interrupt` | no | None. |
-| `interruptUnsafe` | no | None. |
-| `resume` | no | None. |
-| `resumeSignal` | yes | None. |
-| `actionExecute` | no | Encoded. `makeUnsafe` decodes it through the action's `exitSchemaPartial`. |
-| `actionRetryOrigin` | yes | None. |
-| `actionLatestAttempt` | yes | None. |
-| `deferredResult` | no | Encoded. `makeUnsafe` decodes it through the deferred's `exitSchema`. |
-| `deferredDone` | no | Encoded. `makeUnsafe` encodes the exit before the call. |
-| `deferredDoneIfWaiting` | yes | Encoded, encoded before the call the same way. |
-| `scheduleClock` | no | None. |
+| Member                  | Optional | Value crossing the seam                                                                                                                    |
+| ----------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`              | no       | None.                                                                                                                                      |
+| `execute`               | no       | A decoded `Flow.Result`, which the implementation decodes through `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`. |
+| `poll`                  | no       | A decoded `Flow.Result`, decoded the same way.                                                                                             |
+| `interrupt`             | no       | None.                                                                                                                                      |
+| `interruptUnsafe`       | no       | None.                                                                                                                                      |
+| `resume`                | no       | None.                                                                                                                                      |
+| `resumeSignal`          | yes      | None.                                                                                                                                      |
+| `actionExecute`         | no       | Encoded. `makeUnsafe` decodes it through the action's `exitSchemaPartial`.                                                                 |
+| `actionRetryOrigin`     | yes      | None.                                                                                                                                      |
+| `actionLatestAttempt`   | yes      | None.                                                                                                                                      |
+| `deferredResult`        | no       | Encoded. `makeUnsafe` decodes it through the deferred's `exitSchema`.                                                                      |
+| `deferredDone`          | no       | Encoded. `makeUnsafe` encodes the exit before the call.                                                                                    |
+| `deferredDoneIfWaiting` | yes      | Encoded, encoded before the call the same way.                                                                                             |
+| `scheduleClock`         | no       | None.                                                                                                                                      |
 
 `executionId` on `execute` is caller-supplied identity. A repeated id joins the run that already owns it, which is what makes a retried submission idempotent. `poll` answers `Option.none` for a known unsettled execution, and for an execution that belongs to a different flow declaration. Only an execution id no engine knows fails, with `FlowRuntime.FlowExecutionNotFound`. `interrupt`, `interruptUnsafe`, and `resume` treat an unknown execution id as a silent no-op.
 
@@ -351,15 +351,15 @@ The union of RPC handler services required to serve one flow's generated execute
 
 The package defines seven coded refusals, five as `Schema.TaggedError` values raised as defects and two as `Error` subclasses thrown before proxy construction:
 
-| Tag | Raised when | Fields |
-| --- | --- | --- |
-| `@smthrs/engine/SuspendedResumeGaveUp` | A caller polling a suspended execution spends its `suspendedRetryPolicy`, by elapsed time or by attempt count. | `code`, `flowName`, `executionId`, `attempt`, `elapsedMs`, `reason`, `message` |
-| `@smthrs/engine/SnapshotBoundaryRequired` | A compensable action dispatches with no `SnapshotBoundary` in context. | `code`, `actionName`, `message` |
-| `@smthrs/engine/FlowNotRegistered` | A flow executes, or a handoff names a target, that this engine holds no registration for. | `code`, `flowName`, `message` |
-| `@smthrs/engine/ExecutionIdentityConflict` | A reused execution id names a different flow declaration, arrives with a different payload, or completes a deferred for another flow. | `code`, `executionId`, `field`, `expected`, `actual`, `message` |
-| `@smthrs/engine/InvalidRound` | A round carries a malformed lineage id or ordinal, or `Round.next` receives a `maxRounds` that is not a positive safe integer. | `code`, `message` |
-| `FlowProxyCollision` | Two operations derived from a flow set share one wire name. | `code`, `operation`, `message` |
-| `InvalidFlowTag` | `FlowProxy.toHttpApiGroup` encodes a route for a flow tag that is not well-formed UTF-16. | `code`, `tag`, `message` |
+| Tag                                        | Raised when                                                                                                                           | Fields                                                                         |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `@smthrs/engine/SuspendedResumeGaveUp`     | A caller polling a suspended execution spends its `suspendedRetryPolicy`, by elapsed time or by attempt count.                        | `code`, `flowName`, `executionId`, `attempt`, `elapsedMs`, `reason`, `message` |
+| `@smthrs/engine/SnapshotBoundaryRequired`  | A compensable action dispatches with no `SnapshotBoundary` in context.                                                                | `code`, `actionName`, `message`                                                |
+| `@smthrs/engine/FlowNotRegistered`         | A flow executes, or a handoff names a target, that this engine holds no registration for.                                             | `code`, `flowName`, `message`                                                  |
+| `@smthrs/engine/ExecutionIdentityConflict` | A reused execution id names a different flow declaration, arrives with a different payload, or completes a deferred for another flow. | `code`, `executionId`, `field`, `expected`, `actual`, `message`                |
+| `@smthrs/engine/InvalidRound`              | A round carries a malformed lineage id or ordinal, or `Round.next` receives a `maxRounds` that is not a positive safe integer.        | `code`, `message`                                                              |
+| `FlowProxyCollision`                       | Two operations derived from a flow set share one wire name.                                                                           | `code`, `operation`, `message`                                                 |
+| `InvalidFlowTag`                           | `FlowProxy.toHttpApiGroup` encodes a route for a flow tag that is not well-formed UTF-16.                                             | `code`, `tag`, `message`                                                       |
 
 The five tagged errors declare `code` as a `Schema.Literal` with a constructor default, and the two `Error` subclasses declare it as a readonly field. The codes, in table order, are `suspended_resume_gave_up`, `snapshot_boundary_required`, `flow_not_registered`, `execution_identity_conflict`, `invalid_round`, `flow_proxy_collision`, and `invalid_flow_tag`. The engine also raises two refusals defined in `@smthrs/flow`: `Flow.MaxRoundsExceeded` from `Round.next`, and `Action.IrreversibleRetryRequiresIdempotencyKey` when an irreversible action retries without an idempotency key.
 

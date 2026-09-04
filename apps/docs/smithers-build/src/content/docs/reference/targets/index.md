@@ -62,6 +62,7 @@ exists for future additions and is unused. See
 | ------------------------------ | ------ | --------- | -------- | ------------------------------------------------------------------------------------- |
 | [EsLint](/reference/targets/es-lint/)           | `lint` | Never     | Executes | Runs ESLint over declared source sets with a flat config.                             |
 | [BiomeCheck](/reference/targets/biome-check/)   | `lint` | Never     | Executes | Runs `biome check` and `biome format` without writing files.                          |
+| [Dprint](/reference/targets/dprint/)            | `lint` | Never     | Executes | Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.              |
 | [DepsLint](/reference/targets/deps-lint/)       | `lint` | Never     | Executes | Checks dependency declarations with knip or depcheck.                                 |
 | [PackageLint](/reference/targets/package-lint/) | `lint` | Never     | Executes | Checks the published package surface with publint and attw.                           |
 | [LlmLint](/reference/targets/llm-lint/)         | `lint` | Never     | Executes | Reviews changed files with a model against a rubric, through the claude or codex CLI. |

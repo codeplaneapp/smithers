@@ -64,13 +64,13 @@ restart, so the action boundary uses a schema instead:
 `Core.ActionFailure.IntegrationFailure`. Its fields are the ones an operator
 reads after a restart:
 
-| Field                 | Meaning                                                                 |
-| --------------------- | ----------------------------------------------------------------------- |
-| `reason`              | The machine-readable classification, from the `IntegrationError` list.  |
-| `message`             | Provider text already safe to persist, capped at 512 characters.        |
-| `retryable`           | Whether another attempt could clear it.                                 |
+| Field                 | Meaning                                                                     |
+| --------------------- | --------------------------------------------------------------------------- |
+| `reason`              | The machine-readable classification, from the `IntegrationError` list.      |
+| `message`             | Provider text already safe to persist, capped at 512 characters.            |
+| `retryable`           | Whether another attempt could clear it.                                     |
 | `outcomeUnknown`      | The write may already have been applied. Absent when it definitely was not. |
-| `deliveredMessageIds` | What a partially completed Telegram send already put in the chat.       |
+| `deliveredMessageIds` | What a partially completed Telegram send already put in the chat.           |
 
 `outcomeUnknown` is the difference between "this did not happen" and "nobody
 knows", and an operator deciding whether to run the step again needs it, so

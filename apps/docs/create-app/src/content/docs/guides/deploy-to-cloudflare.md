@@ -1,0 +1,130 @@
+---
+title: "Deploy to Cloudflare"
+description: "What CreateApp's four targets run, which credentials each one needs, why wrangler deploy takes no --config flag, and what to set before the first deploy."
+sidebar:
+  order: 7
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/create-app/docs/guides/deploy-to-cloudflare.md"
+---
+
+`CreateApp` returns four targets beside the manifest. Put them in the package's
+target map and `smithers-build` addresses them by label:
+
+```ts
+export const Package = S.Package({
+  targets: { routes: App.routes, dev: App.dev, build: App.build, deploy: App.deploy }
+})
+```
+
+| Target   | Label       | What it runs                                                    |
+| -------- | ----------- | --------------------------------------------------------------- |
+| `routes` | `//:routes` | The `smithers-routes` executable over the app root              |
+| `dev`    | `//:dev`    | `vite` on port 5173, with workerd in the loop                   |
+| `build`  | `//:build`  | `vite build`, producing the Worker bundle and the static assets |
+| `deploy` | `//:deploy` | `wrangler deploy`, gated on `build`                             |
+
+Each is an ordinary [`@smthrs/targets`](https://targets.smithers.sh/reference/api/) rule, so an app runs on
+the build CLI without a target kind of its own.
+
+## What the targets declare
+
+`routes` keys on everything the router reads: pages, panes, flows, layer files,
+and `PACKAGE.ts`. Adding one of those invalidates the generated tables, and
+nothing else does. Its declared changes are the two generated files, which is
+how `smithers-build lint '//:routes'` checks drift.
+
+`dev` waits for port 5173 and stops with `SIGTERM` and a five second grace
+period. It runs with the network on.
+
+`build` reads the app, flow, tool, worker, and source directories plus the
+wrangler config and `vite.config.ts`, and writes `dist`.
+
+`deploy` is gated on `build`, runs with the network on, and requires approval.
+Its two credentials are declared as secrets scoped to
+`https://api.cloudflare.com`:
+
+- `CLOUDFLARE_API_TOKEN`, with permission to edit Workers Scripts and Workers
+  Routes.
+- `CLOUDFLARE_ACCOUNT_ID`.
+
+## Point the app at a domain you own
+
+Two files name the same hostname, and both have to be a zone your Cloudflare
+account owns:
+
+```ts
+// PACKAGE.ts
+deploy: { cloudflare: { workerName: "ledger", domain: "ledger.example.com" } }
+```
+
+```jsonc
+// worker/wrangler.jsonc
+"routes": [{ "pattern": "ledger.example.com", "custom_domain": true }]
+```
+
+Wrangler creates the DNS record and the certificate on the first deploy, so
+there is nothing to add in the dashboard. Removing the `routes` entry detaches
+the domain from the Worker.
+
+`config` defaults to `worker/wrangler.jsonc` and is the one path an app
+overrides:
+
+```ts
+deploy: { cloudflare: { workerName: "ledger", domain: "ledger.example.com", config: "infra/wrangler.jsonc" } }
+```
+
+The Worker name and its routes are its identity. Durable Object storage is
+keyed to the Worker name, so renaming it creates a fresh Worker with empty
+storage. Neither field changes as part of a routine deploy.
+
+## Set the secrets
+
+The provider credential follows the seat in `AGENT.ts`. A host resolves the
+seat's provider and reads that provider's key, so an `anthropic:` seat needs
+`ANTHROPIC_API_KEY` and an `openai:` seat needs `OPENAI_API_KEY`:
+
+```bash
+wrangler secret put OPENAI_API_KEY --config worker/wrangler.jsonc
+```
+
+An app whose Worker never calls a model needs none. The `default` template is
+in that position: its turn endpoint is a stub, so nothing on its Worker path
+reaches a provider until you build the host.
+
+The `aomi` template adds one more, `APP_API_TOKEN`, and it matters before the
+first public deploy. While it is unset, every `/api/*` route answers any
+caller, which is what a local `pnpm dev` wants and what a public domain does
+not: an anonymous caller can allocate Durable Object storage and read or
+overwrite any session id it guesses. `GET /api/health` reports whether a
+running instance is in `none` or `token` mode, so an operator can tell from
+outside without a credential.
+
+Local development reads the same values from `.dev.vars`, which is gitignored.
+Both templates ship an example file.
+
+## Build and deploy
+
+```bash
+pnpm build
+pnpm deploy
+```
+
+Run `wrangler deploy` from the app root and pass no `--config` flag. The build
+writes `.wrangler/deploy/config.json`, and wrangler follows that redirect only
+when no `--config` is given. With the flag set, wrangler bundles the Worker
+entry point with esbuild alone, which fails on
+`virtual:smthrs-app/manifest`: that module is served by the create-app Vite
+plugin and is reachable from `routes.gen.ts`.
+
+Both templates' `deploy` script is a bare `wrangler deploy`, and the `deploy`
+target passes no `--config` either, so both paths already take the redirect.
+The `--config` flag is still correct for `wrangler secret put`, which does not
+go through the build.
+
+## What a deployed app serves
+
+The templates put the SPA in the assets bucket and scope
+`run_worker_first` to `/api/*`, so an asset request never wakes the Worker.
+`not_found_handling` is `single-page-application`, which is why the templates
+route in the browser on the location hash rather than on the path. An unrouted
+`/api/*` path answers the Worker's own JSON 404 rather than the SPA's
+`index.html`.

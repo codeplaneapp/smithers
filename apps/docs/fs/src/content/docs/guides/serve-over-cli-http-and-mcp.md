@@ -19,9 +19,9 @@ that step, see [Quickstart](/quickstart/).
 installed `FlowInvoker`, so provide the invoker when you run the effect:
 
 ```ts
-import { FileRouter, FlowInvoker, Incur } from "@smthrs/fs"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
+import { FileRouter, FlowInvoker, Incur } from "@smthrs/fs"
 import { Effect, Layer } from "effect"
 import { resolve } from "node:path"
 

@@ -1,6 +1,6 @@
 ---
 title: "Durability"
-description: "Flow-native scoring, durable observations, and asynchronous score runners for flows"
+description: "What the score store guarantees across a restart: the rows it refuses, how a job claim stays atomic, how a long history pages, and what nothing prunes."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/scorers/docs/durability.md"
 ---
 
@@ -105,3 +105,11 @@ them and no automatic expiry. A deployment that scores every step of a
 long-running flow owns that growth. Both tables are keyed by strings the caller
 supplies, so bounding identity and key length is the caller's job as well as
 this package's.
+
+## See also
+
+- [Record a score exactly once](/guides/record-a-score-once/): the caller
+  side of the job claim.
+- [Read scores back](/guides/read-scores-back/): paging a long history and
+  reading an aggregate.
+- [Observations](/concepts/observations/): what each kind of row means.

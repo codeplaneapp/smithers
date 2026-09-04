@@ -36,13 +36,24 @@ environment rather than replacing it.
 
 Catalog tools must declare `inputSchema.type: "object"`. Structured-only tool
 results are accepted with `content: []`, and declared `outputSchema` documents
-are enforced for the supported keyword subset described in the reference.
+are enforced for the supported keyword subset.
+
+This is the client half of Smithers and MCP: a Smithers run calling somebody
+else's tools. The other half, an agent such as Claude Code driving Smithers, is
+the Smithers MCP server behind `smthrs mcp`.
 
 ## Documentation
 
-[`docs/reference.md`](./docs/reference.md) is the generated reference: the
-declared authority every MCP flow carries, the nine bounds this client enforces
-on an untrusted server, every `McpError` code and what it means, and the export
-table for each public module. It is generated from this package's sources by
-`node packages/smithers/mcp/scripts/docs.mjs`; see [`docs/README.md`](./docs/README.md)
-for what owns which sentence.
+The site at https://mcp.smithers.sh is built from `docs/` in this package:
+
+- [`docs/README.md`](./docs/README.md) is the overview.
+- [`docs/quickstart.md`](./docs/quickstart.md) connects to a real server and
+  calls a tool.
+- [`docs/api.md`](./docs/api.md) is the API reference: every public export of
+  `McpClient`, `McpError`, and `McpFlows`.
+- [`docs/troubleshooting.md`](./docs/troubleshooting.md) lists every failure
+  this package reports, with its cause and fix.
+
+`docs/concepts/` explains the projection model and the life of a session;
+`docs/guides/` covers connecting, filtering, authority, failures, structured
+output, limits, CLI configuration, and testing.

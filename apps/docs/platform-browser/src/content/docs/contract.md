@@ -1,6 +1,6 @@
 ---
-title: "Contract"
-description: "Browser implementations of Effect platform services backed by ZenFS and just-bash"
+title: "The browser host contract"
+description: "What BrowserHost guarantees where it diverges from NodeHost: the filesystem options a mounted volume honours, the operations it refuses, and the spawner's one-run-at-a-time abort boundary."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-browser/docs/contract.md"
 ---
 

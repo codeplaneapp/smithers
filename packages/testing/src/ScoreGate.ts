@@ -7,8 +7,8 @@
  * vitest-evals harnesses this is modelled on; scorer samples flow through it
  * unchanged.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Scored suites and
- * inconclusive grading".
+ * Governing design: `packages/testing/docs/concepts/scored-suites.md`, "A fault
+ * never eats a decision".
  *
  * INCONCLUSIVE grades an environment fault, never a measurement. A gate the
  * scores actually missed is a finding and grades `Failed`, so a suite cannot

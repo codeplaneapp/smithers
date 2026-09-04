@@ -9,7 +9,8 @@ custom properties plus the base element and component rules that consume them.
 `@smthrs/ui` builds its shadcn-anatomy components on these tokens; `apps/ui` and
 `apps/review` embed the sheets directly.
 
-Private at `1.0.0-rc.0`: the package ships only inside the workspace.
+Private at `1.0.0-rc.0`: the package ships only inside the workspace, as
+TypeScript source with no build step and no dependencies.
 
 ```ts
 import { standaloneThemeCss, themeCss, themeRegistry, workflowUiStyles } from "@smthrs/ui-styleguide";
@@ -23,12 +24,17 @@ const css = themeCss({ palettes: ["one"] });
 
 ## Documentation
 
-- [`docs/api.md`](./docs/api.md) — every runtime export and type, with the input
-  contracts and the failure modes each one throws on.
-- [`docs/theming.md`](./docs/theming.md) — the `data-palette` and `data-theme`
-  axes, why source order decides the cascade, and the WCAG AA table the tests
-  enforce.
-- [`docs/README.md`](./docs/README.md) — how these files relate to `src/`.
+The full site is at https://ui-styleguide.smithers.sh. Its sources live in
+[`docs/`](./docs/), which is the only place to edit them.
+
+- [`docs/README.md`](./docs/README.md) is the landing page.
+- [`docs/api.md`](./docs/api.md) covers every runtime export and type, with the
+  input contracts and the failure modes each one throws on.
+- [`docs/theming.md`](./docs/theming.md) covers the `data-palette` and
+  `data-theme` axes, why source order decides the cascade, and the specificity
+  an override has to beat.
+- [`docs/concepts/contrast-budget.md`](./docs/concepts/contrast-budget.md)
+  covers the WCAG AA table the tests enforce and the recorded upstream gaps.
 
 ## Layout
 
@@ -56,3 +62,6 @@ open item from the tooling review.
 `bunfig.toml` turns coverage on for the test run and fails it below 100% line
 and function coverage. The threshold covers `src/` and the shared pair table,
 so there is no separate coverage command.
+
+`tests/docs.test.ts` reads `docs/api.md` against the barrel and fails when an
+export goes undocumented, so a new export is a documentation change too.

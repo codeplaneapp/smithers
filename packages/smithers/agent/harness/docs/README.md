@@ -54,13 +54,12 @@ This program opens a QuickJS realm, evaluates one cell that completes the run,
 and prints the outcome. It runs on Node with no other setup.
 
 ```ts
-import { Effect } from "effect"
 import * as Cell from "@smthrs/harness/Cell"
 import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
 import * as Sandbox from "@smthrs/harness/Sandbox"
+import { Effect } from "effect"
 
-const call: Sandbox.Handler = () =>
-  Effect.succeed(new Cell.CallResult({ outcome: "success", value: null }))
+const call: Sandbox.Handler = () => Effect.succeed(new Cell.CallResult({ outcome: "success", value: null }))
 
 const program = Effect.gen(function*() {
   const sandbox = yield* QuickJSSandbox.make

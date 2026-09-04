@@ -1,139 +1,316 @@
 ---
 title: "API reference"
-description: "The flows standard tool library: filesystem, search, and shell flows"
+description: "Every module and every public export of @smthrs/std: the flow modules, the six injectable services, their implementations, the search contract, the registries, and the error type."
+sidebar:
+  order: 1
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/std/docs/api.md"
 ---
 
-Every callable tool in this package is an ordinary `@smthrs/core` flow: a
-declaration carrying `name`, `description`, `Input`, `Output`, `capabilities`
-and `effects`, plus a handler where execution is host-owned. A host binds the
-handlers it can serve and offers the declarations it wants a model to see.
+The package exports 31 modules. Each is reachable from the root entry point as a
+namespace and from its own subpath:
 
 ```ts
-import { Manifest, Read } from "@smthrs/std"
-import { Effect } from "effect"
-
-const program = Read.run({ path: "/workspace/notes.md" }).pipe(
-  Effect.map((page) => page.content)
-)
-
-Manifest.flows // every declaration, by name
-Manifest.handlers // the executable subset, by name
-Manifest.effectsFor // the per-invocation envelope narrowing, by name
-Manifest.readOnly // the names a read-only seat may see
+import { Read } from "@smthrs/std"
+import * as Read from "@smthrs/std/Read"
 ```
 
-`Manifest.effectsFor` is how a host narrows a declaration for one decoded call:
-`bash` in `mode: "hermetic"` declares the caller's own `reads` and `writes`
-rather than the registry-time worst case, and `read`, `edit`, `ls`, `glob` and
-`grep` declare the path or subtree they were given. Every name in
-`Manifest.names` has an entry.
+`@smthrs/std/internal/*` and `@smthrs/std/<Module>/index` are not public.
 
-## Limits
+For the input and output fields of each flow, see the
+[Flow reference](/reference/flows/). This page is the module and export
+surface.
 
-Every limit is a display budget disclosed to the caller, never a silent cut. A
-capped result says so in its own output: `truncated`, `<stream>Truncated`, or a
-`notice` line naming what was shown and what there was.
+## The flow modules
 
-| Limit                             | Value       | Applies to                                                   |
-| --------------------------------- | ----------- | ------------------------------------------------------------ |
-| `DEFAULT_READ_LIMIT`              | 2,000 lines | one `read` page                                              |
-| `MAX_LINE_CHARS`                  | 2,000       | one displayed line; a clipped line is not an edit anchor     |
-| `MAX_ENTRIES`                     | 1,000       | one `ls` or `glob` page                                      |
-| `MAX_GREP_MATCHES`                | 200         | one `grep` call                                              |
-| `MAX_OUTPUT_BYTES`                | 60,000      | one rendered text payload (`fetch`, `http-post`, `webfetch`) |
-| `MAX_SHELL_OUTPUT_BYTES`          | 30,000      | each captured shell stream                                   |
-| `Bash.DEFAULT_TIMEOUT_MS`         | 600,000     | one `bash` call with no `timeoutMs`                          |
-| `TestRun.DEFAULT_TIMEOUT_MS`      | 600,000     | one `test` call with no `timeoutMs`                          |
-| `TestRun.MAX_CAPTURE_BYTES`       | 8,000,000   | the runner output one `test` call holds in memory            |
-| `ShellCommand.DEFAULT_TIMEOUT_MS` | 10,000      | one `shell_command` call with no `timeout`                   |
-| `ShellCommand.MAX_CAPTURE_BYTES`  | 8,000,000   | the command output one `shell_command` call holds in memory  |
-| `NativeSearch.MAX_CAPTURE_BYTES`  | 64 MiB      | one `rg` invocation's captured output, refused past the cap  |
-| HTTP response bytes               | 5 MiB       | `fetch`, `http-post` and `webfetch`, refused past the cap    |
-| `webfetch` request timeout        | 120 s cap   | the request and the body read                                |
-| Language-server frame             | 8 MiB       | one JSON-RPC frame, with an 8 KiB header bound               |
-| `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
-| `MAX_PENDING_REQUESTS`            | 512         | concurrent in-flight JSON-RPC requests to one server         |
+Seventeen modules declare a flow. Every one of them exports the same names:
 
-Shell capture is bounded where it is read, not after: a command that prints
-gigabytes costs the bound rather than the whole of what it printed, and the
-`<stream>DroppedBytes` fields count what the process actually produced. Every
-caller-supplied command (`bash`, `test`, `shell_command`) passes a bound. The
-internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do
-not, because a listing read for its content is useless with its head missing.
-Those
-fields and the `<stream>Truncated` flags beside them are a wire convention
-`@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact
-bytes; renaming one disarms that guard silently.
+| Export         | Type                                     | Meaning                                  |
+| -------------- | ---------------------------------------- | ---------------------------------------- |
+| `name`         | string literal                           | The registry name.                       |
+| `description`  | string                                   | The one line the model sees.             |
+| `Input`        | `Schema`                                 | The input schema.                        |
+| `Output`       | `Schema`                                 | The output schema.                       |
+| `effects`      | `Effects.Declaration`                    | The declared envelope, before any input. |
+| `effectsFor`   | `(input) => Effects.Declaration`         | The envelope narrowed to one input.      |
+| `capabilities` | `ReadonlyArray<string>`                  | `action:resource` strings.               |
+| `flow`         | `Flow`                                   | The declaration, built by `Flow.make`.   |
+| `run`          | `(input) => Effect<Output, StdError, R>` | The handler.                             |
 
-## Failures
+The modules are `ApplyPatch`, `Bash`, `Edit`, `Explore`, `Fetch`, `Glob`,
+`Grep`, `HttpPost`, `Ls`, `Lsp`, `Read`, `ShellCommand`, `TestRun`,
+`UpdatePlan`, `WebFetch`, `WebSearch`, and `Write`.
 
-Handlers keep ordinary outcomes in the success channel: a non-zero exit code,
-an empty match set and a 500 response are all values. `StdError` is reserved
-for failures a model must see as failures, and its `code` is a closed, stable
-list carried with the offending `path` where one exists.
+Some of them export more than the common nine:
 
-| Code                       | Meaning                                                       |
-| -------------------------- | ------------------------------------------------------------- |
-| `not_found`                | The named path or ref does not exist.                         |
-| `not_a_file`               | A file operation was aimed at something that is not a file.   |
-| `not_a_directory`          | A directory operation was aimed at something that is not one. |
-| `is_directory`             | A read was aimed at a directory.                              |
-| `binary_file`              | The bytes hold a NUL or are not valid UTF-8.                  |
-| `offset_out_of_range`      | The requested page or line span is past the end.              |
-| `invalid_pattern`          | The search pattern does not compile.                          |
-| `invalid_input`            | The input is self-contradictory or names an unusable value.   |
-| `no_match`                 | The edit anchor or patch context is not in the file.          |
-| `not_modified`             | The write would leave the file exactly as it was.             |
-| `outside_declared_reads`   | A hermetic path token is outside the declared read set.       |
-| `outside_declared_writes`  | A hermetic path token is outside the declared write set.      |
-| `command_failed`           | The process could not start, or a host operation failed.      |
-| `request_failed`           | The HTTP or language-server request failed.                   |
-| `timeout`                  | The call exceeded its wall-clock budget.                      |
-| `provider_unavailable`     | No host bound the service this flow needs, or it refused.     |
-| `unsupported`              | The service does not implement this query.                    |
-| `unsupported_content_type` | The response is not a type this flow renders.                 |
-| `response_too_large`       | The response exceeded the byte cap before decoding.           |
+| Module         | Additional exports                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| `Bash`         | `DEFAULT_TIMEOUT_MS`, and `Input` and `Output` as TypeScript types beside the schemas       |
+| `Explore`      | `make(options: { model?: string })`, and no `run`                                           |
+| `Grep`         | `ContextLine`, `Symbol`, `Match` schemas                                                    |
+| `ShellCommand` | `DEFAULT_TIMEOUT_MS`, `MAX_CAPTURE_BYTES`, `DEFAULT_MAX_OUTPUT_TOKENS`, `TIMEOUT_EXIT_CODE` |
+| `TestRun`      | `scratchDirectory`, `DEFAULT_TIMEOUT_MS`, `MAX_CAPTURE_BYTES`, `Outcome`                    |
+| `UpdatePlan`   | `StepStatus`, `Plan`                                                                        |
+| `WebSearch`    | the `WebSearch` service, `make`, `makeNoop`, `layerNoop`                                    |
 
-## Services a host binds
+## Manifest
 
-Six services are injected, and a flow whose service a host has not bound gets
-the `makeNoop` refusal rather than a silent success. Refusing loudly is
-the contract: a flow that appears to work while doing nothing costs a model the
-frames it takes to notice.
+The whole library keyed by registry name. Every registry is frozen.
 
-| Service          | Needed by          | Bound by                                                        |
-| ---------------- | ------------------ | --------------------------------------------------------------- |
-| `Search`         | `grep`, `glob`     | `NativeSearch.layer` (ripgrep) or `PortableSearch` (in process) |
-| `Container`      | `bash`, `test`     | `Container.layerCommand` (docker or podman)                     |
-| `TestRunner`     | `test`             | the repository's own declaration                                |
-| `Checkpoints`    | agent-side pinning | the git checkpoint store                                        |
-| `WebSearch`      | `websearch`        | `ExaWebSearch.layer`                                            |
-| `LanguageServer` | `lsp`              | `NodeLanguageServer.layer`                                      |
+| Export       | Type                                 | Meaning                                    |
+| ------------ | ------------------------------------ | ------------------------------------------ |
+| `flows`      | record of name to declaration        | All 17 declarations.                       |
+| `handlers`   | record of name to handler            | The 16 that have one; `explore` is absent. |
+| `effectsFor` | record of name to narrowing function | All 17, including `explore`.               |
+| `names`      | readonly tuple of 17 names           | Registry order.                            |
+| `readOnly`   | readonly tuple of 8 names            | The read-only projection.                  |
 
-`NativeSearch` and `PortableSearch` are two implementations of one contract,
-and `SearchContract` exports the matcher both build on so a third peer cannot
-drift on what a pattern means. `SearchConformance` is how a peer proves it:
-it generates a tree and a batch of calls from a seed, runs them through two
-implementations, and reports every answer that differs. It found two drifts
-between the peers shipped here, one in how `maxCount` interacts with context
-lines and one in how `ignoreCase` and `smartCase` combine.
+```ts
+import * as Manifest from "@smthrs/std/Manifest"
 
-## Hermetic mode is a pre-check, not a sandbox
+Manifest.names // ["read", "write", "edit", "ls", "glob", "grep", "bash", ...]
+Manifest.readOnly // ["read", "ls", "glob", "grep", "fetch", "explore", "webfetch", "lsp"]
+```
 
-`bash` keeps `mode: "hermetic"` as effect-contract vocabulary. The handler
-lexically pre-checks the explicit path tokens in the command against `reads`
-and `writes`, resolving every token and every declaration before comparing, and
-refuses the call when one falls outside. It then starts an ordinary host
-process. Shell expansion, subprocesses, and paths computed at runtime are not
-observed, so the check bounds what a caller declared it would do, not what the
-process can do. A host that needs confinement supplies a sandbox or an
-access-reporting boundary; this check alone cannot prove hermetic execution.
+## StdError
 
-## Runtime
+The single typed failure every handler uses.
 
-The root entry point is Node-only: it pulls `node:url` in through
-`NodeLanguageServer`. The four search subpaths `@smthrs/std/Grep`,
-`@smthrs/std/Glob`, `@smthrs/std/Search` and `@smthrs/std/PortableSearch` are
-browser-safe and are the entries the browser contract checks. `internal/*` and
-nested `*/index` subpaths are not exported and carry no promise.
+| Export     | Type                                    | Meaning                                                  |
+| ---------- | --------------------------------------- | -------------------------------------------------------- |
+| `Code`     | `Schema.Literals` and the matching type | The closed list of failure codes.                        |
+| `StdError` | `Schema.TaggedError` class              | `{ code, message, path? }`, tagged `flows/std/StdError`. |
+
+```ts
+import * as StdError from "@smthrs/std/StdError"
+
+const failure = new StdError.StdError({
+  code: "not_found",
+  message: "File not found: /workspace/missing.ts",
+  path: "/workspace/missing.ts"
+})
+```
+
+The codes are listed in the [Flow reference](/reference/flows/#failures).
+
+## Probe
+
+Telling an invalid probe from a failing check. A non-zero exit is a runner's
+verdict about the code it ran, not about the command it was handed.
+
+| Export         | Type                                                                  | Meaning                                                                                     |
+| -------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `key`          | `"invalidProbe"`                                                      | The reserved output key a flow reports one under.                                           |
+| `Reason`       | `Schema.Literals` and the matching type                               | `unknown-command`, `unknown-test`, `unknown-path`, `unknown-module`, `unknown-environment`. |
+| `InvalidProbe` | `Schema.Struct` and the matching type                                 | `{ reason, evidence, message }`.                                                            |
+| `classify`     | `(result: { exitCode, stdout, stderr }) => InvalidProbe \| undefined` | Classifies one command result.                                                              |
+
+```ts
+import * as Probe from "@smthrs/std/Probe"
+
+const probe = Probe.classify({ exitCode: 127, stdout: "", stderr: "pytest: command not found" })
+// { reason: "unknown-command", evidence: "pytest: command not found", message: "..." }
+```
+
+A zero exit is never classified. A runner's own report that it executed tests
+vetoes every wording recogniser, so a genuine reproduction that prints
+`No module named` from inside a test is not suppressed. Exit codes 126 and 127
+are the shell's verdict and are not vetoed.
+
+## Search
+
+The implementation seam behind `grep` and `glob`.
+
+| Export        | Type                                | Meaning                                                                      |
+| ------------- | ----------------------------------- | ---------------------------------------------------------------------------- |
+| `Search`      | interface and `Context.Service` tag | `{ grep, glob }`.                                                            |
+| `make`        | `(service: Search) => Search`       | Builds a peer from its two operations.                                       |
+| `makeNoop`    | `() => Search`                      | Fails both calls with `provider_unavailable`.                                |
+| `layerNoop`   | `Layer<Search>`                     | Provides `makeNoop`.                                                         |
+| `GrepInput`   | interface                           | Normalized grep input, with every option resolved.                           |
+| `GrepOutput`  | interface                           | `matches`, `files`, `filesSearched`, `skippedBinary`, `truncated`, `notice`. |
+| `GrepLine`    | interface                           | One row a peer produces before grouping: `file`, `line`, `text`, `kind`.     |
+| `GrepMatch`   | interface                           | One hit with its `before`, `after`, and `symbol`.                            |
+| `ContextLine` | interface                           | `line`, `text`.                                                              |
+| `Symbol`      | interface                           | `kind`, `name`, `startLine`, `endLine`.                                      |
+| `GlobInput`   | interface                           | `pattern`, `root`, `hidden`, `limit`.                                        |
+| `GlobOutput`  | interface                           | `paths`, `total`, `truncated`, `notice`.                                     |
+
+Both operations return `Effect<_, StdError>` with no requirement, so a peer
+resolves its own services when it is built.
+
+## PortableSearch
+
+The in-process peer. Walks the injected `FileSystem`, so it needs no external
+binary and is browser-safe.
+
+| Export  | Type                                                       |
+| ------- | ---------------------------------------------------------- |
+| `make`  | `(services: Context<FileSystem \| Path>) => Search.Search` |
+| `layer` | `Layer<Search.Search, never, FileSystem \| Path>`          |
+
+## NativeSearch
+
+The peer that drives the `rg` executable through the permission-aware spawner.
+
+| Export              | Type                                                                              | Meaning                                                            |
+| ------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `MAX_CAPTURE_BYTES` | `67_108_864`                                                                      | Bytes captured from either `rg` stream before the call is refused. |
+| `make`              | `(services: Context<FileSystem \| Path \| ChildProcessSpawner>) => Search.Search` |                                                                    |
+| `layer`             | `Layer<Search.Search, never, FileSystem \| Path \| ChildProcessSpawner>`          |                                                                    |
+
+An overflow is `command_failed` rather than a truncation, because a partial
+ripgrep stream could make this peer disagree with the portable one. A failure to
+start `rg` is `provider_unavailable`.
+
+## SearchContract
+
+The validation and matching rules both peers build on, exported so a third peer
+cannot drift on what a pattern means.
+
+| Export                | Type                                                                                  | Meaning                                          |
+| --------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `validatePattern`     | `(pattern: string, fixedStrings: boolean) => StdError \| undefined`                   | Checks Smithers Ripgrep ASCII v1.                |
+| `validateGlob`        | `(glob: string) => StdError \| undefined`                                             | Checks the glob grammar.                         |
+| `canonicalGlob`       | `(glob: string) => string`                                                            | The one spelling both peers match against.       |
+| `matchesGlob`         | `(pattern: string, relative: string, basename: string) => boolean`                    | One glob against one candidate.                  |
+| `includedByGlobs`     | `(globs: ReadonlyArray<string>, relative: string, basename: string) => boolean`       | Ordered include and exclude.                     |
+| `expression`          | `(pattern: string, fixedStrings: boolean, insensitive: boolean) => RegExp`            | Compiles a validated pattern.                    |
+| `unsatisfiableNotice` | `(options: { fileSystem, path, root, globs, hidden }) => Effect<string \| undefined>` | Explains globs no file under the root can match. |
+
+## SearchConformance
+
+A differential kit that reports where two `Search` peers disagree.
+
+| Export          | Type                                                                           | Meaning                                                                        |
+| --------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `GeneratedFile` | interface                                                                      | `path` relative to the tree root, and `content`.                               |
+| `Plan`          | interface                                                                      | `seed`, `root`, `files`, `grep`, `glob`.                                       |
+| `Divergence`    | interface                                                                      | `call`, `input`, `subject`, `reference`.                                       |
+| `plan`          | `(options: { seed, root, files?, calls? }) => Plan`                            | Builds a reproducible tree and call batch. Defaults are 12 files and 12 calls. |
+| `materialize`   | `(plan: Plan) => Effect<void, never, FileSystem \| Path>`                      | Writes the tree.                                                               |
+| `compare`       | `(options: { plan, subject, reference }) => Effect<ReadonlyArray<Divergence>>` | Runs every call through both peers.                                            |
+| `report`        | `(divergences: ReadonlyArray<Divergence>) => string`                           | Renders them as a failing run's output.                                        |
+
+## Container
+
+The host's route into a named container, as an injected transport. Nothing here
+spawns: it only decides an argv, which `bash` then spawns through the same
+permission-aware spawner as everything else.
+
+| Export         | Type                                                   | Meaning                                                   |
+| -------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| `Container`    | interface and `Context.Service` tag                    | `{ exec: (request: Request) => Effect<Plan, StdError> }`. |
+| `Request`      | interface                                              | `container`, `file`, `args`, `cwd?`, `env?`, `stdin`.     |
+| `Plan`         | interface                                              | `file`, `args`: the argv the host spawns.                 |
+| `make`         | `(service: Container) => Container`                    |                                                           |
+| `unavailable`  | `(container: string) => StdError`                      | The refusal a host with no route answers with.            |
+| `makeNoop`     | `() => Container`                                      | Fails every request with `unavailable`.                   |
+| `layerNoop`    | `Layer<Container>`                                     |                                                           |
+| `makeCommand`  | `(options?: { program?: string }) => Container`        | A `docker exec` compatible CLI. Defaults to `docker`.     |
+| `layerCommand` | `(options?: { program?: string }) => Layer<Container>` |                                                           |
+
+`makeCommand` attaches `-i` only when the payload arrives on standard input,
+because a container CLI holding stdin open for a command that never reads it
+makes that command hang. A container name that is empty or starts with `-` is
+`invalid_input`.
+
+## TestRunner
+
+How this repository runs its tests, declared once by the host.
+
+| Export        | Type                                    | Meaning                                                                     |
+| ------------- | --------------------------------------- | --------------------------------------------------------------------------- |
+| `captureBase` | `"refs/flows/capture-base"`             | The default ref naming the pristine tree.                                   |
+| `Runner`      | interface                               | `command`, `cwd?`, `root?`, `container?`, `env?`, `baseRef?`, `timeoutMs?`. |
+| `TestRunner`  | interface and `Context.Service` tag     | `{ declared: Effect<Runner, StdError> }`.                                   |
+| `make`        | `(runner: Runner) => TestRunner`        |                                                                             |
+| `makeNoop`    | `() => TestRunner`                      | Declares that this host knows of no runner.                                 |
+| `layer`       | `(runner: Runner) => Layer<TestRunner>` |                                                                             |
+| `layerNoop`   | `Layer<TestRunner>`                     |                                                                             |
+
+## Checkpoints
+
+Pinned trees, and the scratch checkouts a call runs against.
+
+| Export             | Type                                                                       | Meaning                                                        |
+| ------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `Checkpoints`      | interface and `Context.Service` tag                                        | `{ capture, materialize }`.                                    |
+| `Snapshot`         | `Schema.Class`                                                             | `{ id, ref }`, identified as `flows/std/Checkpoints/Snapshot`. |
+| `Materialized`     | interface                                                                  | `id`, `host`, `guest`, `root`, `guestRoot`.                    |
+| `baseId`           | `"base"`                                                                   | The id naming the tree the run opened on.                      |
+| `scratchDirectory` | `".flows-checkpoints"`                                                     | Where a checkpoint is materialized, relative to the root.      |
+| `configSection`    | `"flows-checkpoint"`                                                       | The git-config section minted checkpoints are recorded under.  |
+| `make`             | `(service: Checkpoints) => Checkpoints`                                    |                                                                |
+| `unavailable`      | `StdError`                                                                 | The refusal a host that pins nothing answers with.             |
+| `makeNoop`         | `() => Checkpoints`                                                        |                                                                |
+| `layerNoop`        | `Layer<Checkpoints>`                                                       |                                                                |
+| `GitOptions`       | interface                                                                  | `root`, `cwd?`, `baseRef?`.                                    |
+| `makeGit`          | `(options: GitOptions) => Effect<Checkpoints, never, ChildProcessSpawner>` |                                                                |
+| `layerGit`         | `(options: GitOptions) => Layer<Checkpoints, never, ChildProcessSpawner>`  |                                                                |
+| `Relocation`       | tagged union                                                               | `Relocated`, `UnsupportedFlow`, `AbsolutePath`, `OutsideTree`. |
+| `relocate`         | `(flow: string, input: Json, materialized: Materialized) => Relocation`    | Rewrites one call's input onto a checkpoint.                   |
+
+`capture(id)` returns a `Snapshot`. `materialize(id, use)` is scoped: it hands
+the tree to `use` and removes the checkout however that effect ends.
+
+## LanguageServer
+
+The code-intelligence seam.
+
+| Export           | Type                                          | Meaning                                                             |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------------------- |
+| `Position`       | interface                                     | `path`, `line`, `character`, in the protocol's 0-based coordinates. |
+| `LanguageServer` | interface and `Context.Service` tag           | Ten methods, each returning `Effect<unknown, StdError>`.            |
+| `make`           | `(service: LanguageServer) => LanguageServer` |                                                                     |
+| `makeNoop`       | `() => LanguageServer`                        | Answers `unsupported` for every request.                            |
+| `layerNoop`      | `Layer<LanguageServer>`                       |                                                                     |
+
+The methods are `hover`, `definition`, `references`, `implementation`,
+`documentSymbols`, `workspaceSymbols`, `prepareCallHierarchy`,
+`callHierarchyIncoming`, `callHierarchyOutgoing`, and `diagnostics`.
+
+## NodeLanguageServer
+
+A host LSP client over the permission-checked process spawner, speaking framed
+JSON-RPC on ordinary stdio pipes.
+
+| Export                 | Type                                                                                 | Meaning                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `Config`               | interface                                                                            | `command`, `args?`, `cwd`, `environment?`, `timeoutMs?`. |
+| `MAX_QUEUED_FRAMES`    | `256`                                                                                | Frames buffered for the server's standard input.         |
+| `MAX_PENDING_REQUESTS` | `512`                                                                                | Concurrent in-flight requests.                           |
+| `make`                 | `(config: Config) => Effect<LanguageServer, StdError, ChildProcessSpawner \| Scope>` |                                                          |
+| `layer`                | `(config: Config) => Layer<LanguageServer, StdError, ChildProcessSpawner>`           |                                                          |
+
+`make` sends `initialize` with `cwd` as the root URI and then `initialized`, so
+the service is ready when it resolves. `timeoutMs` defaults to 30,000 and bounds
+every request and every write. A frame body may be 8 MiB and its headers 8 KiB.
+
+## ExaWebSearch
+
+A `WebSearch` provider backed by the Exa API.
+
+| Export  | Type                                                                                    |
+| ------- | --------------------------------------------------------------------------------------- |
+| `layer` | `(credentialId: string) => Layer<WebSearch.WebSearch, never, Credential \| HttpClient>` |
+
+The key is read from the named credential through
+[`@smthrs/control`](https://control.smithers.sh/reference/api/) rather than from the environment. See
+[Reach the network](/guides/reach-the-network/#search-the-web) for the status
+mapping.
+
+## Runtime notes
+
+The root entry point is Node-only: it re-exports `NodeLanguageServer`, which
+imports `node:url`. The four browser-safe subpaths are `@smthrs/std/Grep`,
+`@smthrs/std/Glob`, `@smthrs/std/Search`, and `@smthrs/std/PortableSearch`, and
+they are the entries the repository's browser contract checks.
+
+Two pieces of prose that used to live on this page now have their own pages,
+because they are the model behind the API rather than part of it:
+
+- [Limits are disclosed, never silent](/concepts/limits-and-disclosure/) for
+  every cap and how it is reported.
+- [Effects and capabilities](/concepts/effects-and-capabilities/) for the
+  declared envelopes, the narrowing, and why hermetic mode is a pre-check rather
+  than a sandbox.

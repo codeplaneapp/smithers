@@ -1,7 +1,15 @@
-# @clack/prompts for the Smithers CLI
+---
+title: "Terminal rendering notes"
+description: "The research behind src/Ui.ts: what @clack/prompts provides, how the CLI decides a session is interactive, and why a streamed list is followed by a select rather than a live one."
+---
 
-Research notes for `src/Ui.ts`, the rendering layer that wraps clack. Facts
-below were read from the installed packages under
+These are the research notes for `src/Ui.ts`, the layer that wraps
+[@clack/prompts](https://github.com/bombshell-dev/clack) and owns the one
+decision clack leaves to its caller: whether this session can animate and ask.
+Read [Output and exit codes](./concepts/output-and-exit-codes.md) first for how
+the two renderings divide the work.
+
+Facts below were read from the installed packages under
 `node_modules/.pnpm/@clack+prompts@1.7.0` and `@clack+core@1.4.3`, the
 upstream README and CHANGELOG at `bombshell-dev/clack`, and a disposable
 prototype driven with fake streams (2026-09-03).
@@ -61,8 +69,12 @@ unless noted. `output` defaults to `process.stdout`.
 `S_BAR_START ┌`, `S_BAR │`, `S_BAR_END └`, `S_RADIO_ACTIVE ●`,
 `S_RADIO_INACTIVE ○`, `S_CHECKBOX_* ◻/◼`, `S_INFO ●` (blue),
 `S_SUCCESS ◆` (green), `S_WARN ▲` (yellow), `S_ERROR ■` (red), `S_BAR_H ─`,
-box corners `╭ ╮ ╰ ╯`, `S_CONNECT_LEFT ├`. ASCII fallbacks when
-`unicode` is false: `* o x T | — > [ ] [+] • ! -`.
+box corners `╭ ╮ ╰ ╯`, `S_CONNECT_LEFT ├`. The ASCII fallbacks used when
+`unicode` is false, in the same order:
+
+```text
+* o x T | — > [ ] [+] • ! -
+```
 
 ### Colours
 

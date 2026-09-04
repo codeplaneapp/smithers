@@ -1,6 +1,6 @@
 ---
 title: "API reference"
-description: "The flow authoring model: flows, actions, durable waits, retry policy, and the runtime port they execute against"
+description: "The complete public surface of @smthrs/flow: flows, actions, durable primitives, step identity, retry policy, and the runtime port, and how the pieces fit together."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/flow/docs/api.md"
 ---
 
@@ -41,7 +41,7 @@ const layer = Layer.mergeAll(
 
 This page is the public API reference for the flow authoring model: typed flows, recorded actions, durable deferreds, clocks and queues, the system timer and wait point, polling, human tasks, plan-time graph building, the body interpreter, retry policy, step identity, and the runtime port those APIs execute against. It contains no engine implementation: that is [`@smthrs/engine`](https://engine.smithers.sh/reference/api/).
 
-The export tables at the end of the page are generated from the package sources, so every documented declaration appears there. The sections below say how the pieces fit together.
+The [export reference](/reference/flow/) lists every exported symbol with its signature, its defaults, and the errors it raises. The sections below say how the pieces fit together. For task-shaped instructions, start from the [guides](/#where-to-go-next).
 
 ## `Flow`
 
@@ -294,3 +294,11 @@ A `RetryPolicy` is a plain value, so the next retry delay is derived from a pers
 | `CancelRequestFailed`   | a durable runtime could not record a cancellation, with `cancel_request_failed` for a storage failure and `unsafe_interrupt_unsupported` for `interruptUnsafe`, which the durable engine does not implement |
 
 No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a runtime that wants to preempt a suspension when a completion lands in the read-to-park window; a completion wakes a parked run through `FlowRuntime.resume` today.
+
+## See also
+
+- [Flows and actions](/concepts/flows-and-actions/), [bodies are plans](/concepts/bodies-and-plans/), [execution identity](/concepts/execution-identity/), [suspension and replay](/concepts/suspension-and-replay/), [trampoline rounds](/concepts/trampoline-rounds/), and [the runtime port](/concepts/the-runtime-port/): the model behind this surface.
+- [Export reference](/reference/flow/): every symbol, with types and defaults read from source.
+- [Troubleshooting](/troubleshooting/): the same failures, sorted by symptom.
+- [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) implements the `FlowRuntime` port, and [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) makes it durable.
+- [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) owns the `Node` and `FileSet` vocabulary a body is written in.

@@ -1,7 +1,7 @@
 /**
  * Durable race conformance pins.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * Governing design: `packages/testing/docs/concepts/engine-subject.md`, "Race
  * semantics"; manifest: `packages/testing/src/internal/ParityManifest.ts`.
  *
  * @since 0.0.0
@@ -166,7 +166,7 @@ const runRace = (
 /**
  * Pins loser fiber interruption and its journaled aborted outcome.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * Governing design: `packages/testing/docs/concepts/engine-subject.md`, "Race
  * semantics".
  */
 const loserInterrupted: ConformanceCase = {
@@ -204,7 +204,7 @@ const loserInterrupted: ConformanceCase = {
 /**
  * Pins recorded-winner reconstruction under adversarially inverted timing.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * Governing design: `packages/testing/docs/concepts/engine-subject.md`, "Race
  * semantics".
  */
 const recordedWinnerReplay: ConformanceCase = {
@@ -249,7 +249,7 @@ const recordedWinnerReplay: ConformanceCase = {
 /**
  * Pins replay of the loser's recorded interruption.
  *
- * Governing design: `packages/testing/docs/concepts.md`, "Effect race
+ * Governing design: `packages/testing/docs/concepts/engine-subject.md`, "Race
  * semantics".
  */
 const recordedLoserInterruption: ConformanceCase = {
@@ -290,8 +290,8 @@ const recordedLoserInterruption: ConformanceCase = {
 /**
  * Race interruption and deterministic replay conformance cases.
  *
- * Every case pins the contract in `packages/testing/docs/concepts.md`,
- * "Effect race semantics".
+ * Every case pins the contract in
+ * `packages/testing/docs/concepts/engine-subject.md`, "Race semantics".
  *
  * @category conformance
  * @since 0.0.0

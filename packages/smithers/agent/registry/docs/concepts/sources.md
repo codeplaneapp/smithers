@@ -1,0 +1,120 @@
+---
+title: "Sources and naming"
+description: "What a discovery source is, how one directory becomes one flow, the difference between path-derived and frontmatter names, and the rules that decide a collision."
+sidebar:
+  order: 2
+---
+
+A source is one directory root plus the rules for reading it:
+
+```ts
+interface Source {
+  readonly source: string
+  readonly root: string
+  readonly naming: "path" | "frontmatter"
+  readonly system?: boolean | undefined
+}
+```
+
+`source` is opaque caller-supplied metadata. Discovery never interprets it; it
+copies the string onto every descriptor's `provenance`, so a catalog entry can
+say which source produced it. The repository's own hosts use `project` for a
+project's flows and `pack:<name>` for a pack's.
+
+## One directory, one flow
+
+The scan walks the root and, in each directory, looks for one entry file. Three
+names are recognized, in this order of precedence:
+
+| File       | What it is                                                                                                |
+| ---------- | --------------------------------------------------------------------------------------------------------- |
+| `flow.ts`  | A module flow. Its metadata is parsed out of the default `Flow.make` value without evaluating the module. |
+| `flow.mdx` | A markdown flow. Its metadata is the YAML frontmatter.                                                    |
+| `SKILL.md` | The Agent Skills spelling of a markdown flow.                                                             |
+
+A directory holding more than one of them uses the first and reports
+`multiple_entry_files`. Directories named `.git` and `node_modules`, and any
+directory whose name starts with a dot, are skipped. At the root of a
+path-named source, `channels` and `connections` are skipped too, because those
+are the host's own directories rather than flows.
+
+Nothing stops a directory from holding both an entry file and further
+subdirectories: `flows/review/flow.mdx` and `flows/review/read-pr/flow.ts` are
+two flows, `review` and `review/read-pr`.
+
+## Two ways a flow gets its name
+
+`naming: "path"` derives the name from the directory segments below the root,
+joined with `/`. This is the mode a project uses, and it makes the name a fact
+about the tree rather than about a file's contents: `flows/deploy/status/flow.ts`
+is the flow `deploy/status`. A `name` key in the file is ignored, and the scan
+says so with `name_field_ignored` rather than letting an author believe the key
+took effect. An entry file directly in the root has no segments to name it, so
+it is refused with `root_level_entry`.
+
+`naming: "frontmatter"` reads the `name` key out of the file, which is how a
+foreign Agent Skills directory is scanned. The name must be 1 to 64 lowercase
+ASCII letters, numbers, or single hyphens with no edge hyphens. A missing name
+falls back to the directory name and reports `missing_name`; an invalid one
+does the same and reports `invalid_name`; a valid name that does not match its
+directory is used and reports `directory_name_mismatch`.
+
+## Ordered sources and the first-found rule
+
+`Registry.layer` takes sources in caller order and scans them in that order.
+The canonical order is system, project, plugin, then foreign sources. The first
+descriptor to claim a name keeps it; a later one of the same name is dropped
+and reported as a `duplicate_name` warning naming the file that won.
+
+One collision is not a warning. A source declared `system: true` owns its
+names outright, so a name that collides with a system source fails
+construction with `RegistryError { code: "system_collision" }` in either
+direction. A project cannot shadow a system flow, and a system source cannot
+quietly take a name a project already used.
+
+Packs merge under a different rule, because caller order is the wrong authority
+for a set of installed directories. See [Load workflow packs](../guides/load-packs.md).
+
+## The snapshot and refresh
+
+A registry holds one snapshot. Every read observes one complete snapshot, so a
+`list` and the `get` after it never disagree. `refresh` rescans every
+configured source and replaces the snapshot only after all of them succeed, so
+a failed rescan leaves the previous complete snapshot serving reads rather than
+emptying the catalog.
+
+## Walking a real tree safely
+
+Discovery follows symbolic links wherever the host `FileSystem.stat` does,
+which is what the ordinary Node file system does. Two guards bound the walk:
+
+- A visited-directory identity set, keyed on device and inode, refuses to
+  descend into a directory already visited and reports `symlink_cycle`.
+- A ceiling of `Discovery.maximumTraversalDepth` (32) entry-name segments
+  reports `max_depth_exceeded` and stops. The entry-name path is the flow name,
+  so a deeper tree is a loop or a mistake.
+
+Without them a single `flows/a/b/loop -> flows` link yields one flow many times
+over and terminates only when the operating system raises `ELOOP`.
+
+Two more ceilings bound what one file can cost:
+
+| Ceiling                    | Value  | What it bounds                                                                                                                                                                                                        |
+| -------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Discovery.entrySizeLimit` | 4 MiB  | The size of an entry file discovery admits. A larger file is skipped with `entry_too_large` and contributes no descriptor, so a stray build artifact under `flows/` cannot exhaust the process at layer construction. |
+| The metadata parse ceiling | 64 KiB | How much of an admitted file is decoded and parsed looking for frontmatter or module metadata. It bounds parsing only.                                                                                                |
+
+The size ceiling is checked twice, because the first check trusts the host. A
+`stat` size past the limit skips the file unread, which is the fast path an
+ordinary file system takes. The bytes actually read are then measured against
+the same limit, so a host whose `stat` under-reports or omits a size still gets
+`entry_too_large` with the true byte count, and the entry is refused before it
+is hashed, decoded, or parsed. An in-memory or remote `FileSystem` and a
+special file are the hosts that need it.
+
+## Reading it back
+
+- [Discover a project's flows](../guides/discover-a-project.md): the task, with
+  the layers written out.
+- [Diagnose a flow that did not appear](../guides/diagnose-a-missing-flow.md):
+  every warning code named here, and what to do about it.

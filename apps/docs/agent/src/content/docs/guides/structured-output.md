@@ -18,11 +18,11 @@ A decode miss spends a correction slot on a re-prompt. Three numbers decide how
 hard a step tries to answer in shape, and each is declared where the person who
 cares about it works:
 
-| Where | What it says |
-| --- | --- |
-| `Options.corrections` | This step's budget. Zero makes a first miss terminal. |
+| Where                     | What it says                                          |
+| ------------------------- | ----------------------------------------------------- |
+| `Options.corrections`     | This step's budget. Zero makes a first miss terminal. |
 | `Host.defaultCorrections` | The composition's budget for steps that declare none. |
-| `Options.repair` | One bounded ask after the budget is spent. |
+| `Options.repair`          | One bounded ask after the budget is spent.            |
 
 Neither declared leaves the budget at one. The declaration always beats the
 composition default, including when it is zero: a step that declared a first
@@ -49,8 +49,7 @@ const Review = AgentAction.make("review/Diff", {
   prompt: ({ diff }) => `Review this diff:\n${diff}`,
   corrections: 2,
   repair: {
-    prompt: (failure) =>
-      `Return ONLY the JSON review. The last answer failed with: ${failure.issues.join("; ")}`
+    prompt: (failure) => `Return ONLY the JSON review. The last answer failed with: ${failure.issues.join("; ")}`
   }
 })
 ```

@@ -1,0 +1,123 @@
+---
+title: "Installation"
+description: "Install @smthrs/journal, choose a database layer, install the migration sets a journal needs, and learn which extra table the fenced write path reads."
+sidebar:
+  order: 1
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/journal/docs/installation.md"
+---
+
+## Install the package
+
+```bash
+pnpm add @smthrs/journal
+```
+
+The package requires Node.js 22.19.0 or later and ships as both ESM and
+CommonJS with TypeScript declarations. Its only runtime dependencies are
+[`effect`](https://effect.website) and [`@smthrs/database`](https://database.smithers.sh/reference/api/).
+
+## Add a database
+
+`SqlJournal.layer` needs two services from `@smthrs/database`: a
+`SqlClient.SqlClient` to read through and a `DurableWriter` to write through.
+On Node, `NodeDatabase.layer` provides the client and `DurableWriter.layer()`
+provides the writer:
+
+```ts
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import * as Layer from "effect/Layer"
+
+const database = Layer.provideMerge(
+  DurableWriter.layer(),
+  NodeDatabase.layer({ filename: "flows.db" })
+)
+```
+
+SQLite is the supported backend at `1.0.0-rc.0`. PostgreSQL and PGlite are
+not; see [databases](https://smithers.sh/docs/migration/1.0/#databases).
+
+## Install the migrations
+
+`Migrations.layer` creates this package's two tables and nothing else:
+`flows_journal_events` with its event-type index, and
+`flows_journal_checkpoints`.
+
+```ts
+import { Migrations, SqlJournal } from "@smthrs/journal"
+import * as Layer from "effect/Layer"
+
+const journal = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
+  Layer.provide(Layer.provideMerge(Migrations.layer, database))
+)
+```
+
+An application that also needs run, cache, or engine tables composes migration
+sets rather than stacking layers. `Migrations.set` is the journal's namespaced
+set, and `@smthrs/database`'s `Migrations.layer` runs several sets over one
+`flows_migrations` table, giving each package a reserved id block so two
+packages' `0001_initial` cannot collide:
+
+```ts
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as JournalMigrations from "@smthrs/journal/Migrations"
+import * as RunStoreMigrations from "@smthrs/run-store/Migrations"
+
+const migrations = DatabaseMigrations.layer([
+  JournalMigrations.set,
+  RunStoreMigrations.set
+])
+```
+
+`@smthrs/engine-store/Migrations` already exports `sets`, the whole durable
+schema a durable engine needs, in dependency order. Take that list if you are
+composing an engine rather than a standalone journal.
+
+## What a fenced write needs
+
+`emitDurable`, `checkpoint`, and `compact` gate their write on a `flows_runs`
+row that still names the supplied owner. That table belongs to
+[`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/), so a composition that installs only the
+journal's migrations has no table for the fence to read, and all three fail
+with `sink_failed` carrying `no such table: flows_runs`.
+
+Install `@smthrs/run-store`'s migration set alongside the journal's whenever
+you intend to write on the fenced channel. `emitLossy`, `emitDurableUnfenced`,
+`entries`, `stream`, `project`, and `flush` read no table but the journal's
+own, so a standalone journal serves them without run-store.
+
+For why the fence exists and when the unfenced channel is the correct one, see
+[the owner fence](/concepts/owner-fence/).
+
+## Import forms
+
+The root entry point re-exports every module as a namespace:
+
+```ts
+import { Journal, JournalEvent, Migrations, Redaction, SqlJournal } from "@smthrs/journal"
+```
+
+Each module is also importable from its own subpath, which is the form the API
+reference uses:
+
+```ts
+import * as Journal from "@smthrs/journal/Journal"
+import * as SqlJournal from "@smthrs/journal/SqlJournal"
+```
+
+The root is written against the driver-neutral `@smthrs/database` contract and
+bundles for the browser. The two test doubles bind a Node SQLite database, so
+they are not in the root and are imported by subpath:
+
+```ts
+import * as Notifying from "@smthrs/journal/test/Notifying"
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
+```
+
+Three subpath forms are not public and are blocked in the export map:
+`@smthrs/journal/internal/*`, `@smthrs/journal/migrations/*`, and
+`@smthrs/journal/*/index`. `@smthrs/journal/package.json` is exported.
+
+## Next step
+
+Write and read one run in the [Quickstart](/quickstart/).

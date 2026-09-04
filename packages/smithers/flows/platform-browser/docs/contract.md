@@ -1,3 +1,8 @@
+---
+title: "The browser host contract"
+description: "What BrowserHost guarantees where it diverges from NodeHost: the filesystem options a mounted volume honours, the operations it refuses, and the spawner's one-run-at-a-time abort boundary."
+---
+
 The [`@smthrs/platform-browser`](/api/platform-browser) bundle is the only host
 whose services are adapters over injected backends rather than over the machine,
 so its divergences from `NodeHost` are part of the browser claim. Its

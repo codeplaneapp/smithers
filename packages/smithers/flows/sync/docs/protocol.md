@@ -1,3 +1,8 @@
+---
+title: "Wire protocol"
+description: "The normative message shapes of the sync read path: scopes, cursors, read requests and responses, subscription frames, and the limits every side enforces."
+---
+
 ## Scopes and cursors
 
 A client reads either one run or every run in a workspace:
@@ -87,7 +92,7 @@ them. `SubscribeOptions.onResync` runs before the cursor moves and must
 succeed, so a consumer that cannot restore the prefix fails instead of silently
 skipping it. A Node follower reads that prefix out of band with
 `journal.latestCheckpoint(runId)`, applies `checkpoint.state`, and continues
-from the sync stream. See [Checkpoints and compaction](/compaction).
+from the sync stream. See [Checkpoints and compaction](/pkg/journal/concepts/compaction).
 :::
 
 ## Directionality

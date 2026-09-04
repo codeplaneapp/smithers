@@ -1,8 +1,26 @@
 ---
 title: "API reference"
-description: "The runtime that executes @smthrs/flow flows, plus HTTP and RPC transport projections"
+description: "Every public export of @smthrs/engine: the FlowEngine runtime and its Encoded seam, the FlowProxy transport derivations, the FlowProxyServer layers, and the coded refusals each one raises."
+sidebar:
+  order: 1
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/engine/docs/api.md"
 ---
+
+`@smthrs/engine` exports three namespaces from its root, each also importable
+from `@smthrs/engine/<Namespace>`:
+
+| Import                           | Source                                                                                                                             | Platform |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| `@smthrs/engine`                 | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/src/index.ts)                       | any      |
+| `@smthrs/engine/FlowEngine`      | [src/FlowEngine/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/src/FlowEngine/index.ts) | any      |
+| `@smthrs/engine/FlowProxy`       | [src/FlowProxy.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/src/FlowProxy.ts)               | any      |
+| `@smthrs/engine/FlowProxyServer` | [src/FlowProxyServer.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/src/FlowProxyServer.ts)   | any      |
+
+The service tag `FlowRuntime`, the `FlowInstance` service, `annotateWaiting`,
+and `FlowCycleDetected` live in [`@smthrs/flow`](https://flow.smithers.sh/reference/api/). What this package
+owns is the implementation.
+
+A composition that runs one flow looks like this:
 
 ```ts
 import { FlowEngine } from "@smthrs/engine"
@@ -29,130 +47,190 @@ const layer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(FlowEngine.layerMemory))
 ```
 
-## Entry point
+For the generated page that lists every export with field-level tables, see
+[@smthrs/engine exports](/reference/engine/).
 
-| Import           | Source                                                                                                       | Platform |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ | -------- |
-| `@smthrs/engine` | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/src/index.ts) | any      |
+## FlowEngine
 
-The service tag, `FlowInstance`, `annotateWaiting`, and `FlowCycleDetected`
-live in [`@smthrs/flow`](https://flow.smithers.sh/reference/api/). What this package owns is the
-implementation.
+The runtime. It implements `FlowRuntime` over the `Encoded` seam a store
+supplies.
 
-## The encoded seam
+### Layers and constructors
 
-`Encoded` is the interface a store implements, and `makeUnsafe(encoded)` adapts
-it into the typed `FlowRuntime` service. The seam is only partly encoded, and
-the split is part of the contract:
+| Export         | Signature                                                                      | Meaning                                                                                                                                                                 |
+| -------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layerMemory`  | `Layer.Layer<FlowRuntime.FlowRuntime>`                                         | The volatile in-memory implementation. Keeps registrations, executions, action settlements, deferred results, and clocks for the life of the layer scope.               |
+| `makeUnsafe`   | `(options: Encoded) => FlowRuntime.FlowRuntime["Service"]`                     | Adapts a low-level encoded implementation into the typed port. Unsafe in that it trusts the implementation to persist, resume, and encode correctly.                    |
+| `makeInstance` | `(flow: Flow.Any, executionId: string) => FlowRuntime.FlowInstance["Service"]` | Builds the per-execution state a runtime hands a flow run: scope, suspension and interruption flags, the run's root journal lineage, and the action coordination state. |
 
-| Member                                                                | Value crossing the seam                                                  |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `actionExecute`, `deferredResult`                                     | encoded; `makeUnsafe` decodes through the action or deferred exit schema |
-| `deferredDone`, `deferredDoneIfWaiting`                               | encoded; `makeUnsafe` encodes before the call                            |
-| `execute`, `poll`                                                     | decoded `Flow.Result` values, produced by the implementation             |
-| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | no payload                                                               |
+### The encoded seam
 
-An implementation of `execute` or `poll` therefore decodes on its own, through
+`Encoded` is the interface a store implements. The seam is only partly encoded,
+and the split is part of the contract:
+
+| Member                                                                | Value crossing the seam                                                                                |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `actionExecute`, `deferredResult`                                     | Encoded. `makeUnsafe` decodes through the action's `exitSchemaPartial` or the deferred's `exitSchema`. |
+| `deferredDone`, `deferredDoneIfWaiting`                               | Encoded. `makeUnsafe` encodes before the call.                                                         |
+| `execute`, `poll`                                                     | Decoded `Flow.Result` values, produced by the implementation.                                          |
+| `interrupt`, `interruptUnsafe`, `resume`, `scheduleClock`, `register` | No flow-declared payload.                                                                              |
+
+An implementation of `execute` or `poll` decodes on its own, through
 `Flow.Result({ success: flow.successSchema, error: flow.errorSchema })`, before
 answering. Returning an encoded value from either one produces a silently wrong
 system, because the seam types those returns as `Flow.Result<unknown, unknown>`.
 
-`poll` answers `Option.none()` for a known execution that has not settled, and
-also for an execution that belongs to a different flow declaration; only an
-execution id no engine knows fails, with `FlowExecutionNotFound`. `interrupt`,
-`interruptUnsafe`, and `resume` treat an unknown execution id as a silent
-no-op: the request is idempotent, and a reaped run has nothing left to cancel.
+The members, in full:
 
-## Execution identity
+| Member                  | Signature                                                                                                         | Meaning                                                                                                                                                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`              | `(flow, execute) => Effect<void, never, Scope>`                                                                   | Records a flow declaration and the execute function that drives one round of it. Registrations of one tag stack: the last still-open one serves.                                                             |
+| `execute`               | `(flow, { executionId, payload, discard, parent?, round? }) => Effect<Result \| void, FlowCycleDetected>`         | Starts or joins one execution and answers with its settlement. `discard: true` answers with nothing. `round` carries the execution's trampoline position, and names the preceding execution on later rounds. |
+| `poll`                  | `(flow, executionId) => Effect<Option<Result>, FlowExecutionNotFound>`                                            | The settlement of one execution, when it has one.                                                                                                                                                            |
+| `interrupt`             | `(flow, executionId) => Effect<void, CancelRequestFailed>`                                                        | Requests cancellation with normal cleanup and compensation. Not a pause.                                                                                                                                     |
+| `interruptUnsafe`       | `(flow, executionId) => Effect<void, CancelRequestFailed>`                                                        | Forces cancellation without guaranteeing cleanup or compensation.                                                                                                                                            |
+| `resume`                | `(flow, executionId) => Effect<void>`                                                                             | Re-drives a durably suspended execution. Does not undo cancellation.                                                                                                                                         |
+| `resumeSignal`          | optional `(flow, executionId) => Effect<void>`                                                                    | An in-process wake the engine races against its suspension backoff sleep.                                                                                                                                    |
+| `actionExecute`         | `(options: ActionExecuteOptions) => Effect<Result, never, FlowInstance \| Crypto>`                                | Dispatches one action attempt and answers with its encoded settlement.                                                                                                                                       |
+| `actionRetryOrigin`     | optional `({ key }) => Effect<Option<number>, never, FlowInstance \| Crypto>`                                     | The persisted start time of the earliest surviving attempt for `key`. `Option.none()` means no attempt row survives.                                                                                         |
+| `actionLatestAttempt`   | optional `({ key }) => Effect<Option<number>, never, FlowInstance \| Crypto>`                                     | The highest persisted attempt number for `key`.                                                                                                                                                              |
+| `deferredResult`        | `(deferred) => Effect<Option<Exit>, never, FlowInstance>`                                                         | The recorded result of a durable deferred, when it has one.                                                                                                                                                  |
+| `deferredDone`          | `({ flowName, executionId, deferredName, exit }) => Effect<void>`                                                 | Completes a durable deferred and re-drives the parked execution.                                                                                                                                             |
+| `deferredDoneIfWaiting` | optional `({ flowName, executionId, deferredName, reason, token, exit }) => Effect<DeferredDoneIfWaitingOutcome>` | Completes a deferred only when the run is parked on the matching reason and token. Answers `Completed`, `Existing`, or `NotWaiting`.                                                                         |
+| `scheduleClock`         | `(flow, { executionId, clock }) => Effect<void>`                                                                  | Arms a durable clock for one execution.                                                                                                                                                                      |
 
-`executionId` is caller-supplied identity, not a server-minted handle. A
-repeated id joins the run that already owns it and answers with that run's
-recorded result, which is what makes a retried submission idempotent. Two
-consequences follow.
+`ActionExecuteOptions` is what an encoded implementation receives for one
+dispatch:
 
-A reused id under a different flow declaration is refused, because answering
-would hand one flow's result to another flow's schemas. A reused id with a
-different payload is refused for the same reason. Both refusals are coded
-defects, listed under [Refusals](#refusals).
+| Field              | Type                | Meaning                                                                         |
+| ------------------ | ------------------- | ------------------------------------------------------------------------------- |
+| `action`           | `Action.Any`        | The declaration being dispatched.                                               |
+| `attempt`          | `number`            | The attempt number, starting at 1. Above 1 marks a retry.                       |
+| `key`              | `string`            | The persisted step identity the attempt is recorded under.                      |
+| `tier`             | `Action.Tier`       | `"sealed"`, `"compensable"`, or `"irreversible"`.                               |
+| `nondeterministic` | `true \| undefined` | Present when a cache put race may retain the first row without failing the run. |
+| `metadata`         | `unknown`           | The declaration's metadata, passed through unread.                              |
 
-The derived transports pass `executionId` through from the request body by
-default. Set the `executionId` option on
-`FlowProxyServer.layerRpcHandlers` or `layerHttpApi` to rewrite it in one
-server-owned place. Both layers apply the mapping to execute, discard, and
-resume requests, so resume cannot bypass the namespace. Returning `undefined`
-for execute or discard lets the engine derive the id from the flow's
-idempotency key. Returning `undefined` for resume preserves the client value.
+[The port and the seam](/concepts/port-and-seam/) explains the design, and
+[Implement the Encoded seam](/guides/implement-the-encoded-seam/) is the
+task-shaped walkthrough.
 
-The hook is a pure function over the flow and request payload. Resume provides
-an `undefined` payload because its request carries only an execution id. The
-hook cannot read request-scoped authentication by itself. Middleware can put a
-trusted tenant in the payload, or the server can wrap the layer with a mapping
-that closes over the trusted namespace.
+### The snapshot boundary
 
-## Trampoline and journal identity
+`SnapshotBoundary` is the host hook compensable actions run inside. This
+package declares the service and ships no implementation.
 
-Two different ids in this package are called a lineage.
+| Member     | Signature                                                                  |
+| ---------- | -------------------------------------------------------------------------- |
+| `snapshot` | `(options: SnapshotBoundaryOptions) => Effect<unknown>`                    |
+| `restore`  | `(snapshot: unknown, options: SnapshotBoundaryOptions) => Effect<void>`    |
+| `diff`     | `(snapshot: unknown, options: SnapshotBoundaryOptions) => Effect<unknown>` |
 
-`Lineage` mints the JOURNAL lineage: a versioned encoded tuple of the run id
-and the node path from the run root, carried as `meta.lineageId` on every
-durable record. `Round` carries the TRAMPOLINE lineage: round zero's execution
-id, naming the chain of round executions that one `Flow.execute` call follows
-across handoffs. `Round.executionId` derives each later round's id from
-`(lineageId, ordinal)` through the injected SHA-256, which is what makes a
-handoff at-most-once across a restart. Those derived ids are persisted as run
-rows, so their preimage is frozen by golden vectors in the package test suite
-and changing it is a durable-identity break.
+`SnapshotBoundaryOptions` carries `flow`, `executionId`, `key`, `attempt`, and
+the action's `metadata`. The engine snapshots before each attempt, diffs after
+each one, and restores the previous snapshot before a retry. See
+[Run a compensable action](/guides/compensable-actions/).
 
-## In-memory lifetime
+### Journal lineage
 
-`FlowEngine.layerMemory` is a deterministic test and local-development runtime,
-not a bounded store. It retains completed executions, action settlements,
-deferred results, and clocks until the layer scope closes; there is no eviction
-option. It rebuilds a submitted payload through the flow's own payload schema
-constructor at admission and again on every re-drive, so neither the caller nor
-a handler can mutate the value a later drive runs on. The constructor is the
-copier because it is the only description of the payload the engine has: it
-rebuilds each struct, array, and record the schema declares and hands back
-declared-opaque values by reference. Same-key in-flight actions share one
-settlement, so a concurrent duplicate dispatch waits rather than executing
-twice.
+`Lineage` mints the journal address every durable record carries as
+`meta.lineageId`: a versioned encoded tuple of the run id and the node path
+from the run root.
 
-## Flow proxies
+| Export                     | Signature                                                           | Meaning                                                       |
+| -------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `Lineage.JournalLineageId` | `type JournalLineageId`                                             | An injective journal address. A branded string.               |
+| `Lineage.root`             | `(runId: string) => JournalLineageId`                               | The lineage id of a run's root node.                          |
+| `Lineage.make`             | `(runId: string, path?: ReadonlyArray<string>) => JournalLineageId` | The lineage id of a node reached by `path` from the run root. |
 
-`FlowProxy.toRpcGroup` and `toHttpApiGroup` derive Effect RPC or HTTP
-definitions from a non-empty flow list, giving every flow execute, discard, and
-resume operations. `operationAddresses` is the single source of those three
-wire names, and every group builder and server layer derives from it.
-`assertNoCollisions` runs first and refuses a flow set whose generated names are
-ambiguous, such as a `Foo` beside a `FooDiscard`. HTTP routes encode a flow tag
-as one opaque URL-safe segment, preserving case, reserved characters, and
-Unicode normalization.
+### Trampoline rounds
 
-`FlowProxyServer.layerRpcHandlers` and `layerHttpApi` bind those definitions to
-the running engine. Both drive the served bodies, so both require what those
-bodies require: `Flow.Requirements` of every flow, on top of the schema services
+`Round` carries the trampoline lineage: round zero's execution id, naming the
+chain of round executions one `Flow.execute` call follows across handoffs.
+
+| Export               | Signature                                                                                                                           | Meaning                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Round.Round`        | `interface Round { lineageId: string; ordinal: number }`                                                                            | Where one execution sits in its lineage.                                                                                                                 |
+| `Round.initial`      | `(executionId: string) => Round`                                                                                                    | Ordinal zero, with the caller's execution id as the lineage id. Throws `InvalidRound` on an ill-formed id.                                               |
+| `Round.executionId`  | `(round: Round) => Effect<string, InvalidRound, Crypto>`                                                                            | The execution id a round runs under, derived from `(lineageId, ordinal)` through SHA-256, so it is the same id in every process and after every restart. |
+| `Round.next`         | `(round, { flowName, maxRounds }) => Effect<{ round: Round; executionId: string }, Flow.MaxRoundsExceeded \| InvalidRound, Crypto>` | The round that follows this one. Fails when the lineage has spent its budget. An absent budget is unbounded.                                             |
+| `Round.InvalidRound` | `class InvalidRound`                                                                                                                | A malformed trampoline identity or resource bound. Fields: `code`, `message`.                                                                            |
+
+The budget counts rounds, so a lineage bounded at `n` may open ordinals 0
+through `n - 1`. See [Trampoline rounds](/concepts/trampoline-rounds/).
+
+### Refusals
+
+| Export                      | Fields                                                                         | Raised when                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `FlowNotRegistered`         | `code`, `flowName`, `message`                                                  | A flow executes, or a handoff names a target, that no registration covers.                                                                       |
+| `ExecutionIdentityConflict` | `code`, `executionId`, `field`, `expected`, `actual`, `message`                | A reused execution id names another flow declaration, arrives with a different payload, or is addressed by a deferred belonging to another flow. |
+| `SuspendedResumeGaveUp`     | `code`, `flowName`, `executionId`, `attempt`, `elapsedMs`, `reason`, `message` | A caller polling a suspended lineage spends its `suspendedRetryPolicy`. `reason` is `"expired"` or `"exhausted"`.                                |
+| `SnapshotBoundaryRequired`  | `code`, `actionName`, `message`                                                | A compensable action runs with no `SnapshotBoundary` in context.                                                                                 |
+
+All four are `Schema.TaggedError` classes tagged `@smthrs/engine/<Name>`, and
+the engine raises them as defects. Their `code` values are
+`flow_not_registered`, `execution_identity_conflict`,
+`suspended_resume_gave_up`, and `snapshot_boundary_required`.
+
+## FlowProxy
+
+Derives RPC and HTTP definitions from flow declarations. Each flow owns three
+wire operations.
+
+| Export               | Signature                                                                                                        | Meaning                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `operationAddresses` | `(tag: string, prefix?: string) => OperationAddresses`                                                           | The three wire names one flow owns: `<prefix><tag>`, `<prefix><tag>Discard`, `<prefix><tag>Resume`. Every group builder and server layer derives from this one function. |
+| `OperationAddresses` | `interface { execute: string; discard: string; resume: string }`                                                 | The derived names.                                                                                                                                                       |
+| `assertNoCollisions` | `(flows: ReadonlyArray<Flow.Any>, prefix?: string) => void`                                                      | Throws `FlowProxyCollision` when two derived operations share a wire name. Runs first inside every builder and server layer.                                             |
+| `toRpcGroup`         | `(flows: NonEmptyReadonlyArray<Flow.Any>, options?: { prefix?: string }) => RpcGroup.RpcGroup<ConvertRpcs<...>>` | Derives an Effect `RpcGroup`. Execute and discard take the flow payload plus an optional `executionId`; resume takes an execution id alone.                              |
+| `ConvertRpcs`        | `type ConvertRpcs<Flows, Prefix>`                                                                                | Maps each flow to its three derived RPC definitions.                                                                                                                     |
+| `toHttpApiGroup`     | `(name: string, flows: NonEmptyReadonlyArray<Flow.Any>) => HttpApiGroup.HttpApiGroup<Name, ConvertHttpApi<...>>` | Derives an `HttpApiGroup` with three POST endpoints per flow: the flow path, `<path>/discard`, and `<path>/resume`.                                                      |
+| `ConvertHttpApi`     | `type ConvertHttpApi<Flows>`                                                                                     | Maps each flow to its three derived endpoints.                                                                                                                           |
+| `FlowProxyCollision` | `class FlowProxyCollision extends Error`                                                                         | Fields `code` (`"flow_proxy_collision"`) and `operation`. Thrown before construction.                                                                                    |
+| `InvalidFlowTag`     | `class InvalidFlowTag extends Error`                                                                             | Fields `code` (`"invalid_flow_tag"`) and `tag`. Thrown before HTTP construction when a tag is not well-formed UTF-16.                                                    |
+
+HTTP routes encode a flow tag as one opaque URL-safe segment, `flow-` followed
+by the tag's UTF-16 code units in hex, which preserves case, reserved
+characters, Unicode normalization, and operation identity across routers that
+disagree about percent-decoding.
+
+## FlowProxyServer
+
+Binds the derived definitions to a running engine.
+
+| Export             | Signature                                                                                                                                                                                       | Meaning                                                                                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layerRpcHandlers` | `(flows, options?: { prefix?: string; executionId?: ExecutionIdScope }) => Layer<RpcHandlers<...>, never, FlowRuntime \| Flow.Requirements<Flows> \| Flow.RequirementsHandler<Flows>>`          | Implements the derived RPCs. Pass the same `prefix` used to build the group.                                                                    |
+| `layerHttpApi`     | `(api, identifier, flows, options?: { executionId?: ExecutionIdScope }) => Layer<HttpApiGroup.Service<...>, never, FlowRuntime \| Flow.Requirements<Flows> \| Flow.RequirementsHandler<Flows>>` | Implements the derived HTTP group.                                                                                                              |
+| `ExecutionIdScope` | `(input: { flow, operation, clientValue, payload }) => string \| undefined`                                                                                                                     | Rewrites the caller-supplied execution id before it reaches the engine. Pure, called once per handler, applied to execute, discard, and resume. |
+| `RpcHandlers`      | `type RpcHandlers<Flows, Prefix>`                                                                                                                                                               | The union of handler services required to serve the derived RPCs.                                                                               |
+
+Both layers drive the served bodies, so both require what those bodies require:
+`Flow.Requirements` of every flow, on top of the schema services
 `Flow.RequirementsHandler` names. A forgotten `Action.toLayer` is a compile
 error on this side of the boundary too. The client side is unaffected: it
 encodes a payload and decodes a result, and requires no implementation at all.
-Both layers log a defect from a served body through `Effect.logError`, annotated
-with the module and the wire operation name.
+
+Both layers log a defect from a served body through `Effect.logError`,
+annotated with the module and the wire operation name.
+
+Returning `undefined` from `ExecutionIdScope` means different things per
+operation: for execute and discard it lets the engine derive the id from the
+flow's idempotency key; for resume it preserves the client value, because
+`Flow.resume` requires a string. See
+[Namespace execution ids per tenant](/guides/namespace-execution-ids/).
 
 These modules expose flow transport only. They do not ship a server, a router,
 an authentication policy, or a durable engine.
 
-## Refusals
+## See also
 
-The engine's admission and configuration refusals are coded defects, so a
-control plane or a proxy classifies one without scraping prose.
-
-| Code                          | Raised when                                                                               |
-| ----------------------------- | ----------------------------------------------------------------------------------------- |
-| `flow_not_registered`         | a flow executes, or a handoff names a target, that no registration covers                 |
-| `execution_identity_conflict` | a reused execution id names another flow declaration, or arrives with a different payload |
-| `suspended_resume_gave_up`    | a caller polling a suspended lineage exhausts or outlives its `suspendedRetryPolicy`      |
-| `snapshot_boundary_required`  | a compensable action runs with no `SnapshotBoundary` in context                           |
-| `invalid_round`               | a trampoline identity or round budget is malformed                                        |
-| `flow_proxy_collision`        | two derived operations share one wire name                                                |
-| `invalid_flow_tag`            | a flow tag is not well-formed UTF-16, so it has no route encoding                         |
-
-See the [Quickstart](https://smithers.sh/docs/quickstart/), [Build your first durable flow](https://smithers.sh/docs/tutorials/first-flow/), and [Replay, defined precisely](https://smithers.sh/docs/concepts/durable-execution/#replay-defined-precisely).
+- [@smthrs/engine exports](/reference/engine/): the generated per-export
+  page with field-level tables.
+- [`@smthrs/flow`](https://flow.smithers.sh/reference/api/) declares `Flow`, `Action`, `RetryPolicy`, and the
+  `FlowRuntime` port this package implements.
+- [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) supplies the durable
+  implementation of the `Encoded` seam.
+- [Durable execution](https://smithers.sh/docs/concepts/durable-execution/) and
+  [Retries](https://smithers.sh/docs/concepts/retries/) on smithers.sh own the cross-package model.

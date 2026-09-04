@@ -15,7 +15,7 @@ The pinned install line for a library project:
 pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/platform-node@next
 ```
 
-The `@next` suffix is required: release candidates publish to the `next` dist-tag, and `latest` still resolves the Smithers 0.x line. Effect is pinned to exactly `4.0.0-rc.108`. For the `smithers` command, install `npm install --global @smthrs/cli@next`.
+The `@next` suffix is required: release candidates publish to the `next` dist-tag, and `latest` still resolves the Smithers 0.x line. Effect is pinned to exactly `4.0.0-rc.108`. For the `smthrs` command, install `npm install --global @smthrs/cli@next`.
 
 ## Reading these pages
 
@@ -38,6 +38,7 @@ Each page is stitched from the package's colocated `docs/api.md`: the source of 
 | [`@smthrs/step-cache`](/docs/reference/api/step-cache/) | Effect service for the flows content-addressed step result cache |
 | [`@smthrs/database`](/docs/reference/api/database/) | A driver-neutral SQL contract with a bounded write-retry seam, plus the composed migration ladder |
 | [`@smthrs/canonical`](/docs/reference/api/canonical/) | RFC 8785 canonical JSON as an Effect Schema |
+| [`@smthrs/errors`](/docs/reference/api/errors/) | `SmithersError` and the error codes the integration adapters raise |
 | [`@smthrs/crypto`](/docs/reference/api/crypto/) | Strict SHA-256 hashing with injected and synchronous Effect entry points |
 | [`@smthrs/keys`](/docs/reference/api/keys/) | Canonical flow-key derivation and stored-key validation |
 | [`@smthrs/time-travel`](/docs/reference/api/time-travel/) | Durable replay, fork, and rewind primitives for flows |

@@ -40,15 +40,15 @@ A rejection means the cell never produced a transition. The outcome is
 `Cell.Rejected` with a `Cell.RejectionCode`; the model is told, and the run
 continues unless the frame budget says otherwise.
 
-| Code | Cause | What to do |
-| --- | --- | --- |
-| `no_cell` | `Cell.extract` found no fenced `cell` block in the model's reply. | The next request restates the contract; a host driving `Cell.extract` itself teaches the fenced-block shape. |
-| `imports_forbidden` | `Sandbox.compile` found module syntax in the cell. | Cells have no module loader; a quoted import inside a string is data and runs. |
-| `compile_failed` | The cell does not parse. The message names the line and column and quotes the offending line. | The controller answers in-frame up to the `revalidations` budget; check `CellProduced.blocks` when a multi-block reply redeclares a name. |
-| `invalid_transition` | The cell produced something that is not a transition. The message carries the decoder's own report. | A cell states intent by calling `ctx.done` or `ctx.park`, never by returning. |
-| `unsupported_language` | A binding could not compile the cell's language. | Neither shipped binding raises it; cells are JavaScript or erasable TypeScript. |
-| `limit_exceeded` | The cell spent a ceiling: `calls`, `steps`, `timeMs`, or `totalMs`. | Raise the specific ceiling, or narrow the cell's work; see [limits](./api.md#limits). |
-| `stalled` | "The cell awaited something that never settles." | Inside a cell the only thing worth awaiting is `ctx.call`; find the awaited promise that nothing settles. |
+| Code                   | Cause                                                                                               | What to do                                                                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `no_cell`              | `Cell.extract` found no fenced `cell` block in the model's reply.                                   | The next request restates the contract; a host driving `Cell.extract` itself teaches the fenced-block shape.                              |
+| `imports_forbidden`    | `Sandbox.compile` found module syntax in the cell.                                                  | Cells have no module loader; a quoted import inside a string is data and runs.                                                            |
+| `compile_failed`       | The cell does not parse. The message names the line and column and quotes the offending line.       | The controller answers in-frame up to the `revalidations` budget; check `CellProduced.blocks` when a multi-block reply redeclares a name. |
+| `invalid_transition`   | The cell produced something that is not a transition. The message carries the decoder's own report. | A cell states intent by calling `ctx.done` or `ctx.park`, never by returning.                                                             |
+| `unsupported_language` | A binding could not compile the cell's language.                                                    | Neither shipped binding raises it; cells are JavaScript or erasable TypeScript.                                                           |
+| `limit_exceeded`       | The cell spent a ceiling: `calls`, `steps`, `timeMs`, or `totalMs`.                                 | Raise the specific ceiling, or narrow the cell's work; see [limits](./api.md#limits).                                                     |
+| `stalled`              | "The cell awaited something that never settles."                                                    | Inside a cell the only thing worth awaiting is `ctx.call`; find the awaited promise that nothing settles.                                 |
 
 **A frame is refused before it runs, naming names to free.** The realm opened
 over its `memoryBytes` run budget, weighed by the panel probe at the previous
@@ -67,21 +67,21 @@ error: { code, message, hint } }`, where `hint` is
 `Cell.callFailureHint[code]`, the one move that recovers the class. The codes,
 from `Cell.CallFailureCode`:
 
-| Code | Raised when | Recovery hint |
-| --- | --- | --- |
-| `unknown_flow` | The name is not in the registry. | Read `ctx.flows` and call one of the names it lists. |
-| `capability_refused` | The descriptor is not model-invocable. | Do the work with a flow `ctx.flows` lists. |
-| `truncated_write` | A write carries bytes a call already reported as truncated. | Restore from source control instead of writing captured output. |
-| `declaration_changed` | The registry entry moved after the catalog was shown. | Read `ctx.flows` again and reissue the call with the shape it now declares. |
-| `invalid_input` | The input failed the flow's declared schema, including a non-handle `at`. | Fix the input against the schema in `ctx.flows` and call again in this cell. |
-| `unimplemented` | The flow is discovered but the host binds no implementation, or it is a markdown flow and the host runs none. | Choose another flow from `ctx.flows`. |
-| `timeout` | The call overran the `callMs` ceiling. | Narrow the call, a smaller root, a tighter pattern, a shorter command, and issue it again in this cell. |
-| `run_completed` | The cell already called `ctx.done` or `ctx.park` on an earlier line. | Guard the `ctx.done` or `ctx.park` on the check that decides it. |
-| `checkpoint_unavailable` | The host pins no tree, including no `ctx.base` record. | Drop `at` and take the reading on the live tree. |
-| `checkpoint_exhausted` | The run reached its `checkpointCap`. | Reuse a checkpoint the run already holds, or `ctx.base`. |
-| `checkpoint_readonly` | A flow that writes ran against a checkpoint. | Drop `at` and make the change on the live tree. |
-| `checkpoint_unsupported` | The flow names what it touches rather than where it runs, so it cannot be pointed at a checkpoint. | Drop `at`, or run the work through a shell flow, which takes a working directory. |
-| `flow_failed` | The flow itself failed; the default when nothing classified the failure. | Read `error.message`: the flow says what went wrong, and it is usually fixable in the same cell. |
+| Code                     | Raised when                                                                                                   | Recovery hint                                                                                           |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `unknown_flow`           | The name is not in the registry.                                                                              | Read `ctx.flows` and call one of the names it lists.                                                    |
+| `capability_refused`     | The descriptor is not model-invocable.                                                                        | Do the work with a flow `ctx.flows` lists.                                                              |
+| `truncated_write`        | A write carries bytes a call already reported as truncated.                                                   | Restore from source control instead of writing captured output.                                         |
+| `declaration_changed`    | The registry entry moved after the catalog was shown.                                                         | Read `ctx.flows` again and reissue the call with the shape it now declares.                             |
+| `invalid_input`          | The input failed the flow's declared schema, including a non-handle `at`.                                     | Fix the input against the schema in `ctx.flows` and call again in this cell.                            |
+| `unimplemented`          | The flow is discovered but the host binds no implementation, or it is a markdown flow and the host runs none. | Choose another flow from `ctx.flows`.                                                                   |
+| `timeout`                | The call overran the `callMs` ceiling.                                                                        | Narrow the call, a smaller root, a tighter pattern, a shorter command, and issue it again in this cell. |
+| `run_completed`          | The cell already called `ctx.done` or `ctx.park` on an earlier line.                                          | Guard the `ctx.done` or `ctx.park` on the check that decides it.                                        |
+| `checkpoint_unavailable` | The host pins no tree, including no `ctx.base` record.                                                        | Drop `at` and take the reading on the live tree.                                                        |
+| `checkpoint_exhausted`   | The run reached its `checkpointCap`.                                                                          | Reuse a checkpoint the run already holds, or `ctx.base`.                                                |
+| `checkpoint_readonly`    | A flow that writes ran against a checkpoint.                                                                  | Drop `at` and make the change on the live tree.                                                         |
+| `checkpoint_unsupported` | The flow names what it touches rather than where it runs, so it cannot be pointed at a checkpoint.            | Drop `at`, or run the work through a shell flow, which takes a working directory.                       |
+| `flow_failed`            | The flow itself failed; the default when nothing classified the failure.                                      | Read `error.message`: the flow says what went wrong, and it is usually fixable in the same cell.        |
 
 **The same interrupted call runs twice.** A call the `callMs` ceiling
 interrupted settled nowhere, so a re-executed frame issues it to the host
@@ -94,16 +94,16 @@ either way; what the run pays for twice is the interrupted call. See
 The controller's own failures are `HarnessError`s, with
 `HarnessError.HarnessErrorCode`:
 
-| Code | Meaning |
-| --- | --- |
-| `assembly_failed` | Composition refused something: two bindings under one name, or an unnamed binding. |
-| `render_failed` | A boundary could not render what it had to show. |
-| `projection_failed` | A projection from durable records failed. |
-| `model_failed` | The sealed model step failed. |
-| `engine_failed` | The engine boundary failed, including a realm that could not open. |
-| `read_only_cap` | The run spent its read-only budget: the cap demanded an edit or a justification, and twice the cap stops the run. |
-| `aborted` | A normalized harness abort; interrupting the stream reports one. |
-| `suspended` | The run parked: a permission requirement, a durable wait, or an engine suspension. |
+| Code                | Meaning                                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `assembly_failed`   | Composition refused something: two bindings under one name, or an unnamed binding.                                |
+| `render_failed`     | A boundary could not render what it had to show.                                                                  |
+| `projection_failed` | A projection from durable records failed.                                                                         |
+| `model_failed`      | The sealed model step failed.                                                                                     |
+| `engine_failed`     | The engine boundary failed, including a realm that could not open.                                                |
+| `read_only_cap`     | The run spent its read-only budget: the cap demanded an edit or a justification, and twice the cap stops the run. |
+| `aborted`           | A normalized harness abort; interrupting the stream reports one.                                                  |
+| `suspended`         | The run parked: a permission requirement, a durable wait, or an engine suspension.                                |
 
 **A `park` transition comes back refused.** `CellTurn.make` defaults
 `approvalChannel` to `false`, which means nobody can answer the run, so a

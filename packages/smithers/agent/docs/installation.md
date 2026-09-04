@@ -58,7 +58,7 @@ pnpm add @smthrs/engine @smthrs/flow @smthrs/model @smthrs/registry @effect/plat
 
 A control-plane host adds [`@smthrs/control`](/api/control) and a journal from
 [`@smthrs/journal`](/api/journal). The CLI composition in
-[`@smthrs/cli`](/api/cli) wires all of this for the `smithers` commands.
+[`@smthrs/cli`](/api/cli) wires all of this for the `smthrs` commands.
 
 ## Next step
 

@@ -22,9 +22,9 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Projection`        | Derives notification state from journal entries.                                          |
 | `SteerPayload`      | Defines the steering vocabulary a control plane and a harness exchange through a payload. |
 
-Every export of every module, with a one-line summary each, is listed on
-[the API page](https://smithers.sh/docs/reference/api/notifications). That table is generated
-from the JSDoc in `src`, so it cannot drift from the barrel; this file
+Every export of every module, with its signature and the meaning of each
+parameter, is on
+[the API reference](https://notifications.smithers.sh/reference/api/). This file
 deliberately does not repeat it.
 
 ## What a caller has to know
@@ -53,6 +53,7 @@ deliberately does not repeat it.
   committed since, keeping the 64 most recently read runs.
 
 ```ts
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Effect } from "effect"
 
@@ -60,11 +61,19 @@ const program = Effect.gen(function*() {
   const queue = yield* NotificationQueue.NotificationQueue
   return yield* queue.drain({
     runId: "run-1",
-    targetLineageId: "root",
-    boundary: "turn-close",
+    targetLineageId: "run-1/root",
+    boundary: "turn-1",
     wouldIdle: true
   })
-}).pipe(Effect.provide(NotificationQueue.layerNoop()))
+}).pipe(
+  Effect.provide(NotificationQueue.layer),
+  // A real SQLite journal over an in-memory database. Swap in `SqlJournal.layer`
+  // over a file for a deployment.
+  Effect.provide(TestJournal.layer()),
+  Effect.scoped
+)
 ```
 
-Use `NotificationQueue.layer` with Journal for durable operation. `@smthrs/notifications/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
+`NotificationQueue.layerNoop()` provides the same seam with every method failing as
+`notification_unavailable`, for a composition that means to serve nothing.
+`@smthrs/notifications/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.

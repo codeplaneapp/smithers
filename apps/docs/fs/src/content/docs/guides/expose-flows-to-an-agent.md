@@ -51,7 +51,7 @@ resolves the longest command prefix, loads the selected module, and decodes
 the input, stopping before invocation:
 
 ```ts
-const parsed = yield* commands.parse("review --number 42 --tags one --tags two")
+const parsed = yield * commands.parse("review --number 42 --tags one --tags two")
 // parsed.route.name === "review"
 // parsed.input === { number: 42, tags: ["one", "two"] }
 ```
@@ -89,7 +89,7 @@ match exactly, and the input is snapshotted to inert JSON before the module
 loads, so later mutation cannot reach the in-flight invocation:
 
 ```ts
-const output = yield* commands.call("review", { number: 42 }).pipe(
+const output = yield * commands.call("review", { number: 42 }).pipe(
   Effect.provide(Layer.succeed(FlowInvoker.FlowInvoker, invoker))
 )
 ```

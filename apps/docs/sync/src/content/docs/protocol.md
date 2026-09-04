@@ -1,6 +1,6 @@
 ---
-title: "Protocol"
-description: "Workspace read-path sync protocol, server, and client for flows"
+title: "Wire protocol"
+description: "The normative message shapes of the sync read path: scopes, cursors, read requests and responses, subscription frames, and the limits every side enforces."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/sync/docs/protocol.md"
 ---
 
@@ -93,7 +93,7 @@ them. `SubscribeOptions.onResync` runs before the cursor moves and must
 succeed, so a consumer that cannot restore the prefix fails instead of silently
 skipping it. A Node follower reads that prefix out of band with
 `journal.latestCheckpoint(runId)`, applies `checkpoint.state`, and continues
-from the sync stream. See [Checkpoints and compaction](https://smithers.sh/docs/compaction/).
+from the sync stream. See [Checkpoints and compaction](https://journal.smithers.sh/concepts/compaction/).
 :::
 
 ## Directionality
