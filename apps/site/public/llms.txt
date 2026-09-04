@@ -32,7 +32,7 @@
 - [Configure model seats and providers](https://smithers.sh/docs/guides/model-seats/): Set the provider keys a flow's model seat resolves from, choose how OpenAI seats authenticate, and change the seat a flow runs on.
 - [Set quotas, budgets, and corrections for agents](https://smithers.sh/docs/guides/agent-policies/): Bound what an agent run spends, park runs through provider quota windows, and give schema-enforced steps a correction budget.
 - [Give a flow tools](https://smithers.sh/docs/guides/tools/): Call the std tool library from a module flow, attach external MCP servers with --mcp-config or SMITHERS_MCP_CONFIG, and grant the capabilities the tools declare.
-- [Drive Smithers from your agent](https://smithers.sh/docs/guides/mcp-setup/): Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, launch runs, and resolve approvals.
+- [Drive Smithers from your agent](https://smithers.sh/docs/guides/mcp-setup/): Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, watch runs, and inspect approvals.
 - [Declare and grant capabilities](https://smithers.sh/docs/guides/capabilities/): Declare the host authority a flow needs in its frontmatter, grant it with smthrs approve --scope, and read the typed denial when a run exceeds its grant.
 - [Run work in a sandbox](https://smithers.sh/docs/guides/sandboxes/): Compose a sandbox provider to place one action's host services, or a whole child flow, on a provisioned machine.
 - [Wait durably: sleep, poll, deferreds, queues](https://smithers.sh/docs/guides/durable-waits/): Pick the durable wait primitive that matches what you are waiting for, and compose it so the wait survives a process restart.
@@ -52,7 +52,7 @@
 
 - [Durable execution](https://smithers.sh/docs/concepts/durable-execution/): The journal is the one mechanism that lets a flow survive the process running it, and every engine feature is built on it.
 - [Flows, actions, and plans](https://smithers.sh/docs/concepts/flows-actions-plans/): Actions are the atoms, flows are the composites, and the plan is the keyed graph a body compiles to before anything runs.
-- [Content addressing](https://smithers.sh/docs/concepts/content-addressing/): Step keys are derived from canonical content, so renaming an activity cannot corrupt replay and a changed declaration re-keys exactly its dependent cone.
+- [Content addressing](https://smithers.sh/docs/concepts/content-addressing/): Step keys combine canonical content with the declaration identity needed to prevent collisions, while caller-owned keys can opt into rename stability.
 - [Execution IDs and ownership](https://smithers.sh/docs/concepts/ownership/): The caller names the run, a fence follows its recorded owner, and a zombie owner stops itself at the write.
 - [Retries and interruption](https://smithers.sh/docs/concepts/retries/): A retry policy is a plain value over a persisted attempt count, cancellation propagates at once, and only infrastructure interrupts are retried.
 - [Capabilities and the host kernel](https://smithers.sh/docs/concepts/kernel/): A closed host surface, a closed capability vocabulary over it, and a grant check on every call, so no flow reaches the host ambiently.
@@ -64,7 +64,7 @@
 
 ## Reference
 
-- [Library API](https://smithers.sh/docs/reference/api/): One page per published @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source.
+- [Library API](https://smithers.sh/docs/reference/api/): One page per @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source.
 - [Targets](https://smithers.sh/docs/reference/targets/): One page per @smthrs/targets rule: attributes, verbs, cache behavior, and channels from Target.make.
 - [@smthrs/flow](https://smithers.sh/docs/reference/api/flow/): What @smthrs/flow exports: the flow, action, runtime-port, and durable-primitive namespaces, with types and defaults from source.
 - [@smthrs/engine](https://smithers.sh/docs/reference/api/engine/): What @smthrs/engine exports: FlowEngine, FlowProxy, and FlowProxyServer, with types and defaults from source.
