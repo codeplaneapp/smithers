@@ -1059,6 +1059,131 @@ export const maximumRejectionDetailCodeUnits = 8 * 1024
 const formatIssue = SchemaIssue.makeFormatterDefault()
 
 /**
+ * Maximum accepted keys listed in one unknown-property line before the rest
+ * are elided. A struct with a long attr list would otherwise bury the
+ * suggestion under its own inventory.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumListedKeys = 12
+
+/**
+ * Maximum unknown-property lines appended to one rejection. An author who
+ * mistyped a dozen keys is told about the first few and fixes the rest by the
+ * same rule.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const maximumGuidanceLines = 5
+
+/** Levenshtein distance, bounded: it stops caring once the edit count exceeds `limit`. */
+const distance = (a: string, b: string, limit: number): number => {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i]
+    for (let j = 1; j <= b.length; j += 1) {
+      current[j] = Math.min(
+        previous[j]! + 1,
+        current[j - 1]! + 1,
+        previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1)
+      )
+    }
+    previous = current
+  }
+  return previous[b.length]!
+}
+
+/**
+ * The accepted key an author most likely meant, or `undefined` when none is
+ * close enough to name. A case-only difference always wins; otherwise the
+ * nearest key within a third of its own length, so `cwdd` suggests `cwd` and
+ * `zzzzzzzz` suggests nothing.
+ */
+const nearest = (rejected: string, accepted: ReadonlyArray<string>): string | undefined => {
+  const folded = rejected.toLowerCase()
+  const sameLetters = accepted.find((key) => key.toLowerCase() === folded)
+  if (sameLetters !== undefined) return sameLetters
+  let best: { readonly key: string; readonly edits: number } | undefined
+  for (const key of accepted) {
+    const limit = Math.max(1, Math.floor(Math.max(key.length, rejected.length) / 3))
+    const edits = distance(folded, key.toLowerCase(), limit)
+    if (edits <= limit && (best === undefined || edits < best.edits)) best = { key, edits }
+  }
+  return best?.key
+}
+
+/** The property names one struct AST accepts, read as own data so no author code runs. */
+const acceptedKeys = (ast: unknown): ReadonlyArray<string> => {
+  if (typeof ast !== "object" || ast === null || NodeUtil.isProxy(ast)) return []
+  const descriptor = Object.getOwnPropertyDescriptor(ast, "propertySignatures")
+  if (descriptor === undefined || !("value" in descriptor) || !Array.isArray(descriptor.value)) return []
+  const names: Array<string> = []
+  for (const signature of descriptor.value) {
+    if (typeof signature !== "object" || signature === null) continue
+    const name = Object.getOwnPropertyDescriptor(signature, "name")
+    if (name !== undefined && "value" in name && typeof name.value === "string") names.push(name.value)
+  }
+  return names
+}
+
+/**
+ * Turns every `UnexpectedKey` in one issue tree into a line an author can act
+ * on: the rejected key, where it sits, the nearest accepted key, and the keys
+ * the enclosing struct does accept.
+ *
+ * The formatted issue alone reports that a property is not accepted and never
+ * what is, so an author has to open the rule's source to learn the rest. The
+ * enclosing struct's AST travels on the `UnexpectedKey` issue itself, so the
+ * remedy costs no schema plumbing.
+ */
+const unknownPropertyGuidance = (issue: unknown): ReadonlyArray<string> => {
+  const lines: Array<string> = []
+  const visit = (node: unknown, path: ReadonlyArray<PropertyKey>): void => {
+    if (lines.length >= maximumGuidanceLines) return
+    if (typeof node !== "object" || node === null || NodeUtil.isProxy(node)) return
+    const tag = Object.getOwnPropertyDescriptor(node, "_tag")
+    const name = tag !== undefined && "value" in tag ? tag.value : undefined
+    if (name === "Pointer") {
+      const own = Object.getOwnPropertyDescriptor(node, "path")
+      const segments = own !== undefined && "value" in own && Array.isArray(own.value) ? own.value : []
+      const inner = Object.getOwnPropertyDescriptor(node, "issue")
+      if (inner !== undefined && "value" in inner) visit(inner.value, [...path, ...segments])
+      return
+    }
+    if (name === "Composite") {
+      const own = Object.getOwnPropertyDescriptor(node, "issues")
+      const children = own !== undefined && "value" in own && Array.isArray(own.value) ? own.value : []
+      for (const child of children) visit(child, path)
+      return
+    }
+    if (name !== "UnexpectedKey") return
+    const rejected = path[path.length - 1]
+    if (typeof rejected !== "string") return
+    const ast = Object.getOwnPropertyDescriptor(node, "ast")
+    const accepted = acceptedKeys(ast !== undefined && "value" in ast ? ast.value : undefined)
+    const parents = path.slice(0, -1).filter((segment) => typeof segment === "string")
+    const where = parents.length === 0 ? "" : ` at ${JSON.stringify(parents.join("."))}`
+    const suggestion = nearest(rejected, accepted)
+    const listed = accepted.length > maximumListedKeys
+      ? `${accepted.slice(0, maximumListedKeys).join(", ")}, and ${accepted.length - maximumListedKeys} more`
+      : accepted.join(", ")
+    // A question mark ends the clause, so the key list that follows it opens
+    // with a space rather than another semicolon.
+    const asked = suggestion === undefined ? "" : `; did you mean ${JSON.stringify(suggestion)}?`
+    const separator = listed === "" ? "" : asked === "" ? "; " : " "
+    lines.push(
+      `unknown property ${JSON.stringify(rejected)}${where}${asked}` +
+        `${separator}${listed === "" ? "" : `accepted: ${listed}`}`
+    )
+  }
+  visit(issue, [])
+  return lines
+}
+
+/**
  * Renders why one declaration was rejected, without running author code.
  *
  * A rejected `Schema.make` carries the structured issue on `cause`. Reporting
@@ -1080,7 +1205,9 @@ const rejectionDetail = (cause: unknown): string | undefined => {
   const issue = Object.getOwnPropertyDescriptor(cause, "cause")
   if (issue !== undefined && "value" in issue && SchemaIssue.isIssue(issue.value)) {
     try {
-      return bound(formatIssue(issue.value))
+      const guidance = unknownPropertyGuidance(issue.value)
+      const formatted = formatIssue(issue.value)
+      return bound(guidance.length === 0 ? formatted : `${formatted}\n  ${guidance.join("\n  ")}`)
     } catch {
       // Fall through to the plain message below.
     }
