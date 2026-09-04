@@ -109,8 +109,10 @@ describe("packages/smithers/build prose", () => {
     expect(page).toContain("pnpm install --frozen-lockfile --offline")
     expect(page).toContain("CI=1 pnpm exec alchemy plan alchemy.run.ts --stage prod")
     expect(page).toContain("CI=1 pnpm run deploy -- --yes")
+    // `npx` matches in command position only: `Runtime.npx` is an accessor
+    // `targets/docs/reference/targets.md` documents, not a recipe step.
     for (const file of proseFiles()) {
-      expect(read(file), `${file} runs infra through npm`).not.toMatch(/\bnpm ci\b|\bnpx\b/)
+      expect(read(file), `${file} runs infra through npm`).not.toMatch(/\bnpm ci\b|(?<![.\w-])npx\b/)
     }
   })
 
