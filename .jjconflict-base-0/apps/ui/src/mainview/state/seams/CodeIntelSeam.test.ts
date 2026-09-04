@@ -46,7 +46,14 @@ import type { AppStore } from "../AppStore"
  */
 
 const node = await findNode()
-const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(), node)
+/*
+ * The guard asks the question the host will ask: `app()` starts the local
+ * origin with `home: tmpdir()`, so its lsp host searches that home's
+ * candidate dirs and PATH. Probing the real HOME instead lets the suite run
+ * on a machine where only ~/.nvm has the binary, and every case then fails
+ * on the host's own "no TypeScript language server" refusal.
+ */
+const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(Bun.env, tmpdir()), node)
 const skipReason = node === null
   ? "no Node.js >= 22.19 on this machine to run the language server"
   : "missing" in resolved
@@ -231,7 +238,7 @@ const startPlue = (options: PlueOptions = {}) => {
   const received: Array<Record<string, unknown>> = []
   const posts: Array<unknown> = []
   const protocols: Array<string | null> = []
-  const sockets = new Set<{ close: (code?: number, reason?: string) => void }>()
+  const sockets = new Set<{ close: (code?: number, reason?: string) => void; terminate: () => void }>()
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -284,7 +291,20 @@ const startPlue = (options: PlueOptions = {}) => {
       }
     }
   })
-  disposers.push(() => server.stop(true))
+  /*
+   * The double outlives the tunnel it served, so it hangs up before it stops:
+   * `stop(true)` waits on every live connection, and a relayed lsp socket is
+   * still open here — the app half of the tunnel is torn down by the earlier
+   * disposers without a close frame ever reaching this side. Leaving one open
+   * parks the file's afterAll past bun's 5s hook budget on CI's bun (1.3.14),
+   * and the failure has no test to name. `terminate` drops each connection
+   * with no handshake, which is what a stopped double owes a gone peer.
+   */
+  disposers.push(async () => {
+    for (const socket of [...sockets]) socket.terminate()
+    sockets.clear()
+    await server.stop(true)
+  })
   return {
     origin: `http://127.0.0.1:${server.port}`,
     received,
