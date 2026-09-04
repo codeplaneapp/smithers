@@ -10,6 +10,10 @@ const workspaceConfig = S.file("//pnpm-workspace.yaml")
 export const runtime = S.Runtime.Node({ version: ">=22.19.0" })
 export const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
 export const bunRuntime = S.Runtime.Bun({ version: ">=1.4.0" })
+/** Exact Bun release installed by CI and the Nix environment. @since 1.0.0-rc.0 @category configuration */
+export const bunVersion = "1.4.1"
+/** Exact jj release installed by CI and the Nix environment. @since 1.0.0-rc.0 @category configuration */
+export const jjVersion = "0.39.0"
 export const bunPackageManager = S.PackageManager.BunPackages({ runtime: bunRuntime })
 
 // The same toolchain as one Nix closure: flake.nix pins pnpm at exactly

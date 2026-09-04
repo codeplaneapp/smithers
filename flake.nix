@@ -57,8 +57,8 @@
           packages = [
             pkgs.nodejs_22
             (pnpmPinned pkgs)
-            pkgs.bun
-            pkgs.jujutsu
+            (assert pkgs.bun.version == "1.4.1"; pkgs.bun)
+            (assert pkgs.jujutsu.version == "0.39.0"; pkgs.jujutsu)
             pkgs.ripgrep
             pkgs.git
             pkgs.cacert

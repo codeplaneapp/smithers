@@ -78,6 +78,19 @@ export const findings = ({ workspace, packageJson, flake, ci }) => {
       out.push(`ci.yml installs bun ${release}; WORKSPACE.ts declares ${bunRuntime.version}`)
     }
   }
+  for (const [name, version] of [["bun", workspace.bunVersion], ["jujutsu", workspace.jjVersion]]) {
+    const pin = new RegExp(`assert pkgs\\.${name}\\.version == "([^"\\s]+)";`).exec(flake)
+    if (pin === null) out.push(`flake.nix pins no ${name} version assertion`)
+    else if (pin[1] !== version) out.push(`flake.nix pins ${name} ${pin[1]}; WORKSPACE.ts declares ${version}`)
+  }
+  const jjPins = [...ci.matchAll(/jj-cli@([^\s]+)/g)]
+  if (jjPins.length === 0) out.push("ci.yml installs no jj-cli release")
+  for (const [, release] of jjPins) {
+    if (release !== workspace.jjVersion) out.push(`ci.yml installs jj ${release}; WORKSPACE.ts declares ${workspace.jjVersion}`)
+  }
+  for (const [, release] of ci.matchAll(/bun-version:\s*([^\s]+)/g)) {
+    if (release !== workspace.bunVersion) out.push(`ci.yml pins bun ${release}; WORKSPACE.ts declares ${workspace.bunVersion}`)
+  }
   return out
 }
 

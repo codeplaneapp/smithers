@@ -5,7 +5,9 @@ import { check, findings, satisfies } from "./check-toolchain-pins.mjs"
 const workspace = {
   runtime: { version: ">=22.19.0" },
   packageManager: { version: "11.21.0" },
-  bunRuntime: { version: ">=1.3.0" }
+  bunRuntime: { version: ">=1.3.0" },
+  bunVersion: "1.3.14",
+  jjVersion: "0.39.0"
 }
 const packageJson = JSON.stringify({
   packageManager: "pnpm@11.21.0",
@@ -15,13 +17,16 @@ const flake = `pnpmPinned = pkgs: pkgs.stdenvNoCC.mkDerivation rec {
   pname = "pnpm";
   version = "11.21.0";
 };
-packages = [ pkgs.nodejs_22 (pnpmPinned pkgs) ];`
+packages = [ pkgs.nodejs_22 (pnpmPinned pkgs) ];
+assert pkgs.bun.version == "1.3.14";
+assert pkgs.jujutsu.version == "0.39.0";`
 const ci = `      - uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.14`
+          bun-version: 1.3.14
+ tool: jj-cli@0.39.0`
 
 test("an exact release satisfies its floor only within the declared major", () => {
   assert.equal(satisfies("22.19.0", ">=22.19.0"), true)
@@ -48,17 +53,34 @@ test("every file that disagrees is named with both values", () => {
     "flake.nix pins pnpm 11.19.0; WORKSPACE.ts declares 11.21.0",
     "flake.nix uses nodejs_24; WORKSPACE.ts declares Node >=22.19.0",
     "ci.yml installs node 20.11.0; WORKSPACE.ts declares >=22.19.0",
-    "ci.yml installs bun 1.2.9; WORKSPACE.ts declares >=1.3.0"
+    "ci.yml installs bun 1.2.9; WORKSPACE.ts declares >=1.3.0",
+    "ci.yml pins bun 1.2.9; WORKSPACE.ts declares 1.3.14"
   ])
 })
 
 test("a flake without the pnpm pin or a Node package is a finding, not a pass", () => {
   assert.deepEqual(findings({ workspace, packageJson, flake: "{ }", ci }), [
     "flake.nix pins no pnpm tarball (expected pname = \"pnpm\"; version = \"...\")",
-    "flake.nix names no nodejs_<major> package"
+    "flake.nix names no nodejs_<major> package",
+    "flake.nix pins no bun version assertion",
+    "flake.nix pins no jujutsu version assertion"
   ])
 })
 
 test("the real repository is in sync", async () => {
   assert.deepEqual(await check(), [])
+})
+
+test("Bun and jj pins are required in the flake and CI", () => {
+  const declared = { ...workspace, bunVersion: "1.3.14", jjVersion: "0.39.0" }
+  for (const [flakeText, ciText, expected] of [
+    ["", "", "flake.nix pins no bun"],
+    ["", "", "flake.nix pins no jujutsu"],
+    ["", "", "ci.yml installs no jj-cli"],
+    ['\nassert pkgs.bun.version == "1.2.0";', ci, "flake.nix pins bun 1.2.0"],
+    ['\nassert pkgs.jujutsu.version == "0.38.0";', ci, "flake.nix pins jujutsu 0.38.0"],
+    [flake, ci + '\n tool: jj-cli@0.38.0', "ci.yml installs jj 0.38.0"]
+  ]) {
+    assert.ok(findings({ workspace: declared, packageJson, flake: flakeText, ci: ciText }).some((item) => item.startsWith(expected)), expected)
+  }
 })
