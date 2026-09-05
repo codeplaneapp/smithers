@@ -102,7 +102,7 @@ ${getStarted.join("\n")}
 
 ## Documentation
 
-Read the [Smithers documentation](https://smithers.sh/docs/) for tutorials, guides, and the full reference. For the top-level build API, keep the [Smithers API cheat sheet](https://smithers.sh/docs/reference/api/cheat-sheet/) handy.
+Read the [Smithers documentation](https://smithers.sh/docs/) for tutorials, guides, and the full reference. For the top-level build API, keep the [Smithers API cheat sheet](./packages/smithers/build/targets/docs/reference/cheat-sheet.md) handy: one file of TypeScript examples covering the whole \`Smithers.*\` surface.
 
 ## Contributing
 
