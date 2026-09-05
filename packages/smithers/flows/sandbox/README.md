@@ -1,25 +1,28 @@
 # @smthrs/sandbox
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://sandbox.smithers.sh
 
 Provisioned machines, provider-neutral remote process execution, and sandbox
-liveness for flows. A provider package adapts its SDK session to one of two
-seams: `RemoteChildProcessSpawner.Provider`, which can only run a command line,
-or `Sandbox.Provider`, which owns a machine's whole lifecycle and its
-filesystem. This package derives Effect's host services, two conformance
-suites, health, and supervision from those seams, and ships nine machine
-providers built on them.
+liveness for flows. A provider adapts its SDK session to one of two seams:
+`RemoteChildProcessSpawner.Provider`, which can only run a command line, or
+`Sandbox.Provider`, which owns a machine's whole lifecycle and its filesystem.
+This package derives Effect's host services, two conformance suites, health,
+and supervision from those seams, and ships nine machine providers built on
+them.
 
 It implements no isolation of its own. What a sandbox does and does not prevent
 differs per provider and is documented at
 https://sandbox.smithers.sh/concepts/isolation/.
 
+`@smthrs/sandbox` is at `1.0.0-rc.0` and has not reached npm yet. When it does,
+the release candidate publishes under the `next` dist tag:
+
 ```sh
-pnpm add @smthrs/sandbox
+pnpm add @smthrs/sandbox@next
 ```
 
 ## Public API
@@ -59,8 +62,7 @@ Output `pipe`, `ignore`, and `inherit` options and output sinks are
 honored by the adapter.
 
 The package is browser-bundleable: it adapts a provider a caller hands it and
-owns no host access of its own. `pnpm run browser` at the repository root pins
-that property.
+owns no host access of its own.
 
 ```ts
 import { RemoteChildProcessSpawner } from "@smthrs/sandbox"
@@ -106,8 +108,8 @@ import { SandboxSupervision } from "@smthrs/sandbox"
 const supervised = SandboxSupervision.layer(provider, { interval: "10 seconds", tolerance: 2 })
 ```
 
-Provider packages prove their adapter with `ProviderConformance.check` or, for
-a lifecycle provider, `SandboxConformance.check`. Both run the contract as
+A provider proves its adapter with `ProviderConformance.check` or, for a
+lifecycle provider, `SandboxConformance.check`. Both run the contract as
 behavior through the real adapter layer and report every check that did not
 hold. `signals-a-running-command` watches the process rather than the call: a
 `kill` that answers success and leaves the command running satisfies the type
@@ -123,20 +125,28 @@ turn a host directory into a filesystem, user, or network security boundary.
 
 ## Limits
 
-Two paths are bounded: a command's standard input at 16 MiB, refused above it
-and counted as the bytes arrive, and the signal a closing scope sends at 5
-seconds. Everything else, including file transfer and a command's output, is
-sized by the host's heap. Command output is byte exact through
-`DirectorySandbox`, `ContainerSandbox`, `KubernetesSandbox`,
-`MicrosandboxSandbox`, and `JustBashSandbox`, and is not through
-`VercelSandbox`, `DaytonaSandbox`, `CloudflareSandbox`, or `AwsSandbox`. File
-transfer is byte exact on all nine.
+Two things here are bounded and the rest is sized by the host's heap. A caller
+placing an agent's file tools on a machine should know which is which.
 
-The per-path table, with the `AwsSandbox` chunking arithmetic, is at
-https://sandbox.smithers.sh/limits/.
+| Path                                    | Bound                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a command's standard input              | 16 MiB, refused above it. The count runs as the bytes arrive, so an oversized or endless producer is stopped at the bound rather than after it finishes                                                                                                                                                                                                                                                                                                                                                     |
+| the signal a closing scope sends        | 5 seconds, or however long it takes the command's exit to be observed, whichever comes first. A finalizer cannot be interrupted, so a provider whose `kill` never answers would hold the closing fiber open forever; the provider's own teardown sends it again. `string` and `lines` close the scope when the output ends rather than when the exit lands, so the exit observation is what keeps a command that already finished from costing its caller the whole bound                                   |
+| `Session.readFile`, `Session.writeFile` | none. A file crosses whole, in memory, on every provider                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| a command's `stdout` and `stderr`       | none. `RemoteChildProcessSpawner` and the probe helpers collect a command's output whole                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `Sandbox.fileSystem.readDirectory`      | none, and a listing is materialized twice: once as probe output and once as the parsed entries                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `AwsSandbox` command output             | none, and buffered whole by construction: the Session Manager channel carries one session's output as a single stream that is parsed after it ends                                                                                                                                                                                                                                                                                                                                                          |
+| `AwsSandbox` file writes                | one remote `aws ecs execute-command` round trip per `ExecTransport.chunkBytes` bytes (default 3072 before base64). A 64 MiB write at the default is roughly 22,000 sequential invocations. The enforced range is 1 through 65536 bytes. Each slice is base64 inside one `--command` argv entry; base64 expands by four thirds, and Linux caps one entry at 128 KiB (`MAX_ARG_STRLEN`, 32 pages), so 64 KiB plus framing stays inside the smallest known limit. AWS publishes no separate SSM document limit |
 
-## Documentation
+Command output is byte-exact through `DirectorySandbox`, `ContainerSandbox`,
+`KubernetesSandbox`, `MicrosandboxSandbox`, and `JustBashSandbox`. It is not
+through `VercelSandbox`, `DaytonaSandbox`, or `CloudflareSandbox`, whose vendor
+APIs report a command's output as a string: what those providers stream is that
+string re-encoded as UTF-8, so a command writing a tarball or a compiled binary
+to stdout comes back changed. `AwsSandbox` reframes output through a
+pseudo-terminal, which normalizes line endings and interleaves standard error.
+File transfer is byte-exact on all nine, so a caller that needs bytes out of a
+command has it write a file and reads that back with `readFile`.
 
-- https://sandbox.smithers.sh for guides, concepts, and the API reference.
-- https://sandbox.smithers.sh/reference/api/ and https://kernel.smithers.sh/reference/api/ for the
-  same reference alongside the rest of the fleet.
+See the [API reference](https://sandbox.smithers.sh/reference/api/) and the
+[kernel reference](https://kernel.smithers.sh/reference/api/).

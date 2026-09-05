@@ -67,7 +67,6 @@ do under `NodeChildProcessSpawner`. An unconfigured extra descriptor answers
 ## Two divergences the error channel cannot report
 
 These cannot be refused, because nothing in the call says they are happening.
-Both are stated in the module header and repeated here.
 
 - **`extendEnv` is ignored.** The remote session's ambient environment never
   crosses the seam, so only the `env` overrides travel, and `extendEnv: false`

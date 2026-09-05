@@ -101,9 +101,9 @@ text boundary. Those are properties of a real backend.
 
 Use the doubles for adapter logic, cancellation, and composition. Prove backend
 behavior with [the conformance suites](./prove-a-provider.md) against something
-real: this repository runs them against host directories and processes, Docker,
-OrbStack Kubernetes, and a Microsandbox microVM, and skips each when the
-backend is not present.
+real. The package's own suite runs them against host directories and processes,
+Docker, OrbStack Kubernetes, and a Microsandbox microVM, skipping each when the
+backend is not present, and yours can do the same.
 
 ## Read next
 

@@ -86,8 +86,8 @@ const provider = yield* Sandbox.selectProvider(registry, requested)
 
 `requested` is a `Sandbox.ProviderName` or `undefined`. When it is
 `undefined`, `Sandbox.defaultProviderName` is used, which is `"microsandbox"`:
-a microVM is the only bundled backend that can hold the workspace's declared
-Nix environment.
+a microVM is the only bundled backend that can hold a declared Nix
+environment.
 
 A name the registry does not hold, the default included, fails with
 `ProviderError.code === "unavailable"` listing what is registered. Nothing
@@ -98,11 +98,12 @@ The full name set is `"microsandbox"`, `"directory"`, `"container"`,
 `"kubernetes"`, `"just-bash"`, `"vercel"`, `"daytona"`, `"aws"`, and
 `"cloudflare"`.
 
-## Run the workspace's Nix environment in the microVM
+## Run a Nix environment in the microVM
 
 `MicrosandboxSandbox` accepts the flake text rather than a path, because this
-package reads no host files. The host composing the provider reads the files
-its workspace declaration names:
+package reads no host files. Whoever composes the provider reads them, from a
+checkout, a fixture, or a
+[workspace's declared environment](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/docs/concepts/environments.md):
 
 ```ts
 const provider = MicrosandboxSandbox.make({

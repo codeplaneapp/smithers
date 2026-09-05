@@ -11,9 +11,8 @@ locally. Only the implementation layer is given `Sandbox.layerHost`, so its
 file operations and child processes reach one provisioned session instead of
 the engine host.
 
-The runnable original of this guide is
-[`examples/src/40-sandbox-placement.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/40-sandbox-placement.ts)
-in the repository.
+The complete program this guide walks through is
+[`examples/src/40-sandbox-placement.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/40-sandbox-placement.ts).
 
 ## What layerHost provides
 
@@ -43,7 +42,10 @@ body written against Effect's ordinary services runs unchanged.
 ## Keep the graph independent of the placement
 
 The action's declaration says nothing about where it runs. Only the
-implementation layer does:
+implementation layer does. `Action`, `Flow`, and `Interpreter` come from
+[`@smthrs/flow`](/api/flow), the authoring model, which
+[`@smthrs/flows`](/api/flows) also re-exports if you installed the whole
+engine:
 
 ```ts
 import { Action, Flow, Interpreter } from "@smthrs/flow"

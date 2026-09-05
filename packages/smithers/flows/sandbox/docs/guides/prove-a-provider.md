@@ -9,9 +9,9 @@ Both suites state a contract as behavior and report every check that did not
 hold. Run the one that matches your seam in your own test suite and assert the
 returned array is empty.
 
-They exist because vendor providers live in their own packages, so this package
-cannot test them. What the prose promises callers is available as something an
-adapter has to produce.
+They exist so that what the prose here promises a caller is also something an
+adapter has to produce. A suite runs through the real adapter layer against the
+backend it actually talks to, so passing it is evidence rather than a claim.
 
 ## Prove a lifecycle provider
 

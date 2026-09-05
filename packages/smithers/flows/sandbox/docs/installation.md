@@ -7,17 +7,21 @@ sidebar:
 
 ## Install the package
 
+`@smthrs/sandbox` is at `1.0.0-rc.0` and has not reached npm yet. When it
+does, the release candidate publishes under the `next` dist tag, so ask for
+that tag until 1.0 is final:
+
 ```bash
-pnpm add @smthrs/sandbox
+pnpm add @smthrs/sandbox@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as ESM and CommonJS
 with TypeScript declarations. It has two runtime dependencies,
 [`effect`](https://effect.website) and
 [`@smthrs/kernel`](/api/kernel), and the second is used only for command line
-rendering and POSIX quoting. Nothing else in the workspace is required,
-because a sandbox is one way to satisfy Effect's `ChildProcessSpawner` rather
-than a member of the closed host list.
+rendering and POSIX quoting. Nothing else is required: a sandbox is one way to
+satisfy Effect's `ChildProcessSpawner` rather than a new host interface you
+have to adopt.
 
 ## Import forms
 
@@ -41,8 +45,8 @@ Two subpath forms are blocked in the export map:
 
 ## What a runnable composition adds
 
-Two providers need Effect's own host services, which a platform package
-supplies. On Node:
+Four of the bundled providers are built from Effect's own host services,
+which a platform package supplies. On Node:
 
 ```bash
 pnpm add @effect/platform-node
@@ -51,7 +55,9 @@ pnpm add @effect/platform-node
 `NodeServices.layer` provides `FileSystem`, `Path`, and `ChildProcessSpawner`
 together, which is what `DirectorySandbox`, `ContainerSandbox`,
 `KubernetesSandbox`, and `AwsSandbox` are constructed from. The
-[Quickstart](./quickstart.md) uses it.
+[Quickstart](./quickstart.md) uses it. `JustBashSandbox` also takes a
+`FileSystem`, but one mounted over its interpreter's tree rather than the
+host's.
 
 Nothing else is required to run a sandbox. Everything below is per provider.
 
@@ -75,16 +81,16 @@ backend needs.
 | `CloudflareSandbox`   | The `@cloudflare/sandbox` `getSandbox` function and a Worker binding to a deployed Durable Object namespace.                  | The Worker.                                                                         |
 
 Because the SDK slices are structural, you can satisfy them with a test double
-instead of the vendor package. That is how this repository proves seven of the
-nine providers; see [Test against a scripted machine](./guides/testing.md).
+instead of the vendor package, which is how the package's own suite proves
+seven of the nine providers. See
+[Test against a scripted machine](./guides/testing.md).
 
 ## Browser bundles
 
-The package is gated as a browser entry point by `scripts/browser-check.mjs`
-at the repository root. Nothing under `src/` reads a host global: the
-conformance fixture's per-process uniqueness comes from Web Crypto rather than
-a process id, because a bundler cannot catch a free `process` identifier that
-survives into the bundle and throws in a browser.
+The package bundles for the browser. No module reads a host global: the conformance fixture's per-process
+uniqueness comes from Web Crypto rather than a process id, because a bundler
+cannot catch a free `process` identifier that survives into the bundle and
+throws in a browser.
 
 `JustBashSandbox` is the provider a browser page can actually run, over a
 just-bash interpreter and a filesystem mounted on the same tree. The other

@@ -32,9 +32,9 @@ interface VendorSdk {
 ```
 
 A command-line tool arrives the same way, as an injected
-`ChildProcessSpawner` rather than a call to `node:child_process`. Nothing under
-`src/` in this package reads a host global, and a provider that follows the
-rule keeps that property.
+`ChildProcessSpawner` rather than a call to `node:child_process`. No module in
+`@smthrs/sandbox` reads a host global, which is what lets the package bundle
+for a browser; a provider that follows the same rule keeps that property.
 
 ## Implement acquire
 

@@ -1,134 +1,152 @@
 ---
 title: "@smthrs/sandbox"
-description: "Provisioned machines for flows: two provider seams, Effect host services derived from them, two conformance suites, liveness, and nine bundled machine providers."
+description: "Run an Effect program's files and child processes on a machine you provision: a container, a microVM, a Kubernetes Pod, a cloud sandbox, or a scratch directory, all behind one contract."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/sandbox/docs/README.md"
 ---
 
-`@smthrs/sandbox` puts a flow's file operations and child processes on a
-machine that is not the one running the flow.
+`@smthrs/sandbox` runs part of an Effect program somewhere other than the
+process that started it. You hand it a provider that owns a machine, and it
+serves Effect's ordinary `FileSystem`, `Path`, and `ChildProcessSpawner` from
+one session on that machine. Code written against those services runs unchanged
+whether the machine is a scratch directory on your laptop, a container, a
+microVM, or an AWS Fargate task.
 
-It contains no vendor SDK, reads no host global, and opens no socket of its
-own. A provider adapts a backend (a container, a microVM, a cloud runner) to
-one of two contracts, and this package derives everything else from that
-contract: Effect's `ChildProcessSpawner` and `FileSystem`, a liveness probe,
-heartbeat supervision, and two conformance suites that state each contract as
-behavior an adapter has to produce.
+## What it solves
 
-## The two seams
+Code that writes files and runs commands on behalf of a model, a build, or a
+customer's script needs a boundary, and the boundary you want in production is
+rarely the one you want in a test. Reaching for a vendor SDK directly puts that
+choice in every call site: the SDK's own exec API, its own file API, its own
+error type, its own idea of what happens when you cancel.
 
-Which contract a backend can satisfy is decided by what its transport can do,
-not by how much you want from it.
+This package moves the choice to one place. A backend implements one of two
+provider contracts, and everything else derives from it:
 
-- `RemoteChildProcessSpawner.Provider` runs one rendered command line and
-  reports `stdout`, `stderr`, and an exit code. That is enough to satisfy
-  Effect's `ChildProcessSpawner` and nothing more. Use it when something else
-  already provisioned the machine.
-- `Sandbox.Provider` owns a machine's whole lifecycle. `acquire(key)` creates
-  or reattaches one machine and hands back a `Session`: byte-typed file
-  transfer beside the same spawn, torn down when the acquiring scope closes.
-  A session is what you need to place work, because a body that edits a file
-  and then compiles it needs the file operations and the processes to see one
-  tree.
+- The **machine** is acquired once per session key and torn down when the scope
+  closes. There is no `destroy` method to forget, and an interruption tears the
+  machine down like any other finalizer.
+- The **body** asks for Effect's ordinary host services. It never names a
+  provider, and a relative path resolves against the session's working
+  directory, so the same code lands in the right place on every backend.
+- What a backend **cannot** do is refused rather than silently dropped. A
+  command that supplies standard input to a transport with no input channel,
+  `stdin: "inherit"`, extra file descriptors, or `kill` on a provider that
+  declares none each fail before anything starts.
 
-Everything built on the narrower seam composes with the wider one:
-`Sandbox.commandProvider` projects a lifecycle provider back down to a spawn
-provider, so the adapter, the health probe, supervision, and the provider
-conformance suite all work unchanged.
+Nine providers ship with the package: `DirectorySandbox`, `JustBashSandbox`,
+`ContainerSandbox`, `KubernetesSandbox`, `MicrosandboxSandbox`,
+`VercelSandbox`, `DaytonaSandbox`, `AwsSandbox`, and `CloudflareSandbox`. None
+of them costs the package a vendor dependency: an SDK arrives as an injected
+structural slice and a command-line tool arrives as an injected spawner, so you
+install only what the backend you picked needs.
 
-## Who uses this package
-
-Hosts place a flow body or an agent's standard tools on a provisioned machine
-with `Sandbox.layerHost`. Provider authors implement one of the two seams and
-prove the adapter with the matching conformance suite. Both audiences share the
-same warning: this package adapts whatever isolation a backend gives you and
-adds none of its own. Read
+The package is not an isolation mechanism. It adapts whatever boundary the
+backend already provides, and that ranges from a microVM down to a directory on
+the machine you are sitting at. Read
 [What a sandbox does and does not prevent](/concepts/isolation/) before you
-rely on one.
+place code you do not trust.
 
 ## Install
 
+The 1.0 release candidate has not reached npm yet. When it does it publishes
+under the `next` dist tag:
+
 ```bash
-pnpm add @smthrs/sandbox
+pnpm add @smthrs/sandbox@next @effect/platform-node
 ```
 
-For runtime requirements, import forms, and the vendor SDKs each provider
-expects, see [Installation](/installation/).
+Node.js 22.19.0 or later. `@effect/platform-node` supplies the host services
+`DirectorySandbox` is built from; a browser page or another runtime brings its
+own.
 
-## The smallest real example
+## Place one body on a machine
 
-Hold one machine and serve the host surface from it. The body asks for
-Effect's ordinary services and never names a provider:
+This program writes a file and measures it with a process. Both operations come
+from one session, which is why `wc` finds a file that `writeFileString` wrote
+without either call naming a provider or an absolute remote path:
 
 ```ts
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 
-const body = Effect.gen(function*() {
+/** Nothing in this effect knows which machine it runs on. */
+const countBytes = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner
-  yield* fs.writeFileString("report.txt", "placed\n")
-  return yield* spawner.string(ChildProcess.make("wc", ["-c", "report.txt"]))
+  yield* fs.writeFileString("report.txt", "placed on the machine\n")
+  const printed = yield* spawner.string(ChildProcess.make("wc", ["-c", "report.txt"]))
+  return Number.parseInt(printed.trim(), 10)
 })
 
-const placed = (fs: FileSystem.FileSystem, spawner: ChildProcessSpawner["Service"]) =>
-  body.pipe(
-    Effect.provide(
-      Sandbox.layerHost(
-        DirectorySandbox.make({ fs, spawner, root: "/var/tmp/smithers" }),
-        { session: "run:01J..." }
-      )
-    )
+const program = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const spawner = yield* ChildProcessSpawner
+  const provider = DirectorySandbox.make({ fs, spawner, root: "/var/tmp/smithers" })
+  return yield* countBytes.pipe(
+    Effect.provide(Sandbox.layerHost(provider, { session: "demo:01J" })),
+    Effect.scoped
   )
+})
+
+console.log(
+  await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer), Effect.orDie))
+)
 ```
 
-The [Quickstart](/quickstart/) runs this end to end and prints the byte
-count. Swapping `DirectorySandbox` for `ContainerSandbox` or
-`MicrosandboxSandbox` changes nothing above the provider construction.
+```text
+22
+```
 
-## The package at a glance
+`Effect.scoped` is what ends the machine: closing the scope runs the provider's
+teardown finalizer, which removes the directory and the file in it. Swap
+`DirectorySandbox.make` for `ContainerSandbox.make` or
+`MicrosandboxSandbox.make` and `countBytes` does not change.
 
-Every namespace is also its own import subpath, for example
-`@smthrs/sandbox/Sandbox`.
+## How this relates to @smthrs/flows
 
-| Namespace                   | What it is                                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `Sandbox`                   | The provisioned-machine contract, its projections (`commandProvider`, `fileSystem`, `layerHost`), and provider selection. |
-| `RemoteChildProcessSpawner` | The spawn-only contract and its adapter onto Effect's `ChildProcessSpawner`.                                              |
-| `SandboxHealth`             | The liveness taxonomy and the deadline-bounded probe that reports it.                                                     |
-| `SandboxSupervision`        | A heartbeat that retires a dead session so its commands fail instead of waiting.                                          |
-| `ProviderConformance`       | The suite a spawn-only provider must pass.                                                                                |
-| `SandboxConformance`        | The suite a lifecycle provider must pass.                                                                                 |
-| `DirectorySandbox`          | Machines are directories on this host. The conformance reference, and no boundary at all.                                 |
-| `JustBashSandbox`           | Commands are interpreted in-process over a shared virtual filesystem, for hosts that cannot spawn.                        |
-| `ContainerSandbox`          | One container per session, over a Docker-compatible CLI.                                                                  |
-| `KubernetesSandbox`         | One Pod per session, over `kubectl`.                                                                                      |
-| `MicrosandboxSandbox`       | One local microVM per session, optionally holding the workspace's Nix environment.                                        |
-| `VercelSandbox`             | One persistent Vercel sandbox per session.                                                                                |
-| `DaytonaSandbox`            | One Daytona sandbox per session.                                                                                          |
-| `AwsSandbox`                | One Fargate task per session, driven through ECS Exec.                                                                    |
-| `CloudflareSandbox`         | One Sandbox Durable Object per session, behind a Worker binding.                                                          |
+`@smthrs/sandbox` stands alone: it shares its `effect` peer with the host and
+depends on [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) for command-line rendering, and you
+can use it in any Effect program without adopting anything else.
+
+It also supplies the machines that Smithers flows run on.
+[`@smthrs/flows`](https://flows.smithers.sh/reference/api/) is the durable flow engine: it records each step
+of a long-running job in a journal so a crashed run resumes where it stopped.
+Its `SandboxedFlow` module runs a child flow's own code inside a provisioned
+machine, and the provider it runs that code on is one of the providers
+documented here. The seam between them is `Sandbox.Provider`, so a flow author
+chooses a backend by name and never writes against a vendor SDK.
+
+Two package names are one letter apart. [`@smthrs/flows`](https://flows.smithers.sh/reference/api/), plural,
+is the whole engine in one install; [`@smthrs/flow`](https://flow.smithers.sh/reference/api/), singular, is
+the authoring model inside it, which is where `Action`, `Flow`, and
+`Interpreter` are defined. `@smthrs/flows` re-exports those names, so
+installing the plural package is enough for the guides here.
+
+Both packages sit under the `smithers` command-line tool, which is where you
+start a run, watch it, and resume it: see the
+[CLI reference](https://cli.smithers.sh/reference/api/). If you came here to place a flow's work on another
+machine, read
+[Place a flow body on a machine](/guides/place-a-flow-body-on-a-machine/)
+next.
 
 ## Where to go next
 
-- [Installation](/installation/): requirements, import forms, and what each
-  provider expects you to install.
-- [Quickstart](/quickstart/): place a flow body on a real machine and read
-  its result.
-- Concepts: [the two seams](/concepts/seams/),
-  [sessions and their keys](/concepts/sessions/),
-  [what a sandbox does and does not prevent](/concepts/isolation/), and
-  [how a remote command differs from a local one](/concepts/remote-commands/).
-- Guides: [place a flow body on a machine](/guides/place-a-flow-body-on-a-machine/),
-  [run commands through a transport](/guides/run-commands-through-a-transport/),
-  [choose a provider](/guides/choose-a-provider/),
-  [supervise a session](/guides/supervise-a-session/),
-  [write a provider](/guides/write-a-provider/),
-  [prove a provider](/guides/prove-a-provider/), and
-  [test against a scripted machine](/guides/testing/).
-- [Limits](/limits/): what this package bounds and what it buffers whole.
-- [Troubleshooting](/troubleshooting/): the failures this package reports
-  and what to change.
-- [API reference](/reference/api/): every export, with signatures and behavior.
+- [Installation](/installation/): import forms, and what each of the nine
+  providers expects you to supply.
+- [Quickstart](/quickstart/): the walkthrough behind the example above,
+  including what the health verdict does and does not mean.
+- [The two provider seams](/concepts/seams/): the contract a backend
+  implements, and why there are two of them.
+- [Choose a provider](/guides/choose-a-provider/): the nine side by side, by
+  boundary, byte exactness, and cost to run.
+- [Write a provider](/guides/write-a-provider/) and
+  [Prove a provider](/guides/prove-a-provider/): adapt your own backend and
+  hold it to the conformance suites.
+- [API reference](/reference/api/): every export, with the per-provider mechanics and
+  honest limits.
+- [Troubleshooting](/troubleshooting/): what each refusal means and what to
+  change.
