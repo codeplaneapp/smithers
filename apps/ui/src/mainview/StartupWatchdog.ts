@@ -15,7 +15,7 @@ export interface StartupWatchdog {
   /** React reported a boot failure and is rendering its own panel; stand down. */
   readonly handleRenderFailure: (error: unknown) => void
   readonly reportFailure: (error: unknown) => void
-  readonly stop: () => void
+  readonly stop: () => Promise<void>
 }
 
 /**
@@ -33,6 +33,12 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
   const clientErrors = options.clientErrors ?? createClientErrorReporter()
   let firstBootError: unknown
   let settled = false
+  let panel: ReturnType<typeof createStartupErrorElement> | undefined
+  const releasePanel = (): Promise<void> => {
+    const current = panel
+    panel = undefined
+    return current?.dispose() ?? Promise.resolve()
+  }
   const remember = (error: unknown): void => {
     if (firstBootError !== undefined || settled) return
     firstBootError = error
@@ -48,30 +54,37 @@ export const startStartupWatchdog = (options: StartupWatchdogOptions): StartupWa
   }
   windowTarget.addEventListener("error", onError)
   windowTarget.addEventListener("unhandledrejection", onRejection)
-  const stop = (): void => {
+  const markMounted = (): void => {
+    settled = true
+    windowTarget.clearTimeout(timer)
+    void releasePanel().catch(() => console.warn("Smithers: local recovery cleanup could not finish."))
+  }
+  const stop = (): Promise<void> => {
     settled = true
     windowTarget.clearTimeout(timer)
     windowTarget.removeEventListener("error", onError)
     windowTarget.removeEventListener("unhandledrejection", onRejection)
+    return releasePanel()
   }
   const reportFailure = (reason: unknown): void => {
     if (settled) return
-    stop()
+    void stop().catch(() => console.warn("Smithers: local recovery cleanup could not finish."))
     console.error("Smithers failed to start", reason, firstBootError)
     const root = documentTarget.getElementById("root") ?? documentTarget.body
     root.textContent = ""
-    root.append(createStartupErrorElement(documentTarget, startupErrorMessage(reason, firstBootError)))
+    panel = createStartupErrorElement(documentTarget, startupErrorMessage(reason, firstBootError))
+    root.append(panel.element)
   }
   const timer = windowTarget.setTimeout(() => {
     reportFailure(new Error(`Smithers did not finish starting within ${options.timeoutMs}ms.`))
   }, options.timeoutMs)
   return {
-    markMounted: stop,
+    markMounted,
     handleRenderFailure: (error) => {
-      if (settled) return
-      stop()
-      console.error("Smithers failed to start", error, firstBootError)
       clientErrors.report("error", error)
+      if (settled) return
+      markMounted()
+      console.error("Smithers failed to start", error, firstBootError)
     },
     reportFailure,
     stop

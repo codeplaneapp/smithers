@@ -7,13 +7,15 @@
  */
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from "electrobun/main"
+import Electrobun, { BrowserView, BrowserWindow, BuildConfig, Screen, Utils } from "electrobun/main"
 import type { SmithersNativeRPC } from "@smthrs/rpc/NativeRPC"
 import { encodeRgbaPng, startPackagedE2EBridge } from "./PackagedE2EBridge"
+import { createNativeShutdown } from "./NativeShutdown"
 import { defaultDistDir, startLocalServer } from "./server"
+import { startWithPersistentOrigin } from "./NativeOrigin"
 
 const headless = Bun.env.SMITHERS_LOCAL_HEADLESS === "1"
-const port = Number(Bun.env.SMITHERS_LOCAL_PORT ?? "0")
+const port = Bun.env.SMITHERS_LOCAL_PORT === undefined ? undefined : Number(Bun.env.SMITHERS_LOCAL_PORT)
 
 /** http(s) only: the page must not launch arbitrary local schemes through the privileged side. */
 const openExternal = async (url: string): Promise<boolean> => {
@@ -32,26 +34,27 @@ const stateDir = process.platform === "darwin"
   ? join(homedir(), "Library", "Application Support", "Smithers")
   : join(Bun.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "smithers")
 
-const server = await startLocalServer({
-  port: Number.isInteger(port) && port >= 0 ? port : 0,
+const server = await startWithPersistentOrigin(stateDir, (port) => startLocalServer({
+  port,
   distDir: defaultDistDir(import.meta.dir),
   stateDir,
   chatStub: Bun.env.SMITHERS_CHAT_STUB === "1",
   cloudMode: Bun.env.SMITHERS_LOCAL_MODE === "offline" ? "offline" : "hybrid",
   allowManualRepositoryPaths: headless
-})
+}), port)
 
 let mainWindow: BrowserWindow | undefined
 let bridge: ReturnType<typeof startPackagedE2EBridge>
 const queuedRepositorySelections: Array<{ readonly path: string | null }> = []
-let shuttingDown = false
-const shutdown = async (): Promise<void> => {
-  if (shuttingDown) return
-  shuttingDown = true
-  bridge?.stop()
-  await server.stop()
-  process.exit(0)
-}
+const shutdown = createNativeShutdown({
+  stop: async () => {
+    bridge?.stop()
+    await server.stop()
+  },
+  quit: (code) => process.exit(code),
+  onBeforeQuit: (handler) => { Electrobun.events.on("before-quit", handler) },
+  log: (message) => console.error(message)
+})
 
 if (headless) {
   console.log("SMITHERS_LOCAL_HEADLESS=1: serving without a window")

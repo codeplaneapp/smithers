@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The target-graph controller (docs/LOCAL-APP.md "Cards: target graph"): the
  * chat commands' door to the five graph cards. `show graph` loads the typed
@@ -132,9 +133,9 @@ export const createTargetGraphController = (
   const { store, baseUrl } = ctx
   const { nextOrdinal, runs, devFixtures } = dependencies
   /** Recorded/replayed events per runId, for the scrubber. */
-  const replayEvents = new Map<string, ReadonlyArray<TargetRunEvent>>()
+  const replayEvents = actorSharedState(ctx, "target-replays", () => new Map<string, ReadonlyArray<TargetRunEvent>>())
   /** Live folds per runId, shared by the graph overlay and the timeline card. */
-  const liveRuns = new Map<string, { nodes: Map<string, NodeTiming>; summary: RunSummary | undefined; logs: Map<string, string>; error?: string }>()
+  const liveRuns = actorSharedState(ctx, "target-live-runs", () => new Map<string, { nodes: Map<string, NodeTiming>; summary: RunSummary | undefined; logs: Map<string, string>; error?: string }>())
 
   const upsert = (card: Card): void => {
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
@@ -224,7 +225,7 @@ export const createTargetGraphController = (
    * accumulated fold outlives the attachment on purpose: a timeline card opened
    * after the run settled still paints from it.
    */
-  const detachers = new Map<string, () => void>()
+  const detachers = actorSharedState(ctx, "target-detachers", () => new Map<string, () => void>())
   const releaseRun = (runId: string): void => {
     const detach = detachers.get(runId)
     if (detach === undefined) return

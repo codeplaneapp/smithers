@@ -22,7 +22,7 @@ describe("browser local-session transport", () => {
       }
     })
     await appFetch("/api/repos")
-    await appFetch("https://jjhub.test/api/repos")
+    await appFetch("https://smithers-cloud.test/api/repos")
     await appFetch("/assets/app.js")
     expect(seen[0]?.headers.get(LOCAL_SESSION_HEADER)).toBe(TOKEN)
     expect(seen[1]?.headers.has(LOCAL_SESSION_HEADER)).toBe(false)

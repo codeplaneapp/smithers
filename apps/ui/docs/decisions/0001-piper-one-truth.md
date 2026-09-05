@@ -2,10 +2,10 @@
 
 ## Decision
 
-1. jjhub is the source of truth. Repos live under users or orgs and mirror
+1. Smithers Cloud is the source of truth. Repos live under users or orgs and mirror
    GitHub (Smithers is the source, GitHub the destination remote). A local
-   checkout is a working copy of a jjhub repo; a cloud workspace is another.
-2. jjhub presents as one file system: every file has a global path
+   checkout is a working copy of a Smithers Cloud repo; a cloud workspace is another.
+2. Smithers Cloud presents as one file system: every file has a global path
    `/org/repo/path`. Cross-repo changes and versioning are implemented
    server-side as jj-submodule "ghost monorepos". Users never see a submodule.
 3. Builds are maximally cached and incremental (the Smithers build graph on
@@ -52,25 +52,29 @@
   ahead/behind. A third issue: per-repo mirror status.
 - Auth from the native app: the CLI's browser login, not an env token. Bun
   listens on `127.0.0.1:<random>` with `/callback`, opens the browser at
-  `${API}/api/auth/github/cli?callback_port=<port>`, receives
-  `{ token, username, email, expiresAt }` (a `smithers_` PAT), stores it in
+  `${API}/api/auth/github/cli?callback_port=<port>&callback_state=<state>&scopes=<scopes>`, receives
+  a fragment containing `{ token, username, email, expires_at, callback_state }`
+  (a `smithers_` PAT), verifies the per-attempt state, stores the token in
   the OS keychain, never exposes it to the renderer. `SMITHERS_CLOUD_TOKEN`
   is a dev/CI override only. No device-code flow; bearers cannot mint tokens.
   Scopes the app needs: read:user, read:organization, read:repository,
   write:repository, read:workspace, write:workspace, write:agent,
-  write:approval. TODAY the CLI login mints a fixed legacy set (repo, user,
-  org → write:repository, write:user, write:organization); workspace, agent,
-  and approval calls 403 with "insufficient token scope". A plue issue adds
-  `scopes=` to the start route. Until then the app degrades honestly: probe
+  write:approval. The app requests these explicitly through the API's
+  `scopes=` parameter. Restored legacy tokens can still lack workspace,
+  agent and approval access, so the app degrades honestly: probe
   once with `GET /api/user/workspaces`; a 403 insufficient-scope answer sets
   a `degraded` state and every workspace, agent-launch, and approval act
-  shows "sign in again to enable" instead of failing silently.
+  shows "sign in again to enable" instead of failing silently. The callback
+  browser page clears the fragment immediately and posts it to Bun with a
+  page nonce; Bun requires the API-echoed state before claiming the attempt.
+  API callback-state support must roll out before this native version:
+  missing or mismatched state is refused, never accepted as a legacy fallback.
 - The org superproject (ghost monorepo) is server-side only. A workspace
   never checks out a superproject; working copies are local checkouts and
   cloud workspaces.
 
 ## Open
 
-- (settled above) How the native app authenticates to the jjhub API (today: only the
+- (settled above) How the native app authenticates to the Smithers Cloud API (today: only the
   identity seam is proxied). First cut: a Bun-side token from
   `SMITHERS_CLOUD_TOKEN`; never in renderer-visible state.

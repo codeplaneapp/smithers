@@ -30,7 +30,7 @@ const NATIVE_EVERYTHING = {
   host: "local" as const,
   version: "0",
   buildSha: "x",
-  capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.repository-path-entry", "local.targets", "local.terminal", "local.harnesses", "local.lsp"] as const,
+  capabilities: ["agent", "identity", "cloud", "local.repositories", "local.repository-path-entry", "local.targets", "local.terminal", "local.harnesses", "local.lsp"] as const,
   authFlow: "both" as const,
   sandbox: null
 }

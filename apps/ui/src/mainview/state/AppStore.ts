@@ -1,19 +1,31 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import { openBrowserWASQLiteOPFSDatabase } from "@tanstack/browser-db-sqlite-persistence"
-import { localStorageCollectionOptions } from "@tanstack/db"
+import { localOnlyCollectionOptions } from "@tanstack/db"
 import type { InferSchemaOutput, StorageApi, StorageEventApi } from "@tanstack/db"
 import { createCollection, createTransaction } from "@tanstack/react-db"
 import type { Transaction } from "@tanstack/react-db"
 import {
   APP_SCHEMA_VERSION,
+  PERSISTED_KEY_PREFIX,
+  PERSISTENCE_BACKEND_STORAGE_KEY,
+  SCHEMA_VERSION_STORAGE_KEY,
   enforceSchemaVersion,
   readRecordedBackend,
   recordBackend
 } from "../chain/SchemaVersion"
 import { openSqliteRowStorage } from "../chain/SqliteRowStorage"
-import { openTransactionalStorage } from "../chain/TransactionalStorage"
+import type { SqliteRowDatabase } from "../chain/SqliteRowStorage"
+import { readSqliteRecovery, StorageRecoveryError } from "../chain/StorageRecovery"
+import type { RecoveryTable, StorageRecoverySnapshot, EnumerableRecoveryStorage } from "../chain/StorageRecovery"
+import { captureBrowserStorageRecovery, recoveryStorage } from "./BrowserStorageRecovery"
+import { createCollectionPersistence, durableCollectionOptions } from "../chain/DurableCollection"
+import { retiredLineageKey } from "../chain/LineageRetirement"
+import type { CollectionPersistence } from "../chain/DurableCollection"
+import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY, matchesStoredStringId, openTransactionalStorage } from "../chain/TransactionalStorage"
 import type { TransactionalStorage } from "../chain/TransactionalStorage"
 import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
+import { archiveNotice, conversationNotes } from "./ConversationArchive"
+import { framePath } from "../runtime/FrameHistory"
 import {
   AgentRoleSchema,
   BillingAccountSchema,
@@ -21,6 +33,7 @@ import {
   CardSchema,
   cardFrameId,
   ChainEventRecordSchema,
+  RetiredChainLineageSchema,
   ChangeRowSchema,
   CloudRepositorySchema,
   CloudSessionRowSchema,
@@ -65,7 +78,6 @@ import {
   TransitionRecordSchema,
   WorkingCopySchema,
   WorkspaceSchema,
-  WORLD_DISPLAY_NAME,
   WorldDocumentSchema
 } from "./AppState"
 import type {
@@ -75,12 +87,14 @@ import type {
   Branch,
   Card,
   ChainEventRecord,
+  RetiredChainLineage,
   ChangeRow,
   CloudRepository,
   CloudSessionRow,
   CloudWorkspaceRow,
   ConnectorOperation,
   Frame,
+  FrameSnapshot,
   GitHubAppStatusRow,
   Harness,
   IdentitySession,
@@ -107,14 +121,13 @@ import type {
 const SESSION_ID = "main"
 
 /*
- * Retention bounds for the log collections (apps/ui/docs/persistence.md §
+ * Retention bounds for derived diagnostic logs (apps/ui/docs/persistence.md §
  * "Retention and compaction"). Compaction runs inside the same dispatch
  * transaction that appends, so it is part of the atomic commit, and it keeps
  * the newest records: the debuggable tail is the valuable end of a log.
  */
 export const MAX_TRANSITION_RECORDS = 500
 export const MAX_TOOL_CALL_RECORDS = 250
-export const MAX_CHAIN_EVENT_RECORDS = 1000
 
 /**
  * The keys of the records beyond `keep`, oldest first. `order` is the row's
@@ -255,6 +268,8 @@ export type PersistenceBackend =
     readonly abortBatch: () => void
     readonly flush: () => Promise<void>
     readonly close: () => Promise<void>
+    /** Read on the owning connection, serialized with writes. Older injected hosts may refuse recovery. */
+    readonly readRecovery?: () => Promise<ReadonlyArray<RecoveryTable>>
   }
   | {
     readonly kind: "localStorage"
@@ -266,6 +281,8 @@ interface ResolvedPersistence {
   readonly mode: PersistenceMode
   /** True when the store holding the user's data could not be opened. */
   readonly degraded: boolean
+  /** Record adoption only after the selected legacy store validates and initializes. */
+  readonly recordSuccessfulOpen?: () => void
 }
 
 const OPFS_DATABASE_NAME = "smithers-mvp.sqlite"
@@ -282,7 +299,8 @@ const PERSISTED_COLLECTION_SPECS = [
   { id: "app-billing-accounts", schema: BillingAccountSchema },
   { id: "app-toasts", schema: ToastSchema },
   { id: "app-tool-calls", schema: ToolCallRecordSchema },
-  { id: "app-chain-events", schema: ChainEventRecordSchema },
+  { id: "app-chain-events", schema: ChainEventRecordSchema, invalidRows: "refuse" as const, validateKey: matchesStoredStringId },
+  { id: "app-retired-chain-lineages", schema: RetiredChainLineageSchema, invalidRows: "refuse" as const, validateKey: matchesStoredStringId },
   { id: "app-tabs", schema: TabSchema },
   { id: "app-harnesses", schema: HarnessSchema },
   /* Agents as data (custom-agents.md): the mirror of `GET /api/agents`, re-read after every mutation. */
@@ -294,7 +312,7 @@ const PERSISTED_COLLECTION_SPECS = [
   { id: "app-branches", schema: BranchSchema },
   { id: "app-frames", schema: FrameSchema },
   { id: "app-recommendations", schema: RecommendationSchema },
-  /* Lane piper: the jjhub inventory, the working copies, and the cloud session. */
+  /* Lane piper: the Smithers Cloud inventory, the working copies, and the cloud session. */
   { id: "app-cloud-repositories", schema: CloudRepositorySchema },
   { id: "app-working-copies", schema: WorkingCopySchema },
   { id: "app-cloud-sessions", schema: CloudSessionRowSchema },
@@ -314,9 +332,11 @@ const OPFS_OPEN_BUDGET_MS = 4_000
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** A localStorage-shaped store that lives only as long as this document. */
-const memoryStorage = (): StorageApi => {
+const memoryStorage = (): StorageApi & EnumerableRecoveryStorage => {
   const data = new Map<string, string>()
   return {
+    get length() { return data.size },
+    key: (index) => [...data.keys()][index] ?? null,
     getItem: (key) => data.get(key) ?? null,
     setItem: (key, value) => void data.set(key, value),
     removeItem: (key) => void data.delete(key)
@@ -340,6 +360,42 @@ const bootRecordStorage = (): StorageApi | undefined => {
     return typeof window === "undefined" ? undefined : window.localStorage
   } catch {
     return undefined
+  }
+}
+
+/** Read-only existence check for the installed OPFSCoopSyncVFS's database path. */
+const browserDatabaseExists = async (): Promise<boolean> => {
+  if (typeof navigator === "undefined" || typeof navigator.storage?.getDirectory !== "function") return false
+  const root = await navigator.storage.getDirectory()
+  try {
+    await root.getFileHandle(OPFS_DATABASE_NAME)
+    return true
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") return false
+    throw error
+  }
+}
+
+const hasLegacyLocalState = (storage: StorageApi): boolean => {
+  const keys = [ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY, ...PERSISTED_COLLECTION_SPECS.map((spec) => `${PERSISTED_KEY_PREFIX}${spec.id}`)]
+  if (keys.some((key) => storage.getItem(key) !== null)) return true
+  // Include historical collection names the current schema no longer lists.
+  const scannable = storage as StorageApi & { readonly length?: number; readonly key?: (index: number) => string | null }
+  if (typeof scannable.length === "number" && typeof scannable.key === "function") {
+    const length = scannable.length
+    for (let index = 0; index < length; index++) {
+      const key = scannable.key(index)
+      if (key !== null && key.startsWith(PERSISTED_KEY_PREFIX) && key !== SCHEMA_VERSION_STORAGE_KEY &&
+        key !== PERSISTENCE_BACKEND_STORAGE_KEY && key !== THEME_MIRROR_KEY && key !== PALETTE_MIRROR_KEY &&
+        storage.getItem(key) !== null) return true
+    }
+  }
+  return false
+}
+
+export class AmbiguousPersistenceBackendError extends Error {
+  constructor() {
+    super("Saved local browser data has no recorded backend and another database may exist. Opening either could select a stale history. Recover or explicitly select the existing backend before continuing; neither store was reset.")
   }
 }
 
@@ -406,6 +462,28 @@ const openOpfsDatabaseWithinBudget = async (attempts: number) => {
   }
 }
 
+/** Raw recovery never invokes AppStore initialization, migrations or backend selection. */
+const existingBrowserDatabaseRecovery = async (): Promise<ReadonlyArray<RecoveryTable> | undefined> => {
+  if (!await browserDatabaseExists()) return undefined
+  const database = await openOpfsDatabaseWithinBudget(OPFS_OPEN_ATTEMPTS)
+  try {
+    return await readSqliteRecovery(database)
+  } finally {
+    await database.close?.()
+  }
+}
+
+const browserSqliteRecoveryReader = () => typeof navigator !== "undefined" && typeof navigator.storage?.getDirectory === "function"
+  ? existingBrowserDatabaseRecovery
+  : undefined
+
+/** Lazily imported by the startup panel only when the human requests a download. */
+export const readUnopenedBrowserRecovery = (): Promise<StorageRecoverySnapshot> => captureBrowserStorageRecovery({
+  session: "unopened",
+  localStorage: recoveryStorage(bootRecordStorage()),
+  sqlite: browserSqliteRecoveryReader()
+})
+
 /*
  * Choose the store this launch reads, and honour the choice the last launch
  * made (E3.6).
@@ -422,9 +500,25 @@ const openOpfsDatabaseWithinBudget = async (attempts: number) => {
  * the app starts, the real store is untouched and returns on the next launch,
  * and `persistenceDegraded` plus a console error say so rather than passing the
  * empty surface off as a fresh start.
+ *
+ * Only failure to acquire the database may take that path. Once it is open,
+ * any read, validation, migration or commit failure must refuse this launch.
+ * An unreadable execution journal is not permission to start work from zero.
  */
-const resolvePersistence = async (): Promise<ResolvedPersistence> => {
-  const record = bootRecordStorage()
+/** Browser-owned capabilities; injected hosts exercise the actual boot resolver without module mocks. */
+export interface BrowserPersistenceHost {
+  readonly bootRecord: () => StorageApi | undefined
+  readonly openDatabase: (attempts: number) => Promise<SqliteRowDatabase>
+  /** Inspect existence without opening/creating SQLite; needed only for unstamped legacy data. */
+  readonly databaseExists?: () => Promise<boolean>
+}
+
+export const resolvePersistence = async (host: BrowserPersistenceHost = {
+  bootRecord: bootRecordStorage,
+  openDatabase: openOpfsDatabaseWithinBudget,
+  databaseExists: browserDatabaseExists
+}): Promise<ResolvedPersistence> => {
+  const record = host.bootRecord()
   const recorded = record === undefined ? null : readRecordedBackend(record)
   if (recorded === "localStorage") {
     return {
@@ -433,30 +527,18 @@ const resolvePersistence = async (): Promise<ResolvedPersistence> => {
       degraded: false
     }
   }
-  try {
-    const database = await openOpfsDatabaseWithinBudget(recorded === "opfs" ? OPFS_OPEN_ATTEMPTS : 1)
-    const sqlite = await openSqliteRowStorage(database, {
-      collections: PERSISTED_COLLECTION_SPECS,
-      schemaVersion: APP_SCHEMA_VERSION
-    }).catch(async (error) => {
-      await database.close?.()
-      throw error
-    })
-    if (record !== undefined) stampBackend(record, "opfs")
+  if (recorded === null && record !== undefined && hasLegacyLocalState(record)) {
+    if (host.databaseExists === undefined || await host.databaseExists()) throw new AmbiguousPersistenceBackendError()
     return {
-      backend: {
-        kind: "opfs",
-        storage: sqlite.storage,
-        storageEventApi: inertStorageEvents,
-        beginBatch: sqlite.beginBatch,
-        commitBatch: sqlite.commitBatch,
-        abortBatch: sqlite.abortBatch,
-        flush: sqlite.flush,
-        close: sqlite.close
-      },
-      mode: "opfs",
-      degraded: false
+      backend: { kind: "localStorage", storage: record },
+      mode: "localStorage",
+      degraded: false,
+      recordSuccessfulOpen: () => stampBackend(record, "localStorage")
     }
+  }
+  let database: SqliteRowDatabase
+  try {
+    database = await host.openDatabase(recorded === "opfs" ? OPFS_OPEN_ATTEMPTS : 1)
   } catch (error) {
     if (recorded === "opfs") {
       console.error(
@@ -479,13 +561,41 @@ const resolvePersistence = async (): Promise<ResolvedPersistence> => {
     stampBackend(record, "localStorage")
     return { backend: { kind: "localStorage", storage: record }, mode: "localStorage", degraded: false }
   }
+  const sqlite = await openSqliteRowStorage(database, {
+    collections: PERSISTED_COLLECTION_SPECS,
+    schemaVersion: APP_SCHEMA_VERSION
+  }).catch(async (error) => {
+    try {
+      await database.close?.()
+    } catch {
+      // Do not mask the original refusal, or log private database error data.
+      console.warn("Smithers: the refused SQLite store could not be closed; reload before retrying recovery.")
+    }
+    throw error
+  })
+  if (record !== undefined) stampBackend(record, "opfs")
+  return {
+    backend: {
+      kind: "opfs",
+      storage: sqlite.storage,
+      storageEventApi: inertStorageEvents,
+      beginBatch: sqlite.beginBatch,
+      commitBatch: sqlite.commitBatch,
+      abortBatch: sqlite.abortBatch,
+      flush: sqlite.flush,
+      close: sqlite.close,
+      readRecovery: sqlite.readRecovery
+    },
+    mode: "opfs",
+    degraded: false
+  }
 }
 
 /*
  * The storage object a localStorage-backed store actually reads, so the schema
- * gate runs over the same bytes the collections do. TanStack resolves an
- * omitted `storage` to window.localStorage, then to its own in-memory store;
- * the last case has nothing persisted to gate.
+ * gate runs over the same bytes as the durable collection coordinator. An
+ * omitted host resolves to the boot record store, then to an isolated memory
+ * store when browser storage is unavailable.
  */
 const storageOf = (backend: PersistenceBackend): StorageApi | undefined =>
   backend.kind === "opfs" ? backend.storage : (backend.storage ?? bootRecordStorage())
@@ -500,14 +610,9 @@ const createPersistedCollection = <TSchema extends StandardSchemaV1>(
   backend: PersistenceBackend,
   spec: CollectionSpec<TSchema>
 ) => {
-  const options = localStorageCollectionOptions({
-    id: spec.id,
-    storageKey: `smithers-mvp.${spec.id}`,
-    getKey: spec.getKey,
-    schema: spec.schema,
-    ...(backend.storage === undefined ? {} : { storage: backend.storage }),
-    ...(backend.kind === "opfs" ? { storageEventApi: backend.storageEventApi } : {})
-  })
+  const persistence = (backend as PersistenceBackend & { readonly collectionPersistence?: CollectionPersistence }).collectionPersistence
+    ?? createCollectionPersistence({ storage: storageOf(backend) ?? memoryStorage() })
+  const options = durableCollectionOptions(persistence, spec)
   return createCollection({ ...options, schema: spec.schema })
 }
 
@@ -524,6 +629,7 @@ export interface AppCollections {
   readonly toasts: ReturnType<typeof createToastCollection>
   readonly toolCalls: ReturnType<typeof createToolCallCollection>
   readonly chainEvents: ReturnType<typeof createChainEventCollection>
+  readonly retiredChainLineages: ReturnType<typeof createRetiredChainLineageCollection>
   /* The local-app tab strip and what its `+` menu and repo chip read (docs/LOCAL-APP.md). */
   readonly tabs: ReturnType<typeof createTabCollection>
   readonly harnesses: ReturnType<typeof createHarnessCollection>
@@ -540,7 +646,7 @@ export interface AppCollections {
   readonly frames: ReturnType<typeof createFrameCollection>
   /* The one next-step recommendation row the pills project (Recommend.ts). */
   readonly recommendations: ReturnType<typeof createRecommendationCollection>
-  /* Lane piper: the jjhub inventory, its working copies, and the cloud session (no token). */
+  /* Lane piper: the Smithers Cloud inventory, its working copies, and the cloud session (no token). */
   readonly repositories: ReturnType<typeof createRepositoriesCollection>
   readonly workingCopies: ReturnType<typeof createWorkingCopyCollection>
   readonly cloudSessions: ReturnType<typeof createCloudSessionCollection>
@@ -584,8 +690,10 @@ export interface AppStore {
   readonly session: () => Session
   readonly worldStateSnapshot: () => WorldStateSnapshot
   readonly agentContextSnapshot: () => AgentContextSnapshot
+  /** Private host capability, never a model/tool payload. */
+  readonly readRecovery: () => Promise<StorageRecoverySnapshot>
   /** Release persistence resources acquired for this store. */
-  readonly dispose?: () => void
+  readonly dispose?: () => void | Promise<void>
 }
 
 const createSessionCollection = (backend: PersistenceBackend) =>
@@ -672,6 +780,13 @@ const createChainEventCollection = (backend: PersistenceBackend) =>
     schema: ChainEventRecordSchema
   })
 
+const createRetiredChainLineageCollection = (backend: PersistenceBackend) =>
+  createPersistedCollection(backend, {
+    id: "app-retired-chain-lineages",
+    getKey: (record: RetiredChainLineage) => record.id,
+    schema: RetiredChainLineageSchema
+  })
+
 const createTabCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
     id: "app-tabs",
@@ -714,11 +829,11 @@ const createPinnedRepoCollection = (backend: PersistenceBackend) =>
  * remembered listing would be a stale one presented as current.
  */
 const createRepoTreeCollection = () =>
-  createPersistedCollection({ kind: "localStorage", storage: memoryStorage() }, {
+  createCollection(localOnlyCollectionOptions({
     id: "app-repo-tree",
     getKey: (row: RepoTreeRow) => row.id,
     schema: RepoTreeRowSchema
-  })
+  }))
 
 const createStarredTargetCollection = (backend: PersistenceBackend) =>
   createPersistedCollection(backend, {
@@ -886,6 +1001,7 @@ const seed = async (collections: AppCollections): Promise<void> => {
     collections.toasts.preload(),
     collections.toolCalls.preload(),
     collections.chainEvents.preload(),
+    collections.retiredChainLineages.preload(),
     collections.tabs.preload(),
     collections.harnesses.preload(),
     collections.agents.preload(),
@@ -1049,6 +1165,13 @@ const repositoryCapabilities = (
  * is not undoable.
  */
 const forgetAccountState = (collections: AppCollections): void => {
+  // Private journal contents leave with the account, but their identities
+  // cannot become executable again. Refusal and deletion are one transaction.
+  const lineages = new Set([...collections.chainEvents.values()].map((event) => event.lineageId))
+  for (const lineage of lineages) {
+    const id = retiredLineageKey(lineage)
+    if (!collections.retiredChainLineages.has(id)) collections.retiredChainLineages.insert({ id })
+  }
   for (
     const collection of [
       collections.messages,
@@ -1066,6 +1189,13 @@ const forgetAccountState = (collections: AppCollections): void => {
     .filter((frame) => frame.kind === "card")
     .map((frame) => frame.id)
   if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
+  // Archived conversations must obey the same account boundary as the live projection.
+  for (const branch of collections.branches.values()) {
+    if (branch.snapshot !== undefined) collections.branches.update(branch.id, (draft) => { delete draft.snapshot })
+  }
+  for (const frame of collections.frames.values()) {
+    if (frame.snapshot !== undefined) collections.frames.update(frame.id, (draft) => { delete draft.snapshot })
+  }
   collections.sessions.update(SESSION_ID, (draft) => {
     const branchId = draft.activeBranchId ?? DEFAULT_BRANCH_ID
     draft.maximizedCardId = null
@@ -1100,53 +1230,75 @@ export const createAppStore = async (
   const resolved: ResolvedPersistence = backend === undefined
     ? await resolvePersistence()
     : { backend, mode: backend.kind, degraded: false }
+  try {
+    const store = await initializeAppStore(resolved)
+    resolved.recordSuccessfulOpen?.()
+    return store
+  } catch (error) {
+    if (resolved.backend.kind === "opfs") {
+      try { await resolved.backend.close() } catch {
+        // Preserve the boot failure; close can repeat a failed durable flush.
+        console.warn("Smithers: closing the failed app store also failed; reload before retrying recovery.")
+      }
+    }
+    throw error
+  }
+}
+
+/** Ownership transfers to the returned store only after every boot step succeeds. */
+const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppStore> => {
   let resolvedBackend = resolved.backend
-  /*
-   * E14.2: the localStorage backend gets the version gate the OPFS backend
-   * gets from `schemaMismatchPolicy`. It runs here, before the first
-   * collection exists, because a collection reads its rows out of storage as
-   * soon as it is preloaded and TanStack never validates them.
-   */
+  /* Validate persisted rows before creating collections. Compatible older
+   * rows migrate; a newer store stays untouched. Only a successful open
+   * advances the version stamp. */
   const persistedLocally = storageOf(resolvedBackend)
   let transactional: TransactionalStorage | undefined
   if (persistedLocally !== undefined && resolvedBackend.kind === "localStorage") {
-    enforceSchemaVersion(persistedLocally)
+    enforceSchemaVersion(persistedLocally, { onMismatch: "validate" })
     /* Open recovers any interrupted localStorage commit and validates the
      * envelope before the first collection reads it. */
-    transactional = await openTransactionalStorage(persistedLocally)
+    transactional = await openTransactionalStorage(persistedLocally, { collections: PERSISTED_COLLECTION_SPECS })
+    persistedLocally.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
     resolvedBackend = { ...resolvedBackend, storage: transactional.storage }
   }
+  const collectionPersistence = createCollectionPersistence({
+    storage: storageOf(resolvedBackend) ?? memoryStorage(),
+    batch: resolvedBackend.kind === "opfs" ? resolvedBackend : transactional,
+    ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {})
+  })
+  const collectionBackend = { ...resolvedBackend, collectionPersistence }
   const collections: AppCollections = {
-    sessions: createSessionCollection(resolvedBackend),
-    messages: createMessageCollection(resolvedBackend),
-    connectors: createConnectorCollection(resolvedBackend),
-    connectorOperations: createConnectorOperationCollection(resolvedBackend),
-    worldDocuments: createWorldDocumentCollection(resolvedBackend),
-    cards: createCardCollection(resolvedBackend),
-    transitions: createTransitionCollection(resolvedBackend),
-    identitySessions: createIdentitySessionCollection(resolvedBackend),
-    billingAccounts: createBillingAccountCollection(resolvedBackend),
-    toasts: createToastCollection(resolvedBackend),
-    toolCalls: createToolCallCollection(resolvedBackend),
-    chainEvents: createChainEventCollection(resolvedBackend),
-    tabs: createTabCollection(resolvedBackend),
-    harnesses: createHarnessCollection(resolvedBackend),
-    agents: createAgentCollection(resolvedBackend),
-    repos: createRepoCollection(resolvedBackend),
-    pinnedRepos: createPinnedRepoCollection(resolvedBackend),
+    sessions: createSessionCollection(collectionBackend),
+    messages: createMessageCollection(collectionBackend),
+    connectors: createConnectorCollection(collectionBackend),
+    connectorOperations: createConnectorOperationCollection(collectionBackend),
+    worldDocuments: createWorldDocumentCollection(collectionBackend),
+    cards: createCardCollection(collectionBackend),
+    transitions: createTransitionCollection(collectionBackend),
+    identitySessions: createIdentitySessionCollection(collectionBackend),
+    billingAccounts: createBillingAccountCollection(collectionBackend),
+    toasts: createToastCollection(collectionBackend),
+    toolCalls: createToolCallCollection(collectionBackend),
+    chainEvents: createChainEventCollection(collectionBackend),
+    retiredChainLineages: createRetiredChainLineageCollection(collectionBackend),
+    tabs: createTabCollection(collectionBackend),
+    harnesses: createHarnessCollection(collectionBackend),
+    agents: createAgentCollection(collectionBackend),
+    repos: createRepoCollection(collectionBackend),
+    pinnedRepos: createPinnedRepoCollection(collectionBackend),
     repoTree: createRepoTreeCollection(),
-    starredTargets: createStarredTargetCollection(resolvedBackend),
-    workspaces: createWorkspaceCollection(resolvedBackend),
-    branches: createBranchCollection(resolvedBackend),
-    frames: createFrameCollection(resolvedBackend),
-    recommendations: createRecommendationCollection(resolvedBackend),
-    repositories: createRepositoriesCollection(resolvedBackend),
-    workingCopies: createWorkingCopyCollection(resolvedBackend),
-    cloudSessions: createCloudSessionCollection(resolvedBackend),
-    cloudWorkspaces: createCloudWorkspaceCollection(resolvedBackend),
-    changes: createChangeCollection(resolvedBackend),
-    linearIntegrations: createLinearIntegrationCollection(resolvedBackend),
-    githubAppStatuses: createGitHubAppStatusCollection(resolvedBackend)
+    starredTargets: createStarredTargetCollection(collectionBackend),
+    workspaces: createWorkspaceCollection(collectionBackend),
+    branches: createBranchCollection(collectionBackend),
+    frames: createFrameCollection(collectionBackend),
+    recommendations: createRecommendationCollection(collectionBackend),
+    repositories: createRepositoriesCollection(collectionBackend),
+    workingCopies: createWorkingCopyCollection(collectionBackend),
+    cloudSessions: createCloudSessionCollection(collectionBackend),
+    cloudWorkspaces: createCloudWorkspaceCollection(collectionBackend),
+    changes: createChangeCollection(collectionBackend),
+    linearIntegrations: createLinearIntegrationCollection(collectionBackend),
+    githubAppStatuses: createGitHubAppStatusCollection(collectionBackend)
   }
 
   await seed(collections)
@@ -1193,65 +1345,12 @@ export const createAppStore = async (
   }
 
   const persist = async (transaction: Parameters<typeof collections.sessions.utils.acceptMutations>[0]) => {
-    const fanOut = (): Promise<unknown[]> =>
-      Promise.all([
-        collections.sessions.utils.acceptMutations(transaction),
-        collections.messages.utils.acceptMutations(transaction),
-        collections.connectors.utils.acceptMutations(transaction),
-        collections.connectorOperations.utils.acceptMutations(transaction),
-        collections.worldDocuments.utils.acceptMutations(transaction),
-        collections.cards.utils.acceptMutations(transaction),
-        collections.transitions.utils.acceptMutations(transaction),
-        collections.identitySessions.utils.acceptMutations(transaction),
-        collections.billingAccounts.utils.acceptMutations(transaction),
-        collections.toasts.utils.acceptMutations(transaction),
-        collections.toolCalls.utils.acceptMutations(transaction),
-        collections.chainEvents.utils.acceptMutations(transaction),
-        collections.tabs.utils.acceptMutations(transaction),
-        collections.harnesses.utils.acceptMutations(transaction),
-        collections.agents.utils.acceptMutations(transaction),
-        collections.repos.utils.acceptMutations(transaction),
-        collections.pinnedRepos.utils.acceptMutations(transaction),
-        collections.repoTree.utils.acceptMutations(transaction),
-        collections.starredTargets.utils.acceptMutations(transaction),
-        collections.workspaces.utils.acceptMutations(transaction),
-        collections.branches.utils.acceptMutations(transaction),
-        collections.frames.utils.acceptMutations(transaction),
-        collections.recommendations.utils.acceptMutations(transaction),
-        collections.repositories.utils.acceptMutations(transaction),
-        collections.workingCopies.utils.acceptMutations(transaction),
-        collections.cloudSessions.utils.acceptMutations(transaction),
-        collections.cloudWorkspaces.utils.acceptMutations(transaction),
-        collections.changes.utils.acceptMutations(transaction),
-        collections.linearIntegrations.utils.acceptMutations(transaction),
-        collections.githubAppStatuses.utils.acceptMutations(transaction)
-      ])
-    /*
-     * One atomic commit per logical transition: SQLite batches row changes in
-     * one transaction; localStorage batches collection strings in one WAL
-     * envelope. Every projection changes or none does.
-     */
-    const batch = resolvedBackend.kind === "opfs" ? resolvedBackend : transactional
-    if (batch === undefined) {
-      await fanOut()
-      return
-    }
-    /*
-     * Between begin and commit every collection write accumulates in the
-     * backend's transaction, so every projection changes or none does
-     * (docs/persistence.md). The commit runs synchronously as the fan-out
-     * settles — deferring it even a microtask would leave the transaction
-     * uncommitted when the next dispatch mutates, which TanStack answers
-     * with an optimistic rollback/replay that revisits a revision.
-     */
-    batch.beginBatch()
-    try {
-      await fanOut()
-      batch.commitBatch()
-      if (resolvedBackend.kind === "opfs") await resolvedBackend.flush()
-    } catch (error) {
-      batch.abortBatch()
-      throw error
+    // The coordinator commits every durable projection before local-only sync
+    // confirms any of them. A failed commit can therefore roll back optimism
+    // without retaining failed rows in an adapter cache or the live collection.
+    await collectionPersistence.persist(transaction)
+    for (const collection of Object.values(collections)) {
+      collection.utils.acceptMutations(transaction)
     }
   }
 
@@ -1268,6 +1367,48 @@ export const createAppStore = async (
     transaction.mutate(() => {
       const activeWorkspaceId = current.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
       const activeBranchId = current.activeBranchId ?? DEFAULT_BRANCH_ID
+      const snapshot = (): FrameSnapshot => ({
+        revision,
+        messages: [...collections.messages.values()],
+        cards: [...collections.cards.values()],
+        worldDocuments: [...collections.worldDocuments.values()],
+        draft: collections.sessions.get(SESSION_ID)?.draft ?? "",
+        selectedWorldDocumentId: collections.sessions.get(SESSION_ID)?.selectedWorldDocumentId ?? null
+      })
+      const restoreSnapshot = (saved: FrameSnapshot): void => {
+        const messageIds = new Set(saved.messages.map((row) => row.id))
+        const cardIds = new Set(saved.cards.map((row) => row.id))
+        const worldIds = new Set(saved.worldDocuments.map((row) => row.id))
+        const messageKeys = [...collections.messages.keys()].filter((id) => !messageIds.has(id))
+        const cardKeys = [...collections.cards.keys()].filter((id) => !cardIds.has(id))
+        const worldKeys = [...collections.worldDocuments.keys()].filter((id) => !worldIds.has(id))
+        if (messageKeys.length > 0) collections.messages.delete(messageKeys)
+        if (cardKeys.length > 0) collections.cards.delete(cardKeys)
+        if (worldKeys.length > 0) collections.worldDocuments.delete(worldKeys)
+        const replace = (draft: object, row: object): void => {
+          const target = draft as Record<string, unknown>
+          for (const key of Object.keys(target)) if (!(key in row)) delete target[key]
+          Object.assign(draft, row)
+        }
+        for (const row of saved.messages) {
+          if (collections.messages.get(row.id) === undefined) collections.messages.insert(row)
+          else collections.messages.update(row.id, (draft) => replace(draft, row))
+        }
+        for (const row of saved.cards) {
+          if (collections.cards.get(row.id) === undefined) collections.cards.insert(row)
+          else collections.cards.update(row.id, (draft) => replace(draft, row))
+        }
+        for (const row of saved.worldDocuments) {
+          if (collections.worldDocuments.get(row.id) === undefined) collections.worldDocuments.insert(row)
+          else collections.worldDocuments.update(row.id, (draft) => replace(draft, row))
+        }
+        collections.sessions.update(SESSION_ID, (draft) => {
+          draft.draft = saved.draft
+          draft.selectedWorldDocumentId = saved.selectedWorldDocumentId !== undefined
+            ? saved.selectedWorldDocumentId
+            : saved.worldDocuments[0]?.id ?? null
+        })
+      }
       /*
        * The conversation every row written by this dispatch belongs to
        * (docs/LOCAL-APP.md "Tabs"): undefined, the one Smithers conversation.
@@ -1499,7 +1640,7 @@ export const createAppStore = async (
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
           const removedCards = new Set(cardKeys)
           const cardFrameKeys = [...collections.frames.values()]
-            .filter((frame) => frame.kind === "card" && frame.cardId !== null && removedCards.has(frame.cardId))
+            .filter((frame) => frame.branchId === activeBranchId && frame.kind === "card" && frame.cardId !== null && removedCards.has(frame.cardId))
             .map((frame) => frame.id)
           if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
           collections.sessions.update(SESSION_ID, (draft) => {
@@ -1522,20 +1663,46 @@ export const createAppStore = async (
           break
 
         case "conversation.cleared": {
-          // /clear (§2h): the sweep already kept what mattered in world
-          // notes; the chat clears and one calm line states what was kept.
-          const keys = [...collections.messages.keys()]
+          const branchId = transition.branchId
+          const rootId = rootFrameId(branchId)
+          if (collections.branches.has(branchId) || collections.frames.has(rootId)) {
+            throw new Error("The new conversation already exists")
+          }
+          const saved = { ...snapshot(), revision: current.revision }
+          if (transition.interruptedTurnId !== undefined) {
+            const responseId = `message-${transition.interruptedTurnId}-smithers`
+            const detail = "This turn was stopped when the conversation was archived."
+            const response = saved.messages.find((message) => message.id === responseId)
+            saved.messages = response === undefined
+              ? [...saved.messages, { id: responseId, role: "smithers", text: detail, status: "interrupted", createdAt, ordinal: nextOrdinal(collections), ...(conversationTabId === undefined ? {} : { tabId: conversationTabId }) }]
+              : saved.messages.map((message) => message.id === responseId ? { ...message, status: "interrupted" as const, statusDetail: detail } : message)
+          }
+          collections.branches.update(activeBranchId, (draft) => { draft.snapshot = saved })
+          collections.branches.insert({
+            id: branchId, workspaceId: activeWorkspaceId, title: `Conversation ${new Date(createdAt).toISOString().slice(0, 16).replace("T", " ")} UTC`,
+            parentBranchId: activeBranchId, forkedFromFrameId: rootFrameId(activeBranchId),
+            forkedAtRevision: current.revision, createdAt, revision
+          })
+          collections.frames.insert({
+            id: rootId, workspaceId: activeWorkspaceId, branchId, kind: "root", parentFrameId: null,
+            cardId: null, presentation: "embedded", stateRevision: revision, createdAt, updatedAt: createdAt, revision
+          })
+          for (const note of conversationNotes(transition.notes, saved.worldDocuments, activeBranchId, current.revision, branchId, revision, createdAt)) {
+            collections.worldDocuments.insert(note)
+          }
+          // Legacy conversation rows are recoverable data too. Only remove
+          // this conversation from the new branch's live projection. All
+          // outgoing frames remain owned by the archived branch.
+          const keys = [...collections.messages.values()].filter((row) => inConversation(row, conversationTabId)).map((row) => row.id)
           if (keys.length > 0) collections.messages.delete(keys)
-          const cardKeys = [...collections.cards.keys()]
+          const cardKeys = saved.cards.filter((row) => inConversation(row, conversationTabId)).map((row) => row.id)
           if (cardKeys.length > 0) collections.cards.delete(cardKeys)
-          const cardFrameKeys = [...collections.frames.values()].filter((frame) => frame.kind === "card").map((frame) => frame.id)
-          if (cardFrameKeys.length > 0) collections.frames.delete(cardFrameKeys)
+          const previous = framePath({ workspaceId: activeWorkspaceId, branchId: activeBranchId, frameId: rootFrameId(activeBranchId) })
+          const kept = transition.notes.length
           insertMessage({
             id: `message-${revision}-cleared`,
             role: "smithers",
-            text: transition.kept === 0
-              ? "Cleared — there was nothing new worth keeping."
-              : `Saved ${transition.kept} note${transition.kept === 1 ? "" : "s"} to ${WORLD_DISPLAY_NAME}. Cleared.`,
+            text: archiveNotice(kept, previous, resolved.mode === "memory"),
             status: "complete",
             createdAt,
             ordinal: 0
@@ -1545,7 +1712,10 @@ export const createAppStore = async (
             draft.phase = "idle"
             draft.composerOwner = "user"
             draft.maximizedCardId = null
-            draft.activeFrameId = rootFrameId(activeBranchId)
+            draft.activeBranchId = branchId
+            draft.activeFrameId = rootId
+            draft.turnTabId = null
+            draft.resetConfirmOpen = false
             draft.revision = revision
           })
           break
@@ -1566,6 +1736,7 @@ export const createAppStore = async (
             collections.frames.update(frame.id, (draft) => {
               draft.presentation = "maximized"
               draft.stateRevision = revision
+              draft.snapshot = snapshot()
               draft.updatedAt = createdAt
               draft.revision = revision
             })
@@ -1605,8 +1776,15 @@ export const createAppStore = async (
             branch?.workspaceId !== workspace.id ||
             frame?.workspaceId !== workspace.id ||
             frame.branchId !== branch.id ||
-            (frame.cardId !== null && collections.cards.get(frame.cardId) === undefined)
+            (frame.cardId !== null && collections.cards.get(frame.cardId) === undefined &&
+              !branch.snapshot?.cards.some((card) => card.id === frame.cardId))
           ) return
+          if (branch.id !== activeBranchId) {
+            if (current.phase === "responding") return
+            const outgoing = snapshot()
+            collections.branches.update(activeBranchId, (draft) => { draft.snapshot = outgoing })
+            if (branch.snapshot !== undefined) restoreSnapshot(branch.snapshot)
+          }
           if (current.activeFrameId !== undefined && current.activeFrameId !== frame.id && collections.frames.get(current.activeFrameId) !== undefined) {
             collections.frames.update(current.activeFrameId, (draft) => {
               draft.presentation = "embedded"
@@ -1639,6 +1817,9 @@ export const createAppStore = async (
             transition.branch.id !== transition.rootFrame.branchId ||
             transition.branch.id !== transition.selectedFrame.branchId
           ) return
+          if (current.phase === "responding") return
+          collections.branches.update(activeBranchId, (draft) => { draft.snapshot = snapshot() })
+          if (transition.branch.snapshot !== undefined) restoreSnapshot(transition.branch.snapshot)
           collections.branches.insert(transition.branch)
           collections.frames.insert(transition.rootFrame)
           if (transition.selectedFrame.id !== transition.rootFrame.id) collections.frames.insert(transition.selectedFrame)
@@ -1997,6 +2178,7 @@ export const createAppStore = async (
           const frame = ensureCardFrame(transition.card.id)
           collections.frames.update(frame.id, (draft) => {
             draft.stateRevision = revision
+            if (frame.snapshot !== undefined) draft.snapshot = snapshot()
             draft.updatedAt = createdAt
             draft.revision = revision
           })
@@ -2018,6 +2200,7 @@ export const createAppStore = async (
             if (frame.cardId !== transition.id || frame.branchId !== activeBranchId) continue
             collections.frames.update(frame.id, (draft) => {
               draft.stateRevision = revision
+              if (frame.snapshot !== undefined) draft.snapshot = snapshot()
               draft.updatedAt = createdAt
               draft.revision = revision
             })
@@ -2997,7 +3180,7 @@ export const createAppStore = async (
         createdAt
       })
       /*
-       * Retention (docs/persistence.md): the log collections compact inside
+       * Retention (docs/persistence.md): derived diagnostic logs compact inside
        * the appending transaction, so the bound is part of the atomic commit
        * and a crash can never leave a half-swept log.
        */
@@ -3013,12 +3196,9 @@ export const createAppStore = async (
         (record) => record.createdAt
       )
       if (staleToolCalls.length > 0) collections.toolCalls.delete(staleToolCalls)
-      const staleChainEvents = staleLogKeys(
-        [...collections.chainEvents.values()],
-        MAX_CHAIN_EVENT_RECORDS,
-        (record) => record.createdAt
-      )
-      if (staleChainEvents.length > 0) collections.chainEvents.delete(staleChainEvents)
+      // chainEvents is execution authority, not a debug tail. Deleting even
+      // a terminal lineage makes replay look new and can repeat its effects.
+      // Retain it until an explicit archive/tombstone protocol exists.
     })
 
     return transaction
@@ -3033,6 +3213,26 @@ export const createAppStore = async (
   // rejected boot rather than an unhandled rejection nobody sees.
   if (collections.sessions.get(SESSION_ID)?.phase === "responding") {
     await dispatch({ type: "session.turn.orphaned", actor: "system" }).isPersisted.promise
+  }
+
+  // A submission belongs to the previous controller's lifetime. Preserve
+  // its inputs, release the busy guard, and name the uncertain outcome so
+  // the user can check for a completed side effect before retrying.
+  for (const card of collections.cards.values()) {
+    if (card.kind !== "flow-form" || card.payload.submitting !== true) continue
+    await dispatch({
+      type: "card.updated",
+      actor: "system",
+      id: card.id,
+      patch: {
+        status: "error",
+        payload: {
+          ...card.payload,
+          submitting: false,
+          error: "Submission was interrupted. Check the result before submitting again."
+        }
+      }
+    }).isPersisted.promise
   }
 
   /*
@@ -3114,6 +3314,14 @@ export const createAppStore = async (
     session,
     worldStateSnapshot,
     agentContextSnapshot,
-    dispose: resolvedBackend.kind === "opfs" ? () => void resolvedBackend.close() : undefined
+    readRecovery: () => captureBrowserStorageRecovery({
+      session: resolved.mode,
+      localStorage: recoveryStorage(resolved.mode === "localStorage" ? persistedLocally : bootRecordStorage()),
+      sqlite: resolvedBackend.kind === "opfs"
+        ? resolvedBackend.readRecovery ?? (() => Promise.reject(new StorageRecoveryError("unreadable")))
+        : browserSqliteRecoveryReader(),
+      ...(resolved.mode === "memory" ? { memory: recoveryStorage(persistedLocally) } : {})
+    }),
+    dispose: resolvedBackend.kind === "opfs" ? () => resolvedBackend.close() : undefined
   }
 }

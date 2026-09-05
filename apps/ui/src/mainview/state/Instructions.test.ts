@@ -106,7 +106,7 @@ const bootstrapFor = (host: AppBootstrap["host"]): AppBootstrap =>
       host,
       version: "test",
       buildSha: "cloud",
-      capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: false, terminal: false }),
+      capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: false, terminal: false }),
       authFlow: "redirect",
       sandbox: null
     }
@@ -115,7 +115,7 @@ const bootstrapFor = (host: AppBootstrap["host"]): AppBootstrap =>
       host,
       version: "test",
       buildSha: "local",
-      capabilities: localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }),
+      capabilities: localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true }),
       authFlow: "native-handoff",
       sandbox: { platform: "darwin", mode: "enforced" }
     }

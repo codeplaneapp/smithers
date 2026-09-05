@@ -12,7 +12,7 @@ flow with three doors, close reasons and refusals verbatim.
 ## Design
 
 - Transport: the Bun tunnel `/api/cloud-ws/*` already relays workspace
-  terminal sockets to jjhub with the keychain PAT (`src/bun/server.ts`
+  terminal sockets to Smithers Cloud with the keychain PAT (`src/bun/server.ts`
   CloudWsBridge: segment guard, Origin policy, 64 KiB frame cap, refusal →
   44xx close codes via one recovery GET). Add an `lsp` branch: allow the
   `…/workspace/sessions/{id}/lsp` path, the `lsp` subprotocol, and raise the

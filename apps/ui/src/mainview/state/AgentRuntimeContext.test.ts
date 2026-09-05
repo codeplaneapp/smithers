@@ -230,7 +230,7 @@ describe("per-turn runtime context", () => {
         host: "local",
         version: "test",
         buildSha: "test",
-        capabilities: ["agent", "identity", "jjhub", "cloud.pat", "cloud.terminal"],
+        capabilities: ["agent", "identity", "cloud", "cloud.pat", "cloud.terminal"],
         authFlow: "both",
         sandbox: { platform: "darwin", mode: "enforced" }
       }
@@ -263,7 +263,7 @@ describe("per-turn runtime context", () => {
         host: "cloud",
         version: "test",
         buildSha: "cloud",
-        capabilities: ["agent", "identity", "jjhub"],
+        capabilities: ["agent", "identity", "cloud"],
         authFlow: "redirect",
         sandbox: null
       }

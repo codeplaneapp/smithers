@@ -43,6 +43,8 @@ import { nameOf, nativeOnly, recommendedNames } from "./registry"
 GlobalRegistrator.register()
 
 afterAll(async () => {
+  const { disposeCodeViewPool } = await import("@smthrs/ui/adapters/code-view")
+  disposeCodeViewPool()
   for (let tick = 0; tick < 3; tick += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
@@ -100,9 +102,9 @@ const localBootstrap = (capabilities: ReadonlyArray<RuntimeCapability>): AppBoot
 })
 
 /** The Worker with everything it can configure today (the W4 relay still off). */
-const WEB = cloudBootstrap(cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: false }))
+const WEB = cloudBootstrap(cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: false, browser: true }))
 /** The Bun server with a cloud upstream, the agent, identity and manual paths. */
-const NATIVE = localBootstrap(localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }))
+const NATIVE = localBootstrap(localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true, browser: true }))
 
 /** Every command state the recommendation rule distinguishes. */
 const STATES: ReadonlyArray<CommandState> = (["chat", "world", "connectors", "flows"] as const).flatMap((surface) =>
@@ -133,7 +135,8 @@ const seamsByFlow = (): Map<string, ReadonlySet<string>> => {
     actionSeam.set(match[1] as string, match[2] as string)
   }
   const seamFile = new Map<string, string>()
-  for (const match of controller.matchAll(/const (\w+Seam) = (create\w+Seam)\(/g)) {
+  // A principal pair wraps the same seam factory without changing its route family.
+  for (const match of controller.matchAll(/const (\w+Seam) = (?:actors\.pair\([^\n]*?=>\s*)?(create\w+Seam)\(/g)) {
     const imported = new RegExp(`import \\{[^}]*\\b${match[2]}\\b[^}]*\\} from "\\./seams/(\\w+)"`).exec(controller)
     if (imported?.[1] !== undefined) seamFile.set(match[1] as string, imported[1])
   }
@@ -282,7 +285,7 @@ describe("host parity — the web and native catalogs against the servers' own c
     const { web } = await registries
     const misclassified = web.commands.entries().filter((entry) => nativeOnly(entry.metadata)).map(nameOf)
     expect(misclassified).toEqual([])
-    // The either/or reads serve the web through jjhub, and are present.
+    // The either/or reads serve the web through Smithers Cloud, and are present.
     const names = web.commands.all().map((command) => command.name)
     expect(names).toContain("files.list")
     expect(names).toContain("files.read")
@@ -382,14 +385,14 @@ describe("host parity — the web and native catalogs against the servers' own c
 
   test("(c) workspace.terminal is present exactly when cloud.terminal is", async () => {
     const withRelay = await controllerFor(
-      cloudBootstrap(cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: false, terminal: true }))
+      cloudBootstrap(cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: false, terminal: true }))
     )
     const withoutRelay = await controllerFor(
-      cloudBootstrap(cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: false, terminal: false }))
+      cloudBootstrap(cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: false, terminal: false }))
     )
     const nativeOnline = await controllerFor(NATIVE)
     const nativeOffline = await controllerFor(
-      localBootstrap(localCapabilities({ agent: true, identity: false, jjhub: false, pathEntry: false }))
+      localBootstrap(localCapabilities({ agent: true, identity: false, cloud: false, pathEntry: false }))
     )
     const has = (controller: AppController): boolean => controller.commands.find("workspace.terminal") !== undefined
     expect(has(withRelay)).toBe(true)
@@ -418,8 +421,8 @@ describe("host parity — the web and native catalogs against the servers' own c
 
   test("drift: every capability the schema knows has a host row", () => {
     const everything = new Set<RuntimeCapability>([
-      ...cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: true }),
-      ...localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true })
+      ...cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: true, browser: true }),
+      ...localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true, browser: true })
     ])
     /*
      * Pinned orphans: capabilities the schema names that NO host emits today.
@@ -433,8 +436,8 @@ describe("host parity — the web and native catalogs against the servers' own c
 
   test("the Worker never claims a native door", () => {
     for (const identity of [true, false]) {
-      for (const jjhub of [true, false]) {
-        const emitted = cloudCapabilities({ identity, jjhub, agent: true, checkout: true, terminal: true })
+      for (const cloud of [true, false]) {
+        const emitted = cloudCapabilities({ identity, cloud, agent: true, checkout: true, terminal: true })
         expect(emitted.filter((capability) => capability.startsWith("local.") || capability === "cloud.pat")).toEqual([])
       }
     }
@@ -513,6 +516,8 @@ describe("host parity — the web and native catalogs against the servers' own c
     try {
       for (let tick = 0; tick < 600 && host.querySelector(".code-surface") === null; tick += 1) await new Promise((resolve) => setTimeout(resolve, 10))
       expect(host.querySelector(".code-surface")).not.toBeNull()
+      // This checks command bindings, not highlighting. The page's pool is
+      // explicitly disposed in afterAll, including unfinished initialization.
       const webNames = new Set(controller.commands.all().map((command) => command.name))
       const rendered = [
         ...new Set([
@@ -529,6 +534,7 @@ describe("host parity — the web and native catalogs against the servers' own c
       expect(host.querySelector('[data-kind="file"] [data-intel="unavailable"]')?.textContent).toContain("needs the native app")
     } finally {
       flushSync(() => root.unmount())
+      controller.dispose()
       host.remove()
     }
   })
@@ -563,6 +569,7 @@ describe("host parity — the web and native catalogs against the servers' own c
       expect(rendered.filter((name) => nativeOnlyNames.has(name))).toEqual([])
     } finally {
       flushSync(() => root.unmount())
+      controller.dispose()
       host.remove()
     }
   })

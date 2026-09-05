@@ -410,7 +410,7 @@ describe("the composer's + menu and surface pill", () => {
       "tab.harness",
       "agent.new"
     ])
-    // No jjhub on the local host: no flow.create, so no "New flow…" is offered.
+    // No Smithers Cloud on the local host: no flow.create, so no "New flow…" is offered.
     expect(controller.commands.find("flow.create")).toBeUndefined()
 
     // Add files… is honest about the host: no attach seam, one Smithers message, menu closed.

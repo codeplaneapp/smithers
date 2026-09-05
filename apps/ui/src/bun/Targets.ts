@@ -319,10 +319,13 @@ const VERB_BY_KIND: Readonly<Record<string, string>> = {
  * refuses that form there ("the bare-label form executes PACKAGE.ts targets;
  * this workspace has no WORKSPACE.ts"), so it runs `smithers-build <verb>
  * <label>` with the verb from the target's first kind. `--ui plain` goes on
- * BOTH forms: the parser reads the plain renderer's `//label  status  ms`
+ * BOTH forms, with an explicit human audience: the parser reads the plain renderer's `//label  status  ms`
  * lines, and the CLI's `auto` renderer picks `stream` (ANSI, no status
  * lines) whenever FORCE_COLOR reaches the child — which a Playwright
  * webserver, and any coloured terminal that launched the app, hands down.
+ * Piped output and inherited agent/CI markers otherwise silence successful
+ * progress. Failed runs then omit those targets and their totals entirely.
+ * stdin is ignored, so this output policy never enables interactive prompts.
  */
 export const runArgv = (
   cwd: string,
@@ -331,16 +334,16 @@ export const runArgv = (
   exists: (path: string) => boolean = existsSync
 ): Array<string> => {
   const packageMode = exists(join(cwd, "WORKSPACE.ts")) || exists(join(cwd, ".smithers", "WORKSPACE.ts"))
-  if (packageMode) return [label, "--ui", "plain"]
+  if (packageMode) return [label, "--audience", "human", "--ui", "plain"]
   const verb = kinds.map((kind) => VERB_BY_KIND[kind]).find((candidate) => candidate !== undefined) ?? "build"
-  return [verb, label, "--ui", "plain"]
+  return [verb, label, "--audience", "human", "--ui", "plain"]
 }
 
 /**
  * The argv of a pattern run: the verb over the pattern, on either authoring
  * surface (`smithers-build ci '//packages/...'` is how CI runs everything).
  */
-export const patternRunArgv = (verb: string, pattern: string): Array<string> => [verb, pattern, "--ui", "plain"]
+export const patternRunArgv = (verb: string, pattern: string): Array<string> => [verb, pattern, "--audience", "human", "--ui", "plain"]
 
 /**
  * The argv that PLANS one target (`--plan --format json`), under the same

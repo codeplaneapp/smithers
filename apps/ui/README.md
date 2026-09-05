@@ -1,71 +1,52 @@
-# React + Tailwind + Vite Electrobun Template
+# Smithers UI
 
-A fast Electrobun desktop app template with React, Tailwind CSS, and Vite for hot module replacement (HMR).
+The React renderer and Electrobun desktop host for Smithers. The native window
+loads the app from its authenticated loopback server, not `views://` or a Vite
+development origin. The browser build is also served by `apps/server`.
 
-## Getting Started
+## Development
 
-```bash
-# Install dependencies (pnpm workspace install, from the monorepo root)
+From the monorepo root, with the repository's Bun/pnpm toolchain installed:
+
+```sh
 pnpm install
-
-# Development without HMR (uses bundled assets)
-bun run dev
-
-# Development with HMR (recommended)
-bun run dev:hmr
-
-# Build for production
-bun run build
-
-# Build for production release
-bun run build:prod
+pnpm --filter smithers-ui start
 ```
 
-## How HMR Works
+`start` prepares the Electrobun devkit, builds the SPA, then launches the desktop
+app. `pnpm --filter smithers-ui dev` runs the native watch loop. For build-only
+work, use `build:web` for the SPA or `build:native` for the native package.
+The old template's `dev:hmr` and `build:prod` scripts do not exist.
 
-When you run `bun run dev:hmr`:
+## Verification
 
-1. **Vite dev server** starts on `http://localhost:5173` with HMR enabled
-2. **Electrobun** starts and detects the running Vite server
-3. The app loads from the Vite dev server instead of bundled assets
-4. Changes to React components update instantly without full page reload
-
-When you run `bun run dev` (without HMR):
-
-1. Electrobun starts and loads from `views://mainview/index.html`
-2. You need to rebuild (`bun run build`) to see changes
-
-## Project Structure
-
-This package (`smithers-ui`) is one of two apps in the monorepo. Code it used
-to own now lives nearby: `packages/rpc` publishes the wire contracts as the
-workspace package `@smthrs/rpc`, and `apps/server` holds the Cloudflare
-Worker. Runtime packages come from the monorepo's `packages/` tree as pnpm
-workspace links; there is no vendored `@smthrs` closure any more.
-
-```
-packages/
-└── rpc/                    # wire contracts (imported as "@smthrs/rpc/<Module>")
-apps/
-├── server/                 # Cloudflare Worker + wrangler.jsonc
-└── ui/                     # this package
-    ├── src/
-    │   ├── bun/            # Electrobun main process (index.ts, CloudAgent, LocalRepository)
-    │   ├── dev/            # AgentApi middleware for the vite dev/preview server
-    │   └── mainview/       # React renderer (App.tsx, main.tsx, index.html, index.css)
-    ├── scripts/            # e2e and live-check drivers
-    ├── electrobun.config.ts
-    ├── vite.config.ts
-    ├── tailwind.config.js
-    └── package.json
+```sh
+pnpm --filter smithers-ui typecheck
+pnpm --filter smithers-ui test
+pnpm --filter smithers-ui test:e2e
 ```
 
-## Customizing
+The unit/source suite does not automatically adopt personal host checkouts.
+Host-workspace integration cases require explicit opt-in and retain their run
+histories; see [build and verification](docs/LOCAL-APP.md#build-and-verification).
+The default Playwright host uses a temporary home/state directory, a chat stub,
+and no real harness discovery or credential-bearing shell environment. The
+real-harness browser cases require `SMITHERS_E2E_HOST_HARNESSES=1`; this permits
+reading local account state and launching installed harnesses. Real chat is a
+separate opt-in, `SMITHERS_CHAT_STUB=0`.
+Packaged native testing is a separate lane (`test:e2e:packaged`) with its own
+platform/network requirements.
 
-- **React components**: Edit files in `src/mainview/`
-- **Shared contracts**: Edit `packages/rpc/src/`, import as `@smthrs/rpc/<Module>`
-- **Dev-server API**: Edit `src/dev/AgentApi.ts`
-- **Tailwind theme**: Edit `tailwind.config.js`
-- **Vite settings**: Edit `vite.config.ts`
-- **Window settings**: Edit `src/bun/index.ts`
-- **App metadata**: Edit `electrobun.config.ts`
+## Code ownership
+
+- `src/mainview/`: chat, embedded surfaces, Flow registry, controller and store.
+- `src/mainview/chain/`: browser persistence, replay journal and recovery.
+- `src/bun/`: native host, authenticated local server, repositories, PTYs and LSP.
+- `packages/rpc/src/`: shared `@smthrs/rpc` wire contracts.
+- `packages/smithers/`: the new Flow, Harness, Journal and related runtime packages.
+- `apps/server/`: Cloudflare Worker and web host.
+
+Read [AGENTS.md](AGENTS.md) before changing interactions. The
+[local-app architecture](docs/LOCAL-APP.md) describes transports and native
+boundaries; [persistence](docs/persistence.md) describes storage, migration,
+archiving and private recovery files.

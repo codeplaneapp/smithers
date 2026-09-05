@@ -2,10 +2,13 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
-import { createAppController } from "../AppController"
+import { scopedControllers } from "../ControllerTestScope"
+import { trackDispatchCommits } from "../StoreTestScope"
 import type { AppServices } from "../AppController"
 import { repoKeyOf, repoTreeRowId } from "../AppState"
 import { createAppStore } from "../AppStore"
+
+const createAppController = scopedControllers()
 
 /*
  * The sidebar's file tree seam (RepoTreeSeam.ts) through the real command
@@ -44,8 +47,6 @@ const unavailableRepositories: NativeRepositories = {
 
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
-
-const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const localRepo = (id: string, name: string, path: string): Repo => ({
   id,
@@ -98,7 +99,7 @@ const treeBackend = () => {
 const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
   const backend = treeBackend()
   const storage = memoryStorage()
-  const store = await createAppStore({ kind: "localStorage", storage })
+  const { store, settle } = trackDispatchCommits(await createAppStore({ kind: "localStorage", storage }))
   const controller = createAppController(store, unavailableRepositories, unavailableAgent, {
     ...backend.services,
     bootstrap: {
@@ -111,9 +112,8 @@ const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
       sandbox: { platform: "darwin", mode: "enforced" }
     }
   })
-  store.dispatch({ type: "repos.loaded", actor: "system", repos: [...repos] })
-  await settled()
-  return { store, controller, storage, requests: backend.requests }
+  await store.dispatch({ type: "repos.loaded", actor: "system", repos: [...repos] }).isPersisted.promise
+  return { store, controller, storage, requests: backend.requests, settle }
 }
 
 describe("repo tree seam — one directory per request, the route's answer verbatim", () => {
@@ -213,10 +213,12 @@ describe("repo tree seam — one directory per request, the route's answer verba
   })
 
   test("the rows are collection state for this launch only: a store reopened over the same storage starts collapsed", async () => {
-    const { store, controller, storage } = await treeController()
+    const { store, controller, storage, settle } = await treeController()
     expect((await controller.commands.run("repo.tree", COPY)).status).toBe("executed")
     expect(store.collections.repoTree.size).toBe(1)
     expect([...store.collections.repoTree.values()][0]?.expanded).toBe(true)
+    await controller.dispose()
+    await settle()
     const reopened = await createAppStore({ kind: "localStorage", storage })
     expect(reopened.collections.repoTree.size).toBe(0)
     // Nothing under the tree's id ever reached the shared storage.

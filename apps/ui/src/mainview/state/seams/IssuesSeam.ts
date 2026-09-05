@@ -181,7 +181,7 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
   /**
    * GitHub's issues for `repo`, through the GitHub-source route, with the
    * read's provenance from plue's X-Metadata-* headers. A refusal answers
-   * no rows and the reason; the caller states it beside jjhub's own list.
+   * no rows and the reason; the caller states it beside Smithers Cloud's own list.
    */
   const readGithubIssues = async (
     repo: string,
@@ -348,10 +348,10 @@ export const createIssuesSeam = (ctx: SeamContext): IssuesSeam => {
       }
       const native = body.flatMap((entry) => {
         const parsed = parseListRow(entry)
-        return parsed === null ? [] : [{ ...parsed, source: "jjhub" as const }]
+        return parsed === null ? [] : [{ ...parsed, source: "smithers-cloud" as const }]
       })
       /*
-       * jjhub's /issues is the repository's OWN tracker and is correctly
+       * Smithers Cloud's /issues is the repository's OWN tracker and is correctly
        * empty for a repo mirrored from GitHub; the upstream issues live at
        * the GitHub-source route (synced store or live GitHub, per plue). One
        * list shows both, each row labeled with where it came from, and the

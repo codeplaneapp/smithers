@@ -1,3 +1,4 @@
+import { fileArgs } from "../flows/FileArgs"
 /*
  * The repo file cards: a directory listing ("file-list") whose rows open
  * /files.list or /files.read, and a file view ("file") rendered as a fenced
@@ -148,6 +149,7 @@ const shortId = (id: string): string => (id.length > 12 ? id.slice(0, 8) : id)
  */
 const FileCardHeader = (props: {
   readonly repo: string
+  readonly localRepoId?: string | undefined
   readonly path: string
   readonly address?: string | undefined
   readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
@@ -162,6 +164,7 @@ const FileCardHeader = (props: {
 
 export const FileCardAddressLine = ({
   repo,
+  localRepoId,
   path,
   address,
   readAt,
@@ -171,6 +174,7 @@ export const FileCardAddressLine = ({
   trailing
 }: {
   readonly repo: string
+  readonly localRepoId?: string | undefined
   readonly path: string
   readonly address?: string | undefined
   readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
@@ -183,7 +187,7 @@ export const FileCardAddressLine = ({
   // A working-copy read is pinned at the checkout's `@`, which is not the head by design: its drift is the origin chip's "N ahead", never "head moved".
   const moved = readAt?.source !== "working-copy" && head !== null && readAt?.commitId != null && head.commitId != null &&
     head.commitId !== readAt.commitId
-  const refreshArgs = `${path === "" ? "/" : path} ${repo}`
+  const refreshArgs = fileArgs(path === "" ? "/" : path, localRepoId ?? repo)
   return (
     <div>
       <p className="world-card-path">
@@ -217,6 +221,7 @@ const FileCardHeaderLive = ({
 }: {
   readonly controller: AppController
   readonly repo: string
+  readonly localRepoId?: string | undefined
   readonly path: string
   readonly address?: string | undefined
   readonly readAt?: { readonly changeId: string | null; readonly commitId: string | null; readonly source?: "head" | "working-copy" | undefined } | undefined
@@ -242,6 +247,7 @@ export const FileListCardBody = ({
     <div className="world-card-list world-card-panel">
       <FileCardHeader
         repo={repo}
+        localRepoId={card.payload.localRepoId}
         path={path}
         address={card.payload.address}
         readAt={card.payload.readAt}
@@ -264,7 +270,7 @@ export const FileListCardBody = ({
                       variant="ghost"
                       size="sm"
                       data-flow="files.list"
-                      onClick={() => onRunCommand("files.list", `${childPath(path, entry.name)} ${repo}`)}
+                      onClick={() => onRunCommand("files.list", fileArgs(childPath(path, entry.name), card.payload.localRepoId ?? repo))}
                     >
                       <Folder size={12} aria-hidden="true" />
                       <span className="world-card-title">{entry.name}</span>
@@ -275,7 +281,7 @@ export const FileListCardBody = ({
                       variant="ghost"
                       size="sm"
                       data-flow="files.read"
-                      onClick={() => onRunCommand("files.read", `${childPath(path, entry.name)} ${repo}`)}
+                      onClick={() => onRunCommand("files.read", fileArgs(childPath(path, entry.name), card.payload.localRepoId ?? repo))}
                     >
                       <FileText size={12} aria-hidden="true" />
                       <span className="world-card-title">{entry.name}</span>
@@ -321,6 +327,7 @@ export const FileCardBody = ({
     <div className="world-card-list world-card-panel" data-line={card.payload.line}>
       <FileCardHeader
         repo={card.payload.repo}
+        localRepoId={card.payload.localRepoId}
         path={card.payload.path}
         address={card.payload.address}
         readAt={card.payload.readAt}

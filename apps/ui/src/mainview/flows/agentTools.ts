@@ -135,6 +135,9 @@ export const executeAgentToolCall = async (
   } catch {
     return "failed: the commands tool arguments were not valid JSON"
   }
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return "failed: the commands tool arguments must be an object"
+  }
   if (input.action === "list") {
     return JSON.stringify({
       state: registry.state(),

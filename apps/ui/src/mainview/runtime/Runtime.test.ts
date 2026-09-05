@@ -8,7 +8,7 @@ const cloud: AppBootstrap = {
   host: "cloud",
   version: "1",
   buildSha: "abc",
-  capabilities: ["agent", "identity", "jjhub"],
+  capabilities: ["agent", "identity", "cloud"],
   authFlow: "redirect",
   sandbox: null
 }
@@ -25,7 +25,7 @@ describe("runtime composition", () => {
     })
     expect(runtime.backend.agent?.available).toBe(true)
     expect(runtime.backend.identity).toEqual({ authFlow: "redirect" })
-    expect(runtime.backend.jjhub).toEqual({ available: true })
+    expect(runtime.backend.cloud).toEqual({ available: true })
     expect(runtime.backend.local).toBeUndefined()
     expect(runtime.shell.kind).toBe("browser")
     await runtime.backend.agent?.cancelTurn("run")

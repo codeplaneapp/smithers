@@ -92,7 +92,7 @@ const NATIVE = await controllerFor({
   host: "local",
   version: "test",
   buildSha: "local",
-  capabilities: localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }),
+  capabilities: localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true }),
   authFlow: "native-handoff",
   sandbox: { platform: "darwin", mode: "enforced" }
 })
@@ -102,7 +102,7 @@ const WEB_WITHOUT_RELAY = await controllerFor({
   host: "cloud",
   version: "test",
   buildSha: "cloud",
-  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: false, terminal: false }),
+  capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: false, terminal: false }),
   authFlow: "redirect",
   sandbox: null
 })
@@ -245,10 +245,10 @@ describe("the workspace card", () => {
   })
 
   test("the ssh host is a copyable line; without one there is no line and no button", () => {
-    const { host, commands } = render(workspaceCard({ sshHost: "vm-77@ssh.jjhub.tech" }))
-    expect(host.textContent).toContain("vm-77@ssh.jjhub.tech")
-    click(host, "Copy vm-77@ssh.jjhub.tech")
-    expect(commands[0]).toEqual({ name: "chat.copy-message", args: "vm-77@ssh.jjhub.tech" })
+    const { host, commands } = render(workspaceCard({ sshHost: "vm-77@ssh.smithers-cloud.test" }))
+    expect(host.textContent).toContain("vm-77@ssh.smithers-cloud.test")
+    click(host, "Copy vm-77@ssh.smithers-cloud.test")
+    expect(commands[0]).toEqual({ name: "chat.copy-message", args: "vm-77@ssh.smithers-cloud.test" })
     host.remove()
     const without = render(workspaceCard())
     expect([...without.host.querySelectorAll("button")].some((button) => button.getAttribute("aria-label")?.startsWith("Copy "))).toBe(false)
@@ -382,14 +382,14 @@ describe("the workspace card", () => {
         facet: "services",
         services: [
           { name: "postgres", state: "running", port: 5432, url: null },
-          { name: "web", state: "running", port: 3000, url: "https://ws-1.workspaces.jjhub.tech" }
+          { name: "web", state: "running", port: 3000, url: "https://ws-1.workspaces.smithers-cloud.test" }
         ]
       })
     )
     // The row is the name and the state pill, adjacent: "postgres" then its state.
     expect(host.textContent).toContain("postgresRunning")
     expect(host.textContent).toContain("port 5432")
-    expect(host.textContent).toContain("https://ws-1.workspaces.jjhub.tech")
+    expect(host.textContent).toContain("https://ws-1.workspaces.smithers-cloud.test")
     click(host, "Snapshots")
     expect(commands[0]).toEqual({ name: "workspace.facet", args: "ws-1 snapshots" })
     host.remove()
@@ -611,13 +611,13 @@ describe("the workspace card's desktop facet", () => {
         source: ".smithers/environment.nix",
         revision: "b3f21c9d4e5a6b7c",
         closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-        image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+        image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
       },
       desktop: { streamUrl: "/api/workspaces/ws-1/desktop/stream", session: null },
       ...overrides
     })
 
-  const streamUrl = "https://api.jjhub.tech/api/workspaces/ws-1/desktop/dtok-8f3a2b1c/vnc.html?autoconnect=1"
+  const streamUrl = "https://api.smithers-cloud.test/api/workspaces/ws-1/desktop/dtok-8f3a2b1c/vnc.html?autoconnect=1"
 
   const holdStream = (expiresAt: string | null = "2026-09-03T09:12:00Z", url = streamUrl): void =>
     holdDesktopStream({ workspaceId: "ws-1", url, sessionId: "dsess-1", expiresAt })
@@ -777,7 +777,7 @@ describe("the workspace card's environment provenance", () => {
             source: ".smithers/environment.nix",
             revision: null,
             closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-            image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+            image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
           }
         }).payload
       )
@@ -824,7 +824,7 @@ describe("the workspace card's environment provenance", () => {
             source: ".smithers/environment.nix",
             revision: null,
             closureHash: null,
-            image: "registry.jjhub.tech/environments/base"
+            image: "registry.smithers-cloud.test/environments/base"
           }
         }).payload
       )
@@ -839,7 +839,7 @@ describe("the workspace card's environment provenance", () => {
           source: ".smithers/environment.nix",
           revision: null,
           closureHash: "9f2b1c0d4e5a6b7c",
-          image: "registry.jjhub.tech/environments/base:nixos-2405"
+          image: "registry.smithers-cloud.test/environments/base:nixos-2405"
         }
       })
     )
@@ -909,7 +909,7 @@ describe("the environment images card", () => {
           source: ".smithers/environment.nix",
           sourceRevision: "b3f21c9d4e5a6b7c",
           closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-          image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
+          image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
           status: "ready",
           platformBase: false,
           coldPull: false
@@ -923,7 +923,7 @@ describe("the environment images card", () => {
     /* The shared StatusPill title-cases plue's own word. */
     expect(text).toContain("Ready")
     // The whole registry path is never printed — the tag is what identifies the build.
-    expect(text).not.toContain("registry.jjhub.tech")
+    expect(text).not.toContain("registry.smithers-cloud.test")
     expect(text).not.toContain("cold pull")
     host.remove()
   })
@@ -937,7 +937,7 @@ describe("the environment images card", () => {
           source: "platform",
           sourceRevision: null,
           closureHash: "1122334455667788",
-          image: "registry.jjhub.tech/environments/base:nixos-2405",
+          image: "registry.smithers-cloud.test/environments/base:nixos-2405",
           status: "building",
           platformBase: true,
           coldPull: true

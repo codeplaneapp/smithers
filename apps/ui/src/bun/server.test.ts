@@ -49,7 +49,8 @@ beforeAll(async () => {
         ...deps,
         // A plain shell with the sandbox off: the seatbelt profile is Sandbox.test.ts's subject.
         shell: "/bin/sh",
-        home: tmpdir(),
+        home: dist,
+        env: {},
         sandboxHost: { platform: "linux", disabled: true, log: () => {} },
         killGraceMs: 300,
         log: () => {}
@@ -178,7 +179,7 @@ describe("the local origin", () => {
     expect(sessionId).toMatch(/^pty-/)
     const listed = (await (await apiFetch("/api/pty")).json()) as { sessions: Array<Record<string, unknown>> }
     expect(listed.sessions.map((session) => session.sessionId)).toEqual([sessionId])
-    expect(listed.sessions[0]).toMatchObject({ kind: "terminal", alive: true, cwd: tmpdir() })
+    expect(listed.sessions[0]).toMatchObject({ kind: "terminal", alive: true, cwd: dist })
 
     const socket = new WebSocket(`${server.origin.replace("http", "ws")}/ws`, server.websocketProtocol)
     await new Promise<void>((resolve, reject) => {
@@ -209,6 +210,7 @@ describe("the local origin", () => {
     expect(tail.output).toContain("hi-from-pty")
     expect(tail.output).not.toContain("\u001b")
     expect((await apiFetch(`/api/pty/${sessionId}/output?tail=-1`)).status).toBe(400)
+    expect((await apiFetch(`/api/pty/${sessionId}/output?tail=9007199254740992`)).status).toBe(400)
     expect((await apiFetch("/api/pty/nope/output")).status).toBe(404)
 
     const resized = await apiFetch(`/api/pty/${sessionId}/resize`, {
@@ -468,13 +470,13 @@ describe("the local origin", () => {
   })
 })
 
-describe("the jjhub cloud seam", () => {
+describe("the Smithers Cloud seam", () => {
   test("offline answers 501 like the identity stub, and the session is honestly signed-out", async () => {
     // Offline the host claims neither cloud door: the bootstrap is the shared
-    // table (@smthrs/rpc/HostCapabilities) for a launch with no jjhub upstream.
+    // table (@smthrs/rpc/HostCapabilities) for a launch with no Smithers Cloud upstream.
     const bootstrap = (await (await apiFetch("/api/bootstrap")).json()) as { capabilities: Array<string> }
     expect(bootstrap.capabilities).toEqual(
-      localCapabilities({ agent: true, identity: false, jjhub: false, pathEntry: true })
+      localCapabilities({ agent: true, identity: false, cloud: false, pathEntry: true })
     )
     expect((await apiFetch("/api/cloud/api/user/repos")).status).toBe(501)
     expect((await apiFetch("/api/cloud-auth/start", {
@@ -553,7 +555,7 @@ describe("the jjhub cloud seam", () => {
           ? new Response(JSON.stringify([{ full_name: "will/smithers" }]), {
             headers: {
               "content-type": "application/json",
-              "set-cookie": "cloud_session=sealed; Domain=api.jjhub.tech; Path=/; Secure; HttpOnly"
+              "set-cookie": "cloud_session=sealed; Domain=api.smithers-cloud.test; Path=/; Secure; HttpOnly"
             }
           })
           : new Response("not found", { status: 404 })
@@ -582,9 +584,9 @@ describe("the jjhub cloud seam", () => {
       const bootstrap = (await (await fetch(`${proxied.origin}/api/bootstrap`, {
         headers: { [LOCAL_SESSION_HEADER]: proxied.sessionToken }
       })).json()) as { capabilities: Array<string> }
-      // The same table the parity matrix reads: a jjhub upstream opens both cloud doors.
+      // The same table the parity matrix reads: a Smithers Cloud upstream opens both cloud doors.
       expect(bootstrap.capabilities).toEqual(
-        localCapabilities({ agent: true, identity: false, jjhub: true, pathEntry: false })
+        localCapabilities({ agent: true, identity: false, cloud: true, browser: true, pathEntry: false })
       )
 
       const response = await fetch(`${proxied.origin}/api/cloud/api/user/repos?per_page=1`, {

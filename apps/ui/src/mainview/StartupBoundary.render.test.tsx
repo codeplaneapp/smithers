@@ -2,9 +2,11 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
+import type { Root } from "react-dom/client"
 import { MountedSignal, StartupErrorBoundary } from "./StartupBoundary"
 
 GlobalRegistrator.register()
+const roots = new Set<Root>()
 
 afterAll(async () => {
   // React's scheduler finishes a commit in a task of its own; unregistering the
@@ -14,13 +16,29 @@ afterAll(async () => {
 })
 
 afterEach(() => {
+  flushSync(() => {
+    for (const root of roots) root.unmount()
+  })
+  roots.clear()
   document.body.textContent = ""
 })
 
 const mount = (children: React.ReactNode): void => {
   const host = document.createElement("div")
   document.body.append(host)
-  flushSync(() => createRoot(host).render(children))
+  const root = createRoot(host)
+  roots.add(root)
+  flushSync(() => root.render(children))
+}
+
+const withExpectedReactError = (run: () => void): void => {
+  const original = console.error
+  console.error = () => {}
+  try {
+    run()
+  } finally {
+    console.error = original
+  }
 }
 
 /*
@@ -40,14 +58,13 @@ describe("the startup error boundary", () => {
    */
   test("renders the startup panel and reports the failure", () => {
     let reported: unknown
-    const consoleError = console.error
-    console.error = () => {}
-    mount(
-      <StartupErrorBoundary onError={(error) => void (reported = error)}>
-        <Throws error={new Error("create app store: opfs unavailable")} />
-      </StartupErrorBoundary>
+    withExpectedReactError(() =>
+      mount(
+        <StartupErrorBoundary onError={(error) => void (reported = error)}>
+          <Throws error={new Error("create app store: opfs unavailable")} />
+        </StartupErrorBoundary>
+      )
     )
-    console.error = consoleError
     expect(document.body.textContent).toContain("Smithers failed to start")
     expect(document.body.textContent).toContain("opfs unavailable")
     expect(document.body.textContent).toContain("Reload to try again")
@@ -79,15 +96,14 @@ describe("the mounted signal", () => {
 
   test("never reports a mount when the tree it sits in fails first", () => {
     let mounted = 0
-    const consoleError = console.error
-    console.error = () => {}
-    mount(
-      <StartupErrorBoundary onError={() => {}}>
-        <MountedSignal onMounted={() => void (mounted += 1)} />
-        <Throws error={new Error("boot rejected")} />
-      </StartupErrorBoundary>
+    withExpectedReactError(() =>
+      mount(
+        <StartupErrorBoundary onError={() => {}}>
+          <MountedSignal onMounted={() => void (mounted += 1)} />
+          <Throws error={new Error("boot rejected")} />
+        </StartupErrorBoundary>
+      )
     )
-    console.error = consoleError
     expect(mounted).toBe(0)
     expect(document.body.textContent).toContain("Smithers failed to start")
   })

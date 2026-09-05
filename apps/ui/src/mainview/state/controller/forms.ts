@@ -205,7 +205,25 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const draft = draftFrom(fields, given)
     const resolved = withOptions(fields, draft)
     const cardId = formCardId(request.name)
+    // A human's menu action now continues in the form. Release the menu's
+    // backdrop through the same transitions used by its close gestures.
+    // Agent-created forms do not dismiss chrome the human is using.
+    if (request.via === "user" && ctx.commandActor === "user") {
+      const session = store.session()
+      const menus = [
+        ["tab.menu.toggled", session.tabMenuOpen],
+        ["add-menu.toggled", session.addMenuOpen],
+        ["connect-menu.toggled", session.connectMenuOpen],
+        ["surfaces-menu.toggled", session.surfacesMenuOpen]
+      ] as const
+      for (const [type, open] of menus) {
+        if (open === true) store.dispatch({ type, actor: "user", open: false })
+      }
+    }
     const existing = collections.cards.get(cardId)
+    if (existing?.kind === "flow-form" && existing.payload.submitting === true) {
+      return { cardId, missing: missingFields(existing.payload.fields, existing.payload.draft) }
+    }
     store.dispatch({
       type: "card.upsert",
       actor: ctx.commandActor,
@@ -249,6 +267,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const card = formCard(cardId)
     if (card === undefined) return `There is no form card ${cardId}.`
     if (card.status === "acted") return `The form ${cardId} was already submitted.`
+    if (card.payload.submitting === true) return `The form ${cardId} is being submitted.`
     const field = card.payload.fields.find((candidate) => candidate.name === name)
     if (field === undefined) return `The form has no field ${name}; its fields are ${card.payload.fields.map((candidate) => candidate.name).join(", ")}.`
     const value = raw.trim()
@@ -291,6 +310,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const card = formCard(cardId)
     if (card === undefined) return `There is no form card ${cardId}.`
     if (card.status === "acted") return `The form ${cardId} was already submitted.`
+    if (card.payload.submitting === true) return `The form ${cardId} is being submitted.`
     const missing = missingFields(card.payload.fields, card.payload.draft)
     if (missing.length > 0) {
       const labels = card.payload.fields.filter((field) => missing.includes(field.name)).map((field) => field.label)
@@ -301,7 +321,10 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const { flow, via } = card.payload
     const entry = ctx.commands.find(flow)
     if (entry === undefined) return `/${flow} is not available here.`
-    const args = assembleArgs(card.payload.fields, entry.metadata.form, { ...card.payload.given, ...card.payload.draft })
+    // Represented fields belong to the draft, including an explicit clear.
+    const represented = new Set(card.payload.fields.map((field) => field.name))
+    const unrepresented = Object.fromEntries(Object.entries(card.payload.given).filter(([name]) => !represented.has(name)))
+    const args = assembleArgs(card.payload.fields, entry.metadata.form, { ...unrepresented, ...card.payload.draft })
     const actor = ctx.commandActor
     /*
      * The continuation keeps the asker's actor: an agent-rendered form runs
@@ -310,18 +333,23 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
      * never launder an act through a human's form: its own call is the agent's.
      */
     const asAgent = via === "agent" || actor === "smithers"
-    const outcome = asAgent
-      ? await ctx.commands.runForAgent(flow, args === "" ? undefined : args)
-      : await ctx.commands.run(flow, args === "" ? undefined : args)
-    ctx.commandActor = actor
+    patch(card, { ...card.payload, submitting: true }, "active")
+    let outcome: CommandOutcome
+    try {
+      outcome = asAgent
+        ? await ctx.commands.runForAgent(flow, args === "" ? undefined : args)
+        : await ctx.commands.run(flow, args === "" ? undefined : args)
+    } catch (cause) {
+      outcome = { status: "failed", error: cause instanceof Error ? cause.message : String(cause) }
+    }
     const current = formCard(cardId) ?? card
     if (outcome.status === "executed") {
       const { error: _dropped, ...payload } = current.payload
-      patch(current, payload, "acted")
+      patch(current, { ...payload, submitting: false }, "acted")
       return { value: outcome.value ?? `submitted /${flow}${args === "" ? "" : ` ${args}`}` }
     }
     const error = describe(outcome)
-    patch(current, { ...current.payload, error }, "error")
+    patch(current, { ...current.payload, submitting: false, error }, "error")
     // The card carries the refusal for the human; the agent reads it as its result.
     return actor === "smithers" ? error : undefined
   }
@@ -330,6 +358,7 @@ export const createFormsController = (ctx: ControllerContext, deps: FormsControl
     const card = collections.cards.get(cardId)
     if (card === undefined) return `There is no card ${cardId}.`
     if (card.kind !== "flow-form") return `/card.dismiss dismisses form cards; ${cardId} is a ${card.kind} card.`
+    if (card.payload.submitting === true) return `The form ${cardId} is being submitted.`
     store.dispatch({ type: "card.removed", actor: ctx.commandActor, id: cardId })
   }
 

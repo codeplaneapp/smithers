@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
-import { existsSync, rmSync, writeFileSync } from "node:fs"
-import { homedir } from "node:os"
-import { join } from "node:path"
+import { execFileSync } from "node:child_process"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, join, resolve } from "node:path"
+import { localApiGet, localApiPost } from "./localApi"
 
 /*
  * The target-graph feature end to end against the REAL backend — no fixture
@@ -12,7 +14,7 @@ import { join } from "node:path"
  * loader against a real workspace on this machine.
  *
  * The whole flow, in one session, in the order a human does it:
- *   open the repo → show graph → focus a node → run //src:typeCheck →
+ *   open the repo → list targets → show graph → focus a node → run //:hello →
  *   watch the overlay and the timeline settle → open history → replay with
  *   the scrubber → touch a file and show affected → show ci.
  *
@@ -21,17 +23,18 @@ import { join } from "node:path"
  * cannot cover is the native window chrome and the OS folder picker, which
  * is why the repository is opened through the window.prompt fallback.
  *
- * Runs execute targets, so they run in ~/artsy-e2e/force — a clone. The
- * read-only checkout at ~/artsy is never written to by this spec.
+ * The backend loads a unique temporary copy of the checked-in repo-plugin
+ * workspace. Its hello target needs no network or installed dependencies;
+ * tracked scratch and CI files exercise the real git and YAML readers.
  */
 
 test.skip(process.env.SMITHERS_CHAT_STUB === "0", "the stub suite; the real endpoint is the manual proof")
 
-const FORCE_E2E = join(homedir(), "artsy-e2e", "force")
-const RUNS_DIR = join(FORCE_E2E, ".flows", "ui", "runs")
-const SCRATCH = join(FORCE_E2E, "src", "smithers-e2e-affected.ts")
+const FIXTURE = resolve(__dirname, "../fixtures/repo-plugin")
+let ownedRoot: string | undefined
+let openedRepoPath: string | undefined
 
-/* A real loader run against a real monorepo; nothing here finishes quickly. */
+/* Leave time for a cold real loader while keeping the workspace small. */
 const SLOW = 180_000
 test.setTimeout(600_000)
 
@@ -58,31 +61,57 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test.afterAll(() => {
-  rmSync(SCRATCH, { force: true })
-  rmSync(RUNS_DIR, { recursive: true, force: true })
+test.afterEach(async ({ page, request }) => {
+  try {
+    if (openedRepoPath !== undefined) {
+      const listed = await localApiGet(page, request, "/api/repos")
+      if (listed.ok()) {
+        const { repos } = (await listed.json()) as { repos: Array<{ id: string; path: string }> }
+        const opened = repos.find((repo) => repo.path === openedRepoPath)
+        if (opened !== undefined) await localApiPost(page, request, "/api/repo/close", { repoId: opened.id })
+      }
+    }
+  } finally {
+    openedRepoPath = undefined
+    if (ownedRoot !== undefined) rmSync(ownedRoot, { recursive: true, force: true })
+    ownedRoot = undefined
+  }
 })
 
 test("the whole target-graph flow against the real backend", async ({ page }) => {
-  test.skip(!existsSync(join(FORCE_E2E, "PACKAGE.ts")), `${FORCE_E2E} is not on this machine`)
-  rmSync(RUNS_DIR, { recursive: true, force: true })
-  rmSync(SCRATCH, { force: true })
+  ownedRoot = realpathSync(mkdtempSync(join(tmpdir(), "smithers-target-graph-e2e-")))
+  const repository = join(ownedRoot, "repo-plugin-fixture")
+  cpSync(FIXTURE, repository, {
+    recursive: true,
+    filter: (path) => ![".git", ".flows", "node_modules"].includes(basename(path))
+  })
+  const runsDir = join(repository, ".flows", "ui", "runs")
+  const scratch = join(repository, "smithers-e2e-affected.ts")
+  writeFileSync(scratch, "export const smithersE2eAffected = false\n")
+  writeFileSync(join(repository, ".gitignore"), ".flows/\n")
+  mkdirSync(join(repository, ".github", "workflows"), { recursive: true })
+  writeFileSync(join(repository, ".github", "workflows", "fixture.yml"), [
+    "name: fixture-ci", "on: [push]", "jobs:", "  hello:", "    runs-on: ubuntu-latest",
+    "    steps:", "      - run: smithers-build //:hello", ""
+  ].join("\n"))
+  execFileSync("git", ["init", "-q"], { cwd: repository })
+  execFileSync("git", ["add", "-A"], { cwd: repository })
+  execFileSync("git", ["-c", "user.email=e2e@smithers.sh", "-c", "user.name=e2e", "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture"], { cwd: repository })
 
   await page.goto("/")
-  page.once("dialog", (dialog) => void dialog.accept(FORCE_E2E))
+  openedRepoPath = repository
+  page.once("dialog", (dialog) => void dialog.accept(repository))
   await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
-  await expect(card(page, "repo")).toBeVisible({ timeout: SLOW })
-  /*
-   * Opening a repository auto-loads its targets, which spawns the loader.
-   * Wait for that to land before asking for the graph: a human watches the
-   * repo finish opening, and issuing both at once makes two loader processes
-   * fight for the same cores, which is a property of this spec rather than
-   * of the product.
-   */
+  await expect(page.getByTestId("composer-repo-trigger")).toHaveText("repo-plugin-fixture", { timeout: SLOW })
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("title", repository)
+  // Opening selects the working copy silently. Target discovery is its own act.
+  await expect(card(page, "repo")).toHaveCount(0)
+  await expect(card(page, "targets")).toHaveCount(0)
+  await command(page, "/target.list")
   const targets = card(page, "targets")
   await expect(targets).toBeVisible({ timeout: SLOW })
-  await expect.poll(() => targets.locator("[data-target-row]").count(), { timeout: SLOW }).toBeGreaterThan(0)
+  await expect(targets.locator('[data-target-row="//:hello"]')).toBeVisible({ timeout: SLOW })
 
   // 1. The typed DAG, loaded by the real loader from the real declarations.
   await command(page, "/target.graph")
@@ -92,7 +121,7 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
   /* A real workspace, not a fixture: the loader finds the whole graph. */
   const counts = await graph.locator(".graph-card-counts").textContent()
   const targetCount = Number(/(\d+) targets/.exec(counts ?? "")?.[1] ?? "0")
-  expect(targetCount).toBeGreaterThanOrEqual(80)
+  expect(targetCount).toBeGreaterThanOrEqual(1)
   /* The DAG is PAINTED, not merely mounted. */
   const canvasBox = await graph.locator(".graph-card-canvas").boundingBox()
   expect(canvasBox?.height ?? 0).toBeGreaterThan(200)
@@ -107,14 +136,14 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
   expect(painted).toBeGreaterThan(0)
 
   // 2. Focus a node: the drawer shows the plan facts the planner really returned.
-  await command(page, "/target.graph //src:typeCheck")
-  const drawer = graph.locator("[data-testid=\"graph-drawer-//src:typeCheck\"]")
+  await command(page, "/target.graph //:hello")
+  const drawer = graph.locator("[data-testid=\"graph-drawer-//:hello\"]")
   await expect(drawer).toBeVisible({ timeout: SLOW })
-  await expect(drawer.locator(".graph-drawer-label")).toHaveText("//src:typeCheck")
+  await expect(drawer.locator(".graph-drawer-label")).toHaveText("//:hello")
   /* A rule the loader named, not a placeholder. */
   await expect(drawer.locator(".graph-drawer-fact-name").first()).toBeVisible()
   const drawerText = await drawer.textContent()
-  expect(drawerText).toContain("//src")
+  expect(drawerText).toContain("Shell.Test")
 
   // 3. Run the target for real, from the drawer's own Run button — the
   //    affordance a human actually clicks, which carries the repository id
@@ -145,13 +174,13 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
     .toMatch(/^(done|failed)$/)
 
   // 4. History: the run it just executed is recorded, on disk, in this repo.
-  await expect.poll(() => existsSync(RUNS_DIR), { timeout: SLOW }).toBe(true)
+  await expect.poll(() => existsSync(runsDir), { timeout: SLOW }).toBe(true)
   await command(page, "/target.history")
   const history = card(page, "run-history")
   await expect(history).toBeVisible({ timeout: SLOW })
   const rows = history.locator("[data-run-row]")
   await expect.poll(() => rows.count(), { timeout: SLOW }).toBeGreaterThan(0)
-  await expect(rows.first()).toContainText("//src:typeCheck")
+  await expect(rows.first()).toContainText("//:hello")
 
   // 5. Replay: selecting the row rebuilds the timeline from the recording.
   await history.locator("[data-run-row] .run-history-select").first().click()
@@ -160,7 +189,7 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
   const timelineRows = timeline.locator("[data-timeline-row]")
   await expect.poll(() => timelineRows.count(), { timeout: SLOW }).toBeGreaterThan(0)
   /* The rows are the labels the run really touched. */
-  await expect(timeline.locator("[data-timeline-row=\"//src:typeCheck\"]")).toBeVisible()
+  await expect(timeline.locator("[data-timeline-row=\"//:hello\"]")).toBeVisible()
 
   // 6. The scrubber is time travel: dragging to the start empties the Gantt.
   const scrubber = timeline.locator("[data-testid^=\"run-timeline-scrubber-\"]")
@@ -194,7 +223,7 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
   await expect.poll(() => timelineRows.count(), { timeout: 30_000 }).toBe(settledRows)
 
   // 7. Affected: a real edit to a real file, read through the real git diff.
-  writeFileSync(SCRATCH, "export const smithersE2eAffected = true\n")
+  writeFileSync(scratch, "export const smithersE2eAffected = true\n")
   await command(page, "/target.affected")
   const affected = card(page, "affected")
   await expect(affected).toBeVisible({ timeout: SLOW })
@@ -207,4 +236,6 @@ test("the whole target-graph flow against the real backend", async ({ page }) =>
   await expect(ci).toBeVisible({ timeout: SLOW })
   await expect(ci.locator(".ci-matrix-jobs").first()).toBeVisible({ timeout: SLOW })
   await expect(ci.locator("[data-job-row]").first()).toBeVisible({ timeout: SLOW })
+  await expect(ci).toContainText("fixture-ci")
+  await expect(ci).toContainText("//:hello")
 })

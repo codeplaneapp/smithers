@@ -204,7 +204,7 @@ describe("issues seam — the list", () => {
         author: "ana",
         comments: 2,
         updatedAt: "2026-08-11T09:00:00Z",
-        source: "jjhub"
+        source: "smithers-cloud"
       },
       {
         number: 9,
@@ -213,11 +213,11 @@ describe("issues seam — the list", () => {
         author: null,
         comments: 0,
         updatedAt: null,
-        source: "jjhub"
+        source: "smithers-cloud"
       }
     ])
     expect(calls).toContain("GET /api/repos/will/flows/issues?state=open")
-    // GitHub's issues are read beside jjhub's own; an unstubbed (404) GitHub route is a stated refusal, never a silent absence.
+    // GitHub's issues are read beside Smithers Cloud's own; an unstubbed (404) GitHub route is a stated refusal, never a silent absence.
     expect(calls).toContain("GET /api/user/github-repos/will/flows/issues?state=open")
     expect(card.payload.github?.refusal).toBeTruthy()
   })
@@ -234,12 +234,12 @@ describe("issues seam — the list", () => {
     expect(card.payload.filter).toBe("all")
     expect(card.payload.issues).toEqual([])
     expect(calls).toContain("GET /api/repos/will/flows/issues")
-    // jjhub's own route never sees state=all; GitHub's accepts it.
+    // Smithers Cloud's own route never sees state=all; GitHub's accepts it.
     expect(calls.some((call) => call.startsWith("GET /api/repos/") && call.includes("state=all"))).toBe(false)
     expect(calls).toContain("GET /api/user/github-repos/will/flows/issues?state=all")
   })
 
-  test("a mirrored repo lists jjhub's own issues AND GitHub's, each row labeled, with the read's provenance from plue's headers", async () => {
+  test("a mirrored repo lists Smithers Cloud's own issues AND GitHub's, each row labeled, with the read's provenance from plue's headers", async () => {
     const { store, controller } = await issuesController(
       backend({
         "GET /api/repos/will/flows/issues": json(200, [wireIssue(7)]),
@@ -259,7 +259,7 @@ describe("issues seam — the list", () => {
     expect(outcome.status).toBe("executed")
     await settled()
     const card = cardOfKind(store, "issues-will/flows", "issue-list")
-    expect(card.payload.issues.map((issue) => [issue.number, issue.source])).toEqual([[7, "jjhub"], [12, "github"]])
+    expect(card.payload.issues.map((issue) => [issue.number, issue.source])).toEqual([[7, "smithers-cloud"], [12, "github"]])
     expect(card.payload.issues[1]?.htmlUrl).toBe("https://github.com/will/flows/issues/12")
     expect(card.payload.github).toEqual({
       source: "synced",
@@ -272,7 +272,7 @@ describe("issues seam — the list", () => {
     expect(outcome.status === "executed" ? outcome.value : "").toContain("#12 Upstream bug 12 · open · GitHub")
   })
 
-  test("a GitHub refusal (not linked, not mirrored) is stated on the card while jjhub's own issues still list", async () => {
+  test("a GitHub refusal (not linked, not mirrored) is stated on the card while Smithers Cloud's own issues still list", async () => {
     const { store, controller } = await issuesController(
       backend({
         "GET /api/repos/will/flows/issues": json(200, [wireIssue(7)]),

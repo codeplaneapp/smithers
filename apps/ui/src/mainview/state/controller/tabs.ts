@@ -169,7 +169,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     }
     store.dispatch({
       type: "tab.opened",
-      actor: "user",
+      actor: ctx.commandActor,
       // The session id is the tab id: unique per process, and `tab-<id>` stays a readable test id.
       tab: { id: sessionId, kind: "terminal", title: tabTitleFor("Terminal", repo), sessionId, cwd: directory, ...repoKeyFor(repo) }
     })
@@ -215,7 +215,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
     }
     store.dispatch({
       type: "tab.opened",
-      actor: "user",
+      actor: ctx.commandActor,
       tab: {
         id: sessionId,
         kind: "harness",
@@ -224,7 +224,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
         harnessId: harness.id,
         ...(role === undefined ? {} : { roleId: role.id }),
         cwd: directory,
-        ...activeRepoKey()
+        ...repoKeyFor(repo)
       }
     })
     /*
@@ -236,7 +236,7 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
      */
     store.dispatch({
       type: "card.upsert",
-      actor: "user",
+      actor: ctx.commandActor,
       card: {
         id: `agent-${sessionId}`,
         kind: "agent",
@@ -479,13 +479,21 @@ export const createTabsController = (ctx: ControllerContext): TabsController => 
           return result.message
         }
         const { authorizationId, ...repository } = result.repository
+        // A picked handle is not yet an open local repository. Publish
+        // readiness only after the host has adopted the authorization;
+        // commands and the composer must see the same usable checkout.
+        const refusal = await ctx.openRepo({ authorizationId, displayName: repository.name })
+        if (refusal !== undefined) {
+          store.dispatch({ type: "connector.local.failed", actor: "system", message: refusal })
+          return refusal
+        }
         store.dispatch({
           type: "connector.local.connected",
           actor: "system",
           access: "read-write",
           repository
         })
-        return ctx.openRepo({ authorizationId, displayName: repository.name })
+        return
       } catch {
         const message = "The native repository picker stopped responding. Try again."
         store.dispatch({ type: "connector.local.failed", actor: "system", message })

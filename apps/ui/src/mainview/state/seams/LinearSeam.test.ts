@@ -94,7 +94,7 @@ const op = (over: Record<string, unknown> = {}) => ({
   id: 12,
   run_id: 4,
   source: "linear",
-  target: "jjhub",
+  target: "smithers-cloud",
   entity: "issue",
   entity_id: "ENG-482",
   action: "create",
@@ -236,7 +236,7 @@ describe("createLinearSeam", () => {
     const opened: Array<string> = []
     const { store, seam, requests } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear?callback_port=9" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear?callback_port=9" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP)
       },
@@ -246,7 +246,7 @@ describe("createLinearSeam", () => {
 
     await seam.openLinear()
 
-    expect(opened).toEqual(["https://api.jjhub.tech/api/auth/linear?callback_port=9"])
+    expect(opened).toEqual(["https://api.smithers-cloud.test/api/auth/linear?callback_port=9"])
     expect(requests).toContain("POST /api/linear-auth/start")
     expect(requests).toContain("GET api/linear/setup/sk-123")
     const payload = payloadOf(store)
@@ -270,7 +270,7 @@ describe("createLinearSeam", () => {
      */
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP_LIVE)
       },
@@ -291,7 +291,7 @@ describe("createLinearSeam", () => {
     /* chi's plain-text 404 is plumbing: never copied, and never mistaken for an expired key. */
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession()
       },
       { pollMs: 1, timeoutMs: 5000, openExternal: async () => true }
@@ -309,7 +309,7 @@ describe("createLinearSeam", () => {
   test("openLinear with an expired setup key reads authorization expired", async () => {
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(404, { message: "linear oauth setup not found or expired" })
       },
@@ -328,7 +328,7 @@ describe("createLinearSeam", () => {
   test("pickTeam marks the team and activates the repository step", async () => {
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP)
       },
@@ -354,7 +354,7 @@ describe("createLinearSeam", () => {
   test("confirmConnect posts the integration and turns the card connected", async () => {
     const { store, seam, requests } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP),
         "POST api/linear": json(201, INTEGRATION),
@@ -401,7 +401,7 @@ describe("createLinearSeam", () => {
     let integrations: Array<unknown> = []
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP),
         "POST api/linear": (init) => {
@@ -450,7 +450,7 @@ describe("createLinearSeam", () => {
      */
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP_LIVE),
         "POST api/linear": json(201, {
@@ -476,7 +476,7 @@ describe("createLinearSeam", () => {
     /* A Linear actor id is not a person's name; the email still identifies the account. */
     const { store, seam } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, {
           ...SETUP_LIVE,
@@ -537,7 +537,7 @@ describe("createLinearSeam", () => {
         },
         [`api/linear/7/ops?limit=${OPS_PAGE_LIMIT}`]: json(200, [
           op(),
-          op({ id: 11, source: "jjhub", target: "linear", entity: "issue", entity_id: "90", action: "update", status: "failed", error_message: "Linear API: 422 label 'infra' does not exist on team ENG" })
+          op({ id: 11, source: "smithers-cloud", target: "linear", entity: "issue", entity_id: "90", action: "update", status: "failed", error_message: "Linear API: 422 label 'infra' does not exist on team ENG" })
         ])
       })
 
@@ -553,7 +553,7 @@ describe("createLinearSeam", () => {
       expect(payload?.ops[0]).toEqual({
         id: "12",
         source: "linear",
-        target: "jjhub",
+        target: "smithers-cloud",
         entity: "issue",
         entityId: "ENG-482",
         action: "create",
@@ -747,7 +747,7 @@ describe("createLinearSeam", () => {
     let integrations: Array<unknown> = [INTEGRATION]
     const { store, seam, requests } = await harness(
       {
-        "POST /api/linear-auth/start": json(200, { url: "https://api.jjhub.tech/api/auth/linear" }),
+        "POST /api/linear-auth/start": json(200, { url: "https://api.smithers-cloud.test/api/auth/linear" }),
         "GET /api/linear-auth/session": authorizedSession(),
         "api/linear/setup/sk-123": json(200, SETUP),
         "POST api/linear": json(201, INTEGRATION),

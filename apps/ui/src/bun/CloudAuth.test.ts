@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { Server } from "bun"
-import { createCloudAuth, parseCloudCredentials } from "./CloudAuth"
+import { CLOUD_AUTH_BODY_LIMIT, createCloudAuth, parseCloudCredentials } from "./CloudAuth"
 import type { CloudAuth, CloudKeychain } from "./CloudAuth"
 
 /*
@@ -18,6 +18,8 @@ const memoryKeychain = (): CloudKeychain & { readonly store: Map<string, string>
   }
 }
 
+const callbackBody = (url: string, value: Record<string, unknown>): string => JSON.stringify({ ...value, callback_state: new URL(url).searchParams.get("callback_state") })
+
 const CREDENTIALS = {
   token: "smithers_test_token",
   username: "will",
@@ -26,7 +28,7 @@ const CREDENTIALS = {
 }
 
 /*
- * The fake jjhub upstream: when the login URL is opened it POSTs the
+ * The fake Smithers Cloud upstream: when the login URL is opened it POSTs the
  * credentials to the callback port (the GitHub CLI flow's half), and it
  * answers the scope probe. `probeStatus`/`probeBody` shape the probe answer.
  */
@@ -47,7 +49,7 @@ const fakeUpstream = (
         void fetch(`http://127.0.0.1:${port}/callback`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(CREDENTIALS)
+          body: JSON.stringify({ ...CREDENTIALS, callback_state: url.searchParams.get("callback_state") })
         })
         return new Response("<html>login</html>", { headers: { "content-type": "text/html" } })
       }
@@ -77,10 +79,78 @@ describe("parseCloudCredentials", () => {
     expect(parseCloudCredentials({ token: "x" })).toBeNull()
     expect(parseCloudCredentials({ ...CREDENTIALS, token: "" })).toBeNull()
     expect(parseCloudCredentials("nope")).toBeNull()
+    expect(parseCloudCredentials({ ...CREDENTIALS, expiresAt: undefined, expires_at: CREDENTIALS.expiresAt })?.expiresAt).toBe(CREDENTIALS.expiresAt)
   })
 })
 
 describe("cloud sign-in", () => {
+  test("a fresh attempt rejects missing and previous callback state before probing", async () => {
+    let probes = 0
+    auth = await createCloudAuth({ api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => { probes++; return new Response("[]") } })
+    const first = await auth.start()
+    if (!("url" in first)) throw new Error(first.error)
+    await auth.signOut()
+    const current = await auth.start()
+    if (!("url" in current)) throw new Error(current.error)
+    expect(new URL(first.url).searchParams.get("callback_state")).not.toBe(new URL(current.url).searchParams.get("callback_state"))
+    const port = new URL(current.url).searchParams.get("callback_port")
+    const callback = `http://127.0.0.1:${port}/callback`
+    const headers = { "content-type": "application/json" }
+    for (const body of [JSON.stringify(CREDENTIALS), callbackBody(first.url, CREDENTIALS)]) {
+      expect((await fetch(callback, { method: "POST", headers, body })).status).toBe(403)
+    }
+    expect((await fetch(callback, { method: "POST", headers: { ...headers, origin: new URL(callback).origin }, body: callbackBody(current.url, CREDENTIALS) })).status).toBe(403)
+    expect(auth.session().state).toBe("signing-in")
+    expect(probes).toBe(0)
+    expect((await fetch(callback, { method: "POST", headers, body: callbackBody(current.url, CREDENTIALS) })).status).toBe(200)
+  })
+
+  test("foreign browser callbacks and invalid hosts cannot claim a login attempt", async () => {
+    let probes = 0
+    const saved = memoryKeychain()
+    const api = "https://cloud-auth.test"
+    auth = await createCloudAuth({ api, keychain: saved, fetchImpl: async () => { probes++; return new Response("[]") } })
+    const started = await auth.start()
+    if (!("url" in started)) throw new Error(started.error)
+    const port = new URL(started.url).searchParams.get("callback_port")
+    const callback = `http://127.0.0.1:${port}/callback`
+    for (const contentType of ["application/json", "text/plain"]) {
+      const response = await fetch(callback, { method: "POST", headers: { origin: "https://foreign.test", "content-type": contentType }, body: callbackBody(started.url, CREDENTIALS) })
+      expect(response.status).toBe(403)
+    }
+    expect((await fetch(callback, { method: "POST", headers: { origin: "null", "content-type": "application/json" }, body: callbackBody(started.url, CREDENTIALS) })).status).toBe(403)
+    expect((await fetch(callback, { method: "POST", headers: { host: `rebound.test:${port}`, "content-type": "application/json" }, body: callbackBody(started.url, CREDENTIALS) })).status).toBe(403)
+    expect((await fetch(callback, { method: "POST", headers: { "content-type": "text/plain" }, body: callbackBody(started.url, CREDENTIALS) })).status).toBe(415)
+    expect(auth.session().state).toBe("signing-in")
+    expect(auth.token()).toBeUndefined()
+    expect(probes).toBe(0)
+    expect(saved.store.size).toBe(0)
+    const trusted = await fetch(callback, { method: "POST", headers: { origin: api, "content-type": "application/json; charset=utf-8" }, body: callbackBody(started.url, CREDENTIALS) })
+    expect(trusted.status).toBe(200)
+    const deadline = Date.now() + 1000
+    while (auth.session().state !== "signed-in" && Date.now() < deadline) await Bun.sleep(5)
+    expect(auth.token()).toBe(CREDENTIALS.token)
+    expect(probes).toBe(1)
+  })
+
+  test("oversized callback bodies do not consume the attempt", async () => {
+    auth = await createCloudAuth({ api: "https://cloud-auth.test", keychain: memoryKeychain(), fetchImpl: async () => new Response("[]") })
+    const started = await auth.start()
+    if (!("url" in started)) throw new Error(started.error)
+    const port = new URL(started.url).searchParams.get("callback_port")
+    const callback = `http://127.0.0.1:${port}/callback`
+    const headers = { "content-type": "application/json" }
+    const oversized = JSON.stringify({ ...CREDENTIALS, username: "x".repeat(CLOUD_AUTH_BODY_LIMIT) })
+    expect((await fetch(callback, { method: "POST", headers, body: oversized })).status).toBe(413)
+    const streamed = new ReadableStream<Uint8Array>({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(oversized))
+      controller.close()
+    } })
+    expect((await fetch(callback, { method: "POST", headers, body: streamed })).status).toBe(413)
+    expect(auth.session().state).toBe("signing-in")
+    expect((await fetch(callback, { method: "POST", headers, body: callbackBody(started.url, CREDENTIALS) })).status).toBe(200)
+  })
+
   test("only the first callback settles the attempt; a replay or a racing local process is refused", async () => {
     const upstream = fakeUpstream()
     const keychain = memoryKeychain()
@@ -93,12 +163,12 @@ describe("cloud sign-in", () => {
       const first = await fetch(`http://127.0.0.1:${port}/callback`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...CREDENTIALS, token: "smithers_attacker_token", username: "mallory" })
+        body: callbackBody(started.url, { ...CREDENTIALS, token: "smithers_attacker_token", username: "mallory" })
       })
       const second = await fetch(`http://127.0.0.1:${port}/callback`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...CREDENTIALS, token: "smithers_attacker_token_2", username: "mallory2" })
+        body: callbackBody(started.url, { ...CREDENTIALS, token: "smithers_attacker_token_2", username: "mallory2" })
       }).catch(() => null)
       expect([200, 409]).toContain(first.status)
       if (second !== null) expect(second.status).toBe(409)
@@ -124,6 +194,8 @@ describe("cloud sign-in", () => {
     const login = new URL(started.url)
     expect(login.origin).toBe(fake.origin)
     expect(login.pathname).toBe("/api/auth/github/cli")
+    expect(login.searchParams.get("scopes")?.split(",")).toEqual(["read:user", "read:organization", "read:repository", "write:repository", "read:workspace", "write:workspace", "write:agent", "write:approval"])
+    expect(login.searchParams.get("callback_state")).toMatch(/^[A-Za-z0-9_-]{43}$/)
     const callbackPort = Number(login.searchParams.get("callback_port"))
     expect(callbackPort).toBeGreaterThan(0)
     expect(auth.session().state).toBe("signing-in")
@@ -222,14 +294,14 @@ describe("cloud sign-in", () => {
     const bad = await fetch(`http://127.0.0.1:${port}/callback`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token: "" })
+      body: callbackBody(started.url, { token: "" })
     })
     expect(bad.status).toBe(400)
     expect(auth.session().state).toBe("signing-in")
     const good = await fetch(`http://127.0.0.1:${port}/callback`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(CREDENTIALS)
+      body: callbackBody(started.url, CREDENTIALS)
     })
     expect(good.status).toBe(200)
   })
@@ -251,16 +323,16 @@ describe("cloud sign-in", () => {
 
   test("a previous launch's credential restores from the keychain", async () => {
     const keychain = memoryKeychain()
-    keychain.store.set("smithers-cloud:api.jjhub.tech", JSON.stringify(CREDENTIALS))
-    auth = await createCloudAuth({ api: "https://api.jjhub.tech", keychain })
+    keychain.store.set("smithers-cloud:api.smithers-cloud.test", JSON.stringify(CREDENTIALS))
+    auth = await createCloudAuth({ api: "https://api.smithers-cloud.test", keychain, fetchImpl: async () => new Response("[]") })
     expect(auth.session()).toEqual({ state: "signed-in", username: "will", expiresAt: CREDENTIALS.expiresAt })
     expect(auth.token()).toBe(CREDENTIALS.token)
   })
 
   test("SMITHERS_CLOUD_TOKEN is the dev/CI override: read first, never stored", async () => {
     const keychain = memoryKeychain()
-    keychain.store.set("smithers-cloud:api.jjhub.tech", JSON.stringify(CREDENTIALS))
-    auth = await createCloudAuth({ api: "https://api.jjhub.tech", keychain, envToken: "smithers_env_override" })
+    keychain.store.set("smithers-cloud:api.smithers-cloud.test", JSON.stringify(CREDENTIALS))
+    auth = await createCloudAuth({ api: "https://api.smithers-cloud.test", keychain, envToken: "smithers_env_override", fetchImpl: async () => new Response("[]") })
     expect(auth.token()).toBe("smithers_env_override")
     expect(auth.session().state).toBe("signed-in")
     // The override is not a login: no stored credential is touched or reported.

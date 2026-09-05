@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test"
  * the exact "sign in again to enable" wording.
  *
  * The server is a double (piper.spec.ts's pattern): every seam answers
- * through page.route — the bootstrap, the cloud session, the jjhub
+ * through page.route — the bootstrap, the cloud session, the Smithers Cloud
  * inventory, and the workspace routes behind /api/cloud/*.
  */
 
@@ -44,7 +44,7 @@ const serve = async (
     host: "local",
     version: "test",
     buildSha: "test",
-    capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
+    capabilities: ["agent", "identity", "cloud", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
     authFlow: "none",
     sandbox: { platform: "darwin", mode: "trusted-only" }
   })))

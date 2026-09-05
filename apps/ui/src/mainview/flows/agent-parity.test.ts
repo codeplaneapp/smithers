@@ -22,6 +22,7 @@ import { createAppController } from "../state/AppController"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 import { modelInvocable, nameOf } from "./registry"
+import { STORAGE_RECOVERY_USER_ONLY_REASON } from "./StorageRecoveryFlow"
 
 /**
  * Every user-only flow, with the reason the registry states. A flow user-only
@@ -29,6 +30,7 @@ import { modelInvocable, nameOf } from "./registry"
  * no longer user-only fails it too.
  */
 const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
+  "storage.recovery.export": STORAGE_RECOVERY_USER_ONLY_REASON,
   "chat.send": "the composer is the human's; the model is already the turn, and sending would nest one",
   "chat.stop": "stopping the model's own turn is the human's Escape key",
   "chat.copy-message": "the clipboard write is the human's browser gesture",
@@ -82,6 +84,7 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
 
 /** The policy table's agent rows (agent-parity.md): the args exercised and whether the act confirms. */
 const AGENT_ROWS: ReadonlyArray<{ readonly name: string; readonly args?: string; readonly confirm: boolean }> = [
+  { name: "chat.clear", confirm: true },
   { name: "tab.terminal", confirm: false },
   { name: "tab.harness", args: "claude", confirm: true },
   { name: "agent.role", args: "implementation", confirm: true },
@@ -146,7 +149,7 @@ const WEB: AppBootstrap = {
   host: "cloud",
   version: "test",
   buildSha: "cloud",
-  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: true }),
+  capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: true }),
   authFlow: "redirect",
   sandbox: null
 }
@@ -407,14 +410,19 @@ describe("the three-door law", () => {
     }
     store.dispatch({ type: "agents.loaded", actor: "system", agents: [...(await import("@smthrs/rpc/AgentRoles")).AGENT_ROLES, reviewer] })
     await settle(2)
-    expect(await execute(controller, "agent.delegate", "reviewer review the retry")).toBe("executed /agent.delegate")
+    expect(await execute(controller, "agent.delegate", "reviewer review the retry")).toContain("asked the user to confirm")
+    expect(ptyBodies).toHaveLength(0)
+    expect(confirmationFor(store, "agent.delegate")?.action?.args).toBe("reviewer review the retry")
+    expect((await controller.commands.run("agent.delegate", "reviewer review the retry")).status).toBe("executed")
     expect(ptyBodies.at(-1)).toMatchObject({ kind: "harness", harnessId: "codex", roleId: "reviewer", task: "review the retry" })
     expect(store.collections.cards.get("agent-pty-1")?.payload).toMatchObject({ roleId: "reviewer", purpose: "Reviews diffs." })
     expect(await execute(controller, "agent.role", "reviewer")).toContain("asked the user to confirm")
     expect(confirmationFor(store, "agent.role")?.action?.args).toBe("reviewer")
     // An id the store lacks is refused by the store's list, not an enum.
-    const refused = await execute(controller, "agent.delegate", "poet write a haiku")
-    expect(refused).toStartWith("failed: There is no agent named poet")
-    expect(refused).toContain("reviewer")
+    const refused = await controller.commands.run("agent.delegate", "poet write a haiku")
+    expect(refused.status).toBe("failed")
+    if (refused.status !== "failed") throw new Error("The unknown agent must be refused")
+    expect(refused.error).toContain("There is no agent named poet")
+    expect(refused.error).toContain("reviewer")
   })
 })

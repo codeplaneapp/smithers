@@ -99,6 +99,12 @@ export const createAgentStore = (options: AgentStoreOptions = {}): AgentStore =>
   const now = options.now ?? (() => Date.now())
   const path = options.stateDir === undefined ? undefined : join(options.stateDir, AGENTS_FILE)
   let loaded: Promise<Array<AgentRole>> | undefined
+  let mutations: Promise<unknown> = Promise.resolve()
+  const serial = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = mutations.then(operation)
+    mutations = result.catch(() => {})
+    return result
+  }
 
   const read = async (): Promise<Array<AgentRole>> => {
     if (path === undefined) return [...AGENT_ROLES]
@@ -186,7 +192,7 @@ export const createAgentStore = (options: AgentStoreOptions = {}): AgentStore =>
     return { status: "removed" }
   }
 
-  return { list, get, put, remove }
+  return { list, get, put: (id, input) => serial(() => put(id, input)), remove: (id) => serial(() => remove(id)) }
 }
 
 /** One model id per printed line; blank lines and anything that is not a model id are dropped. */

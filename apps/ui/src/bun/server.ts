@@ -50,6 +50,7 @@ import {
 } from "@smthrs/rpc/LocalSession"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { createChatStub } from "./ChatStub"
+import { handleBrowserFetch } from "./BrowserFetch"
 import { createCloudAgent } from "./CloudAgent"
 import type { CloudAgent } from "./CloudAgent"
 import { createCloudAuth } from "./CloudAuth"
@@ -79,7 +80,7 @@ import { currentSandboxHost, sandboxEnforced } from "./Sandbox"
 export const DEFAULT_CHAT_ORIGIN = "https://canary.smithers.sh"
 /** The deployed identity seam the sign-in device flow talks to. */
 export const DEFAULT_IDENTITY_UPSTREAM = "https://canary.smithers.sh"
-/** The jjhub Cloud API `/api/cloud/*` forwards to (SMITHERS_CLOUD_API overrides). */
+/** The Smithers Cloud API `/api/cloud/*` forwards to (SMITHERS_CLOUD_API overrides). */
 export const DEFAULT_CLOUD_API = "https://api.jjhub.tech"
 export const APP_VERSION = "0.0.1"
 /** Where the SPA posts uncaught errors; the client half is state/ClientErrors.ts. */
@@ -128,7 +129,7 @@ export interface LocalServerOptions {
    */
   readonly identityUpstream?: string | null
   /**
-   * Where `/api/cloud/*` forwards (the jjhub Cloud API) and where the
+   * Where `/api/cloud/*` forwards (the Smithers Cloud API) and where the
    * `/api/cloud-auth/*` login points. `undefined` reads SMITHERS_CLOUD_API,
    * defaulting to DEFAULT_CLOUD_API; `null` disables the seam. Offline mode
    * disables it either way.
@@ -486,7 +487,7 @@ const proxyIdentity = async (
 }
 
 /**
- * Forwards a jjhub Cloud request (`/api/cloud/*`) to the cloud API, following
+ * Forwards a Smithers Cloud request (`/api/cloud/*`) to the cloud API, following
  * proxyIdentity: Host and Origin follow the upstream, `content-length` and
  * the local session header are dropped, Set-Cookie is re-scoped, and the
  * request leaves one trail line (the shared `/api/*` trail). The bearer is
@@ -561,7 +562,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     ? DEFAULT_IDENTITY_UPSTREAM
     : options.identityUpstream
   /*
-   * The jjhub Cloud seam (lane piper): offline performs no egress, so the
+   * The Smithers Cloud seam (lane piper): offline performs no egress, so the
    * proxy and the login answer 501 like the identity stub. Hybrid forwards
    * to SMITHERS_CLOUD_API (default DEFAULT_CLOUD_API).
    */
@@ -601,6 +602,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   }
 
   const router = new Router()
+  router.add("POST", "/api/tools/browser-fetch", ({ request }) => remoteEnabled
+    ? handleBrowserFetch(request)
+    : jsonError(501, "not_implemented", "The browser reader is disabled in offline mode."))
 
   router.add("GET", APP_BOOTSTRAP_PATH, () => {
     const enforced = sandboxEnforced(sandboxHost)
@@ -610,11 +614,12 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
       version,
       buildSha: options.buildSha ?? Bun.env.SMITHERS_BUILD_SHA ?? "unknown",
       // The shared table the Worker and the parity matrix read; both cloud
-      // doors (`cloud.terminal`, `cloud.pat`) ride the jjhub upstream.
+      // doors (`cloud.terminal`, `cloud.pat`) ride the Smithers Cloud upstream.
       capabilities: localCapabilities({
         agent: agent !== undefined,
         identity: identityUpstream !== null,
-        jjhub: cloudUpstream !== null,
+        cloud: cloudUpstream !== null,
+        browser: remoteEnabled,
         pathEntry: options.allowManualRepositoryPaths === true
       }),
       authFlow: identityUpstream === null ? "none" : "both",
@@ -646,6 +651,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     }
     const body = parsed.body
     const runId = body.runId
+    if (writers.has(runId)) return jsonError(409, "turn_running", "That Smithers turn is already running.")
     // The writer exists before the agent starts, so a frame published before
     // the response stream opens is queued, never lost.
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -722,7 +728,7 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
   router.add("POST", CHAT_CANCEL_PATH, handleChatCancel)
 
   /*
-   * The jjhub Cloud login (lane piper, ADR 0001): start answers the URL the
+   * The Smithers Cloud login (lane piper, ADR 0001): start answers the URL the
    * renderer opens in the system browser; the session answer never carries
    * the token; sign-out forgets it. Offline answers 501 like the identity
    * stub.
@@ -929,7 +935,9 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
        */
       const oauthNavigation = request.method === "GET" &&
         (pathname === AUTH_SIGN_IN_PATH || pathname === AUTH_CALLBACK_PATH)
-      if (pathname !== HEALTH_PATH && !oauthNavigation) {
+      const linearNavigation = request.method === "GET" && linearAuth?.claimNavigation(url) === true
+      if (linearNavigation) url.searchParams.delete("handoff")
+      if (pathname !== HEALTH_PATH && !oauthNavigation && !linearNavigation) {
         if (request.headers.get(LOCAL_SESSION_HEADER) !== sessionToken) {
           return jsonError(401, "local_session_required", "The local session capability is required.")
         }
@@ -1217,19 +1225,25 @@ export const startLocalServer = async (options: LocalServerOptions): Promise<Loc
     onMessage,
     authorizeRepository: repositoryAuthority.authorize,
     stop: async () => {
-      for (const [runId, writer] of writers) {
-        agent?.cancel(runId)
-        writer.end()
-      }
+      // Close PTY admission synchronously, before any asynchronous host cleanup.
+      let ptyStopped: Promise<void>
+      try { ptyStopped = pty.dispose() } catch (error) { ptyStopped = Promise.reject(error) }
+      const writerCleanup = [...writers].flatMap(([runId, writer]) => [() => agent?.cancel(runId), () => writer.end()])
       writers.clear()
-      // Every child dies with the server; nothing keeps a shell alive past the app.
-      closeCloudBridges(1001, "the local app is shutting down")
-      await cloudAuth?.stop()
-      await linearAuth?.stop()
-      await pty.killAll()
-      await lsp.killAll()
-      repositoryAuthority.clear()
-      server.stop(true)
+      // Stop accepting traffic before waiting on independent resources. A
+      // failed finalizer must not strand the listener or another child owner.
+      const results = await Promise.allSettled([
+        ...writerCleanup,
+        () => closeCloudBridges(1001, "the local app is shutting down"),
+        () => server.stop(true),
+        () => cloudAuth?.stop(),
+        () => linearAuth?.stop(),
+        () => ptyStopped,
+        () => lsp.killAll(),
+        () => repositoryAuthority.clear()
+      ].map(async (cleanup) => cleanup()))
+      const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, "Local server shutdown failed.")
     }
   }
   const targetGraph = registerTargetGraphRoutes(local, { repos: repoTargets.repos, history: repoTargets.history, node: nodeProbe, ...(options.buildCli === undefined ? {} : { cli: options.buildCli }) })

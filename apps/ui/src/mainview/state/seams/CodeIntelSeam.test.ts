@@ -46,14 +46,7 @@ import type { AppStore } from "../AppStore"
  */
 
 const node = await findNode()
-/*
- * The guard asks the question the host will ask: `app()` starts the local
- * origin with `home: tmpdir()`, so its lsp host searches that home's
- * candidate dirs and PATH. Probing the real HOME instead lets the suite run
- * on a machine where only ~/.nvm has the binary, and every case then fails
- * on the host's own "no TypeScript language server" refusal.
- */
-const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(Bun.env, tmpdir()), node)
+const resolved = resolveServer(TYPESCRIPT_SERVER, defaultServerLookup(), node)
 const skipReason = node === null
   ? "no Node.js >= 22.19 on this machine to run the language server"
   : "missing" in resolved
@@ -188,7 +181,7 @@ describe("code-intel seam — refusals that need no language server", () => {
     })
     const outcome = await controller.commands.run("code.hover", "src/index.ts:3:7")
     expect(outcome).toEqual({ status: "failed", error: `No TypeScript language server on this machine. Install: ${INSTALL}` })
-    const card = fileCard(store, `file-${repo.name}-src/index.ts`)
+    const card = fileCard(store, `file-${repo.id}-src/index.ts`)
     // The file card rendered (the human sees the file at the position) and states the door honestly.
     expect(card?.payload).toMatchObject({ path: "src/index.ts", line: 3, column: 7, intel: { state: "missing", note: INSTALL } })
     expect(card?.payload.hover).toBeUndefined()
@@ -196,18 +189,22 @@ describe("code-intel seam — refusals that need no language server", () => {
     const servers = await fetch(`${server.origin}/api/lsp/servers`, { headers: { [LOCAL_SESSION_HEADER]: server.sessionToken } })
     expect(await servers.json()).toEqual({ servers: [] })
     // The agent door reads the same sentence.
+    const previous = new Set(store.collections.transitions.keys())
     const agent = await controller.commands.executeForAgent({
       name: "commands",
       arguments: JSON.stringify({ action: "execute", name: "code.diagnostics", args: "src/index.ts" })
     })
     expect(agent).toBe(`failed: No TypeScript language server on this machine. Install: ${INSTALL}`)
+    const edits = [...store.collections.transitions.values()].filter((row) => !previous.has(row.id) && row.type.startsWith("card."))
+    expect(edits.length).toBeGreaterThan(0)
+    expect(edits.every((row) => row.actor === "smithers")).toBe(true)
   }, 30_000)
 
   test("a file no server handles answers the host's typed refusal, stated on the card as unavailable", async () => {
     const { repo, store, controller } = await app()
     const outcome = await controller.commands.run("code.diagnostics", "README.md")
     expect(outcome).toEqual({ status: "failed", error: "No language server handles .md files." })
-    expect(fileCard(store, `file-${repo.name}-README.md`)?.payload.intel).toEqual({
+    expect(fileCard(store, `file-${repo.id}-README.md`)?.payload.intel).toEqual({
       state: "unavailable",
       note: "No language server handles .md files."
     })
@@ -509,7 +506,7 @@ describe.skipIf(skipReason !== undefined)("code-intel seam — against the real 
   let repo: Repo
   let store: AppStore
   let controller: AppController
-  const cardId = (path: string): string => `file-${repo.name}-${path}`
+  const cardId = (path: string): string => `file-${repo.id}-${path}`
 
   beforeAll(async () => {
     ;({ repo, store, controller } = await app())
@@ -636,6 +633,7 @@ describe.skipIf(skipReason !== undefined)("code-intel seam — against the real 
   }, 30_000)
 
   test("the agent door: the tool call answers the hover text, never a bare executed", async () => {
+    const previous = new Set(store.collections.transitions.keys())
     const result = await controller.commands.executeForAgent({
       name: "commands",
       arguments: JSON.stringify({ action: "execute", name: "code.hover", args: "src/index.ts:3:7" })
@@ -643,5 +641,8 @@ describe.skipIf(skipReason !== undefined)("code-intel seam — against the real 
     expect(result).toContain("const message: string")
     expect(result).not.toStartWith("executed")
     expect(result).not.toStartWith("failed")
+    const edits = [...store.collections.transitions.values()].filter((row) => !previous.has(row.id) && row.type.startsWith("card.") && row.actor !== "system")
+    expect(edits.length).toBeGreaterThan(0)
+    expect(edits.every((row) => row.actor === "smithers")).toBe(true)
   }, 30_000)
 })

@@ -9,7 +9,7 @@ import type { Page } from "@playwright/test"
  * carries the global address and the position the read was taken at.
  *
  * The server is a double (tabs.spec.ts's pattern): every seam answers
- * through page.route — the local repos read, the cloud session, the jjhub
+ * through page.route — the local repos read, the cloud session, the Smithers Cloud
  * inventory behind /api/cloud/*, and the repo-files read.
  */
 
@@ -44,7 +44,7 @@ const serve = async (page: Page): Promise<void> => {
     host: "local",
     version: "test",
     buildSha: "test",
-    capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
+    capabilities: ["agent", "identity", "cloud", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
     authFlow: "none",
     sandbox: { platform: "darwin", mode: "trusted-only" }
   })))

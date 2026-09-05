@@ -54,7 +54,7 @@ const serve = async (page: Page): Promise<{ rpc: Array<RpcCall> }> => {
     host: "local",
     version: "test",
     buildSha: "test",
-    capabilities: ["agent", "identity", "jjhub", "local.repositories"],
+    capabilities: ["agent", "identity", "cloud", "local.repositories"],
     authFlow: "none",
     sandbox: { platform: "darwin", mode: "trusted-only" }
   })))

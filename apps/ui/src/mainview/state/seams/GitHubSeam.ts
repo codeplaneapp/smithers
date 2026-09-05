@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The GitHub seam (lane sync, ADR 0005; lane L5 against the live routes),
  * behind the `/api/cloud/*` proxy. Every path was read off plue's own router
@@ -173,7 +174,7 @@ const parseMirrorRun = (value: unknown): MirrorRunAnswer | null => {
 export const createGitHubSeam = (ctx: SeamContext, deps: GitHubSeamDeps = {}): GitHubSeam => {
   const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
   /* One tracking loop per repo: a re-run supersedes the loop before it. */
-  const epochs = new Map<string, number>()
+  const epochs = actorSharedState(ctx, "github-epochs", () => new Map<string, number>())
 
   const gate = (): string | void => {
     const session = ctx.store.collections.cloudSessions.get("cloud")

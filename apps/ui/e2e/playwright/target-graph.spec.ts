@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
-import { existsSync, mkdirSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync } from "node:fs"
 import { resolve } from "node:path"
 
 /*
@@ -55,7 +55,8 @@ test("every target-graph card renders against the fixture stream", async ({ page
   page.once("dialog", (dialog) => void dialog.accept(FIXTURE_REPO))
   await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
-  await expect(card(page, "repo")).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("title", realpathSync(FIXTURE_REPO), { timeout: 30_000 })
+  await expect(card(page, "repo")).toHaveCount(0)
 
   // 1. The graph card: the typed DAG, laid out, with its counts line.
   await command(page, "/target.graph")

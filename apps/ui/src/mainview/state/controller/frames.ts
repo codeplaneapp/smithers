@@ -4,7 +4,7 @@ import {
   DEFAULT_WORKSPACE_ID,
   rootFrameId
 } from "../AppState"
-import type { Branch, Frame } from "../AppState"
+import type { Branch, Frame, FrameSnapshot } from "../AppState"
 import type { FrameHistoryPort, FrameLocation } from "../../runtime/FrameHistory"
 import type { ControllerContext } from "./context"
 
@@ -34,7 +34,8 @@ const validLocation = (ctx: ControllerContext, location: FrameLocation): boolean
     branch?.workspaceId === workspace.id &&
     frame?.workspaceId === workspace.id &&
     frame.branchId === branch.id &&
-    (frame.cardId === null || ctx.store.collections.cards.get(frame.cardId) !== undefined)
+    (frame.cardId === null || ctx.store.collections.cards.get(frame.cardId) !== undefined ||
+      branch.snapshot?.cards.some((card) => card.id === frame.cardId) === true)
 }
 
 const sameLocation = (left: FrameLocation, right: FrameLocation): boolean =>
@@ -45,6 +46,10 @@ export const createFramesController = (
   history: FrameHistoryPort | undefined
 ): FramesController => {
   const navigateFromHistory = (location: FrameLocation | undefined): void => {
+    if (location !== undefined && location.branchId !== sessionLocation(ctx).branchId && ctx.store.session().phase === "responding") {
+      history?.replace(sessionLocation(ctx))
+      return
+    }
     if (location === undefined || !validLocation(ctx, location)) {
       history?.replace(sessionLocation(ctx))
       return
@@ -78,6 +83,7 @@ export const createFramesController = (
   }
 
   const forkFrame = (): string | void => {
+    if (ctx.store.session().phase === "responding") return "Wait for the current turn to finish before forking."
     const sourceLocation = sessionLocation(ctx)
     const source = ctx.store.collections.frames.get(sourceLocation.frameId)
     if (source === undefined) return "The current frame no longer exists."
@@ -85,13 +91,24 @@ export const createFramesController = (
     const rootId = rootFrameId(id)
     const createdAt = Date.now()
     const revision = ctx.store.session().revision + 1
+    // Historical frames keep their recorded state; the live collections are
+    // only the active branch's projection, never an authority for another branch.
+    const snapshot: FrameSnapshot = source.snapshot ?? {
+      revision: ctx.store.session().revision,
+      messages: [...ctx.store.collections.messages.values()],
+      cards: [...ctx.store.collections.cards.values()],
+      worldDocuments: [...ctx.store.collections.worldDocuments.values()],
+      draft: ctx.store.session().draft,
+      selectedWorldDocumentId: ctx.store.session().selectedWorldDocumentId
+    }
     const branch: Branch = {
       id,
       workspaceId: source.workspaceId,
       title: `Fork ${ctx.store.collections.branches.size}`,
       parentBranchId: source.branchId,
       forkedFromFrameId: source.id,
-      forkedAtRevision: source.stateRevision,
+      forkedAtRevision: snapshot.revision,
+      snapshot,
       createdAt,
       revision
     }
@@ -103,7 +120,8 @@ export const createFramesController = (
       parentFrameId: null,
       cardId: null,
       presentation: "embedded",
-      stateRevision: source.stateRevision,
+      stateRevision: snapshot.revision,
+      snapshot,
       createdAt,
       updatedAt: createdAt,
       revision
@@ -118,7 +136,8 @@ export const createFramesController = (
         parentFrameId: rootId,
         cardId: source.cardId,
         presentation: "maximized",
-        stateRevision: source.stateRevision,
+        stateRevision: snapshot.revision,
+        snapshot,
         createdAt,
         updatedAt: createdAt,
         revision

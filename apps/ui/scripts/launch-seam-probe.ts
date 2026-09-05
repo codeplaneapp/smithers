@@ -89,17 +89,13 @@ check(
 )
 
 /*
- * 5. Gateway seam: the proxied gateway answers for itself.
- *
- * The rc.0 Worker proxies the gateway's own mounts (`/rpc`, `/projections`,
- * `/sync`, `/health`) and 501s on all four when `GATEWAY_UPSTREAM_URL` is
- * unset, so `/health` is the whole seam in one unauthenticated request. There
- * is no approval route to probe any more: a decision is the gateway's
- * `Approval.Submit`, relayed through `/api/workflow/rpc`, which needs a
- * provisioned workspace and a parked run this probe has no business creating.
+ * 5. The insecure static gateway proxy is retired, not merely unconfigured.
+ * A decision uses the session-validated /api/workflow/rpc relay, which needs
+ * a provisioned workspace and parked run this probe has no business creating.
  */
 const gatewayHealth = await fetch(`${origin}/health`, { headers: { cookie } })
-await no501("gateway seam /health", gatewayHealth)
+const gatewayBody = await gatewayHealth.json() as { code?: string }
+check("static gateway proxy stays retired", gatewayHealth.status === 410 && gatewayBody.code === "gateway_proxy_removed", `HTTP ${gatewayHealth.status}`)
 
 // 6. Admin surface: a signed-in NON-admin probe is byte-identical to an
 // unknown route (404, never 403, never a 501).

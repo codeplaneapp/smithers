@@ -7,10 +7,10 @@ on them.
 ## 0. Brief corrections (verified against the tree)
 
 1. **Tag counts.** `flows/Flows.ts` declares 188 names; 134 carry a `runtime`
-   tag: jjhub 81 (+2 via `runtimeAny`), local.targets 20, identity 14,
+   tag: Smithers Cloud 81 (+2 via `runtimeAny`), local.targets 20, identity 14,
    local.repositories 11 (+2 via `runtimeAny`), local.harnesses 3, keys.byok 2,
    billing.checkout 2, agent 2, local.terminal 1. `files.list`/`files.read`
-   use `runtimeAny: ["jjhub", "local.repositories"]`.
+   use `runtimeAny: ["Smithers Cloud", "local.repositories"]`.
 2. **No WorkOS.** Identity is the sibling Worker `smithers-cloud-identity`
    (`apps/UPSTREAMS.md`), GitHub OAuth only; `apps/server/src/index.ts`
    proxies `/api/auth/*`, `/api/identity/*` and validates the cookie session
@@ -26,14 +26,14 @@ on them.
    `WorkspaceSeam`, `ChangeSeam`, `GitHubSeam`, `LinearSeam`,
    `RepoImportSeam`, `EgressSeam`) call `CLOUD_ROUTE_PREFIX` (`/api/cloud/*`),
    the Bun PAT proxy. The Worker answers `/api/cloud/*` with its canonical
-   404, yet emits `jjhub` in `/api/bootstrap`. On canary today every
-   jjhub-tagged flow registers and fails. `workspace.terminal` (tagged
-   `jjhub` only) registers on web and never opens a socket:
+   404, yet emits `cloud` in `/api/bootstrap`. On canary today every
+   Smithers Cloud-tagged flow registers and fails. `workspace.terminal` (tagged
+   `cloud` only) registers on web and never opens a socket:
    `CloudTerminalClient` gets `socketProtocol()` undefined (no local-session
    meta) and treats that as "no socket".
 5. **Persistence.** Both shells persist UI collections in OPFS SQLite inside
    the webview (`state/AppStore.ts`, `docs/persistence.md`). The native disk
-   holds the jjhub PAT (macOS keychain, `CloudAuth.ts`) and `stateDir` host
+   holds the Smithers Cloud PAT (macOS keychain, `CloudAuth.ts`) and `stateDir` host
    records, never the collections.
 6. **No web test tier exists.** `e2e/README.md` and `scripts/README.md`
    record the hermetic web runners and the `wrangler dev` stack as removed on
@@ -66,18 +66,18 @@ one axis is missing; add them, do not build a parallel capability set:
 
 - `@smthrs/rpc/AppBootstrap.ts`: extend `RuntimeCapabilitySchema` with
   `"cloud.terminal"` (a workspace-terminal tunnel exists on this origin) and
-  `"cloud.pat"` (a host-held jjhub PAT session: `/api/cloud-auth/*`, the
+  `"cloud.pat"` (a host-held Smithers Cloud PAT session: `/api/cloud-auth/*`, the
   Linear loopback). Bun emits both today; the Worker emits `cloud.terminal`
   after lane W3 and never `cloud.pat`.
-- `flows/Flows.ts`: `workspace.terminal` -> `runtime: ["jjhub", "cloud.terminal"]`;
+- `flows/Flows.ts`: `workspace.terminal` -> `runtime: ["Smithers Cloud", "cloud.terminal"]`;
   `cloud.sign-in`, `cloud.sign-out`, `linear.connect*` -> add `"cloud.pat"`.
 - `flows/registry.ts` `FlowMetadata`: add `readonly hosts?: ReadonlyArray<AppBootstrap["host"]>`;
   `Commands.ts` `available()` checks it. Used by exactly one flow
   (`app.download`, `hosts: ["cloud"]`), so native chrome gains nothing
   (NO INVENTION).
 - Extract the two capability lists into `@smthrs/rpc/HostCapabilities.ts`:
-  `cloudCapabilities(env: { identity: boolean; jjhub: boolean; agent: boolean; checkout: boolean; terminal: boolean }): RuntimeCapability[]`
-  and `localCapabilities(opts: { agent; identity; jjhub; pathEntry }): RuntimeCapability[]`.
+  `cloudCapabilities(env: { identity: boolean; Smithers Cloud: boolean; agent: boolean; checkout: boolean; terminal: boolean }): RuntimeCapability[]`
+  and `localCapabilities(opts: { agent; identity; Smithers Cloud; pathEntry }): RuntimeCapability[]`.
   `index.ts` and `server.ts` call them; the parity test (section 6) reads
   the same functions, so the matrix can never drift from the servers.
 
@@ -112,19 +112,19 @@ refusal name the native app:
 | Flows and runs (`flow.*`, `runs.*`, `approvals.*`) | yes | R6 | both | `/api/workflow/rpc` relay lives on the Worker |
 | GitHub import, mirror sync | yes (W0) | yes | both | `/api/github/import` allowlisted; `RepoImportSeam` via bridge |
 | Linear connect | no | yes | native | loopback callback rides `/api/linear-auth/*` (Bun); `cloud.pat` |
-| jjhub PAT sign-in (`cloud.sign-in`) | no | yes | native | on web the session cookie IS the cloud identity (`fetchCloudToken`) |
+| Smithers Cloud PAT sign-in (`cloud.sign-in`) | no | yes | native | on web the session cookie IS the cloud identity (`fetchCloudToken`) |
 | Local repositories, file tree, `repo.*`, `files.*` local | no | yes | native | `local.repositories`; folder picker is a native door |
 | Local terminal (`tab.terminal`, PTY) | no | yes | native | `local.terminal`, `/ws` on Bun |
 | Build targets (`target.*`) | no | yes | native | `local.targets`, smithers-build runtime in the bundle |
 | Local agents (`agent.delegate`, `tab.harness`) | no | yes | native | `local.harnesses` |
-| BYOK keys | no | no | neither (v1) | neither host emits `keys.byok`; jjhub has no key store (`PLATFORM_UNIMPLEMENTED`). When it lands: secret in jjhub, never the browser |
+| BYOK keys | no | no | neither (v1) | neither host emits `keys.byok`; Smithers Cloud has no key store (`PLATFORM_UNIMPLEMENTED`). When it lands: secret in Smithers Cloud, never the browser |
 | Billing balance | yes | yes | both | `/api/billing/balance` on both origins |
 | Billing checkout/portal | when `BILLING_CHECKOUT_ENABLED=1` | no | web | `billing.checkout` capability; money is a browser act |
 | World notes | yes | yes | both | OPFS, no seam |
 | Download button (`app.download`) | yes | no | web | `hosts: ["cloud"]` |
 
 **Terminal transport decision: a Worker-level WebSocket relay, no Durable
-Object, never direct-to-jjhub.** Direct-to-jjhub needs a bearer in the
+Object, never direct-to-cloud.** Direct-to-Smithers Cloud needs a bearer in the
 browser; a browser cannot set `Authorization` on an upgrade, so the token
 would ride the URL or subprotocol (logged by proxies, visible in devtools),
 and plue's upgrade authenticates Bearer principals (`cloudWsUpstreamHeaders`),
@@ -170,7 +170,7 @@ GitHub consent, 1 click on a repo row, 1 click on a file. No wizard.
 ┌ Workspace ✎ ───────┐ ┌──────────────────────────────────────────────────┐
 │ smithersai/        │ │  S  Smithers initialized successfully            │
 │  ▾ smithers  head  │ │     - Host: cloud (1.0.0 2f00e3c)                │
-│     ▸ apps         │ │     - Capabilities: agent, identity, jjhub        │
+│     ▸ apps         │ │     - Capabilities: agent, identity, Smithers Cloud        │
 │     README.md      │ │  ┌ /smithersai/smithers/README.md @ qupxosqw ──┐ │
 │  ▸ plue      head  │ │  │ # Smithers                                   │ │
 │                    │ │  │ Durable-execution engine ...        [ ⤢ ]    │ │
@@ -282,7 +282,7 @@ static `electrobun/view` import in `NativeBridge.ts`. W4 makes it lazy:
   `default-src 'self'; connect-src 'self' wss://app.smithers.sh; script-src 'self' 'sha256-<theme bootstrap>'; img-src 'self' data:`
   emitted from the same helper, with a Worker unit test that recomputes the
   inline-script hash from `dist/index.html`.
-- Never in the browser: the jjhub token (minted per login inside the Worker,
+- Never in the browser: the Smithers Cloud token (minted per login inside the Worker,
   `fetchCloudToken`; relay records in `GATEWAY_SESSIONS`), the chat bearer,
   gateway tokens, admin tokens. The session cookie is set by identity and
   proxied; the SPA never reads it. `STRIPPED_IDENTITY_HEADERS` stays.
@@ -348,7 +348,7 @@ download button is visible, `/repo.open` answers the download sentence.
 - R2 The allowlist (`requireTurnSession`) gates the platform proxy, so a
   visitor who is not a design partner sees repos only after W6. Until then
   the funnel is sign in -> request access -> download.
-- R3 Native carries two identities (GitHub cookie + jjhub PAT) while web
+- R3 Native carries two identities (GitHub cookie + Smithers Cloud PAT) while web
   carries one; `/api/user/*` on native forwards with the cookie and
   `/api/cloud/*` with the PAT. Not changed here (Q5).
 - R4 A Worker WebSocket is bounded by the Worker's own limits (1 MiB
@@ -374,6 +374,6 @@ download button is visible, `/repo.open` answers the download sentence.
    for W1/W5; notarization before the funnel goes public.
 4. Terminal on web in the first release or after? Default: after W0-W2, as
    W3, Worker relay, no Durable Object.
-5. Should native drop the jjhub PAT keychain and adopt the Worker's
+5. Should native drop the Smithers Cloud PAT keychain and adopt the Worker's
    cookie->cloud-token bridge so both modes share one identity? Default: yes,
    as a later lane; this plan does not touch `CloudAuth.ts`.

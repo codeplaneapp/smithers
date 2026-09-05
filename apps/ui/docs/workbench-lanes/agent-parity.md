@@ -52,7 +52,7 @@ never user-only because they are consequential.
 
 New flows:
 
-- `cloud.prompt`: agent-invocable, listed, runtime `["jjhub"]`, summary
+- `cloud.prompt`: agent-invocable, listed, runtime `["Smithers Cloud"]`, summary
   "Offer the Smithers Cloud sign-in step in the chat"; renders one Smithers
   message with action `{ flow: "cloud.sign-in", label: "Sign in to Smithers
   Cloud" }`, mirroring `auth.prompt`. When the cloud session is already

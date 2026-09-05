@@ -26,8 +26,8 @@ native renderer are production implementations. The account-owned
 `codeplanesmithers/canary-sandbox` remote is fetched at a pinned revision, then
 Smithers declarations are added only to the isolated clone.
 
-Every test gets a temporary home and fixed random local origin, so WebKit state
-survives relaunch without touching the user's profile. An atomic suite lease
+Every test gets a temporary home and uses the app's persisted local origin, so
+relaunch tests exercise production origin selection without touching the user's profile. An atomic suite lease
 and per-test marker are cleared only after process and fixture cleanup. A dead
 prior lease is removed and fails preflight once; rerun after inspecting the
 stale-fixture report, or set `SMITHERS_E2E_RECOVER_STALE=1` to repair and

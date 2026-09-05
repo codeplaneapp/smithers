@@ -188,14 +188,19 @@ describe.skipIf(skipReason !== undefined)("/api/lsp against the real typescript-
       expect(response.status).toBe(200)
       const body = LspDiagnosticsResponseSchema.parse(await response.json())
       expect(body.path).toBe("src/index.ts")
-      expect(body.items?.map((item) => item.code)).toEqual(["2551"])
       const deadline = Date.now() + 5000
       const published = () => frames.map((frame) => LspDiagnosticsMessageSchema.safeParse(frame)).filter((parsed) => parsed.success).map((parsed) => parsed.data)
-      while (published().length === 0) {
-        if (Date.now() > deadline) throw new Error(`no lsp.diagnostics frame: ${JSON.stringify(frames)}`)
+      // The server publishes syntax, semantic and suggestion results as they
+      // arrive. The first publication can be empty; await the semantic result
+      // for this exact revision before checking the route's latest cache.
+      const semantic = () => published().find((frame) => frame.path === body.path && frame.digest === body.digest && frame.items.some((item) => item.code === "2551"))
+      while (semantic() === undefined) {
+        if (Date.now() > deadline) throw new Error(`no semantic lsp.diagnostics frame: ${JSON.stringify(frames)}`)
         await Bun.sleep(25)
       }
-      expect(published().at(-1)).toMatchObject({ type: "lsp.diagnostics", repoId, path: "src/index.ts", items: body.items })
+      const latest = LspDiagnosticsResponseSchema.parse(await (await post(LSP_DIAGNOSTICS_PATH, { repoId, path: body.path })).json())
+      expect(latest.items?.map((item) => item.code)).toEqual(["2551"])
+      expect(semantic()).toMatchObject({ type: "lsp.diagnostics", repoId, path: body.path, digest: latest.digest, items: latest.items })
     } finally {
       socket.close()
     }

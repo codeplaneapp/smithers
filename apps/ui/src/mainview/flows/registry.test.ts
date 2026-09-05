@@ -445,7 +445,7 @@ describe("command registry bindings", () => {
       host: "cloud",
       version: "test",
       buildSha: "cloud",
-      capabilities: ["agent", "identity", "jjhub"],
+      capabilities: ["agent", "identity", "cloud", "browser.read"],
       authFlow: "redirect",
       sandbox: null
     })
@@ -458,6 +458,13 @@ describe("command registry bindings", () => {
     expect(cloudNames).not.toContain("target.run")
     expect(cloudNames).not.toContain("tab.terminal")
     expect(cloudNames).not.toContain("keys.list")
+    const withoutBrowser = await freshController({
+      apiVersion: 1, host: "cloud", version: "test", buildSha: "cloud",
+      capabilities: ["agent", "identity", "cloud"], authFlow: "redirect", sandbox: null
+    })
+    expect(withoutBrowser.controller.commands.all().map((command) => command.name)).not.toContain("browser.open")
+    expect((await withoutBrowser.controller.commands.runForAgent("browser.open", "https://example.com")).status).toBe("unavailable")
+    local.controller.dispose(); cloud.controller.dispose(); withoutBrowser.controller.dispose()
   })
 
   test("every registered action executes through the one run path", async () => {
@@ -522,6 +529,8 @@ describe("command registry bindings", () => {
       "auth.prompt",
       "auth.sign-out",
       "auth.request-access",
+      "storage.recovery",
+      "storage.recovery.export",
       "cloud.sign-in",
       "cloud.prompt",
       "cloud.sign-out",
@@ -947,7 +956,8 @@ describe("command registry bindings", () => {
       arguments: JSON.stringify({ action: "execute", name: "/connect" })
     })
     expect(executed).toBe("executed /connect")
-    expect(store.session().surface).toBe("connectors")
+    expect(store.session().surface).toBe("chat")
+    expect(store.collections.cards.get("connect-embedded")?.kind).toBe("connect")
 
     // The slash spelling resolves through the alias and executes now that the
     // look-and-feel flows are model-invocable (flows/invocable.test.ts).

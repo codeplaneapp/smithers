@@ -9,6 +9,14 @@ import { payloadFor } from "./SlashPayload"
  */
 
 describe("slash payload argument counts", () => {
+  test("chat.clear is local by default and summarization requires its exact flag", () => {
+    expect(payloadFor("chat.clear", "")).toEqual({ payload: {} })
+    expect(payloadFor("chat.clear", "--summarize")).toEqual({ payload: { summarize: true } })
+    for (const input of ["true", "--sumarize", "--summarize extra", "--summarize --summarize"]) {
+      expect(payloadFor("chat.clear", input)).toHaveProperty("error")
+    }
+  })
+
   test("flow.run refuses a third token instead of dropping it", () => {
     const parsed = payloadFor("flow.run", "create-workflow will/flows extra")
     expect(parsed).toEqual({ error: "flow.run takes a workflow name and optionally an owner/repo" })

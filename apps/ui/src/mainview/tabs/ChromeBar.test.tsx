@@ -102,7 +102,7 @@ const cloudHarness = async (services: AppServices = {}): Promise<{ store: AppSto
       host: "cloud",
       version: "test",
       buildSha: "cloud",
-      capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: false }),
+      capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: false }),
       authFlow: "redirect",
       sandbox: null
     },
@@ -141,6 +141,24 @@ const persisted = async (store: AppStore, transition: Parameters<AppStore["dispa
 }
 
 describe("the + menu", () => {
+  test("New agent replaces the initiating menu and its blocking backdrop with the form", async () => {
+    const { store, controller } = await localHarness({
+      fetchImpl: async () => new Response(JSON.stringify({}), { status: 404 })
+    })
+    const { host, act } = mount(controller)
+    try {
+      await act(() => host.querySelector<HTMLButtonElement>("[data-testid=tab-add]")?.click())
+      expect(host.querySelector(".tab-add-backdrop")).not.toBeNull()
+      await act(() => host.querySelector<HTMLButtonElement>("[data-testid=tab-add-new-agent]")?.click())
+      for (let tick = 0; tick < 100 && !store.collections.cards.has("form-agent.create"); tick += 1) await act(() => {})
+      await act(() => {})
+      expect(host.querySelector("[data-testid=flow-form-submit]")).not.toBeNull()
+      expect(host.querySelector("[data-testid=tab-add-menu]")).toBeNull()
+      expect(host.querySelector(".tab-add-backdrop")).toBeNull()
+      expect(store.session().tabMenuOpen).toBe(false)
+    } finally { controller.dispose() }
+  })
+
   test("opens outside the scrolling list: Terminal first, then the agents", async () => {
     const { store, controller } = await localHarness()
     await persisted(store, {
@@ -597,7 +615,7 @@ describe("the sidebar's file tree", () => {
     // A file click is files.read <path> <repo>: the existing file card lands in the chat; the sidebar does not change.
     await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-file-${COPY}#README.md"]`)?.click())
     expect(requests.at(-1)).toEqual({ repoId: "repo-smithers", path: "README.md" })
-    const card = store.collections.cards.get("file-smithersai/smithers-README.md")
+    const card = store.collections.cards.get("file-repo-smithers-README.md")
     expect(card?.kind).toBe("file")
     expect(host.querySelector("[data-testid=transcript] .smithers-card[data-kind=file]")).not.toBeNull()
     expect(store.session().activeTabId).toBe("main")

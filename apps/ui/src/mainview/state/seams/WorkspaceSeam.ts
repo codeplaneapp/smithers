@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The workspaces seam (lane citc, ADR 0002): the persistent cloud computers
  * behind the `/api/cloud/*` proxy.
@@ -57,6 +58,7 @@ import type {
   WorkspaceHead,
   WorkspaceService
 } from "../AppState"
+import { CARD_CONTENT_CAP, fileValue, listingValue } from "./FilesSeam"
 import { resolveTargetRepo } from "../RepoContext"
 import { dropDesktopStream, holdDesktopStream } from "./DesktopStream"
 import type { DesktopStream } from "./DesktopStream"
@@ -620,11 +622,13 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${rest}`
   }
 
-  const timers = new Set<ReturnType<typeof setTimeout>>()
-  const watching = new Set<string>()
-  const watchPolls = new Map<string, number>()
-  /** One desktop mint at a time per workspace: a newer mint (or a drop) supersedes the retry loop before it. */
-  const desktopMintEpochs = new Map<string, number>()
+  const { timers, watching, watchPolls, desktopMintEpochs, terminalOpenEpochs } = actorSharedState(ctx, "workspace", () => ({
+    timers: new Set<ReturnType<typeof setTimeout>>(),
+    watching: new Set<string>(),
+    watchPolls: new Map<string, number>(),
+    desktopMintEpochs: new Map<string, number>(),
+    terminalOpenEpochs: new Map<string, number>()
+  }))
   /** 5s cadence × 120 = ten minutes, the provisioning ceiling the workspaces spec names. */
   const MAX_WATCH_POLLS = 120
 
@@ -646,6 +650,7 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     /* The controller is going away, so no facet can be mounted: the credential goes with it. */
     dropDesktopStream()
     desktopMintEpochs.clear()
+    terminalOpenEpochs.clear()
   }
 
   /*
@@ -1548,11 +1553,10 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const card = ctx.store.collections.cards.get(cardIdOf(workspace.id))
     const files = card?.kind === "workspace" ? card.payload.files ?? [] : []
     return {
-      value: files.length === 0
-        ? `Nothing under ${at === "" ? "/" : at} in "${workspace.name}" (${workspace.id}).`
-        : `${files.length} entr${files.length === 1 ? "y" : "ies"} under ${
-          at === "" ? "/" : at
-        } in "${workspace.name}" (${workspace.id}) — the card lists them.`
+      value: listingValue(`"${workspace.name}" (${workspace.id})`, at, files.map((file) => ({
+        name: file.name,
+        kind: file.type === "dir" ? "dir" : "file"
+      })))
     }
   }
 
@@ -1575,6 +1579,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      * repository file card follows.
      */
     const binary = body?.encoding === "base64"
+    const text = binary ? "" : content.slice(0, CARD_CONTENT_CAP)
+    const truncated = !binary && (body?.truncated === true || content.length > CARD_CONTENT_CAP)
     const id = `workspace-file-${workspace.id}-${path}`
     const existing = ctx.store.collections.cards.get(id)
     ctx.dispatch({
@@ -1590,15 +1596,15 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
         payload: {
           repo: workspace.repoId,
           path,
-          content,
-          truncated: false,
+          content: text,
+          truncated,
           binary,
           /* The address names the computer the bytes came from: this is not the repository's copy. */
           address: `${workspace.repoId} · ${workspace.name} · ${path}`
         }
       }
     })
-    return { value: `${path} in "${workspace.name}" (${workspace.id}) is on the card.` }
+    return { value: fileValue(`"${workspace.name}" (${workspace.id})`, path, { content: text, truncated, binary }) }
   }
 
   const listServices: WorkspaceSeam["listServices"] = async (workspaceId) => {
@@ -1812,7 +1818,6 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
   }
 
   /* One terminal-open loop per workspace: a later open supersedes the one before it. */
-  const terminalOpenEpochs = new Map<string, number>()
 
   const openTerminal: WorkspaceSeam["openTerminal"] = async (workspaceId) => {
     const refusal = gate()

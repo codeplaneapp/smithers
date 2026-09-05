@@ -1,5 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY } from "./TransactionalStorage"
+import { retainRecoveryCopy } from "./RecoveryCopy"
+import { parseSchemaStamp } from "./SchemaStamp"
 
 /*
  * The boot gate for the persisted store: which backend holds it (E3.6) and
@@ -7,19 +9,13 @@ import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY } from "./Transaction
  *
  * AppStore calls both halves before it constructs a single collection.
  *
- * The version half. The OPFS/wa-sqlite backend already declares a version:
- * AppStore passes `schemaVersion` plus `schemaMismatchPolicy: "reset"` to
- * `persistedCollectionOptions`, so a shape change drops the database and the
- * app reseeds. The localStorage fallback had no equivalent.
- * `localStorageCollectionOptions` takes no version, and TanStack's
- * `loadFromStorage` only JSON.parses each `{versionKey, data}` envelope — it
- * never runs the collection schema. A row written under an older shape
- * therefore enters the live collection unvalidated, and the first update that
- * validates the full row wedges every later dispatch. `enforceSchemaVersion`
- * gives the fallback the same contract: boot stamps the version, and a boot
- * that reads a DIFFERENT stamp clears every persisted collection key. Reset,
- * not migration, matches the OPFS policy, so both backends behave identically
- * on a bump.
+ * The version half. TanStack's localStorage loader does not validate rows.
+ * AppStore uses the validation gate, then opens TransactionalStorage
+ * with the collection schemas before stamping the new version. Compatible
+ * older rows survive; ordinary rejected rows are quarantined. Future versions
+ * refuse open without mutation. A destructive reset requires the explicit
+ * onMismatch: "reset" option. SQLite performs its own schema gate and
+ * row validation in SqliteRowStorage.
  *
  * The backend half. AppStore can persist into either store, and it cannot
  * merge them. A launch that opens the store the previous launch did not write
@@ -37,7 +33,7 @@ import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY } from "./Transaction
  * The shape version of everything AppStore persists. Bump it whenever a
  * persisted schema changes in a way an older row cannot satisfy.
  */
-export const APP_SCHEMA_VERSION = 10
+export const APP_SCHEMA_VERSION = 11
 
 /** The prefix AppStore gives every persisted collection's storage key. */
 export const PERSISTED_KEY_PREFIX = "smithers-mvp."
@@ -53,6 +49,12 @@ export const SCHEMA_QUARANTINE_PREFIX = "smithers-mvp-quarantine."
 
 /** The two stores AppStore can persist into. */
 export type PersistenceBackendKind = "opfs" | "localStorage"
+
+export class UnknownPersistenceBackendError extends Error {
+  constructor() {
+    super("The recorded persistence backend is unknown to this build. No other store was selected; recover the backend record before continuing.")
+  }
+}
 
 /*
  * The gate's own bookkeeping, as opposed to the data. A reset clears the data
@@ -70,7 +72,9 @@ const BOOKKEEPING_KEYS: ReadonlySet<string> = new Set([
  */
 export const readRecordedBackend = (storage: StorageApi): PersistenceBackendKind | null => {
   const stamped = storage.getItem(PERSISTENCE_BACKEND_STORAGE_KEY)
-  return stamped === "opfs" || stamped === "localStorage" ? stamped : null
+  if (stamped === null) return null
+  if (stamped === "opfs" || stamped === "localStorage") return stamped
+  throw new UnknownPersistenceBackendError()
 }
 
 /** Stamp the backend this launch committed to, for the next launch to honour. */
@@ -97,6 +101,7 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-toasts",
   "app-tool-calls",
   "app-chain-events",
+  "app-retired-chain-lineages",
   "app-tabs",
   "app-harnesses",
   /* Agents as data (custom-agents.md): the mirror of `GET /api/agents`. */
@@ -134,13 +139,13 @@ export const persistedStorageKeys = (): ReadonlyArray<string> => [
 
 export interface SchemaVersionOutcome {
   /**
-   * "match" left the store alone. "reset" cleared it because the stamp named
-   * a different version.
+   * "match" left the store alone. "reset" cleared a different version.
+   * "validate" requires validated storage open before the caller stamps `to`.
    */
-  readonly action: "match" | "reset"
+  readonly action: "match" | "reset" | "validate"
   /** The stamp the gate read, or null when the store carried none. */
   readonly from: string | null
-  /** The version now stamped. */
+  /** The target version; `validate` leaves the existing stamp untouched. */
   readonly to: number
   /** The keys the gate removed, sorted. */
   readonly clearedKeys: ReadonlyArray<string>
@@ -151,6 +156,14 @@ export interface SchemaVersionOutcome {
 export interface SchemaVersionOptions {
   /** Defaults to APP_SCHEMA_VERSION. Tests pass a bump. */
   readonly version?: number
+  /** Defaults to validation without writes. "reset" is an explicit destructive recovery operation. */
+  readonly onMismatch?: "validate" | "reset"
+}
+
+export class UnsupportedLocalStorageSchemaError extends Error {
+  constructor(readonly found: string, readonly supported: number) {
+    super(`Local storage state schema ${found} cannot be opened by this build's schema ${supported}.`)
+  }
 }
 
 /*
@@ -191,32 +204,36 @@ const keysToClear = (storage: StorageApi): ReadonlyArray<string> => {
  *
  * Call it before any collection is constructed.
  *
- * - A stamp that matches: untouched.
- * - A stamp that differs: cleared and restamped. The rows were written under a
- *   shape this build cannot satisfy, and reset matches the OPFS policy.
- * - No stamp: stamped as the current version.
+ * A matching stamp is untouched. By default, older/absent stamps
+ * await the storage opener's validated commit and future/invalid stamps
+ * refuse open. Only onMismatch: "reset" permits a destructive reset with
+ * recovery copies. Merely checking a version never silently clears user data.
  */
 export const enforceSchemaVersion = (
   storage: StorageApi,
   options: SchemaVersionOptions = {}
 ): SchemaVersionOutcome => {
   const version = options.version ?? APP_SCHEMA_VERSION
+  parseSchemaStamp(version, "Local storage configuration")
   const from = storage.getItem(SCHEMA_VERSION_STORAGE_KEY)
   if (from === String(version)) {
     return { action: "match", from, to: version, clearedKeys: [], quarantinedKeys: [] }
   }
-  if (from === null) {
-    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(version))
-    return { action: "match", from, to: version, clearedKeys: [], quarantinedKeys: [] }
+  if (options.onMismatch !== "reset") {
+    if (from !== null && (!/^\d+$/.test(from) || !Number.isSafeInteger(Number(from)) || Number(from) > version)) {
+      throw new UnsupportedLocalStorageSchemaError(from, version)
+    }
+    // Validation and its durable commit must succeed before the caller stamps
+    // this version. This branch never moves, removes, or rewrites source data.
+    return { action: "validate", from, to: version, clearedKeys: [], quarantinedKeys: [] }
   }
   const clearedKeys = keysToClear(storage)
   const quarantinedKeys: string[] = []
   for (const key of clearedKeys) {
     const raw = storage.getItem(key)
     if (raw === null) continue
-    const quarantineKey = `${SCHEMA_QUARANTINE_PREFIX}${from}.${key.slice(PERSISTED_KEY_PREFIX.length)}`
-    storage.setItem(quarantineKey, raw)
-    quarantinedKeys.push(quarantineKey)
+    const quarantineKey = `${SCHEMA_QUARANTINE_PREFIX}${from ?? "unversioned"}.${key.slice(PERSISTED_KEY_PREFIX.length)}`
+    quarantinedKeys.push(retainRecoveryCopy(storage, quarantineKey, raw))
   }
   for (const key of clearedKeys) storage.removeItem(key)
   storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(version))

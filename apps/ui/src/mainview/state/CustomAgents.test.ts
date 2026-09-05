@@ -6,9 +6,11 @@ import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { Harness } from "@smthrs/rpc/LocalApp"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { createAppController } from "./AppController"
+import { scopedControllers } from "./ControllerTestScope"
 import { createAppStore } from "./AppStore"
 import type { Card } from "./AppState"
+
+const createAppController = scopedControllers()
 
 /*
  * Agents as data, renderer side (docs/workbench-lanes/custom-agents.md): the

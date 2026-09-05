@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The Linear seam (lane sync, ADR 0005; lane L5 against the live routes),
  * behind the `/api/cloud/*` proxy. Every path below was read off plue's own
@@ -276,7 +277,7 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   const now = deps.now ?? (() => Date.now())
   const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
   /* One tracking loop per integration: a re-run supersedes the loop before it. */
-  const epochs = new Map<string, number>()
+  const epochs = actorSharedState(ctx, "linear-epochs", () => new Map<string, number>())
 
   const gate = (): string | void => {
     const session = ctx.store.collections.cloudSessions.get("cloud")

@@ -67,6 +67,8 @@ const streamTurn = (
   config: CloudAgentConfig
 ): Effect.Effect<void, Error, Scope.Scope> =>
   Effect.gen(function*() {
+    // Billing belongs to this provider invocation, while frames and cancellation retain the caller's id.
+    const upstreamRunId = crypto.randomUUID()
     // The hidden runtime context is rendered server-side into the
     // instructions: upstream sees one string, secrets and structure stay on
     // this side, and the visible transcript never holds it. The chat seam caps
@@ -80,7 +82,7 @@ const streamTurn = (
           headers: {
             "content-type": "application/json",
             origin: config.origin?.trim() || DEFAULT_APP_ORIGIN,
-            "x-smithers-run-id": request.runId
+            "x-smithers-run-id": upstreamRunId
           },
           body: JSON.stringify({
             messages: request.messages,
@@ -132,7 +134,9 @@ const streamTurn = (
           publish({ runId: request.runId, type: "delta", kind: parsed.kind, text: parsed.text })
           break
         case "card":
-          publish({ runId: request.runId, type: "card", card: parsed.card })
+          publish({ runId: request.runId, type: "card", card: "runId" in parsed.card.payload && parsed.card.payload.runId === upstreamRunId
+            ? CardSchema.parse({ ...parsed.card, payload: { ...parsed.card.payload, runId: request.runId } })
+            : parsed.card })
           break
         case "card.update":
           publish({ runId: request.runId, type: "card.update", id: parsed.id, patch: parsed.patch })

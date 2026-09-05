@@ -1,9 +1,10 @@
+import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
+import { createControllerContext } from "./controller/context"
 
 /*
  * Ruling B (docs/persistence.md): everything a controller opens is released
@@ -49,6 +50,67 @@ const countingAgent = (): { agent: NativeAgent; listeners: Set<(frame: AgentTurn
 }
 
 describe("disposing a controller releases what it opened", () => {
+  test("scope finalizers release in reverse acquisition order and a failure cannot skip later releases", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const { agent } = countingAgent()
+    const context = createControllerContext(store, unavailableRepositories, agent, {})
+    const released: string[] = []
+    const original = new Error("second resource close failed")
+    context.onDispose(() => {
+      released.push("first")
+    })
+    context.onDispose(() => {
+      released.push("second")
+      throw original
+    })
+    context.onDispose(() => {
+      released.push("third")
+    })
+    let caught: unknown
+    try {
+      await context.dispose()
+    } catch (error) {
+      caught = error
+    }
+    expect(released).toEqual(["third", "second", "first"])
+    expect(caught).toBeInstanceOf(AggregateError)
+    expect((caught as AggregateError).errors).toEqual([original])
+    await expect(context.dispose()).rejects.toBe(caught)
+    expect(released).toHaveLength(3)
+    context.onDispose(() => {
+      released.push("late")
+    })
+    expect(released).toEqual(["third", "second", "first", "late"])
+  })
+
+  test("a failing agent unsubscribe cannot strand persistence and both failures are reported", async () => {
+    const released: string[] = []
+    const store = {
+      ...(await createAppStore({ kind: "localStorage", storage: memoryStorage() })),
+      dispose: () => {
+        released.push("store")
+        throw new Error("store close failed")
+      }
+    }
+    const { agent, listeners } = countingAgent()
+    const controller = createAppController(store, unavailableRepositories, {
+      ...agent,
+      subscribe: (listener) => {
+        const unsubscribe = agent.subscribe(listener)
+        return () => {
+          unsubscribe?.()
+          released.push("agent")
+          throw new Error("agent unsubscribe failed")
+        }
+      }
+    })
+    expect(listeners.size).toBe(1)
+    await expect(controller.dispose()).rejects.toThrow(AggregateError)
+    expect(released).toEqual(["agent", "store"])
+    expect(listeners.size).toBe(0)
+    await expect(controller.dispose()).rejects.toThrow(AggregateError)
+  })
+
   test("the persistence resource is released with the controller scope", async () => {
     let releases = 0
     const store = {
@@ -59,8 +121,8 @@ describe("disposing a controller releases what it opened", () => {
     }
     const { agent } = countingAgent()
     const controller = createAppController(store, unavailableRepositories, agent)
-    controller.dispose()
-    controller.dispose()
+    await controller.dispose()
+    await controller.dispose()
     expect(releases).toBe(1)
   })
 
@@ -72,7 +134,7 @@ describe("disposing a controller releases what it opened", () => {
       agent
     )
     expect(listeners.size).toBe(1)
-    controller.dispose()
+    await controller.dispose()
     expect(listeners.size).toBe(0)
   })
 
@@ -83,8 +145,8 @@ describe("disposing a controller releases what it opened", () => {
       unavailableRepositories,
       agent
     )
-    controller.dispose()
-    expect(() => controller.dispose()).not.toThrow()
+    await controller.dispose()
+    await controller.dispose()
     expect(listeners.size).toBe(0)
   })
 
@@ -119,7 +181,7 @@ describe("disposing a controller releases what it opened", () => {
       await settled()
       const readsAfterFocus = sessionReads
       expect(readsAfterFocus).toBeGreaterThan(0)
-      controller.dispose()
+      await controller.dispose()
       window.dispatchEvent(new window.Event("focus"))
       await settled()
       await settled()

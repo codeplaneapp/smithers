@@ -60,6 +60,7 @@ export interface LspHostOptions {
   readonly maxServers?: number
   readonly idleMs?: number
   readonly requestTimeoutMs?: number
+  readonly startupTimeoutMs?: number
   readonly killGraceMs?: number
   readonly log?: (line: string) => void
 }
@@ -113,6 +114,7 @@ interface Live {
   readonly repoId: string
   readonly session: LspSession
   timer: ReturnType<typeof setTimeout> | undefined
+  retiring: Promise<void> | undefined
 }
 
 export const createLspHost = (options: LspHostOptions): LspHost => {
@@ -125,15 +127,21 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
   const live = new Map<string, Live>()
   const keyOf = (repoId: string, language: LanguageId): string => `${repoId}\n${language}`
 
-  const retire = async (entry: Live, reason: string): Promise<void> => {
-    if (live.get(entry.key) === entry) live.delete(entry.key)
+  const retire = (entry: Live, reason: string): Promise<void> => {
+    if (entry.retiring !== undefined) return entry.retiring
     if (entry.timer !== undefined) clearTimeout(entry.timer)
     entry.timer = undefined
     if (entry.session.state !== "exited") log(`lsp ${entry.repoId}/${entry.session.language}: shutting down (${reason})`)
-    await entry.session.shutdown()
+    // Keep the process owned while shutdown is in flight: closeRepo/killAll
+    // must still await it, and a replacement must not overlap its lifetime.
+    entry.retiring = entry.session.shutdown().finally(() => {
+      if (live.get(entry.key) === entry) live.delete(entry.key)
+    })
+    return entry.retiring
   }
 
   const arm = (entry: Live): void => {
+    if (entry.retiring !== undefined) return
     if (entry.timer !== undefined) clearTimeout(entry.timer)
     entry.timer = setTimeout(() => {
       // A request still running (the first one carries tsserver's project load) is activity: the clock restarts behind it.
@@ -154,6 +162,7 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
       key,
       repoId,
       timer: undefined,
+      retiring: undefined,
       session: createLspSession({
         repoId,
         repoRoot,
@@ -162,6 +171,7 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
         env: lspChildEnv(env, options.home, binDirOf(node?.path)),
         publish: options.publish,
         ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
+        ...(options.startupTimeoutMs === undefined ? {} : { startupTimeoutMs: options.startupTimeoutMs }),
         ...(options.killGraceMs === undefined ? {} : { killGraceMs: options.killGraceMs }),
         onTouch: () => {
           if (live.get(key) === entry) arm(entry)
@@ -186,11 +196,19 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
     if (language === null) return { status: "unsupported" }
     const key = keyOf(repoId, language)
     const existing = live.get(key)
+    if (existing?.retiring !== undefined) {
+      await existing.retiring
+      return session(repoId, repoRoot, path)
+    }
     if (existing !== undefined && existing.session.state !== "exited") return { status: "ok", session: existing.session }
     const root = safeRealpath(repoRoot)
     const node = await options.node
     // The await above is the one window a second caller could open the same key in.
     const raced = live.get(key)
+    if (raced?.retiring !== undefined) {
+      await raced.retiring
+      return session(repoId, repoRoot, path)
+    }
     if (raced !== undefined && raced.session.state !== "exited") return { status: "ok", session: raced.session }
     const spec = serverFor(language)
     const resolved = resolveServer(spec, lookup, node)
@@ -200,6 +218,8 @@ export const createLspHost = (options: LspHostOptions): LspHost => {
       if (oldest === undefined) break
       await retire(oldest, `room for ${repoId}`)
     }
+    // Another caller may have filled this same key while capacity was freed.
+    if (live.has(key)) return session(repoId, repoRoot, path)
     return { status: "ok", session: start(repoId, root, language, resolved.argv, node).session }
   }
 

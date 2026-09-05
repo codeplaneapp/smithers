@@ -1,3 +1,4 @@
+import { fileArgs, parseFileArgs } from "../flows/FileArgs"
 /*
  * The workspace card (lane citc, ADR 0002; completed by lane L3): one
  * persistent cloud computer, reviewed in the transcript.
@@ -301,11 +302,14 @@ const WorkspaceFacetBody = ({
     return (
       <FileListCardBody
         card={listingCard(payload)}
-        onRunCommand={(name, args) =>
+        onRunCommand={(name, args) => {
+          const parsed = parseFileArgs(args)
+          if ("error" in parsed) return
           onRunCommand(
             name === "files.list" ? "workspace.files" : "workspace.file",
-            `${args?.split(" ")[0] ?? ""} ${payload.workspaceId}`
-          )}
+            fileArgs(parsed.tokens[0] ?? "", payload.workspaceId)
+          )
+        }}
       />
     )
   }

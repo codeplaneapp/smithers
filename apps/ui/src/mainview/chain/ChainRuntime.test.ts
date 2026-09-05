@@ -5,10 +5,13 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { createAppController } from "../state/AppController"
+import { scopedControllers } from "../state/ControllerTestScope"
+import { trackDispatchCommits } from "../state/StoreTestScope"
 import { createAppStore } from "../state/AppStore"
 import type { AppStore } from "../state/AppStore"
 import { createAgentSeat, createChainRuntime } from "./ChainRuntime"
+
+const createAppController = scopedControllers()
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -70,6 +73,7 @@ interface Harness {
   readonly frames: Array<AgentTurnFrame>
   readonly nativeRequests: Array<StartAgentTurnRequest>
   readonly waitForDone: () => Promise<AgentTurnFrame & { readonly type: "done" }>
+  readonly settle: () => Promise<void>
 }
 
 const harness = async (options: {
@@ -77,10 +81,10 @@ const harness = async (options: {
   readonly author: Layer.Layer<Author.Author>
   readonly entries?: ReadonlyArray<Catalog.Entry>
 }): Promise<Harness> => {
-  const store = await createAppStore({
+  const { store, settle } = trackDispatchCommits(await createAppStore({
     kind: "localStorage",
     storage: options.storage ?? memoryStorage()
-  })
+  }))
   const native = recordingNative()
   const agent = createAgentSeat(native.agent)
   const controller = createAppController(store, unavailableRepositories, agent)
@@ -101,10 +105,10 @@ const harness = async (options: {
   })
   const waitForDone = () =>
     new Promise<AgentTurnFrame & { readonly type: "done" }>((resolve, reject) => {
-      doneWaiters.push(resolve)
-      setTimeout(() => reject(new Error("no done frame within 5s")), 5000)
+      const timer = setTimeout(() => reject(new Error("no done frame within 5s")), 5000)
+      doneWaiters.push((frame) => { clearTimeout(timer); resolve(frame) })
     })
-  return { store, controller, frames, nativeRequests: native.requests, waitForDone }
+  return { store, controller, frames, nativeRequests: native.requests, waitForDone, settle }
 }
 
 describe("ChainRuntime behind the NativeAgent seam", () => {
@@ -592,9 +596,12 @@ describe("ChainRuntime behind the NativeAgent seam", () => {
     expect(lineage).toBeDefined()
     const worldAfterFirst = first.store.collections.worldDocuments.size
 
+    // A done frame is not the controller's persistence receipt. Quiesce the
+    // old owner and drain its accepted commits before simulating a reload.
+    await first.controller.dispose()
+    await first.settle()
     // The reload: same storage, an author that fails if ever consulted.
     const second = await harness({ storage, author: Author.layerMock([]) })
-    const agentDone = second.waitForDone()
     const runtime = createChainRuntime({
       store: second.store,
       commands: second.controller.commands,
@@ -621,6 +628,5 @@ describe("ChainRuntime behind the NativeAgent seam", () => {
     expect(terminal !== undefined && "error" in terminal ? terminal.error : undefined).toBeUndefined()
     // Zero re-executed effects: the world did not grow again.
     expect(second.store.collections.worldDocuments.size).toBe(worldAfterFirst)
-    void agentDone.catch(() => {})
   })
 })

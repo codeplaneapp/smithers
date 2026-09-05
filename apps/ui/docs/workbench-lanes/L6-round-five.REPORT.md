@@ -34,7 +34,7 @@ own route tests (`internal/routes/workspace_desktop_test.go` gave the exact
 | --- | --- | --- |
 | `GET https://api.jjhub.tech/api/health` | 200 | the API is up |
 | `GET /api/user/workspaces` | 401 | registered; auth is the gate |
-| `GET /api/user/workspaces` with `JJHUB_TOKEN` / `JJHUB_ADMIN_TOKEN` | 401 | **no usable credential in this session** |
+| `GET /api/user/workspaces` with `SMITHERS_CLOUD_TOKEN` / `SMITHERS_CLOUD_ADMIN_TOKEN` | 401 | **no usable credential in this session** |
 | `GET /api/integrations/linear` | **401** | **NEW since L5, which saw 404.** plue's Linear OAuth client is configured in production now, so the whole `/api/linear*` group is routed |
 | `GET /api/linear/setup/abc` | **401** | registered (404 at L5) |
 | `GET /api/linear/1/ops` | **401** | registered (404 at L5) |
@@ -104,7 +104,7 @@ changed, as instructed: `Commands.ts`, `App.tsx`, `ChromeBar.tsx`,
 `Composer.tsx`, `FileCards.tsx`, `Instructions.ts`, `apps/server`,
 `packages/smithers/ui`. The web-mode lane's `hosts` / `nativeOnly` / `absentDoor` /
 `explainAbsent` and its two `app.*` flows are intact and were re-read before
-each edit; my four flows declare `runtime: ["jjhub"]`, so they exist on both
+each edit; my four flows declare `runtime: ["Smithers Cloud"]`, so they exist on both
 hosts.
 
 ## New flows
@@ -307,7 +307,7 @@ pagination links`). Every field and body below was read from that Go source
 and from plue's own route tests, which state the wire shapes verbatim.
 
 **What was observed on the wire** (anonymous read-only GETs, 2026-09-03 — the
-public jjhub mirror `roninjin10/smithers` does answer them):
+public Smithers Cloud mirror `roninjin10/smithers` does answer them):
 
 | probe | code | reading |
 | --- | --- | --- |

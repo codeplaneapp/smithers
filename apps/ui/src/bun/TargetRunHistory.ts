@@ -114,15 +114,24 @@ export const createTargetRunHistory = (): TargetRunHistory => {
   return {
     start: async (run) => {
       const dir = runsDir(run.repo)
-      await mkdir(dir, { recursive: true })
       const record: RunRecord = {
         runId: run.runId, repoId: run.repoId, label: run.label, labels: [...run.labels], status: "pending", startedAt: run.startedAt
       }
       const path = join(dir, `${run.runId}.jsonl`)
-      await writeFile(path, encode({ type: "record", record }))
-      runs.set(run.runId, { record, events: [], path, queue: Promise.resolve(), logChars: 0 })
-      /* The run just written is in `runs`; nothing on disk is still unseen. */
-      if (!loading.has(run.repo)) loading.set(run.repo, Promise.resolve())
+      // Register now: the runner may emit while old journals are loading. Its
+      // appends queue behind initialization instead of being silently dropped.
+      const initialized = loadRepo(run.repoId, run.repo).then(async () => {
+        await mkdir(dir, { recursive: true })
+        await writeFile(path, encode({ type: "record", record }))
+      })
+      const stored: StoredRun = { record, events: [], path, queue: initialized, logChars: 0 }
+      runs.set(run.runId, stored)
+      try {
+        await initialized
+      } catch (error) {
+        if (runs.get(run.runId) === stored) runs.delete(run.runId)
+        throw error
+      }
     },
     event: (run, event) => {
       const stored = runs.get(run.runId)

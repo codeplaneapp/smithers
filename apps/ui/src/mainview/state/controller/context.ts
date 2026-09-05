@@ -65,9 +65,9 @@ export interface ControllerContext {
    * when the controller's scope closes via `dispose` — nothing a controller
    * opened outlives it.
    */
-  readonly onDispose: (finalizer: () => void) => void
-  /** Close the controller's scope: run every registered finalizer, once. */
-  readonly dispose: () => void
+  readonly onDispose: (finalizer: () => void | Promise<void>) => void | Promise<void>
+  /** Release in reverse order, awaiting each resource; repeated calls share the completion/failure. */
+  readonly dispose: () => Promise<void>
   readonly toastDebounceMs: number
   readonly toastAutoDismissMs: number
   readonly workflowPollMs: number
@@ -141,8 +141,9 @@ export const createControllerContext = (
    * all of it. Previously the agent unsubscribe was discarded and the
    * identity listeners and BroadcastChannel leaked for the page lifetime.
    */
-  const finalizers: Array<() => void> = []
+  const finalizers: Array<() => void | Promise<void>> = []
   let disposed = false
+  let completion: Promise<void> | undefined
   const ctx = {
     store,
     repositories,
@@ -177,15 +178,35 @@ export const createControllerContext = (
       // Registering after disposal runs the finalizer at once, so a late
       // acquisition never leaks either.
       if (disposed) {
-        finalizer()
-        return
+        return finalizer()
       }
       finalizers.push(finalizer)
     },
     dispose: () => {
-      if (disposed) return
+      if (completion !== undefined) return completion
       disposed = true
-      for (const finalizer of finalizers.splice(0)) finalizer()
+      let resolve!: () => void
+      let reject!: (error: unknown) => void
+      completion = new Promise<void>((done, failed) => { resolve = done; reject = failed })
+      const closing = completion
+      const pending = finalizers.splice(0).reverse()
+      // Invoke synchronous releases immediately; only an asynchronous resource
+      // delays its host's release. Record the completion before invoking user
+      // finalizers, so reentrant disposal cannot run any of them twice.
+      void (async () => {
+        const errors: unknown[] = []
+        // Stop producers before releasing resources they can still call.
+        try { ctx.stopWorkflowPumps() } catch (error) { errors.push(error) }
+        for (const finalizer of pending) {
+          try {
+            const result = finalizer()
+            if (result === closing) throw new Error("A resource finalizer cannot await its own scope's disposal")
+            if (result !== undefined) await result
+          } catch (error) { errors.push(error) }
+        }
+        if (errors.length > 0) throw new AggregateError(errors, "Controller resource cleanup failed")
+      })().then(resolve, reject)
+      return completion
     },
     http: undefined as unknown as FetchLike,
     boundedFetch: undefined as unknown as ControllerContext["boundedFetch"],

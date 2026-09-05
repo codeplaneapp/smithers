@@ -111,6 +111,7 @@ const serve = async (page: Page, repos: ReadonlyArray<unknown> = []): Promise<Se
     socket.onMessage((message) => {
       const frame = JSON.parse(String(message)) as { type: string; topic?: string; sessionId?: string; data?: string }
       if (frame.type === "subscribe" && frame.topic === `pty:${SESSION_ID}`) {
+        socket.send(JSON.stringify({ type: "subscribed", topic: frame.topic }))
         socket.send(JSON.stringify({ type: "pty.output", sessionId: SESSION_ID, data: "hello from pty\r\n" }))
       }
       if (frame.type === "pty.input" && frame.sessionId === SESSION_ID) inputs.push(frame.data ?? "")
@@ -191,6 +192,7 @@ test("the composer header names the active repository and its local path", async
   await page.goto("/")
   await expect(page.getByTestId("composer-repo-trigger")).toHaveText("artsy/force")
   await expect(page.getByTestId("repo-chip")).toContainText("artsy/force")
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("title", FORCE_REPO.path)
   await expect(page.getByTestId("repo-chip")).toHaveAttribute("data-origin", "local")
 })
 
@@ -237,7 +239,8 @@ test("the + menu paints beside the sidebar: Terminal, then the agents with their
   await expect(gemini).toContainText("unavailable")
   const items = menu.locator("[role=menuitem]")
   await expect(items.first()).toHaveText("Terminal")
-  await expect(items.last()).toContainText("Gemini")
+  await expect(items.last()).toHaveText("New agent…")
+  await expect(page.getByTestId("tab-add-new-agent")).toBeEnabled()
 })
 
 test("the sidebar is vertical and its chrome stays visible inside a terminal tab", async ({ page }) => {

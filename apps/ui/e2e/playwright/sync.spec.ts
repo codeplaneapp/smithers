@@ -50,7 +50,7 @@ const OPS = [
   {
     id: 90,
     run_id: 41,
-    source: "jjhub",
+    source: "smithers-cloud",
     target: "linear",
     entity: "issue",
     entity_id: "90",
@@ -63,7 +63,7 @@ const OPS = [
     id: 91,
     run_id: 41,
     source: "linear",
-    target: "jjhub",
+    target: "smithers-cloud",
     entity: "issue",
     entity_id: "ENG-482",
     action: "create",
@@ -88,7 +88,7 @@ const serve = async (page: Page): Promise<void> => {
     host: "local",
     version: "test",
     buildSha: "test",
-    capabilities: ["agent", "identity", "jjhub", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
+    capabilities: ["agent", "identity", "cloud", "cloud.pat", "local.repositories", "local.targets", "local.terminal", "local.harnesses"],
     authFlow: "none",
     sandbox: { platform: "darwin", mode: "trusted-only" }
   })))
@@ -130,9 +130,13 @@ const serve = async (page: Page): Promise<void> => {
       started_at: "2026-09-02T09:00:00Z",
       finished_at: "2026-09-02T09:05:00Z"
     })))
-  await page.route(/\/api\/cloud\/api\/linear\/7\/ops(\?.*)?$/, (route) => route.fulfill(json(OPS)))
-  await page.route(/\/api\/cloud\/api\/linear\/7\/ops\/90\/retry$/, (route) =>
-    route.fulfill(json({ ...OPS[1], id: 92, retry_of_id: 90 }, 202)))
+  let ops = [...OPS]
+  await page.route(/\/api\/cloud\/api\/linear\/7\/ops(\?.*)?$/, (route) => route.fulfill(json(ops)))
+  await page.route(/\/api\/cloud\/api\/linear\/7\/ops\/90\/retry$/, (route) => {
+    const retry = { ...OPS[0]!, id: 92, retry_of_id: 90, status: "success", error_message: "" }
+    ops = [retry, ...ops]
+    return route.fulfill(json(retry, 202))
+  })
 
   /* The import seam: the job starts cloning, then answers ready with its workspace. */
   let importPolls = 0
@@ -219,11 +223,13 @@ test("T1: /linear.sync tracks the run, lists its ops, and Retry runs on the fail
 
   /* The run poll fills the header and the rows; the failed op keeps its own words. */
   await expect(syncCard).toContainText("1 of 2 · 1 failed", { timeout: 20_000 })
-  await expect(syncCard).toContainText("jjhub → linear issue 90 update")
+  await expect(syncCard).toContainText("Smithers Cloud → linear issue 90 update")
   await expect(syncCard).toContainText("Linear API: 422 label 'infra' does not exist on team ENG")
 
+  const retrying = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/linear/7/ops/90/retry"))
   await syncCard.getByRole("button", { name: /Retry/ }).click()
-  await expect(page.getByText(/Op 90 retried/)).toBeVisible({ timeout: 15_000 })
+  expect((await retrying).status()).toBe(202)
+  await expect(syncCard.getByTestId("sync-op-92")).toContainText("Complete", { timeout: 15_000 })
 })
 
 test("T1: /repos.import tracks the job to done with the workspace link", async ({ page }) => {

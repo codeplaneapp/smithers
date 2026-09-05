@@ -41,6 +41,7 @@ export const FlowFormCardBody = ({
 }) => {
   const { flow, fields, draft, error } = card.payload
   const settled = card.status === "acted"
+  const busy = card.payload.submitting === true
   const commit = (field: string, value: string): void => onRunCommand("form.set", value === "" ? `${card.id} ${field}` : `${card.id} ${field} ${value}`)
   const complete = unfilled(card.payload).length === 0
   return (
@@ -61,7 +62,7 @@ export const FlowFormCardBody = ({
                   data-testid={testId}
                   value={text}
                   required={field.required}
-                  disabled={settled}
+                  disabled={settled || busy}
                   onChange={(event) => commit(field.name, event.currentTarget.value)}
                 >
                   {/* The unpicked state: a select must be able to say "nothing yet" without inventing a default. */}
@@ -80,7 +81,7 @@ export const FlowFormCardBody = ({
                   aria-label={field.label}
                   data-testid={testId}
                   checked={value === true}
-                  disabled={settled}
+                  disabled={settled || busy}
                   onChange={(event) => commit(field.name, event.currentTarget.checked ? "true" : "false")}
                 />
               ) :
@@ -95,7 +96,7 @@ export const FlowFormCardBody = ({
                     defaultValue={text}
                     placeholder={field.placeholder}
                     required={field.required}
-                    disabled={settled}
+                    disabled={settled || busy}
                     list={options.length > 0 ? listId : undefined}
                     onBlur={(event) => {
                       if (event.currentTarget.value !== text) commit(field.name, event.currentTarget.value)
@@ -116,10 +117,10 @@ export const FlowFormCardBody = ({
       })}
       {settled ? null : (
         <div className="flow-run-actions">
-          <Button variant="ghost" size="sm" data-flow="card.dismiss" data-testid="flow-form-cancel" onClick={() => onRunCommand("card.dismiss", card.id)}>
+          <Button variant="ghost" size="sm" data-flow="card.dismiss" data-testid="flow-form-cancel" disabled={busy} onClick={() => onRunCommand("card.dismiss", card.id)}>
             Cancel
           </Button>
-          <Button size="sm" data-flow="form.submit" data-testid="flow-form-submit" disabled={!complete} onClick={() => onRunCommand("form.submit", card.id)}>
+          <Button size="sm" data-flow="form.submit" data-testid="flow-form-submit" disabled={!complete || busy} onClick={() => onRunCommand("form.submit", card.id)}>
             Submit
           </Button>
         </div>

@@ -28,7 +28,9 @@ import { isAgentRoleId } from "@smthrs/rpc/AgentRoles"
 import type { AppController } from "../state/AppController"
 import { PALETTES, WORLD_DISPLAY_NAME } from "../state/AppState"
 import type { CommandState, FlowEntry, FlowMetadata } from "./registry"
+import { fileArgs } from "./FileArgs"
 import { flag, line, text } from "./FlowForms"
+import { storageRecoveryExportFlow } from "./StorageRecoveryFlow"
 
 /**
  * What a flow handler resolves: nothing, an honest error string, or a success
@@ -48,6 +50,7 @@ export type CommandActions =
   & Omit<
     AppController,
     | "store"
+    | "storageRecoveryState"
     | "nativeAgentAvailable"
     | "nativeRepositoriesAvailable"
     | "slashCommands"
@@ -66,9 +69,8 @@ export type CommandActions =
   & {
     readonly snapshot: () => CommandState
     /*
-     * Run work as the AGENT actor: every agent invocation dispatches under
-     * actor smithers, so agent-driven flows render embedded cards and record
-     * via:"agent", never user chrome (THE EMBED LAW, §2c″).
+     * Integration hook around agent dispatch. The app's actor is fixed by
+     * its separate action bindings; this hook must not mutate a shared actor.
      */
     readonly withAgentActor: <T>(work: () => Promise<T>) => Promise<T>
   }
@@ -265,20 +267,22 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     }
   }
   /*
-   * /chat.clear (§2h): sweep the outgoing transcript for what belongs in
-   * world, keep it, THEN clear — a failed sweep clears nothing.
+   * Local archive/start-new is always available. Optional summarization may
+   * fail without changing the conversation; it never replaces existing notes.
    */
   const CLEAR = {
     name: "chat.clear",
-    summary: "Clear the chat, keeping anything worth remembering",
-    input: NoPayload,
-    handler: () => actions.clearConversation()
+    summary: "Archive this conversation and start fresh; optionally summarize into World notes",
+    confirm: "archive this conversation and start a new one",
+    args: "[--summarize]",
+    input: Schema.Struct({ summarize: Schema.optional(Schema.Boolean) }),
+    handler: (options: { readonly summarize?: boolean }) => actions.clearConversation(options)
   }
   /* The browser tool + surface (§2d/§2d′): read a page; embed its card. */
   const BROWSER = {
     name: "browser.open",
     summary: "Open a web page as a card Smithers can read",
-    runtime: ["agent"] as const,
+    runtime: ["agent", "browser.read"] as const,
     args: "<url>",
     capabilities: ["session:net-read"],
     input: Schema.Struct({ url: Schema.String }),
@@ -432,7 +436,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.create",
     summary: "Create a Smithers workflow from a description",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<description> [owner/repo]",
     requires: ["signed-in"],
     capabilities: ["outbound:launch"],
@@ -454,7 +458,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.repo.choose",
     summary: "Choose which loaded repository a workflow belongs to",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     userOnly: true,
     userOnlyReason: "the answer to the which-repository card is the human's choice; a model must not provision on its guess",
@@ -472,7 +476,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "flow.run.stop",
     summary: "Stop a run",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "stop the run",
     args: "<cardId> [reason]",
@@ -486,7 +490,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* A retry spends (agent-parity.md): the model may ask, the human confirms. */
     name: "flow.run.retry",
     summary: "Check a run again",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "check the run again",
     args: "<cardId>",
@@ -496,16 +500,17 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "flow.list",
     summary: "List the workflows on your workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     requires: ["signed-in"],
-    input: NoPayload,
-    handler: () => actions.listWorkspaceWorkflows()
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.listWorkspaceWorkflows(repo)
   }),
   flow({
     name: "flow.run",
     form: { fields: { name: { label: "Workflow" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Run a workflow on your workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<name> [owner/repo]",
     requires: ["signed-in"],
     capabilities: ["outbound:launch"],
@@ -537,7 +542,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
         )
     },
     summary: "List the runs on your workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[status] [flow] [by=principal] [lineage=id] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -552,7 +557,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "runs.open",
     summary: "Open a run as a card that tracks it",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -565,7 +570,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.resume",
     confirm: "resume the run",
     summary: "Resume a parked run",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String }),
@@ -575,7 +580,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* A relaunch is real work on the user's workspace: the launch capability. */
     name: "runs.rerun",
     summary: "Run a run's flow again with the same input",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId>",
     requires: ["signed-in"],
     capabilities: ["outbound:launch"],
@@ -586,7 +591,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.signal",
     confirm: "release the run's wait with a signal",
     summary: "Deliver a named signal to a waiting run",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> <name> [json]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -600,7 +605,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.steer",
     confirm: "steer the running agent",
     summary: "Send an operator message into a running run",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> <message>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String, body: Schema.String }),
@@ -610,7 +615,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.seat",
     confirm: "change the run's seat",
     summary: "Move a run to a different model seat",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> <seat>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String, seat: Schema.String }),
@@ -620,7 +625,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.thinking",
     confirm: "change the run's thinking level",
     summary: "Change a run's thinking level",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> <level>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String, thinking: Schema.String }),
@@ -630,7 +635,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "runs.tools",
     confirm: "change the run's tools",
     summary: "Add tools to a run's active set",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> <names,comma-separated>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String, toolNames: Schema.String }),
@@ -639,7 +644,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "runs.logs",
     summary: "Show a run's transcript on its card (--follow keeps it live)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId> [--follow]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -652,7 +657,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The run card's Steps tab: the card's own presentation act, so it stays hidden. */
     name: "runs.steps",
     summary: "Show a run's steps on its card",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     args: "<runId>",
     input: Schema.Struct({ runId: Schema.String }),
@@ -662,7 +667,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The raw journal is a debug surface; the controller gates it on verbose. */
     name: "runs.events",
     summary: "Show a run's raw events on its card (verbose)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String }),
@@ -672,7 +677,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* Stopping every run is consequential: agent invocations confirm first. */
     name: "flow.run.stop-all",
     summary: "Stop every live run on your workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "stop every run",
     args: "[owner/repo]",
@@ -683,7 +688,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "approvals.list",
     summary: "List the workspace's pending approvals",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ repo: Schema.optional(Schema.String) }),
@@ -692,7 +697,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "approvals.open",
     summary: "Open a run's pending approvals as cards",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<runId>",
     requires: ["signed-in"],
     input: Schema.Struct({ runId: Schema.String }),
@@ -949,8 +954,15 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     input: Schema.Struct({ flow: Schema.optional(Schema.String) }),
     handler: ({ flow }) => actions.promptDownload(flow)
   }),
+  flow({
+    name: "storage.recovery",
+    summary: "Offer a private local recovery download in the chat",
+    input: NoPayload,
+    handler: () => actions.promptStorageRecovery()
+  }),
+  storageRecoveryExportFlow(actions.exportStorageRecovery),
   /*
-   * Lane piper (ADR 0001): the jjhub Cloud login is the CLI's browser flow —
+   * Lane piper (ADR 0001): the Smithers Cloud login is the CLI's browser flow —
    * Bun listens for the callback and holds the token (the keychain at rest);
    * the renderer only opens the URL through the native door. Browser
    * mechanics the human clicks, so user-only, like auth.sign-in.
@@ -958,7 +970,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "cloud.sign-in",
     summary: "Sign in to Smithers Cloud",
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     userOnly: true,
     userOnlyReason:
       "the Smithers Cloud browser login is the human's gesture on their account; the agent renders the step with cloud.prompt",
@@ -969,19 +981,19 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /*
      * The agent's door to the Cloud session, mirroring auth.prompt: it cannot
      * run cloud.sign-in, but it CAN render the step — the message's action IS
-     * the sign-in button. Registered wherever jjhub is: on the web the GitHub
+     * the sign-in button. Registered wherever Smithers Cloud is: on the web the GitHub
      * sign-in is the Cloud sign-in, and the controller offers that step.
      */
     name: "cloud.prompt",
     summary: "Offer the Smithers Cloud sign-in step in the chat",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     input: NoPayload,
     handler: () => actions.promptCloudSignIn()
   }),
   flow({
     name: "cloud.sign-out",
     summary: "Sign out of Smithers Cloud",
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     userOnly: true,
     userOnlyReason: "dropping the human's Smithers Cloud credential is theirs alone",
     input: NoPayload,
@@ -1019,7 +1031,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.import",
     summary: "Import a GitHub repository into Smithers Cloud",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1028,7 +1040,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.list",
     summary: "List a repository's issues",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[open|closed|all] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1040,7 +1052,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.view",
     summary: "Open an issue with its comments",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -1050,7 +1062,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "issues.create",
     form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Create an issue",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<title> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ title: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1059,7 +1071,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.close",
     summary: "Close an issue",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -1068,7 +1080,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.reopen",
     summary: "Reopen a closed issue",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -1078,7 +1090,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "issues.comment",
     form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Comment on an issue",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> <text> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1091,7 +1103,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.list",
     summary: "List a repository's pull requests",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1100,7 +1112,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "prs.view",
     summary: "Open a pull request with reviews and checks",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
     input: NumberedTarget,
@@ -1113,7 +1125,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
       args: (payload) => line(text(payload, "title"), text(payload, "from") === undefined ? undefined : `from:${text(payload, "from")}`, text(payload, "repo"))
     },
     summary: "Open a pull request",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<title> [from:<bookmark>] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1131,7 +1143,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "prs.land",
     summary: "Land a pull request (queues the merge)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "land the pull request",
     args: "<number> [owner/repo]",
     requires: ["signed-in"],
@@ -1146,7 +1158,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
         line(text(payload, "number"), text(payload, "verdict") === "request_changes" ? "request-changes" : text(payload, "verdict"), text(payload, "text"), text(payload, "repo"))
     },
     summary: "Review a pull request",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> approve|request-changes|comment [text] [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1179,7 +1191,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "notifications.list",
     summary: "Show your notifications",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.listNotifications()
@@ -1187,7 +1199,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "notifications.read",
     summary: "Mark every notification read",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     requires: ["signed-in"],
     input: NoPayload,
     handler: () => actions.markNotificationsRead()
@@ -1195,7 +1207,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "env.view",
     summary: "Show a repository's agent environment",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1204,7 +1216,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "env.set",
     summary: "Set an agent-environment variable",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<NAME=value> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ assignment: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1213,7 +1225,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "branches.list",
     summary: "List a repository's branches (bookmarks)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1226,8 +1238,9 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * second token to cross repositories.
      */
     name: "files.list",
+    form: { args: (payload) => fileArgs(text(payload, "path") ?? "/", text(payload, "repo")) },
     summary: "List a repository directory",
-    runtimeAny: ["jjhub", "local.repositories"],
+    runtimeAny: ["cloud", "local.repositories"],
     args: "[path] [owner/repo]",
     requires: ["repo-source"],
     input: Schema.Struct({ path: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1237,10 +1250,10 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "files.read",
     form: {
       fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
-      args: (payload) => line([text(payload, "path"), text(payload, "line"), text(payload, "column")].filter((part) => part !== undefined).join(":"), text(payload, "repo"))
+      args: (payload) => fileArgs([text(payload, "path"), text(payload, "line"), text(payload, "column")].filter((part) => part !== undefined).join(":"), text(payload, "repo"))
     },
     summary: "Read a file from a repository",
-    runtimeAny: ["jjhub", "local.repositories"],
+    runtimeAny: ["cloud", "local.repositories"],
     /* `:line[:col]` (docs/code-intel/PLAN.md §1): the card scrolls to and marks the line; the parser strips it off the path token. */
     args: "<path>[:<line>[:<col>]] [owner/repo]",
     requires: ["repo-source"],
@@ -1265,7 +1278,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "code.hover",
     form: {
       fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
-      args: (payload) => line(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
+      args: (payload) => fileArgs(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
     },
     summary: "The type and docs of the symbol at a position",
     runtime: ["local.lsp"],
@@ -1277,7 +1290,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "code.definition",
     form: {
       fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } },
-      args: (payload) => line(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
+      args: (payload) => fileArgs(`${text(payload, "path") ?? ""}:${text(payload, "line") ?? ""}:${text(payload, "column") ?? ""}`, text(payload, "repo"))
     },
     summary: "Where the symbol at a position is defined; opens that file at the line",
     runtime: ["local.lsp"],
@@ -1287,7 +1300,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "code.diagnostics",
-    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } }, args: (payload) => fileArgs(text(payload, "path"), text(payload, "repo")) },
     summary: "The language server's errors and warnings for a file",
     runtime: ["local.lsp"],
     args: "<path> [owner/repo]",
@@ -1303,7 +1316,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "github.app",
     summary: "Check the Smithers GitHub App on a repository",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1314,7 +1327,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "github.app.open",
     summary: "Open the GitHub App's install page",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1323,7 +1336,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "github.reconcile",
     summary: "Re-derive the GitHub App's wiring, then re-read the status",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1332,7 +1345,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "github.mirror-sync",
     summary: "Pull GitHub into the repository's mirror",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1346,7 +1359,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "github.mirror.retry-ref",
     summary: "Retry one failed mirror ref",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<ref> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ ref: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1355,7 +1368,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repos.import.retry",
     summary: "Retry a failed GitHub import job",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<jobId>",
     requires: ["signed-in"],
     input: Schema.Struct({ jobId: Schema.String }),
@@ -1365,7 +1378,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect",
     summary: "Connect a repository to a Linear team",
     /* The wizard's Linear OAuth lands on the host's `/api/linear-auth/*` loopback, a PAT-session door. */
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1376,7 +1389,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.open",
     summary: "Open Linear to authorize the connection",
     hidden: true,
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1386,7 +1399,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.team",
     summary: "Pick the Linear team for the connection",
     hidden: true,
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     args: "<teamId> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({ teamId: Schema.String, repo: Schema.optional(Schema.String) }),
@@ -1396,7 +1409,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.connect.repo",
     summary: "Pick the repository for the connection",
     hidden: true,
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     args: "<cardRepo> <owner/repo>",
     requires: ["signed-in"],
     input: Schema.Struct({ cardRepo: Schema.String, repo: Schema.String }),
@@ -1405,7 +1418,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "linear.connect.confirm",
     summary: "Create the Linear integration the wizard gathered",
-    runtime: ["jjhub", "cloud.pat"],
+    runtime: ["cloud", "cloud.pat"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1414,7 +1427,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "linear.sync",
     summary: "Sync a Linear integration now",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[integration]",
     requires: ["signed-in"],
     input: Schema.Struct({ integration: Schema.optional(Schema.String) }),
@@ -1423,7 +1436,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "linear.activity",
     summary: "Show a Linear integration's last 24 hours",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[integration]",
     requires: ["signed-in"],
     input: Schema.Struct({ integration: Schema.optional(Schema.String) }),
@@ -1434,7 +1447,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "linear.disconnect",
     form: { fields: { confirmKey: { label: "Team key, typed back" } } },
     summary: "Disconnect a Linear integration",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "disconnect the Linear integration",
     /* The team key typed back is the flow's own input: the seam disconnects only when it matches, whoever invoked. */
     args: "<integration> <teamKey>",
@@ -1445,7 +1458,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "sync.retry",
     summary: "Retry one failed sync op",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<opId>",
     requires: ["signed-in"],
     input: Schema.Struct({ opId: Schema.String }),
@@ -1456,7 +1469,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "sync.ops.show-more",
     summary: "Widen a sync card's ops window",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<cardId>",
     requires: ["signed-in"],
     input: Schema.Struct({ cardId: Schema.String }),
@@ -1467,7 +1480,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "sync.ops.load-older",
     summary: "Load a sync card's older ops",
     hidden: true,
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<cardId>",
     requires: ["signed-in"],
     input: Schema.Struct({ cardId: Schema.String }),
@@ -1477,7 +1490,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "issues.link-linear",
     form: { fields: { number: { label: "Issue number" }, identifier: { label: "Linear identifier" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
     summary: "Link an issue to a Linear identifier",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<number> <identifier> [owner/repo]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1490,7 +1503,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "issues.unlink-linear",
     summary: "Remove an issue's Linear link",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "remove the issue's Linear link",
     /* The identifier typed back is the flow's own input: the seam unlinks only when it matches, whoever invoked. */
     args: "<number> <identifier> [owner/repo]",
@@ -1512,7 +1525,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.list",
     summary: "List your cloud workspaces",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1526,7 +1539,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
       args: (payload) => line(text(payload, "bookmark"), text(payload, "repo"), flag(payload, "kind"))
     },
     summary: "Open (create or reuse) a Linux workspace in Smithers Cloud on a bookmark: a real machine with a terminal, files, and services the user can use",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     capabilities: ["outbound:launch"],
     /* ADR 0002: three sandbox kinds share one option surface, and the kind is the choice. */
     args: "[bookmark] [owner/repo] [--kind container|vm|desktop]",
@@ -1542,7 +1555,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.view",
     form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Open one cloud workspace's card",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<workspaceId>",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.String }),
@@ -1552,7 +1565,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.terminal",
     summary: "Open a terminal on a cloud workspace",
     /* The terminal rides this origin's `/api/cloud-ws/` tunnel: an origin without one registers no terminal. */
-    runtime: ["jjhub", "cloud.terminal"],
+    runtime: ["cloud", "cloud.terminal"],
     args: "[workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
@@ -1561,7 +1574,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.suspend",
     summary: "Suspend a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "suspend the workspace",
     args: "[workspaceId]",
     requires: ["signed-in"],
@@ -1571,7 +1584,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.resume",
     summary: "Resume a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "resume the workspace",
     args: "[workspaceId]",
     requires: ["signed-in"],
@@ -1581,7 +1594,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.fork",
     summary: "Fork a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "fork the workspace",
     args: "[workspaceId] [name]",
     requires: ["signed-in"],
@@ -1591,7 +1604,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.snapshot",
     summary: "Snapshot a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "snapshot the workspace",
     args: "[workspaceId] [name]",
     requires: ["signed-in"],
@@ -1601,7 +1614,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.snapshot.delete",
     summary: "Delete a workspace snapshot",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "delete the snapshot",
     args: "<snapshotId> [workspaceId]",
@@ -1613,7 +1626,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The snapshot row's "Fork from": a new workspace whose image is the snapshot. */
     name: "workspace.snapshot.fork",
     summary: "Create a workspace from a snapshot",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     capabilities: ["outbound:launch"],
     confirm: "create a workspace from the snapshot",
@@ -1629,7 +1642,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
       args: (payload) => line(text(payload, "snapshotId"), text(payload, "workspaceId"), flag(payload, "name"))
     },
     summary: "Create a workspace template from a snapshot",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<snapshotId> <name> [workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1642,7 +1655,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.sessions",
     summary: "List a cloud workspace's sessions",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
@@ -1651,7 +1664,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.session.destroy",
     summary: "Destroy a workspace session",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "destroy the session",
     args: "<sessionId> [workspaceId]",
@@ -1663,7 +1676,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.delete",
     form: { fields: { workspaceId: { optionsFrom: "workspaces" }, confirmName: { label: "Name, typed back" } } },
     summary: "Delete a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "delete the workspace",
     /* The workspace's name typed back is the flow's own input: the seam deletes only when it matches, whoever invoked. */
@@ -1677,7 +1690,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.facet",
     form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Switch a workspace card's facet",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<workspaceId> <facet>",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1695,8 +1708,9 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   flow({
     name: "workspace.files",
+    form: { args: (payload) => fileArgs(text(payload, "path") ?? "/", text(payload, "workspaceId")) },
     summary: "List a cloud workspace's files under a directory",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[path] [workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ path: Schema.optional(Schema.String), workspaceId: Schema.optional(Schema.String) }),
@@ -1704,9 +1718,9 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "workspace.file",
-    form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
+    form: { fields: { workspaceId: { optionsFrom: "workspaces" } }, args: (payload) => fileArgs(text(payload, "path"), text(payload, "workspaceId")) },
     summary: "Read one file out of a cloud workspace",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<path> [workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ path: Schema.String, workspaceId: Schema.optional(Schema.String) }),
@@ -1715,7 +1729,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.services",
     summary: "List a cloud workspace's services",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[workspaceId]",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.optional(Schema.String) }),
@@ -1724,7 +1738,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.egress",
     summary: "List what a cloud workspace called out to, and which secret names were swapped in",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[workspaceId] [cursor]",
     requires: ["signed-in"],
     input: Schema.Struct({ workspaceId: Schema.optional(Schema.String), cursor: Schema.optional(Schema.String) }),
@@ -1741,7 +1755,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.desktop",
     form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Open the desktop of a cloud workspace and stream it into the card",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "open the workspace's desktop",
     args: "<workspaceId>",
     requires: ["signed-in"],
@@ -1753,7 +1767,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "workspace.desktop.rotate",
     form: { fields: { workspaceId: { optionsFrom: "workspaces" } } },
     summary: "Rotate a workspace desktop session",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     confirm: "rotate the desktop session",
     args: "<workspaceId>",
@@ -1764,7 +1778,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "workspace.images",
     summary: "List the environment images a repository has built for its workspaces",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "[owner/repo]",
     requires: ["signed-in"],
     input: RepoTarget,
@@ -1774,7 +1788,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The same audit for an agent session's sandbox; the app has no agent-session card to face it. */
     name: "egress.session",
     summary: "List what an agent session called out to, and which secret names were swapped in",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<sessionId> [owner/repo] [cursor]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1795,7 +1809,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.view",
     summary: "Open a change's card",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> [rev]",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, rev: Schema.optional(Schema.Number) }),
@@ -1804,7 +1818,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.diff",
     summary: "Open a change's diff at two pins",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> [from] [to] [path]",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1818,7 +1832,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.land",
     summary: "Land a change (its landing request, or its changeset atomically)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     /* The scope is the whole unit: a landing request lands 1 → N (its stack, from its top change), a changeset every member; the card's button and the seam's line name N. */
     confirm: "land the change — the whole landing request 1 → N, or the whole changeset",
     args: "<changeId>",
@@ -1829,7 +1843,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.split-ready",
     summary: "Split a changeset's ready members into a new change",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "split the ready members into a new change",
     args: "<changeId>",
     requires: ["signed-in"],
@@ -1846,7 +1860,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      */
     name: "change.split",
     summary: "Move a change's named paths into a new change",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "move the named paths into a new change",
     args: "<changeId> <path> [path…]",
     requires: ["signed-in"],
@@ -1856,7 +1870,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.resolve",
     summary: "Dispatch an agent to resolve a change's conflict",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "dispatch an agent to resolve the conflict",
     args: "<changeId> <path>",
     requires: ["signed-in"],
@@ -1866,7 +1880,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.revert",
     summary: "Revert a landed change",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "revert the landed change",
     args: "<changeId>",
     requires: ["signed-in"],
@@ -1877,7 +1891,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* The card's body tab: showing a facet is how the agent answers "show me the diff / the checks" (agent-parity.md). */
     name: "change.facet",
     summary: "Switch a change card's facet",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <facet>",
     requires: ["signed-in"],
     input: Schema.Struct({
@@ -1897,7 +1911,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.pins",
     summary: "Pin a change card's diff between two revisions (parent|<rev> → <rev>|current)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <from> <to>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, from: Schema.String, to: Schema.String }),
@@ -1906,7 +1920,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "change.checks",
     summary: "Read a change's checks at one revision",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <seq>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, seq: Schema.Number }),
@@ -1916,7 +1930,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     /* Forking a revision's snapshot into a computer is an outbound act: the capability always asks. */
     name: "change.open-computer",
     summary: "Open the computer that produced a revision (fork its snapshot into a workspace)",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     hidden: true,
     capabilities: ["outbound:launch"],
     confirm: "open a computer from the revision's snapshot",
@@ -1928,7 +1942,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "review.since-mine",
     summary: "Open a change's diff since my last review",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String }),
@@ -1937,7 +1951,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "review.done",
     summary: "Mark a review thread done: the author addressed it at the current revision",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <threadId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
@@ -1946,7 +1960,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "review.ack",
     summary: "Acknowledge a done review thread: the reviewer accepts the author's work",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <threadId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
@@ -1955,7 +1969,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "review.reopen",
     summary: "Reopen a done or resolved review thread",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <threadId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, threadId: Schema.Number }),
@@ -1972,7 +1986,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     name: "review.request",
     form: { fields: { reviewer: { label: "Login or agent:name" } } },
     summary: "Ask someone to review a change",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "request a review of the change",
     args: "<changeId> <login|agent:name>",
     requires: ["signed-in"],
@@ -1982,7 +1996,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "review.unrequest",
     summary: "Dismiss a review request on a change",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "dismiss the review request",
     args: "<changeId> <requestId>",
     requires: ["signed-in"],
@@ -1992,7 +2006,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "findings.please-fix",
     summary: "Dispatch the agent on one finding",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     confirm: "dispatch the agent on the finding",
     args: "<changeId> <findingId>",
     requires: ["signed-in"],
@@ -2002,7 +2016,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "findings.not-useful",
     summary: "Mark a finding not useful",
-    runtime: ["jjhub"],
+    runtime: ["cloud"],
     args: "<changeId> <findingId>",
     requires: ["signed-in"],
     input: Schema.Struct({ changeId: Schema.String, findingId: Schema.Number }),
@@ -2077,6 +2091,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * reads the result back with tab.read.
      */
     name: "agent.delegate",
+    confirm: "delegate a task to an agent session",
     form: { fields: { roleId: { optionsFrom: "agents" } } },
     summary: "Delegate a task to an agent (built-in or custom; agent.list shows them)",
     runtime: ["local.harnesses"],

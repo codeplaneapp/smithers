@@ -5,9 +5,8 @@
  *   1. NO signed-in session exists yet (identity has no GitHub OAuth creds —
  *      will's click). The identity/billing seams must answer their honest
  *      signed-out shapes (401/Unauthorized), never a 501, never a fake session.
- *   2. GATEWAY_UPSTREAM_URL is deliberately UNSET: the gateway seam must answer
- *      the honest 501 that names the unset var. Here a 501 is the PASS shape
- *      for that one seam — the inverted assertion is the point.
+ *   2. The insecure static gateway proxy was removed in 1.0. Its former raw
+ *      mounts must answer 410, even if legacy deployment secrets remain.
  *
  *   3. The turn seam is session-gated on any deployment that has an identity
  *      seam (it spends the model credential and meters real dollars). Signed
@@ -117,16 +116,14 @@ if (cookie === undefined) {
   )
 }
 
-// 5. Gateway seam: the INVERTED check — GATEWAY_UPSTREAM_URL is unset on
-//    purpose this pass, so the seam MUST answer the honest 501 that names it.
-//    `/health` is one of the four gateway mounts the Worker proxies, and it
-//    needs no session, so it is the smallest request that reaches the seam.
-const approval = await fetch(`${origin}/health`)
-const approvalBody = await approval.text()
+// 5. Raw gateway forwarding must stay retired. The per-user workflow relay
+//    has its own session/target tests; this check must not provision a run.
+const gateway = await fetch(`${origin}/health`)
+const gatewayBody = await gateway.json() as { code?: string }
 check(
-  "gateway seam answers the EXPECTED honest 501 naming GATEWAY_UPSTREAM_URL",
-  approval.status === 501 && approvalBody.includes("GATEWAY_UPSTREAM_URL"),
-  `HTTP ${approval.status} ${approvalBody.trim().slice(0, 140)}`
+  "static gateway proxy stays retired",
+  gateway.status === 410 && gatewayBody.code === "gateway_proxy_removed",
+  `HTTP ${gateway.status}`
 )
 
 // 6. Admin surface: a signed-out probe is byte-identical to an unknown route.
@@ -152,5 +149,5 @@ if (failures > 0) {
 console.log(
   `\nCANARY SEAM PROBE PASS: every seam honest — signed-out refusals, ${
     cookie === undefined ? "turn seam closed to anonymous callers" : "live metered chat"
-  }, expected gateway 501.`
+  }, static gateway proxy retired.`
 )

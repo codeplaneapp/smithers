@@ -1,3 +1,4 @@
+import { fileArgs } from "../flows/FileArgs"
 /*
  * The highlighted file body (docs/code-intel/PLAN.md §1, §5): `@pierre/diffs`
  * `File` through `@smthrs/ui/adapters/code-view`, Shiki underneath. The
@@ -83,7 +84,7 @@ export const CodeSurface = ({
    * position the payload already answers is never asked.
    */
   const asked = useRef<{ readonly key: string; readonly payload: FilePayload } | null>(null)
-  const position = (token: CodeTokenPosition): string => `${path}:${token.line}:${token.column} ${repo}`
+  const position = (token: CodeTokenPosition): string => fileArgs(`${path}:${token.line}:${token.column}`, payload.localRepoId ?? repo)
   const onTokenRest = (token: CodeTokenPosition): void => {
     const key = `${token.line}:${token.column}`
     if (hover != null && hover.line === token.line && hover.character === token.column) return

@@ -4,17 +4,17 @@
  * spawn the real `smithers-build` loader through the real Node sidecar, and the
  * assertions are facts about repositories on this machine.
  *
- *   ~/artsy/force      — read only, the graph/plan/affected/ci proof (82/94).
- *   ~/artsy-e2e/force  — a clone, where a run may actually execute.
- *
- * Both are host fixtures, so every case skips (loudly, by name) where they
- * are absent rather than passing on nothing.
+ * Host workspaces are explicit opt-in, never inferred from personal checkout
+ * paths. Set SMITHERS_HOST_WORKSPACE_TESTS=1 plus the absolute
+ * SMITHERS_GRAPH_READ_WORKSPACE and/or SMITHERS_GRAPH_RUN_WORKSPACE. The latter
+ * must be a disposable clone: these tests execute build commands there and
+ * retain their run history. No cleanup deletes a host workspace's artifacts.
  */
 import { afterAll, beforeAll, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { homedir, tmpdir } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   RunHistoryResponseSchema,
@@ -28,17 +28,22 @@ import { findNode } from "./Node"
 import { clearTargetGraphCache } from "./TargetGraph"
 import { startLocalServer } from "./server"
 import type { LocalServer } from "./server"
+import { hostWorkspaceTests } from "../../scripts/host-workspace-tests"
 
-const FORCE = join(homedir(), "artsy", "force")
-const FORCE_E2E = join(homedir(), "artsy-e2e", "force")
+const workspaces = hostWorkspaceTests(process.env)
+const READ_WORKSPACE = workspaces.read ?? ""
+const RUN_WORKSPACE = workspaces.run ?? ""
 const workspaceLoads = (path: string): boolean =>
   existsSync(join(path, "PACKAGE.ts")) &&
   spawnSync(join(import.meta.dir, "../../../../packages/smithers/build/build-cli/bin/smithers-build"), ["query", "//..."], {
     cwd: path,
-    stdio: "ignore"
+    stdio: "ignore",
+    timeout: 30_000
   }).status === 0
-const haveForce = workspaceLoads(FORCE)
-const haveE2E = workspaceLoads(FORCE_E2E)
+const haveReadWorkspace = workspaces.read !== undefined && workspaceLoads(READ_WORKSPACE)
+const haveRunWorkspace = workspaces.run !== undefined && workspaceLoads(RUN_WORKSPACE)
+if (workspaces.read !== undefined && !haveReadWorkspace) throw new Error("The selected read workspace could not load its build graph.")
+if (workspaces.run !== undefined && !haveRunWorkspace) throw new Error("The selected run workspace could not load its build graph.")
 
 /* A real loader run against a real monorepo; nothing here finishes in 5s. */
 const BUDGET = 300_000
@@ -50,7 +55,7 @@ let node: Awaited<ReturnType<typeof findNode>> = null
 
 beforeAll(async () => {
   clearTargetGraphCache()
-  node = await findNode()
+  node = haveReadWorkspace || haveRunWorkspace ? await findNode() : null
   dist = await mkdtemp(join(tmpdir(), "smithers-integration-dist-"))
   await writeFile(join(dist, "index.html"), "<!doctype html><div id=\"root\"></div>")
   server = await startLocalServer({
@@ -59,7 +64,10 @@ beforeAll(async () => {
     chatStub: true,
     allowManualRepositoryPaths: true,
     ...(node === null ? {} : { node }),
-    home: homedir(),
+    home: dist,
+    stateDir: join(dist, "state"),
+    cloudApi: null,
+    identityUpstream: null,
     harnesses: async () => [],
     log: () => {}
   })
@@ -67,10 +75,11 @@ beforeAll(async () => {
 }, BUDGET)
 
 afterAll(async () => {
-  server?.stop()
-  await rm(dist, { recursive: true, force: true })
-  /* The runs this suite recorded live in the clone; leave it as we found it. */
-  await rm(join(FORCE_E2E, ".flows", "ui", "runs"), { recursive: true, force: true })
+  try {
+    await server?.stop()
+  } finally {
+    if (dist !== "") await rm(dist, { recursive: true, force: true })
+  }
 })
 
 const post = async (route: string, body: unknown): Promise<Response> =>
@@ -104,8 +113,8 @@ const graphOf = async (repoId: string, extra: Record<string, unknown> = {}): Pro
   return parsed.data
 }
 
-test.skipIf(!haveForce)("the graph route answers the force workspace's real DAG", async () => {
-  const repoId = await openRepo(FORCE)
+test.skipIf(!haveReadWorkspace)("the graph route answers the opted-in workspace's real DAG", async () => {
+  const repoId = await openRepo(READ_WORKSPACE)
   const graph = await graphOf(repoId)
   /* The workspace's real shape, as the CLI reports it. */
   expect(graph.nodes.length).toBeGreaterThan(0)
@@ -127,8 +136,8 @@ test.skipIf(!haveForce)("the graph route answers the force workspace's real DAG"
   expect(typeCheck?.rule).not.toBe("")
 }, BUDGET)
 
-test.skipIf(!haveForce)("the graph route carries the planner's facts when asked to plan", async () => {
-  const repoId = await openRepo(FORCE)
+test.skipIf(!haveReadWorkspace)("the graph route carries the planner's facts when asked to plan", async () => {
+  const repoId = await openRepo(READ_WORKSPACE)
   const planned = await graphOf(repoId, { plan: true, labels: ["//src:typeCheck"] })
   const node = planned.nodes.find((entry) => entry.label === "//src:typeCheck")
   expect(node?.plan).toBeDefined()
@@ -142,8 +151,8 @@ test.skipIf(!haveForce)("the graph route carries the planner's facts when asked 
   expect(bare.nodes.find((entry) => entry.label === "//src:typeCheck")?.plan).toBeUndefined()
 }, BUDGET)
 
-test.skipIf(!haveForce)("the affected route reads the real working tree", async () => {
-  const repoId = await openRepo(FORCE)
+test.skipIf(!haveReadWorkspace)("the affected route reads the real working tree", async () => {
+  const repoId = await openRepo(READ_WORKSPACE)
   const response = await post("/api/targets/affected", { repoId })
   expect(response.status).toBe(200)
   const body = await response.json() as { repoId: string; changedFiles: Array<string>; affected: Array<{ label: string }> }
@@ -155,8 +164,8 @@ test.skipIf(!haveForce)("the affected route reads the real working tree", async 
   for (const entry of body.affected) expect(labels.has(entry.label)).toBe(true)
 }, BUDGET)
 
-test.skipIf(!haveForce)("the ci route answers the workflows the workspace really has", async () => {
-  const repoId = await openRepo(FORCE)
+test.skipIf(!haveReadWorkspace)("the ci route answers the workflows the workspace really has", async () => {
+  const repoId = await openRepo(READ_WORKSPACE)
   const response = await post("/api/targets/ci", { repoId })
   expect(response.status).toBe(200)
   const body = await response.json() as {
@@ -170,8 +179,8 @@ test.skipIf(!haveForce)("the ci route answers the workflows the workspace really
   }
 }, BUDGET)
 
-test.skipIf(!haveE2E)("a real run of //src:typeCheck streams node frames and a critical path", async () => {
-  const repoId = await openRepo(FORCE_E2E)
+test.skipIf(!haveRunWorkspace)("a real run of //src:typeCheck streams node frames and a critical path", async () => {
+  const repoId = await openRepo(RUN_WORKSPACE)
   const started = await post("/api/targets/run", { repoId, targetId: await targetIdOf(repoId, "//src:typeCheck") })
   expect(started.status).toBe(200)
   const { runId } = await started.json() as { runId: string }
@@ -218,8 +227,8 @@ test.skipIf(!haveE2E)("a real run of //src:typeCheck streams node frames and a c
   expect(replay.events.map((event) => event.seq)).toEqual(replay.events.map((_event, index) => index))
 }, BUDGET)
 
-test.skipIf(!haveE2E)("history and replay round-trip through the repository's own disk", async () => {
-  const repoId = await openRepo(FORCE_E2E)
+test.skipIf(!haveRunWorkspace)("history and replay round-trip through the repository's own disk", async () => {
+  const repoId = await openRepo(RUN_WORKSPACE)
   const started = await post("/api/targets/run", { repoId, targetId: await targetIdOf(repoId, "//src:srcs") })
   const { runId } = await started.json() as { runId: string }
 
@@ -240,7 +249,7 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
   expect(record?.status).toBe("done")
 
   /* The journal is on disk in the repository the run belonged to. */
-  expect(existsSync(join(FORCE_E2E, ".flows", "ui", "runs", `${runId}.jsonl`))).toBe(true)
+  expect(existsSync(join(RUN_WORKSPACE, ".flows", "ui", "runs", `${runId}.jsonl`))).toBe(true)
 
   /* A SECOND server, sharing only that directory, rebuilds the same recording. */
   const secondDist = await mkdtemp(join(tmpdir(), "smithers-integration-dist2-"))
@@ -251,7 +260,10 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
     chatStub: true,
     allowManualRepositoryPaths: true,
     ...(node === null ? {} : { node }),
-    home: homedir(),
+    home: secondDist,
+    stateDir: join(secondDist, "state"),
+    cloudApi: null,
+    identityUpstream: null,
     harnesses: async () => [],
     log: () => {}
   })
@@ -260,7 +272,7 @@ test.skipIf(!haveE2E)("history and replay round-trip through the repository's ow
     const open = await fetch(`${secondBase}/api/repo/open`, {
       method: "POST",
       headers: { "content-type": "application/json", [LOCAL_SESSION_HEADER]: second.sessionToken },
-      body: JSON.stringify({ path: FORCE_E2E })
+      body: JSON.stringify({ path: RUN_WORKSPACE })
     })
     const reopened = (await open.json() as { repo: { id: string } }).repo.id
     const history = await fetch(`${secondBase}/api/targets/runs`, {
@@ -326,8 +338,8 @@ test("the replay route cannot be walked out of the runs directory", async () => 
   }
 })
 
-test.skipIf(!haveForce)("the graph route rejects labels that are not strings", async () => {
-  const repoId = await openRepo(FORCE)
+test.skipIf(!haveReadWorkspace)("the graph route rejects labels that are not strings", async () => {
+  const repoId = await openRepo(READ_WORKSPACE)
   for (const labels of [42, ["//src:typeCheck", 7], "not an array"]) {
     const response = await post("/api/targets/graph", { repoId, labels })
     expect(response.status).toBe(400)

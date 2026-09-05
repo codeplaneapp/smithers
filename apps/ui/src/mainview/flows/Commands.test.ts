@@ -3,7 +3,7 @@
  *
  * The web app (bootstrap host "cloud") registers no flow that needs a native
  * door — a local repository, a local terminal, a build target, a host-held
- * jjhub PAT. Asking for one must be answered HONESTLY and identically by every
+ * Smithers Cloud PAT. Asking for one must be answered HONESTLY and identically by every
  * trigger: a typed slash, a button, and the agent's tool call all get the same
  * `unavailable` outcome and the same download card. Sign-in stays a
  * prerequisite (the requirement axis), never a mode refusal; a name that exists
@@ -54,7 +54,7 @@ const WEB: AppBootstrap = {
   host: "cloud",
   version: "test",
   buildSha: "cloud",
-  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: false, terminal: false }),
+  capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: false, terminal: false }),
   authFlow: "redirect",
   sandbox: null
 }
@@ -65,7 +65,7 @@ const NATIVE: AppBootstrap = {
   host: "local",
   version: "test",
   buildSha: "local",
-  capabilities: localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }),
+  capabilities: localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true }),
   authFlow: "native-handoff",
   sandbox: { platform: "darwin", mode: "enforced" }
 }
@@ -137,20 +137,20 @@ const downloadCards = (store: AppStore) =>
 describe("nativeOnly — the flows the web host can never have", () => {
   test("a local.* or cloud.pat requirement is native-only; a cloud door alone is not", () => {
     expect(nativeOnly({ summary: "", runtime: ["local.repositories"] })).toBe(true)
-    expect(nativeOnly({ summary: "", runtime: ["jjhub", "cloud.pat"] })).toBe(true)
+    expect(nativeOnly({ summary: "", runtime: ["cloud", "cloud.pat"] })).toBe(true)
     expect(nativeOnly({ summary: "", runtime: ["local.targets", "local.repositories"] })).toBe(true)
-    expect(nativeOnly({ summary: "", runtime: ["jjhub"] })).toBe(false)
-    expect(nativeOnly({ summary: "", runtime: ["jjhub", "cloud.terminal"] })).toBe(false)
+    expect(nativeOnly({ summary: "", runtime: ["cloud"] })).toBe(false)
+    expect(nativeOnly({ summary: "", runtime: ["cloud", "cloud.terminal"] })).toBe(false)
     expect(nativeOnly({ summary: "", runtime: ["identity"] })).toBe(false)
     expect(nativeOnly({ summary: "" })).toBe(false)
   })
 
   test("an either/or flow is native-only only when EVERY alternative is a native door", () => {
     // files.list serves a Cloud repository OR a local one: the web has the first.
-    expect(nativeOnly({ summary: "", runtimeAny: ["jjhub", "local.repositories"] })).toBe(false)
+    expect(nativeOnly({ summary: "", runtimeAny: ["cloud", "local.repositories"] })).toBe(false)
     expect(nativeOnly({ summary: "", runtimeAny: ["local.repositories", "local.targets"] })).toBe(true)
     // A native `runtime` beside a cloud `runtimeAny` still needs the native door.
-    expect(nativeOnly({ summary: "", runtime: ["local.harnesses"], runtimeAny: ["jjhub", "local.repositories"] })).toBe(
+    expect(nativeOnly({ summary: "", runtime: ["local.harnesses"], runtimeAny: ["cloud", "local.repositories"] })).toBe(
       true
     )
   })
@@ -234,10 +234,10 @@ describe("explainAbsent — an exact miss classified against the unfiltered cata
       door: "origin",
       reason: "/keys.list is not available on this origin yet."
     })
-    // A Worker without the jjhub upstream lacks every jjhub flow the same way.
+    // A Worker without the Smithers Cloud upstream lacks every Smithers Cloud flow the same way.
     const offline = await freshController({
       ...WEB,
-      capabilities: cloudCapabilities({ identity: true, jjhub: false, agent: true, checkout: false, terminal: false })
+      capabilities: cloudCapabilities({ identity: true, cloud: false, agent: true, checkout: false, terminal: false })
     })
     expect(offline.controller.commands.explainAbsent("issues.list")).toEqual({
       door: "origin",
@@ -253,7 +253,7 @@ describe("explainAbsent — an exact miss classified against the unfiltered cata
     expect(controller.commands.explainAbsent("app.download")).toBeUndefined()
     const offline = await freshController({
       ...NATIVE,
-      capabilities: localCapabilities({ agent: true, identity: false, jjhub: false, pathEntry: false })
+      capabilities: localCapabilities({ agent: true, identity: false, cloud: false, pathEntry: false })
     })
     expect(offline.controller.commands.explainAbsent("workspace.terminal")).toEqual({ door: "origin", reason: ORIGIN_REFUSAL })
     expect(offline.controller.commands.explainAbsent("repo.open")).toBeUndefined()

@@ -13,6 +13,7 @@ interface Harness {
   /** Sockets the server currently holds open. */
   readonly live: () => number
   readonly output: (data: string) => void
+  readonly outputBytes: (data: Uint8Array) => void
   readonly stop: () => void
 }
 
@@ -61,6 +62,9 @@ const serve = (options: ServeOptions = {}): Harness => {
     live: () => open.size,
     output: (data) => {
       for (const socket of open) socket.send(new TextEncoder().encode(data) as never)
+    },
+    outputBytes: (data) => {
+      for (const socket of open) socket.send(data as never)
     },
     stop: () => server.stop(true)
   }
@@ -149,6 +153,18 @@ test("keystrokes sent before the socket opens flush on open", async () => {
   await until(() => server.seen.length >= 1)
   expect(text(server.seen[0]!)).toBe("early\r")
   terminal.dispose()
+})
+
+test("UTF-8 characters survive arbitrary binary frame boundaries", async () => {
+  const server = serve()
+  const terminal = client(server)
+  const output: Array<string> = []
+  terminal.attach("will/smithers", "sess-1", { onOutput: (data) => output.push(data) })
+  await until(() => server.live() === 1)
+  const bytes = new TextEncoder().encode("héllo 😀 世界\r\n")
+  for (const byte of bytes) server.outputBytes(new Uint8Array([byte]))
+  await until(() => output.join("").endsWith("\r\n"))
+  expect(output.join("")).toBe("héllo 😀 世界\r\n")
 })
 
 /*

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -29,6 +29,9 @@ const manager = (overrides: Partial<Parameters<typeof createPtyManager>[0]> = {}
     publish: (topic, message) => frames.push({ topic, message: message as Frame["message"] }),
     harnesses: async () => [],
     shell: "/bin/sh",
+    // A real login shell must never source the developer's personal profile.
+    home: scratch,
+    env: {},
     sandboxHost: { platform: "linux", disabled: true, log: () => {} },
     killGraceMs: 300,
     log: () => {},
@@ -55,8 +58,12 @@ const until = async (predicate: () => boolean, timeoutMs = 5000): Promise<void> 
   }
 }
 
+beforeAll(async () => {
+  scratch = await mkdtemp(join(tmpdir(), "smithers-pty-"))
+})
+
 afterAll(async () => {
-  await Promise.all(managers.map((m) => m.killAll()))
+  await Promise.all(managers.map((m) => m.dispose()))
   if (scratch !== "") await rm(scratch, { recursive: true, force: true })
 })
 
@@ -93,7 +100,6 @@ describe("childEnv", () => {
 
 describe("sessions", () => {
   test("a terminal session echoes typed text on its topic, is listed alive, and exits with its code", async () => {
-    scratch = await mkdtemp(join(tmpdir(), "smithers-pty-"))
     const m = manager({ home: scratch })
     const created = await m.create({ kind: "terminal", cwd: "~", cols: 80, rows: 24 })
     if (created.status !== "ok") throw new Error(created.message)
@@ -120,7 +126,7 @@ describe("sessions", () => {
     expect(await m.kill(sessionId)).toBe(false)
   })
 
-  test("kill hangs up a live session and drops it; killAll empties the table", async () => {
+  test("kill hangs up a live session and drops it; dispose empties the table", async () => {
     const m = manager()
     const a = await m.create({ kind: "terminal", cwd: tmpdir(), cols: 80, rows: 24 })
     const b = await m.create({ kind: "terminal", cwd: tmpdir(), cols: 80, rows: 24 })
@@ -129,7 +135,7 @@ describe("sessions", () => {
     expect(await m.kill(a.session.sessionId)).toBe(true)
     await until(() => exitOf(a.session.sessionId) !== undefined)
     expect(m.list().map((session) => session.sessionId)).toEqual([b.session.sessionId])
-    await m.killAll()
+    await m.dispose()
     expect(m.list()).toEqual([])
   })
 

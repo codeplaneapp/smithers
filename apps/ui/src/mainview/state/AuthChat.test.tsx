@@ -99,7 +99,7 @@ const WEB: AppBootstrap = {
   host: "cloud",
   version: "test",
   buildSha: "cloud",
-  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: false }),
+  capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: false }),
   authFlow: "redirect",
   sandbox: null
 }

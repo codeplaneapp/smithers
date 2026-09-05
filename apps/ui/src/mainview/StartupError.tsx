@@ -1,4 +1,5 @@
 import { errorMessage } from "./state/ClientErrors"
+import { createStartupRecovery, mountStartupRecovery } from "./StartupRecovery"
 
 const PANEL_STYLE = [
   "font-family: ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -56,6 +57,7 @@ export function StartupErrorPanel({ message }: { readonly message: string }) {
 				{message}
       </pre>
       <p>{HINT}</p>
+      <div ref={mountStartupRecovery} />
     </main>
   )
 }
@@ -64,7 +66,7 @@ export function StartupErrorPanel({ message }: { readonly message: string }) {
  * The same panel built as DOM, for the failure React cannot report: a boot that
  * never resolves, or a bundle that never ran at all.
  */
-export const createStartupErrorElement = (documentTarget: Document, message: string): HTMLElement => {
+export const createStartupErrorElement = (documentTarget: Document, message: string) => {
   const panel = documentTarget.createElement("main")
   panel.setAttribute("style", PANEL_STYLE)
   const heading = documentTarget.createElement("h1")
@@ -74,6 +76,7 @@ export const createStartupErrorElement = (documentTarget: Document, message: str
   detail.textContent = message
   const hint = documentTarget.createElement("p")
   hint.textContent = HINT
-  panel.append(heading, detail, hint)
-  return panel
+  const recovery = createStartupRecovery(documentTarget)
+  panel.append(heading, detail, hint, recovery.element)
+  return { element: panel, dispose: recovery.dispose }
 }

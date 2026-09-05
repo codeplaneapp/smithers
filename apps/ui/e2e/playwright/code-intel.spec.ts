@@ -132,13 +132,15 @@ test("T1: a TypeScript file card highlights, hovers, lists its diagnostics, and 
 
   // /files.read renders the file card; the token view replaces the plain block once the grammar has loaded.
   await command(page, "/files.read src/index.ts")
-  const card = page.getByTestId(`card-file-${repo.name}-src/index.ts`)
+  const card = page.getByTestId(`card-file-${repo.id}-src/index.ts`)
   await expect(card).toBeVisible({ timeout: 15_000 })
   await expect(card.locator('[data-slot="code-language"]')).toHaveText("TypeScript")
   const view = card.locator('[data-slot="code-view"]')
   await expect(view).toHaveAttribute("data-state", "ready", { timeout: 30_000 })
   await expect(view).toHaveAttribute("data-language", "typescript")
-  expect(await view.locator("[data-line] span[style]").count()).toBeGreaterThan(1)
+  // The first painted lines are readable before the asynchronous grammar
+  // finishes. Wait for actual colored tokens, as the adapter contract does.
+  await expect.poll(() => view.locator("[data-line] span[style]").count(), { timeout: 30_000 }).toBeGreaterThan(1)
   // Nothing about the server is stated before anyone asked it.
   await expect(card.locator("[data-intel]")).toHaveCount(0)
   await expect(card.locator('[data-slot="code-diagnostics-count"]')).toHaveCount(0)
@@ -164,7 +166,7 @@ test("T1: a TypeScript file card highlights, hovers, lists its diagnostics, and 
 
   // ⌘-click (Ctrl-click off macOS) on `greet` runs code.definition: greet.ts opens as its own card, anchored at the defining line.
   await greet.click({ modifiers: [process.platform === "darwin" ? "Meta" : "Control"] })
-  const target = page.getByTestId(`card-file-${repo.name}-src/greet.ts`)
+  const target = page.getByTestId(`card-file-${repo.id}-src/greet.ts`)
   await expect(target).toBeVisible({ timeout: 60_000 })
   await expect(target.locator(".world-card-panel")).toHaveAttribute("data-line", "6")
   const targetView = target.locator('[data-slot="code-view"]')

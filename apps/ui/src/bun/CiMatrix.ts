@@ -4,7 +4,8 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import type { CiMatrixResponse } from "@smthrs/rpc/TargetGraph"
 import type { NodeSidecar } from "./Node"
-import { buildCliEnvironment, resolveBuildCli } from "./Targets"
+import { buildCliEnvironment, resolveBuildCli, sandboxPathsFor } from "./Targets"
+import { loaderPolicy, wrapSandbox } from "./Sandbox"
 
 export type CiWorkflow = CiMatrixResponse["workflows"][number]
 
@@ -111,7 +112,10 @@ export const renderCiMatrix = async (options: {
     const cli = options.cli ?? resolveBuildCli()
     const environment = buildCliEnvironment(cli)
     for (const label of options.labels) {
-      const child = Bun.spawn([options.node.path, cli, label, "--write"], {
+      // A scratch cwd is not confinement: imports can still write absolute
+      // paths or use the network. Preview has the same read authority as a query.
+      const wrapped = wrapSandbox([options.node.path, cli, label, "--write"], loaderPolicy(sandboxPathsFor(scratch)))
+      const child = Bun.spawn([...wrapped.argv], {
         cwd: scratch,
         ...(environment === undefined ? {} : { env: environment }),
         stdout: "pipe",

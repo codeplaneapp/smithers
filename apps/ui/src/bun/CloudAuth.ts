@@ -1,25 +1,27 @@
 /*
- * The jjhub Cloud sign-in on the local origin (ADR 0001 "Settled with the
+ * The Smithers Cloud sign-in on the local origin (ADR 0001 "Settled with the
  * backend"): the CLI's browser login, not an env token. `start` listens on
  * 127.0.0.1:<random> with `/callback` and answers the URL the renderer opens
  * in the system browser (`${API}/api/auth/github/cli?callback_port=<port>`);
- * the callback receives `{ token, username, email, expiresAt }` (a
+ * the API redirects to a fragment callback with a per-attempt callback_state;
+ * a local browser page strips the fragment and posts its credentials (a
  * `smithers_` PAT), which is stored in the macOS keychain under
- * `smithers-cloud` and kept in Bun memory. The token NEVER leaves this
- * process: `session()` answers `{ state, username, expiresAt, scopes? }` and
+ * `smithers-cloud` and kept in Bun memory. The app renderer never receives
+ * the token: `session()` answers `{ state, username, expiresAt, scopes? }` and
  * the `/api/cloud/*` proxy attaches the bearer itself.
  *
  * `SMITHERS_CLOUD_TOKEN` is a dev/CI override, read first — a set override
  * means signed-in with no login round-trip and nothing to store.
  *
- * Scopes degrade honestly (ADR 0001): today the CLI login mints the legacy
- * set and workspace/agent/approval calls 403 "insufficient token scope", so
+ * The login explicitly requests ADR 0001's app scopes. Legacy restored
+ * credentials can still lack workspace/agent/approval scopes, so
  * the probe (GET /api/user/workspaces) runs once, before the session reports
  * signed-in; a 403 whose body says insufficient scope marks the session
  * `scopes: "degraded"`. The session never reports signed-in without its scope
  * verdict, so a reader that polls for the state gets one consistent answer.
  */
 import type { Server } from "bun"
+import { randomBytes, timingSafeEqual } from "node:crypto"
 import type { CloudSession } from "@smthrs/rpc/LocalApp"
 
 /** What the login callback posts; the keychain entry serializes exactly this. */
@@ -43,10 +45,12 @@ export interface CloudAuthOptions {
   /** SMITHERS_CLOUD_TOKEN: the dev/CI override, read before any stored credential. */
   readonly envToken?: string | undefined
   readonly keychain?: CloudKeychain
-  readonly fetchImpl?: typeof fetch
+  readonly fetchImpl?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   /** The callback wait; production is five minutes. */
   readonly waitTimeoutMs?: number
   readonly log?: (line: string) => void
+  readonly now?: () => number
+  readonly probeTimeoutMs?: number
 }
 
 export interface CloudAuth {
@@ -64,9 +68,29 @@ export interface CloudAuth {
 
 export const CLOUD_KEYCHAIN_SERVICE = "smithers-cloud"
 export const CLOUD_AUTH_WAIT_TIMEOUT_MS = 5 * 60 * 1000
+export const CLOUD_AUTH_BODY_LIMIT = 16 * 1024
+/** ADR 0001's app capabilities, without user/org writes or administrative grants. */
+export const CLOUD_AUTH_SCOPES = ["read:user", "read:organization", "read:repository", "write:repository", "read:workspace", "write:workspace", "write:agent", "write:approval"] as const
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
+
+const matchesSecret = (value: unknown, expected: string): boolean =>
+  typeof value === "string" && Buffer.byteLength(value) === Buffer.byteLength(expected) && timingSafeEqual(Buffer.from(value), Buffer.from(expected))
+
+/** The API returns credentials in the fragment, which never reaches HTTP logs. */
+const callbackPage = (nonce: string): Response => new Response(`<!doctype html><meta charset="utf-8"><title>Smithers sign-in</title><p id="message">Completing sign-in…</p><script nonce="${nonce}">
+const params = new URLSearchParams(location.hash.slice(1));
+history.replaceState(null, '', location.pathname);
+const message = document.getElementById('message');
+fetch('/callback', { method: 'POST', headers: { 'content-type': 'application/json', 'x-smithers-callback': '${nonce}' }, body: JSON.stringify({ token: params.get('token'), username: params.get('username'), email: params.get('email'), expires_at: params.get('expires_at'), callback_state: params.get('callback_state') }) })
+  .then(response => { message.textContent = response.ok ? 'Return to Smithers to finish signing in.' : 'Sign-in could not be verified. Start again in Smithers; the cloud API must support callback state.'; })
+  .catch(() => { message.textContent = 'Sign-in could not finish. Return to Smithers and try again.'; });
+</script>`, { headers: {
+  "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer",
+  "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+  "x-content-type-options": "nosniff"
+} })
 
 /** The callback body's contract; anything else is refused, never partially stored. */
 export const parseCloudCredentials = (value: unknown): CloudCredentials | null => {
@@ -77,7 +101,7 @@ export const parseCloudCredentials = (value: unknown): CloudCredentials | null =
     token: value.token,
     username: value.username,
     email: typeof value.email === "string" ? value.email : null,
-    expiresAt: typeof value.expiresAt === "string" ? value.expiresAt : null
+    expiresAt: typeof value.expiresAt === "string" ? value.expiresAt : typeof value.expires_at === "string" ? value.expires_at : null
   }
 }
 
@@ -127,6 +151,7 @@ const inertKeychain = (): CloudKeychain => ({
 })
 
 interface PendingLogin {
+  readonly attempt: number
   readonly url: string
   readonly server: Server<undefined>
   readonly timeout: ReturnType<typeof setTimeout>
@@ -135,15 +160,25 @@ interface PendingLogin {
 
 export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudAuth> => {
   const api = options.api.replace(/\/+$/, "")
+  const apiOrigin = new URL(api).origin
   const account = new URL(api).host
   const keychain = options.keychain ?? (process.platform === "darwin" ? darwinKeychain() : inertKeychain())
   const fetchImpl = options.fetchImpl ?? fetch
   const waitTimeoutMs = options.waitTimeoutMs ?? CLOUD_AUTH_WAIT_TIMEOUT_MS
   const log = options.log ?? (() => {})
+  const now = options.now ?? Date.now
 
   let credentials: CloudCredentials | null = null
   let degraded = false
   let pending: PendingLogin | null = null
+  let generation = 0
+  let keychainQueue: Promise<void> = Promise.resolve()
+  const persist = (operation: () => Promise<void>): Promise<void> => {
+    keychainQueue = keychainQueue.then(operation).catch(() => {})
+    return keychainQueue
+  }
+  const expired = (value: CloudCredentials): boolean => value.expiresAt !== null &&
+    (!Number.isFinite(Date.parse(value.expiresAt)) || Date.parse(value.expiresAt) <= now())
 
   // A previous launch's login restores from the keychain; the env override still wins.
   if (options.envToken === undefined || options.envToken === "") {
@@ -158,49 +193,68 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
   }
 
   const token = (): string | undefined =>
-    options.envToken !== undefined && options.envToken !== "" ? options.envToken : credentials?.token
+    options.envToken !== undefined && options.envToken !== "" ? options.envToken :
+      credentials !== null && !expired(credentials) ? credentials.token : undefined
 
   /*
    * The one probe (ADR 0001): a 403 that says insufficient scope means the
    * legacy token set — workspace/agent/approval acts degrade to "sign in
    * again to enable" instead of failing silently.
    */
-  const probeScopes = async (bearer: string): Promise<boolean> => {
+  const probeScopes = async (bearer: string): Promise<{ degraded: boolean; valid: boolean }> => {
     try {
       const response = await fetchImpl(`${api}/api/user/workspaces`, {
-        headers: { authorization: `Bearer ${bearer}` }
+        headers: { authorization: `Bearer ${bearer}` },
+        signal: AbortSignal.timeout(options.probeTimeoutMs ?? 5000)
       })
-      if (response.status !== 403) return false
+      if (response.status !== 403) {
+        await response.body?.cancel()
+        return { degraded: false, valid: response.status !== 401 }
+      }
       const text = await response.text().catch(() => "")
-      return /insufficient/i.test(text) && /scope/i.test(text)
+      return { degraded: /insufficient/i.test(text) && /scope/i.test(text), valid: true }
     } catch {
       // A failed probe says nothing about scope; the session stays undegraded.
-      return false
+      return { degraded: false, valid: true }
     }
   }
 
-  const clearPending = (): void => {
-    if (pending === null) return
+  if (credentials !== null) {
+    if (expired(credentials)) {
+      credentials = null
+      await persist(() => keychain.remove(CLOUD_KEYCHAIN_SERVICE, account))
+    } else {
+      const probe = await probeScopes(credentials.token)
+      degraded = probe.degraded
+      if (!probe.valid) {
+        credentials = null
+        await persist(() => keychain.remove(CLOUD_KEYCHAIN_SERVICE, account))
+      }
+    }
+  } else if (options.envToken) degraded = (await probeScopes(options.envToken)).degraded
+
+  const clearPending = (attempt?: number): void => {
+    if (pending === null || (attempt !== undefined && pending.attempt !== attempt)) return
     clearTimeout(pending.timeout)
     pending.server.stop(true)
     pending = null
   }
 
-  const accept = async (value: unknown): Promise<void> => {
+  const accept = async (value: unknown, attempt: number): Promise<void> => {
     const parsed = parseCloudCredentials(value)
     if (parsed === null) return
     // The probe answers before the credentials are published: `session()`
     // reads signed-in off the stored credentials, so publishing first would
     // let a reader see signed-in with no scope verdict and then watch it
     // degrade a moment later.
-    const scopesDegraded = await probeScopes(parsed.token)
+    const probe = await probeScopes(parsed.token)
+    if (generation !== attempt || expired(parsed) || !probe.valid) return
     credentials = parsed
-    degraded = scopesDegraded
-    try {
-      await keychain.write(CLOUD_KEYCHAIN_SERVICE, account, JSON.stringify(parsed))
-    } catch {
-      // Best-effort persistence; memory still holds the session.
-    }
+    degraded = probe.degraded
+    await persist(async () => {
+      if (generation === attempt) await keychain.write(CLOUD_KEYCHAIN_SERVICE, account, JSON.stringify(parsed))
+    })
+    if (generation !== attempt) return
     log(`cloud-auth: signed in as ${parsed.username}`)
   }
 
@@ -208,13 +262,18 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
     token,
     session: (): CloudSession => ({
       state: token() !== undefined ? "signed-in" : pending === null ? "signed-out" : "signing-in",
-      username: credentials?.username ?? null,
-      expiresAt: credentials?.expiresAt ?? null,
-      ...(degraded ? { scopes: "degraded" as const } : {})
+      username: token() === undefined ? null : credentials?.username ?? null,
+      expiresAt: token() === undefined ? null : credentials?.expiresAt ?? null,
+      ...(token() !== undefined && degraded ? { scopes: "degraded" as const } : {})
     }),
     start: async () => {
       if (token() !== undefined) return { error: "Already signed in to Smithers Cloud." }
       if (pending !== null) return { url: pending.url }
+      const attempt = ++generation
+      const callbackState = randomBytes(32).toString("base64url")
+      const bridgeNonce = randomBytes(24).toString("base64url")
+      credentials = null
+      degraded = false
       let settle: () => void = () => {}
       const done = new Promise<void>((resolve) => {
         settle = resolve
@@ -225,12 +284,49 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
         server = Bun.serve({
           hostname: "127.0.0.1",
           port: 0,
+          maxRequestBodySize: CLOUD_AUTH_BODY_LIMIT,
           fetch: async (request) => {
+            if (request.headers.get("host") !== `127.0.0.1:${server.port}`) return new Response("invalid host", { status: 403 })
             const { pathname } = new URL(request.url)
             if (pathname !== "/callback") return new Response("not found", { status: 404 })
+            if (request.method === "GET") return callbackPage(bridgeNonce)
             if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
-            const body: unknown = await request.json().catch(() => null)
-            if (parseCloudCredentials(body) === null) {
+            // A foreign page can issue a simple text/plain POST to loopback.
+            // Refuse its Origin before reading or claiming this login attempt;
+            // non-browser CLI callbacks can legitimately omit Origin.
+            const origin = request.headers.get("origin")
+            const localOrigin = `http://127.0.0.1:${server.port}`
+            if (origin !== null && origin !== apiOrigin && origin !== localOrigin) return new Response("invalid origin", { status: 403 })
+            if (origin === localOrigin && !matchesSecret(request.headers.get("x-smithers-callback"), bridgeNonce)) return new Response("invalid callback page", { status: 403 })
+            const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
+            if (mediaType !== "application/json") return new Response("expected application/json", { status: 415 })
+            if (Number(request.headers.get("content-length")) > CLOUD_AUTH_BODY_LIMIT) return new Response("body too large", { status: 413 })
+            const reader = request.body?.getReader()
+            const decoder = new TextDecoder()
+            let text = ""
+            let size = 0
+            try {
+              while (reader !== undefined) {
+                const chunk = await reader.read()
+                if (chunk.done) break
+                size += chunk.value.byteLength
+                if (size > CLOUD_AUTH_BODY_LIMIT) {
+                  await reader.cancel()
+                  return new Response("body too large", { status: 413 })
+                }
+                text += decoder.decode(chunk.value, { stream: true })
+              }
+              text += decoder.decode()
+            } catch {
+              return new Response("invalid callback body", { status: 400 })
+            } finally {
+              reader?.releaseLock()
+            }
+            let body: unknown = null
+            try { body = JSON.parse(text) } catch { /* The shape check below refuses malformed JSON. */ }
+            if (!isRecord(body) || !matchesSecret(body.callback_state, callbackState)) return new Response("invalid callback state", { status: 403 })
+            const parsed = parseCloudCredentials(body)
+            if (parsed === null || expired(parsed)) {
               return Response.json({ error: "expected { token, username, email, expiresAt }" }, { status: 400 })
             }
             // The first well-formed callback settles the attempt; a later one
@@ -238,30 +334,34 @@ export const createCloudAuth = async (options: CloudAuthOptions): Promise<CloudA
             // longer substitute the token.
             if (claimed) return Response.json({ error: "this sign-in attempt already received its callback" }, { status: 409 })
             claimed = true
-            void accept(body).finally(settle)
+            void accept(body, attempt).finally(settle)
             return Response.json({ ok: true })
           }
         })
       } catch (error) {
         return { error: `Could not listen for the sign-in callback: ${error instanceof Error ? error.message : String(error)}` }
       }
-      const url = `${api}/api/auth/github/cli?callback_port=${server.port}`
+      const url = `${api}/api/auth/github/cli?${new URLSearchParams({ callback_port: String(server.port), callback_state: callbackState, scopes: CLOUD_AUTH_SCOPES.join(",") })}`
       const timeout = setTimeout(() => {
         log("cloud-auth: the sign-in callback never arrived; the attempt expired")
+        if (generation === attempt) generation += 1
         settle()
       }, waitTimeoutMs)
-      pending = { url, server, timeout, done }
-      void done.finally(clearPending)
+      pending = { attempt, url, server, timeout, done }
+      void done.finally(() => clearPending(attempt))
       return { url }
     },
     signOut: async () => {
+      generation += 1
       clearPending()
       credentials = null
       degraded = false
-      await keychain.remove(CLOUD_KEYCHAIN_SERVICE, account)
+      await persist(() => keychain.remove(CLOUD_KEYCHAIN_SERVICE, account))
     },
     stop: async () => {
+      generation += 1
       clearPending()
+      await keychainQueue
     }
   }
 }

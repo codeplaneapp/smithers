@@ -137,7 +137,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### control plane targets · Run flows against a local checkout's control plane or an arbitrary remote gateway (`--remote`/`--credential`, `smithers serve`, read-only Sync follower)
 
 - Source: smithers · coverage: partial · effort: M
-- Exists: The app relays only to the per-repo jjhub workspace gateway (apps/server/src/gatewayRpc.ts:22-45); local.targets runs build targets locally, not flows.
+- Exists: The app relays only to the per-repo Smithers Cloud workspace gateway (apps/server/src/gatewayRpc.ts:22-45); local.targets runs build targets locally, not flows.
 - UI: Connectors surface gains rows `Local Smithers control plane` (root · .flows state · serve state; one act Serve or Stop) and `Remote gateway` (URL · token in keychain · `follow-only` as a state word derived from the connection, chosen at connect, not a toggle without a flow); flow.run target grammar gains `local` and a gateway name.
 - Flows: `gateway.connect <url> [--follow]; gateway.disconnect <name> (confirm); gateway.serve [--port]; gateway.serve.stop (confirm); flow.run <name> local|<gateway>`
 
@@ -145,7 +145,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 
 - Source: plue · coverage: partial · effort: S
 - Exists: flow-run phases `reconnecting` and `no-capacity` (packages/rpc/src/Cards.ts:286) are the only trace; the relay targets the gateway blindly (apps/server/src/gatewayRpc.ts:22-45); the control-plane targets row covers remote and local gateways, not the per-repo cloud one.
-- UI: Connectors surface `Smithers Cloud` row (ADR 0005 L128-133) reads `gateway · running · <version>` or `gateway · cold` from GET /health; the run-list header repeats the word; a cold gateway's one act is Wake.
+- UI: Connectors surface `cloud` row (ADR 0005 L128-133) reads `gateway · running · <version>` or `gateway · cold` from GET /health; the run-list header repeats the word; a cold gateway's one act is Wake.
 - Flows: `gateway.status [owner/repo]; gateway.wake [owner/repo]`
 
 ### diagnostics · Doctor: registry discovery warnings, .flows state, control.db/engine.db migration ladder, Node version, jj on PATH, provider keys, unsupported backend, 0.x state
@@ -172,7 +172,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### landing review · Stacked PRs against GitHub: submit, unsubmit, sync, land, status; active stack upsert
 
 - Source: plue · coverage: none · effort: M
-- Exists: stack card designed for jjhub-native stacks only (ADR 0003 §2).
+- Exists: stack card designed for Smithers Cloud-native stacks only (ADR 0003 §2).
 - UI: stack card footer gains `Submit to GitHub` (confirm) when the repo has a GitHub mirror; rows carry the PR number and GitHub CI glyph; Sync and Unsubmit actions.
 - Flows: `stack.submit [bookmark]; stack.sync; stack.unsubmit (confirm); stack.status; stack.land (confirm)`
 
@@ -200,7 +200,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### repositories · Connect a local jj repo to Smithers Cloud: license check, GitHub App wait, connection file, auto-push jj hook, disconnect, status, 10-repo quota; repository sync from source
 
 - Source: plue · coverage: partial · effort: M
-- Exists: connector.add connects a local repo to the app only (Flows.ts:618); ADR 0005 L128-133 names a `Smithers Cloud` connectors row with no anatomy.
+- Exists: connector.add connects a local repo to the app only (Flows.ts:618); ADR 0005 L128-133 names a `cloud` connectors row with no anatomy.
 - UI: connector-setup card kind cloud: steps Pick checkout → GitHub App (reuses kind github) → Install auto-push hook (shows the hook line, toggle); connected state `cloud · owner/repo · auto-push on · last push N ago · 3 of 10 repos`; Sync now and Disconnect (confirm).
 - Flows: `cloud.connect [path]; cloud.status; cloud.sync [owner/repo]; cloud.disconnect <repo> (confirm)`
 
@@ -391,7 +391,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### flow authoring · Scaffold a flow (`smithers init`: flow.mdx with a seat from the first provider key) and edit a flow's source
 
 - Source: smithers · coverage: partial · effort: S
-- Exists: flow.create authors from a description on jjhub (Flows.ts:473); files.read plus the editor can open source by path.
+- Exists: flow.create authors from a description on Smithers Cloud (Flows.ts:473); files.read plus the editor can open source by path.
 - UI: flow.new renders the scaffolded flow.mdx in the file card editor with a seat picker row limited to resolved providers before saving; workflow-list row gains Edit.
 - Flows: `flow.new <name> [seat]; flow.edit <name>`
 

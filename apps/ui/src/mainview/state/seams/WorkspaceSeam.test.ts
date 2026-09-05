@@ -2,6 +2,7 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { createAppStore } from "../AppStore"
+import { createActorBindings } from "../ActorBindings"
 import type { AppStore } from "../AppStore"
 import type { CloudWorkspaceInput } from "../AppState"
 import { dropDesktopStream, readDesktopStream } from "./DesktopStream"
@@ -77,7 +78,7 @@ const WS_LIVE = {
   is_fork: true,
   vm_id: "vm-77",
   persistence: "persistent",
-  ssh_host: "vm-77@ssh.jjhub.tech",
+  ssh_host: "vm-77@ssh.smithers-cloud.test",
   idle_timeout_seconds: 1800,
   last_activity_at: "2026-09-02T09:00:00Z",
   suspended_at: "2026-09-02T09:30:00Z",
@@ -100,7 +101,7 @@ const WS_DESKTOP = {
     source: ".smithers/environment.nix",
     revision: "b3f21c9d4e5a6b7c",
     closure_hash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-    image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+    image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
   },
   /* plue#496: `ready` is true only once the guest verified noVNC. */
   desktop: { ready: true, stream_url: "/api/workspaces/ws-1/desktop/stream", session: null }
@@ -115,7 +116,7 @@ const WS_DESKTOP = {
 const DESKTOP_TOKEN = "dtok-8f3a2b1c"
 const DESKTOP_VNC_PASSWORD = "vncpw-51ce9d0a"
 const DESKTOP_STREAM_URL =
-  `https://api.jjhub.tech/api/workspaces/ws-1/desktop/${DESKTOP_TOKEN}/vnc.html?autoconnect=1&password=${DESKTOP_VNC_PASSWORD}`
+  `https://api.smithers-cloud.test/api/workspaces/ws-1/desktop/${DESKTOP_TOKEN}/vnc.html?autoconnect=1&password=${DESKTOP_VNC_PASSWORD}`
 const DESKTOP_MINT = {
   workspace_id: "ws-1",
   stream_url: DESKTOP_STREAM_URL,
@@ -212,7 +213,7 @@ const harness = async (
       }
     ]
   })
-  return { store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched, storage, bodies }
+  return { ctx, store, seam: createWorkspaceSeam(ctx, { pollMs: 1 }), requests, urls, dispatched, storage, bodies }
 }
 
 const seedWorkspace = async (store: AppStore, workspace: CloudWorkspaceInput = wsRow): Promise<void> => {
@@ -1070,7 +1071,7 @@ describe("workspace seam header facts (plue#446)", () => {
           image: null
         },
         persistence: "persistent",
-        sshHost: "vm-77@ssh.jjhub.tech"
+        sshHost: "vm-77@ssh.smithers-cloud.test"
       })
     )
     expect(payloadOf(store)).toEqual(
@@ -1088,7 +1089,7 @@ describe("workspace seam header facts (plue#446)", () => {
           image: null
         },
         persistence: "persistent",
-        sshHost: "vm-77@ssh.jjhub.tech"
+        sshHost: "vm-77@ssh.smithers-cloud.test"
       })
     )
   })
@@ -1189,7 +1190,7 @@ describe("workspace seam header facts (plue#446)", () => {
         status: "suspended",
         kind: "container",
         persistence: "persistent",
-        sshHost: "vm-77@ssh.jjhub.tech",
+        sshHost: "vm-77@ssh.smithers-cloud.test",
         head: { changeId: "qupxosqwmnrt", commitId: "c0ffee1234567890" },
         startedAt: null
       })
@@ -1210,7 +1211,7 @@ describe("workspace seam files and services (plue#449)", () => {
     await seedWorkspace(store)
     const result = await seam.listFiles("/", "ws-1")
     expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/files?path="])
-    expect(result).toEqual({ value: "3 entries under / in \"review\" (ws-1) — the card lists them." })
+    expect(result).toEqual({ value: "/ in \"review\" (ws-1):\nsrc/\nlatest\nREADME.md" })
     expect(payloadOf(store)?.files).toEqual([
       { name: "src", path: "src", type: "dir", size: 0 },
       { name: "latest", path: "latest", type: "symlink", size: 8 },
@@ -1255,7 +1256,7 @@ describe("workspace seam files and services (plue#449)", () => {
     })
     await seedWorkspace(store)
     expect(await seam.readFile("README.md", "ws-1")).toEqual({
-      value: "README.md in \"review\" (ws-1) is on the card."
+      value: "README.md in \"review\" (ws-1):\n# hi"
     })
     expect(urls).toEqual(["GET api/repos/will/smithers/workspaces/ws-1/files/content?path=README.md"])
     const text = store.collections.cards.get("workspace-file-ws-1-README.md")
@@ -1276,11 +1277,31 @@ describe("workspace seam files and services (plue#449)", () => {
     expect(binary?.kind === "file" ? binary.payload.binary : undefined).toBe(true)
   })
 
+  test("workspace file tool results are bounded text, with binary and truncation stated", async () => {
+    const { store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1/files/content": (url) => json(200,
+        url.searchParams.get("path") === "image.png"
+          ? { content: "AAEC", encoding: "base64" }
+          : { content: "a".repeat(20_000), encoding: "utf-8" })
+    })
+    await seedWorkspace(store)
+    const text = await seam.readFile("large.txt", "ws-1")
+    expect(typeof text === "object" && text?.value).toContain("truncated")
+    expect(typeof text === "object" && text?.value.length).toBeLessThan(17_000)
+    const card = store.collections.cards.get("workspace-file-ws-1-large.txt")
+    expect(card?.kind === "file" && card.payload.content.length).toBe(16 * 1024)
+    expect(card?.kind === "file" && card.payload.truncated).toBe(true)
+    const binary = await seam.readFile("image.png", "ws-1")
+    expect(typeof binary === "object" && binary?.value).toContain("binary file")
+    expect(typeof binary === "object" && binary?.value).not.toContain("AAEC")
+    seam.dispose()
+  })
+
   test("the Services facet lists the name, the state, and plue#483's port and url", async () => {
     const { store, seam, urls } = await harness({
       "api/repos/will/smithers/workspaces/ws-1/services": json(200, [
         { name: "postgres", state: "running", port: 5432 },
-        { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.jjhub.tech" },
+        { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.smithers-cloud.test" },
         { name: "" }
       ])
     })
@@ -1290,7 +1311,7 @@ describe("workspace seam files and services (plue#449)", () => {
     expect(result).toEqual({ value: "\"review\" (ws-1) services: postgres (running), web (failed)." })
     expect(payloadOf(store)?.services).toEqual([
       { name: "postgres", state: "running", port: 5432, url: null },
-      { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.jjhub.tech" }
+      { name: "web", state: "failed", port: 3000, url: "https://ws-1.workspaces.smithers-cloud.test" }
     ])
   })
 
@@ -1481,7 +1502,7 @@ describe("workspace seam desktop kinds and provenance", () => {
           source: ".smithers/environment.nix",
           revision: "b3f21c9d4e5a6b7c",
           closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-          image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
+          image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d"
         },
         desktop: { ready: true, streamUrl: "/api/workspaces/ws-1/desktop/stream", session: null }
       })
@@ -1742,6 +1763,66 @@ describe("workspace seam desktop session", () => {
     }
   })
 
+  test("a human facet change cancels a desktop mint started by the agent", async () => {
+    dropDesktopStream()
+    let release!: () => void
+    const pendingMint = new Promise<void>((resolve) => { release = resolve })
+    let started!: () => void
+    const mintStarted = new Promise<void>((resolve) => { started = resolve })
+    const { ctx, store, seam } = await harness({
+      "POST api/repos/will/smithers/workspaces/ws-1/desktop/session": async () => {
+        started(); await pendingMint; return json(201, DESKTOP_MINT)
+      },
+      "api/repos/will/smithers/workspaces/ws-1/services": json(200, [])
+    })
+    const disposers: Array<() => void> = []
+    const actors = createActorBindings((dispose) => disposers.push(dispose))
+    const user = actors.pair(ctx, (context) => createWorkspaceSeam(context))
+    const agent = actors.select(user)
+    try {
+      await seedWorkspace(store, { ...wsRow, kind: "desktop" })
+      const mint = agent.openDesktop("ws-1")
+      await mintStarted
+      await user.setFacet("ws-1", "services")
+      release(); await mint
+      expect(payloadOf(store)?.facet).toBe("services")
+      expect(readDesktopStream("ws-1")).toBeNull()
+    } finally {
+      release()
+      for (const dispose of disposers) dispose()
+      user.dispose(); seam.dispose()
+    }
+  })
+
+  test("human and agent views share one settling workspace poll", async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    let reads = 0
+    const { ctx, store, seam } = await harness({
+      "api/repos/will/smithers/workspaces/ws-1": async () => {
+        reads += 1
+        // The first view starts a held poll; the second view only rereads its DTO.
+        if (reads === 2 || reads >= 4) await gate
+        return json(200, { ...WS_RUNNING, status: reads === 2 ? "running" : "starting" })
+      }
+    })
+    const disposers: Array<() => void> = []
+    const actors = createActorBindings((dispose) => disposers.push(dispose))
+    const user = actors.pair(ctx, (context) => createWorkspaceSeam(context, { pollMs: 60_000 }))
+    try {
+      await seedWorkspace(store)
+      await user.viewWorkspace("ws-1")
+      await actors.select(user).viewWorkspace("ws-1")
+      expect(reads).toBe(3)
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    } finally {
+      release()
+      for (const dispose of disposers) dispose()
+      user.dispose(); seam.dispose()
+    }
+  })
+
   test("rotating mints again and swaps the held stream; the old one is gone", async () => {
     dropDesktopStream()
     let mints = 0
@@ -1829,7 +1910,7 @@ describe("workspace seam environment images", () => {
           source: ".smithers/environment.nix",
           source_revision: "b3f21c9d4e5a6b7c",
           closure_hash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-          image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
+          image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
           status: "ready",
           golden_snapshot_id: "",
           created_at: "2026-09-02T00:00:00Z"
@@ -1841,7 +1922,7 @@ describe("workspace seam environment images", () => {
           source: "platform",
           source_revision: "",
           closure_hash: "1122334455667788",
-          image: "registry.jjhub.tech/environments/base:nixos-2405",
+          image: "registry.smithers-cloud.test/environments/base:nixos-2405",
           status: "ready",
           golden_snapshot_id: "snap-9",
           created_at: "2026-08-01T00:00:00Z"
@@ -1860,7 +1941,7 @@ describe("workspace seam environment images", () => {
         source: ".smithers/environment.nix",
         sourceRevision: "b3f21c9d4e5a6b7c",
         closureHash: "9f2b1c0d4e5a6b7c8d9e0f1a",
-        image: "registry.jjhub.tech/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
+        image: "registry.smithers-cloud.test/environments/smithersai/smithers:nixos-2405-9f2b1c0d",
         status: "ready",
         platformBase: false,
         coldPull: true
@@ -1871,7 +1952,7 @@ describe("workspace seam environment images", () => {
         source: "platform",
         sourceRevision: null,
         closureHash: "1122334455667788",
-        image: "registry.jjhub.tech/environments/base:nixos-2405",
+        image: "registry.smithers-cloud.test/environments/base:nixos-2405",
         status: "ready",
         platformBase: true,
         coldPull: false

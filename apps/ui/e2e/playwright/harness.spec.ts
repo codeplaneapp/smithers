@@ -12,9 +12,12 @@ import { localApiDelete, localApiGet } from "./localApi"
  * harness tab runs `claude` under the harness sandbox policy until its
  * banner shows in the emulator.
  *
- * The signed-in assertions depend on this machine's credentials, so they
- * skip with a reason where `~/.claude.json` carries no oauthAccount.
+ * These tests inspect real credentials and can launch installed harnesses.
+ * They require explicit opt-in before even reading account state. Missing
+ * credentials after opt-in still skip with a reason.
  */
+
+test.skip(process.env.SMITHERS_E2E_HOST_HARNESSES !== "1", "set SMITHERS_E2E_HOST_HARNESSES=1 to inspect host credentials and launch installed harnesses")
 
 interface HarnessRow {
   id: string

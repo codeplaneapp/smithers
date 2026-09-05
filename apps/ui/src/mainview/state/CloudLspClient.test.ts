@@ -263,7 +263,7 @@ test("the recorded transcript: session POST, initialize with the guest root, ini
       textDocument: {
         synchronization: { dynamicRegistration: false, didSave: false },
         hover: { contentFormat: ["markdown", "plaintext"] },
-        publishDiagnostics: { relatedInformation: false }
+        publishDiagnostics: { relatedInformation: false, versionSupport: true }
       },
       workspace: { configuration: true, workspaceFolders: true }
     }
@@ -334,6 +334,35 @@ test("a server that publishes nothing within the wait answers null items, never 
   const server = serve({ publish: false })
   const { lsp } = client(server, { requestTimeoutMs: 100 })
   expect(await lsp.diagnostics(DOC)).toEqual({ ok: { items: null, total: null } })
+})
+
+test("a delayed publication for the previous document version cannot settle or overwrite the current diagnostics", async () => {
+  const server = serve({ publish: false })
+  const { lsp, events } = client(server)
+  await lsp.hover(DOC, { line: 1, character: 1 })
+  const changed = { ...DOC, content: `${DOC.content}// changed\n` }
+  await lsp.hover(changed, { line: 1, character: 1 })
+  let settled = false
+  const pending = lsp.diagnostics(changed).then((answer) => { settled = true; return answer })
+  const publish = (version: number, message: string): void => server.sockets()[0]!.send(JSON.stringify({
+    jsonrpc: "2.0",
+    method: "textDocument/publishDiagnostics",
+    params: {
+      uri: cloudDocumentUri(DOC.path), version,
+      diagnostics: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, message }]
+    }
+  }))
+  publish(1, "stale")
+  await Bun.sleep(30)
+  expect(settled).toBe(false)
+  expect(events.filter((event) => event.type === "diagnostics")).toEqual([])
+  publish(2, "current")
+  const result = await pending
+  expect("ok" in result && result.ok.items?.[0]?.message).toBe("current")
+  publish(1, "late stale")
+  await Bun.sleep(30)
+  expect(await lsp.diagnostics(changed)).toEqual(result)
+  expect(events.filter((event) => event.type === "diagnostics")).toHaveLength(1)
 })
 
 test("a definition inside the checkout is a relative location; one in the store is counted as omitted, never listed", async () => {

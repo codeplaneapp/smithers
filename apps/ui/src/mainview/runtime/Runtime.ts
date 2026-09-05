@@ -8,7 +8,7 @@ export interface IdentityPort {
   readonly authFlow: AppBootstrap["authFlow"]
 }
 
-export interface JjhubPort {
+export interface SmithersCloudPort {
   readonly available: true
 }
 
@@ -27,7 +27,7 @@ export interface AppRuntime {
   readonly backend: {
     readonly agent?: NativeAgent
     readonly identity?: IdentityPort
-    readonly jjhub?: JjhubPort
+    readonly cloud?: SmithersCloudPort
     readonly local?: LocalHostPort
   }
   readonly shell: ShellPort
@@ -76,7 +76,7 @@ export const createRuntime = (options: {
     backend: {
       ...(hasCapability(bootstrap, "agent") ? { agent: createWebAgent({ fetchImpl: http }) } : {}),
       ...(hasCapability(bootstrap, "identity") ? { identity: { authFlow: bootstrap.authFlow } } : {}),
-      ...(hasCapability(bootstrap, "jjhub") ? { jjhub: { available: true as const } } : {}),
+      ...(hasCapability(bootstrap, "cloud") ? { cloud: { available: true as const } } : {}),
       ...(bootstrap.host === "local" && bootstrap.sandbox !== null
         ? { local: { repositories: options.nativeRepositories ?? unavailableRepositories, sandbox: bootstrap.sandbox } }
         : {})

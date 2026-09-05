@@ -54,11 +54,11 @@ expired · Open Linear again`.
 
 ```
 ┌ Sync · Linear ENG ↔ smithersai/smithers ─────── ● RUNNING · 12 ops ┐
-│ ✓ linear → jjhub   issue ENG-482   created #91          2s ago      │
-│ ✓ jjhub → linear   comment #88     created              2s ago      │
-│ ✗ jjhub → linear   issue #90       update   Retry                   │
+│ ✓ linear → Smithers Cloud   issue ENG-482   created #91          2s ago      │
+│ ✓ Smithers Cloud → linear   comment #88     created              2s ago      │
+│ ✗ Smithers Cloud → linear   issue #90       update   Retry                   │
 │   "Linear API: 422 label 'infra' does not exist on team ENG"        │
-│ ● linear → jjhub   comment ENG-480 create                           │
+│ ● linear → Smithers Cloud   comment ENG-480 create                           │
 │ 9 more · show                                                        │
 └──────────────────────────────────────────────────────────────────────┘
 ```

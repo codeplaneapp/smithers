@@ -18,6 +18,9 @@
  * headless machine does not have. The local server is the real one.
  */
 import { mock } from "bun:test"
+import * as os from "node:os"
+import { mkdtemp, rm } from "node:fs/promises"
+import { join } from "node:path"
 import { PROBE_MARKER } from "./Probe.ts"
 import type { NativeProbeReport, ProbeScenario, RecordedWindow } from "./Probe.ts"
 
@@ -49,6 +52,7 @@ interface RpcConfig {
 }
 
 const fakeSdk = {
+  default: { events: { on: () => {} } },
   BuildConfig: {
     getSync: () => ({
       isPackaged: false,
@@ -91,6 +95,11 @@ const fakeSdk = {
 mock.module("electrobun/main", () => fakeSdk)
 mock.module("electrobun/bun", () => fakeSdk)
 
+// A probe must never restore or rewrite the signed-in user's real application state.
+const probeHome = await mkdtemp(join(os.tmpdir(), "smithers-native-probe-home-"))
+const hostOs = { ...os, homedir: () => probeHome }
+mock.module("node:os", () => hostOs)
+
 await import("../../src/bun/index.ts")
 
 for (const exercise of scenario.exercises ?? []) {
@@ -120,4 +129,5 @@ const report: NativeProbeReport = {
   results
 }
 await Bun.write(Bun.stdout, `${PROBE_MARKER}${JSON.stringify(report)}\n`)
+await rm(probeHome, { recursive: true, force: true })
 process.exit(0)

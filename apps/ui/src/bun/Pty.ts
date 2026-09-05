@@ -11,6 +11,7 @@
  * the SPA deletes them, so a tab can still show the exit line and close
  * without a second kill.
  */
+import { Buffer } from "node:buffer"
 import { randomBytes } from "node:crypto"
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -50,6 +51,7 @@ export type PtyCreateResult =
       | "unknown_harness"
       | "harness_unavailable"
       | "capacity_reached"
+      | "manager_closed"
       | "spawn_failed"
     readonly message: string
   }
@@ -63,11 +65,13 @@ export interface PtyManager {
   readonly resize: (sessionId: string, cols: number, rows: number) => boolean
   /** SIGHUP, then SIGKILL after a grace period; the record is dropped. False when unknown. */
   readonly kill: (sessionId: string) => Promise<boolean>
-  readonly killAll: () => Promise<void>
+  /** Permanently close admission, cancel pending creates, and stop every owned child. Idempotent. */
+  readonly dispose: () => Promise<void>
   /**
    * The session's recent output as plain text (`tab.read`): the tail of a
-   * bounded scrollback with ANSI escapes stripped. `tailBytes` cuts it
-   * further from the end. Undefined when the session is unknown.
+   * bounded scrollback with ANSI escapes stripped. `tailBytes` is a
+   * non-negative safe integer UTF-8 byte cap. Partial code points are dropped,
+   * so the result may use fewer bytes. Undefined when the session is unknown.
    */
   readonly read: (sessionId: string, tailBytes?: number) => PtyOutput | undefined
 }
@@ -92,6 +96,15 @@ const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b
 /** The buffered output as the model should read it. */
 export const plainText = (raw: string): string => raw.replace(ANSI, "").replace(/\r/g, "")
 
+/** Keep a UTF-8 suffix without manufacturing a replacement character at the cut. */
+const tailUtf8 = (text: string, limit: number): string => {
+  if (Buffer.byteLength(text, "utf8") <= limit) return text
+  const bytes = Buffer.from(text, "utf8")
+  let start = bytes.length - limit
+  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1
+  return bytes.toString("utf8", start)
+}
+
 export interface PtyManagerOptions {
   /** `pty:<sessionId>` frames go out through here (the server's publish). */
   readonly publish: (topic: string, message: unknown) => void
@@ -113,7 +126,7 @@ export interface PtyManagerOptions {
   readonly sandboxHost?: SandboxHost
   /** Grace between SIGHUP and SIGKILL on kill. */
   readonly killGraceMs?: number
-  /** Maximum simultaneously live child processes; default 8. */
+  /** Capacity includes pending launches and children still terminating; default 8, zero disables. */
   readonly maxSessions?: number
   readonly log?: (line: string) => void
 }
@@ -150,6 +163,7 @@ export const ENV_ALLOWLIST: ReadonlyArray<string> = [
   "OPENCODE_API_KEY",
   /* OpenCode's "Kimi For Coding" provider reads this (`opencode providers list`). */
   "KIMI_API_KEY",
+  "CEREBRAS_API_KEY",
   "CURSOR_API_KEY",
   "AMP_API_KEY"
 ]
@@ -222,10 +236,21 @@ interface LiveSession {
   scrollback: string
   /** True once older output has fallen off the front of `scrollback`. */
   dropped: boolean
+  processExited: boolean
+  stopping?: Promise<boolean>
+}
+
+interface PendingCreate {
+  readonly canceled: ReturnType<typeof Promise.withResolvers<PtyCreateResult>>
+  closed: boolean
 }
 
 export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
-  const log = options.log ?? ((line: string) => console.error(line))
+  const logger = options.log ?? ((line: string) => console.error(line))
+  const log = (line: string): void => { try { logger(line) } catch { /* Diagnostics cannot break child ownership. */ } }
+  const publish = (topic: string, message: unknown): void => {
+    try { options.publish(topic, message) } catch { log("A PTY observer failed; child ownership is unchanged.") }
+  }
   const home = options.home ?? homedir()
   const scratch = options.tmpdir ?? safeRealpath(tmpdir())
   const env = options.env ?? Bun.env
@@ -233,7 +258,16 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
   const sandboxHost = options.sandboxHost ?? currentSandboxHost(env)
   const killGraceMs = options.killGraceMs ?? 2000
   const maxSessions = options.maxSessions ?? 8
+  if (!Number.isSafeInteger(maxSessions) || maxSessions < 0) throw new RangeError("maxSessions must be a non-negative safe integer.")
   const sessions = new Map<string, LiveSession>()
+  // Display records may disappear before their child exits. Admission and
+  // disposal retain ownership independently until the OS reports termination.
+  const children = new Map<string, LiveSession>()
+  const retiring = new Map<string, LiveSession>()
+  const preparing = new Set<PendingCreate>()
+  let disposed = false
+  let disposal: Promise<void> | undefined
+  const closedResult = (): PtyCreateResult => ({ status: "error", code: "manager_closed", message: "The terminal manager is closed." })
 
   const topic = (sessionId: string): string => `pty:${sessionId}`
 
@@ -243,21 +277,16 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     const live = sessions.get(sessionId)
     if (live !== undefined) {
       const joined = live.scrollback + text
-      if (joined.length > PTY_SCROLLBACK_BYTES) {
-        live.scrollback = joined.slice(joined.length - PTY_SCROLLBACK_BYTES)
-        live.dropped = true
-      } else {
-        live.scrollback = joined
-      }
+      live.scrollback = tailUtf8(joined, PTY_SCROLLBACK_BYTES)
+      if (live.scrollback !== joined) live.dropped = true
     }
-    options.publish(topic(sessionId), { type: "pty.output", sessionId, data: text })
+    publish(topic(sessionId), { type: "pty.output", sessionId, data: text })
   }
 
-  const create: PtyManager["create"] = async (input) => {
-    const liveCount = [...sessions.values()].filter((session) => session.record.alive).length
-    if (liveCount >= maxSessions) {
-      return { status: "error", code: "capacity_reached", message: `At most ${maxSessions} terminal sessions may run at once.` }
-    }
+  const prepare = async (
+    input: PtyCreateInput,
+    admission: PendingCreate
+  ): Promise<PtyCreateResult> => {
     const cwd = expandCwd(input.cwd, home)
     if (!isDirectory(cwd)) return { status: "error", code: "bad_cwd", message: `${cwd} is not a directory.` }
     let argv: Array<string>
@@ -267,10 +296,12 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
       let role: AgentRole | undefined
       if (input.roleId !== undefined) {
         role = findAgentRole(input.roleId, await (options.roles ?? (async () => AGENT_ROLES))())
+        if (admission.closed) return closedResult()
         if (role === undefined) return { status: "error", code: "unknown_role", message: `There is no agent with id ${input.roleId}.` }
       }
       const wantedHarness = role?.harness ?? input.harnessId
       const harness = (await options.harnesses()).find((candidate) => candidate.id === wantedHarness)
+      if (admission.closed) return closedResult()
       if (harness === undefined) {
         return { status: "error", code: "unknown_harness", message: `There is no harness with id ${String(wantedHarness)}.` }
       }
@@ -300,6 +331,7 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     const wrapped = wrapSandbox(argv, input.kind === "harness" ? harnessPolicy(paths) : terminalPolicy(paths), sandboxHost)
     const sessionId = newSessionId()
     const prepend = typeof options.pathPrepend === "function" ? await options.pathPrepend() : options.pathPrepend ?? []
+    if (admission.closed) return closedResult()
     const childEnvironment = childEnv(env, home, prepend)
     const decoder = new TextDecoder("utf-8")
     let eof: () => void = () => {}
@@ -332,10 +364,13 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
       pid: proc.pid,
       alive: true
     }
-    const live: LiveSession = { record, proc, decoder, exited: Promise.resolve(), scrollback: "", dropped: false }
+    const live: LiveSession = { record, proc, decoder, exited: Promise.resolve(), scrollback: "", dropped: false, processExited: false }
     sessions.set(sessionId, live)
-    log(`pty ${sessionId}: ${input.kind} pid ${proc.pid} in ${cwd} (sandbox ${wrapped.enforced ? "on" : "off"})`)
+    preparing.delete(admission)
+    children.set(sessionId, live)
     live.exited = proc.exited.then(async (code) => {
+      live.processExited = true
+      children.delete(sessionId)
       // The last output usually lands after SIGCHLD; the PTY's EOF (or a short grace) orders it before the exit frame.
       await Promise.race([eofSeen, Bun.sleep(300)])
       emitOutput(sessionId, decoder.decode())
@@ -343,7 +378,7 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
       const exitCode = typeof code === "number" ? code : null
       // The list (and tab.read) name the exit code too, not only the one-shot exit frame.
       if (current !== undefined) current.record = { ...current.record, alive: false, exitCode }
-      options.publish(topic(sessionId), { type: "pty.exit", sessionId, code: exitCode })
+      publish(topic(sessionId), { type: "pty.exit", sessionId, code: exitCode })
       log(`pty ${sessionId}: exited ${String(code)}`)
       try {
         proc.terminal?.close()
@@ -351,7 +386,22 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
         // Already closed.
       }
     })
+    // An OS observation failure remains visible to kill/dispose, without an
+    // unhandled rejection when no caller is currently awaiting this session.
+    void live.exited.catch(() => log("A PTY exit could not be observed; its child remains owned."))
+    log(`pty ${sessionId}: ${input.kind} pid ${proc.pid} in ${cwd} (sandbox ${wrapped.enforced ? "on" : "off"})`)
     return { status: "ok", session: record }
+  }
+
+  const create: PtyManager["create"] = (input) => {
+    if (disposed) return Promise.resolve(closedResult())
+    if (preparing.size + children.size >= maxSessions) {
+      return Promise.resolve({ status: "error", code: "capacity_reached", message: `At most ${maxSessions} terminal sessions may run at once.` })
+    }
+    const admission = { canceled: Promise.withResolvers<PtyCreateResult>(), closed: false }
+    preparing.add(admission)
+    return Promise.race([prepare({ ...input }, admission), admission.canceled.promise])
+      .finally(() => preparing.delete(admission))
   }
 
   const list: PtyManager["list"] = () => [...sessions.values()].map((live) => ({ ...live.record }))
@@ -383,51 +433,73 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     }
   }
 
-  const kill: PtyManager["kill"] = async (sessionId) => {
-    const live = sessions.get(sessionId)
-    if (live === undefined) return false
+  const stopSession = (live: LiveSession): Promise<boolean> => {
+    if (live.stopping !== undefined) return live.stopping
+    const sessionId = live.record.sessionId
     sessions.delete(sessionId)
-    if (live.record.alive) {
+    retiring.set(sessionId, live)
+    live.stopping = (async () => {
       try {
-        live.proc.kill("SIGHUP")
-      } catch {
-        // Already gone.
-      }
-      const exited = await Promise.race([live.exited.then(() => true), Bun.sleep(killGraceMs).then(() => false)])
-      if (!exited) {
-        try {
-          live.proc.kill("SIGKILL")
-        } catch {
-          // Already gone.
+        if (!live.processExited) {
+          try { live.proc.kill("SIGHUP") } catch { /* Observe termination below. */ }
+          const exited = await Promise.race([live.exited.then(() => true), Bun.sleep(killGraceMs).then(() => false)])
+          if (!exited) {
+            try { live.proc.kill("SIGKILL") } catch { /* Observe termination below. */ }
+            const killed = await Promise.race([live.exited.then(() => true), Bun.sleep(1000).then(() => false)])
+            if (!killed) throw new Error("The PTY child did not exit after termination. Its capacity remains reserved.")
+          }
+        } else {
+          await live.exited
         }
-        await Promise.race([live.exited, Bun.sleep(1000)])
+        return true
+      } finally {
+        try {
+          live.proc.terminal?.close()
+        } catch {
+          // Already closed.
+        }
+        retiring.delete(sessionId)
       }
-    }
-    try {
-      live.proc.terminal?.close()
-    } catch {
-      // Already closed.
-    }
-    return true
+    })()
+    return live.stopping
   }
 
-  const killAll: PtyManager["killAll"] = async () => {
-    await Promise.all([...sessions.keys()].map((sessionId) => kill(sessionId)))
+  const kill: PtyManager["kill"] = (sessionId) => {
+    const live = sessions.get(sessionId) ?? children.get(sessionId) ?? retiring.get(sessionId)
+    return live === undefined ? Promise.resolve(false) : stopSession(live)
+  }
+
+  const dispose: PtyManager["dispose"] = () => {
+    if (disposal !== undefined) return disposal
+    disposed = true
+    for (const admission of preparing) {
+      admission.closed = true
+      admission.canceled.resolve(closedResult())
+    }
+    const owned = new Set([...sessions.values(), ...children.values(), ...retiring.values()])
+    disposal = Promise.allSettled([...owned].map(stopSession)).then((results) => {
+      const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
+      if (errors.length > 0) throw new AggregateError(errors, "Some PTY children could not be stopped.")
+    })
+    return disposal
   }
 
   const read: PtyManager["read"] = (sessionId, tailBytes) => {
+    if (tailBytes !== undefined && (!Number.isSafeInteger(tailBytes) || tailBytes < 0)) {
+      throw new RangeError("tailBytes must be a non-negative safe integer.")
+    }
     const live = sessions.get(sessionId)
     if (live === undefined) return undefined
     const text = plainText(live.scrollback)
-    const cut = tailBytes !== undefined && tailBytes >= 0 && text.length > tailBytes
+    const output = tailBytes === undefined ? text : tailUtf8(text, tailBytes)
     return {
-      output: cut ? text.slice(text.length - tailBytes) : text,
+      output,
       alive: live.record.alive,
-      truncated: live.dropped || cut
+      truncated: live.dropped || output !== text
     }
   }
 
-  return { create, list, get, write, resize, kill, killAll, read }
+  return { create, list, get, write, resize, kill, dispose, read }
 }
 
 const safeRealpath = (path: string): string => {

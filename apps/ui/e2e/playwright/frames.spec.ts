@@ -1,14 +1,10 @@
 import { expect, test } from "@playwright/test"
-import { mkdtempSync } from "node:fs"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 
 /*
  * Durable frame contract: the same card node expands in chat, frame identity
  * is addressable, browser history restores presentation, and a fork gets a
- * new branch without losing its source URL. The local server's explicitly
- * enabled manual-path adapter is used only to create a deterministic repo
- * card; production browser builds accept repository grants instead.
+ * new branch without losing its source URL. The explicitly requested theme
+ * picker provides a deterministic card without depending on repository I/O.
  */
 test.skip(process.env.SMITHERS_CHAT_STUB === "0", "the deterministic local-app lane")
 
@@ -22,15 +18,43 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test("frame URLs survive reload, traverse history, preserve the card node, and fork", async ({ page }) => {
-  const repository = mkdtempSync(join(tmpdir(), "smithers-frame-repo-"))
+test("clear archives locally and its recovery link restores the conversation after reload", async ({ page }) => {
+  let summaryRequests = 0
+  await page.route("**/api/model/stream", async (route) => {
+    summaryRequests++
+    await route.fulfill({ status: 503, body: "offline" })
+  })
   await page.goto("/")
+  await page.getByTestId("composer-input").fill("/appearance.theme")
+  await page.getByTestId("composer-send").click()
+  const card = page.getByTestId("transcript").locator('.smithers-card[data-kind="theme-picker"]')
+  await expect(card).toBeVisible()
+  const cardId = await card.getAttribute("data-testid")
+  const originalUrl = page.url()
+  await page.getByTestId("composer-input").fill("/chat.clear")
+  await page.getByTestId("composer-send").click()
+  await expect(page.getByRole("link", { name: "Open the archived conversation" })).toBeVisible()
+  await expect(card).toHaveCount(0)
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+  await expect(page).not.toHaveURL(originalUrl)
+  const newUrl = page.url()
+  await page.reload()
+  await page.getByRole("link", { name: "Open the archived conversation" }).click()
+  await expect(page).toHaveURL(originalUrl)
+  await expect(page.getByTestId(cardId!)).toBeVisible()
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+  await page.goBack()
+  await expect(page).toHaveURL(newUrl)
+  await expect(page.getByRole("link", { name: "Open the archived conversation" })).toBeVisible()
+  expect(summaryRequests).toBe(0)
+})
 
-  page.once("dialog", (dialog) => void dialog.accept(repository))
-  await page.getByTestId("composer-repo-trigger").click()
-  await page.getByTestId("chrome-open-repo").click()
+test("frame URLs survive reload, traverse history, preserve the card node, and fork", async ({ page }) => {
+  await page.goto("/")
+  await page.getByTestId("composer-input").fill("/appearance.theme")
+  await page.getByTestId("composer-send").click()
 
-  const card = page.locator('.smithers-card[data-kind="repo"]')
+  const card = page.locator('.smithers-card[data-kind="theme-picker"]')
   await expect(card).toBeVisible()
   const cardId = (await card.getAttribute("data-testid"))?.replace(/^card-/, "")
   expect(cardId).toBeTruthy()
@@ -75,13 +99,11 @@ test("frame URLs survive reload, traverse history, preserve the card node, and f
 })
 
 test("open-in-tab returns the address bar to the root frame and Escape minimizes a pointer-maximized card", async ({ page }) => {
-  const repository = mkdtempSync(join(tmpdir(), "smithers-frame-repo-"))
   await page.goto("/")
-  page.once("dialog", (dialog) => void dialog.accept(repository))
-  await page.getByTestId("composer-repo-trigger").click()
-  await page.getByTestId("chrome-open-repo").click()
+  await page.getByTestId("composer-input").fill("/appearance.theme")
+  await page.getByTestId("composer-send").click()
 
-  const card = page.getByTestId("transcript").locator('.smithers-card[data-kind="repo"]')
+  const card = page.getByTestId("transcript").locator('.smithers-card[data-kind="theme-picker"]')
   await expect(card).toBeVisible()
   const cardId = (await card.getAttribute("data-testid"))?.replace(/^card-/, "")
   expect(cardId).toBeTruthy()
@@ -102,6 +124,6 @@ test("open-in-tab returns the address bar to the root frame and Escape minimizes
   await expect.poll(() => decodeURIComponent(new URL(page.url()).pathname))
     .toBe("/w/workspace-main/b/branch-main/f/frame-root:branch-main")
   await page.reload()
-  await expect(page.locator('.smithers-card[data-kind="repo"][data-maximized="true"]')).toHaveCount(0)
+  await expect(page.locator('.smithers-card[data-kind="theme-picker"][data-maximized="true"]')).toHaveCount(0)
   await expect(page.locator(".card-maximize-backdrop")).toHaveCount(0)
 })

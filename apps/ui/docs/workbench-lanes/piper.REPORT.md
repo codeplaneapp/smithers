@@ -12,7 +12,7 @@ changes); the docs updates in this report's commit are the only remainder.
    `SMITHERS_CLOUD_API` (default `https://api.jjhub.tech`): Host/Origin follow
    upstream, `content-length` and the local session header drop, Set-Cookie
    re-scopes, `Authorization: Bearer` attaches from the Bun-side credential,
-   offline answers 501, the bootstrap advertises `jjhub`. Tests in
+   offline answers 501, the bootstrap advertises `cloud`. Tests in
    `src/bun/server.test.ts`.
 1b. **Cloud sign-in.** `POST /api/cloud-auth/start` (loopback `/callback`
    listener, `${api}/api/auth/github/cli?callback_port=` URL), `GET

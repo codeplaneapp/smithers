@@ -1,6 +1,6 @@
 # Smithers UI runtime contract
 
-The same React application runs against two explicit hosts: jjhub Cloud and a
+The same React application runs against two explicit hosts: Smithers Cloud and a
 local Bun origin. Electrobun is an optional native shell around the local
 origin; it is not a separate application or state model.
 
@@ -8,7 +8,7 @@ origin; it is not a separate application or state model.
 
 | Host | Server | Native privileges | Typical capabilities |
 | --- | --- | --- | --- |
-| jjhub Cloud | `apps/server` Cloudflare Worker | none | agent, identity, jjhub, checkout when configured |
+| Smithers Cloud | `apps/server` Cloudflare Worker | none | agent, identity, Smithers Cloud, checkout when configured |
 | Local browser/headless | `apps/ui/src/bun/serve.ts` | explicit development path entry | repositories, targets, terminal, harnesses; agent/identity only in hybrid mode |
 | Local native | `apps/ui/src/bun/index.ts` + Electrobun | folder picker and system-browser handoff | same local services; no renderer-supplied filesystem paths |
 
@@ -17,7 +17,7 @@ The client first loads `GET /api/bootstrap` and validates it with
 registry omits unavailable commands. Components render from that registry,
 so disabled hosts do not expose controls that can only fail.
 
-Supported capabilities are `agent`, `identity`, `jjhub`, `billing.checkout`,
+Supported capabilities are `agent`, `identity`, `cloud`, `billing.checkout`,
 `keys.byok`, `local.repositories`, `local.repository-path-entry`,
 `local.targets`, `local.terminal`, and `local.harnesses`.
 
@@ -29,7 +29,12 @@ Cloud requests. `hybrid` enables the configured chat and identity upstreams.
 also disables the identity proxy.
 
 The native launcher defaults to hybrid unless explicitly set to offline. The
-packaged app serves its built SPA from `127.0.0.1` on a random port. The
+packaged app serves its built SPA from `127.0.0.1` on a port chosen at first
+launch and saved as `local-origin-port` in its application-support directory.
+Later launches reuse that port because OPFS and localStorage belong to the
+complete browser origin. If the saved port is occupied, startup fails rather
+than moving the user's conversation to an empty origin. `SMITHERS_LOCAL_PORT`
+is an explicit development/test override and does not replace the saved port. The
 headless server prints `SMITHERS_LOCAL_ORIGIN=http://127.0.0.1:<port>` when it
 is ready.
 
@@ -72,7 +77,7 @@ and the token lives in the macOS keychain (`smithers-cloud`) plus Bun memory;
 the session route answers `{ state, username, expiresAt }` only.
 `SMITHERS_CLOUD_TOKEN` is a dev/CI override read first. A signed-in session
 loads the repository inventory (the sidebar's `org/ → repo → working copies`
-tree) through the proxy; the bootstrap advertises the `jjhub` capability when
+tree) through the proxy; the bootstrap advertises the `cloud` capability when
 the proxy is enabled.
 
 ## Repository and process authority
@@ -111,9 +116,28 @@ tsserver computed for it. Every answer names the digest
 (`RepoFilesResponse.digest`, SHA-256 of the bytes) of the file text it was
 about, and every cap says it cut (`total`, `omitted`, `truncated`).
 
-PTY count, target-run count, input bytes, output buffering, and WebSocket
-subscriptions are bounded. Shutdown awaits agent cancellation, process
-termination, and server close.
+PTY admission defaults to eight slots, including launches still resolving
+their setup and children still terminating after a tab closes. Exited display
+records do not consume a process slot. The internal PTY owner has an idempotent,
+permanent `dispose()` (replacing `killAll()`): pending create calls settle as
+`manager_closed`, late setup cannot spawn, and new creates are refused (HTTP
+503 while the route is still reachable). Injected setup work itself has no
+abort contract. Termination failures reject shutdown; they never report a
+clean stop or release the still-owned child's capacity. Independent local
+listener, auth and LSP finalizers are attempted even if PTY disposal fails.
+
+PTY scrollback retains at most 64 KiB of raw UTF-8 output per session.
+`GET /api/pty/:id/output?tail=<bytes>` strips ANSI escapes and returns a suffix
+within the requested non-negative safe-integer byte limit. It drops a partial
+code point at the cut, so a result can be shorter than the requested limit;
+`truncated` reports either scrollback or requested-tail loss. This is text
+capture, not a reconstruction of the terminal screen.
+
+Target-run count, input bytes, retained history and WebSocket subscriptions
+also have limits. Target-run shutdown currently sends a kill signal without
+awaiting termination; its admission/lifetime and parser buffering remain
+under review. Do not treat server shutdown as a verified descendant-process
+drain or a complete bound on every subprocess output path.
 
 ## Multi-workspace repositories and plugins
 
@@ -389,6 +413,26 @@ bun run test:e2e
 The web build is the Cloud Worker asset and the local server asset. Heavy graph
 and markdown-editor modules are dynamic chunks, so they are absent from the
 initial application chunk.
+
+`bun test src` does not infer permission to inspect or build a developer's
+personal checkouts. The host-workspace cases in `TargetGraph.integration.test.ts`
+skip by default. To run them deliberately, set `SMITHERS_HOST_WORKSPACE_TESTS=1`
+and an absolute `SMITHERS_GRAPH_READ_WORKSPACE` and/or
+`SMITHERS_GRAPH_RUN_WORKSPACE`. These fixtures expect `//src:typeCheck` and
+`//src:srcs`; the run workspace must be a disposable clone because its build
+commands execute there. The suite retains generated run histories and never
+removes a host checkout's existing history directory. Only its own temporary
+server directories are automatically cleaned up.
+
+The default Playwright host also owns a temporary home/state directory and
+does not discover installed harnesses, inspect their account files, or pass
+ambient credentials to test terminal sessions. Its harness table reports the
+normal contract entries as unavailable. `SMITHERS_E2E_HOST_HARNESSES=1`
+explicitly enables real-host detection and the installed-harness browser tests;
+those tests can read local account state and launch installed CLIs. This flag
+does not enable cloud identity or real chat. `SMITHERS_CHAT_STUB=0` is a separate
+explicit real-chat request. A successful server shutdown removes only its
+owned temporary directory; failed startup/shutdown retains it for inspection.
 
 The root `test:e2e` command packages the stable macOS app with Electrobun's
 native renderer, launches the actual bundle, and drives it through a loopback

@@ -14,9 +14,11 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { createAppController } from "./AppController"
+import { scopedControllers } from "./ControllerTestScope"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
+
+const createAppController = scopedControllers()
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()

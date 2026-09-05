@@ -186,6 +186,16 @@ const openRepository = async (app: PackagedApp, path: string | null): Promise<vo
     })()
   `)
   await clickTestId(app, "chrome-open-repo")
+  // A successful native pick still has to be consumed and mirrored into the
+  // renderer before subsequent commands can resolve the selected repository.
+  if (path !== null && (await stat(path).catch(() => undefined))?.isDirectory()) {
+    const selectedPath = await realpath(path)
+    await app.waitFor<boolean>(`
+      document.querySelector('[data-testid="repo-chip"]')?.getAttribute('title') === ${JSON.stringify(selectedPath)} &&
+      Array.from(document.querySelectorAll('[data-testid^="repo-select-"]')).some((node) =>
+        node.getAttribute('data-testid') === ${JSON.stringify(`repo-select-local:${selectedPath}`)})
+    `)
+  }
 }
 
 const runCommand = async (argv: ReadonlyArray<string>, cwd: string): Promise<string> => {
@@ -474,15 +484,25 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       const beforeRelaunch = await app.state()
       await app.relaunch()
       expect((await app.state()).app.pid).not.toBe(beforeRelaunch.app.pid)
-      expect((await rendererApi<{ repos: Array<unknown> }>(app, "/api/repos")).body.repos).toEqual([])
+      // Native startup restores the user's remembered directory grants before
+      // serving requests. Reusing the pin must not require another folder pick.
+      const restored = await rendererApi<{ repos: Array<{ id: string; path: string; name: string }> }>(app, "/api/repos")
+      expect(restored.status).toBe(200)
+      expect(restored.body.repos).toEqual([
+        expect.objectContaining({ path: repository, name: "codeplanesmithers/canary-sandbox" })
+      ])
+      const restoredRead = await rendererApi<{ kind: string }>(app, "/api/repo/files", {
+        method: "POST",
+        body: { repoId: restored.body.repos[0]!.id, path: "README.md" }
+      })
+      expect(restoredRead.status).toBe(200)
       expect(
         await app.waitFor<boolean>(`
         Array.from(document.querySelectorAll('.repo-name')).some((node) => node.textContent === 'codeplanesmithers/canary-sandbox')
       `)
       ).toBe(true)
 
-      await app.queueRepositorySelection(repository)
-      await clickSelector(app, ".repo-select")
+      await clickTestId(app, `repo-select-local:${repository}`)
       expect(
         await app.waitFor<number>(
           `
@@ -513,9 +533,7 @@ describe.skipIf(!enabled)("the packaged production Electrobun app", () => {
       const repository = await fixture.makeDirectory("terminal-repository")
       await runCommand(["git", "init", "--quiet"], repository)
       await openRepository(app, repository)
-      expect(await app.waitFor<boolean>(`document.querySelector('.smithers-card[data-kind="repo"]') !== null`)).toBe(
-        true
-      )
+      expect(await app.waitFor<boolean>(`document.querySelector('[data-testid="repo-chip"]') !== null`)).toBe(true)
 
       await clickTestId(app, "tab-add")
       await app.waitFor<boolean>(`document.querySelector('[data-testid="tab-add-terminal"]') !== null`)

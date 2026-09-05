@@ -1,6 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import { createAppStore } from "../state/AppStore"
+import { ENVELOPE_STORAGE_KEY } from "./TransactionalStorage"
 import {
   APP_SCHEMA_VERSION,
   enforceSchemaVersion,
@@ -89,12 +90,51 @@ describe("the persisted collection inventory the gate clears", () => {
 })
 
 describe("enforceSchemaVersion", () => {
-  test("stamps a fresh store and then matches it", () => {
+  test("default behavior preserves older state and waits for a validated commit", () => {
+    const storage = memoryStorage()
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
+    storage.setItem("smithers-mvp.app-messages", "original conversation")
+    const before = [...storage.data]
+    expect(enforceSchemaVersion(storage).action).toBe("validate")
+    expect([...storage.data]).toEqual(before)
+  })
+
+  test("default behavior refuses a newer store without resetting or quarantining it", () => {
+    const storage = memoryStorage()
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION + 1))
+    storage.setItem("smithers-mvp.app-messages", "future conversation")
+    const before = [...storage.data]
+    expect(() => enforceSchemaVersion(storage)).toThrow("cannot be opened")
+    expect([...storage.data]).toEqual(before)
+  })
+
+  test("validated upgrades preserve bytes and the old stamp until the storage opener commits", () => {
+    const storage = memoryStorage()
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
+    storage.setItem(`${PERSISTED_KEY_PREFIX}app-sessions`, "legacy bytes")
+    const before = [...storage.data]
+    expect(enforceSchemaVersion(storage, { onMismatch: "validate" }).action).toBe("validate")
+    expect([...storage.data]).toEqual(before)
+  })
+
+  test("validated upgrades refuse future or invalid app versions without touching storage", () => {
+    for (const stamp of [String(APP_SCHEMA_VERSION + 1), "invalid"]) {
+      const storage = memoryStorage()
+      storage.setItem(SCHEMA_VERSION_STORAGE_KEY, stamp)
+      storage.setItem(`${PERSISTED_KEY_PREFIX}app-sessions`, "future bytes")
+      const before = [...storage.data]
+      expect(() => enforceSchemaVersion(storage, { onMismatch: "validate" })).toThrow("cannot be opened")
+      expect([...storage.data]).toEqual(before)
+    }
+  })
+  test("a fresh store waits for validation; a committed stamp then matches", () => {
     const storage = memoryStorage()
     const first = enforceSchemaVersion(storage)
-    expect(first.action).toBe("match")
+    expect(first.action).toBe("validate")
     expect(first.from).toBe(null)
-    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
+    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(null)
+    // The validated storage opener, not this read-only gate, commits the stamp.
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
     const second = enforceSchemaVersion(storage)
     expect(second.action).toBe("match")
     expect(second.clearedKeys).toEqual([])
@@ -104,7 +144,7 @@ describe("enforceSchemaVersion", () => {
     const storage = memoryStorage()
     for (const key of persistedStorageKeys()) storage.setItem(key, "{}")
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
-    const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1 })
+    const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1, onMismatch: "reset" })
     expect(outcome.action).toBe("reset")
     expect(outcome.from).toBe(String(APP_SCHEMA_VERSION))
     expect([...outcome.clearedKeys]).toEqual([...persistedStorageKeys()].sort())
@@ -129,7 +169,7 @@ describe("enforceSchemaVersion", () => {
   test("does not touch keys outside the store's namespace", () => {
     const storage = enumerableStorage()
     storage.setItem("unrelated-app.state", "keep me")
-    enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1 })
+    enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1, onMismatch: "reset" })
     expect(storage.getItem("unrelated-app.state")).toBe("keep me")
   })
 
@@ -143,13 +183,39 @@ describe("enforceSchemaVersion", () => {
     storage.setItem(`${PERSISTED_KEY_PREFIX}app-retired-collection`, "{}")
     // A genuine bump, so the stamp must be present.
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION))
-    const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1 })
+    const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1, onMismatch: "reset" })
     expect(outcome.clearedKeys).toContain(`${PERSISTED_KEY_PREFIX}app-retired-collection`)
     expect(storage.getItem(`${PERSISTED_KEY_PREFIX}app-retired-collection`)).toBe(null)
   })
 })
 
 describe("a real store across a schema version bump", () => {
+  test("future state refuses app open without changing the durable store", async () => {
+    const storage = memoryStorage()
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION + 1))
+    storage.setItem(ENVELOPE_STORAGE_KEY, "future opaque bytes")
+    const before = [...storage.data]
+    await expect(createAppStore({ kind: "localStorage", storage })).rejects.toThrow("cannot be opened")
+    expect([...storage.data]).toEqual(before)
+  })
+
+  test("a failed validated commit leaves the older schema stamp and legacy bytes untouched", async () => {
+    const storage = memoryStorage()
+    const stamp = String(APP_SCHEMA_VERSION - 1)
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, stamp)
+    const legacyKey = `${PERSISTED_KEY_PREFIX}app-cards`
+    storage.setItem(legacyKey, "{}")
+    const host: StorageApi = {
+      ...storage,
+      setItem: (key, value) => {
+        if (key === ENVELOPE_STORAGE_KEY) throw new Error("quota refused")
+        storage.setItem(key, value)
+      }
+    }
+    await expect(createAppStore({ kind: "localStorage", storage: host })).rejects.toThrow("quota refused")
+    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(stamp)
+    expect(storage.getItem(legacyKey)).toBe("{}")
+  })
   /*
    * The defect E14.2 names. TanStack's localStorage loader parses the
    * {versionKey, data} envelope and never runs the collection schema, so a row
@@ -158,7 +224,7 @@ describe("a real store across a schema version bump", () => {
    * the path the app actually takes: an older build's store is reproduced by
    * writing its bytes and its stamp, never by calling the gate by hand.
    */
-  test("a boot over an older stamp keeps that row out and reseeds clean", async () => {
+  test("a boot over an older stamp keeps invalid rows out and preserves compatible state", async () => {
     const storage = memoryStorage()
     const first = await createAppStore({ kind: "localStorage", storage })
     await first.dispatch({ type: "composer.changed", actor: "user", draft: "written before the bump" })
@@ -173,13 +239,13 @@ describe("a real store across a schema version bump", () => {
     const second = await createAppStore({ kind: "localStorage", storage })
     expect(second.collections.cards.get("invalid-card")).toBeUndefined()
     expect(second.collections.cards.size).toBe(0)
-    expect(second.session().draft).toBe("")
+    expect(second.session().draft).toBe("written before the bump")
     expect(second.session().id).toBe("main")
     expect(second.collections.worldDocuments.size).toBeGreaterThan(0)
     expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
   })
 
-  test("the reseeded store still dispatches and persists", async () => {
+  test("the validated store still dispatches and persists", async () => {
     const storage = memoryStorage()
     const first = await createAppStore({ kind: "localStorage", storage })
     await first.dispatch({ type: "composer.changed", actor: "user", draft: "before" })
@@ -187,7 +253,7 @@ describe("a real store across a schema version bump", () => {
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
 
     const second = await createAppStore({ kind: "localStorage", storage })
-    expect(second.session().draft).toBe("")
+    expect(second.session().draft).toBe("before")
     await second.dispatch({ type: "composer.changed", actor: "user", draft: "after" })
       .isPersisted.promise
     await settled()
@@ -242,9 +308,10 @@ describe("the recorded backend", () => {
     expect(readRecordedBackend(storage)).toBe("localStorage")
   })
 
-  test("reads null for a stamp that names no backend this build knows", () => {
+  test("refuses an unknown backend without changing its stamp", () => {
     const storage = memoryStorage()
     storage.setItem(PERSISTENCE_BACKEND_STORAGE_KEY, "indexeddb")
-    expect(readRecordedBackend(storage)).toBe(null)
+    expect(() => readRecordedBackend(storage)).toThrow("backend")
+    expect(storage.getItem(PERSISTENCE_BACKEND_STORAGE_KEY)).toBe("indexeddb")
   })
 })

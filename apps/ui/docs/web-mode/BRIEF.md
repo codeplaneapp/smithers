@@ -28,16 +28,16 @@ AND ARCHITECTURE, not code. Ground every claim in the tree; cite files.
     `/api/*`, `/v1/*`, `/workflows/*`) on `canary.smithers.sh`. It owns GitHub
     OAuth / WorkOS sign-in cookies, the chat turn seam (`/v1`, Durable Objects
     `TURN_CANCELS`, `TURN_LIMITS`, `GATEWAY_SESSIONS`, `CLIENT_ERRORS`), and a
-    per-route allowlist to jjhub (`PLATFORM_PROXY_RULES`). Its identity is
+    per-route allowlist to Smithers Cloud (`PLATFORM_PROXY_RULES`). Its identity is
     frozen (`apps/server/DEPLOY.md`); `scripts/deploy.ts` builds the SPA and
     deploys with a receipt.
 - The SPA already abstracts the shell: `src/mainview/runtime/Runtime.ts`
-  (`AppRuntime { bootstrap, http, backend { agent?, identity?, jjhub?, local? },
+  (`AppRuntime { bootstrap, http, backend { agent?, identity?, Smithers Cloud?, local? },
   shell: browser | native }`), bootstrap capabilities
   (`@smthrs/rpc/AppBootstrap`, `hasCapability`), `native/WebAgent.ts` (the
   agent over HTTP when no native bridge), `native/NativeBridge.ts`
   (`window.__electrobun`). Every flow in `src/mainview/flows/Flows.ts`
-  declares `runtime: [...]` requirements: counts today — jjhub 80,
+  declares `runtime: [...]` requirements: counts today — Smithers Cloud 80,
   local.targets 20, identity 14, local.repositories 9, local.harnesses 3,
   keys.byok 2, billing.checkout 2, agent 2, local.terminal 1. A flow whose
   runtime is absent is refused honestly (see `flows/Commands.ts`).
@@ -47,12 +47,12 @@ AND ARCHITECTURE, not code. Ground every claim in the tree; cite files.
   act is a flow (slash + agent + button), consequential acts confirm, 300 ms
   toast law, honesty lines generated from the live catalog
   (`state/Instructions.ts`).
-- Backend: plue/jjhub (`~/plue`) — repos mirroring GitHub under users/orgs,
+- Backend: Smithers Cloud (`~/plue`) — repos mirroring GitHub under users/orgs,
   workspaces (cloud Linux machines with a terminal over WebSocket, Bearer +
   `terminal` subprotocol, 64 KiB frames, close-code contract), changes and
   landing requests, GitHub-synced issues, Linear sync. The Worker bridges the
-  cookie session to a jjhub cloud token for `/api/repos/`, `/api/user/…`,
-  `/api/github/import`, `/api/notifications/`; a separate jjhub PAT flow
+  cookie session to a Smithers Cloud token for `/api/repos/`, `/api/user/…`,
+  `/api/github/import`, `/api/notifications/`; a separate Smithers Cloud PAT flow
   (`/api/auth/github/cli`) exists for the native app (keychain).
 - Today's sidebar/surface work in flight (docs/workbench-lanes/sidebar-tree.md):
   repository file tree in the sidebar, sessions (not tabs), Flows surface,
@@ -67,7 +67,7 @@ AND ARCHITECTURE, not code. Ground every claim in the tree; cite files.
 2. The web feature set (a table: feature → web / native / both, with the
    reason): cloud repos, issues, changes and review, workspaces and their
    terminal (the Bun WebSocket tunnel does not exist in a Worker: Worker
-   WebSocket proxy, Durable Object, or direct-to-jjhub with a short-lived
+   WebSocket proxy, Durable Object, or direct-to-cloud with a short-lived
    token — pick one and say why, including the token-exposure argument),
    agent chat (chat seam), flows/runs, local repositories (native only),
    local terminal (native only), BYOK keys (where the secret lives), billing.

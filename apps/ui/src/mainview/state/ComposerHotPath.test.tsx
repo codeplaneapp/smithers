@@ -75,13 +75,13 @@ interface Counted {
   /** How many times App has rendered since mount. */
   readonly renders: () => number
   readonly host: HTMLElement
-  readonly act: (change: () => void) => Promise<void>
+  readonly act: (change: () => unknown) => Promise<void>
 }
 
 /** Mount App behind a controller whose registry read counts the shell's renders. */
 const mountCounted = async (): Promise<Counted> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-  const real = createAppController(store, unavailableRepositories, unavailableAgent)
+  const real = createAppController(store, unavailableRepositories, unavailableAgent, { recommender: { debounceMs: 0 } })
   let count = 0
   const controller: AppControllerType = {
     ...real,
@@ -105,10 +105,13 @@ const mountCounted = async (): Promise<Counted> => {
   )
   mounted.push(() => {
     flushSync(() => root.unmount())
+    controller.dispose()
     host.remove()
   })
-  const act = async (change: () => void): Promise<void> => {
-    flushSync(change)
+  const act = async (change: () => unknown): Promise<void> => {
+    let pending: unknown
+    flushSync(() => { pending = change() })
+    await pending
     // Collection subscriptions land on a microtask; flush what they queued.
     await new Promise((resolve) => setTimeout(resolve, 0))
     flushSync(() => {})
@@ -151,7 +154,15 @@ describe("the composer hot path: typing never re-renders the transcript", () => 
 
   test("typing leaves the transcript's rendered messages untouched", async () => {
     const view = await mountCounted()
-    await view.act(() => view.controller.runCommandArgs("chat.send", "a message worth keeping"))
+    await view.act(async () => {
+      await view.controller.commands.run("chat.send", "a message worth keeping")
+      // Sending also schedules a recommendation row. Settle that material
+      // update before attributing subsequent shell renders to keystrokes.
+      for (let tick = 0; tick < 100 && (view.controller.store.session().phase !== "idle" || view.controller.store.collections.recommendations.size === 0); tick += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      expect(view.controller.store.collections.recommendations.size).toBe(1)
+    })
     const before = view.host.querySelector(".smithers-transcript")?.innerHTML
     const renders = view.renders()
 

@@ -51,6 +51,7 @@ const spawnProbe = async (options: ProbeOptions): Promise<NativeProbeReport> => 
       SMITHERS_NATIVE_PROBE: JSON.stringify(options.scenario ?? {}),
       SMITHERS_LOCAL_PORT: "0",
       SMITHERS_CHAT_STUB: "1",
+      SMITHERS_LOCAL_MODE: "offline",
       ...options.env
     },
     stdout: "pipe",

@@ -77,6 +77,16 @@ interface Excuse {
  */
 const RESOLVES_ELSEWHERE: ReadonlyArray<Excuse> = [
   {
+    literal: "storage-test-",
+    file: "e2e/playwright/storage-refusal.spec.ts",
+    reason: "test-owned request IDs on the shipped SQLite worker protocol, not application card IDs"
+  },
+  {
+    literal: "smithers-mvp-quarantine.private-test",
+    file: "e2e/playwright/storage-refusal.spec.ts",
+    reason: "an intentionally invented historical quarantine key; recovery must enumerate unknown original keys, not only a current vocabulary"
+  },
+  {
     literal: "stable-macos-",
     file: "e2e/packaged/PackagedApp.ts",
     reason: "the Electrobun stable package directory prefix under build/, not an application card id"

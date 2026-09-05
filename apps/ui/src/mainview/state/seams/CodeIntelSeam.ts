@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The code-intel seam (docs/code-intel/PLAN.md §4): `code.hover`,
  * `code.definition` and `code.diagnostics` against a language server. Each is
@@ -36,10 +37,10 @@
 import { LSP_HOVER_CAP_CHARS, LSP_LANGUAGE_SERVER_MISSING, LSP_REQUEST_TIMEOUT_MS, lspLanguageFor } from "@smthrs/rpc/LocalApp"
 import type { LspDiagnostic, LspLocation, Repo } from "@smthrs/rpc/LocalApp"
 import { parseRepoSelection } from "../AppState"
-import type { Card, CloudWorkspaceRow } from "../AppState"
+import type { Actor, Card, CloudWorkspaceRow } from "../AppState"
 import type { CloudLspClient, CloudLspDocument, CloudLspEvent } from "../CloudLspClient"
 import type { LspAnswer, LspClient, LspRefusal } from "../LspClient"
-import { localFileFields, requestLocalFiles, resolveFileTarget } from "./FilesSeam"
+import { localFileCardId, localFileFields, requestLocalFiles, resolveFileTarget } from "./FilesSeam"
 import type { FileAnchor, FilesSeam } from "./FilesSeam"
 import type { SeamContext } from "./SeamContext"
 
@@ -139,10 +140,10 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
   }
 
   /** Patch the file card's payload through the dispatcher; false when no such card exists. */
-  const patch = (id: string, fields: Partial<FilePayload>): boolean => {
+  const patch = (id: string, fields: Partial<FilePayload>, actor: Actor = ctx.actor()): boolean => {
     const card = fileCard(id)
     if (card === undefined) return false
-    ctx.dispatch({ type: "card.updated", actor: ctx.actor(), id, patch: { payload: { ...card.payload, ...fields } } })
+    ctx.dispatch({ type: "card.updated", actor, id, patch: { payload: { ...card.payload, ...fields } } })
     return true
   }
 
@@ -158,16 +159,16 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
    * first code.* call on a repository opens it, so a repository nobody asked
    * about costs no socket topic.
    */
-  const watching = new Map<string, () => void>()
+  const watching = actorSharedState(ctx, "code-local-watches", () => new Map<string, () => void>())
   const watch = (repo: Repo): void => {
     if (watching.has(repo.id)) return
     watching.set(
       repo.id,
       options.lsp.subscribe(repo.id, (message) => {
-        const id = cardIdOf(repo.name, message.path)
+        const id = localFileCardId(repo.id, message.path)
         if (fileCard(id) === undefined) return
-        void reconciled(repo, message.path, id, message.digest).then((agree) => {
-          if (agree) patch(id, diagnosticsFields(message.items, message.total))
+        void reconciled(repo, message.path, id, message.digest, "system").then((agree) => {
+          if (agree) patch(id, diagnosticsFields(message.items, message.total), "system")
         })
       })
     )
@@ -181,27 +182,27 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
    * right now (the first act opens no document until the server is ready).
    * Never a silent close.
    */
-  let unwatchCloud: (() => void) | undefined
-  const dialing = new Map<string, Set<string>>()
+  const cloudWatch = actorSharedState(ctx, "code-cloud-watch", () => ({ unwatch: undefined as (() => void) | undefined }))
+  const dialing = actorSharedState(ctx, "code-cloud-dialing", () => new Map<string, Set<string>>())
   const connectionKey = (workspaceId: string, language: string): string => `${workspaceId} ${language}`
   const cloudCards = (event: Extract<CloudLspEvent, { readonly paths: ReadonlyArray<string> }>): ReadonlySet<string> =>
     new Set([...event.paths.map((path) => cardIdOf(event.repo, path)), ...(dialing.get(connectionKey(event.workspaceId, event.language)) ?? [])])
   const watchCloud = (): void => {
-    if (unwatchCloud !== undefined || options.cloudLsp === undefined) return
-    unwatchCloud = options.cloudLsp.subscribe((event) => {
+    if (cloudWatch.unwatch !== undefined || options.cloudLsp === undefined) return
+    cloudWatch.unwatch = options.cloudLsp.subscribe((event) => {
       switch (event.type) {
         case "diagnostics": {
           const id = cardIdOf(event.repo, event.path)
-          if (fileCard(id)?.payload.content === event.content) patch(id, diagnosticsFields(event.items, event.total))
+          if (fileCard(id)?.payload.content === event.content) patch(id, diagnosticsFields(event.items, event.total), "system")
           return
         }
         case "closed": {
           const note = `the workspace language server closed: ${event.reason === "" ? "no reason given" : event.reason} (${event.code})`
-          for (const id of cloudCards(event)) patch(id, { intel: { state: "unavailable", note } })
+          for (const id of cloudCards(event)) patch(id, { intel: { state: "unavailable", note } }, "system")
           return
         }
         case "waiting": {
-          for (const id of cloudCards(event)) patch(id, { intel: { state: "unavailable", note: event.note } })
+          for (const id of cloudCards(event)) patch(id, { intel: { state: "unavailable", note: event.note } }, "system")
           return
         }
       }
@@ -215,14 +216,14 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
    * the digests then agree — a file changing twice between two reads is
    * stated by silence, never by an annotation on the wrong line.
    */
-  const reconciled = async (repo: Repo, path: string, id: string, digest: string): Promise<boolean> => {
+  const reconciled = async (repo: Repo, path: string, id: string, digest: string, actor: Actor = ctx.actor()): Promise<boolean> => {
     const card = fileCard(id)
     if (card === undefined) return false
     if (card.payload.digest === digest) return true
     const answer = await requestLocalFiles(ctx, repo, path, path, "read")
     if ("error" in answer || answer.body.kind !== "file") return false
     const fields = localFileFields(answer.body)
-    patch(id, { ...fields, hover: undefined, diagnostics: undefined, diagnosticsTotal: undefined })
+    patch(id, { ...fields, hover: undefined, diagnostics: undefined, diagnosticsTotal: undefined }, actor)
     return fields.digest === digest
   }
 
@@ -336,10 +337,10 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
     if ("error" in target) return target.error
     if (target.path === "") return "code intelligence needs a file path"
     if (target.kind === "cloud") return prepareCloud(target.repo, target.path, anchor)
-    const refusal = await ensureCard(target.repo.name, target.path, anchor)
+    const refusal = await ensureCard(target.repo.id, target.path, anchor)
     if (refusal !== undefined) return refusal
     watch(target.repo)
-    return { kind: "local", repo: target.repo, path: target.path, id: cardIdOf(target.repo.name, target.path) }
+    return { kind: "local", repo: target.repo, path: target.path, id: localFileCardId(target.repo.id, target.path) }
   }
 
   const repoNameOf = (prepared: Prepared): string => prepared.kind === "local" ? prepared.repo.name : prepared.repo
@@ -425,7 +426,7 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
        * scroll. The read's own value stays out of this answer: the model
        * asked where, not what; it reads the target with files.read.
        */
-      await options.readFile(first.path, repo, { line: first.line, column: first.character })
+      await options.readFile(first.path, prepared.kind === "local" ? prepared.repo.id : repo, { line: first.line, column: first.character })
       const more = total - omitted - locations.length
       const trailer = [
         ...(more > 0 ? [`… and ${more} more`] : []),
@@ -463,8 +464,8 @@ export const createCodeIntelSeam = (ctx: SeamContext, options: CodeIntelSeamOpti
     dispose: () => {
       for (const detach of watching.values()) detach()
       watching.clear()
-      unwatchCloud?.()
-      unwatchCloud = undefined
+      cloudWatch.unwatch?.()
+      cloudWatch.unwatch = undefined
       dialing.clear()
     }
   }

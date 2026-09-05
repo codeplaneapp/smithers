@@ -13,6 +13,7 @@
  * parsed is refused before the handler runs, which is why no handler below the
  * boundary contains an argument check.
  */
+import { parseFileArgs } from "./FileArgs"
 import { splitTrailingRepo } from "../state/RepoContext"
 
 /** A parsed invocation, or the honest refusal that names what is missing. */
@@ -70,7 +71,9 @@ const tokensOf = (args: string | undefined): Array<string> =>
  * files.read's anchor does.
  */
 const positioned = (name: string, args: string | undefined): Parsed => {
-  const tokens = tokensOf(args)
+  const parsed = parseFileArgs(args)
+  if ("error" in parsed) return parsed
+  const tokens = parsed.tokens
   const [token, repo] = tokens
   const usage = `/${name} <path>:<line>:<col> [owner/repo]`
   if (token === undefined) return no(`${name} needs a position: ${usage}`)
@@ -140,6 +143,9 @@ const numberedChangeRef = (name: string, field: string, what: string, args: stri
 const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = {
   "appearance.theme": (args) => ok({ palette: args ?? "" }),
   "chat.send": (args) => required("text", args, "send needs the text to submit"),
+  "chat.clear": (args) => trimmed(args) === "" ? NONE : trimmed(args) === "--summarize"
+    ? ok({ summarize: true })
+    : no("chat.clear accepts only --summarize; omit it to archive locally"),
   "browser.open": (args) => required("url", args, "browser needs a URL: /browser.open https://example.com"),
   /*
    * The description keeps the trailing `owner/repo` token: createWorkflow
@@ -234,6 +240,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "approvals.list": (args) => repoOnly("approvals.list", args),
   "flow.run.stop-all": (args) => repoOnly("flow.run.stop-all", args),
   "approvals.open": (args) => required("runId", args, "approvals.open needs a run id"),
+  "flow.list": (args) => repoOnly("flow.list", args),
   "flow.run": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("flow.run takes a workflow name and optionally an owner/repo")
@@ -453,7 +460,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
    * the workspace id.
    */
   "workspace.files": (args) => {
-    const [path, workspaceId, ...rest] = tokensOf(args)
+    const parsed = parseFileArgs(args)
+    if ("error" in parsed) return parsed
+    const [path, workspaceId, ...rest] = parsed.tokens
     if (rest.length > 0) return no("workspace.files takes a path and optionally a workspace id")
     return ok({
       ...(path === undefined ? {} : { path }),
@@ -461,7 +470,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     })
   },
   "workspace.file": (args) => {
-    const [path, workspaceId, ...rest] = tokensOf(args)
+    const parsed = parseFileArgs(args)
+    if ("error" in parsed) return parsed
+    const [path, workspaceId, ...rest] = parsed.tokens
     if (path === undefined) return no("workspace.file needs a path: /workspace.file <path> [workspaceId]")
     if (rest.length > 0) return no("workspace.file takes a path and optionally a workspace id")
     return ok(workspaceId === undefined ? { path } : { path, workspaceId })
@@ -575,7 +586,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "findings.please-fix": (args) => numberedChangeRef("findings.please-fix", "findingId", "a finding id", args),
   "findings.not-useful": (args) => numberedChangeRef("findings.not-useful", "findingId", "a finding id", args),
   "files.list": (args) => {
-    const tokens = tokensOf(args)
+    const parsed = parseFileArgs(args)
+    if ("error" in parsed) return parsed
+    const tokens = parsed.tokens
     if (tokens.length > 2) return no("files.list takes a path and optionally an owner/repo")
     const [path, repo] = tokens
     return ok(repo === undefined ? { path: path ?? "" } : { path: path ?? "", repo })
@@ -586,7 +599,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
    * with a colon of its own keeps working; the parser stays first-token-is-path.
    */
   "files.read": (args) => {
-    const tokens = tokensOf(args)
+    const parsed = parseFileArgs(args)
+    if ("error" in parsed) return parsed
+    const tokens = parsed.tokens
     const [token, repo] = tokens
     if (token === undefined) return no("files.read needs a file path")
     if (tokens.length > 2) return no("files.read takes a path and optionally an owner/repo")
@@ -607,7 +622,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "code.hover": (args) => positioned("code.hover", args),
   "code.definition": (args) => positioned("code.definition", args),
   "code.diagnostics": (args) => {
-    const tokens = tokensOf(args)
+    const parsed = parseFileArgs(args)
+    if ("error" in parsed) return parsed
+    const tokens = parsed.tokens
     const [path, repo] = tokens
     if (path === undefined) return no("code.diagnostics needs a file path: /code.diagnostics <path> [owner/repo]")
     if (tokens.length > 2) return no("code.diagnostics takes a path and optionally an owner/repo")

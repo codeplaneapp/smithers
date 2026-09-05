@@ -17,6 +17,7 @@
  * the handoff did not come back; no route is faked.
  */
 import type { Server } from "bun"
+import { randomBytes } from "node:crypto"
 import type { LinearAuthSession } from "@smthrs/rpc/LocalApp"
 
 export interface LinearAuthOptions {
@@ -28,6 +29,8 @@ export interface LinearAuthOptions {
 }
 
 export interface LinearAuth {
+  /** Consume the one-use capability for the browser's OAuth navigation. */
+  readonly claimNavigation: (url: URL) => boolean
   /** The renderer-safe session answer: the state, and the key only once authorized. */
   readonly session: () => LinearAuthSession
   /** Begin the handoff: answers the URL the renderer opens in the system browser. */
@@ -47,6 +50,7 @@ interface PendingHandoff {
   readonly url: string
   readonly server: Server<undefined>
   readonly timeout: ReturnType<typeof setTimeout>
+  navigationClaimed: boolean
 }
 
 export const createLinearAuth = (options: LinearAuthOptions): LinearAuth => {
@@ -64,6 +68,11 @@ export const createLinearAuth = (options: LinearAuthOptions): LinearAuth => {
   }
 
   return {
+    claimNavigation: (url) => {
+      if (pending === null || pending.navigationClaimed || url.href !== pending.url) return false
+      pending.navigationClaimed = true
+      return true
+    },
     session: (): LinearAuthSession =>
       setupKey !== null
         ? { state: "authorized", setupKey }
@@ -102,8 +111,8 @@ export const createLinearAuth = (options: LinearAuthOptions): LinearAuth => {
         log("linear-auth: the callback never arrived; the attempt expired")
         clearPending()
       }, waitTimeoutMs)
-      const url = `${options.origin().replace(/\/+$/, "")}/api/cloud/api/auth/linear?callback_port=${server.port}`
-      pending = { url, server, timeout }
+      const url = `${options.origin().replace(/\/+$/, "")}/api/cloud/api/auth/linear?callback_port=${server.port}&handoff=${randomBytes(32).toString("base64url")}`
+      pending = { url, server, timeout, navigationClaimed: false }
       return { url }
     },
     stop: async () => {

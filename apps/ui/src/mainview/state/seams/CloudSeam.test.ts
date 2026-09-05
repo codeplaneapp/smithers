@@ -32,7 +32,7 @@ const json = (status: number, body: unknown): Response =>
 
 const TOKEN = "smithers_never_in_the_renderer"
 
-const harness = async (route: (path: string, init?: RequestInit) => Response | Promise<Response>) => {
+const harness = async (route: (path: string, init?: RequestInit) => Response | Promise<Response>, timeoutMs = 2000) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const requests: Array<{ readonly method: string; readonly url: string }> = []
   const ctx: SeamContext = {
@@ -53,7 +53,7 @@ const harness = async (route: (path: string, init?: RequestInit) => Response | P
       return true
     },
     pollMs: 5,
-    timeoutMs: 2000
+    timeoutMs
   })
   return { store, seam, requests, opened }
 }
@@ -90,7 +90,7 @@ describe("cloud session seam", () => {
         queueMicrotask(() => {
           signedIn = true
         })
-        return json(200, { url: "https://api.jjhub.tech/api/auth/github/cli?callback_port=4321" })
+        return json(200, { url: "https://api.smithers-cloud.test/api/auth/github/cli?callback_port=4321" })
       }
       if (path === CLOUD_AUTH_SESSION_PATH) {
         return signedIn
@@ -101,7 +101,7 @@ describe("cloud session seam", () => {
     })
     const refusal = await seam.signIn()
     expect(refusal).toBeUndefined()
-    expect(opened).toEqual(["https://api.jjhub.tech/api/auth/github/cli?callback_port=4321"])
+    expect(opened).toEqual(["https://api.smithers-cloud.test/api/auth/github/cli?callback_port=4321"])
     expect(sessionRow(store)?.state).toBe("signed-in")
     expect(requests[0]).toEqual({ method: "GET", url: CLOUD_AUTH_SESSION_PATH })
     expect(requests[1]).toEqual({ method: "POST", url: CLOUD_AUTH_START_PATH })
@@ -112,7 +112,7 @@ describe("cloud session seam", () => {
       path === CLOUD_AUTH_SESSION_PATH
         ? json(200, { state: "signed-out", username: null, expiresAt: null })
         : path === CLOUD_AUTH_START_PATH
-        ? json(200, { url: "https://api.jjhub.tech/api/auth/github/cli?callback_port=1" })
+        ? json(200, { url: "https://api.smithers-cloud.test/api/auth/github/cli?callback_port=1" })
         : json(404, {}))
     const refusal = await seam.signIn()
     expect(typeof refusal).toBe("string")
@@ -129,6 +129,23 @@ describe("cloud session seam", () => {
     expect(refusal).toBe("Already signed in to Smithers Cloud as will.")
     expect(requests.filter((request) => request.url === CLOUD_AUTH_START_PATH)).toEqual([])
   })
+
+  for (const failure of ["network", "http", "malformed"] as const) {
+    test(`sign-in stops at its deadline when session polls fail (${failure})`, async () => {
+      let started = false
+      const { store, seam } = await harness((path) => {
+        if (path === CLOUD_AUTH_START_PATH) {
+          started = true
+          return json(200, { url: "https://cloud.test/login" })
+        }
+        if (!started) return json(200, { state: "signed-out", username: null, expiresAt: null })
+        if (failure === "network") throw new Error("local service stopped")
+        return failure === "http" ? json(503, {}) : json(200, { state: "invalid" })
+      }, 20)
+      expect(await seam.signIn()).toContain("timed out")
+      expect(sessionRow(store)?.state).toBe("signed-out")
+    })
+  }
 
   test("sign-out posts the route and mirrors signed-out", async () => {
     const { store, seam, requests } = await harness((path, init) =>

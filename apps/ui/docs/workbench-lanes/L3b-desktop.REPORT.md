@@ -98,7 +98,7 @@ send CORP too.
 
 The desktop roll (`smithers-api d5f613f9834b`) was announced live mid-lane.
 **No repo-scoped route's shape was observed**, because no credential is
-reachable from this session: `JJHUB_TOKEN` and `JJHUB_ADMIN_TOKEN` in the
+reachable from this session: `SMITHERS_CLOUD_TOKEN` and `SMITHERS_CLOUD_ADMIN_TOKEN` in the
 environment both answer `401` on `GET /api/user/workspaces`, and the Bun
 keychain PAT is not available here. Nothing was created and no session was
 minted against production.
@@ -109,7 +109,7 @@ What the read-only probes *did* establish:
 | --- | --- | --- |
 | `GET /api/health` | `200 ok` | The API is up. |
 | `GET /api/user/workspaces` (no auth) | `401` | Auth is the gate; the route exists. |
-| `GET /api/user/workspaces` with `JJHUB_TOKEN` / `JJHUB_ADMIN_TOKEN` | `401` | No usable credential here. Fixtures below stay **unverified**. |
+| `GET /api/user/workspaces` with `SMITHERS_CLOUD_TOKEN` / `SMITHERS_CLOUD_ADMIN_TOKEN` | `401` | No usable credential here. Fixtures below stay **unverified**. |
 | `POST /api/repos/smithersai/smithers/workspaces/ws-probe/desktop/session` (no auth) | `404 {"message":"repository not found"}` | Indistinguishable from a missing route: the repo-context middleware answers before routing for an anonymous caller, and a deliberately bogus path under the same prefix answers identically. **No signal.** |
 | `GET /api/repos/smithersai/smithers/environment-images` (no auth) | `404 {"message":"repository not found"}` | Same — no signal. |
 | `GET /api/workspaces/{id}/desktop/{token}/vnc.html` (no auth) | `401 {"message":"invalid desktop session"}` | **The relay is deployed.** It is not repo-scoped, so it reaches its own handler, and that handler's words are plue's. |

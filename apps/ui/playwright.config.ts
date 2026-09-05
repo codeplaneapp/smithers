@@ -13,7 +13,7 @@ const CHAT_STUB = process.env.SMITHERS_CHAT_STUB === "0" ? "0" : "1"
 
 export default defineConfig({
   testDir: "e2e/playwright",
-  testIgnore: ["**/native/**"],
+  testIgnore: ["**/native/**", ...(process.env.SMITHERS_PR_E2E === "1" ? ["**/harness.spec.ts"] : [])],
   fullyParallel: false,
   workers: 1,
   retries: 0,

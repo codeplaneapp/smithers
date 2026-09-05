@@ -84,6 +84,19 @@ describe("the startup watchdog outside React", () => {
     watchdog.stop()
   })
 
+  test("keeps runtime and render error reporting after mount without triggering the boot panel", () => {
+    const errors = reporter()
+    const watchdog = startStartupWatchdog({ timeoutMs: 10, clientErrors: errors.value })
+    watchdog.markMounted()
+    window.dispatchEvent(new ErrorEvent("error", { error: new Error("after mount") }))
+    window.dispatchEvent(Object.assign(new Event("unhandledrejection"), { reason: "after mount" }))
+    watchdog.handleRenderFailure(new Error("render after mount"))
+    jest.advanceTimersByTime(10)
+    expect(errors.reports.map(([kind]) => kind)).toEqual(["error", "unhandledrejection", "error"])
+    expect(rootText()).toBe("")
+    watchdog.stop()
+  })
+
   test("carries the earliest blank-page error as context for the failure it renders", () => {
     const errors = reporter()
     const consoleError = spyOn(console, "error").mockImplementation(() => {})

@@ -517,9 +517,10 @@ describe("files seam — a repository open in the local app", () => {
     // The model reads the value: the same text the card shows, never a bare "executed".
     expect(outcome.status === "executed" ? outcome.value : undefined).toBe("README.md in smithersai/smithers:\n# Local — hi\n")
     expect(requests).toEqual([{ url: "/api/repo/files", body: { repoId: "repo-smithers", path: "README.md" } }])
-    const card = fileCard(store, "file-smithersai/smithers-README.md")
+    const card = fileCard(store, "file-repo-smithers-README.md")
     expect(card?.payload).toEqual({
       repo: "smithersai/smithers",
+      localRepoId: "repo-smithers",
       path: "README.md",
       content: "# Local — hi\n",
       truncated: false,
@@ -533,9 +534,10 @@ describe("files seam — a repository open in the local app", () => {
     const listed = await controller.commands.run("files.list", "")
     expect(listed.status).toBe("executed")
     expect(listed.status === "executed" ? listed.value : undefined).toBe("/ in smithersai/smithers:\nsrc/\nREADME.md\nzeta.txt")
-    const card = listCard(store, "files-smithersai/smithers-/")
+    const card = listCard(store, "files-repo-smithers-/")
     expect(card?.payload).toEqual({
       repo: "smithersai/smithers",
+      localRepoId: "repo-smithers",
       path: "",
       entries: [{ name: "src", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "zeta.txt", kind: "file" }],
       address: "/smithersai/smithers/"
@@ -549,7 +551,7 @@ describe("files seam — a repository open in the local app", () => {
     const value = listed.status === "executed" ? listed.value ?? "" : ""
     expect(value.split("\n").length).toBe(1 + 400 + 1)
     expect(value.endsWith("… and 600 more (the card lists them all)")).toBe(true)
-    expect(listCard(store, "files-smithersai/smithers-node_modules")?.payload.entries).toHaveLength(1000)
+    expect(listCard(store, "files-repo-smithers-node_modules")?.payload.entries).toHaveLength(1000)
   })
 
   test("the repository's owner/repo name or folder name routes locally; any other name is still a Cloud read", async () => {
@@ -557,7 +559,7 @@ describe("files seam — a repository open in the local app", () => {
     expect((await controller.commands.run("files.read", "README.md smithersai/smithers")).status).toBe("executed")
     expect((await controller.commands.run("files.read", "README.md smithers")).status).toBe("executed")
     expect(requests.filter((request) => request.url === "/api/repo/files")).toHaveLength(2)
-    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload.content).toBe("# Local — hi\n")
+    expect(fileCard(store, "file-repo-smithers-README.md")?.payload.content).toBe("# Local — hi\n")
     const cloud = await controller.commands.run("files.read", "README.md will/flows")
     expect(cloud.status).toBe("failed")
     expect(requests.some((request) => request.url.includes("/api/repos/will/flows/contents/README.md"))).toBe(true)
@@ -566,12 +568,13 @@ describe("files seam — a repository open in the local app", () => {
   test("a bounded read states truncation, a binary file is stated not printed, and a missing path is the honest string", async () => {
     const { store, controller } = await localController([SMITHERS])
     expect((await controller.commands.run("files.read", "big.txt")).status).toBe("executed")
-    expect(fileCard(store, "file-smithersai/smithers-big.txt")?.payload.truncated).toBe(true)
+    expect(fileCard(store, "file-repo-smithers-big.txt")?.payload.truncated).toBe(true)
     const binary = await controller.commands.run("files.read", "logo.png")
     expect(binary.status).toBe("executed")
     expect(binary.status === "executed" ? binary.value : undefined).toBe("logo.png in smithersai/smithers is a binary file; its bytes are not shown.")
-    expect(fileCard(store, "file-smithersai/smithers-logo.png")?.payload).toEqual({
+    expect(fileCard(store, "file-repo-smithers-logo.png")?.payload).toEqual({
       repo: "smithersai/smithers",
+      localRepoId: "repo-smithers",
       path: "logo.png",
       content: "",
       truncated: false,
@@ -623,16 +626,16 @@ describe("files seam — the line anchor", () => {
     const outcome = await controller.commands.run("files.read", "README.md:2:3")
     expect(outcome.status).toBe("executed")
     expect(requests).toEqual([{ url: "/api/repo/files", body: { repoId: "repo-smithers", path: "README.md" } }])
-    const card = fileCard(store, "file-smithersai/smithers-README.md")
+    const card = fileCard(store, "file-repo-smithers-README.md")
     expect(card?.payload.line).toBe(2)
     expect(card?.payload.column).toBe(3)
     expect(card?.payload.content).toBe("# Local — hi\n")
     expect(CardSchema.safeParse(card).success).toBe(true)
     await controller.commands.run("files.read", "README.md:1")
-    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload).toMatchObject({ line: 1 })
-    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload.column).toBeUndefined()
+    expect(fileCard(store, "file-repo-smithers-README.md")?.payload).toMatchObject({ line: 1 })
+    expect(fileCard(store, "file-repo-smithers-README.md")?.payload.column).toBeUndefined()
     await controller.commands.run("files.read", "README.md")
-    expect(fileCard(store, "file-smithersai/smithers-README.md")?.payload.line).toBeUndefined()
+    expect(fileCard(store, "file-repo-smithers-README.md")?.payload.line).toBeUndefined()
   })
 
   test("a Cloud read anchors the same way, and the model's copy is the file", async () => {

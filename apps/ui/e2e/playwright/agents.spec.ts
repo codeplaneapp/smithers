@@ -129,7 +129,7 @@ test("an agent created through the derived form appears in the + menu with its a
   const form = page.locator("[data-kind=flow-form]")
   await expect(form).toBeVisible()
   // The harness select is the harness seam: an unpickable harness is disabled with its reason.
-  await expect(page.getByTestId("flow-form-harness").locator("option[value=opencode-kimi]")).toBeDisabled()
+  await expect(page.getByTestId("flow-form-harness").locator("option[value=opencode-kimi]")).toHaveJSProperty("disabled", true)
   await expect(page.getByTestId("flow-form-harness").locator("option[value=opencode-kimi]")).toContainText("no credential")
   await page.getByTestId("flow-form-id").fill("reviewer")
   await page.getByTestId("flow-form-id").press("Enter")

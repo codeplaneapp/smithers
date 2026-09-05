@@ -1,5 +1,5 @@
 /*
- * The jjhub Cloud session seam (lane piper step 1b, ADR 0001): the renderer's
+ * The Smithers Cloud session seam (lane piper step 1b, ADR 0001): the renderer's
  * half of the CLI browser login. The Bun side holds the token (memory + OS
  * keychain) and answers only `{ state, username, expiresAt, scopes? }`; this
  * seam mirrors THAT answer into the `cloudSessions` row and runs the sign-in
@@ -107,12 +107,11 @@ export const createCloudSeam = (ctx: SeamContext, deps: CloudSeamDeps = {}): Clo
       for (;;) {
         await wait(pollMs)
         const session = await readSession()
-        if (session === null) continue
-        if (session.state === "signed-in") {
+        if (session?.state === "signed-in") {
           mirror(session)
           return
         }
-        if (session.state === "signed-out" || Date.now() > deadline) {
+        if (session?.state === "signed-out" || Date.now() >= deadline) {
           mirror({ state: "signed-out", username: null, expiresAt: null })
           return "Sign-in did not complete — the browser step was closed or timed out. Run /cloud.sign-in to try again."
         }

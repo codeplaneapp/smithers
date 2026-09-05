@@ -57,7 +57,7 @@ surface first and defer the desktop.
 One line each. Names are the ones plue already uses; the app never invents a
 second word for the same thing.
 
-- **Repository** — a jjhub repository, the source of truth. The local checkout
+- **Repository** — a Smithers Cloud repository, the source of truth. The local checkout
   the app opens today is a working copy of one.
 - **Bookmark** — a jj bookmark (branch).
 - **Change** — a jj change: id, description, diff, position in a stack.
@@ -205,7 +205,7 @@ session contract in §6, a thumbnail route, and a workspace class with enough
 memory for a display (the 512MB class cannot run a compositor; the spike used
 c3-standard-8 hosts, the guest size is the open question).
 
-**Tracer bullet A.** `/workspace.open main` on a jjhub repo shows the card
+**Tracer bullet A.** `/workspace.open main` on a Smithers Cloud repo shows the card
 `running`; the Terminal facet echoes a command; the Desktop facet shows a live
 thumbnail of a NixOS session; Attach types into a terminal emulator inside the
 guest and the keystrokes appear. Exit criterion: a screenshot of the card,
@@ -264,7 +264,7 @@ change description write.
 
 **Tracer bullet B.** `/change.view` on an open landing renders the card;
 the Diff facet shows the real diff; Land is a confirm flow that lands it on
-jjhub. Exit criterion: the landing state pill goes `open` to `merged` on
+Smithers Cloud. Exit criterion: the landing state pill goes `open` to `merged` on
 camera without leaving the chat.
 
 ### 3.3 Review (Critique)
@@ -348,7 +348,7 @@ checkout.
 workspace over exec and stream over the workspace SSE, into the same
 `target-run` card. No new card kinds.
 
-**Constraint.** Builds do not run in 512MB VMs (`jjhub` skill, gotcha: never
+**Constraint.** Builds do not run in 512MB VMs (Smithers Cloud skill, gotcha: never
 run full builds in-VM). The workspace class for builds is the same open
 question as the desktop's.
 
@@ -412,7 +412,7 @@ change.
 **Behavior.** `migration.plan` runs a flow that computes the scope and
 proposes the wave split by owner; the card renders the plan; the human
 approves a wave; the fleet (one agent per change, the recipe in
-`~/smithers/.smithers/workflows/jjhub-issue-fleet.tsx`) produces the changes;
+`~/smithers/.smithers/workflows/cloud-issue-fleet.tsx`) produces the changes;
 each goes through §3.3 and §3.7; the wave lands when every change is green
 and approved.
 
@@ -621,7 +621,7 @@ code lanes are briefed here for the first available seat.
 | C2 cloud proxy | `/api/cloud/*` on the local origin, the identity pattern, with the session capability stripped | `apps/ui/src/bun/server.ts` | server tests | Sol / Opus | briefed |
 | C3 workspace seam + card | `WorkspaceSeam`, `workspace` card, Terminal and Files facets, `workspace.*` flows, T1 spec | `apps/ui/src/mainview/{state/seams,cards,flows}` | seam tests, card tests, T1 | Sol / Opus | briefed, waits on C1 |
 | C4 desktop facet | video element, thumbnail, attach/release, §5 input encoder, meta row | `apps/ui/src/mainview/cards/WorkspaceDesktop.tsx` | card tests with a fake session | Sol / Opus | blocked on plue desktop contract |
-| C5 change seam + card | `ChangeSeam`, `change`, `diff`, `change-stack` cards, `change.*` flows, land confirm | as C3 | seam tests, T1 against jjhub | Sol / Opus | briefed, waits on C1 |
+| C5 change seam + card | `ChangeSeam`, `change`, `diff`, `change-stack` cards, `change.*` flows, land confirm | as C3 | seam tests, T1 against Smithers Cloud | Sol / Opus | briefed, waits on C1 |
 | C6 review facet | threads, anchors, verdict flows, `review.ask` run | `ReviewFacet.tsx` | tests | Sol / Opus | waits on plue anchors |
 | C7 search + line anchor | `code.search`, `search-results` card, file card `line` | seams, cards | tests, T1 | Sol / Opus | briefed |
 | P1 plue: desktop session + thumbnail | §6 rows 2–4 | `~/plue` | contract test | plue lane | briefed |

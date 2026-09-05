@@ -287,13 +287,13 @@ describe("runArgv picks the CLI form the workspace's authoring surface accepts",
   const { runArgv } = require("./Targets") as typeof import("./Targets")
   test("a WORKSPACE.ts workspace runs the bare-label form, still with --ui plain so FORCE_COLOR cannot hide the status lines", () => {
     const exists = (path: string) => path.endsWith("/WORKSPACE.ts")
-    expect(runArgv("/w", "//src:lint", ["lint"], exists)).toEqual(["//src:lint", "--ui", "plain"])
+    expect(runArgv("/w", "//src:lint", ["lint"], exists)).toEqual(["//src:lint", "--audience", "human", "--ui", "plain"])
   })
   test("a legacy declaration-rooted workspace runs `<verb> <label> --ui plain` with the verb from the first kind", () => {
     const exists = () => false
-    expect(runArgv("/w", "//packages/smithers/flows/canonical:check", ["build"], exists)).toEqual(["build", "//packages/smithers/flows/canonical:check", "--ui", "plain"])
-    expect(runArgv("/w", "//:tsconfig", ["run", "lint"], exists)).toEqual(["run", "//:tsconfig", "--ui", "plain"])
-    expect(runArgv("/w", "//x:y", [], exists)).toEqual(["build", "//x:y", "--ui", "plain"])
+    expect(runArgv("/w", "//packages/smithers/flows/canonical:check", ["build"], exists)).toEqual(["build", "//packages/smithers/flows/canonical:check", "--audience", "human", "--ui", "plain"])
+    expect(runArgv("/w", "//:tsconfig", ["run", "lint"], exists)).toEqual(["run", "//:tsconfig", "--audience", "human", "--ui", "plain"])
+    expect(runArgv("/w", "//x:y", [], exists)).toEqual(["build", "//x:y", "--audience", "human", "--ui", "plain"])
   })
 })
 
@@ -329,7 +329,7 @@ describe("pattern runs and the results block", () => {
   ].join("\n")
 
   test("patternRunArgv is the verb over the pattern with the plain renderer, on either authoring surface", () => {
-    expect(patternRunArgv("ci", "//packages/...")).toEqual(["ci", "//packages/...", "--ui", "plain"])
+    expect(patternRunArgv("ci", "//packages/...")).toEqual(["ci", "//packages/...", "--audience", "human", "--ui", "plain"])
   })
 
   test("the status lines fill the rows, the summary lands, and the results block names each target's rule", () => {

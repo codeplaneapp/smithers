@@ -38,6 +38,7 @@ import type { JsonRpc } from "./JsonRpc"
 import type { LanguageId, ServerSpec } from "./LanguageServers"
 
 export type LspSessionState = "starting" | "ready" | "exited"
+export const LSP_STARTUP_TIMEOUT_MS = 15_000
 
 /** A 1-based position as the wire carries it. */
 export interface WirePosition {
@@ -73,6 +74,8 @@ export interface LspSessionOptions {
   readonly env: Record<string, string>
   readonly publish: (topic: string, message: unknown) => void
   readonly requestTimeoutMs?: number
+  /** Initialization and the shared first project-load window; steady requests keep their shorter bound. */
+  readonly startupTimeoutMs?: number
   /** Requests in flight per server; default 8. */
   readonly maxInFlight?: number
   /** Grace between the LSP `exit` and SIGKILL. */
@@ -138,6 +141,7 @@ interface OpenDocument {
 export const createLspSession = (options: LspSessionOptions): LspSession => {
   const { repoId, repoRoot, spec, publish, log } = options
   const requestTimeoutMs = options.requestTimeoutMs ?? LSP_REQUEST_TIMEOUT_MS
+  const startupTimeoutMs = options.startupTimeoutMs ?? LSP_STARTUP_TIMEOUT_MS
   const killGraceMs = options.killGraceMs ?? 2000
   const documents = new Map<string, OpenDocument>()
   let state: LspSessionState = "starting"
@@ -183,9 +187,11 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
     // A publication for a file this session never opened has no card and no digest to name: it stays with the server.
     const document = documents.get(relative)
     if (document === undefined) return
+    const version = typeof params.version === "number" && Number.isInteger(params.version) && params.version >= 0 ? params.version : null
+    // An older publication must not acquire the current text's digest or settle its waiters.
+    if (version !== null && version !== document.version) return
     const wire = params.diagnostics as ReadonlyArray<LspDiagnosticWire>
     const items = wire.slice(0, LSP_DIAGNOSTICS_CAP).map((item) => toDiagnostic(item, redact))
-    const version = typeof params.version === "number" && Number.isInteger(params.version) && params.version >= 0 ? params.version : null
     const response: LspDiagnosticsResponse = { path: relative, version, items, total: wire.length, digest: document.digest }
     document.latest = response
     document.awaitingPublication = false
@@ -223,7 +229,7 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
       workspaceFolders: [{ uri: rootUri, name: basename(repoRoot) }],
       capabilities: LSP_CLIENT_CAPABILITIES,
       ...(spec.initializationOptions === undefined ? {} : { initializationOptions: spec.initializationOptions })
-    }, requestTimeoutMs)
+    }, startupTimeoutMs)
     .then(() => {
       rpc.notify("initialized", {})
       if (state === "starting") state = "ready"
@@ -325,16 +331,24 @@ export const createLspSession = (options: LspSessionOptions): LspSession => {
    * and on exit, and counts itself in flight in between so the host never
    * retires a server mid-answer (a first request carries the project load).
    */
+  let projectLoaded = false
+  let projectLoadDeadline: number | undefined
   const positioned = async <T>(path: string, position: WirePosition, method: string): Promise<{ readonly answer: T; readonly document: OpenDocument }> => {
     touch()
     inFlight += 1
     try {
       await ready
       const document = await sync(path)
+      // Initialize does not load tsserver's project. Concurrent first queries
+      // share one bounded cold-load window, then every query returns to 5 s.
+      if (!projectLoaded) projectLoadDeadline ??= Date.now() + startupTimeoutMs
+      const coldRemaining = (projectLoadDeadline ?? 0) - Date.now()
+      const timeout = !projectLoaded && coldRemaining > 0 ? coldRemaining : requestTimeoutMs
       const answer = await rpc.request<T>(method, {
         textDocument: { uri: document.uri },
         position: { line: position.line - 1, character: position.character - 1 }
-      }, requestTimeoutMs)
+      }, timeout)
+      projectLoaded = true
       return { answer, document }
     } catch (error) {
       throw refused(error)

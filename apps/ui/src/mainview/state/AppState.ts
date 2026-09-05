@@ -114,7 +114,7 @@ export const starredTargetId = (repoKey: string, label: string): string => `${re
 export const repoKeyOf = (path: string): string => `local:${path}`
 
 /*
- * Lane piper (docs/decisions/0001-piper-one-truth.md): jjhub is the one
+ * Lane piper (docs/decisions/0001-piper-one-truth.md): Smithers Cloud is the one
  * truth. A repository lives under a user or an org; its head is the default
  * bookmark's change and commit ids. NO mirror field: the backend has no
  * mirror status yet, and nothing here may fake one. The row is shaped so
@@ -169,7 +169,7 @@ export const WorkingCopySchema = z.object({
 export type WorkingCopy = z.infer<typeof WorkingCopySchema>
 
 /*
- * The jjhub Cloud session as the renderer may know it (lane piper step 1b):
+ * The Smithers Cloud session as the renderer may know it (lane piper step 1b):
  * the token NEVER appears here — it lives in Bun memory and the OS keychain.
  * "degraded" scopes mean the legacy token set lacks workspace/agent/approval
  * scope, so those acts say "sign in again to enable".
@@ -464,6 +464,17 @@ export const WorkspaceSchema = z.object({
 })
 export type Workspace = z.infer<typeof WorkspaceSchema>
 
+/** Branch-owned conversation state. Host resources and credentials remain shared authorities. */
+export const FrameSnapshotSchema = z.object({
+  revision: z.number().int().nonnegative(),
+  messages: z.array(MessageSchema),
+  cards: z.array(CardSchema),
+  worldDocuments: z.array(z.lazy(() => WorldDocumentSchema)),
+  draft: z.string(),
+  selectedWorldDocumentId: z.string().nullable().optional()
+})
+export type FrameSnapshot = z.infer<typeof FrameSnapshotSchema>
+
 export const BranchSchema = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -471,6 +482,7 @@ export const BranchSchema = z.object({
   parentBranchId: z.string().nullable(),
   forkedFromFrameId: z.string().nullable(),
   forkedAtRevision: z.number().int().nonnegative().nullable(),
+  snapshot: FrameSnapshotSchema.optional(),
   createdAt: z.number(),
   revision: z.number().int().nonnegative()
 })
@@ -485,6 +497,7 @@ export const FrameSchema = z.object({
   cardId: z.string().nullable(),
   presentation: z.enum(["embedded", "maximized"]),
   stateRevision: z.number().int().nonnegative(),
+  snapshot: FrameSnapshotSchema.optional(),
   createdAt: z.number(),
   updatedAt: z.number(),
   revision: z.number().int().nonnegative()
@@ -626,14 +639,10 @@ export const SessionSchema = z.object({
    * recorded, exactly like surfacesMenuOpen above. Optional (missing = closed)
    * so sessions persisted before the field parse without a schema reset.
    *
-   * The requirement reads "boolean default false", and the default lives in
-   * `initialSession` below, not in a `z.boolean().default(false)`. A zod
-   * default would never run on the rows this actually has to survive: a
-   * collection reads its rows straight out of storage on preload and TanStack
-   * never validates them (see the version gate in AppStore). The default would
-   * only widen the inferred type to a non-optional `boolean` while a session
-   * persisted before the field still handed back `undefined`. Every read is
-   * `=== true` / `!== true` for that reason.
+   * `initialSession` supplies false for new sessions. The storage openers now
+   * run schema decoders, but this remains optional for older snapshots and
+   * in-memory producers too. Every read uses `=== true` / `!== true`, so an
+   * omitted field consistently means closed at all of those boundaries.
    */
   connectMenuOpen: z.boolean().optional(),
   /** Admin reset confirmation; optional for sessions persisted before this field. */
@@ -878,6 +887,12 @@ export const ChainEventRecordSchema = z.object({
 })
 export type ChainEventRecord = z.infer<typeof ChainEventRecordSchema>
 
+/** A permanent replay refusal after account data was scrubbed; no event content. */
+export const RetiredChainLineageSchema = z.object({
+  id: z.string().regex(/^[a-f0-9]{64}$/)
+})
+export type RetiredChainLineage = z.infer<typeof RetiredChainLineageSchema>
+
 export const WorldDocumentSchema = z.object({
   id: z.string(),
   path: z.string(),
@@ -1025,12 +1040,14 @@ export type AppTransition =
   | { type: "conversation.reset.asked"; actor: "user"; open: boolean }
   | {
     /*
-     * /clear (Wave 10, §2h): the sweep already ran and kept what
-     * mattered; the chat clears and ONE calm line states what was kept.
+     * One commit archives the outgoing branch, adds optional summary notes,
+     * and starts a fresh conversation. Notes are append-only, never upserts.
      */
     type: "conversation.cleared"
     actor: "user"
-    kept: number
+    branchId: string
+    notes: ReadonlyArray<{ readonly title: string; readonly body: string; readonly confidence: number }>
+    interruptedTurnId?: string
   }
   | { type: "theme.changed"; actor: "user" | "system"; theme: Session["theme"] }
   /* The color theme (/theme) — the axis orthogonal to light/dark. */
@@ -1318,7 +1335,8 @@ export type AppTransition =
   | {
     /* A complete one-line Smithers message (admin results, honest states, auth replies). */
     type: "message.appended"
-    actor: "system"
+    /** The initiator of this app-authored reply, independently of its transcript role. */
+    actor: "system" | "user" | "smithers"
     text: string
     /** The action that rides the message (sign-in, request access, retry, a confirm flow). */
     action?: { flow: string; args?: string; label: string }

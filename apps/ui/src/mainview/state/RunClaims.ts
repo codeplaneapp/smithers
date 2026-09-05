@@ -31,13 +31,14 @@ export const RUN_LAUNCH_COMMANDS: ReadonlyArray<string> = ["flow.create", "flow.
 export const runLaunchCommandOf = (toolName: string, toolArguments: string): string | undefined => {
   if (RUN_LAUNCH_COMMANDS.includes(toolName)) return toolName
   if (toolName !== "commands") return undefined
-  let parsed: { action?: unknown; name?: unknown }
+  let parsed: unknown
   try {
-    parsed = JSON.parse(toolArguments) as typeof parsed
+    parsed = JSON.parse(toolArguments)
   } catch {
     return undefined
   }
-  if (parsed.action !== "execute" || typeof parsed.name !== "string") return undefined
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  if (!("action" in parsed) || !("name" in parsed) || parsed.action !== "execute" || typeof parsed.name !== "string") return undefined
   return RUN_LAUNCH_COMMANDS.includes(parsed.name) ? parsed.name : undefined
 }
 

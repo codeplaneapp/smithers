@@ -101,11 +101,17 @@ describe("POST /api/targets/graph", () => {
     expect(targetId).toBeDefined()
     const started = await post("/api/targets/run", { repoId, targetId })
     const runId = ((await started.json()) as { runId: string }).runId
-    await new Promise((resolve) => setTimeout(resolve, 1_200))
-    const history = RunHistoryResponseSchema.parse(await (await post("/api/targets/runs", { repoId })).json())
-    expect(history.runs[0]).toMatchObject({ runId, status: "done" })
+    const deadline = Date.now() + 10_000
+    let completed
+    while (Date.now() < deadline) {
+      const history = RunHistoryResponseSchema.parse(await (await post("/api/targets/runs", { repoId })).json())
+      completed = history.runs.find((run) => run.runId === runId)
+      if (completed !== undefined && completed.status !== "pending" && completed.status !== "running") break
+      await Bun.sleep(25)
+    }
+    expect(completed).toMatchObject({ runId, status: "done" })
     const replay = RunReplayResponseSchema.parse(await (await post("/api/targets/runs/replay", { runId })).json())
     expect(replay.events.map((event) => event.type)).toEqual(["started", "stdout", "node", "node", "summary", "exit"])
     expect(replay.events.map((event) => event.seq)).toEqual(replay.events.map((_, index) => index))
-  })
+  }, 15_000)
 })

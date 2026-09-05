@@ -148,15 +148,15 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
   const healthyMs = options.healthyMs ?? DEFAULT_HEALTHY_MS
   const earlyExitMs = options.earlyExitMs ?? DEFAULT_EARLY_EXIT_MS
 
-  const decode = (data: unknown): Promise<string | null> => {
+  const decode = (data: unknown, decoder: TextDecoder): Promise<string | null> => {
     if (typeof data === "string") return Promise.resolve(data)
-    if (data instanceof ArrayBuffer) return Promise.resolve(new TextDecoder().decode(data))
+    if (data instanceof ArrayBuffer) return Promise.resolve(decoder.decode(data, { stream: true }))
     /* Bun's client delivers binary frames as Buffer (a Uint8Array); a browser as Blob/ArrayBuffer. */
     if (typeof Uint8Array !== "undefined" && data instanceof Uint8Array) {
-      return Promise.resolve(new TextDecoder().decode(data))
+      return Promise.resolve(decoder.decode(data, { stream: true }))
     }
     if (typeof Blob !== "undefined" && data instanceof Blob) {
-      return data.arrayBuffer().then((buffer) => new TextDecoder().decode(buffer)).catch(() => null)
+      return data.arrayBuffer().then((buffer) => decoder.decode(buffer, { stream: true })).catch(() => null)
     }
     return Promise.resolve(null)
   }
@@ -205,6 +205,12 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
     const protocol = options.socketProtocol()
     if (url === undefined || protocol === undefined) return
     const opened = new WebSocket(url, [protocol])
+    // PTY frames are arbitrary byte chunks, not complete UTF-8 strings.
+    // One decoder belongs to this socket so partial characters survive a
+    // frame boundary without leaking into another session or reconnect.
+    opened.binaryType = "arraybuffer"
+    const decoder = new TextDecoder()
+    let output = Promise.resolve()
     conn.socket = opened
     sockets.add(opened)
     let openedAt: number | undefined
@@ -217,8 +223,9 @@ export const createCloudTerminalClient = (options: CloudTerminalClientOptions): 
       conn.pending.length = 0
     }
     opened.onmessage = (event: MessageEvent) => {
-      void decode(event.data).then((text) => {
-        if (text === null) return
+      output = output.then(async () => {
+        const text = await decode(event.data, decoder)
+        if (text === null || text === "" || disposed) return
         for (const listener of conn.listeners) listener.onOutput(text)
       })
     }

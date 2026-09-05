@@ -44,6 +44,28 @@ const drain = async (turns = 50): Promise<void> => {
 }
 
 describe("createCloudAgent", () => {
+  test("each provider call has a fresh billing id while frames keep the caller id", async () => {
+    const ids: Array<string> = []
+    const frames: Array<AgentTurnFrame> = []
+    const agent = createCloudAgent((frame) => frames.push(frame), {
+      fetchImpl: async (_input, init) => {
+        const id = new Headers(init?.headers).get("x-smithers-run-id")!
+        ids.push(id)
+        return ndjsonResponse([{ type: "card", card: { id: `card-${ids.length}`, kind: "approval", title: "Approve", status: "active", createdAt: 1, ordinal: 1,
+          payload: { runId: id, capability: "read" } } }, { type: "done" }])
+      }
+    })
+    expect(agent.start(request).status).toBe("started")
+    await until(() => frames.filter((frame) => frame.type === "done").length === 1, "first billing call")
+    await drain()
+    expect(agent.start(request).status).toBe("started")
+    await until(() => frames.filter((frame) => frame.type === "done").length === 2, "second billing call")
+    expect(ids).toHaveLength(2)
+    expect(ids[0]).not.toBe(ids[1]); expect(ids).not.toContain(request.runId)
+    expect(frames.every((frame) => frame.runId === request.runId)).toBe(true)
+    expect(frames.flatMap((frame) => frame.type === "card" && frame.card.kind === "approval" ? [frame.card.payload.runId] : [])).toEqual([request.runId, request.runId])
+  })
+
   test("streams upstream NDJSON frames to the publisher", async () => {
     const frames: AgentTurnFrame[] = []
     const agent = createCloudAgent((frame) => frames.push(frame), {

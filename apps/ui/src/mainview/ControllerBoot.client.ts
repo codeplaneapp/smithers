@@ -69,8 +69,8 @@ const bootProgram = (session: BootSession | undefined) =>
         // Agents as data (custom-agents.md): the app-agents mirror loads beside the harness list.
         yield* Effect.sync(() => void controller.loadAgents())
       }
-      // Lane piper: the jjhub session mirrors into the store; a signed-in answer pulls the inventory.
-      if (runtime.bootstrap.capabilities.includes("jjhub")) {
+      // Lane piper: the Smithers Cloud session mirrors into the store; a signed-in answer pulls the inventory.
+      if (runtime.bootstrap.capabilities.includes("cloud")) {
         yield* Effect.sync(() => void controller.loadCloudSession())
       }
       if (controller.handleAuthReturn(window.location.search)) {

@@ -45,6 +45,8 @@ import { TabBodies } from "./tabs/TabBodies"
 import { timeLabel } from "./Timestamps"
 import { ToastStack } from "./ToastStack"
 import { useCardRows } from "./state/useCardRows"
+import { StorageRecoveryButton } from "./StorageRecoveryButton"
+import { STORAGE_RECOVERY_EXPORT } from "./state/StorageRecoveryContract"
 
 const MarkdownEditorSurface = lazy(() =>
   import("./MarkdownEditorSurface").then((module) => ({ default: module.MarkdownEditorSurface }))
@@ -266,7 +268,7 @@ function App() {
       id: "auth-state",
       role: "smithers",
       text:
-        "This host doesn't provide Smithers identity, so GitHub sign-in and jjhub account features are unavailable. Commands supported by this host remain available below. Use a jjhub Cloud deployment with identity configured for the signed-in experience.",
+        "This host doesn't provide Smithers identity, so GitHub sign-in and Smithers Cloud account features are unavailable. Commands supported by this host remain available below. Use a Smithers Cloud deployment with identity configured for the signed-in experience.",
       status: "complete",
       createdAt: 0,
       ordinal: 0
@@ -585,7 +587,9 @@ function App() {
                         </time>
                       ) :
                       null}
-                    {entry.message.action !== undefined ?
+                    {entry.message.action?.flow === STORAGE_RECOVERY_EXPORT ?
+                      <StorageRecoveryButton state={controller.storageRecoveryState} onDownload={() => { controller.runCommand(STORAGE_RECOVERY_EXPORT) }} /> :
+                      entry.message.action !== undefined ?
                       (
                         <Button
                           className="message-cta"

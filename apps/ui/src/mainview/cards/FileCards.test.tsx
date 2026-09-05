@@ -38,6 +38,8 @@ afterEach(() => {
 })
 
 afterAll(async () => {
+  const { disposeCodeViewPool } = await import("@smthrs/ui/adapters/code-view")
+  disposeCodeViewPool()
   for (let tick = 0; tick < 3; tick += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
@@ -385,7 +387,7 @@ const WEB: AppBootstrap = {
   host: "cloud",
   version: "test",
   buildSha: "cloud",
-  capabilities: cloudCapabilities({ identity: true, jjhub: true, agent: true, checkout: true, terminal: true }),
+  capabilities: cloudCapabilities({ identity: true, cloud: true, agent: true, checkout: true, terminal: true }),
   authFlow: "redirect",
   sandbox: null
 }
@@ -394,7 +396,7 @@ const NATIVE: AppBootstrap = {
   host: "local",
   version: "test",
   buildSha: "local",
-  capabilities: localCapabilities({ agent: true, identity: true, jjhub: true, pathEntry: true }),
+  capabilities: localCapabilities({ agent: true, identity: true, cloud: true, pathEntry: true }),
   authFlow: "native-handoff",
   sandbox: null
 }

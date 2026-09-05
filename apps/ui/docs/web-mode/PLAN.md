@@ -21,7 +21,7 @@ file:line after each claim); each decision names its source plan and why.
    `index.ts:196`) are absent, so those paths serve `index.html`. (Fable.)
 3. **Tag counts drift while the sidebar lane edits `Flows.ts` uncommitted**
    (`git status`: `M apps/ui/src/mainview/flows/Flows.ts`). At 20:45:
-   139 `runtime:` + 2 `runtimeAny:`; jjhub 86 (+2 any), local.targets 20,
+   139 `runtime:` + 2 `runtimeAny:`; Smithers Cloud 86 (+2 any), local.targets 20,
    identity 14, local.repositories 9 (+2 any), local.harnesses 3, keys.byok
    2, billing.checkout 2, agent 2, local.terminal 1. Fable (81) and Codex
    (88) counted different snapshots; the mechanism is unchanged:
@@ -38,7 +38,7 @@ file:line after each claim); each decision names its source plan and why.
    know the repo name, but the repository list (`/api/user/repos`, absent
    from the rules too) never loads. (Fable on the 404; Codex on FilesSeam.)
 5. **`workspace.terminal` registers on web and never connects.** Tagged
-   `runtime: ["jjhub"]` only (`Flows.ts:1406-1408`); the client's
+   `runtime: ["Smithers Cloud"]` only (`Flows.ts:1406-1408`); the client's
    `socketProtocol` is `localSocketProtocols()[0]` (`AppController.ts:681`,
    `LocalSession.ts:48-50`), undefined without the local-session meta, and
    `CloudTerminalClient.ts:170-171` returns without opening. (Fable.)
@@ -46,7 +46,7 @@ file:line after each claim); each decision names its source plan and why.
    0002-citc-sandbox-kinds.md:53-70`): `POST /api/auth/sse-ticket` (30 s,
    single use) exists "only for browsers"; Origin is mandatory and checked
    before auth for non-Bearer principals; "No reserved app origin exists."
-   Fable's claim that direct-to-jjhub needs a backend auth change is wrong;
+   Fable's claim that direct-to-cloud needs a backend auth change is wrong;
    it needs a plue origin-allowlist change. (Codex.)
 7. **The sidebar tree is local-only.** `repo.tree` is
    `runtime: ["local.repositories"]` (`Flows.ts:1941-1943`) and
@@ -54,7 +54,7 @@ file:line after each claim); each decision names its source plan and why.
    signed-in mockup shows a cloud tree that does not exist. (Codex.)
 8. **Persistence is the same in both shells.** Collections live in OPFS
    SQLite in the webview (`state/AppStore.ts:2`, `docs/persistence.md:6-21`);
-   native disk holds only the jjhub PAT (`seams/CloudSeam.ts:3-5`) and
+   native disk holds only the Smithers Cloud PAT (`seams/CloudSeam.ts:3-5`) and
    `stateDir` records (`src/bun/index.ts:31-33`). (Both.)
 9. **No web test tier, no web targets.** `e2e/README.md:3-5` records the
    `wrangler dev` stack removed 2026-08-26; `playwright.config.ts:27-28` has
@@ -93,14 +93,14 @@ the same mechanism).
 
 - `packages/rpc/src/AppBootstrap.ts`: `RuntimeCapabilitySchema` gains
   `"cloud.terminal"` (this origin tunnels workspace terminals) and
-  `"cloud.pat"` (a host-held jjhub PAT session: `/api/cloud-auth/*`, the
+  `"cloud.pat"` (a host-held Smithers Cloud PAT session: `/api/cloud-auth/*`, the
   Linear loopback). Bun emits both; the Worker emits `cloud.terminal` after
   W4 and never `cloud.pat`.
 - New `packages/rpc/src/HostCapabilities.ts`:
-  `cloudCapabilities(env: { identity; jjhub; agent; checkout; terminal: boolean }): RuntimeCapability[]`
-  and `localCapabilities(opts: { agent; identity; jjhub; pathEntry: boolean }): RuntimeCapability[]`.
+  `cloudCapabilities(env: { identity; Smithers Cloud; agent; checkout; terminal: boolean }): RuntimeCapability[]`
+  and `localCapabilities(opts: { agent; identity; Smithers Cloud; pathEntry: boolean }): RuntimeCapability[]`.
   `index.ts:2246` and `server.ts:524` call them; the parity test reads them.
-- `flows/Flows.ts`: `workspace.terminal` -> `["jjhub", "cloud.terminal"]`;
+- `flows/Flows.ts`: `workspace.terminal` -> `["Smithers Cloud", "cloud.terminal"]`;
   `cloud.sign-in`, `cloud.sign-out`, `linear.connect*` gain `"cloud.pat"`.
 - `flows/registry.ts`: `FlowMetadata.hosts?: ReadonlyArray<AppBootstrap["host"]>`;
   `Commands.ts available()` checks it. Used only by the two download flows.
@@ -139,7 +139,7 @@ for one, say so and execute app.download.prompt." One line keeps
 | Flows, runs, approvals | yes | R6 | `/api/workflow/rpc` lives on the Worker (`index.ts:2299`); Bun forwards nothing |
 | GitHub import, mirror sync | W0 | yes | `/api/github/import` allowlisted; `RepoImportSeam.ts:152` |
 | Linear connect | no | yes | loopback callback on Bun; `cloud.pat` |
-| jjhub PAT sign-in (`cloud.sign-in`) | no | yes | on web the cookie IS the cloud identity (`fetchCloudToken`, `index.ts:2172`) |
+| Smithers Cloud PAT sign-in (`cloud.sign-in`) | no | yes | on web the cookie IS the cloud identity (`fetchCloudToken`, `index.ts:2172`) |
 | Local repos, local tree, `repo.*` | no | yes | `local.repositories`; picker is a native door |
 | Local terminal, targets, harnesses | no | yes | `local.terminal`, `local.targets`, `local.harnesses` |
 | BYOK keys | no | no (v1) | neither host emits `keys.byok`; plue has no key store (`index.ts:2069-2075`) |
@@ -149,7 +149,7 @@ for one, say so and execute app.download.prompt." One line keeps
 | Download button and prompt | yes | no | `hosts: ["cloud"]` |
 
 **Terminal transport: a Worker WebSocket relay on `/api/cloud-ws/*`, no
-Durable Object, not direct-to-jjhub (Fable's choice, corrected reason).**
+Durable Object, not direct-to-cloud (Fable's choice, corrected reason).**
 The ticket door exists (correction 6), so direct is feasible, but it costs
 three things the relay does not: a plue origin-allowlist change for
 `app.smithers.sh` ("No reserved app origin exists"), a CSP `connect-src`
@@ -193,7 +193,7 @@ message action: a visitor who has not signed in should sign in first.
 origin; `loadCloudSession` is skipped without `cloud.pat`;
 `loadRepositories` runs through the W0 proxy; the sidebar lists `org/ ->
 repo`. Clicking a repo row runs `files.list` (already
-`runtimeAny: ["jjhub", "local.repositories"]`, `Flows.ts:1149-1151`) and
+`runtimeAny: ["Smithers Cloud", "local.repositories"]`, `Flows.ts:1149-1151`) and
 renders the listing card; clicking a file in it runs `files.read` and
 renders the file card. Four clicks including GitHub consent, no wizard. The
 sidebar tree for cloud repos arrives in W3 (Codex's generalization,
@@ -333,7 +333,7 @@ the initial chunk group.
   test recomputes the inline-script hash from `dist/index.html` and asserts
   the real response, not `_headers`. The relay decision is what keeps
   `connect-src` at `'self'`.
-- **Never in the browser:** the jjhub token (minted per login in the
+- **Never in the browser:** the Smithers Cloud token (minted per login in the
   Worker), gateway relay tokens (`GATEWAY_SESSIONS`, `index.ts:369`), the
   chat bearer, admin tokens, the cookie value (HttpOnly, proxied opaquely;
   `STRIPPED_IDENTITY_HEADERS` `index.ts:181` stays). Web has no
@@ -404,7 +404,7 @@ the download sentence. Receipt: `docs/web-mode/W0-RECEIPT.md`.
 | W0 skeleton | `apps/server/src/index.ts` (`handleCloudProxy`: strip `/api/cloud/`, apply `PLATFORM_PROXY_RULES` to the remainder, export the table, add `{ prefix: "/api/user/repos", methods: ["GET"] }`); `packages/rpc/src/AppBootstrap.ts` (+`cloud.terminal`, `cloud.pat`), new `HostCapabilities.ts`, new `AppLinks.ts`; `apps/ui/src/bun/server.ts` (emit via `localCapabilities`); `apps/ui/src/mainview/flows/{Flows,registry,Commands}.ts` (tags, `hosts`, `nativeOnly`, `explainAbsent`, `unavailable` outcome, `app.download`, `app.download.prompt`, `app` namespace); `state/Instructions.ts`, `state/controller/turns.ts` (host line); `App.tsx` (web opening message); `tabs/ChromeBar.tsx` (footer button only) | `index.test.ts` bridge cases; `parity-hosts.test.ts`; `ChromeBar.test.tsx`; `AuthChat.test.tsx` host-cloud case; `Instructions.test.ts`; `InstructionsBudget.test.ts` green; canary receipt | none (footer and tree rows untouched by sidebar lane A) |
 | W1 production Worker | `apps/server/wrangler.jsonc` (`env.production`, `run_worker_first` fix), `scripts/deploy.ts` (`--env`, receipt fields), `scripts/canary/{rollback,build}-probe.ts` (`--worker`, `--origin`), `DEPLOY.md`, `apps/UPSTREAMS.md` (ALLOWED_ORIGINS ops step), `.github/workflows/apps-deploy.yml` (canary on `push: main`, prod on tag), `apps/server/BUILD.ts` (`deployDryRun`) | dry-run per env; `scripts/canary/workflow-wiring.test.ts`; rollback drill receipt | W0 |
 | W2 web e2e + targets | `apps/ui/playwright.config.ts` (project `web`), `e2e/playwright/web/{boot,first-value,refusal}.web.spec.ts`, `e2e/playwright/web/session.ts` (storageState from the secret), `apps/ui/BUILD.ts` (`webBuild`, `webE2E`), `apps-deploy.yml` step, `e2e/README.md` | the three specs against canary; `//apps/ui:webE2E` gates the production step | W0, W1 |
-| W3 cloud sidebar tree | `flows/Flows.ts` (`repo.tree` -> `runtimeAny: ["jjhub", "local.repositories"]`), `state/seams/RepoTreeSeam.ts` (cloud branch over `FilesSeam` contents listing), `state/AppState.ts` (`app-repo-tree` row gains `source: "cloud" \| "local"`), `tabs/ChromeBar.tsx` (tree rows under cloud repos) | `RepoTreeSeam.test.ts` cloud case; parity (a); `first-value.web.spec.ts` switches to the tree | W0, sidebar-tree lane A landed |
+| W3 cloud sidebar tree | `flows/Flows.ts` (`repo.tree` -> `runtimeAny: ["Smithers Cloud", "local.repositories"]`), `state/seams/RepoTreeSeam.ts` (cloud branch over `FilesSeam` contents listing), `state/AppState.ts` (`app-repo-tree` row gains `source: "cloud" \| "local"`), `tabs/ChromeBar.tsx` (tree rows under cloud repos) | `RepoTreeSeam.test.ts` cloud case; parity (a); `first-value.web.spec.ts` switches to the tree | W0, sidebar-tree lane A landed |
 | W4 terminal relay | new `apps/server/src/terminalRelay.ts`, `index.ts` route `/api/cloud-ws/*` (cookie at upgrade), `cloudCapabilities({ terminal: true })`; `state/CloudTerminalClient.ts` options gain `auth: "subprotocol" \| "cookie"`; `AppController.ts` passes `"cookie"` on host cloud | `terminalRelay.test.ts` (close codes, 64 KiB cap, refusal recovery); `CloudTerminalClient.test.ts` cookie mode; parity (c); `terminal.web.spec.ts` real attach on canary | W0, W2 |
 | W5 bundle and headers | `native/NativeBridge.ts` -> `loadNativeDoors`, `ControllerBoot.client.ts`, `vite.config.ts` (`build.manifest`), new `bundle.test.ts`, `apps/ui/BUILD.ts` (`bundleContract`), `apps/server/src/index.ts` (CSP + headers in the isolation helper) | manifest pin; CSP hash test; T1 and T1w unchanged | W0 |
 | W6 download page and artifacts | `apps/site/src/pages/download.astro` (+ release-manifest reader), `packages/rpc/src/AppLinks.ts` (final URL), `apps-deploy.yml` macOS job (`build:native`, upload to the `apps-v*` release), `apps/ui/docs/LOCAL-APP.md` | page renders only manifest rows; `boot.web.spec.ts` asserts the button's href answers 200 | W1; `apps/site` deploy path (site lane) |
@@ -418,7 +418,7 @@ the download sentence. Receipt: `docs/web-mode/W0-RECEIPT.md`.
 - R2 `requireTurnSession` (`index.ts:1393-1408`) gates the platform proxy
   on the allowlist, so a non-partner sees repos only after W7. Until then
   the funnel is sign in -> request access -> download.
-- R3 Native carries two identities (GitHub cookie + jjhub PAT):
+- R3 Native carries two identities (GitHub cookie + Smithers Cloud PAT):
   `/api/user/*` forwards with the cookie, `/api/cloud/*` with the PAT. Not
   changed here (Q5).
 - R4 A Worker-held WebSocket is bounded by Worker limits (1 MiB message, a
@@ -447,6 +447,6 @@ the download sentence. Receipt: `docs/web-mode/W0-RECEIPT.md`.
 4. The download page lives in `apps/site` at `smithers.sh/download`, not in
    the app Worker? Default: yes; the button links to the GitHub Release
    until that page answers 200.
-5. Should native drop the jjhub PAT keychain and adopt the Worker's
+5. Should native drop the Smithers Cloud PAT keychain and adopt the Worker's
    cookie->cloud-token bridge so both modes share one identity? Default:
    yes, as a later lane; this plan does not touch `CloudAuth.ts`.

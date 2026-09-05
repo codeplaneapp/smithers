@@ -1,8 +1,8 @@
 /**
- * Targets for the UI application: the typecheck and the unit suite.
+ * Targets for the UI application: typecheck, unit suite and browser tier.
  *
- * The Playwright browser tier and packaged Electrobun E2E tier stay out of
- * the per-push graph; see docs/LOCAL-APP.md "Test tiers".
+ * Playwright T1 runs in the dedicated PR browser job. Packaged Electrobun
+ * remains a separate operator tier; see docs/LOCAL-APP.md "Test tiers".
  *
  * Everything runs under Bun, which is what the app's own scripts use, so the
  * runtime is the root Bun declaration and nothing here spells `bun` into an
@@ -71,6 +71,9 @@ const check = Smithers.Typecheck({
  * @since 0.1.0
  * @category test
  */
+// Coverage policy: assertion-only for Bun UI units, with required offline
+// Playwright in browserE2e. No source coverage percentage is claimed; see
+// scripts/repo-contract/README.md for the denominator exception.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["src"]),
@@ -79,6 +82,16 @@ const unitTests = Smithers.NodeTest({
   cwd
 })
 
+/** Runs the actual pinned Playwright browser suite, with no live provider calls. */
+const browserE2e = Smithers.NodeTest({
+  runner: Smithers.entrypoint(Smithers.file("scripts/run-pr-e2e.mjs")),
+  srcs: [sources, componentSources, styleSources, harnessSources, suiteSources, ...buildConfigs,
+    Smithers.file("playwright.config.ts"), Smithers.file("package.json"), Smithers.file("//pnpm-lock.yaml")],
+  deps: [],
+  env: { SMITHERS_CHAT_STUB: "1" },
+  cwd
+})
+
 export const Package = Smithers.Package({
-  targets: { check, unitTests }
+  targets: { check, unitTests, browserE2e }
 })

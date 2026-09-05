@@ -428,6 +428,8 @@ export const createTurnController = (
       // The raw tool name is the honest label when the arguments don't parse.
     }
     if (call.name === "commands" && action === "list") return "Smithers checked what it can do here"
+    if (result.startsWith("asked the user to confirm ")) return `Smithers asked for confirmation of /${inner}`
+    if (result.startsWith("rendered a form for ")) return `Smithers opened the /${inner} form`
     if (
       call.name === "commands" && (inner === "browser" || inner === "browser.open") && !result.startsWith("failed:") && !result.startsWith("unknown-")
     ) {
@@ -470,9 +472,11 @@ export const createTurnController = (
     if (call === undefined) return
     turn.pendingCall = undefined
     turn.toolLegs += 1
-    // executeForAgent runs as actor smithers (withAgentActor) — the same
-    // dispatch path as buttons and slash, with the agent attribution.
-    const result = await ctx.commands.executeForAgent({ name: call.name, arguments: call.args })
+    // The registry selects fixed smithers bindings for the same flow
+    // definitions used by buttons and slash commands.
+    const result = await ctx.commands.executeForAgent({ name: call.name, arguments: call.args }).catch((error: unknown) =>
+      `failed: ${error instanceof Error ? error.message : String(error)}`
+    )
     if (ctx.activeTurn?.id !== turn.id) return
     /*
      * Wave 12 §1: a real launch arms the deterministic claim surface for the

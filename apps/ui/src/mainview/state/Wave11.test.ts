@@ -15,9 +15,11 @@ import { describe, expect, test } from "bun:test"
 import type { Card } from "@smthrs/rpc/Cards"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { createAppController } from "./AppController"
+import { scopedControllers } from "./ControllerTestScope"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
+
+const createAppController = scopedControllers()
 
 const memoryStorage = (): StorageApi => {
   const data = new Map<string, string>()
@@ -466,7 +468,7 @@ describe("wave 11 — the loaded repositories are the universe", () => {
     const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
 
     for (const command of ["flow.create", "flow.list", "flow.run"]) {
-      const outcome = await controller.commands.run(command, "x")
+      const outcome = await controller.commands.run(command, command === "flow.list" ? undefined : "x")
       expect(said(outcome)).toContain("Sign in")
     }
     expect(double.calls).toHaveLength(0)
@@ -655,6 +657,21 @@ describe("wave 11 — workflows are presented", () => {
     // A workflow with no description says nothing rather than inventing one.
     expect(card?.kind === "workflow-list" && card.payload.workflows[1]?.description).toBeNull()
     expect(store.collections.sessions.get("main")?.surface).toBe("chat")
+  })
+
+  test("flow.list uses the selected repository and accepts an explicit override", async () => {
+    const store = await webStore()
+    const double = relay()
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    try {
+      await signIn(store, [REPO, "another/project"])
+      store.dispatch({ type: "repo.selected", actor: "user", id: "another/project" })
+      expect((await controller.commands.run("flow.list")).status).toBe("executed")
+      expect(double.calls.find((call) => call.path === "/api/workflow/provision")?.body).toEqual({ repo: "another/project" })
+      expect(store.collections.cards.has("workflow-list-another/project")).toBe(true)
+      expect((await controller.commands.run("flow.list", REPO)).status).toBe("executed")
+      expect(store.collections.cards.has(`workflow-list-${REPO}`)).toBe(true)
+    } finally { controller.dispose() }
   })
 
   test("flow.run refuses a name the workspace does not have, and names what it does have", async () => {

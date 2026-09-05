@@ -50,7 +50,7 @@ export interface FlowMetadata {
   readonly runtime?: ReadonlyArray<RuntimeCapability>
   /**
    * Host services of which at least ONE must be present. A flow that serves
-   * two hosts (a Cloud repository via jjhub, or a repository opened in the
+   * two hosts (a Cloud repository via Smithers Cloud, or a repository opened in the
    * local app) names both; `runtime` alone cannot say "either".
    */
   readonly runtimeAny?: ReadonlyArray<RuntimeCapability>
@@ -132,7 +132,7 @@ export const itemOf = (entry: FlowEntry): CatalogItem => ({
   ...entry.metadata
 })
 
-/** A door only the native host opens: a local service, or the host-held jjhub PAT session. */
+/** A door only the native host opens: a local service, or the host-held Smithers Cloud PAT session. */
 const nativeDoor = (capability: RuntimeCapability): boolean =>
   capability.startsWith("local.") || capability === "cloud.pat"
 
@@ -142,7 +142,7 @@ const nativeDoor = (capability: RuntimeCapability): boolean =>
  *
  * A `runtime` entry that is a native door settles it. An either/or flow
  * (`runtimeAny`) is native-only only when EVERY alternative is a native door:
- * `files.list` names jjhub OR a local repository, and the web has jjhub. A
+ * `files.list` names Smithers Cloud OR a local repository, and the web has Smithers Cloud. A
  * flow that names its `hosts` without the cloud is native-only by declaration.
  */
 export const nativeOnly = (metadata: FlowMetadata): boolean =>
@@ -154,7 +154,7 @@ export const nativeOnly = (metadata: FlowMetadata): boolean =>
  * The door a host lacks for a declared flow: a `local.*` service (only the
  * native app has one), the host-held PAT session (`cloud.pat`, the native
  * app's Smithers Cloud session), or a door this origin could grow (`origin`:
- * the terminal relay, the jjhub upstream, keys).
+ * the terminal relay, the Smithers Cloud upstream, keys).
  */
 export type MissingDoor = "local" | "cloud.pat" | "origin"
 
@@ -338,7 +338,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "notifications", label: "Notifications", summary: "GitHub notifications" },
   { id: "browser", label: "Browser", summary: "Read web pages" },
   { id: "auth", label: "Account", summary: "Sign in and out" },
-  { id: "cloud", label: "Cloud", summary: "Smithers Cloud (jjhub)" },
+  { id: "cloud", label: "Cloud", summary: "Smithers Cloud" },
   { id: "billing", label: "Billing", summary: "Balance and plan" },
   { id: "card", label: "Cards", summary: "Maximize and minimize cards" },
   { id: "frame", label: "Frames", summary: "Navigate and fork frames" },

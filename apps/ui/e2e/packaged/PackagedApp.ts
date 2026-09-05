@@ -102,7 +102,6 @@ export class PackagedApp {
   private readonly temporaryRoot: string
   private readonly processEnv: Readonly<Record<string, string>>
   private readonly startupTimeoutMs: number
-  private readonly localPort: number
   private child: ChildProcess | undefined
   private exit: Promise<ProcessExit> | undefined
   private processGroup: number | undefined
@@ -117,8 +116,7 @@ export class PackagedApp {
     options: LaunchAppOptions,
     temporaryRoot: string,
     stateDirectory: string,
-    artifactsDirectory: string,
-    localPort: number
+    artifactsDirectory: string
   ) {
     this.executable = resolve(options.executable)
     this.temporaryRoot = temporaryRoot
@@ -126,7 +124,6 @@ export class PackagedApp {
     this.artifactsDirectory = artifactsDirectory
     this.processEnv = options.env ?? {}
     this.startupTimeoutMs = options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS
-    this.localPort = localPort
   }
 
   static async launch(options: LaunchAppOptions): Promise<PackagedApp> {
@@ -153,8 +150,7 @@ export class PackagedApp {
       { ...options, executable },
       temporaryRoot,
       stateDirectory,
-      artifactsDirectory,
-      await availableLoopbackPort()
+      artifactsDirectory
     )
     try {
       await app.startProcess()
@@ -206,7 +202,7 @@ export class PackagedApp {
       SMITHERS_E2E_BRIDGE: "1",
       SMITHERS_E2E_BRIDGE_PORT: String(this.bridgePort),
       SMITHERS_E2E_BRIDGE_TOKEN: this.bridgeToken,
-      SMITHERS_LOCAL_PORT: String(this.localPort),
+      SMITHERS_LOCAL_PORT: undefined,
       SMITHERS_LOCAL_MODE: "offline",
       SMITHERS_CHAT_STUB: "1",
       ELECTROBUN_CONSOLE: "1",

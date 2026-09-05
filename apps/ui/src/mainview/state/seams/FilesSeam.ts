@@ -15,7 +15,7 @@
 import { REPO_FILES_PATH, RepoFilesResponseSchema } from "@smthrs/rpc/LocalApp"
 import type { Repo, RepoFilesResponse } from "@smthrs/rpc/LocalApp"
 import type { Card } from "../AppState"
-import { localCopyIdOf, repoIdFromRemote } from "../AppState"
+import { localCopyIdOf, repoIdFromRemote, repoKeyOf } from "../AppState"
 import type { AppStore } from "../AppStore"
 import { resolveOpenRepo, resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "./SeamContext"
@@ -49,10 +49,10 @@ const anchored = (anchor: FileAnchor | undefined): { readonly line?: number; rea
   anchor === undefined ? {} : { line: anchor.line, ...(anchor.column === undefined ? {} : { column: anchor.column }) }
 
 /** The model's copy of a listing stops here (a node_modules has thousands of entries); the card keeps them all. */
-const LISTING_VALUE_CAP = 400
+export const LISTING_VALUE_CAP = 400
 
 /** The model's copy of a directory listing: one entry per line, directories marked, bounded. */
-const listingValue = (repo: string, path: string, entries: ReadonlyArray<{ name: string; kind: "file" | "dir" }>): string => {
+export const listingValue = (repo: string, path: string, entries: ReadonlyArray<{ name: string; kind: "file" | "dir" }>): string => {
   if (entries.length === 0) return `${path || "/"} in ${repo} is empty.`
   const shown = entries.slice(0, LISTING_VALUE_CAP).map((entry) => (entry.kind === "dir" ? `${entry.name}/` : entry.name))
   const rest = entries.length - shown.length
@@ -60,7 +60,7 @@ const listingValue = (repo: string, path: string, entries: ReadonlyArray<{ name:
 }
 
 /** The model's copy of a file: the same bounded text the card shows, with truncation and binary stated. */
-const fileValue = (
+export const fileValue = (
   repo: string,
   path: string,
   payload: { readonly content: string; readonly truncated: boolean; readonly binary?: boolean }
@@ -73,7 +73,9 @@ type FileListPayload = Extract<Card, { kind: "file-list" }>["payload"]
 type FileListEntry = FileListPayload["entries"][number]
 
 /** The card cap (characters): a transcript card states a file, it is not an editor. */
-const CARD_CONTENT_CAP = 16 * 1024
+export const CARD_CONTENT_CAP = 16 * 1024
+
+export const localFileCardId = (repoId: string, path: string): string => `file-${repoId}-${path}`
 
 /**
  * The content fields of a local file card from the route's answer: the card
@@ -231,10 +233,11 @@ const localTarget = (
 ): { readonly repo: Repo } | { readonly error: string } | undefined => {
   const repos = [...store.collections.repos.values()]
   if (explicit !== undefined && explicit !== "") {
-    const named = repos.find((repo) =>
-      repo.name === explicit || repo.path === explicit || repo.path.split("/").pop() === explicit
-    )
-    return named === undefined ? undefined : { repo: named }
+    const exact = repos.find((repo) => repo.id === explicit || repo.path === explicit || repoKeyOf(repo.path) === explicit)
+    if (exact !== undefined) return { repo: exact }
+    const named = repos.filter((repo) => repo.name === explicit || repo.path.split("/").pop() === explicit)
+    if (named.length > 1) return { error: `${explicit} has several open working copies — name a repository id or path: ${named.map((repo) => `${repo.id} (${repo.path})`).join(", ")}.` }
+    return named[0] === undefined ? undefined : { repo: named[0] }
   }
   if (repos.length === 0) return undefined
   const open = resolveOpenRepo(store)
@@ -343,7 +346,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     if (answer.body.kind === "file") return `${normalized} in ${repo.name} is a file — run /files.read ${normalized} instead`
     const entries = sortEntries(answer.body.entries)
     upsert({
-      id: `files-${repo.name}-${label}`,
+      id: `files-${repo.id}-${label}`,
       kind: "file-list",
       title: `Files · ${repo.name} · ${label}`,
       status: "active",
@@ -351,6 +354,7 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
       ordinal: ctx.nextOrdinal(),
       payload: {
         repo: repo.name,
+        localRepoId: repo.id,
         path: normalized,
         entries,
         ...(answer.body.truncated === true ? { truncated: true } : {}),
@@ -371,13 +375,14 @@ export const createFilesSeam = (ctx: SeamContext): FilesSeam => {
     if (answer.body.kind === "dir") return `${normalized} in ${repo.name} is a directory — run /files.list ${normalized} instead`
     const payload = {
       repo: repo.name,
+      localRepoId: repo.id,
       path: normalized,
       ...localFileFields(answer.body),
       ...localAddressing(ctx.store, repo, normalized),
       ...anchored(anchor)
     }
     upsert({
-      id: `file-${repo.name}-${normalized}`,
+      id: localFileCardId(repo.id, normalized),
       kind: "file",
       title: `File · ${repo.name} · ${normalized}`,
       status: "active",

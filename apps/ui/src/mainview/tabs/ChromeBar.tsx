@@ -1,3 +1,4 @@
+import { fileArgs } from "../flows/FileArgs"
 import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
 import { ChevronRight, Download, FolderGit2, Moon, Pencil, Plus, RotateCcw, Sun, X } from "lucide-react"
@@ -229,7 +230,7 @@ export function ChromeBar() {
           directories={view.directories}
           collapsed={view.collapsed}
           onToggle={(path) => controller.runCommandArgs("repo.tree", `${copy.id}#${path}`)}
-          onSelect={(path) => controller.runCommandArgs("files.read", repo === undefined ? path : `${path} ${repo.name}`)}
+          onSelect={(path) => controller.runCommandArgs("files.read", fileArgs(path, repo?.id))}
           renderDirectoryEmpty={(path) => (
             <span className="repo-tree-state" data-state={view.rows.get(path)?.state ?? "loading"} data-testid={`repo-tree-state-${copy.id}#${path}`}>
               {stateOf(path)}

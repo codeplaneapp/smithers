@@ -46,6 +46,7 @@ const setup = async () => {
   let next = 0
   const ctx = {
     store,
+    commandActor: "user",
     baseUrl: "http://local",
     boundedFetch: async (_url: string, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>)

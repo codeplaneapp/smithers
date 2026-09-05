@@ -2,9 +2,11 @@ import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { createAppController } from "./AppController"
+import { scopedControllers } from "./ControllerTestScope"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
+
+const createAppController = scopedControllers()
 
 /*
  * Wave 10 — the embed law's in-app half, transcript hygiene, /clear's sweep,
@@ -208,8 +210,8 @@ describe("wave 10 — transcript hygiene (§2b)", () => {
   })
 })
 
-describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
-  test("sweep → world notes → clear, in that order, with the one calm confirm line", async () => {
+describe("/chat.clear — optional summaries and atomic local archives", () => {
+  test("an explicit summary commits new world notes and the archive together", async () => {
     const store = await webStore()
     const calls: Array<{ path: string; method: string; body: unknown }> = []
     const controller = createAppController(store, unavailableRepositories, silentAgent(), {
@@ -225,7 +227,7 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
                   text:
                     "{\"notes\":[{\"title\":\"Prefers dark mode\",\"body\":\"The user keeps the app in dark mode.\",\"confidence\":0.9}]}"
                 })
-              }\n${JSON.stringify({ runId: "sweep", type: "done" })}\n`,
+              }\n${JSON.stringify({ runId: "sweep", type: "done", reason: "stop" })}\n`,
               { status: 200, headers: { "content-type": "application/x-ndjson" } }
             )
         },
@@ -241,13 +243,13 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     expect(beforeClear.length).toBeGreaterThan(0)
     expect(beforeClear.some((message) => message.text === "remember that I prefer dark mode")).toBe(true)
 
-    const outcome = await controller.commands.run("chat.clear")
+    const outcome = await controller.commands.run("chat.clear", "--summarize")
     expect(outcome.status).toBe("executed")
     await settled()
 
     // The sweep is a model call, so it rode the one metered model route.
     expect(calls.some((call) => call.path === "/api/model/stream" && call.method === "POST")).toBe(true)
-    // The note landed in world with the house provenance BEFORE the clear.
+    // Notes and clear share one commit, with distinct model provenance.
     const notes = [...store.collections.worldDocuments.values()].filter((document) =>
       document.sources.includes("chat-sweep")
     )
@@ -256,13 +258,13 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     expect(notes[0]?.updatedBy).toBe("smithers")
     expect(notes[0]?.confidence).toBe(0.9)
     const journal = [...store.collections.transitions.values()].sort((a, b) => a.revision - b.revision)
-    const upsertRevision = journal.find((record) => record.type === "world.document.upserted")?.revision ?? 0
     const clearedRevision = journal.find((record) => record.type === "conversation.cleared")?.revision ?? 0
-    expect(upsertRevision).toBeLessThan(clearedRevision)
+    expect(notes[0]?.revision).toBe(clearedRevision)
     // The chat is cleared and the one line states what was kept.
     const messages = [...store.collections.messages.values()]
     expect(messages).toHaveLength(1)
-    expect(messages[0]?.text).toBe("Saved 1 note to World. Cleared.")
+    expect(messages[0]?.text).toContain("Saved 1 new note to World")
+    expect(messages[0]?.text).toContain("Open the archived conversation")
   })
 
   test("a failed sweep leaves the chat UNcleared with an honest line", async () => {
@@ -277,12 +279,12 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     await settled()
     const before = [...store.collections.messages.values()].length
 
-    await controller.commands.run("chat.clear")
+    const outcome = await controller.commands.run("chat.clear", "--summarize")
     await settled()
 
     const messages = [...store.collections.messages.values()]
-    expect(messages.length).toBe(before + 1)
-    expect(messages.some((message) => message.text.includes("left it exactly as it was"))).toBe(true)
+    expect(messages.length).toBe(before)
+    expect(outcome).toMatchObject({ status: "failed", error: expect.stringContaining("nothing was cleared or saved") })
     expect([...store.collections.transitions.values()].some((record) => record.type === "conversation.cleared")).toBe(
       false
     )
@@ -295,7 +297,7 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
         "/api/model/stream": () =>
           new Response(
             `${JSON.stringify({ runId: "sweep", type: "delta", kind: "text", text: "{\"notes\":[]}" })}\n${
-              JSON.stringify({ runId: "sweep", type: "done" })
+              JSON.stringify({ runId: "sweep", type: "done", reason: "stop" })
             }\n`,
             { status: 200, headers: { "content-type": "application/x-ndjson" } }
           )
@@ -304,10 +306,10 @@ describe("wave 10 — /clear sweeps before it clears (§2h)", () => {
     await signIn(store)
     controller.send("hi")
     await settled()
-    await controller.commands.run("chat.clear")
+    await controller.commands.run("chat.clear", "--summarize")
     const messages = [...store.collections.messages.values()]
     expect(messages).toHaveLength(1)
-    expect(messages[0]?.text).toBe("Cleared — there was nothing new worth keeping.")
+    expect(messages[0]?.text).toContain("Started a new conversation.")
   })
 })
 

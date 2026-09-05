@@ -1,11 +1,12 @@
 import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
+import { resolveTargetRepo } from "../RepoContext"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 
 export interface WorkflowController {
   readonly createWorkflow: (description: string, repo?: string) => Promise<string | void | { readonly value: string }>
-  readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
+  readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** The Flows pane: the surface switch, and the same listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -110,7 +111,7 @@ export const createWorkflowController = (
     preferred: string | undefined,
     askWhenAmbiguous: boolean
   ): { readonly repo: string } | { readonly error: string } | { readonly ask: ReadonlyArray<string> } => {
-    if (preferred !== undefined) return { repo: preferred }
+    if (preferred !== undefined || store.session().activeRepoKey != null) return resolveTargetRepo(store, preferred)
     const loaded = [...store.collections.repositories.values()].map((repository) => repository.id)
     if (loaded.length === 0) return { error: NO_REPO_LOADED }
     if (loaded.length > 1 && askWhenAmbiguous) return { ask: loaded }
@@ -121,10 +122,8 @@ export const createWorkflowController = (
   }
 
   /** The two-way form, for the calls that do not ask (list, run-by-name). */
-  const workflowTargetRepo = (preferred?: string): { readonly repo: string } | { readonly error: string } => {
-    const target = workflowTargetRepoOrAsk(preferred, false)
-    return "ask" in target ? { error: NO_REPO_LOADED } : target
-  }
+  const workflowTargetRepo = (preferred?: string): { readonly repo: string } | { readonly error: string } =>
+    resolveTargetRepo(store, preferred)
 
   /** The `owner/repo` shape the seam addresses — the same one the Worker refuses past. */
   const isWorkflowRepoArg = (value: string): boolean =>
@@ -351,10 +350,10 @@ export const createWorkflowController = (
     return { value: `run-started workflow=create-workflow run=${launched.runId} repo=${repo}` }
   }
 
-  const listWorkspaceWorkflows = async (): Promise<string | void | { readonly value: string }> => {
+  const listWorkspaceWorkflows = async (repoArg?: string): Promise<string | void | { readonly value: string }> => {
     const guard = workflowIdentityGuard()
     if (guard !== undefined) return guard
-    const target = workflowTargetRepo()
+    const target = workflowTargetRepo(repoArg)
     if ("error" in target) return target.error
     const repo = target.repo
     const provisioned = await provisionWorkspace(repo)

@@ -73,6 +73,7 @@ export const registerPtyRoutes = (
     const result = await manager.create({ ...body.data, cwd: resolved.path })
     if (result.status === "error") {
       const status = result.code === "spawn_failed" ? 500
+        : result.code === "manager_closed" ? 503
         : result.code === "unknown_harness" || result.code === "unknown_role" ? 404
         : result.code === "capacity_reached" ? 429
         : 400
@@ -90,8 +91,8 @@ export const registerPtyRoutes = (
     const id = params.id ?? ""
     const tailParam = new URL(request.url).searchParams.get("tail")
     const tail = tailParam === null ? undefined : Number(tailParam)
-    if (tail !== undefined && (!Number.isInteger(tail) || tail < 0)) {
-      return jsonError(400, "invalid_request", "tail must be a non-negative integer.")
+    if (tail !== undefined && (!Number.isSafeInteger(tail) || tail < 0)) {
+      return jsonError(400, "invalid_request", "tail must be a non-negative safe integer.")
     }
     const output = manager.read(id, tail)
     if (output === undefined) return jsonError(404, "not_found", `No PTY session ${id}.`)

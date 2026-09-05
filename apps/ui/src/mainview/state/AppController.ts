@@ -1,3 +1,5 @@
+import type { CommandActions } from "../flows/Flows"
+import { createActorBindings } from "./ActorBindings"
 import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { RepositoryAccess } from "@smthrs/rpc/NativeRepository"
@@ -85,8 +87,13 @@ import { createLinearSeam } from "./seams/LinearSeam"
 import type { LinearSeam } from "./seams/LinearSeam"
 import type { RepoImportSeam } from "./seams/RepoImportSeam"
 import type { SeamContext } from "./seams/SeamContext"
+import { createStorageRecoveryController } from "./controller/storage-recovery"
+import type { StorageRecoveryAction, StorageRecoveryHost } from "./StorageRecoveryAction"
 
 export interface AppController {
+  readonly storageRecoveryState: StorageRecoveryAction["state"]
+  readonly promptStorageRecovery: () => Promise<void>
+  readonly exportStorageRecovery: () => Promise<string | void>
   readonly store: AppStore
   readonly bootstrap: AppBootstrap | undefined
   /** The native app's download URL this page offers; null while no native release carries an asset (controller/app.ts). */
@@ -127,8 +134,8 @@ export interface AppController {
   readonly toggleTheme: () => void
   /** Wear a color theme (/theme) — the axis orthogonal to light/dark. */
   readonly setPalette: (args: string) => string | void
-  /* /clear (§2h): sweep the transcript into world notes, THEN clear. */
-  readonly clearConversation: () => Promise<string | void>
+  /** Archive locally and start fresh; model-generated notes are opt-in. */
+  readonly clearConversation: (options?: { readonly summarize?: boolean }) => Promise<string | void>
   /* The browser tool + surface (§2d/§2d′). */
   readonly openBrowser: (url: string) => Promise<string | void | { readonly value: string }>
   /*
@@ -139,7 +146,7 @@ export interface AppController {
     description: string,
     repo?: string
   ) => Promise<string | void | { readonly value: string }>
-  readonly listWorkspaceWorkflows: () => Promise<string | void | { readonly value: string }>
+  readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** Ask 5: the Flows pane — the surface switch and the listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -379,7 +386,7 @@ export interface AppController {
   readonly retryMirrorRef: GitHubSeam["retryMirrorRef"]
   readonly githubMirrorSync: GitHubSeam["mirrorSync"]
   /*
-   * Lane piper: the jjhub Cloud session (the CLI browser login; the token
+   * Lane piper: the Smithers Cloud session (the CLI browser login; the token
    * never reaches the renderer) and the repository inventory behind the
    * `/api/cloud/*` proxy (state/seams/CloudSeam.ts, RepositoriesSeam.ts).
    */
@@ -460,13 +467,15 @@ export interface AppController {
    * cross-tab identity listeners, the identity BroadcastChannel). Nothing a
    * controller opened outlives it.
    */
-  readonly dispose: () => void
+  readonly dispose: () => Promise<void>
 }
 /**
  * The product-Worker backend seams the controller talks to. Injectable so tests
  * bind honest doubles instead of a network; production uses same-origin fetch.
  */
 export interface AppServices {
+  /** Trusted local handoff, injectable by the embedding host; never projected as a tool. */
+  readonly storageRecoveryHost?: StorageRecoveryHost
   readonly fetchImpl?: FetchLike
   /**
    * The `/ws` URL the PTY and target-run clients open; default the page's
@@ -561,6 +570,7 @@ export const createAppController = (
   services: AppServices = {}
 ): AppController => {
   const ctx = createControllerContext(store, repositories, agent, services)
+  const actors = createActorBindings(ctx.onDispose)
   if (store.dispose !== undefined) ctx.onDispose(store.dispose)
   const { baseUrl, http } = ctx
   const features: Required<AppFeatures> = { suggestionPills: services.features?.suggestionPills === true }
@@ -593,43 +603,43 @@ export const createAppController = (
     actor: () => ctx.commandActor,
     nextOrdinal: nextTranscriptOrdinal
   }
-  const issuesSeam = createIssuesSeam(seamCtx)
-  const landingsSeam = createLandingsSeam(seamCtx)
-  const billingSeam = createBillingSeam(seamCtx)
-  const keysSeam = createKeysSeam(seamCtx)
-  const notificationsSeam = createNotificationsSeam(seamCtx)
-  const environmentSeam = createEnvironmentSeam(seamCtx)
-  const repoImportSeam = createRepoImportSeam(seamCtx)
-  const bookmarksSeam = createBookmarksSeam(seamCtx)
-  const filesSeam = createFilesSeam(seamCtx)
-  const repoTreeSeam = createRepoTreeSeam(seamCtx)
+  const issuesSeam = actors.pair(seamCtx, (context) => createIssuesSeam(context))
+  const landingsSeam = actors.pair(seamCtx, (context) => createLandingsSeam(context))
+  const billingSeam = actors.pair(seamCtx, (context) => createBillingSeam(context))
+  const keysSeam = actors.pair(seamCtx, (context) => createKeysSeam(context))
+  const notificationsSeam = actors.pair(seamCtx, (context) => createNotificationsSeam(context))
+  const environmentSeam = actors.pair(seamCtx, (context) => createEnvironmentSeam(context))
+  const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
+  const bookmarksSeam = actors.pair(seamCtx, (context) => createBookmarksSeam(context))
+  const filesSeam = actors.pair(seamCtx, (context) => createFilesSeam(context))
+  const repoTreeSeam = actors.pair(seamCtx, (context) => createRepoTreeSeam(context))
   /*
    * Lane sync: the Linear and GitHub seams. The OAuth handoffs ride the
    * same native openExternal door as cloud sign-in; the Linear handoff's
    * receiver is the Bun server's /api/linear-auth/* (bun/LinearAuth.ts).
    */
-  const gitHubSeam = createGitHubSeam(seamCtx, {
+  const gitHubSeam = actors.pair(seamCtx, (context) => createGitHubSeam(context, {
     ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
-  })
-  const linearSeam = createLinearSeam(seamCtx, {
+  }))
+  const linearSeam = actors.pair(seamCtx, (context) => createLinearSeam(context, {
     ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
-  })
+  }))
   /*
    * Lane piper: the cloud session and inventory seams. A definitive
    * signed-in answer pulls the repository inventory; sign-in does the same
    * when its wait settles.
    */
-  const cloudSeam = createCloudSeam(seamCtx, {
+  const cloudSeam = actors.pair(seamCtx, (context) => createCloudSeam(context, {
     ...(services.openExternal === undefined ? {} : { openExternal: services.openExternal })
-  })
-  const repositoriesSeam = createRepositoriesSeam(seamCtx)
+  }))
+  const repositoriesSeam = actors.pair(seamCtx, (context) => createRepositoriesSeam(context))
   /* Lane citc: the cloud workspaces; its settle watches die with the controller. */
-  const workspaceSeam = createWorkspaceSeam(seamCtx)
-  const egressSeam = createEgressSeam(seamCtx)
+  const workspaceSeam = actors.pair(seamCtx, (context) => createWorkspaceSeam(context))
+  const egressSeam = actors.pair(seamCtx, (context) => createEgressSeam(context))
   ctx.onDispose(workspaceSeam.dispose)
   /* Lane change: the change/diff cards and their acts. */
   /* Lane L1: a revision's snapshot forks into a computer whose card the workspace seam renders. */
-  const changeSeam = createChangeSeam(seamCtx, { viewWorkspace: workspaceSeam.viewWorkspace })
+  const changeSeam = actors.pair(seamCtx, (context, select) => createChangeSeam(context, { viewWorkspace: select(workspaceSeam.viewWorkspace) }))
   const reloadRepositoriesWhenSignedIn = (): void => {
     if (store.collections.cloudSessions.get("cloud")?.state === "signed-in") {
       void repositoriesSeam.loadRepositories()
@@ -666,8 +676,9 @@ export const createAppController = (
     adminHealth,
     settleTurnBilling,
     watchIdentityAcrossTabs
-  } = createAuthBillingController(ctx, nextTranscriptOrdinal)
-  const { downloadUrl, openDownload, promptDownload } = createAppShellController(ctx)
+  } = actors.pair(ctx, (context) => createAuthBillingController(context, nextTranscriptOrdinal))
+  const { downloadUrl, openDownload, promptDownload } = actors.pair(ctx, (context) => createAppShellController(context))
+  const { storageRecoveryState, promptStorageRecovery, exportStorageRecovery } = actors.pair(ctx, createStorageRecoveryController)
 
   const {
     showChat,
@@ -693,7 +704,7 @@ export const createAppController = (
     openBrowser,
     toggleTheme,
     setPalette
-  } = createPresentationController(ctx, adminHealth)
+  } = actors.pair(ctx, (context, select) => createPresentationController(context, select(adminHealth)))
 
   const {
     maximizeCard,
@@ -720,8 +731,8 @@ export const createAppController = (
     loadRepos,
     notePtyExit,
     installKeyboard
-  } = createTabsController(ctx)
-  const { renderFlowForm, setFormField, submitForm, dismissCard } = createFormsController(ctx, { nextOrdinal: nextTranscriptOrdinal })
+  } = actors.pair(ctx, (context) => createTabsController(context))
+  const { renderFlowForm, setFormField, submitForm, dismissCard } = actors.pair(ctx, (context) => createFormsController(context, { nextOrdinal: nextTranscriptOrdinal }))
   const {
     loadAgents,
     listAgents,
@@ -730,8 +741,8 @@ export const createAppController = (
     editAgent,
     removeAgent,
     listHarnessModels
-  } = createAgentsController(ctx, { nextOrdinal: nextTranscriptOrdinal, loadHarnesses, renderFlowForm })
-  const { toggleRepoTree, renameWorkspace, toggleWorkspaceRename } = createSidebarController(ctx, repoTreeSeam)
+  } = actors.pair(ctx, (context, select) => createAgentsController(context, { nextOrdinal: nextTranscriptOrdinal, loadHarnesses: select(loadHarnesses), renderFlowForm: select(renderFlowForm) }))
+  const { toggleRepoTree, renameWorkspace, toggleWorkspaceRename } = actors.pair(ctx, (context, select) => createSidebarController(context, select(repoTreeSeam)))
   /*
    * "Open in tab" is offered on the maximized card, so opening the tab also
    * returns the transcript's copy to its embedded form — through the frames
@@ -781,29 +792,31 @@ export const createAppController = (
     })
     : undefined
   if (cloudLsp !== undefined) ctx.onDispose(cloudLsp.dispose)
-  const codeIntelSeam = createCodeIntelSeam(seamCtx, { lsp, readFile: filesSeam.readFile, ...(cloudLsp === undefined ? {} : { cloudLsp }) })
+  const codeIntelSeam = actors.pair(seamCtx, (context, select) => createCodeIntelSeam(context, { lsp, readFile: select(filesSeam.readFile), ...(cloudLsp === undefined ? {} : { cloudLsp }) }))
   ctx.onDispose(codeIntelSeam.dispose)
-  const codeHover: CodeIntelSeam["hover"] = (path, line, column, repo) =>
-    withToast("code.hover", `Asking the language server about ${path}:${line}:${column}…`, "Language server answered", () =>
-      codeIntelSeam.hover(path, line, column, repo))
-  const codeDefinition: CodeIntelSeam["definition"] = (path, line, column, repo) =>
-    withToast("code.definition", `Asking the language server where ${path}:${line}:${column} is defined…`, "Language server answered", () =>
-      codeIntelSeam.definition(path, line, column, repo))
-  const codeDiagnostics: CodeIntelSeam["diagnostics"] = (path, repo) =>
-    withToast("code.diagnostics", `Asking the language server about ${path}…`, "Language server answered", () =>
-      codeIntelSeam.diagnostics(path, repo))
-  const targetGraph = createTargetGraphController(ctx, {
+  const { codeHover, codeDefinition, codeDiagnostics } = actors.pair(seamCtx, (_context, select) => {
+    const seam = select(codeIntelSeam)
+    return {
+      codeHover: (path: string, line: number, column: number, repo?: string) =>
+        withToast("code.hover", `Asking the language server about ${path}:${line}:${column}…`, "Language server answered", () => seam.hover(path, line, column, repo)),
+      codeDefinition: (path: string, line: number, column: number, repo?: string) =>
+        withToast("code.definition", `Asking the language server where ${path}:${line}:${column} is defined…`, "Language server answered", () => seam.definition(path, line, column, repo)),
+      codeDiagnostics: (path: string, repo?: string) =>
+        withToast("code.diagnostics", `Asking the language server about ${path}…`, "Language server answered", () => seam.diagnostics(path, repo))
+    }
+  })
+  const targetGraph = actors.pair(ctx, (context) => createTargetGraphController(context, {
     nextOrdinal: nextTranscriptOrdinal,
     runs: targetRuns,
     devFixtures: createTargetGraphDevFixtures()
-  })
+  }))
   const { openRepo, listTargets, runTarget, runPattern, openTarget, filterTargets, selectTarget, starTarget, expandTargetGroup, pickTargets, runTargetSet } =
-    createTargetsController(ctx, {
+    actors.pair(ctx, (context, select) => createTargetsController(context, {
     nextOrdinal: nextTranscriptOrdinal,
-    loadRepos,
+    loadRepos: select(loadRepos),
     runs: targetRuns,
-    onRunStarted: targetGraph.noteRunStarted
-  })
+    onRunStarted: select(targetGraph.noteRunStarted)
+  }))
   ctx.openRepo = openRepo
 
   const {
@@ -813,7 +826,7 @@ export const createAppController = (
     resumeWorkflowRuns
   } = createWorkflowPumpController(ctx, nextTranscriptOrdinal)
 
-  const workflowController: WorkflowController = createWorkflowController(ctx, nextTranscriptOrdinal, pumpWorkflowRun)
+  const workflowController: WorkflowController = actors.pair(ctx, (context) => createWorkflowController(context, nextTranscriptOrdinal, pumpWorkflowRun))
   const {
     createWorkflow,
     listWorkspaceWorkflows,
@@ -823,7 +836,7 @@ export const createAppController = (
     forwardApprovalDecision,
     forwardInboxApprovalDecision
   } = workflowController
-  const runs = createRunsController(ctx, nextTranscriptOrdinal, workflowController)
+  const runs = actors.pair(ctx, (context, select) => createRunsController(context, nextTranscriptOrdinal, select(workflowController)))
   const {
     subscribeToAgent,
     send,
@@ -845,7 +858,7 @@ export const createAppController = (
     removeWorldDocument,
     confirmWorldDelete,
     cancelWorldDelete
-  } = createWorldController(ctx)
+  } = actors.pair(ctx, (context) => createWorldController(context))
 
   const changeDraft = (draft: string): void => {
     store.dispatch({ type: "composer.changed", actor: "user", draft })
@@ -1035,25 +1048,20 @@ export const createAppController = (
     askConnectorRemoval,
     cancelConnectorRemoval,
     removeConnector
-  } = createConnectorController(ctx)
+  } = actors.pair(ctx, (context) => createConnectorController(context))
 
   /*
-   * The agent's entry point ALWAYS runs as actor smithers (wired through
-   * withAgentActor below) — whether it arrives through the streaming tool
+   * The agent's entry point uses fixed smithers bindings — whether it
+   * arrives through the streaming tool
    * loop or a direct executeForAgent call — so agent invocations render
    * embedded cards and record via:"agent", never user chrome.
    */
-  const commands = createCommandRegistry({
+  const commandActions: CommandActions = {
+    promptStorageRecovery,
+    exportStorageRecovery,
     bootstrap: services.bootstrap,
     changeDraft,
-    withAgentActor: async <T>(work: () => Promise<T>): Promise<T> => {
-      ctx.commandActor = "smithers"
-      try {
-        return await work()
-      } finally {
-        ctx.commandActor = "user"
-      }
-    },
+    withAgentActor: <T>(work: () => Promise<T>): Promise<T> => work(),
     reset,
     askReset,
     cancelReset,
@@ -1319,7 +1327,8 @@ export const createAppController = (
           : identity.state
       }
     }
-  })
+  }
+  const commands = createCommandRegistry(commandActions, actors.select(commandActions))
   ctx.commands = commands
 
   subscribeToAgent()
@@ -1328,13 +1337,9 @@ export const createAppController = (
   watchIdentityAcrossTabs()
   // Cmd+T / Cmd+W / Cmd+1..9 on the document, released with the controller.
   if (typeof document !== "undefined") ctx.onDispose(installKeyboard(document))
-  const dispose = (): void => {
-    // The pumps first (they hold EventSources and timers), then the
-    // registered finalizers (the agent subscription, identity listeners,
-    // the BroadcastChannel). Both halves are idempotent.
-    ctx.stopWorkflowPumps()
-    ctx.dispose()
-  }
+  // One completion identity, including for a reentrant close from a resource.
+  // The scope stops pumps, then releases consumers before their hosts.
+  const dispose = ctx.dispose
 
   const runCommand = (name: string): boolean => {
     if (commands.find(name) === undefined) return false
@@ -1350,6 +1355,9 @@ export const createAppController = (
 
   return {
     store,
+    storageRecoveryState,
+    promptStorageRecovery,
+    exportStorageRecovery,
     bootstrap: services.bootstrap,
     downloadUrl,
     features,

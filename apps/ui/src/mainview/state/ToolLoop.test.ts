@@ -154,6 +154,49 @@ describe("the client-side agent tool loop", () => {
     expect(acts.map((message) => message.text)).toEqual(["Smithers ran /world.new-note"])
   })
 
+  test("null tool input is returned to the model and the turn can finish", async () => {
+    const store = await webStore()
+    const { agent, requests } = scriptedToolAgent([
+      () => [
+        { type: "tool_call" as const, call_id: "null-call", name: "commands", arguments: "null" },
+        { type: "done" as const, reason: "tool_call" as const }
+      ],
+      () => [
+        { type: "delta" as const, kind: "text" as const, text: "I can correct that input." },
+        { type: "done" as const, reason: "stop" as const }
+      ]
+    ])
+    const controller = createAppController(store, unavailableRepositories, agent)
+    try {
+      controller.send("read the file")
+      await settled(); await settled()
+      expect(requests).toHaveLength(2)
+      expect(requests[1]?.messages).toContainEqual({ type: "function_call_output", call_id: "null-call", output: "failed: the commands tool arguments must be an object" })
+      expect(store.session().phase).toBe("idle")
+    } finally { controller.dispose() }
+  })
+
+  test("a pending delegation confirmation is described without claiming the agent launched", async () => {
+    const store = await webStore()
+    const { agent, requests } = scriptedToolAgent([
+      () => [
+        { type: "tool_call" as const, call_id: "delegate", name: "commands", arguments: JSON.stringify({ action: "execute", name: "agent.delegate", args: "implementation review this" }) },
+        { type: "done" as const, reason: "tool_call" as const }
+      ],
+      () => [{ type: "done" as const, reason: "stop" as const }]
+    ])
+    const controller = createAppController(store, unavailableRepositories, agent)
+    try {
+      controller.send("delegate the review")
+      await settled(); await settled()
+      expect(requests).toHaveLength(2)
+      const acts = [...store.collections.messages.values()].filter((message) => message.act !== undefined)
+      expect(acts.map((message) => message.text)).toEqual(["Smithers asked for confirmation of /agent.delegate"])
+      expect([...store.collections.tabs.values()].some((tab) => tab.kind === "harness")).toBe(false)
+      expect([...store.collections.messages.values()].some((message) => message.action?.flow === "agent.delegate")).toBe(true)
+    } finally { controller.dispose() }
+  })
+
   test("an unknown tool name returns an honest tool-result error to the model, never a crash", async () => {
     const store = await webStore()
     const { agent, requests } = scriptedToolAgent([

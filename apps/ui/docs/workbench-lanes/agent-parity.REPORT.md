@@ -26,7 +26,7 @@ bun test` 132/132. Nothing committed; no `jj`/`git` write ran.
    NOT user-only in the tree despite the trigger axis, the brief's "keep", and a
    dead `USER_ONLY_ALTERNATIVES` entry; they are user-only now, with reasons, and
    added to `USER_ONLY_VISIBLE` (invocable.test.ts's exception list).
-2. **`cloud.prompt`** (runtime `["jjhub"]`, listed, "Offer the Smithers Cloud
+2. **`cloud.prompt`** (runtime `["Smithers Cloud"]`, listed, "Offer the Smithers Cloud
    sign-in step in the chat"): one Smithers message with action
    `{ flow: "cloud.sign-in", label: "Sign in to Smithers Cloud" }`; signed in it
    answers "Smithers Cloud is already signed in as <user>." On a host without

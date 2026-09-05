@@ -101,7 +101,7 @@ const wireInbox = [
     id: 101,
     unread: true,
     reason: "review_requested",
-    subject: { title: "Land the seam stack", url: "https://jjhub.tech/x", type: "Landing" },
+    subject: { title: "Land the seam stack", url: "https://smithers-cloud.test/x", type: "Landing" },
     repository: { full_name: "will/flows" },
     updated_at: "2026-08-12T09:00:00Z",
     last_read_at: null

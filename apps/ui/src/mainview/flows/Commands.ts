@@ -191,9 +191,14 @@ const valueOf = (value: unknown): string | undefined => {
   return typeof carried === "string" ? carried : undefined
 }
 
-export const createCommandRegistry = (actions: CommandActions): CommandRegistry => {
+export const createCommandRegistry = (actions: CommandActions, agentActions: CommandActions = actions): CommandRegistry => {
   const base = baseFlows(actions)
   const admin = adminFlows(actions)
+  let agentEntries: ReadonlyArray<FlowEntry> | undefined
+  const agentEntry = (name: string): FlowEntry | undefined => {
+    agentEntries ??= agentActions === actions ? [...base, ...admin] : [...baseFlows(agentActions), ...adminFlows(agentActions)]
+    return agentEntries.find((candidate) => nameOf(candidate) === name)
+  }
 
   const available = (entry: FlowEntry): boolean => {
     const bootstrap = actions.bootstrap
@@ -341,7 +346,8 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
       if (prompt !== undefined) await invoke(prompt, { flow: name })
       return { status: "unavailable", door, reason, action: DOWNLOAD_PROMPT }
     }
-    const target = entry
+    const target = invoker === "agent" ? agentEntry(nameOf(entry)) ?? entry : entry
+    const acting = invoker === "agent" ? agentActions : actions
     const unmet = unmetRequirements(target.metadata, actions.snapshot(), flowRequirements)[0]
     if (unmet !== undefined) {
       if (invoker === "agent") {
@@ -351,7 +357,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
          * invoking it, and prose is not a button.
          */
         if (unmet.id === "signed-in") {
-          actions.promptSignIn()
+          acting.promptSignIn()
           return {
             status: "failed",
             error: `${unmet.reason} — the sign-in step is already rendered in the chat; point the user at it`
@@ -384,7 +390,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
        * the grammar's own reason stays the fallback only for a flow with no
        * fields to ask for (none today).
        */
-      const rendered = actions.renderFlowForm({
+      const rendered = acting.renderFlowForm({
         name: nameOf(target),
         args,
         via: invoker,
@@ -403,7 +409,7 @@ export const createCommandRegistry = (actions: CommandActions): CommandRegistry 
      */
     const confirmation = invoker === "agent" ? confirmLabel(target.metadata, parsed.payload) : undefined
     if (confirmation !== undefined) {
-      actions.requestFlowConfirmation(nameOf(target), args ?? null, confirmation)
+      acting.requestFlowConfirmation(nameOf(target), args ?? null, confirmation)
       trace(invoker, name, args, startedAt, "confirm-requested", confirmation)
       return {
         status: "executed",

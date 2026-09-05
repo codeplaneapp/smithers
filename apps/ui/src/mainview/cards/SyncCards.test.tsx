@@ -12,7 +12,7 @@ import type { Card } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
 import { IssueCardBody } from "./IssueCards"
 import { RepoImportCardBody } from "./RepoImportCard"
-import { ConnectorSetupCardBody, rateLimitHeldUntil, SyncOpsCardBody } from "./SyncCards"
+import { ConnectorSetupCardBody, endpointLabel, rateLimitHeldUntil, SyncOpsCardBody } from "./SyncCards"
 
 /*
  * The lane-sync cards (ADR 0005): the Linear wizard renders its steps, the
@@ -611,7 +611,7 @@ describe("SyncOpsCardBody", () => {
             {
               id: "12",
               source: "linear",
-              target: "jjhub",
+              target: "smithers-cloud",
               entity: "issue",
               entityId: "ENG-482",
               action: "create",
@@ -627,11 +627,47 @@ describe("SyncOpsCardBody", () => {
 
     expect(host.textContent).toContain("Running")
     expect(host.textContent).toContain("10 of 12 · 1 failed")
-    expect(host.textContent).toContain("linear → jjhub issue ENG-482 create")
+    expect(host.textContent).toContain("linear → Smithers Cloud issue ENG-482 create")
     /* ADR row: "… action, age". */
     expect(host.textContent).toContain("just now")
     /* Nothing succeeded may offer a Retry. */
     expect(host.querySelectorAll("button")).toHaveLength(0)
+  })
+
+  test("the cloud endpoint reads Smithers Cloud on screen, whichever name the wire used", () => {
+    /*
+     * The backend's own payloads still say `jjhub`, an internal name. The row
+     * renders the product name for it and leaves every other endpoint alone.
+     */
+    expect(endpointLabel("jjhub")).toBe("Smithers Cloud")
+    expect(endpointLabel("smithers-cloud")).toBe("Smithers Cloud")
+    expect(endpointLabel("linear")).toBe("linear")
+    expect(endpointLabel("github")).toBe("github")
+
+    const { host } = render(
+      <SyncOpsCardBody
+        card={syncOpsCard({
+          runState: "completed",
+          ops: [
+            {
+              id: "77",
+              source: "jjhub",
+              target: "linear",
+              entity: "issue",
+              entityId: "77",
+              action: "update",
+              status: "success",
+              retryable: false,
+              at: null
+            }
+          ]
+        })}
+        onRunCommand={() => {}}
+      />
+    )
+
+    expect(host.textContent).toContain("Smithers Cloud → linear issue 77 update")
+    expect(host.textContent).not.toContain("jjhub")
   })
 
   test("ADR 0005 failed op: the error is verbatim on the row, with Retry naming the op", () => {
@@ -643,7 +679,7 @@ describe("SyncOpsCardBody", () => {
           ops: [
             {
               id: "90",
-              source: "jjhub",
+              source: "smithers-cloud",
               target: "linear",
               entity: "issue",
               entityId: "90",
@@ -656,7 +692,7 @@ describe("SyncOpsCardBody", () => {
             {
               id: "91",
               source: "linear",
-              target: "jjhub",
+              target: "smithers-cloud",
               entity: "comment",
               entityId: "ENG-480",
               action: "create",
@@ -670,7 +706,7 @@ describe("SyncOpsCardBody", () => {
       />
     )
 
-    expect(host.textContent).toContain("jjhub → linear issue 90 update")
+    expect(host.textContent).toContain("Smithers Cloud → linear issue 90 update")
     expect(host.textContent).toContain("Linear API: 422 label 'infra' does not exist on team ENG")
     /* The skipped row is a state, not a failure, and it is never filtered out. */
     expect(host.textContent).toContain("Skipped")
@@ -790,7 +826,7 @@ describe("SyncOpsCardBody", () => {
     const ops = Array.from({ length: 12 }, (_, index) => ({
       id: `op-${index}`,
       source: "linear",
-      target: "jjhub",
+      target: "smithers-cloud",
       entity: "issue",
       entityId: `ENG-${index}`,
       action: "update",

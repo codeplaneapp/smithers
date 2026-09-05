@@ -77,6 +77,7 @@ const PRESENTATION_ONLY = [
   "openMenu", // dispatches runCommand("chat.surfaces") — the /chat.surfaces command
   "closeMenu", // dispatches runCommand("chat.surfaces"); the entry itself runs its own command
   "onCopy(", // delegated: App.tsx binds it to runCommandArgs("chat.copy-message", ...)
+  "onDownload}", // delegated: App.tsx binds StorageRecoveryButton to storage.recovery.export
   "onDecideApproval(", // delegated: App.tsx binds it to approval.approve / approval.deny
   "onRecoAction(", // delegated: App.tsx binds it to reco.accept / reco.edit / reco.dismiss
   "onGrantConfirm(", // delegated: App.tsx binds it to admin.grant.confirm
@@ -158,6 +159,7 @@ describe("launch-law parity: every affordance is a command", () => {
       // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
       // +1 (ask 5): the Flows pane's back-to-conversation close, like World's.
       "../App.tsx": 14,
+      "../StorageRecoveryButton.tsx": 1,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
       "../Composer.tsx": 11,
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
@@ -266,6 +268,7 @@ describe("launch-law parity: every affordance is a command", () => {
 
   test("delegated props are bound to commands at their call sites", () => {
     const app = files["../App.tsx"]
+    expect(app).toMatch(/onDownload=\{\(\) => \{\s*controller\.runCommand\(STORAGE_RECOVERY_EXPORT\)/)
     expect(app).toContain("runCommandArgs(\"chat.copy-message\"")
     expect(app).toContain("runCommandArgs(\"toast.dismiss\"")
     expect(app).toContain("runCommandArgs(\n")

@@ -294,6 +294,15 @@ const OP_LIMIT = 10
  * failed`; both vocabularies land here and neither is renamed on screen —
  * the word itself still rides the badge beside the glyph.
  */
+/*
+ * The endpoint name on a sync row. The wire carries whatever the backend
+ * calls itself, and the cloud's own payloads still say `jjhub` — an internal
+ * name the product never shows. One name reaches the screen: Smithers Cloud.
+ * Every other endpoint word rides through unchanged.
+ */
+export const endpointLabel = (endpoint: string): string =>
+  endpoint === "jjhub" || endpoint === "smithers-cloud" ? "Smithers Cloud" : endpoint
+
 export const opGlyph = (status: string) => {
   switch (status) {
     case "success":
@@ -353,7 +362,7 @@ export const SyncOpsCardBody = ({ card, onRunCommand }: { readonly card: SyncOps
         <div key={op.id} className="world-card-row" data-testid={`sync-op-${op.id}`}>
           <span className="connect-store-icon">{opGlyph(op.status)}</span>
           <span className="world-card-title">
-            {`${op.source} → ${op.target} ${op.entity}${op.entityId !== null ? ` ${op.entityId}` : ""} ${op.action}`}
+            {`${endpointLabel(op.source)} → ${endpointLabel(op.target)} ${op.entity}${op.entityId !== null ? ` ${op.entityId}` : ""} ${op.action}`}
           </span>
           <StatusPill status={op.status} />
           {op.at !== null ? <span className="world-card-path">{ageLabel(op.at)}</span> : null}

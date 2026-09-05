@@ -379,6 +379,9 @@ export const createCloudLspClient = (options: CloudLspClientOptions): CloudLspCl
     // A publication for a file no card opened has no card to land on: it stays with the server.
     const document = conn.documents.get(relative)
     if (document === undefined) return
+    // A slow publication can arrive after didChange. Its version must match
+    // the text we attribute to the card; it cannot satisfy the new read.
+    if (typeof params.version === "number" && params.version !== document.version) return
     const wire = params.diagnostics as ReadonlyArray<LspDiagnosticWire>
     const items = wire.slice(0, LSP_DIAGNOSTICS_CAP).map((item) => toDiagnostic(item, redact))
     const total = wire.length

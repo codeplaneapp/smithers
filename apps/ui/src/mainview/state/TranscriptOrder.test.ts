@@ -56,7 +56,7 @@ describe("a pending question never survives a restart", () => {
     const first = await createAppStore({ kind: "localStorage", storage })
     const note = [...first.collections.worldDocuments.values()][0]
     expect(note).toBeDefined()
-    first.dispatch({ type: "world.delete.asked", actor: "user", id: note?.id ?? "" })
+    await first.dispatch({ type: "world.delete.asked", actor: "user", id: note?.id ?? "" }).isPersisted.promise
     expect(first.session().pendingWorldDeleteId).toBe(note?.id ?? "")
 
     // The same persisted store, opened again — the modal's overlay swallows
@@ -83,10 +83,15 @@ describe("messages and cards share one transcript counter", () => {
   })
 
   test("the ordinals themselves are ordered, so the order survives a reload", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    store.dispatch({ type: "card.upsert", actor: "user", card: cardAt("first", 0) })
-    store.dispatch({ type: "message.appended", actor: "system", text: "after the card" })
+    const storage = memoryStorage()
+    const store = await createAppStore({ kind: "localStorage", storage })
+    await store.dispatch({ type: "card.upsert", actor: "user", card: cardAt("first", 0) }).isPersisted.promise
+    await store.dispatch({ type: "message.appended", actor: "system", text: "after the card" }).isPersisted.promise
     const message = [...store.collections.messages.values()][0]
     expect(message?.ordinal).toBe(1)
+    const reopened = await createAppStore({ kind: "localStorage", storage })
+    expect(order(reopened)).toEqual(order(store))
+    expect(reopened.collections.cards.get("first")?.ordinal).toBe(0)
+    expect([...reopened.collections.messages.values()][0]?.ordinal).toBe(1)
   })
 })

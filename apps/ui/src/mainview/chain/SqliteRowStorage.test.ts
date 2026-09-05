@@ -37,6 +37,19 @@ const wire = (rows: Record<string, { readonly versionKey: string; readonly data:
   JSON.stringify(rows)
 
 describe("normalized SQLite row storage", () => {
+  test("a rolled-back write prevents queued deltas from committing against its missing rows", async () => {
+    const db = database()
+    const storage = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    db.sqlite.run(`CREATE TRIGGER refuse_a BEFORE INSERT ON ${ROW_TABLE_NAME}
+      WHEN NEW.row_key = 's:a' BEGIN SELECT RAISE(ABORT, 'refused'); END`)
+    const a = { versionKey: "v1", data: { id: "a", label: "A" } }
+    const b = { versionKey: "v1", data: { id: "b", label: "B" } }
+    storage.storage.setItem("smithers-mvp.widgets", wire({ "s:a": a }))
+    storage.storage.setItem("smithers-mvp.widgets", wire({ "s:a": a, "s:b": b }))
+    await expect(storage.flush()).rejects.toThrow("refused")
+    expect(db.sqlite.query(`SELECT row_key FROM ${ROW_TABLE_NAME}`).all()).toEqual([])
+    await expect(storage.close()).rejects.toThrow("refused")
+  })
   test("persists entities as rows and commits a multi-collection batch atomically", async () => {
     const db = database()
     const storage = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
@@ -123,5 +136,106 @@ describe("normalized SQLite row storage", () => {
     expect(future.sqlite.query(`SELECT value FROM ${METADATA_TABLE_NAME} WHERE key = 'schema-version'`).get())
       .toEqual({ value: "99" })
     future.sqlite.close()
+  })
+})
+
+describe("legacy SQLite imports", () => {
+  const key = "smithers-mvp.widgets"
+  const legacyRow = { versionKey: "old", data: { id: "a", label: "legacy" } }
+  const seedKv = (sqlite: Database, entries: Record<string, string>) => {
+    sqlite.run("CREATE TABLE smithers_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    for (const [key, value] of Object.entries(entries)) sqlite.query("INSERT INTO smithers_kv VALUES (?, ?)").run(key, value)
+  }
+
+  test("imports the historical envelope once, preserves originals and never resurrects deleted rows", async () => {
+    const db = database()
+    const raw = JSON.stringify({ version: 1, entries: { [key]: wire({ "s:a": legacyRow }) } })
+    seedKv(db.sqlite, { "smithers-mvp.store": raw })
+    const imported = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    expect(JSON.parse(imported.storage.getItem(key)!)).toEqual({ "s:a": legacyRow })
+    expect(db.sqlite.query("SELECT value FROM smithers_kv").get()).toEqual({ value: raw })
+    imported.storage.removeItem(key)
+    await imported.flush()
+    const reopened = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    expect(reopened.storage.getItem(key)).toBe("{}")
+    expect(db.sqlite.query(`SELECT value FROM ${METADATA_TABLE_NAME} WHERE key = 'legacy-import-complete'`).get()).toEqual({ value: "1" })
+    await reopened.close()
+  })
+
+  test("imports installed TanStack registry rows and quarantines malformed and incompatible originals", async () => {
+    const db = database()
+    db.sqlite.run("CREATE TABLE collection_registry (collection_id TEXT PRIMARY KEY, table_name TEXT, schema_version INTEGER)")
+    db.sqlite.run("CREATE TABLE c_widgets (key TEXT PRIMARY KEY, value TEXT, metadata TEXT, row_version INTEGER)")
+    db.sqlite.query("INSERT INTO collection_registry VALUES (?, ?, ?)").run("widgets", "c_widgets", 8)
+    const insert = db.sqlite.query("INSERT INTO c_widgets VALUES (?, ?, NULL, ?)")
+    insert.run("s:a", JSON.stringify(legacyRow.data), 3)
+    insert.run("s:bad", JSON.stringify({ id: "bad", label: 42 }), 4)
+    insert.run("s:broken", "{broken", 5)
+    const store = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    expect(JSON.parse(store.storage.getItem(key)!)).toEqual({ "s:a": { ...legacyRow, versionKey: "sqlite-3" } })
+    expect(db.sqlite.query(`SELECT row_key FROM ${QUARANTINE_TABLE_NAME} ORDER BY row_key`).all()).toEqual([{ row_key: "s:bad" }, { row_key: "s:broken" }])
+    expect(db.sqlite.query("SELECT count(*) AS count FROM c_widgets").get()).toEqual({ count: 3 })
+    await store.close()
+  })
+
+  test("validates per-collection KV maps while retaining newer normalized rows", async () => {
+    const db = database()
+    const initial = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    initial.storage.setItem(key, wire({ "s:a": { versionKey: "new", data: { id: "a", label: "current" } } }))
+    await initial.flush()
+    db.sqlite.run(`DELETE FROM ${METADATA_TABLE_NAME} WHERE key = 'legacy-import-complete'`)
+    seedKv(db.sqlite, { [key]: wire({ "s:a": legacyRow, "s:b": { versionKey: "old", data: { id: "b", label: "saved" } }, "s:bad": { versionKey: "old", data: { id: "bad", label: false } } }) })
+    const imported = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    const rows = JSON.parse(imported.storage.getItem(key)!)
+    expect(rows["s:a"].data.label).toBe("current")
+    expect(rows["s:b"].data.label).toBe("saved")
+    expect(rows["s:bad"]).toBeUndefined()
+    await imported.close()
+  })
+
+  test("failed import rolls back inserted rows and marker, so retry imports everything", async () => {
+    const db = database()
+    const initial = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    await initial.flush()
+    db.sqlite.run(`DELETE FROM ${METADATA_TABLE_NAME} WHERE key = 'legacy-import-complete'`)
+    seedKv(db.sqlite, { [key]: wire({ "s:a": legacyRow, "s:b": { ...legacyRow, data: { id: "b", label: "B" } } }) })
+    db.sqlite.run(`CREATE TRIGGER refuse_import BEFORE INSERT ON ${ROW_TABLE_NAME} WHEN NEW.row_key = 's:b' BEGIN SELECT RAISE(ABORT, 'refused import'); END`)
+    await expect(openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })).rejects.toThrow("refused import")
+    expect(db.sqlite.query(`SELECT * FROM ${ROW_TABLE_NAME}`).all()).toEqual([])
+    expect(db.sqlite.query(`SELECT * FROM ${METADATA_TABLE_NAME} WHERE key = 'legacy-import-complete'`).get()).toBe(null)
+    db.sqlite.run("DROP TRIGGER refuse_import")
+    const reopened = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    expect(Object.keys(JSON.parse(reopened.storage.getItem(key)!))).toEqual(["s:a", "s:b"])
+    await reopened.close()
+  })
+
+  test("future current or legacy schema stamps fail before importing rows or markers", async () => {
+    for (const source of ["current", "kv", "registry"] as const) {
+      const db = database()
+      if (source === "registry") {
+        db.sqlite.run("CREATE TABLE collection_registry (collection_id TEXT PRIMARY KEY, table_name TEXT, schema_version INTEGER)")
+        db.sqlite.query("INSERT INTO collection_registry VALUES (?, ?, ?)").run("widgets", "c_widgets", 99)
+      } else {
+        seedKv(db.sqlite, { [key]: wire({ "s:a": legacyRow }), ...(source === "kv" ? { "smithers-mvp.schemaVersion": "99" } : {}) })
+        if (source === "current") {
+          db.sqlite.run(`CREATE TABLE ${METADATA_TABLE_NAME} (key TEXT PRIMARY KEY, value TEXT NOT NULL)`)
+          db.sqlite.query(`INSERT INTO ${METADATA_TABLE_NAME} VALUES (?, ?)`).run("schema-version", "99")
+        }
+      }
+      await expect(openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })).rejects.toBeInstanceOf(FutureSqliteSchemaError)
+      expect(db.sqlite.query(`SELECT * FROM ${ROW_TABLE_NAME}`).all()).toEqual([])
+      expect(db.sqlite.query(`SELECT * FROM ${METADATA_TABLE_NAME} WHERE key = 'legacy-import-complete'`).get()).toBe(null)
+      db.sqlite.close()
+    }
+  })
+
+  test("an authoritative empty envelope does not restore stale registry records", async () => {
+    const db = database()
+    seedKv(db.sqlite, { "smithers-mvp.store": JSON.stringify({ version: 1, entries: {} }), [key]: wire({ "s:a": legacyRow }) })
+    db.sqlite.run("CREATE TABLE collection_registry (collection_id TEXT PRIMARY KEY, table_name TEXT, schema_version INTEGER)")
+    db.sqlite.query("INSERT INTO collection_registry VALUES (?, ?, ?)").run("widgets", "obsolete_table", 8)
+    const store = await openSqliteRowStorage(db.host, { collections, schemaVersion: 9 })
+    expect(store.storage.getItem(key)).toBe("{}")
+    await store.close()
   })
 })

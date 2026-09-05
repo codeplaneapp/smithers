@@ -1,3 +1,4 @@
+import { actorSharedState } from "../ActorBindings"
 /*
  * The repo-import seam: POST /api/github/import {owner, repo} starts the job;
  * GET /api/github/import/{jobId} polls it; POST /api/github/import/{jobId}/retry
@@ -155,7 +156,7 @@ export const createRepoImportSeam = (ctx: SeamContext): RepoImportSeam => {
    * command again) bumps the epoch so a superseded loop stops upserting a
    * card the new run now owns.
    */
-  const epochs = new Map<string, number>()
+  const epochs = actorSharedState(ctx, "repoimport-epochs", () => new Map<string, number>())
 
   const upsert = (repo: string, ordinal: number, createdAt: number, patch: CardPatch): void => {
     const id = `repo-import-${repo}`

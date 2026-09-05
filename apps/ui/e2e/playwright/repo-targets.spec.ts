@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test"
 import type { Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { cpSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { basename, join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
 
 /*
@@ -11,14 +11,13 @@ import { localApiGet, localApiPost } from "./localApi"
  * through the chrome renders nothing; /target.list loads its Smithers targets
  * into a trusted typed card, and that card's parent-owned Run button streams a
  * target run into a target-run card.
- * The demo repository proves the loader at scale
- * (>= 82 targets); target execution happens in a throwaway copy of the
- * build-cli force-spec fixture, never in the demo checkout.
+ * A throwaway copy of the checked-in force-spec workspace proves the loader
+ * and table at scale (>= 80 targets), without depending on a personal checkout.
  */
 
 test.skip(process.env.SMITHERS_CHAT_STUB === "0", "the stub suite; the real endpoint is the manual proof")
+test.setTimeout(180_000)
 
-const FORCE = "/Users/williamcory/artsy/force"
 // Playwright loads specs as CommonJS, so the fixture resolves from __dirname.
 const FIXTURE = resolve(__dirname, "../../../../packages/smithers/build/build-cli/test/fixtures/force-spec")
 
@@ -33,6 +32,7 @@ const openRepo = async (page: Page, path: string): Promise<void> => {
   page.once("dialog", (dialog) => void dialog.accept(path))
   await page.getByTestId("composer-repo-trigger").click()
   await page.getByTestId("chrome-open-repo").click()
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("title", realpathSync(path), { timeout: 30_000 })
 }
 
 /** Type a registered slash command into the composer and send it. */
@@ -43,7 +43,6 @@ const command = async (page: Page, text: string): Promise<void> => {
 
 /** Opening renders nothing in the transcript: no repo card, no targets card, no message. */
 const expectNothingAutomatic = async (page: Page): Promise<void> => {
-  await page.waitForTimeout(1500)
   await expect(repoCard(page)).toHaveCount(0)
   await expect(targetsCard(page)).toHaveCount(0)
 }
@@ -76,24 +75,32 @@ test.afterEach(async ({ page, request }) => {
   }
 })
 
-test("opening the demo repository loads its trusted target card", async ({ page }) => {
-  test.skip(!existsSync(FORCE), `${FORCE} is not on this machine`)
+test("opening a real fixture repository loads its trusted target card", async ({ page }) => {
+  const copy = mkdtempSync(join(tmpdir(), "smithers-target-table-"))
+  temporary.push(copy)
+  cpSync(FIXTURE, copy, { recursive: true })
+  const copyPath = realpathSync(copy)
   await page.goto("/")
-  await openRepo(page, FORCE)
-  opened.push(realpathSync(FORCE))
+  await openRepo(page, copyPath)
+  opened.push(copyPath)
   // The selector names the repo; the origin chip shows WHERE it is (the ~-abbreviated path), never the name again.
-  await expect(page.getByTestId("composer-repo-trigger")).toContainText("artsy/force")
-  await expect(page.getByTestId("repo-chip")).toContainText("~/artsy/force")
+  await expect(page.getByTestId("composer-repo-trigger")).toHaveText(basename(copyPath))
+  await expect(page.getByTestId("repo-chip")).toHaveAttribute("title", copyPath)
   await expectNothingAutomatic(page)
 
   // The targets table is the explicit act.
+  const querying = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/targets/query")
   await command(page, "/target.list")
+  const query = await querying
+  expect(query.status()).toBe(200)
+  const total = ((await query.json()) as { targets: unknown[] }).targets.length
+  expect(total).toBeGreaterThanOrEqual(80)
   const targets = targetsCard(page)
   await expect(targets).toBeVisible()
   await expect(targets.getByTestId("card-kind-targets")).toBeVisible()
   // The loader answers in a few seconds on force; the row count is the whole workspace.
   // Rows are fewer than targets: names shared across packages read as one grouped row; the count is in targets.
-  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82", { timeout: 60_000 })
+  await expect(targets.getByTestId("targets-count")).toHaveText(`${total} of ${total}`, { timeout: 60_000 })
   expect(await targets.locator("[data-target-row]").count()).toBeGreaterThanOrEqual(1)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
 
@@ -105,17 +112,17 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   })
   expect(overflow.overflowY).toBe("auto")
   expect(overflow.bounded).toBe(true)
-  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
+  await expect(targets.getByTestId("targets-count")).toHaveText(`${total} of ${total}`)
 
   // Filtering narrows the rows and the count; clearing restores them.
   await targets.getByTestId("targets-filter-query").fill("detectSecrets")
-  await expect(targets.getByTestId("targets-count")).toHaveText(/^[1-9] of 82$/)
+  await expect(targets.getByTestId("targets-count")).toHaveText(new RegExp(`^[1-9] of ${total}$`))
   const narrowed = await targets.locator("[data-target-row]").count()
   expect(narrowed).toBeGreaterThanOrEqual(1)
   expect(narrowed).toBeLessThan(10)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
   await targets.getByTestId("targets-filter-query").fill("")
-  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
+  await expect(targets.getByTestId("targets-count")).toHaveText(`${total} of ${total}`)
 
   // A kind chip is a filter too, and reads as pressed while it is on.
   const chip = targets.locator('[data-testid^="targets-chip-kind-"]').first()
@@ -124,7 +131,7 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   await expect(chip).toHaveAttribute("aria-pressed", "true")
   const kept = await targets.locator("[data-target-row]").count()
   expect(kept).toBeGreaterThan(0)
-  expect(kept).toBeLessThan(82)
+  expect(kept).toBeLessThan(total)
   await expect(targets.locator("[data-target-row]").first().locator("[data-slot=badge]").filter({ hasText: kind }).first()).toBeVisible()
   await chip.click()
   await expect(chip).toHaveAttribute("aria-pressed", "false")
@@ -147,12 +154,12 @@ test("opening the demo repository loads its trusted target card", async ({ page 
   await expect(targets.getByTestId("targets-star-//:detectSecrets")).toHaveAttribute("aria-pressed", "true")
   await targets.getByTestId("targets-mode-featured").click()
   await expect(targets.getByTestId("targets-mode-featured")).toHaveAttribute("aria-pressed", "true")
-  await expect(targets.getByTestId("targets-count")).toHaveText("1 of 82")
+  await expect(targets.getByTestId("targets-count")).toHaveText(`1 of ${total}`)
   await expect(targets.locator("[data-target-row=\"//:detectSecrets\"]")).toBeVisible()
   await targets.getByTestId("targets-star-//:detectSecrets").click()
-  await expect(targets.getByTestId("targets-count")).toHaveText("0 of 82")
+  await expect(targets.getByTestId("targets-count")).toHaveText(`0 of ${total}`)
   await targets.getByTestId("targets-mode-all").click()
-  await expect(targets.getByTestId("targets-count")).toHaveText("82 of 82")
+  await expect(targets.getByTestId("targets-count")).toHaveText(`${total} of ${total}`)
 })
 
 test("a trusted Run button streams a target run to completion", async ({ page, request }) => {

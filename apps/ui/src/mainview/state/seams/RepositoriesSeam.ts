@@ -1,6 +1,6 @@
 /*
  * The repositories seam (lane piper step 2, ADR 0001 "Settled with the
- * backend"): the jjhub inventory behind the `/api/cloud/*` proxy.
+ * backend"): the Smithers Cloud inventory behind the `/api/cloud/*` proxy.
  *
  *   GET /api/user/repos                  — owner (bare login), name, full_name,
  *                                          default_bookmark, NO head

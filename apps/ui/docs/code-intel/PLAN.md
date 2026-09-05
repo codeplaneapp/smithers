@@ -184,7 +184,12 @@ apps/ui/src/bun/routes/lsp.ts                                // POST /api/lsp/{h
   snapshot-tested like the others). Env is the server's own (`lspChildEnv`:
   HOME, PATH, TMPDIR, locale, zone — none of the PTY allowlist's provider
   keys, SSH agent or config dirs; Remediation 2). Caps: 4 servers, 8
-  in-flight requests per server, 5 s per request, 64 KiB bodies, hover text
+  in-flight requests per server, 5 s per steady-state request. Native
+  initialization and the shared first positioned-query project-load window
+  each allow 15 s: TypeScript loads the project after initialize, and cold
+  loads regularly exceed 5 s under CPU contention. A successful positioned
+  response ends the cold window; concurrent initial queries share its
+  deadline rather than extending it. Bodies are capped at 64 KiB, hover text
   cut at 4 KiB, 50 diagnostics, 20 locations — every cap stated on the wire
   (`truncated`, `total`, `omitted`). A missing server is stated with its
   install line and never installed. Free text from the server has host paths

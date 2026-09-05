@@ -12,6 +12,23 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { renderCiMatrix } from "./CiMatrix"
+import { currentSandboxHost, sandboxEnforced } from "./Sandbox"
+
+test.skipIf(!sandboxEnforced(currentSandboxHost()))("a CI preview cannot write back into the original repository through an absolute path", async () => {
+  // Keep the original outside the system scratch directory, which the loader may write.
+  const original = await mkdtemp(join(process.cwd(), ".ci-preview-confinement-"))
+  try {
+    const proof = join(original, "escaped")
+    const cli = join(original, "cli.mjs")
+    await writeFile(cli, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(proof)}, 'escaped')`)
+    const result = await renderCiMatrix({ repoId: "read-only", repo: original, labels: ["//:ci"], declarationFiles: [], cli,
+      node: { path: process.execPath, version: "v22.19.0" } })
+    expect(await Bun.file(proof).exists()).toBe(false)
+    expect(result.warnings?.length).toBeGreaterThan(0)
+  } finally {
+    await rm(original, { recursive: true, force: true })
+  }
+})
 
 let repo = ""
 beforeEach(async () => {
