@@ -6,6 +6,8 @@
  * bounded capture keeps, and what happens to a process group when the fiber
  * running it is interrupted. Nothing here sleeps and hopes; each case waits
  * for a fact it can observe.
+ *
+ * @since 0.1.0
  */
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -56,7 +58,7 @@ const failed = async (value: Exec.Payload): Promise<Exec.ExecError> => {
 
 /** Waits for a predicate to hold, polling rather than guessing a duration. */
 const until = async <A>(read: () => Promise<A | undefined>): Promise<A> => {
-  const deadline = Date.now() + 10_000
+  const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     const value = await read()
     if (value !== undefined) return value
@@ -345,7 +347,7 @@ describe("payload and environment boundary", () => {
     // A cargo target that compiles a `-sys` crate spawns the host `cc`. On
     // macOS a toolchain clang reached through PATH resolves its sysroot from
     // `SDKROOT`/`DEVELOPER_DIR` and from nothing else, so withholding them
-    // fails the build with `'stdlib.h' file not found` — a host-configuration
+    // fails the build with `'stdlib.h' file not found`, a host-configuration
     // error reported as a compile error three processes down.
     const previousSdk = process.env["SDKROOT"]
     const previousDeveloper = process.env["DEVELOPER_DIR"]
@@ -432,14 +434,42 @@ describe("payload and environment boundary", () => {
   })
 
   it.skipIf(process.platform === "win32")("kills a timed-out tool's descendants", async () => {
-    const marker = NodePath.join(root, "timeout-grandchild")
-    const child = `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(marker)}, "x"), 250)`
-    const program = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(child)}], ` +
-      `{ stdio: "ignore" }); setInterval(() => undefined, 1000)`
-    await failed(payload(program, { timeoutMs: 25 }))
-    await new Promise((resolve) => setTimeout(resolve, 350))
-    await expect(Fs.stat(marker)).rejects.toMatchObject({ code: "ENOENT" })
-  })
+    const pidFile = NodePath.join(root, "timeout-pids.txt")
+    const child = "process.send(process.pid); setInterval(() => {}, 1000)"
+    const program = `const fs = require('node:fs');` +
+      `const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(child)}], ` +
+      `{ stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });` +
+      `child.on('message', pid => fs.writeFileSync(${JSON.stringify(pidFile)}, process.pid + ' ' + pid));` +
+      `setInterval(() => {}, 1000)`
+
+    // A delayed parent timeout can lose a race with a grandchild's marker
+    // timer even when the process group is killed correctly. Wait for both
+    // processes to be ready, then observe their termination after the timeout.
+    const fiber = Effect.runFork(Exec.run({ workspaceRoot: root }, payload(program, { timeoutMs: 30_000 })))
+    let pids: Array<number> = []
+    try {
+      pids = await until(async () => {
+        const text = await Fs.readFile(pidFile, "utf8").catch(() => undefined)
+        const parsed = text?.trim().split(" ").map(Number)
+        return parsed?.length === 2 && parsed.every((pid) => Number.isInteger(pid) && pid > 0) ? parsed : undefined
+      })
+      expect(pids.map(alive)).toEqual([true, true])
+      const error = await Effect.runPromise(Effect.flip(Fiber.join(fiber)))
+      expect(error.code).toBe("timed_out")
+      await until(async () => pids.every((pid) => !alive(pid)) ? true : undefined)
+      expect(pids.map(alive)).toEqual([false, false])
+    } finally {
+      await Effect.runPromise(Fiber.interrupt(fiber))
+      // A failing regression must not leave the grandchild running.
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL")
+        } catch {
+          // Successful termination has already removed the process.
+        }
+      }
+    }
+  }, 65_000)
 })
 
 describe("cancellation", () => {
