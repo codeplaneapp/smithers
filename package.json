@@ -1,6 +1,6 @@
 {
   "name": "smithers",
-  "description": "Durable control plane for long-running coding agents",
+  "description": "Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.",
   "author": "William Cory",
   "license": "MIT",
   "private": true,
@@ -14,7 +14,7 @@
   "bugs": {
     "url": "https://github.com/smithersai/smithers/issues"
   },
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@11.25.0",
   "workspaces": [
     "packages/*",
     "packages/smithers/*",
@@ -50,22 +50,24 @@
     "bun": ">=1.4.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@smthrs/build-cli": "workspace:*",
     "@smthrs/cli": "workspace:*",
     "@smthrs/database": "workspace:*",
     "@smthrs/engine-store": "workspace:*",
+    "@smthrs/repo-targets": "workspace:*",
     "@smthrs/targets": "workspace:*",
-    "@types/node": "26.1.0",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "mermaid": "^11.16.1",
+    "@types/node": "26.4.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "mermaid": "^11.17.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "typescript": "6.0.3",
-    "vite": "^8.2.1",
-    "eslint": "9.39.1",
-    "typescript-eslint": "8.65.0"
+    "semver": "7.8.5",
+    "typescript": "5.9.3",
+    "vite": "^8.2.2",
+    "eslint": "9.39.5",
+    "typescript-eslint": "8.69.0"
   }
 }
