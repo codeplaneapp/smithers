@@ -142,7 +142,7 @@ describe("run-store durable migration upgrade", () => {
             })
           )
 
-          expect(upgraded.applied).toEqual([[1002, "run-store_lineage"]])
+          expect(upgraded.applied).toEqual([[1002, "run-store_lineage"], [1003, "run-store_execution_revisions"]])
           expect(upgraded.columns.map((column) => column.name)).toEqual(expect.arrayContaining([
             "lineage_id",
             "round_ordinal"

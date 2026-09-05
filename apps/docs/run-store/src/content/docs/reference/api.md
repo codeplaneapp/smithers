@@ -50,7 +50,7 @@ The service tag. The identity string equals the defining module path.
 
 ### RunStore.Service
 
-Eleven operations. Every one validates its input first and fails with
+Fourteen operations. Every one validates its input first and fails with
 `RunStoreError` on a defect; competition is reported as a success value.
 
 #### create
@@ -71,7 +71,37 @@ const get: (runId: string) => Effect<RunRow, RunStoreError>
 
 Reads one row and re-validates it. Fails with `not_found_row` when there is no
 such run, and with `decode_failed` when the row breaks the durable invariants.
-It is the only read that fails rather than reporting absence.
+`latestRound` also reports a missing row as a failure.
+
+#### lineage and latestRound
+
+```ts
+const lineage: (runId: string) => Effect<ReadonlyArray<RunRow>, RunStoreError>
+const latestRound: (runId: string) => Effect<RunRow, RunStoreError>
+```
+
+Resolve trampoline membership from any existing round. `lineage` returns all
+rounds in ordinal order, or an empty array for an unknown ID. `latestRound`
+returns the highest ordinal using the lineage index, or `not_found_row`.
+Pre-lineage roots with null lineage columns are included as round zero.
+Fork ancestry in `parentRunId` does not join otherwise independent lineages.
+These are individual snapshot reads; compose several reads with the owning
+database transaction when they must describe one coherent state.
+
+#### requestCancelLineage
+
+```ts
+const requestCancelLineage: (runId: string, nowMs: number) => Effect<RequestCancelOutcome, RunStoreError>
+```
+
+Records cancellation for every nonterminal round of the named logical run in
+one write transaction. A completed predecessor does not hide its live handoff
+successor. Existing request times and completed-round history are unchanged.
+`CancelRequested` takes precedence if any round gets a new request;
+otherwise a previous request yields `AlreadyRequested`. With every round
+settled, `Terminal` describes the latest round. An unknown ID yields `NotFound`.
+This method does not traverse child ownership edges or interrupt local fibers;
+the engine coordinates those operations.
 
 #### requestCancel
 
@@ -79,11 +109,23 @@ It is the only read that fails rather than reporting absence.
 const requestCancel: (runId: string, nowMs: number) => Effect<RequestCancelOutcome, RunStoreError>
 ```
 
-Records unfenced cancellation intent that a later guarded transition observes.
+Records unfenced cancellation intent for exactly one round that a later guarded transition observes.
 Any observer may call it, and it is first-writer-wins, so a repeat reports the
 original time. A settled run records nothing. `nowMs` is request data rather than
 a lease predicate, so it is checked as a non-negative safe integer and not bound
 by the skew allowance.
+
+#### acknowledgeCancel
+
+```ts
+const acknowledgeCancel: (runId: string, owner: OwnerId, nowMs: number) => Effect<boolean, RunStoreError>
+```
+
+Records the first owner observation of cancellation intent under the running
+owner fence. Returns false when the run is missing, not running, has no intent,
+or belongs to another owner. Repeated acknowledgements preserve the original
+owner and timestamp. This does not make the run terminal or prove cleanup ended.
+Engine snapshots expose the record separately from request and finish.
 
 #### claim
 
@@ -704,7 +746,8 @@ const run: Effect<ReadonlyArray<readonly [id: number, name: string]>, MigrationE
 const layer: Layer<never, MigrationError | SqlError, SqlClient.SqlClient>
 ```
 
-`set` owns `flows_runs` and `flows_attempts` under the namespace `run-store` and
+`set` owns `flows_runs`, `flows_attempts`, `flows_run_source`, and
+`flows_run_changes` under the namespace `run-store` and
 reserves migration id block 1000, so its ids can never collide with another
 package's. Compose `set` with the other storage packages' sets and run them in
 one pass rather than layering several migrators;
@@ -712,6 +755,12 @@ one pass rather than layering several migrators;
 
 The schema enforces the ownership invariants as SQL `CHECK` constraints, so no
 writer, including one issuing raw SQL, can leave a half-owned row behind.
+
+Migration 1003 adds a per-database source identity, monotonic revision triggers,
+and cancellation acknowledgement. Every run-row mutation advances the revision
+in its transaction. Existing rows receive baseline revisions; earlier mutation
+order and acknowledgement are unknown. Deleted run IDs remain permanent
+tombstones. See [Execution revisions](/concepts/execution-revisions/).
 
 ## Heartbeat
 

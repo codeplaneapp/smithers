@@ -1,105 +1,147 @@
 ---
 title: "@smthrs/run-store"
-description: "Durable run state, fenced ownership, and step attempts for Smithers flows: the rows a restarted engine reads to decide what is running and which process may mutate it."
+description: "Durable run state and fenced ownership for long-running jobs: which runs exist, what each one is doing, which process owns it, and how a restart takes one back safely."
 ---
 
-`@smthrs/run-store` holds the executable authority for a durable run: what is
-running, how far it got, and which process is allowed to move it.
+`@smthrs/run-store` keeps the live state of long-running jobs in a SQL database.
+It answers two questions about every run: what is it doing right now, and which
+process is allowed to touch it.
 
-Two services own that authority. `RunStore` holds one row per run: its status,
-its owner, its heartbeat, and the executable state a resume re-enters.
-`AttemptStore` holds one row per step attempt: its state, its checkpoint, and
-what it finished with. `Ownership` supplies the arbitration around them, and
-`RunStoreMetrics` counts every outcome they decide.
+It is an [Effect](https://effect.website) library of two services, `RunStore`
+and `AttemptStore`, plus the ownership arbitration that decides who holds a run.
 
-The journal in [`@smthrs/journal`](/api/journal) is the other half of durability
-and answers a different question. The journal is history, audit, and replay
-evidence: what happened, in order. These rows are the current fact a restarted
-process reads before it does anything. Both write through the same
-[`@smthrs/database`](/api/database) `DurableWriter`, so a surrounding
-`Journal.transact` commits a state projection and its durable events in one
-serialized transaction.
+## What it solves
 
-## Who uses this package
+A process that owns a long job can die at any moment. Two things then go wrong.
+The work is stranded, because nothing else knows the job existed or how far it
+got. And picking the job back up is dangerous, because the process you assume is
+dead may still be alive and writing.
 
-Engine and control-plane authors use it directly: [`@smthrs/engine-store`](/api/engine-store)
-composes it into the durable engine's storage ladder, and
-[`@smthrs/control`](/api/control) drives it from the control plane. A flow author
-never calls it, because the engine does. Reach for it when you are writing the
-host that owns runs, sweeping stalled runs, or building an adapter that has to
-agree with the engine about who owns what.
+This package handles both in the database rather than in your code:
+
+- **One row is the authority.** `RunStore` keeps a row per run holding its
+  status, its owner, its heartbeat, whether cancellation was requested, and the
+  executable state a resume re-enters. A restarted process reads that row
+  instead of replaying a log to work out where it was.
+- **Every owned write carries a fence.** An owner identity is
+  `{ hostId, pid, nonce }`, and all three fields are compared inside the same
+  SQL statement as the mutation they guard. There is no window between checking
+  ownership and using it, so two processes cannot both win.
+- **Competition is a value, not an error.** Losing a race returns
+  `AlreadyClaimed`, `HeartbeatFresh`, or `FenceLost` as an ordinary success
+  value you branch on. The error channel is reserved for real defects such as an
+  invalid argument or a corrupt row.
+- **Step attempts inherit the run's fence.** `AttemptStore` records when each
+  execution of a step started, the checkpoints it wrote, and how it ended, and
+  refuses every write from a process that no longer owns the run.
+
+The stores carry no database of their own. They are written against the
+driver-neutral [`@smthrs/database`](/api/database) contract, so the same code
+runs over a local SQLite file, over a server, or over an in-memory database in a
+test.
 
 ## Install
 
+Smithers is at `1.0.0-rc.0` and has not reached npm yet; when it does, the
+release candidate publishes under the `next` tag, which is what this installs:
+
 ```bash
-pnpm add @smthrs/run-store
+pnpm add @smthrs/run-store@next effect@4.0.0-rc.112
 ```
 
-For the driver, the migration set, and the import forms, see
-[Installation](./installation.md).
+Node.js 22.19.0 or later. [Installation](./installation.md) covers the import
+forms and the two services a composition has to supply.
 
-## Claiming a run
+## Take a run, do the work, settle it
 
-Ownership is a compare-and-swap against the exact row you read, never a lock:
+This program creates a run, claims ownership of it, and finishes it. The stores
+are the production ones. `TestRunStore.layer` provides them over a migrated
+in-memory database, so the file runs with no configuration:
 
 ```ts
 import { RunStore } from "@smthrs/run-store"
+import type { OwnerId } from "@smthrs/run-store/Ownership"
+import * as TestRunStore from "@smthrs/run-store/test/TestRunStore"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 
-const owner = { hostId: "host-a", pid: 4102, nonce: "3f9c" }
+const owner: OwnerId = { hostId: "worker-1", pid: 4102, nonce: "9c31-af02" }
 
-const takeOver = Effect.gen(function*() {
+const program = Effect.gen(function*() {
   const runs = yield* RunStore.RunStore
-  const row = yield* runs.get("run-1")
-  const expected = { status: row.status, owner: row.owner, heartbeatAtMs: row.heartbeatAtMs }
-  const nowMs = yield* Clock.currentTimeMillis
 
-  const claim = yield* runs.claim("run-1", expected, owner, nowMs)
-  if (claim._tag !== "Claimed") return claim
-  return yield* runs.activate("run-1", owner, claim.claimedAtMs, expected)
+  yield* runs.create("build-42", JSON.stringify({ step: "checkout" }))
+
+  const nowMs = yield* Clock.currentTimeMillis
+  const taken = yield* runs.claimAndOwn(
+    "build-42",
+    { status: "pending", owner: null, heartbeatAtMs: null },
+    owner,
+    nowMs
+  )
+  if (taken._tag !== "Activated") return `another process has it: ${taken._tag}`
+
+  // Do the work here, heartbeating while it runs.
+
+  const settled = yield* runs.transitionOwned(
+    "build-42",
+    owner,
+    "completed",
+    JSON.stringify({ step: "done" })
+  )
+  return `run ended as ${settled._tag}`
 })
+
+console.log(
+  await Effect.runPromise(
+    program.pipe(Effect.provide(TestRunStore.layer), Effect.scoped)
+  )
+)
 ```
 
-`expected` is the row you read, restated. If any of those three fields moved
-while you were deciding, the write refuses and tells you which race you lost.
-Competition is a success value, never a failure: `AlreadyClaimed`,
-`HeartbeatFresh`, and `SnapshotChanged` are ordinary outcomes, while
-`RunStoreError` is reserved for invalid input, corrupt rows, and database
-failures. See [Fencing and ownership](./concepts/fencing.md).
+```text
+run ended as Transitioned
+```
 
-## The package at a glance
+The third argument to `claimAndOwn` is the row as you last read it, restated as
+the three fields a claim guards. The claim is admitted only while the row still
+matches, so a peer that took the run between your read and your write loses the
+race instead of overwriting it. Had that happened, `transitionOwned` would have
+returned `FenceLost` and changed nothing.
 
-The root entry point exports these namespaces, and each is also importable from
-`@smthrs/run-store/<Module>`:
+## How this relates to @smthrs/flows
 
-| Namespace         | What it is                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RunStore`        | The run row: lifecycle, cancellation intent, ownership compare-and-swaps, fenced transitions, and the shape limits on executable run state. |
-| `AttemptStore`    | The attempt row: fenced starts, checkpoints, heartbeats, terminal outcomes, and patches, under a configurable policy.                       |
-| `Ownership`       | `OwnerId`, liveness evidence, the pid probe and the lease check, the heartbeat constants, and the supervision loop.                         |
-| `RunStoreMetrics` | Attributed counters for every claim, heartbeat, and transition outcome the stores decide.                                                   |
-| `Migrations`      | The `flows_runs` and `flows_attempts` schema, as a migration set and as a layer.                                                            |
+`@smthrs/run-store` is one of the storage services inside
+[`@smthrs/flows`](/api/flows), the package that carries the whole Smithers
+durable flow engine in a single dependency. When you write a flow with
+`@smthrs/flows` and run it on a Node host, this package is the code deciding
+which process owns your run and what a restart re-enters. Flow authors never
+call it.
 
-Every export of every namespace, with signatures and outcomes, is on the
-[API reference](./api.md).
+Reach for `@smthrs/run-store` directly when you are building the host rather
+than the flow: a scheduler, a worker pool, or any service that hands durable
+work between processes and needs ownership arbitration it can trust. Most hosts
+do not wire it by hand even then.
+[`@smthrs/engine-store`](/api/engine-store) already composes these stores with
+the journal, the step cache, and the engine's own state into one storage ladder,
+and `@smthrs/flows/NodeRuntime` builds that ladder over a single SQLite file.
+
+Above all of it sits [`smithers`](/api/cli), the command line that plans, runs,
+and inspects durable flows without your writing a host at all. Start there if
+you want to run flows rather than build the machinery underneath them.
 
 ## Where to go next
 
-- [Installation](./installation.md): the driver, the peer packages, the import
-  forms, and what is blocked from the export map.
-- [Quickstart](./quickstart.md): create a run, claim it, record an attempt, and
-  finish it, against an in-memory database.
-- Concepts: [fencing and ownership](./concepts/fencing.md),
-  [the heartbeat lease](./concepts/leases.md),
-  [liveness evidence](./concepts/liveness-evidence.md), and
-  [durable values](./concepts/durable-values.md).
-- Guides: [compose the stores](./guides/compose-the-stores.md),
-  [claim a run and finish it](./guides/claim-and-finish-a-run.md),
-  [record a step attempt](./guides/record-step-attempts.md),
-  [cancel a run](./guides/cancel-a-run.md),
-  [take over a stalled run](./guides/recover-a-stalled-run.md),
-  [observe store outcomes](./guides/observe-outcomes.md), and
-  [testing](./guides/testing.md).
-- [Troubleshooting](./troubleshooting.md): every typed failure and refused
-  outcome, what causes it, and what to change.
+- [Quickstart](./quickstart.md) drives one run through its whole lifecycle,
+  including a step attempt, against an in-memory database.
+- [Fencing and ownership](./concepts/fencing.md) explains the compare-and-swap
+  every write goes through, and [the heartbeat lease](./concepts/leases.md)
+  explains how a run is judged stale.
+- [Claim a run and finish it](./guides/claim-and-finish-a-run.md) and
+  [take over a stalled run](./guides/recover-a-stalled-run.md) are the two
+  paths a host has to get right.
+- [Compose the stores into a host](./guides/compose-the-stores.md) gives the
+  layer order that satisfies both services.
+- [API reference](./api.md) documents every export.
+- [Troubleshooting](./troubleshooting.md) lists each refused outcome and typed
+  error, and what to change.

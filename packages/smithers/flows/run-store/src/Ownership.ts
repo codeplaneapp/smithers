@@ -7,9 +7,6 @@
  * durable appends. It is re-exported here so ownership callers keep reading it
  * as one vocabulary.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
- *
  * @since 0.1.0
  */
 import { OwnerId } from "@smthrs/journal/OwnerId"
@@ -239,8 +236,7 @@ export const sameHostPidProbe: LivenessCheck = (expectedOwner, context) =>
 
 export {
   /**
-   * Heartbeat cadence adopted from `RUN_HEARTBEAT_MS` in the Run Ownership
-   * vault note.
+   * How often the supervision loop pulses to renew the owner's lease.
    *
    * @since 0.1.0
    * @category constants
@@ -255,8 +251,7 @@ export {
    */
   heartbeatSkewAllowance,
   /**
-   * Heartbeat staleness cutoff adopted from `RUN_HEARTBEAT_STALE_MS` in the
-   * Run Ownership vault note.
+   * How old a persisted heartbeat must be before a peer may steal the run.
    *
    * @since 0.1.0
    * @category constants

@@ -5,15 +5,13 @@
  * id block `1000` so its ids can never collide with the journal's or the step
  * cache's — see `@smthrs/database`'s `Migrations` for how the blocks compose.
  *
- * Derived contracts: `docs/pages/concepts/concurrency.md` and
- * `docs/pages/concepts/journal.md`.
- *
  * @since 0.1.0
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
 import { initial } from "./migrations/0001_initial.ts"
 import { lineage } from "./migrations/0002_lineage.ts"
+import { executionRevisions } from "./migrations/0003_execution_revisions.ts"
 
 /**
  * The run store's namespaced migration set, for composition with the other
@@ -27,7 +25,8 @@ export const set: DatabaseMigrations.MigrationSet = {
   idOffset: DatabaseMigrations.idBlock,
   migrations: {
     "0001_initial": initial,
-    "0002_lineage": lineage
+    "0002_lineage": lineage,
+    "0003_execution_revisions": executionRevisions
   }
 }
 

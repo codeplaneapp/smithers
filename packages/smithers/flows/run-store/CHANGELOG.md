@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- Required `RunStore.Service` operations `lineage`, `latestRound`, and
+  `requestCancelLineage` resolve logical runs across trampoline rounds. Logical
+  cancellation is atomic and preserves terminal-round history and existing
+  request timestamps. Custom adapters must implement these operations; the
+  unavailable stub refuses them explicitly. No database migration is needed.
+
 ### Fixed
 
 - Fixed the CommonJS build of the migration set. `migrations/0001_initial`

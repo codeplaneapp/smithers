@@ -54,6 +54,10 @@ const withTestClock = <A, E>(effect: Effect.Effect<A, E, RunStore.RunStore>) =>
   )
 ```
 
+`TestDatabase` comes from [`@smthrs/database`](https://database.smithers.sh/reference/api/), which this
+package depends on but does not re-export, so add it to your dev dependencies
+for that import to resolve.
+
 `TestClock.adjust(Duration.seconds(31))` walks a fresh lease past
 `heartbeatStaleAfter` in one statement, which is what makes a steal test a
 readable ten lines. Take `nowMs` from `Clock.currentTimeMillis` in the code under

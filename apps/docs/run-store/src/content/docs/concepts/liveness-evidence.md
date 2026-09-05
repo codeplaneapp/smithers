@@ -82,7 +82,9 @@ host can give. A fresh process with no application code at all can reclaim a
 hard-killed owner's runs once the lease it stopped renewing expires. Browser
 compositions keep it, because a tab has no process table to ask.
 
-`Ownership.sameHostPidProbe` asks the operating system instead:
+`Ownership.sameHostPidProbe` asks the operating system instead. It is what a
+Node host hands the engine, so this snippet also installs
+[`@smthrs/flows`](https://flows.smithers.sh/reference/api/):
 
 ```ts
 import type * as NodeRuntime from "@smthrs/flows/NodeRuntime"
@@ -115,8 +117,8 @@ delivery checks, and exactly three answers matter:
 
 Failing closed is the whole point. A check that returns `false` without asking
 says "that owner is gone" about an owner it never looked at, and the engine
-steals runs out of live processes on the strength of it. That is why
-`@smthrs/flows/NodeRuntime` requires `isAlive` rather than defaulting it.
+steals runs out of live processes on the strength of it. That is why the
+engine's `NodeRuntime` requires `isAlive` rather than defaulting it.
 
 Two limits are inherent to asking a pid, and they bound what reclaim can
 promise:

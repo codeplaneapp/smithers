@@ -1,8 +1,6 @@
 /**
  * Deterministic bundle of the production run and attempt services.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- *
  * @since 0.1.0
  */
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"

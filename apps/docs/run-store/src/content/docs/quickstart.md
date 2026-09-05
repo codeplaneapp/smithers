@@ -19,7 +19,7 @@ normal run, and read back the row a restart would have found.
 - The package installed:
 
 ```bash
-pnpm add @smthrs/run-store
+pnpm add @smthrs/run-store@next effect@4.0.0-rc.112
 ```
 
 ## Name the owner
@@ -29,7 +29,7 @@ fields, and all three are compared in the same SQL statement as the mutation
 they guard:
 
 ```ts
-import type { OwnerId } from "@smthrs/journal/OwnerId"
+import type { OwnerId } from "@smthrs/run-store/Ownership"
 
 const owner: OwnerId = { hostId: "quickstart-host", pid: 4102, nonce: "3f9c-8b21" }
 ```

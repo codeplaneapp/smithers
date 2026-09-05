@@ -5,8 +5,8 @@
  * recovery reads; `Ownership` supplies the liveness evidence and heartbeat
  * supervision that arbitrate it. The fencing token they trade in, `OwnerId`,
  * is defined by `@smthrs/journal`, because the journal is what it fences, and
- * is re-exported from `Ownership` here. See the
- * [journal model](/concepts/journal).
+ * is re-exported from `Ownership` here, so importing it needs no second
+ * package.
  *
  * This entry point is browser-bundleable: every service here is written
  * against the driver-neutral `@smthrs/database` contract. The test double,

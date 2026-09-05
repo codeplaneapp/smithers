@@ -1,12 +1,6 @@
 /**
  * Fenced run persistence and ownership compare-and-swap operations.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
- *
- * The two-phase snapshot/claim/activation CAS and heartbeat fence are adapted
- * from smithers `packages/db` and `packages/smithers/flows/engine`.
- *
  * Operations that accept or verify `LivenessEvidence` (`claim`,
  * `claimAndOwn`, `steal`, `heartbeat`, `requestCancel`, and `recoverClaim`)
  * take the caller's `nowMs` and judge it literally, including the lease cutoff
@@ -166,8 +160,8 @@ export type RunStoreErrorCode = typeof RunStoreErrorCode.Type
  * Compare-and-swap competition is represented by successful outcome values,
  * never by this error channel.
  *
- * The identity string equals the defining module path, like every other
- * identity in this repository.
+ * The identity string equals the defining module path, which is how every
+ * tagged identity in this package is named.
  *
  * @since 0.1.0
  * @category errors
@@ -207,9 +201,9 @@ export interface RunRow extends RunSnapshot {
   readonly parentRunId: string | null
   readonly cancelRequestedAtMs: number | null
   /**
-   * The trampoline lineage this run is a round of, and which round it is
-   * (`docs/pages/concepts/subflows.md`). `null` on every run that is
-   * not part of a lineage, which reads as round 0 of a lineage of one.
+   * The trampoline lineage this run is a round of, and which round it is.
+   * `null` on every run that is not part of a lineage, which reads as round 0
+   * of a lineage of one.
    *
    * Optional on the interface so a caller that builds a `RunRow` by hand —
    * a time-travel fixture, a recovery double — keeps compiling: the pair was
@@ -228,10 +222,9 @@ export interface RunRow extends RunSnapshot {
  * trampoline round carries. It is a column rather than a `state_json` field
  * because ancestry is walked in SQL.
  *
- * `lineageId` and `roundOrdinal` are the trampoline pair
- * (`docs/pages/concepts/subflows.md`): which lineage a run is a round
- * of, and which round. Both absent — the ordinary case — means the run is a
- * lineage of one, and is read back as round 0 of itself.
+ * `lineageId` and `roundOrdinal` are the trampoline pair: which lineage a run
+ * is a round of, and which round. Both absent — the ordinary case — means the
+ * run is a lineage of one, and is read back as round 0 of itself.
  *
  * @since 0.1.0
  * @category models
@@ -407,8 +400,30 @@ export interface Service {
     options?: CreateOptions | undefined
   ) => Effect.Effect<void, RunStoreError>
   readonly get: (runId: string) => Effect.Effect<RunRow, RunStoreError>
+  /**
+   * Reads every persisted round of this run's trampoline lineage, in ordinal
+   * order, from any member execution ID. An older root with null lineage
+   * columns is included as round zero. Missing IDs return an empty array.
+   * Fork ancestry alone does not join lineages. This is a snapshot read;
+   * callers making lifecycle decisions must hold their shared write transaction.
+   */
+  readonly lineage: (runId: string) => Effect.Effect<ReadonlyArray<RunRow>, RunStoreError>
+  /** Reads only the highest persisted round; fails with not_found_row for an unknown ID. */
+  readonly latestRound: (runId: string) => Effect.Effect<RunRow, RunStoreError>
   /** Records an unfenced cancellation request that later guarded transitions observe. */
   readonly requestCancel: (runId: string, nowMs: number) => Effect.Effect<RequestCancelOutcome, RunStoreError>
+  /**
+   * Records the first owner observation of durable intent. Returns false if
+   * intent is absent or the running owner fence no longer matches.
+   */
+  readonly acknowledgeCancel: (runId: string, owner: OwnerId, nowMs: number) => Effect.Effect<boolean, RunStoreError>
+  /**
+   * Resolves and requests every non-terminal round in one write transaction.
+   * Terminal is returned only when the entire logical run has settled; its
+   * status is the last round's status. Child-DAG cascading belongs to the
+   * engine. Ordinary requestCancel remains the explicitly round-scoped port.
+   */
+  readonly requestCancelLineage: (runId: string, nowMs: number) => Effect.Effect<RequestCancelOutcome, RunStoreError>
   /**
    * Claims an exact pending or suspended snapshot for a later `activate`.
    * `nowMs` becomes `claimed_at_ms`, so it must not run ahead of the Effect
@@ -508,10 +523,8 @@ export interface Service {
 /**
  * Service tag for fenced run persistence.
  *
- * The identity string equals the defining module path, like every other
- * service identity in this repository. The pre-split `flows/journal/RunStore`
- * identity from `docs/pages/concepts/journal.md` was retired pre-release,
- * while no persisted journal or step-key digest named it.
+ * The identity string equals the defining module path, which is how every
+ * service in this package is named.
  *
  * @since 0.1.0
  * @category services
@@ -941,7 +954,7 @@ const decodeRunRow = (method: string, runId: string, input: unknown): Effect.Eff
     })
   )
 
-const selectRun = (sql: SqlClient.SqlClient, runId: string) =>
+const selectRun = (sql: SqlClient.SqlClient, runId: string, mode: "single" | "lineage" | "latest" = "single") =>
   sql<DatabaseRunRow>`
     SELECT
       run_id AS "runId",
@@ -963,7 +976,22 @@ const selectRun = (sql: SqlClient.SqlClient, runId: string) =>
       round_ordinal AS "roundOrdinal",
       state_json AS "stateJson"
     FROM flows_runs
-    WHERE run_id = ${runId}
+    WHERE ${
+    mode === "latest"
+      ? sql`run_id = COALESCE(
+        (SELECT run_id FROM flows_runs
+         WHERE lineage_id = (SELECT COALESCE(lineage_id, run_id) FROM flows_runs WHERE run_id = ${runId})
+         ORDER BY round_ordinal DESC LIMIT 1),
+        (SELECT run_id FROM flows_runs WHERE run_id = ${runId})
+      )`
+      : mode === "lineage"
+      ? sql`(
+        lineage_id = (SELECT COALESCE(lineage_id, run_id) FROM flows_runs WHERE run_id = ${runId})
+        OR run_id = (SELECT COALESCE(lineage_id, run_id) FROM flows_runs WHERE run_id = ${runId})
+      )`
+      : sql`run_id = ${runId}`
+  }
+    ORDER BY COALESCE(round_ordinal, 0), run_id
   `
 
 const classifyClaimLoss = (
@@ -1124,6 +1152,26 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     }).pipe(observeExit)
   )
 
+  const lineage = Effect.fn("RunStore.lineage")((runIdInput: string) =>
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("lineage", runIdInput)
+      yield* Effect.annotateCurrentSpan({ runId })
+      const rows = yield* read("lineage", selectRun(sql, runId, "lineage"))
+      return yield* Effect.forEach(rows, (row) => decodeRunRow("lineage", row.runId, row))
+    }).pipe(observeExit)
+  )
+
+  const latestRound = Effect.fn("RunStore.latestRound")((runIdInput: string) =>
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("latestRound", runIdInput)
+      yield* Effect.annotateCurrentSpan({ runId })
+      const rows = yield* read("latestRound", selectRun(sql, runId, "latest"))
+      return rows[0] === undefined
+        ? yield* Effect.fail(runStoreError("latestRound", "not_found_row", `run ${runId} was not found`, { runId }))
+        : yield* decodeRunRow("latestRound", rows[0].runId, rows[0])
+    }).pipe(observeExit)
+  )
+
   const requestCancel = Effect.fn("RunStore.requestCancel")((
     runIdInput: string,
     nowMsInput: number
@@ -1226,6 +1274,34 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
               { runId, stage: "retry-invariant" }
             )
           )
+        })
+      )
+    }).pipe(observeOutcome<RequestCancelOutcome>())
+  )
+
+  const requestCancelLineage = Effect.fn("RunStore.requestCancelLineage")((runIdInput: string, nowMsInput: number) =>
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("requestCancelLineage", runIdInput)
+      const nowMs = yield* snapshotTimestamp("requestCancelLineage", "nowMs", nowMsInput, { runId })
+      yield* Effect.annotateCurrentSpan({ runId })
+      return yield* write(
+        "requestCancelLineage",
+        Effect.gen(function*() {
+          const rounds = yield* lineage(runId)
+          let outcome: RequestCancelOutcome = notFound
+          for (const round of rounds) {
+            const result = yield* requestCancel(round.runId, nowMs)
+            // A new request dominates an existing request, which dominates a
+            // terminal predecessor. Otherwise keep the last round's ending.
+            if (
+              result._tag === "CancelRequested" ||
+              (outcome._tag !== "CancelRequested" &&
+                (result._tag === "AlreadyRequested" || outcome._tag !== "AlreadyRequested"))
+            ) {
+              outcome = result
+            }
+          }
+          return outcome
         })
       )
     }).pipe(observeOutcome<RequestCancelOutcome>())
@@ -1724,10 +1800,37 @@ export const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlCl
     }).pipe(observeOutcome((outcome) => RunStoreMetrics.steal[outcome._tag]))
   )
 
+  const acknowledgeCancel: Service["acknowledgeCancel"] = Effect.fn("RunStore.acknowledgeCancel")((
+    id,
+    ownerInput,
+    time
+  ) =>
+    Effect.gen(function*() {
+      const runId = yield* snapshotRunId("acknowledgeCancel", id)
+      const owner = yield* snapshotOwner("acknowledgeCancel", "owner", ownerInput)
+      const observedAtMs = yield* snapshotTimestamp("acknowledgeCancel", "nowMs", time, { runId })
+      const acknowledgement = JSON.stringify({ observedAtMs, owner })
+      return yield* write(
+        "acknowledgeCancel",
+        sql`
+        UPDATE flows_runs
+        SET cancel_acknowledgement_json = COALESCE(cancel_acknowledgement_json, ${acknowledgement})
+        WHERE run_id = ${runId} AND status = 'running' AND cancel_requested_at_ms IS NOT NULL
+          AND owner_host_id = ${owner.hostId} AND owner_pid = ${owner.pid} AND owner_nonce = ${owner.nonce}
+        RETURNING run_id
+      `.pipe(Effect.map((rows) => rows.length > 0))
+      )
+    })
+  )
+
   return RunStore.of({
     create,
     get,
+    lineage,
+    latestRound,
     requestCancel,
+    acknowledgeCancel,
+    requestCancelLineage,
     claim,
     claimAndOwn,
     activate,
@@ -1752,7 +1855,11 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
   return RunStore.of({
     create: Effect.fn("RunStore.create")(() => unavailable("create")),
     get: Effect.fn("RunStore.get")(() => unavailable("get")),
+    lineage: Effect.fn("RunStore.lineage")(() => unavailable("lineage")),
+    latestRound: Effect.fn("RunStore.latestRound")(() => unavailable("latestRound")),
     requestCancel: Effect.fn("RunStore.requestCancel")(() => Effect.succeed(notFound)),
+    acknowledgeCancel: Effect.fn("RunStore.acknowledgeCancel")(() => Effect.succeed(false)),
+    requestCancelLineage: Effect.fn("RunStore.requestCancelLineage")(() => unavailable("requestCancelLineage")),
     claim: Effect.fn("RunStore.claim")(() => Effect.succeed(notFound)),
     claimAndOwn: Effect.fn("RunStore.claimAndOwn")(() => Effect.succeed(notFound)),
     activate: Effect.fn("RunStore.activate")(() => Effect.succeed(claimLost)),

@@ -7,16 +7,36 @@ sidebar:
 
 ## Install the package
 
+`@smthrs/run-store` is at `1.0.0-rc.0` and has not reached npm yet. When it
+does, the release candidate publishes under the `next` tag, which is what this
+command selects:
+
 ```bash
-pnpm add @smthrs/run-store
+pnpm add @smthrs/run-store@next effect@4.0.0-rc.112
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Its runtime dependencies install with
-it: [`@smthrs/database`](/api/database) for the durable write contract,
-[`@smthrs/journal`](/api/journal) for the `OwnerId` fencing token,
-[`@smthrs/observability`](/api/observability) for the shared throughput metric,
-and [`effect`](https://effect.website).
+CommonJS with TypeScript declarations. Its dependencies install with it:
+[`@smthrs/database`](/api/database) for the durable write contract,
+[`@smthrs/journal`](/api/journal) for the `OwnerId` fencing token, and
+[`@smthrs/observability`](/api/observability) for the shared throughput metric.
+
+[`effect`](https://effect.website) is a peer dependency pinned at
+`4.0.0-rc.112`, so install exactly that version. Two copies of `effect` in one
+program are two sets of service tags, and a store layer built against one copy
+cannot be provided to a program holding the other: the mismatch surfaces as a
+missing service rather than as a version error.
+
+Installed is not the same as importable. A package manager that isolates
+transitive dependencies puts only `@smthrs/run-store` on your resolution path,
+so install any of those packages you import by name as a direct dependency too.
+`OwnerId` is the one you would otherwise reach for first: import it from
+`@smthrs/run-store/Ownership`, which re-exports the journal's token, rather
+than from `@smthrs/journal`.
+
+[`@smthrs/flows`](/api/flows) is not a dependency of this package at all. The
+snippets on these pages that type a `NodeRuntime.Options` value need it
+installed alongside.
 
 ## What a working composition adds
 

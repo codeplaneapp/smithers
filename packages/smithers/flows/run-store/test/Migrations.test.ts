@@ -37,6 +37,8 @@ describe("run-store migrations", () => {
       expect(master.filter((row) => row.type === "table").map((row) => row.name).sort()).toEqual([
         "flows_attempts",
         "flows_migrations",
+        "flows_run_changes",
+        "flows_run_source",
         "flows_runs"
       ])
       const indexes = master.filter((row) => row.type === "index").map((row) => row.name)
@@ -56,7 +58,10 @@ describe("run-store migrations", () => {
   it.effect("reserves its own migration id block so ids cannot collide", () =>
     Effect.gen(function*() {
       const applied = yield* (Migrations.run.pipe(Effect.provide(TestDatabase.layer)))
-      expect(applied).toEqual([[1001, "run-store_initial"], [1002, "run-store_lineage"]])
+      expect(applied).toEqual([[1001, "run-store_initial"], [1002, "run-store_lineage"], [
+        1003,
+        "run-store_execution_revisions"
+      ]])
     }))
 
   it.effect("rejects a half-populated owner tuple", () =>

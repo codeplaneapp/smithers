@@ -8,15 +8,12 @@
  * `heartbeatStaleAfterMs = 30_000`, and the equality between the two was held
  * only by a steal test asserting a derived timestamp. Here it is structural.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- *
  * @since 0.1.0
  */
 import * as Duration from "effect/Duration"
 
 /**
- * Heartbeat cadence adopted from `RUN_HEARTBEAT_MS` in the Run Ownership vault
- * note.
+ * How often the supervision loop pulses to renew the owner's lease.
  *
  * @since 0.1.0
  * @category constants
@@ -24,8 +21,7 @@ import * as Duration from "effect/Duration"
 export const heartbeatInterval: Duration.Duration = Duration.seconds(1)
 
 /**
- * Heartbeat staleness cutoff adopted from `RUN_HEARTBEAT_STALE_MS` in the Run
- * Ownership vault note.
+ * How old a persisted heartbeat must be before a peer may steal the run.
  *
  * @since 0.1.0
  * @category constants

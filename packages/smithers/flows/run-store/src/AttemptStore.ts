@@ -4,12 +4,8 @@
  * Attempt metadata is deliberately opaque to this module. Its shape belongs to
  * the step executor, and is persisted unchanged across attempt state changes.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
- *
- * The running-state and owner fences follow Flue's
- * `reserveSubmissionSettlement`/store contract: stale attempts and repeated
- * terminal transitions never overwrite the winning row.
+ * The running-state and owner fences mean stale attempts and repeated terminal
+ * transitions never overwrite the winning row.
  *
  * @since 0.1.0
  */
@@ -116,8 +112,8 @@ export type AttemptStoreErrorCode = typeof AttemptStoreErrorCode.Type
 /**
  * Error raised by attempt persistence operations.
  *
- * The identity string equals the defining module path, like every other
- * identity in this repository.
+ * The identity string equals the defining module path, which is how every
+ * tagged identity in this package is named.
  *
  * @category errors
  * @since 0.1.0
@@ -350,11 +346,8 @@ export interface Service {
 /**
  * Service tag for durable step attempts.
  *
- * The identity string equals the defining module path, like every other
- * service identity in this repository. The pre-split
- * `flows/journal/AttemptStore` identity from
- * `docs/pages/concepts/journal.md` was retired pre-release, while no
- * persisted journal or step-key digest named it.
+ * The identity string equals the defining module path, which is how every
+ * service in this package is named.
  *
  * @category services
  * @since 0.1.0

@@ -12,6 +12,13 @@ intent, and the owner decides where its flow can stop cleanly.
 
 ## Record the request
 
+For a logical run that can hand off, use `requestCancelLineage`: a completed
+round is not necessarily a completed job. It resolves every round and records
+intent atomically, including a successor that exists when the transaction wins.
+The engine's handoff transaction refuses to admit a successor if cancellation
+won first. `requestCancel` remains the lower-level, single-round operation used
+by owners coordinating lifecycle transitions and child cleanup.
+
 ```ts
 import { RunStore } from "@smthrs/run-store"
 import * as Clock from "effect/Clock"
@@ -21,11 +28,11 @@ const ask = (runId: string) =>
   Effect.gen(function*() {
     const runs = yield* RunStore.RunStore
     const nowMs = yield* Clock.currentTimeMillis
-    return yield* runs.requestCancel(runId, nowMs)
+    return yield* runs.requestCancelLineage(runId, nowMs)
   })
 ```
 
-`requestCancel` takes no owner, on purpose. An operator, a parent run, or a
+Neither request operation takes an owner, on purpose. An operator, a parent run, or a
 control plane asks for a cancellation without holding the run, and the write is
 first-writer-wins, so asking twice is harmless.
 
@@ -36,11 +43,16 @@ first-writer-wins, so asking twice is harmless.
 | `Terminal`         | The run had already settled, so nothing was recorded. `status` says which ending it lost to.  |
 | `NotFound`         | No such run row.                                                                              |
 
-The status predicate is part of the same statement that writes the column, so a
+For each round, the status predicate is part of the same statement that writes the column, so a
 run that settles between your read and your request loses the write instead of
 racing it. A settled run records nothing because it has no owner left to observe
 the intent, and a reader that took the column as live intent would go on
 cancelling children the finished parent had already dealt with.
+
+For `requestCancelLineage`, the outcome summarizes the transaction: any newly
+recorded request yields `CancelRequested`; otherwise an existing request yields
+`AlreadyRequested`. `Terminal` means every round is settled and reports the
+latest round's status. Terminal predecessor rows are never rewritten.
 
 `nowMs` is taken literally and is not bounded by `heartbeatSkewAllowance`: this
 timestamp is request data rather than a lease predicate, so the only rule is

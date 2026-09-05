@@ -1,8 +1,6 @@
 /**
  * Initial durable run and attempt schema.
  *
- * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
- *
  * @since 0.1.0
  */
 import * as Effect from "effect/Effect"

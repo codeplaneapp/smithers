@@ -1,7 +1,9 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
+import { ReviewTagsMigrationsAndKeys } from "@smthrs/repo-targets"
 /** Standard package targets plus package-owned documentation generation. */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
   cwd: "packages/smithers/flows/run-store"
 })
@@ -13,8 +15,8 @@ const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.Stan
  * @since 0.1.0
  * @category lint
  */
-const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smithers/flows/run-store" })
+const reviewTagsMigrationsAndKeys = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/run-store" })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, docsFiles, durableIdentityGuard, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, reviewTagsMigrationsAndKeys, fmt, lib, lint, test }
 })
