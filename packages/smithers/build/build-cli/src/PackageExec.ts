@@ -423,9 +423,9 @@ export interface PackageNode extends Planner.PlannedTarget {
    */
   readonly readSet: ReadonlyArray<string>
   /**
-   * Absolute host paths outside the workspace the spawned tool reads. A git
-   * submodule whose `.gitmodules` url is a local repository is the one source
-   * today; the confinement binds each read-only.
+   * Absolute host paths outside the workspace the spawned tool reads:
+   * resolved native executable directories and local submodule repositories.
+   * The confinement binds each read-only.
    */
   readonly externalReads: ReadonlyArray<string>
   readonly outDirs: ReadonlyArray<string>
@@ -2969,6 +2969,23 @@ const visit = async (
       : PackageTree.findOnPath(command, spawnEnvironment)
     if (path !== undefined && NodeFs.existsSync(path)) {
       executable.push(await binaryIdentity({ ...context, environment: spawnEnvironment }, path))
+    }
+  }
+  // Native tools can live under the host's /tmp, which bubblewrap hides.
+  // Admit both the launcher and its real installation, including shebang
+  // interpreters. Docker gets its toolchain from the image instead.
+  if (context.index.workspace.sandboxes?.sandboxes["default"]?._tag !== "SandboxDocker") {
+    const identities: Array<Record<string, unknown>> = []
+    collectTagged([toolchain, executable], "Executable", identities, new Set())
+    for (const identity of identities) {
+      for (const field of ["source", "path"]) {
+        const path = String(identity[field])
+        if (!NodePath.isAbsolute(path)) continue
+        const directory = NodePath.dirname(path)
+        // Keep the private temp root and undeclared workspace inputs hidden.
+        const read = directory === "/tmp" || Path.contains(directory, context.root) ? path : directory
+        if (!externalReads.includes(read)) externalReads.push(read)
+      }
     }
   }
 

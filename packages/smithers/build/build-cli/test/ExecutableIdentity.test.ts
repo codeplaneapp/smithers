@@ -110,6 +110,85 @@ const assertReplacement = async (root: string, tools: string, replace: () => Pro
 }
 
 describe("executable cache identity", () => {
+  it.each(["host", "command"])("admits the resolved %s tool and interpreter directories read-only", async (kind) => {
+    const { root, tools } = await fixture(
+      `S.Shell.Build({ ${
+        kind === "host" ? "bin: S.Host.bin(\"identity-compiler\")" : "command: \"identity-compiler\""
+      }, outDirs: ["dist"] })`
+    )
+    const installed = await directory()
+    const interpreters = await directory()
+    await write(installed, "value", "compiled")
+    await write(
+      installed,
+      "compiler",
+      `#!/usr/bin/env identity-shell
+if [ "$1" = --version ]; then echo 1.0.0; exit 0; fi
+mkdir -p dist
+cat '${installed}/value' > dist/value
+if printf changed > '${installed}/value' 2>/dev/null; then exit 1; fi
+`
+    )
+    await write(interpreters, "identity-shell", "#!/bin/sh\nexec /bin/sh \"$@\"\n")
+    await Fs.symlink(Path.join(installed, "compiler"), Path.join(tools, "identity-compiler"))
+    process.env["PATH"] = `${tools}${Path.delimiter}${interpreters}${Path.delimiter}${originalPath ?? ""}`
+    const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+    const planned = await PackageExec.plan({
+      index: PackageIndex.make(loaded),
+      pattern: "//:dist",
+      cacheDirectory: ".flows",
+      verb: "auto"
+    })
+    expect(planned.nodes.get("//:dist")?.externalReads).toEqual(
+      expect.arrayContaining([tools, installed, interpreters])
+    )
+    expect(await serve(root)).toContain("//:dist  ran")
+    expect(await Fs.readFile(Path.join(root, "dist/value"), "utf8")).toBe("compiled")
+    expect(await Fs.readFile(Path.join(installed, "value"), "utf8")).toBe("compiled")
+    expect(await serve(root)).toContain("//:dist  hit")
+  })
+
+  it("leaves the executable installation to a declared Docker image", async () => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ command: \"identity-compiler\", outDirs: [\"dist\"] })",
+      "sandboxes: S.Sandboxes({ default: S.Sandbox.Docker({ image: \"node:22-bookworm\" }) }),"
+    )
+    await write(tools, "identity-compiler", "#!/bin/sh\nexit 0\n")
+    const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+    const planned = await PackageExec.plan({
+      index: PackageIndex.make(loaded),
+      pattern: "//:dist",
+      cacheDirectory: ".flows",
+      verb: "auto"
+    })
+    expect(planned.nodes.get("//:dist")?.externalReads).toEqual([])
+  })
+
+  it("admits a tool directly in /tmp without mounting the private temp root", async () => {
+    const { root } = await fixture("S.Shell.Build({ command: \"true\", outDirs: [\"dist\"] })")
+    const name = `${Path.basename(root)}.compiler`
+    const binary = Path.join("/tmp", name)
+    temporary.push(binary)
+    await write("/tmp", name, "#!/bin/sh\nmkdir -p dist\nprintf compiled > dist/value\n")
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+export const Package = S.Package({ targets: { dist: S.Shell.Build({ command: "${binary}", outDirs: ["dist"] }) } })`
+    )
+    const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+    const planned = await PackageExec.plan({
+      index: PackageIndex.make(loaded),
+      pattern: "//:dist",
+      cacheDirectory: ".flows",
+      verb: "auto"
+    })
+    expect(planned.nodes.get("//:dist")?.externalReads).toContain(binary)
+    expect(planned.nodes.get("//:dist")?.externalReads).not.toContain("/tmp")
+    expect(await serve(root)).toContain("//:dist  ran")
+    expect(await Fs.readFile(Path.join(root, "dist/value"), "utf8")).toBe("compiled")
+  })
+
   it("misses after replacing a declared host executable at the same path and version", async () => {
     const { root, tools } = await fixture(
       "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
