@@ -9,11 +9,12 @@
  * @since 0.1.0
  */
 import { NodeServices } from "@effect/platform-node"
-import { Effect, Schema } from "effect"
+import { Effect, Redacted, Schema } from "effect"
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it, vi } from "vitest"
+import * as Diagnostics from "../src/Diagnostics.ts"
 import * as StdioTransport from "../src/internal/StdioTransport.ts"
 import * as McpClient from "../src/McpClient.ts"
 import * as McpFlows from "../src/McpFlows.ts"
@@ -94,8 +95,23 @@ const errorTool = {
 const namedTool = (name) => ({ name, inputSchema: { type: "object" } })
 
 const reader = startupDiagnostic === undefined ? readline.createInterface({ input: process.stdin }) : undefined
+let serverExchange
 reader?.on("line", (line) => {
   const request = JSON.parse(line)
+  if (serverExchange && !Object.hasOwn(request, "method")) {
+    const expected = serverExchange.pending.get(request.id)
+    if (expected === undefined || JSON.stringify(request) !== JSON.stringify(expected)) {
+      fail(serverExchange.request, -32000, "incorrect server-request response")
+      return
+    }
+    serverExchange.pending.delete(request.id)
+    serverExchange.replies.push(request)
+    if (serverExchange.pending.size === 0) {
+      succeed(serverExchange.request, { content: [], structuredContent: { replies: serverExchange.replies } })
+      serverExchange = undefined
+    }
+    return
+  }
   if (request.method === "notifications/cancelled") {
     if (mode === "capture-cancellation" && closeMarker) {
       fs.appendFileSync(closeMarker, JSON.stringify(request) + "\n")
@@ -258,6 +274,23 @@ reader?.on("line", (line) => {
   }
 
   if (request.method === "tools/call") {
+    if (mode === "server-requests") {
+      const probes = [
+        { id: request.id, method: "ping" },
+        { id: String(request.id), method: "ping" },
+        { id: "probe/😀", method: "ping" },
+        { id: "", method: "ping" },
+        { id: "unsupported", method: "sampling/createMessage" }
+      ]
+      const pending = new Map(probes.map((probe) => [probe.id, probe.method === "ping"
+        ? { jsonrpc: "2.0", id: probe.id, result: {} }
+        : { jsonrpc: "2.0", id: probe.id, error: { code: -32601, message: "Method not found" } }]))
+      serverExchange = { request, pending, replies: [] }
+      send({ jsonrpc: "2.0", method: "notifications/progress", params: { progress: 1 } })
+      send({ jsonrpc: "2.0", method: "ping" })
+      for (const probe of probes) send({ jsonrpc: "2.0", ...probe })
+      return
+    }
     if (mode === "exit-mid-call") process.exit(0)
     if (mode === "hang" || mode === "capture-cancellation") return
     if (mode === "call-rpc-error") {
@@ -437,6 +470,22 @@ const connectTransportNode = (
   )
 
 describe("McpClient against a real MCP server", () => {
+  it("answers server requests during an active tool call without confusing directional ids", async () => {
+    const result = await execute(Effect.scoped(Effect.gen(function*() {
+      const client = yield* connectNode("server-requests", [], { requestTimeoutMs: 2_000 })
+      return yield* client.callTool("add", { a: 2, b: 3 })
+    })))
+    expect(result.structuredContent).toEqual({
+      replies: [
+        { jsonrpc: "2.0", id: 3, result: {} },
+        { jsonrpc: "2.0", id: "3", result: {} },
+        { jsonrpc: "2.0", id: "probe/😀", result: {} },
+        { jsonrpc: "2.0", id: "", result: {} },
+        { jsonrpc: "2.0", id: "unsupported", error: { code: -32601, message: "Method not found" } }
+      ]
+    })
+  })
+
   it("completes the handshake, ignores unrelated frames, and lists tools", async () => {
     const client = await execute(Effect.scoped(connectNode("malformed-frames")))
     expect(client.tools).toEqual([
@@ -496,7 +545,7 @@ describe("McpClient against a real MCP server", () => {
     })))
     expect(error).toMatchObject({
       code: "tool_failed",
-      message: "MCP server \"call-rpc-error\" failed tools/call (-32000): remote exploded",
+      message: "MCP server \"call-rpc-error\" failed tools/call (-32000); remote details withheld",
       server: "call-rpc-error"
     })
   })
@@ -511,7 +560,7 @@ describe("McpClient against a real MCP server", () => {
     })))
     expect(error).toMatchObject({ code: "tool_not_found", server: mode })
     if (mode === "call-invalid-params-unknown-tool") {
-      expect(error.message).toBe(`MCP server "${mode}" failed tools/call (${code}): Unknown tool: add`)
+      expect(error.message).toBe(`MCP server "${mode}" failed tools/call (${code}); remote details withheld`)
     }
   })
 
@@ -523,7 +572,7 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({
       code: "tool_failed",
       server: "call-invalid-params",
-      message: "MCP server \"call-invalid-params\" failed tools/call (-32602): Tool arguments are invalid"
+      message: "MCP server \"call-invalid-params\" failed tools/call (-32602); remote details withheld"
     })
   })
 
@@ -538,7 +587,7 @@ describe("McpClient against a real MCP server", () => {
     ["list-null-entry", "MCP server \"list-null-entry\" returned tools[1], which is not an object"],
     ["list-number-entry", "MCP server \"list-number-entry\" returned tools[1], which is not an object"],
     ["list-array-entry", "MCP server \"list-array-entry\" returned tools[1], which is not an object"],
-    ["list-duplicate-names", "MCP server \"list-duplicate-names\" returned two tools named \"add\""]
+    ["list-duplicate-names", "MCP server \"list-duplicate-names\" returned a duplicate tool name at catalog index 1"]
   ])("rejects a malformed catalog in %s mode", async (mode, message) => {
     const error = await execute(Effect.scoped(Effect.flip(connectNode(mode))))
     expect(error).toMatchObject({ code: "invalid_response", message, server: mode })
@@ -563,7 +612,7 @@ describe("McpClient against a real MCP server", () => {
     ],
     [
       "wrong-protocol-version",
-      "MCP server \"wrong-protocol-version\" speaks protocol \"1999-01-01\"; this client speaks 2025-06-18, 2025-03-26, 2024-11-05"
+      "MCP server \"wrong-protocol-version\" speaks an unsupported protocol version; this client speaks 2025-06-18, 2025-03-26, 2024-11-05"
     ]
   ])("rejects the invalid initialize result in %s mode", async (mode, message) => {
     const error = await execute(Effect.scoped(Effect.flip(connectNode(mode))))
@@ -625,20 +674,20 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       server: "list-rpc-error",
-      message: "MCP server \"list-rpc-error\" failed tools/list (-32601): catalog unavailable"
+      message: "MCP server \"list-rpc-error\" failed tools/list (-32601); remote details withheld"
     })
   })
 
   it.each([
-    ["call-rpc-error-string-data", "context"],
-    ["call-rpc-error-number-data", "7"],
-    ["call-rpc-error-boolean-data", "true"]
-  ])("appends bounded scalar error data in %s mode", async (mode, rendered) => {
+    "call-rpc-error-string-data",
+    "call-rpc-error-number-data",
+    "call-rpc-error-boolean-data"
+  ])("withholds even short scalar error data in %s mode", async (mode) => {
     const error = await execute(Effect.scoped(Effect.gen(function*() {
       const client = yield* connectNode(mode)
       return yield* Effect.flip(client.callTool("add", {}))
     })))
-    expect(error.message).toBe(`MCP server "${mode}" failed tools/call (-32000): remote exploded [data: ${rendered}]`)
+    expect(error.message).toBe(`MCP server "${mode}" failed tools/call (-32000); remote details withheld`)
   })
 
   it.each([
@@ -650,7 +699,7 @@ describe("McpClient against a real MCP server", () => {
       const client = yield* connectNode(mode)
       return yield* Effect.flip(client.callTool("add", {}))
     })))
-    expect(error.message).toBe(`MCP server "${mode}" failed tools/call (-32000): remote exploded`)
+    expect(error.message).toBe(`MCP server "${mode}" failed tools/call (-32000); remote details withheld`)
   })
 
   it("closes the connection on a malformed JSON-RPC reply", async () => {
@@ -736,7 +785,7 @@ describe("McpClient against a real MCP server", () => {
     })
   })
 
-  it("rejects structured output at the exact property whose type is invalid", async () => {
+  it("rejects a structured property type without exposing its path", async () => {
     const error = await execute(Effect.scoped(Effect.gen(function*() {
       const client = yield* connectNode("structured-invalid-type")
       return yield* Effect.flip(client.callTool("add", {}))
@@ -746,7 +795,7 @@ describe("McpClient against a real MCP server", () => {
       code: "invalid_response",
       server: "structured-invalid-type",
       message:
-        "MCP server \"structured-invalid-type\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: expected number"
+        "MCP server \"structured-invalid-type\" returned structuredContent that its own outputSchema rejects: expected number; property path withheld"
     })
   })
 
@@ -759,7 +808,7 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({
       code: "invalid_response",
       message:
-        "MCP server \"structured-missing-required\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: required property is missing"
+        "MCP server \"structured-missing-required\" returned structuredContent that its own outputSchema rejects: required property is missing; property path withheld"
     })
   })
 
@@ -772,11 +821,11 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({
       code: "invalid_response",
       message:
-        "MCP server \"structured-enum-invalid\" returned structuredContent that its own outputSchema rejects at structuredContent.answer: expected a declared enum value"
+        "MCP server \"structured-enum-invalid\" returned structuredContent that its own outputSchema rejects: expected a declared enum value; property path withheld"
     })
   })
 
-  it("names the invalid array index in structured output", async () => {
+  it("rejects an invalid structured array element without exposing its path", async () => {
     const error = await execute(Effect.scoped(Effect.gen(function*() {
       const client = yield* connectNode("structured-array-invalid")
       return yield* Effect.flip(client.callTool("add", {}))
@@ -785,7 +834,7 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({
       code: "invalid_response",
       message:
-        "MCP server \"structured-array-invalid\" returned structuredContent that its own outputSchema rejects at structuredContent.values[1]: expected number"
+        "MCP server \"structured-array-invalid\" returned structuredContent that its own outputSchema rejects: expected number; property path withheld"
     })
   })
 
@@ -838,7 +887,7 @@ describe("McpClient against a real MCP server", () => {
   })
 
   it.each([
-    ["list-repeated-cursor", "MCP server \"list-repeated-cursor\" repeated the tools/list cursor \"again\""],
+    ["list-repeated-cursor", "MCP server \"list-repeated-cursor\" repeated a tools/list cursor"],
     [
       "list-bad-cursor",
       "MCP server \"list-bad-cursor\" returned a tools/list cursor that is not a non-empty string"
@@ -849,7 +898,7 @@ describe("McpClient against a real MCP server", () => {
     ],
     [
       "list-duplicate-across-pages",
-      "MCP server \"list-duplicate-across-pages\" returned two tools named \"add\""
+      "MCP server \"list-duplicate-across-pages\" returned a duplicate tool name at catalog index 0"
     ]
   ])("rejects an invalid paginated catalog in %s mode", async (mode, message) => {
     const error = await execute(Effect.scoped(Effect.flip(connectNode(mode))))
@@ -875,7 +924,7 @@ describe("McpClient against a real MCP server", () => {
     expect(error).toMatchObject({ code: "spawn_failed", server: "missing" })
   })
 
-  it("includes a bounded stderr diagnostic when a server exits during startup", async () => {
+  it("keeps a startup stderr diagnostic out of the ordinary error", async () => {
     const error = await execute(Effect.scoped(Effect.flip(
       connectNode("stderr-exit", [], { handshakeTimeoutMs: 2_000 })
     )))
@@ -883,37 +932,51 @@ describe("McpClient against a real MCP server", () => {
     expect(error.code).toBe("connection_closed")
     expect(error.server).toBe("stderr-exit")
     expect(error.message).toBe(
-      "MCP server \"stderr-exit\" stdout closed (stderr: distinctive startup diagnostic token=[REDACTED])"
+      "MCP server \"stderr-exit\" stdout closed (stderr diagnostic withheld)"
     )
   })
 
   it("redacts credentials split across stderr chunks on a handshake timeout", async () => {
+    const diagnostics: Array<Diagnostics.Event> = []
     const error = await execute(Effect.scoped(Effect.flip(
       connectNode("stderr-timeout", [], { handshakeTimeoutMs: 1_000 })
-    )))
+    )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event)))))
     expect(error.code).toBe("timeout")
-    expect(error.message).toContain("ordinary timeout diagnostic token=[REDACTED]")
-    expect(error.message).not.toContain("sk-ant-")
-    expect(error.message).not.toContain("0123456789abcdef")
+    expect(error.message).toContain("stderr diagnostic withheld")
+    const detail = Redacted.value(diagnostics.find((event) => event.source === "stderr")!.detail)
+    expect(detail).toContain("ordinary timeout diagnostic token=[REDACTED]")
+    expect(detail).not.toContain("sk-ant-")
+    expect(detail).not.toContain("0123456789abcdef")
+    expect(error.message).not.toContain("ordinary timeout diagnostic")
   })
 
   it("caps diagnostics after redaction expands a short credential", async () => {
+    const diagnostics: Array<Diagnostics.Event> = []
     const error = await execute(Effect.scoped(Effect.flip(
       connectNode("stderr-short-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 7 })
-    )))
-    expect(error.message).toBe("MCP server \"stderr-short-exit\" stdout closed (stderr: token=[)")
+    )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event)))))
+    expect(error.message).toContain("stderr diagnostic withheld")
+    const detail = Redacted.value(diagnostics.find((event) => event.source === "stderr")!.detail)
+    expect(detail).toBe("token=[")
+    expect(new TextEncoder().encode(detail).byteLength).toBe(7)
   })
 
   it("keeps only the configured tail of a large stderr diagnostic", async () => {
-    const error = await execute(Effect.scoped(Effect.flip(
-      connectNode("stderr-tail-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 26 })
-    )))
+    const diagnostics: Array<Diagnostics.Event> = []
+    const error = await execute(
+      Effect.scoped(Effect.flip(
+        connectNode("stderr-tail-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 26 })
+      )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event))))
+    )
 
     expect(error.code).toBe("connection_closed")
     expect(error.server).toBe("stderr-tail-exit")
     expect(error.message).toBe(
-      "MCP server \"stderr-tail-exit\" stdout closed (stderr: KEEP-THIS-TAIL-1234567890)"
+      "MCP server \"stderr-tail-exit\" stdout closed (stderr diagnostic withheld)"
     )
+    const detail = diagnostics.find((event) => event.source === "stderr")!
+    expect(Redacted.value(detail.detail)).toBe("KEEP-THIS-TAIL-1234567890")
+    expect(JSON.stringify(diagnostics)).not.toContain("KEEP-THIS")
     expect(error.message.length).toBeLessThanOrEqual(100)
   })
 

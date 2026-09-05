@@ -4,8 +4,9 @@
  * This module owns exactly the connection lifecycle and request/reply
  * correlation an MCP session needs: spawn once, write frames in, read frames
  * out, match replies to the request that asked for them. It knows nothing
- * about `initialize`, `tools/list`, or `tools/call`. {@link McpClient} is
- * the layer that speaks MCP; this one only speaks JSON-RPC-over-lines.
+ * about `initialize`, `tools/list`, or `tools/call`. It answers the protocol's
+ * liveness `ping` with an empty result, and unsupported server requests with
+ * method-not-found. {@link McpClient} owns feature negotiation and tool calls.
  *
  * Server-initiated notifications are received and dropped. A future caller
  * that needs `notifications/*` (for example a progress stream) is the reason
@@ -21,6 +22,8 @@ import type { Scope } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { McpError } from "../McpError.ts"
+import * as DiagnosticReporter from "./DiagnosticReporter.ts"
+import * as JsonLimits from "./JsonLimits.ts"
 import * as Rpc from "./Rpc.ts"
 
 /**
@@ -131,7 +134,7 @@ type ConnectionState = {
   readonly error: McpError
 }
 
-const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
+const positiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0
 
 const limitError = (server: string, name: string): McpError =>
   protocol(server, `MCP option "${name}" must be a positive integer`)
@@ -141,8 +144,6 @@ const replyError = (
   method: string,
   reply: Extract<Rpc.Reply, { readonly _tag: "Error" }>
 ): McpError => {
-  const scalar = ["string", "number", "boolean"].includes(typeof reply.data) ? String(reply.data) : undefined
-  const suffix = scalar !== undefined && scalar.length <= 120 ? ` [data: ${scalar}]` : ""
   // Servers do not standardize unknown-tool prose, so this heuristic stays
   // limited to the two MCP error codes and an explicit tool plus absence phrase.
   const remoteUnknownTool = (reply.code === -32_601 || reply.code === -32_602) &&
@@ -152,7 +153,7 @@ const replyError = (
     code: method === "tools/call"
       ? remoteUnknownTool ? "tool_not_found" : "tool_failed"
       : "protocol_error",
-    message: `MCP server "${server}" failed ${method} (${reply.code}): ${reply.message}${suffix}`,
+    message: `MCP server "${server}" failed ${method} (${reply.code}); remote details withheld`,
     server
   })
 }
@@ -210,6 +211,7 @@ export const connect = (
   options: ConnectOptions
 ): Effect.Effect<Transport, McpError, ChildProcessSpawner | Scope.Scope> =>
   Effect.gen(function*() {
+    const diagnostic = yield* DiagnosticReporter.make(options.server)
     const requestTimeoutMs = options.requestTimeoutMs ?? defaultRequestTimeoutMs
     const queueCapacity = options.queueCapacity ?? defaultQueueCapacity
     const maxFrameBytes = options.maxFrameBytes ?? defaultMaxFrameBytes
@@ -236,13 +238,14 @@ export const connect = (
       // configured byte tail, and stderr failure never fails the connection.
       stderr: "pipe"
     }).pipe(
-      Effect.mapError((error) =>
-        new McpError({
+      Effect.mapError((error) => {
+        diagnostic("spawn", error.message)
+        return new McpError({
           code: "spawn_failed",
-          message: `Failed to start MCP server "${options.server}": ${error.message}`,
+          message: `Failed to start MCP server "${options.server}"; process details withheld`,
           server: options.server
         })
-      )
+      })
     )
 
     const stderrTail = yield* Ref.make<Uint8Array>(new Uint8Array())
@@ -272,15 +275,45 @@ export const connect = (
         const rendered = new TextDecoder().decode(new TextEncoder().encode(redacted).subarray(0, maxStderrBytes), {
           stream: true
         })
+        if (rendered !== "") diagnostic("stderr", rendered)
         return rendered === ""
-          ? error
-          : new McpError({ code: error.code, message: `${error.message} (stderr: ${rendered})`, server: error.server })
+        ? error
+        : new McpError({
+          code: error.code,
+          message: `${error.message} (stderr diagnostic withheld)`,
+          server: error.server
+        })
       })
     }
 
     const nextId = yield* Ref.make(0)
     const outbound = yield* Queue.bounded<Uint8Array>(queueCapacity)
     const state = yield* Ref.make<ConnectionState>({ _tag: "Open", pending: HashMap.empty() })
+
+    // Define these before starting the reader: a server can send a request
+    // immediately on connection, before our first outbound request exists.
+    const enqueue = (frame: Uint8Array): Effect.Effect<void, McpError> =>
+      Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
+        offered
+          ? Effect.void
+          : Effect.flatMap(withStderr(closed(options.server, "outbound queue closed")), Effect.fail))
+
+    const frameOf = (method: string, message: Rpc.OutboundMessage): Effect.Effect<Uint8Array, McpError> =>
+      Effect.try({
+        try: () => Rpc.encode(message),
+        catch: () => protocol(options.server, `MCP server "${options.server}" could not encode a ${method} frame`)
+      }).pipe(
+        Effect.flatMap((frame) =>
+          frame.byteLength <= maxOutboundFrameBytes
+            ? Effect.succeed(frame)
+            : Effect.fail(
+              protocol(
+                options.server,
+                `MCP server "${options.server}" tried to send a ${method} frame larger than ${maxOutboundFrameBytes} bytes`
+              )
+            )
+        )
+      )
 
     /** Closes once, fails every waiter, and rejects all future traffic. */
     const closeWith = (baseError: McpError) =>
@@ -321,8 +354,29 @@ export const connect = (
         Effect.gen(function*() {
           const message = Rpc.parse(line)
           if (message === undefined) return
+          const jsonIssue = JsonLimits.checkParsed(message)
+          if (jsonIssue !== undefined) {
+            return yield* Effect.fail(
+              protocol(options.server, `MCP server "${options.server}" sent invalid JSON: ${jsonIssue}`)
+            )
+          }
           const reply = Rpc.classify(message)
           if (reply._tag === "Notification") return
+          if (reply._tag === "Request") {
+            const response: Rpc.OutboundMessage = reply.method === "ping"
+              ? { jsonrpc: "2.0", id: reply.id, result: {} }
+              : { jsonrpc: "2.0", id: reply.id, error: { code: -32_601, message: "Method not found" } }
+            // Opposite-direction ids are independent, even when they equal an
+            // active tool request's id. Responses share the bounded writer and
+            // size guard, never creating another pending request of our own.
+            return yield* frameOf("server-response", response).pipe(
+              Effect.flatMap(enqueue),
+              Effect.timeoutOrElse({
+                duration: requestTimeoutMs,
+                orElse: () => Effect.fail(timeout(options.server, "server-response admission", requestTimeoutMs))
+              })
+            )
+          }
           if (reply._tag === "Malformed") {
             return yield* Effect.fail(
               protocol(
@@ -340,6 +394,7 @@ export const connect = (
           })
           if (Option.isNone(pending)) return
           if (reply._tag === "Error") {
+            diagnostic("remote-error", { code: reply.code, message: reply.message, data: reply.data })
             yield* Deferred.fail(
               pending.value.deferred,
               replyError(options.server, pending.value.method, reply)
@@ -375,29 +430,6 @@ export const connect = (
         const present = HashMap.has(current.pending, id)
         return [present, { ...current, pending: HashMap.remove(current.pending, id) }]
       })
-
-    const enqueue = (frame: Uint8Array): Effect.Effect<void, McpError> =>
-      Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
-        offered
-          ? Effect.void
-          : Effect.flatMap(withStderr(closed(options.server, "outbound queue closed")), Effect.fail))
-
-    const frameOf = (method: string, message: Rpc.Outbound): Effect.Effect<Uint8Array, McpError> =>
-      Effect.try({
-        try: () => Rpc.encode(message),
-        catch: () => protocol(options.server, `MCP server "${options.server}" could not encode a ${method} frame`)
-      }).pipe(
-        Effect.flatMap((frame) =>
-          frame.byteLength <= maxOutboundFrameBytes
-            ? Effect.succeed(frame)
-            : Effect.fail(
-              protocol(
-                options.server,
-                `MCP server "${options.server}" tried to send a ${method} frame larger than ${maxOutboundFrameBytes} bytes`
-              )
-            )
-        )
-      )
 
     const request = (
       method: string,

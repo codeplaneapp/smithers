@@ -6,16 +6,29 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/mcp/docs/installation.md"
 ---
 
-## Install the package
+## Availability
+
+`@smthrs/mcp` is not published to npm yet. Its source is on
+[GitHub](https://github.com/smithersai/smithers), and the `smthrs` command line
+is the worked example of everything on this page: it composes this package
+behind `--mcp-config`.
+
+When it publishes, the install is one command:
 
 ```bash
 pnpm add @smthrs/mcp
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Its runtime dependencies, including
-[`effect`](https://effect.website) and the `@smthrs/*` packages the adapter
-composes, install with it.
+## Requirements
+
+- Node.js 22.19+ (Node 22) or 24.11+.
+- [`effect`](https://effect.website) 4.0.0-rc.112, a peer dependency and the
+  version this package is built against. Every public function returns an
+  `Effect`, and every schema is an `effect/Schema`.
+
+The package ships as both ESM and CommonJS with TypeScript declarations. The
+`@smthrs/*` packages the adapter composes are ordinary dependencies and install
+with it.
 
 ## Provide a process spawner
 
@@ -30,7 +43,7 @@ caller's environment:
 On Node, `@effect/platform-node` provides the spawner:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 ```ts
@@ -77,7 +90,7 @@ JSON-RPC codec and the stdio transport are not importable.
 
 The projected `FlowBinding.Source` is only useful to something that composes a
 flow catalog. [`@smthrs/harness`](https://harness.smithers.sh/reference/api/),
-[`@smthrs/capability`](https://capability.smithers.sh/reference/api/), and [`@smthrs/registry`](https://registry.smithers.sh/reference/api/)
+[`@smthrs/capability`](https://capability.smithers.sh/reference/api/), and [`@smthrs/core`](https://core.smithers.sh/reference/api/)
 are runtime dependencies of this package and install with it:
 
 - `@smthrs/harness` owns `FlowBinding`, the contract this package implements.
@@ -87,6 +100,9 @@ are runtime dependencies of this package and install with it:
   derived from.
 
 What a host adds is the thing that runs the cell loop:
+
+`@smthrs/registry` and `@smthrs/kernel` are development dependencies of this
+package. A host that imports them declares them in its own manifest.
 
 ```bash
 pnpm add @smthrs/agent

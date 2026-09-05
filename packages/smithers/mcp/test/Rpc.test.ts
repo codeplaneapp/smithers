@@ -64,9 +64,33 @@ describe("Rpc.classify", () => {
     expect(Rpc.classify(message)).toEqual({ _tag: "Notification" })
   })
 
-  it("treats a method-bearing envelope as a notification even when it also has an id", () => {
+  it("distinguishes a server request from an id-less notification", () => {
     const message = Rpc.parse(`{"jsonrpc":"2.0","id":1,"method":"notifications/progress"}`)!
-    expect(Rpc.classify(message)).toEqual({ _tag: "Notification" })
+    expect(Rpc.classify(message)).toMatchObject({ _tag: "Request", id: 1, method: "notifications/progress" })
+  })
+
+  it.each([0, -1, "0", "01", "probe/😀", ""])("preserves server request id %# without reply normalization", (id) => {
+    expect(Rpc.classify({ jsonrpc: "2.0", id, method: "ping" }))
+      .toMatchObject({ _tag: "Request", id, method: "ping" })
+  })
+
+  it.each([null, true, 1.5, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1, {}])(
+    "rejects invalid server request id %#",
+    (id) => {
+      expect(Rpc.classify({ jsonrpc: "2.0", id, method: "ping" })._tag).toBe("Malformed")
+    }
+  )
+
+  it.each([
+    { method: null },
+    { method: 1 },
+    { method: "ping", result: {} },
+    { method: "ping", error: { code: -32_000, message: "error" } },
+    { method: "ping", params: null },
+    { method: "ping", params: [] },
+    { method: "ping", params: 1 }
+  ])("rejects malformed method-bearing envelopes %#", (fields) => {
+    expect(Rpc.classify({ jsonrpc: "2.0", ...fields })._tag).toBe("Malformed")
   })
 
   it("rejects a 2.0 envelope carrying neither an id nor a method", () => {

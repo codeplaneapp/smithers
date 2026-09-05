@@ -50,8 +50,8 @@ anything else. A declaration it cannot parse counts as unauthorized.
 
 So a bare `"*"` does not mean "everything". It parses as nothing, and every MCP
 tool carrying it is refused with `capability_refused` before it runs, under
-every envelope including an unrestricted one. That was a real defect, and the
-enumerated form is the fix.
+every envelope including an unrestricted one. Enumerating the actions is what
+makes the declaration readable to the boundary at all.
 
 ## Narrow it where the trust decision is made
 
@@ -93,7 +93,8 @@ const envelope = [
 
 Narrowing the declaration is better than widening the envelope. An envelope of
 `*:*` grants the whole run everything; this grants exactly the tools of exactly
-this server. The runnable original is
+this server. A runnable version of this composition is in the Smithers
+repository, at
 [`examples/src/22-mcp-tools.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-tools.ts).
 
 ## What a refusal looks like

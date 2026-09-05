@@ -14,6 +14,8 @@ import { isRecord } from "@smthrs/canonical/Record"
 import { Effect, Result, Schema } from "effect"
 import type { Scope } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as DiagnosticReporter from "./internal/DiagnosticReporter.ts"
+import * as JsonLimits from "./internal/JsonLimits.ts"
 import * as StdioTransport from "./internal/StdioTransport.ts"
 import { McpError } from "./McpError.ts"
 
@@ -227,13 +229,22 @@ export const defaultMaxToolNameBytes = 128
  */
 export const defaultMaxCatalogPages = 32
 
+/**
+ * Maximum nested JSON containers, including the JSON-RPC envelope. Fixed so
+ * accepted server schemas and values remain safe for recursive consumers.
+ *
+ * @category constants
+ * @since 1.0.0-rc.0
+ */
+export const maxJsonDepth = JsonLimits.maxDepth
+
 const invalidResponse = (server: string, message: string): McpError =>
   new McpError({ code: "invalid_response", message, server })
 
 const protocolError = (server: string, message: string): McpError =>
   new McpError({ code: "protocol_error", message, server })
 
-const positiveInteger = (value: number): boolean => Number.isInteger(value) && value > 0
+const positiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0
 
 const asInitialize = (server: string, result: unknown): Result.Result<void, McpError> => {
   if (!isRecord(result)) {
@@ -251,7 +262,7 @@ const asInitialize = (server: string, result: unknown): Result.Result<void, McpE
   if (!supportedProtocolVersions.includes(result.protocolVersion)) {
     return Result.fail(protocolError(
       server,
-      `MCP server "${server}" speaks protocol "${result.protocolVersion}"; this client speaks ${
+      `MCP server "${server}" speaks an unsupported protocol version; this client speaks ${
         supportedProtocolVersions.join(", ")
       }`
     ))
@@ -336,7 +347,7 @@ const asToolPage = (
     if (seen.has(record.name)) {
       return Result.fail(invalidResponse(
         server,
-        `MCP server "${server}" returned two tools named "${record.name}"`
+        `MCP server "${server}" returned a duplicate tool name at catalog index ${index}`
       ))
     }
     if (!isRecord(record.inputSchema) || record.inputSchema.type !== "object") {
@@ -436,9 +447,13 @@ const validateStructuredContent = (
   }
 
   const declaredTypes = Array.isArray(schema.type) ? schema.type : [schema.type]
-  const types = declaredTypes.filter((candidate): candidate is JsonSchemaType =>
-    typeof candidate === "string" && jsonSchemaTypes.has(candidate)
-  )
+  const types = [
+    ...new Set(
+      declaredTypes.filter((candidate): candidate is JsonSchemaType =>
+        typeof candidate === "string" && jsonSchemaTypes.has(candidate)
+      )
+    )
+  ]
   if (types.length > 0 && !types.some((type) => matchesJsonSchemaType(value, type))) {
     return { path, reason: `expected ${types.join(" or ")}` }
   }
@@ -472,7 +487,8 @@ const validateStructuredContent = (
 const asToolResult = (
   server: string,
   result: unknown,
-  outputSchema: Record<string, unknown> | undefined
+  outputSchema: Record<string, unknown> | undefined,
+  diagnostic: (source: "invalid-response", detail: unknown) => void
 ): Result.Result<ToolResult, McpError> => {
   if (!isRecord(result)) {
     return Result.fail(invalidResponse(
@@ -523,11 +539,10 @@ const asToolResult = (
     if (outputSchema !== undefined) {
       const issue = validateStructuredContent(structuredContent, outputSchema, "structuredContent")
       if (issue !== undefined) {
+        diagnostic("invalid-response", { issue, outputSchema })
         return Result.fail(invalidResponse(
           server,
-          `MCP server "${server}" returned structuredContent that its own outputSchema rejects at ${
-            boundedPath(issue.path)
-          }: ${issue.reason}`
+          `MCP server "${server}" returned structuredContent that its own outputSchema rejects: ${issue.reason}; property path withheld`
         ))
       }
     }
@@ -574,11 +589,30 @@ const ownDescriptor = (
 const isAccessor = (descriptor: PropertyDescriptor): boolean =>
   Object.hasOwn(descriptor, "get") || Object.hasOwn(descriptor, "set")
 
+type JsonBudget = { remaining: number }
+
+// Lower bounds on encoded size avoid expanding repeated references into an
+// enormous tree before the transport's exact UTF-8 frame check. String/key
+// UTF-16 length is a lower bound even with escapes and surrogate pairs.
+const spendJson = (budget: JsonBudget, bytes: number): boolean => {
+  budget.remaining -= bytes
+  return budget.remaining >= 0
+}
+
 const snapshotJson = (
   value: unknown,
   path: string,
-  ancestors: Set<object>
+  ancestors: Set<object>,
+  budget: JsonBudget
 ): Result.Result<JsonValue, JsonIssue> => {
+  const bytes = typeof value === "string" ?
+    value.length + 2
+    : typeof value === "number" || typeof value === "boolean" ?
+    String(value).length
+    : value === null ?
+    4
+    : 2
+  if (!spendJson(budget, bytes)) return jsonFailure(path, "JSON expansion exceeds the outbound frame budget")
   if (value === null) return Result.succeed(null)
   if (typeof value === "boolean" || typeof value === "string") return Result.succeed(value)
   if (typeof value === "number") {
@@ -590,6 +624,8 @@ const snapshotJson = (
   if (typeof value === "symbol") return jsonFailure(path, "a symbol")
 
   if (ancestors.has(value)) return jsonFailure(path, "a cyclic reference")
+  // Arguments live inside the wire envelope and its params object.
+  if (ancestors.size + 3 > maxJsonDepth) return jsonFailure(path, `JSON nesting exceeds ${maxJsonDepth} containers`)
   const array = reflect(() => Array.isArray(value))
   if (Result.isFailure(array)) return jsonFailure(path, array.failure)
   if (array.success) {
@@ -597,6 +633,9 @@ const snapshotJson = (
     if (Result.isFailure(length)) return jsonFailure(path, length.failure)
     if (!Number.isSafeInteger(length.success) || length.success < 0) {
       return jsonFailure(path, "a property that threw when read")
+    }
+    if (!spendJson(budget, Math.max(0, length.success - 1))) {
+      return jsonFailure(path, "JSON expansion exceeds the outbound frame budget")
     }
     ancestors.add(value)
     const copied: Array<JsonValue> = []
@@ -612,7 +651,7 @@ const snapshotJson = (
         return jsonFailure(memberPath, "an accessor property")
       }
       const member = descriptor.success === undefined ? undefined : descriptor.success.value
-      const snapshot = snapshotJson(member, memberPath, ancestors)
+      const snapshot = snapshotJson(member, memberPath, ancestors, budget)
       if (Result.isFailure(snapshot)) {
         ancestors.delete(value)
         return snapshot
@@ -641,6 +680,7 @@ const snapshotJson = (
 
   ancestors.add(object)
   const copied: JsonObject = {}
+  let members = 0
   for (const key of names.success) {
     const memberPath = `${path}.${key}`
     const descriptor = ownDescriptor(object, key, memberPath)
@@ -649,11 +689,15 @@ const snapshotJson = (
       return Result.fail(descriptor.failure)
     }
     if (descriptor.success === undefined || descriptor.success.enumerable !== true) continue
+    if (!spendJson(budget, key.length + 3 + Math.min(1, members++))) {
+      ancestors.delete(object)
+      return jsonFailure(path, "JSON expansion exceeds the outbound frame budget")
+    }
     if (isAccessor(descriptor.success)) {
       ancestors.delete(object)
       return jsonFailure(memberPath, "an accessor property")
     }
-    const snapshot = snapshotJson(descriptor.success.value, memberPath, ancestors)
+    const snapshot = snapshotJson(descriptor.success.value, memberPath, ancestors, budget)
     if (Result.isFailure(snapshot)) {
       ancestors.delete(object)
       return snapshot
@@ -669,22 +713,24 @@ const snapshotJson = (
   return Result.succeed(copied)
 }
 
-const boundedPath = (path: string): string => path.length <= 120 ? path : `${path.slice(0, 117)}...`
-
 const snapshotArguments = (
   server: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  diagnostic: (source: "invalid-arguments", detail: unknown) => void,
+  maxBytes: number
 ): Result.Result<Record<string, unknown>, McpError> => {
-  const snapshot = snapshotJson(args, "arguments", new Set())
+  const snapshot = snapshotJson(args, "arguments", new Set(), { remaining: maxBytes })
   if (Result.isFailure(snapshot)) {
+    diagnostic("invalid-arguments", snapshot.failure)
     return Result.fail(protocolError(
       server,
-      `MCP server "${server}" was sent a tool argument that is not JSON at ${
-        boundedPath(snapshot.failure.path)
-      }: ${snapshot.failure.reason}`
+      `MCP server "${server}" was sent a tool argument that is not JSON: ${snapshot.failure.reason}; property path withheld`
     ))
   }
-  return Result.succeed(snapshot.success as Record<string, unknown>)
+  if (!isRecord(snapshot.success)) {
+    return Result.fail(protocolError(server, `MCP server "${server}" tool arguments must be a JSON object`))
+  }
+  return Result.succeed(snapshot.success)
 }
 
 /**
@@ -705,7 +751,13 @@ export const connect = (
   options: ConnectOptions
 ): Effect.Effect<McpClient, McpError, ChildProcessSpawner | Scope.Scope> =>
   Effect.gen(function*() {
+    const diagnostic = yield* DiagnosticReporter.make(options.server)
+    const decodeResponse = <A>(response: unknown, decoded: Result.Result<A, McpError>) =>
+      Effect.fromResult(decoded).pipe(
+        Effect.tapError(() => Effect.sync(() => diagnostic("invalid-response", response)))
+      )
     const handshakeTimeoutMs = options.handshakeTimeoutMs ?? defaultHandshakeTimeoutMs
+    const maxArgumentBytes = options.maxOutboundFrameBytes ?? defaultMaxOutboundFrameBytes
     const maxTools = options.maxTools ?? defaultMaxTools
     const maxToolNameBytes = options.maxToolNameBytes ?? defaultMaxToolNameBytes
     const maxCatalogPages = options.maxCatalogPages ?? defaultMaxCatalogPages
@@ -733,7 +785,7 @@ export const connect = (
       },
       handshakeTimeoutMs
     )
-    yield* Effect.fromResult(asInitialize(options.server, initialized))
+    yield* decodeResponse(initialized, asInitialize(options.server, initialized))
     // A notification, not a request: the server never replies to it, and the
     // handshake is not complete until the client sends it.
     yield* transport.notify("notifications/initialized", undefined, handshakeTimeoutMs)
@@ -746,18 +798,22 @@ export const connect = (
     while (true) {
       const listed = yield* transport.request("tools/list", params, handshakeTimeoutMs)
       pageCount += 1
-      const page = yield* Effect.fromResult(asToolPage(
-        options.server,
+      const page = yield* decodeResponse(
         listed,
-        { maxTools, maxToolNameBytes },
-        toolNames,
-        tools
-      ))
+        asToolPage(
+          options.server,
+          listed,
+          { maxTools, maxToolNameBytes },
+          toolNames,
+          tools
+        )
+      )
       if (page.nextCursor === undefined) break
       if (cursors.has(page.nextCursor)) {
+        diagnostic("invalid-response", listed)
         return yield* Effect.fail(invalidResponse(
           options.server,
-          `MCP server "${options.server}" repeated the tools/list cursor "${page.nextCursor}"`
+          `MCP server "${options.server}" repeated a tools/list cursor`
         ))
       }
       if (pageCount >= maxCatalogPages) {
@@ -769,6 +825,7 @@ export const connect = (
       cursors.add(page.nextCursor)
       params = { cursor: page.nextCursor }
     }
+    JsonLimits.freezeParsed(tools)
 
     const callTool = (name: string, args: Record<string, unknown>): Effect.Effect<ToolResult, McpError> => {
       const tool = tools.find((candidate) => candidate.name === name)
@@ -776,16 +833,21 @@ export const connect = (
         return Effect.fail(
           new McpError({
             code: "tool_not_found",
-            message: `MCP server "${options.server}" has no tool "${name}"`,
+            message: `MCP server "${options.server}" has no requested tool`,
             server: options.server
           })
         )
       }
-      const snapshot = snapshotArguments(options.server, args)
-      if (Result.isFailure(snapshot)) return Effect.fail(snapshot.failure)
+      const snapshot = snapshotArguments(options.server, args, diagnostic, maxArgumentBytes)
+      if (Result.isFailure(snapshot)) {
+        // Do not inspect the rejected object again: it may contain throwing
+        // accessors or proxies. Even diagnostic observers see only the safe
+        // rejection, never a second traversal of executable user properties.
+        return Effect.fail(snapshot.failure)
+      }
       return Effect.flatMap(
         transport.request("tools/call", { name, arguments: snapshot.success }),
-        (result) => Effect.fromResult(asToolResult(options.server, result, tool.outputSchema))
+        (result) => decodeResponse(result, asToolResult(options.server, result, tool.outputSchema, diagnostic))
       )
     }
 

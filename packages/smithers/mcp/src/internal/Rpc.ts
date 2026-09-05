@@ -23,6 +23,24 @@ export interface Outbound {
 }
 
 /**
+ * Any outbound wire message, including replies to server requests. A reply
+ * preserves the server's exact id type rather than normalizing it as a
+ * correlation id in the client's pending-request map.
+ *
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type OutboundMessage = Outbound | {
+  readonly jsonrpc: "2.0"
+  readonly id: string | number
+  readonly result: unknown
+} | {
+  readonly jsonrpc: "2.0"
+  readonly id: string | number
+  readonly error: { readonly code: number; readonly message: string }
+}
+
+/**
  * A JSON object from server stdout that claims JSON-RPC by carrying its own
  * `jsonrpc` property. Validation happens after parsing so an incorrect version
  * cannot be mistaken for ordinary stdout noise.
@@ -63,13 +81,18 @@ export type Reply = {
 
 /**
  * The transport-relevant classification of one parsed JSON-RPC object.
- * Notifications need no correlation; every other tagged object is either a
- * validated reply or a malformed envelope that must close the connection.
+ * Server request ids belong to the opposite direction and must never be
+ * looked up in the client's pending-request map.
  *
  * @category models
  * @since 1.0.0-rc.0
  */
-export type Classification = { readonly _tag: "Notification" } | Reply
+export type Classification = { readonly _tag: "Notification" } | {
+  readonly _tag: "Request"
+  readonly id: string | number
+  readonly method: string
+  readonly params: unknown
+} | Reply
 
 const encoder = new TextEncoder()
 
@@ -79,7 +102,7 @@ const encoder = new TextEncoder()
  * @category conversions
  * @since 1.0.0-rc.0
  */
-export const encode = (message: Outbound): Uint8Array => encoder.encode(`${JSON.stringify(message)}\n`)
+export const encode = (message: OutboundMessage): Uint8Array => encoder.encode(`${JSON.stringify(message)}\n`)
 
 /**
  * Parses one line of server output. A blank line, invalid JSON, a non-object,
@@ -154,8 +177,8 @@ export const replyOf = (message: Inbound): Reply => {
 
 /**
  * Classifies a parsed JSON-RPC object for the stdio reader. A wrong version is
- * malformed, an own `method` property marks a server notification, and every
- * remaining object must satisfy {@link replyOf}.
+ * malformed; a valid own `method` with an own id is a server request, without
+ * an id a notification. Every remaining object must satisfy {@link replyOf}.
  *
  * @category conversions
  * @since 1.0.0-rc.0
@@ -164,6 +187,21 @@ export const classify = (message: Inbound): Classification => {
   if (message.jsonrpc !== "2.0") {
     return malformed("a JSON-RPC message must carry jsonrpc \"2.0\"")
   }
-  if (Object.hasOwn(message, "method")) return { _tag: "Notification" }
+  if (Object.hasOwn(message, "method")) {
+    if (typeof message.method !== "string") return malformed("a method must be a string")
+    if (Object.hasOwn(message, "result") || Object.hasOwn(message, "error")) {
+      return malformed("a method-bearing message cannot also carry result or error")
+    }
+    if (
+      Object.hasOwn(message, "params") &&
+      (typeof message.params !== "object" || message.params === null || Array.isArray(message.params))
+    ) return malformed("MCP method params must be an object")
+    if (!Object.hasOwn(message, "id")) return { _tag: "Notification" }
+    const id = message.id
+    if (typeof id !== "string" && (typeof id !== "number" || !Number.isSafeInteger(id))) {
+      return malformed("a server request id must be a string or safe integer")
+    }
+    return { _tag: "Request", id, method: message.method, params: message.params }
+  }
   return replyOf(message)
 }

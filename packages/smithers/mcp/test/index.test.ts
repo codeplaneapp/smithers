@@ -10,7 +10,7 @@ import * as Mcp from "../src/index.ts"
 
 describe("@smthrs/mcp", () => {
   it("re-exports every public module as a namespace", () => {
-    expect(Object.keys(Mcp).sort()).toEqual(["McpClient", "McpError", "McpFlows"])
+    expect(Object.keys(Mcp).sort()).toEqual(["Diagnostics", "McpClient", "McpError", "McpFlows"])
   })
 
   it("exposes the flow-binding projection the CLI composes", () => {

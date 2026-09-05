@@ -185,7 +185,7 @@ export const connected = (
       return Effect.fail(
         new McpError({
           code: "tool_not_found",
-          message: `MCP server "${client.server}" offers no tool "${missing}" named by include`,
+          message: `MCP server "${client.server}" offers no requested include tool`,
           server: client.server
         })
       )

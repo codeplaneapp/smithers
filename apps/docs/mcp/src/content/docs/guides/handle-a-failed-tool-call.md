@@ -79,24 +79,28 @@ The heuristic is deliberately narrow because servers do not standardize
 unknown-tool prose. An argument validation failure stays `tool_failed`, which is
 the truthful answer: the tool exists and refused the call.
 
-The message always names the server and includes the numeric code the server
-sent. A scalar `data` field of 120 characters or fewer is appended as
-`[data: ...]`.
+The message names the configured server and includes the numeric code the
+server sent. Remote message text and `data` are withheld, even when short: a
+short scalar can still be a credential.
 
 ## What an error never contains
 
-Nothing retains the request, the arguments, or the raw frame:
+An ordinary session error contains neither the request nor raw remote details:
 
-- An argument that is not JSON is reported by a bounded property path, such as
-  `arguments.payload.handler`, truncated at 120 characters, plus what was wrong
-  with it.
-- A structured-output violation names the path inside `structuredContent`, not
-  the value.
-- A `spawn_failed`, `timeout`, or `connection_closed` carries a bounded tail of
-  the child's stderr, whitespace-collapsed, up to `maxStderrBytes`.
+- A non-JSON argument or structured-output violation reports a fixed reason,
+  withholding both its value and property path. Property names can be secrets.
+- Invalid protocol versions, duplicate tool names, and repeated cursors are
+  reported without echoing the server's strings.
+- Process startup errors, child stderr, and remote error messages/data never
+  enter the ordinary error, its encoded schema, or its JSON representation.
 
-Reaching for the raw frame in a log is the wrong move: it is not there on
-purpose, because a tool argument can carry a credential.
+For debugging, a trusted host can opt into
+[Diagnostics](/reference/api/#diagnostics). Its bounded details are wrapped in
+`Redacted`; ordinary inspection and JSON serialization hide them. Unwrapping
+requires explicit access and retention controls. Never send unwrapped details
+to an agent, journal, trace, or routine log. Without an observer these details
+are discarded. This is not a scrubber for successful tool output, including
+`isError: true`: that data is returned unchanged.
 
 ## Arguments must be JSON before they are sent
 
@@ -109,6 +113,10 @@ becomes a typed error rather than a defect.
 
 This runs before the wire, so a bad argument never reaches the server and never
 consumes a request deadline.
+
+The argument root must be an object. Deep nesting and expanded JSON size are
+also [bounded](/guides/bound-an-untrusted-server/#json-depth-and-expansion), including
+when many properties reference the same child object.
 
 ## Next
 

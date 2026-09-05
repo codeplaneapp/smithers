@@ -1,13 +1,14 @@
 import * as Capability from "@smthrs/capability/Capability"
 import * as Cell from "@smthrs/harness/Cell"
 import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Ref, Schema, Sink, Stream } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Redacted, Ref, Schema, Sink, Stream } from "effect"
 import type { Scope } from "effect"
 import * as PlatformError from "effect/PlatformError"
 import type * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { existsSync, readFileSync } from "node:fs"
 import { describe, expect, it, vi } from "vitest"
+import * as Diagnostics from "../src/Diagnostics.ts"
 import * as Rpc from "../src/internal/Rpc.ts"
 import * as StdioTransport from "../src/internal/StdioTransport.ts"
 import * as McpClient from "../src/McpClient.ts"
@@ -197,20 +198,38 @@ describe("McpClient.connect", () => {
     expect(McpClient.supportedProtocolVersions[0]).toBe("2025-06-18")
   })
 
-  it("publishes the documentation linked from the package README", () => {
+  it("points the README at the published documentation instead of the source tree", () => {
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
+
+    // npm renders this file, so every reference has to resolve for a reader who
+    // has only the tarball. A relative `docs/` path does not: `docs/` is not
+    // published, and its pages link on into `guides/` and `concepts/` anyway.
+    expect(readme).toContain("https://mcp.smithers.sh")
+    expect(readme).not.toMatch(/\]\(\.\/docs\//)
+
+    // Nothing is published yet, and an install command paired with an admission
+    // that it does not work reads as a note to self, so the README states
+    // availability before it states the command.
+    const install = readme.indexOf("pnpm add @smthrs/mcp")
+    expect(install).toBeGreaterThan(-1)
+    expect(readme.indexOf("not published to npm yet")).toBeLessThan(install)
+
+    // The links a reader without the repository can still follow.
+    for (const path of [new URL("../LICENSE", import.meta.url)]) {
+      expect(existsSync(path)).toBe(true)
+    }
+  })
+
+  it("keeps the source tree's docs out of the published tarball", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../package.json", import.meta.url), "utf8")
     ) as { readonly files: ReadonlyArray<string> }
-    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
 
-    // Asserting the manifest entry alone would pass while the README pointed at
-    // a file the tarball still dropped, so resolve each link the README makes.
-    const linked = [...readme.matchAll(/\]\(\.\/(docs\/[\w.-]+\.md)\)/g)].map(([, path]) => path!)
-    expect(linked.length).toBeGreaterThan(0)
-    for (const path of linked) {
-      expect(existsSync(new URL(`../${path}`, import.meta.url))).toBe(true)
-      expect(manifest.files.some((pattern) => pattern === path || pattern === "docs/*.md")).toBe(true)
-    }
+    // `docs/*.md` shipped the four top-level pages and none of the `guides/`
+    // and `concepts/` pages they link to, so the tarball carried a docs tree
+    // whose own links were broken. mcp.smithers.sh is the whole tree.
+    expect(manifest.files.some((pattern) => pattern.startsWith("docs/"))).toBe(false)
+    expect(manifest.files).toContain("README.md")
   })
 
   it("completes the handshake and fetches the tool catalog", async () => {
@@ -443,7 +462,16 @@ describe("McpClient.connect", () => {
       ["handshakeTimeoutMs", 0],
       ["maxTools", 0],
       ["maxToolNameBytes", -1],
-      ["maxCatalogPages", 1.5]
+      ["maxCatalogPages", 1.5],
+      ["handshakeTimeoutMs", Number.MAX_SAFE_INTEGER + 1],
+      ["maxTools", Number.MAX_SAFE_INTEGER + 1],
+      ["maxToolNameBytes", Number.MAX_SAFE_INTEGER + 1],
+      ["maxCatalogPages", Number.MAX_SAFE_INTEGER + 1],
+      ["requestTimeoutMs", Number.MAX_SAFE_INTEGER + 1],
+      ["queueCapacity", Number.MAX_SAFE_INTEGER + 1],
+      ["maxFrameBytes", Number.MAX_SAFE_INTEGER + 1],
+      ["maxOutboundFrameBytes", Number.MAX_SAFE_INTEGER + 1],
+      ["maxStderrBytes", Number.MAX_SAFE_INTEGER + 1]
     ] as const
   )("rejects an invalid public limit %s", async (name, value) => {
     const error = await withFakeServer(
@@ -494,7 +522,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "tool_not_found",
       server: "known-tools",
-      message: "MCP server \"known-tools\" has no tool \"nope\""
+      message: "MCP server \"known-tools\" has no requested tool"
     })
     expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list"])
   })
@@ -554,7 +582,7 @@ describe("McpClient.connect", () => {
       path: "arguments.value",
       reason: "a symbol-keyed property"
     }
-  ])("rejects a non-JSON $label tool argument", async ({ path, reason, value }) => {
+  ])("rejects a non-JSON $label tool argument", async ({ reason, value }) => {
     const error = await withFakeServer(
       respondToEcho,
       Effect.gen(function*() {
@@ -566,11 +594,12 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       server: "arguments",
-      message: `MCP server "arguments" was sent a tool argument that is not JSON at ${path}: ${reason}`
+      message: `MCP server "arguments" was sent a tool argument that is not JSON: ${reason}; property path withheld`
     })
   })
 
-  it("reports the bounded path to a nested invalid argument", async () => {
+  it("keeps the exact invalid-argument path in redacted host diagnostics only", async () => {
+    const diagnostics: Array<Diagnostics.Event> = []
     const longKey = "x".repeat(140)
     const error = await withFakeServer(
       respondToEcho,
@@ -579,14 +608,14 @@ describe("McpClient.connect", () => {
         return yield* Effect.flip(client.callTool("add", {
           nested: { items: [0, { [longKey]: undefined }] }
         }))
-      })
+      }).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event))))
     )
 
     expect(error.code).toBe("protocol_error")
     expect(error.server).toBe("arguments")
-    expect(error.message).toContain("arguments.nested.items[1].")
-    const renderedPath = error.message.split(": ")[0]!.split(" at ")[1]!
-    expect(renderedPath.length).toBeLessThanOrEqual(120)
+    expect(error.message).not.toContain(longKey)
+    expect(JSON.stringify(diagnostics)).not.toContain(longKey)
+    expect(Redacted.value(diagnostics[0]!.detail)).toContain(`arguments.nested.items[1].${longKey}`)
   })
 
   it("rejects cyclic arguments without a serialization defect", async () => {
@@ -604,7 +633,7 @@ describe("McpClient.connect", () => {
       code: "protocol_error",
       server: "arguments",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.self: a cyclic reference"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: a cyclic reference; property path withheld"
     })
   })
 
@@ -634,7 +663,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.lazy: an accessor property"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: an accessor property; property path withheld"
     })
     expect(invoked).toBe(false)
     expect(methods).toEqual(["initialize", "notifications/initialized", "tools/list"])
@@ -680,7 +709,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value: a property that threw when read"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: a property that threw when read; property path withheld"
     })
   })
 
@@ -712,7 +741,7 @@ describe("McpClient.connect", () => {
 
     expect(error).toMatchObject({
       code: "protocol_error",
-      message: "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.toJSON: a function"
+      message: "MCP server \"arguments\" was sent a tool argument that is not JSON: a function; property path withheld"
     })
   })
 
@@ -849,7 +878,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value: a property that threw when read"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: a property that threw when read; property path withheld"
     })
   })
 
@@ -875,7 +904,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value[0]: an accessor property"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: an accessor property; property path withheld"
     })
     expect(invoked).toBe(false)
   })
@@ -892,7 +921,7 @@ describe("McpClient.connect", () => {
 
     expect(error).toMatchObject({
       code: "protocol_error",
-      message: "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.value[0]: undefined"
+      message: "MCP server \"arguments\" was sent a tool argument that is not JSON: undefined; property path withheld"
     })
   })
 
@@ -914,7 +943,7 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "protocol_error",
       message:
-        "MCP server \"arguments\" was sent a tool argument that is not JSON at arguments.outer.inner: an accessor property"
+        "MCP server \"arguments\" was sent a tool argument that is not JSON: an accessor property; property path withheld"
     })
   })
 
@@ -1000,8 +1029,39 @@ describe("McpClient.connect", () => {
     expect(error).toMatchObject({
       code: "invalid_response",
       message:
-        "MCP server \"schema-integer\" returned structuredContent that its own outputSchema rejects at structuredContent.value: expected integer"
+        "MCP server \"schema-integer\" returned structuredContent that its own outputSchema rejects: expected integer; property path withheld"
     })
+  })
+
+  it("exposes an immutable catalog so callers cannot change later validation or dispatch", async () => {
+    const result = await withFakeServer(
+      respondWithStructured({ type: "object", properties: { value: { type: "number" } } }, { value: "wrong" }),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "catalog-snapshot", command: "mcp", args: [] })
+        const tool = client.tools[0]!
+        expect(Reflect.set(client.tools, "length", 0)).toBe(false)
+        expect(Reflect.set(tool, "name", "changed")).toBe(false)
+        expect(Reflect.set(tool.inputSchema, "type", "array")).toBe(false)
+        const properties = tool.outputSchema!.properties as Record<string, unknown>
+        expect(Reflect.set(properties, "value", {})).toBe(false)
+        expect(Reflect.set(properties.value as object, "type", "string")).toBe(false)
+        return yield* Effect.flip(client.callTool("add", {}))
+      })
+    )
+    expect(result.code).toBe("invalid_response")
+  })
+
+  it("bounds error prose when a schema repeats a supported type", async () => {
+    const error = await withFakeServer(
+      respondWithStructured({ type: Array.from({ length: 2_000 }, () => "number") }, {}),
+      Effect.gen(function*() {
+        const client = yield* McpClient.connect({ server: "schema-types", command: "mcp", args: [] })
+        return yield* Effect.flip(client.callTool("add", {}))
+      })
+    )
+    expect(error.message).toBe(
+      "MCP server \"schema-types\" returned structuredContent that its own outputSchema rejects: expected number; property path withheld"
+    )
   })
 
   it("compares structured enum values by JSON value", async () => {
@@ -1274,7 +1334,7 @@ describe("StdioTransport limits and terminal state", () => {
     expect(error).toMatchObject({
       code: "tool_failed",
       server: "settled-error",
-      message: "MCP server \"settled-error\" failed tools/call (-32000): remote failure"
+      message: "MCP server \"settled-error\" failed tools/call (-32000); remote details withheld"
     })
     expect(frames.filter((frame) => frame.method === "notifications/cancelled")).toEqual([])
   })
@@ -1425,6 +1485,70 @@ describe("StdioTransport limits and terminal state", () => {
     })))
 
     expect(error).toMatchObject({ code: "timeout", server: "blocked-writer" })
+  })
+
+  it("bounds server-response admission when a peer stops reading its stdin", async () => {
+    const failure = await execute(Effect.scoped(Effect.gen(function*() {
+      const writerStarted = yield* Deferred.make<void>()
+      const output = yield* Queue.unbounded<Uint8Array>()
+      const spawner = fakeProcess({
+        pid: ProcessId(2),
+        stdout: Stream.fromQueue(output),
+        stdin: Sink.forEach((_chunk: Uint8Array) =>
+          Deferred.succeed(writerStarted, undefined).pipe(Effect.andThen(Effect.never))
+        )
+      })
+      const transport = yield* provideSpawner(
+        StdioTransport.connect({
+          server: "blocked-server-response",
+          command: "mcp",
+          args: [],
+          queueCapacity: 1,
+          requestTimeoutMs: 25
+        }),
+        spawner
+      )
+      yield* transport.notify("first")
+      yield* Deferred.await(writerStarted)
+      yield* transport.notify("second")
+      yield* Queue.offer(output, Rpc.encode({ jsonrpc: "2.0", id: 99, method: "ping" }))
+      // The reader's deadline closes the connection and unblocks this offer;
+      // the request's own, longer deadline must not be what releases it.
+      yield* transport.request("waiting", undefined, 1_000).pipe(Effect.exit)
+      return yield* Effect.flip(transport.notify("after-close"))
+    })))
+    expect(failure).toMatchObject({
+      code: "timeout",
+      message: "MCP server \"blocked-server-response\" did not answer server-response admission within 25ms"
+    })
+  })
+
+  it("applies the outbound byte limit to responses, even for an immediate server ping", async () => {
+    const failure = await execute(Effect.scoped(Effect.gen(function*() {
+      const spawner = fakeProcess({
+        pid: ProcessId(2),
+        stdout: Stream.concat(
+          Stream.make(
+            new TextEncoder().encode(JSON.stringify({ jsonrpc: "2.0", id: "x".repeat(100), method: "ping" }) + "\n")
+          ),
+          Stream.never
+        )
+      })
+      const transport = yield* provideSpawner(
+        StdioTransport.connect({
+          server: "large-server-response",
+          command: "mcp",
+          args: [],
+          maxOutboundFrameBytes: 64
+        }),
+        spawner
+      )
+      return yield* Effect.flip(transport.request("x"))
+    })))
+    expect(failure).toMatchObject({
+      code: "protocol_error",
+      message: "MCP server \"large-server-response\" tried to send a server-response frame larger than 64 bytes"
+    })
   })
 
   it("turns an exit-status failure into one terminal error for later traffic", async () => {
@@ -1703,7 +1827,7 @@ describe("McpFlows.mcp", () => {
     expect(error).toMatchObject({
       code: "tool_not_found",
       server: "checked",
-      message: "MCP server \"checked\" offers no tool \"missing\" named by include"
+      message: "MCP server \"checked\" offers no requested include tool"
     })
   })
 

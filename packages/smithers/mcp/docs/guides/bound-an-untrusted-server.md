@@ -27,7 +27,8 @@ when you are deciding what to allow a server you do not trust.
 | `maxCatalogPages`       | 32      | `McpClient.defaultMaxCatalogPages`       | `tools/list` pages walked while following a cursor. |
 | `maxStderrBytes`        | 2048    | `McpClient.defaultMaxStderrBytes`        | Child stderr retained as a diagnostic tail.         |
 
-Every one must be a positive integer. A zero, a negative number, or a fraction
+Every one must be a positive safe integer. A zero, a negative number, a fraction,
+or a number above `Number.MAX_SAFE_INTEGER`
 fails with `protocol_error` naming the option, before the process is spawned.
 
 ```ts
@@ -61,10 +62,37 @@ cursor both end a cursor walk that would otherwise never finish.
 **`maxStderrBytes`** bounds a diagnostic buffer. Child stderr is drained
 continuously and only the tail is retained, so a chatty server cannot fill
 memory through the channel that exists to explain its failures.
+The tail never enters an ordinary error. Only an explicitly installed
+[private diagnostic observer](../api.md#diagnostics) may receive it, wrapped in
+`Redacted`. This per-event bound does not bound memory retained by a host's own
+observer; that observer must also limit its history.
 
 **The two deadlines** are separate because they answer different questions. A
 server that never completes a handshake is broken and should fail fast; a tool
 that takes a minute may be working.
+
+## JSON depth and expansion
+
+Bytes alone do not make recursive consumers safe. All incoming JSON-RPC messages
+are checked iteratively before catalog/result validation, and may contain at
+most `McpClient.maxJsonDepth` (128) nested object/array containers, counting the
+wire envelope. This bound is fixed, not increased by raising `maxFrameBytes`.
+Outgoing arguments have the same bound: their root object already counts as
+container three, inside the envelope and `params`. A scalar adds no container.
+An oversized depth or numeric overflow to infinity is a typed `protocol_error`,
+not a stack-overflow defect.
+
+Argument copying also stops when a lower bound on its expanded encoded size
+exceeds `maxOutboundFrameBytes`. A compact JavaScript graph with shared children
+can expand exponentially as JSON; each repeated occurrence consumes the budget.
+Exact UTF-8 frame sizing, including escapes and protocol overhead, still runs
+before writing. The argument root must be a JSON object. A rejected argument
+does not send a request or close the session.
+
+The host still owns memory it allocated before calling this library and any
+executable Proxy traps it supplies. Incoming frames are parsed before the
+iterative depth check, with parse allocation bounded by `maxFrameBytes`; this is
+not a constant-memory streaming JSON parser.
 
 ## The rules a tool name must satisfy
 

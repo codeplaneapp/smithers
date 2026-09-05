@@ -1,47 +1,51 @@
 ---
 title: "@smthrs/mcp"
-description: "The Model Context Protocol client and flow adapter: connect a stdio MCP server, project its tools into a Smithers flow catalog as one flow per tool, and bound what an untrusted server may send back."
+description: "A Model Context Protocol client for Node, and the adapter that projects a remote server's tools into a Smithers run as ordinary flows named mcp/<server>/<tool>."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/mcp/docs/README.md"
 ---
 
-`@smthrs/mcp` connects to a Model Context Protocol server and turns the tools it
-offers into ordinary Smithers flows.
+`@smthrs/mcp` connects to a Model Context Protocol (MCP) server over stdio and
+projects the tools that server offers as flows a Smithers agent can call. It is
+two halves: `McpClient`, a small JSON-RPC client covering the `initialize`
+handshake, `tools/list`, and `tools/call`, and `McpFlows`, which turns a
+connected session's catalog into one flow per tool.
 
-A remote server's tools are not a second kind of capability the harness has to
-know about. `@smthrs/harness/FlowBinding`'s own contract already names this
-case: "a standard filesystem flow, a memory flow, an incoming MCP tool, a
-durable child agent" are all just a flow declaration plus the code that runs it.
-This package is the code that runs it. `McpClient` speaks newline-delimited
-JSON-RPC over a spawned server's stdio, and `McpFlows` projects the resulting
-tool catalog into one `FlowBinding.Binding` per tool. A cell that reads a file
-and a cell that calls an MCP tool run the identical two lines.
+## What it solves
 
-## This package is the client half
+MCP is how a service publishes tools to an agent: a GitHub server, a database
+server, an internal service somebody on your team wrote. Calling one of those
+from an agent run could have been a second kind of capability, with its own
+dispatch, its own permission rules, and its own error type. It is not. This
+package makes a remote tool an ordinary flow:
 
-Smithers meets MCP in two directions, and they are separate features that share
-a name:
+- Each tool becomes a flow named `mcp/<server>/<tool>`, so two servers may offer
+  a tool of the same name without colliding.
+- Each flow carries the server's own JSON Schema as its parameter document, so a
+  model reading the catalog sees the real argument shape rather than a
+  placeholder.
+- A cell calls it with the two lines it already uses for a filesystem flow: find
+  the name in `ctx.flows`, invoke it with `ctx.call`.
 
-| Direction                                   | What it is                                                                                                             | Where it lives                                                                                         |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| A Smithers run calls somebody else's tools. | This package. It spawns the server, fetches its catalog, and projects each tool as a flow named `mcp/<server>/<tool>`. | `@smthrs/mcp`, and the CLI's `--mcp-config` flag, which composes it.                                   |
-| Somebody else's agent drives Smithers.      | The Smithers MCP server, which exposes runs, approvals, and steering as MCP tools.                                     | [`smthrs mcp`](https://smithers.sh/docs/reference/cli/mcp/) and [Wire the MCP server into an agent](https://cli.smithers.sh/guides/wire-the-mcp-server/). |
-
-If you are registering Smithers with Claude Code or Codex, you want the second
-row. Everything else on this site is the first.
+The client half is deliberately small. Resources, prompts, sampling, and roots
+are not implemented, because a projection needs a tool catalog and a way to call
+one entry of it, and nothing else.
 
 ## Install
 
-```bash
-pnpm add @smthrs/mcp
-```
+`@smthrs/mcp` is not published to npm yet. Its source is on
+[GitHub](https://github.com/smithersai/smithers).
 
-For the platform services a connection needs, see
+It needs Node.js 22.19+ (Node 22) or 24.11+. Opening a connection requires two services
+from the caller's environment: Effect's `ChildProcessSpawner`, because an MCP
+server is a subprocess, and a `Scope`, because closing the scope tears that
+subprocess down. `@effect/platform-node` supplies the spawner on Node. For the
+version requirements and the import forms, see
 [Installation](/installation/).
 
-## The smallest real example
+## Connect a server and read its flows
 
-Connecting owns a subprocess, so it is a scoped effect. The connection lives
-exactly as long as the surrounding scope:
+`McpFlows.connected` spawns the server, completes the handshake, fetches the
+tool catalog, and returns the projection in one step:
 
 ```ts
 import { NodeServices } from "@effect/platform-node"
@@ -53,50 +57,69 @@ const program = Effect.scoped(Effect.gen(function*() {
     server: "github",
     command: "npx",
     args: ["-y", "@modelcontextprotocol/server-github"],
-    env: { GITHUB_TOKEN: "..." }
+    env: { GITHUB_TOKEN: process.env.GITHUB_TOKEN },
+    include: ["create_issue", "get_issue", "list_issues"]
   })
-  // source: FlowBinding.Source. Pass it to FlowBinding.catalog(...) alongside
-  // StandardFlows.filesystem(...), StandardFlows.shell(...), and any other
-  // source the host composes.
-  return source
+  const bindings = yield* source.bindings()
+  return bindings.map((binding) => binding.descriptor.name)
 }))
 
-await Effect.runPromise(Effect.provide(program, NodeServices.layer))
+console.log(await Effect.runPromise(Effect.provide(program, NodeServices.layer)))
 ```
 
-Each tool becomes a flow named `mcp/<server>/<tool>`, carrying the server's own
-JSON Schema as its input document, so a caller reading `ctx.flows` sees the real
-parameter shape. For a run you can watch end to end, see the
-[Quickstart](/quickstart/).
+```text
+[ 'mcp/github/create_issue', 'mcp/github/get_issue', 'mcp/github/list_issues' ]
+```
 
-## The package at a glance
+Three details in that program decide how the rest behaves:
 
-The root entry point exports three namespaces, and each is also importable from
-`@smthrs/mcp/<Module>`:
+- `Effect.scoped` owns the subprocess. The session lasts as long as the scope,
+  and every request outstanding when it closes fails with `connection_closed`
+  rather than hanging.
+- `include` is an exact-name allowlist, checked against the catalog the server
+  actually sent, so a typo fails the connection instead of quietly handing the
+  model a smaller toolset. Omit it to project every tool.
+- `env` is merged into the inherited child environment rather than replacing it,
+  so a server started with a credential still receives `PATH` and `HOME`.
 
-| Namespace   | What it is                                                                                                                             |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `McpClient` | The session: the `initialize` handshake, the tool catalog fetched at connect time, and `callTool`.                                     |
-| `McpFlows`  | The adapter: a connected session's catalog as a `FlowBinding.Source`, plus the authority and effect envelope every tool flow declares. |
-| `McpError`  | The one typed failure, and the seven stable codes it carries.                                                                          |
+One step separates that source from a cell that can call it. Every projected
+flow declares the widest authority the capability vocabulary can express,
+because an MCP tool is opaque code this package does not control, and a host
+narrows that declaration to the authority it actually grants the server. The
+recipe is in
+[Grant authority to MCP tools](/guides/grant-authority-to-mcp-tools/).
 
-Every export, with its signature, is on the [API reference](/reference/api/).
+## How this relates to the smithers CLI
 
-## What this package does not do
+`@smthrs/mcp` is one of the packages behind [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), the
+`smthrs` command line that plans, runs, and inspects Smithers flows. The CLI
+composes this package for you: `smthrs --mcp-config <path>` reads a JSON array
+of server entries, connects every one of them when the executor starts, and adds
+their tools to the run's flow catalog. Each entry in that file is structurally an
+`McpClient.ConnectOptions`, so the flag and this package describe the same
+connection. See
+[Configure servers for the CLI](/guides/configure-servers-for-the-cli/).
 
-- stdio transport only. HTTP and SSE transports are not implemented, and the
-  transport interface is package-internal rather than a published extension
-  point.
-- Tools only. Resources, prompts, sampling, and roots are not wired up.
-- One catalog fetch, at connect time. A server that later announces
-  `notifications/tools/list_changed` is not re-polled; reconnect to refresh.
+Import the package directly when you embed Smithers in a program of your own, or
+when you want a projection the flag does not express: a per-server `include`
+list, a custom flow-name prefix, or a narrowed capability declaration. The
+projected `FlowBinding.Source` is the same type the standard flows return, so it
+composes with them in one array; that contract belongs to
+[`@smthrs/harness`](https://harness.smithers.sh/reference/api/).
+
+The CLI also hosts the mirror image of this package, under a name close enough
+to confuse.
+`smthrs --mcp-config` is a Smithers run calling somebody else's tools;
+[`smthrs mcp`](https://smithers.sh/docs/reference/cli/mcp/) runs Smithers itself as an MCP server, so an agent such
+as Claude Code can drive a control plane. For that direction, see
+[Wire the MCP server into an agent](https://cli.smithers.sh/guides/wire-the-mcp-server/).
 
 ## Where to go next
 
-- [Installation](/installation/): the platform services a connection needs
-  and the import forms.
-- [Quickstart](/quickstart/): connect to a real server, call a tool, and read
-  the projected flows.
+- [Installation](/installation/): requirements, the services a connection
+  needs, and the import forms.
+- [Quickstart](/quickstart/): a real server in its own process, two tool
+  calls, and the flows they project.
 - Concepts: [a remote tool as a flow](/concepts/tools-as-flows/) and
   [the life of a session](/concepts/the-session/).
 - Guides: [connect a server](/guides/connect-a-server/),
@@ -107,5 +130,7 @@ Every export, with its signature, is on the [API reference](/reference/api/).
   [bound an untrusted server](/guides/bound-an-untrusted-server/),
   [configure servers for the CLI](/guides/configure-servers-for-the-cli/),
   and [test against a server](/guides/testing/).
-- [Troubleshooting](/troubleshooting/): the failures this package reports,
-  what causes each one, and what to change.
+- [API reference](/reference/api/): every export of `McpClient`, `McpError`, and
+  `McpFlows`.
+- [Troubleshooting](/troubleshooting/): each failure this package reports,
+  found by the message you saw.

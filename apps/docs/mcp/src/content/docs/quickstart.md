@@ -17,12 +17,9 @@ can call.
 
 ## Prerequisites
 
-- Node.js 22.19.0 or later.
-- A package with the dependencies installed:
-
-```bash
-pnpm add @smthrs/mcp @effect/platform-node effect
-```
+Node.js 22.19+ (Node 22) or 24.11+, and a project that depends on `@smthrs/mcp`,
+`@effect/platform-node`, and `effect`. See
+[Installation](/installation/).
 
 ## Write the server
 
@@ -146,7 +143,11 @@ process is torn down and every request still outstanding fails with
 
 ## Run it
 
-Run the file with your TypeScript runner:
+Run the file with a TypeScript runner:
+
+```bash
+npx tsx quickstart.ts
+```
 
 ```text
 {

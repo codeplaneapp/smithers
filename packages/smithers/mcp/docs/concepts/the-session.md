@@ -35,7 +35,10 @@ seconds and is separate from the deadline later tool calls get.
 What the session holds is small: the server name, the tool catalog, and a way to
 call one entry of it.
 
-The catalog is a **snapshot**. It is fetched once and never refreshed. A server
+The catalog is a **deeply frozen snapshot**, including tool entries and their
+schemas. Editing the public catalog cannot change future dispatch or validation;
+make a separate copy if a consumer needs a mutable view. It is fetched once and
+never refreshed. A server
 that later announces `notifications/tools/list_changed` is not re-polled, and
 server-initiated notifications are received and dropped. To pick up a changed
 catalog, close the scope and connect again.
@@ -68,9 +71,12 @@ so a caller never waits on a reply that can no longer come. A clean child exit
 is still a closed session: Node reports an ordinary exit by ending stdout
 successfully.
 
-For `spawn_failed`, `timeout`, and `connection_closed`, the message carries a
-bounded tail of the child's stderr, whitespace-collapsed, up to `maxStderrBytes`.
-That is usually the only place a server says why it would not start.
+For `spawn_failed`, `timeout`, and `connection_closed`, the message withholds
+process details. A child's stderr may contain credentials, including fragments
+whose identifying prefix was removed by truncation. The bounded,
+whitespace-collapsed tail is available only to an explicitly installed
+[private host diagnostic observer](../api.md#diagnostics); it is never appended
+to the ordinary error. Without that observer, private details are discarded.
 
 ## Noise and protocol traffic on stdout
 
@@ -80,9 +86,18 @@ protocol:
 - A blank line, invalid JSON, a JSON scalar, an array, `null`, or a JSON object
   with no own `jsonrpc` property is **noise**, and is dropped.
 - An object that does carry `jsonrpc` is **protocol traffic**. Its version must
-  be exactly `"2.0"`; an envelope with an own `method` is a server notification
-  and is dropped; anything else must be a valid reply with an id and exactly one
-  of `result` or `error`.
+  be exactly `"2.0"`. A valid method-bearing envelope without an id is a
+  notification and is dropped; with an id it is a server request. Anything
+  else must be a valid reply with an id and exactly one of `result` or `error`.
+
+Server `ping` requests receive `{ result: {} }`, preserving the exact string or
+integer id, including while a tool call is pending. Unsupported server methods
+receive JSON-RPC `-32601` (`Method not found`); they are never silently dropped.
+Server-request ids are independent of client-request ids. Reply frames use the
+same outbound byte and queue bounds, with `requestTimeoutMs` limiting queue
+admission; a blocked response closes the connection instead of hanging the
+reader. This implements the negotiated
+[MCP ping contract](https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/ping).
 
 A malformed tagged envelope closes the connection with `protocol_error`. A
 well-formed reply for an id nobody is waiting on is dropped. The raw frame is

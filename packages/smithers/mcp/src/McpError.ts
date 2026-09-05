@@ -37,6 +37,10 @@ export type Code = typeof Code.Type
  * MCP session itself: the server would not exist, the pipe closed, a
  * response could not be parsed.
  *
+ * Client-created messages withhold raw process/remote diagnostics and
+ * user-controlled property paths. Trusted hosts can opt into Diagnostics for
+ * bounded Redacted details. Successful tool output is not scrubbed.
+ *
  * @category errors
  * @since 1.0.0-rc.0
  */

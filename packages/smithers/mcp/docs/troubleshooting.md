@@ -14,8 +14,9 @@ One failure is not an `McpError` at all, and it is the most common one: see
 
 **Code.** `spawn_failed`.
 
-**What happened.** The process could not be started. The message carries the
-spawn error and, when the child produced any, a bounded, redacted tail of its stderr.
+**What happened.** The process could not be started. Raw process details are
+withheld. For local debugging, install a trusted
+[Diagnostics observer](./api.md#diagnostics) before opening the connection.
 
 **What to change.** Check that `command` is on the parent process's `PATH`, that
 `cwd` exists, and that the entry file is readable. The child receives `PATH`
@@ -23,7 +24,7 @@ from the bootstrap allowlist even when `env` declares other names, so a wrong
 `command` usually is the cause. For a server started through `npx`, run the same
 command by hand first.
 
-## ... speaks protocol "X"; this client speaks ...
+## ... speaks an unsupported protocol version; this client speaks ...
 
 **Code.** `protocol_error`.
 
@@ -86,7 +87,7 @@ one. `outputSchema`, when present, must also be a JSON object.
 
 **What happened.** The catalog exceeded `maxTools` (256 by default) or the
 cursor walk exceeded `maxCatalogPages` (32 by default). The related message
-`repeated the tools/list cursor "..."` means the server sent a cursor it had
+`repeated a tools/list cursor` means the server sent a cursor it had
 already sent, which would loop forever.
 
 **What to change.** For a genuinely large server, raise `maxTools` or
@@ -106,7 +107,7 @@ contained `/`, a C0 control character, U+007F, or a C1 control character.
 **What to change.** Rename the tool on the server. The name is embedded in the
 flow name `mcp/<server>/<tool>` and in the journal's declaration digest, so `/`
 would make it ambiguous and a control character would corrupt what a model
-reads. `returned two tools named "..."` is the same class: a duplicate makes the
+reads. `returned a duplicate tool name at catalog index N` is the same class: a duplicate makes the
 flow name ambiguous.
 
 ## ... did not answer METHOD within Nms
@@ -116,11 +117,12 @@ flow name ambiguous.
 **What happened.** The deadline for that method expired.
 `handshakeTimeoutMs` (10 seconds by default) bounds `initialize` and
 `tools/list`; `requestTimeoutMs` (120 seconds by default) bounds `tools/call`.
-The message carries a bounded, redacted stderr tail when the child wrote one.
+The message indicates when a stderr diagnostic was withheld; it never echoes
+the child's output.
 
 **What to change.** For a slow tool, raise `requestTimeoutMs`. For a handshake
-that never completes, read the stderr tail in the message: a server that logs a
-crash there is not slow, it is broken.
+that never completes, inspect the private stderr diagnostic through a trusted
+host observer: a server that reports a crash is not merely slow.
 
 One `notifications/cancelled` was sent for the timed-out request, unless the
 outbound queue was full or the method was `initialize`.
@@ -137,8 +139,8 @@ closed" or "exited with code N".
 **What to change.** "Connection scope closed" is usually the caller's own bug:
 the scope was closed while a call was still running, or a client was used after
 its `Effect.scoped` block returned. Hold the connection for the life of the
-session rather than per call. For a server that exited on its own, read the
-stderr tail in the message.
+session rather than per call. For a server that exited on its own, inspect the
+private stderr diagnostic through a trusted host observer.
 
 ## MCP frame exceeded N bytes
 
@@ -179,7 +181,7 @@ before the process is spawned.
 instead means `McpFlows.connected` was given an empty prefix, which would
 produce flow names starting with `/`.
 
-## MCP server "..." has no tool "..."
+## MCP server "..." has no requested tool
 
 **Code.** `tool_not_found`.
 
@@ -189,10 +191,10 @@ check runs before any frame is written.
 **What to change.** Read `client.tools` for the names the server actually
 offers. Remember the catalog is a snapshot taken at connect time: a tool the
 server added afterwards is not there until you reconnect. The variant
-`offers no tool "..." named by include` is the same mistake in
+`offers no requested include tool` is the same mistake in
 `ProjectionOptions.include`.
 
-## ... failed tools/call (CODE): MESSAGE
+## ... failed tools/call (CODE); remote details withheld
 
 **Code.** `tool_failed`, or `tool_not_found`.
 
@@ -202,29 +204,31 @@ than a result. It becomes `tool_not_found` only when the JSON-RPC code is
 `unknown`, `unrecognized`, `no such`, or `not found`. Everything else, including
 an ordinary invalid-arguments rejection, is `tool_failed`.
 
-**What to change.** Read the numeric code and message: they are the server's,
-passed through. A `tool_failed` from bad arguments means the model or the caller
+**What to change.** Read the numeric code. Remote message text and data are
+available only through the private diagnostic observer, not passed through to
+the caller. A `tool_failed` from bad arguments means the model or the caller
 sent a value the tool's `inputSchema` rejects.
 
 Do not confuse this with a tool that ran and reported a problem. That comes back
 as a **successful** call with `isError: true`. See
 [Handle a failed tool call](./guides/handle-a-failed-tool-call.md).
 
-## ... was sent a tool argument that is not JSON at PATH
+## ... was sent a tool argument that is not JSON: REASON; property path withheld
 
 **Code.** `protocol_error`.
 
 **What happened.** The arguments contained something that cannot cross a JSON
 boundary: a function, a symbol, a bigint, `undefined`, a non-finite number, a
 cyclic reference, an object with a non-plain prototype, an accessor property, a
-symbol-keyed property, or a `toJSON` method. The path is bounded to 120
-characters, and the value is never included.
+symbol-keyed property, or a `toJSON` method. The error names the reason but
+withholds the path and value. A private diagnostic can identify the path without
+re-evaluating an accessor or proxy.
 
 **What to change.** Send plain JSON. Accessors are rejected rather than invoked,
 so a getter that would have produced a fine value still fails; compute it before
 the call.
 
-## ... returned structuredContent that its own outputSchema rejects at PATH
+## ... returned structuredContent that its own outputSchema rejects: REASON; property path withheld
 
 **Code.** `invalid_response`.
 

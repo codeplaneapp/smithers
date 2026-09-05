@@ -41,17 +41,18 @@ its own output.
 
 ## How a violation is reported
 
-A violation fails with `invalid_response`, naming the path inside
-`structuredContent` and what was expected:
+A violation fails with `invalid_response`, naming the expected constraint but
+withholding the property path:
 
 ```text
 MCP server "reports" returned structuredContent that its own outputSchema
-rejects at structuredContent.answer: expected number
+rejects: expected number; property path withheld
 ```
 
-Paths are built as you would write them, `structuredContent.rows[2].id`, and
-truncated to 120 characters. The message names the constraint, never the value,
-so a credential in a tool result does not reach a log through an error.
+Neither property names nor values are safe to echo into model-facing errors.
+A trusted host may inspect the path and rejected response through the optional
+[private diagnostic observer](/reference/api/#diagnostics). Its details are bounded
+and wrapped in `Redacted`, not implicitly logged.
 
 Validation never mutates or replaces the server's value. It either passes it
 through unchanged or fails.

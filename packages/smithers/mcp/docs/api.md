@@ -1,13 +1,13 @@
 ---
 title: "API reference"
-description: "Every public export of @smthrs/mcp: the McpClient session and its limit constants, the McpError codes, and the McpFlows projection with the authority and effects every MCP tool flow declares."
+description: "Every public export of @smthrs/mcp: sessions, limits, safe errors, private host diagnostics, and tool flow projections."
 ---
 
-`@smthrs/mcp` exports three modules from its root entry point, and each is also
+`@smthrs/mcp` exports four modules from its root entry point, and each is also
 importable from `@smthrs/mcp/<Module>`:
 
 ```ts
-import { McpClient, McpError, McpFlows } from "@smthrs/mcp"
+import { Diagnostics, McpClient, McpError, McpFlows } from "@smthrs/mcp"
 // or
 import * as McpClient from "@smthrs/mcp/McpClient"
 ```
@@ -111,7 +111,7 @@ The result of one `tools/call`.
 | `maxToolNameBytes`      | `number \| undefined`                              | Maximum UTF-8 bytes in a tool name. Default 128.                                                          |
 | `maxCatalogPages`       | `number \| undefined`                              | Maximum `tools/list` pages walked. Default 32.                                                            |
 
-Every numeric field must be a positive integer. Anything else fails with
+Every numeric field must be a positive safe integer. Anything else fails with
 `protocol_error` naming the option, before the process is spawned.
 
 The bootstrap child environment contains only `PATH`, `HOME`, `USER`, `LANG`,
@@ -174,6 +174,19 @@ adjust one without restating a literal.
 | `defaultMaxToolNameBytes`      | 128     | `maxToolNameBytes`      |
 | `defaultMaxCatalogPages`       | 32      | `maxCatalogPages`       |
 
+`McpClient.maxJsonDepth` is a fixed safety limit of **128 nested containers**,
+including the JSON-RPC envelope. Arrays and objects each count as one container;
+scalar values do not. Both incoming messages and outgoing arguments obey it.
+An inbound violation closes the connection with `protocol_error`; invalid
+arguments fail before dispatch without closing an otherwise healthy session.
+Incoming JSON numbers that overflow to infinity are also rejected.
+
+Before copying arguments, the client accounts for their expanded JSON size
+against `maxOutboundFrameBytes`. Reusing the same object under several properties
+does not bypass that accounting. The transport additionally checks the exact
+UTF-8 size of the full encoded frame. Neither bound limits a caller's own
+already-allocated input object or time spent in caller-provided Proxy traps.
+
 ## McpError
 
 The single typed error returned by the client and the flow adapter. Ordinary
@@ -190,11 +203,11 @@ class McpError extends Schema.TaggedError<McpError>()("flows/mcp/McpError", {
 }) {}
 ```
 
-| Field     | Type                  | Meaning                                                                                                                                                  |
-| --------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code`    | `Code`                | The stable, model-facing failure code.                                                                                                                   |
-| `message` | `string`              | A human-readable message naming the server and, where it exists, a bounded, redacted stderr tail or property path. Never the raw frame or the arguments. |
-| `server`  | `string \| undefined` | The server the failure belongs to.                                                                                                                       |
+| Field     | Type                  | Meaning                                                                                                                                                                             |
+| --------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code`    | `Code`                | The stable, model-facing failure code.                                                                                                                                              |
+| `message` | `string`              | A fixed failure summary naming the configured server, with a remote numeric error code when available. No child stderr, remote error prose/data, or user-controlled property paths. |
+| `server`  | `string \| undefined` | The server the failure belongs to.                                                                                                                                                  |
 
 The tag is `"flows/mcp/McpError"`, so `Effect.catchTag("flows/mcp/McpError", ...)`
 matches it.
@@ -227,6 +240,45 @@ type Code = typeof Code.Type
 
 For which JSON-RPC errors become which code, see
 [Handle a failed tool call](./guides/handle-a-failed-tool-call.md).
+
+## Diagnostics
+
+Optional host-only diagnostics, separate from the model-facing `McpError`.
+Install `Diagnostics.layer(report)` around the effect that opens the connection.
+The connection captures that observer once. Without it, private details are
+discarded rather than logged.
+
+```ts
+import { Diagnostics } from "@smthrs/mcp"
+
+// A host-owned, bounded sink; this is not an agent or journal callback.
+const privateDiagnostics = Diagnostics.layer((event) => {
+  retainForLocalInspection(event)
+})
+```
+
+`Diagnostics.Diagnostics` is the optional Context service. Its `report` callback
+takes one `Diagnostics.Event`:
+
+| Field       | Meaning                                                                        |
+| ----------- | ------------------------------------------------------------------------------ |
+| `server`    | The host-configured server alias. Do not put credentials in aliases.           |
+| `source`    | `spawn`, `stderr`, `remote-error`, `invalid-response`, or `invalid-arguments`. |
+| `detail`    | `Redacted.Redacted<string>`, at most 16 KiB of UTF-8. May contain secrets.     |
+| `truncated` | Whether this event's private detail exceeded that 16 KiB bound.                |
+
+Ordinary JSON serialization and inspection hide `detail`. A trusted local host
+can explicitly unwrap it with `Redacted.value`; it must control access and
+retention and must never forward that value to agents, journals, traces, or
+routine logs. The callback is synchronous: it must not block or retain an
+unbounded event history. Callback and serialization exceptions are isolated
+from the MCP connection. Diagnostic delivery is best effort, not an audit log.
+The separate `maxStderrBytes` limit applies before the observer sees a stderr
+tail, so `truncated: false` does not imply the entire child output is present.
+
+This protects session errors, not successful tool output. `content`,
+`structuredContent`, and tool-reported `isError: true` results remain unchanged;
+the host must choose which tool outputs it may expose.
 
 ## McpFlows
 

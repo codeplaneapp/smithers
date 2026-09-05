@@ -2,8 +2,33 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Enforce a fixed 128-container JSON nesting limit, including the wire envelope,
+  before recursive consumers; reject incoming numeric overflow. Bound argument
+  expansion before copying shared-reference trees, require an object argument
+  root, and reject unsafe-integer limit options. Violations are typed failures.
+- Deep-freeze the public catalog and schemas so caller edits cannot change
+  subsequent tool dispatch or validation. Copy them before making local edits.
+- **Breaking error prose:** session errors no longer echo child stderr, spawn
+  details, remote error text/data, invalid protocol versions, duplicate tool
+  names, cursors, or argument/result property paths. Stable `McpError` codes and
+  remote numeric error codes remain available. Successful tool output is unchanged.
+
+### Added
+
+- Optional `Diagnostics.layer(report)` for trusted local host inspection.
+  Details are bounded to 16 KiB UTF-8 and wrapped in `Redacted`; JSON/log
+  inspection does not expose them. No implicit raw logging, and callback
+  failures cannot fail the connection. Hosts own access, retention, and any
+  explicit unwrapping.
+
 ### Fixed
 
+- Distinguish inbound server requests from notifications. Reply to `ping` with
+  an empty result and unsupported methods with `-32601`, preserving exact ids
+  independently of active client requests. Server responses obey the outbound
+  frame, queue, and admission-deadline bounds.
 - Keep a timed-out request's cancellation notification best-effort, dropping
   it when the bounded outbound queue is full instead of blocking past the
   deadline it reports.

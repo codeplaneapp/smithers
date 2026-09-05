@@ -21,6 +21,13 @@
 export * as McpClient from "./McpClient.ts"
 
 /**
+ * @category services
+ * @since 1.0.0-rc.0
+ * @slop
+ */
+export * as Diagnostics from "./Diagnostics.ts"
+
+/**
  * @category errors
  * @since 1.0.0-rc.0
  * @slop
