@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1439 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1440 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -985,6 +985,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- sync the targets mirror and llms bundle after the caching-link reword ([dd194b5442](https://github.com/smithersai/smithers/commit/dd194b5442ff9a8baabcfb0499d84e2d7e71ea07))
 - **targets:** drop the unresolved caching link from the executable-identity note ([242a9e6f69](https://github.com/smithersai/smithers/commit/242a9e6f69b992fe715ddf289ba624e51c20749b))
 - **site:** regenerate the ingested reference pages for the fault-tier and cache docs ([1395aba0f1](https://github.com/smithersai/smithers/commit/1395aba0f1d7c7decc4f83ff74647b9d5c32fd36))
 - **targets:** define executable cache identity guarantees ([bbba6b9cc8](https://github.com/smithersai/smithers/commit/bbba6b9cc850792865fb636dfcfb92e295a3364a))
