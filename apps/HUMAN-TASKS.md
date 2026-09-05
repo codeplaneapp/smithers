@@ -106,17 +106,17 @@ records.
 
 **Option A: keep `canary.smithers.sh`.** Zero extra work. The Worker is already
 bound to it (`apps/server/wrangler.jsonc:9`, `custom_domain: true`), the
-GitHub OAuth callbacks are registered, and the jjhub cloud connection already
+GitHub OAuth callbacks are registered, and the Smithers Cloud connection already
 exists through the gateway seam. H2 then deploys as-is.
 
-**Option B: stand the Worker up on a jjhub hostname.** Repoint the route and
+**Option B: stand the Worker up on a Smithers Cloud hostname.** Repoint the route and
 repeat the wave-7 secret inventory. This is a deliberate identity change, not a
 routine deploy:
 
 ```sh
 # 1. Edit the route (and ONLY the route — never the `name`).
 #    apps/server/wrangler.jsonc:9
-#      "routes": [{ "pattern": "<jjhub-hostname>", "custom_domain": true }]
+#      "routes": [{ "pattern": "<Smithers Cloud-hostname>", "custom_domain": true }]
 ```
 
 Read `apps/server/DEPLOY.md` § "Frozen identity" first. The Worker `name`

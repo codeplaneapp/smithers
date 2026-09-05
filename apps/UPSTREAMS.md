@@ -17,10 +17,10 @@ Verified 2026-08-18.
 
 | Seam                                                                                        | Worker env var (`apps/server/wrangler.jsonc`) | Cloudflare Worker         | Source                        | Custom domain          |
 | ------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------- | ----------------------------- | ---------------------- |
-| Identity — GitHub OAuth, sessions, the allowlist, the watched-repos chooser, the jjhub cloud-token door | `IDENTITY_UPSTREAM_URL`                       | `smithers-cloud-identity` | `smithersai/ui`, `workers/identity` | `identity.smithers.sh` |
+| Identity — GitHub OAuth, sessions, the allowlist, the watched-repos chooser, the Smithers Cloud-token door | `IDENTITY_UPSTREAM_URL`                       | `smithers-cloud-identity` | `smithersai/ui`, `workers/identity` | `identity.smithers.sh` |
 | Billing — balances, grants, the admin grant surface                                         | `BILLING_UPSTREAM_URL`                        | `smithers-cloud-billing`  | `smithersai/ui`, `workers/billing` | `billing.smithers.sh`  |
 | Chat — the metered turn upstream                                                            | `SMITHERS_CHAT_URL`                           | `smithers-cloud-chat`     | `smithersai/ui`, `workers/chat` | `chat.smithers.sh`     |
-| Smithers Cloud (jjhub) — gateway provisioning and the relay                                 | `SMITHERS_CLOUD_API_BASE_URL`                 | _(not a Worker)_          | `../plue` | `api.jjhub.tech`       |
+| Smithers Cloud — gateway provisioning and the relay                                 | `SMITHERS_CLOUD_API_BASE_URL`                 | _(not a Worker)_          | `../plue` | `api.jjhub.tech`       |
 
 The recommendations worker (`smithers-cloud-reco`, `reco.smithers.sh`) was
 deleted on 2026-08-24: the first-run digest and the one ranked recommendation

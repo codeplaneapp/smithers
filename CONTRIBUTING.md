@@ -1,6 +1,7 @@
 # Contributing
 
-Use Node.js 22.19 or later. Install dependencies with `pnpm install`.
+Use Node.js 22.19+ within Node 22, or Node.js 24.11+. Install the pinned
+package manager (`pnpm@11.25.0`), then dependencies with `pnpm install`.
 
 Before opening a pull request, run every gate:
 
@@ -11,13 +12,31 @@ pnpm run lint
 pnpm run circular
 pnpm run browser
 pnpm run test:examples
-pnpm exec smithers-build test '//scripts:docs'
+pnpm --filter @smithers/site run check:docs
+pnpm docs:check
 ```
 
 `pnpm test` is the one that catches the most, and it stops at the first
 failing package — so a green partial run proves less than it looks like it
 does. `pnpm --recursive --if-present --no-bail run test` reports every
 package instead of the first casualty.
+
+## Updating documentation
+
+Edit main-site pages in `apps/site/src/content/docs/docs/`. Package sites
+are generated from each package's `docs/` directory; edit those sources,
+then run `pnpm docs:sync`. See [package docs authoring](apps/docs/shared/AUTHORING.md).
+
+After changing CLI declarations, package API docs, or examples, run
+`pnpm --filter @smithers/site run sync:docs` to refresh command help,
+reference pages, examples, and the LLM bundles. For README and overview
+copy, edit `apps/site/src/data/project.json` and run
+`node apps/site/scripts/generate-project-copy.mjs` before syncing.
+
+Before review, run the docs checks above, `pnpm --filter @smithers/site run build`,
+and `pnpm docs:build`. Preview the main docs locally with
+`pnpm --filter @smithers/site run dev` and open `/docs/`. Commit generated
+content with its source changes.
 
 ## Changing a root file
 
@@ -58,7 +77,7 @@ also produces: `Lockfile` writes `pnpm-lock.yaml`, while `Install` consumes the
 lockfile target. The hand-written `pnpm-workspace.yaml` is a planner input. Its
 contents select the workspace manifests, and all of those files key both
 targets, so a membership or dependency edit forces resolution before linking
-`node_modules`. `PackageDefaults` applies `StandardPackage` to each
+`node_modules`. `PackageDefaults` applies `BuildAndCheckTypeScriptPackage` from the private `@smthrs/repo-targets` package to each
 directory under `packages/`, at any of the three nesting depths, that has a
 `package.json` and no BUILD file, synthesizing
 the conventional `lib`, `check`, `test`, `lint`, `fmt`, and `docs` targets;

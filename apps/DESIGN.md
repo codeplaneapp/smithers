@@ -99,7 +99,7 @@ Smithers is the only named agent. Treatment (landed D2): `MessageAvatar` monogra
 
 ## 9. Copy rules
 
-- No internal/transitional names in user-facing copy: no "jjhub", no "— next", no flow/run jargon in first-run surfaces.
+- No internal/transitional names in user-facing copy: no "Smithers Cloud", no "— next", no flow/run jargon in first-run surfaces.
 - Errors are in-character and structured: what happened + what to do next, one sentence each.
 - Suggestion seeds (current): "Build my work queue" (primary/gold), "Connect GitHub", "Plan my day".
 
@@ -287,6 +287,15 @@ Every visible capability still follows the same presentation law: its first outp
 
 ## 14. Agent Chain integration (decided 2026-08-11; supersedes §13's cell vocabulary, keeps its boundary)
 
+**1.0 review amendment (2026-09-04, R7/R8; supersedes the earlier clear/sweep rule):**
+`/chat.clear` is an offline-capable local archive/start-new operation, not a
+model-dependent deletion. `/chat.clear --summarize` explicitly requests additive
+World notes. Archive, notes and clear commit atomically; generated titles never
+overwrite existing documents. A recovery link opens the archived branch after
+reload. Failed/partial/oversized summaries leave the conversation intact and
+do not block the plain local command. Agent invocations require human
+confirmation. See `ui/docs/persistence.md` for bounds and recovery semantics.
+
 Full plan with phase bars and rationale: the agent-chain UI integration plan of 2026-08-11, which is not in this repository. The spec vault, a separate repository, wins where they disagree. This section is the product-side contract each stacked PR lands against.
 
 **The agent is the Agent Chain** (`@smthrs/chain`, a workspace package at `packages/smithers/agent/chain` — promoted 2026-08-15 from the vendored copy, which was the last living source after the upstream agent repo deleted it): a bootstrap authors one flow script per link, the trampoline runs it, and the journal — `ChainStarted · LinkAuthored · CallSettled · GateRejected · LinkEnded · SteeringDrained` — is the only state. The concierge chain runs **in the webview** behind the existing `NativeAgent` seam, and since 2026-08-19 it is the ONLY chat backend: the flag and the second loop are gone, `/debug.backend` reports rather than switches, and every turn authors over `/api/model/stream`. Heavy or server-placed work is a sub-chain catalog call, not a second loop.
@@ -298,6 +307,16 @@ Full plan with phase bars and rationale: the agent-chain UI integration plan of 
 **Catalog.** The command registry is the catalog: `agentVisible()` commands project as entries whose handlers run `executeForAgent` (actor `smithers`), plus `Catalog.system` (`sys/now`, `sys/random`), typed card entries (`card.show`, `card.update` — widgets are typed cards; no generative HTML in v1), worldview `remember`/`recall` bound to `worldDocuments`, and the recursive `agent` entry. Every entry is journaled, envelope-gated, and disclosed exactly once (the double-declaration hazard is a resume-breaker).
 
 **Journal residency.** Chain events persist as a `chainEvents` collection (same persisted-collection layer as every other row). This is the honest app-layer stand-in §13's "one durable database" eventually replaces: when the Smithers engine mounts, the collection becomes a sync-fed projection and the UI folds do not change. Acceptance tests assert journal contents, never runtime API.
+
+**1.0 replay-safety amendment (2026-09-04, R13):** This collection is execution
+authority, never a bounded diagnostic tail. Keep full active and completed
+lineages until a replay-safe archive exists. Account sign-out/expiry/replacement
+scrubs private events and atomically retains permanent hashed lineage-ID
+tombstones; retired IDs refuse replay/reuse after reload. Ordinary chat archive
+does not delete execution evidence. Collection adapters compare append positions
+and wait for commit/rollback before serving reads. Independent tabs still need
+single-writer lineage ownership; this is not an exactly-once external-effects
+claim. Schema version 11 adds the retirement collection.
 
 **Approvals.** `Authorize.layerRules` encodes the three-tier policy (free / ask-once-per-session-revocable / outbound-always-asks). `approval_required` parks the lineage without `LinkEnded`; approval resumes it, re-executing the link from its settled prefix. Denial is a journaled observation the next link routes around.
 

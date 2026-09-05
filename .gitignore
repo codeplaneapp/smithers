@@ -60,6 +60,10 @@ test-results/
 .smithers-review/
 .e2e-flakes/
 REVIEW-*.md
+# Review campaign working docs: intermediate evidence and plans, kept on disk, never committed
+review-evidence/
+consolidated-review-plan.md
+release-rc0-review.md
 packages/*/REVIEW-*.md
 packages/std/test/__repro.test.ts
 packages/std/test/ScratchGrepTiming.test.ts
@@ -123,3 +127,6 @@ apps/reports/launch-checklist/*-dry-run/
 # lock reaches the index.
 .commit-lock
 .commit-lock-pass/
+
+# Grafana runtime state written by the local observability stack
+apps/observability/data/
