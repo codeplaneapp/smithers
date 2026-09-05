@@ -13,10 +13,9 @@ That property is engineered, not accidental, and it comes from four decisions.
 
 `Runner.run` takes `runId` and `at` as options and stamps every observation
 with them. Nothing in a run reads a clock or generates an identifier, so the
-caller controls every input that could vary. The worked suite pins `at` to a
-fixed instant for exactly this reason: observation timestamps are report
-material, and pinning them keeps two runs of an unchanged suite
-byte-identical.
+caller controls every input that could vary. Pin `at` to a fixed instant when
+you want a suite to be comparable across days: observation timestamps are report
+material, and pinning them keeps two runs of an unchanged suite byte-identical.
 
 The format is strict because reproducibility is strict: `at` must be a
 canonical UTC timestamp with millisecond precision that parses and re-renders

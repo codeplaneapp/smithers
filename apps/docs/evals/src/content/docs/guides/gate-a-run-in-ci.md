@@ -47,7 +47,7 @@ secrets must not print the report where the log is readable.
 ## Set thresholds
 
 `Gate.check` evaluates score thresholds through the shared gate arithmetic in
-[@smthrs/testing](https://testing.smithers.sh/reference/api/):
+[@smthrs/scorers/ScoreGate](https://scorers.smithers.sh/reference/api/):
 
 ```ts
 const verdict = yield * Gate.check(comparison, {
@@ -101,13 +101,24 @@ fewer observations than the suite declared.
 
 ## The complete gate
 
-The repository's worked suite, `evals/agent/run.ts`, assembles exactly this:
-run the suite, load the committed baseline, compare, print the Markdown
-report, grade, and exit. Launch it from the repository root:
+Assemble the whole thing as one script that CI runs: build the suite, run it,
+load the committed baseline, compare, print the Markdown report, grade, and set
+`process.exitCode` from the grade. [Quickstart](/quickstart/) has that
+script in full.
 
-```bash
-node evals/agent/run.ts
+Two flags earn their place on it:
+
+- `--update` re-records the baseline from this run, for the times a score moved
+  for a reason you can name. Keep it off the CI path.
+- `--json` prints `Report.json` instead of the Markdown summary, so a drifting
+  run leaves a machine-readable artifact to diff.
+
+Then call the script from your CI job and let the exit code decide the step:
+
+```yaml
+- name: Evaluate
+  run: node quickstart.ts
 ```
 
-It adds `--update` to re-record the baseline and `--json` to print the full
-machine-readable report when a run drifts.
+The gate's exit code is the whole contract: 0 and the job goes green, 1 and it
+fails on a real red, 5 and it fails on a harness you need to repair.

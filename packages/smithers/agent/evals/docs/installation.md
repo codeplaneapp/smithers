@@ -3,39 +3,30 @@ title: "Installation"
 description: "Add @smthrs/evals to a workspace package, plus its runtime requirements and entry points."
 ---
 
-`@smthrs/evals` is workspace-private at 1.0.0-rc.0: its `package.json` marks it
-`"private": true`, so it is not published to npm and cannot be installed from
-the registry. It is consumed from inside the smithers repository.
+Install the current release candidate from the `next` dist-tag:
 
-## Add it to a workspace package
-
-Declare a workspace dependency, the same form `evals/agent` uses:
+```bash
+pnpm add @smthrs/evals@next
+```
 
 ```json
 {
   "dependencies": {
-    "@smthrs/evals": "workspace:*"
+    "@smthrs/evals": "1.0.0-rc.0"
   }
 }
-```
-
-Then install:
-
-```bash
-pnpm install
 ```
 
 ## Runtime requirements
 
 - Node.js 22.19.0 or later, from the package's `engines` field.
-- `effect` 4.0.0-rc.108. Suites, runs, baselines, and gates are all `Effect`
+- `effect` 4.0.0-rc.112. Suites, runs, baselines, and gates are all `Effect`
   values, so every program composes with the `effect` library directly.
-- `@smthrs/core`, `@smthrs/scorers`, and `@smthrs/testing` are declared
-  dependencies, and pnpm links them with the package. You import from them for
-  the pieces the pipeline composes: `Flow` values from
-  [@smthrs/core](/api/core), scorers and bindings from
-  [@smthrs/scorers](/api/scorers), gate arithmetic from
-  [@smthrs/testing](/api/testing).
+- `@smthrs/core` supplies `Flow` values. `@smthrs/scorers` supplies scorers,
+  bindings, and the pure `@smthrs/scorers/ScoreGate` grading contract, including
+  `ScoreGateError`. The evaluation runtime does not load `@smthrs/testing`;
+  that package supplies a test facade for development consumers. To run the
+  agent behind a case, add [@smthrs/agent](/api/agent) as well.
 
 ## Entry points
 

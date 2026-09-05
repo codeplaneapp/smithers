@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema"
 import { EvalError } from "./EvalError.ts"
 
 /**
- * A scorer binding accepted from `/scorers`.
+ * A scorer binding accepted from `@smthrs/scorers`.
  *
  * The binding's `appliesTo` flow is matched against an execution's `target` by
  * reference identity, so a binding only ever grades the exact flow value it was

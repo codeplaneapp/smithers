@@ -7,8 +7,8 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/age
 Fixed-suite evaluation, baselines, regression reports, and score gates for
 flows.
 
-The package is workspace-private at 1.0.0-rc.0 and is not published to npm. It
-is consumed from inside this repository, by `evals/agent`.
+For how to add the package to a project, see
+[Installation](/installation/).
 
 ## The pipeline
 
@@ -427,7 +427,7 @@ const check = (report: Regression.Report, options?: Options): Effect.Effect<Verd
 ```
 
 Checks thresholds through the shared ScoreGate arithmetic in
-[@smthrs/testing](https://testing.smithers.sh/reference/api/). The threshold gates always run: an
+[@smthrs/scorers/ScoreGate](https://scorers.smithers.sh/reference/api/). The threshold gates always run: an
 unobserved case cannot excuse the cases that were observed. Regressions and
 nondeterminism are findings and force a `Failed` verdict; failed cases and
 missing observations are environment faults and travel beside the verdict. A
@@ -449,7 +449,7 @@ over fewer observations than the suite declared.
 | ------------------------------- | ------------- | ----------------------------------------------------------------------------------- |
 | `EvalError.EvalErrorCode`       | models        | Stable evaluation failure codes.                                                    |
 | `EvalError.EvalError`           | errors        | A typed failure raised while loading or executing an evaluation.                    |
-| `Suite.Binding`                 | models        | A scorer binding accepted from `/scorers`.                                          |
+| `Suite.Binding`                 | models        | A scorer binding accepted from `@smthrs/scorers`.                                   |
 | `Suite.Case`                    | models        | One immutable fixed-suite case.                                                     |
 | `Suite.MakeOptions`             | models        | Options for constructing a suite.                                                   |
 | `Suite.Suite`                   | models        | A validated, named collection of fixed cases and scorer bindings.                   |
@@ -468,8 +468,8 @@ over fewer observations than the suite declared.
 | `CaseExecutor.layerNoop`        | layers        | Provides the unavailable executor.                                                  |
 | `Runner.Observation`            | models        | One score observation emitted by a suite run.                                       |
 | `Runner.ScoreRequest`           | models        | A request sent to the scorers batch runner.                                         |
-| `Runner.ScoreJob`               | models        | A blocking scorer job, matching `/scorers/Runner`.                                  |
-| `Runner.ScoreBatchRunner`       | services      | Structural adapter for `/scorers`' blocking batch runner.                           |
+| `Runner.ScoreJob`               | models        | A blocking scorer job, matching the `Runner` module of `@smthrs/scorers`.           |
+| `Runner.ScoreBatchRunner`       | services      | Structural adapter for `@smthrs/scorers`' blocking batch runner.                    |
 | `Runner.ScoreObservation`       | models        | A score result aligned with a `ScoreRequest`.                                       |
 | `Runner.BatchResult`            | models        | A batch result tagged with the identity of the job that produced it.                |
 | `Runner.CaseResult`             | models        | Per-case result retained by the deterministic runner.                               |
@@ -496,11 +496,16 @@ over fewer observations than the suite declared.
 | `Report.json`                   | serialization | Serializes a regression report as stable, sorted-key JSON.                          |
 | `Report.markdown`               | rendering     | Renders a concise stable Markdown regression report.                                |
 | `Gate.Options`                  | models        | Thresholds accepted by a CI score gate.                                             |
-| `Gate.check`                    | constructors  | Checks thresholds through `/testing`'s shared ScoreGate arithmetic.                 |
+| `Gate.check`                    | constructors  | Checks thresholds through `@smthrs/scorers`' shared ScoreGate arithmetic.           |
 | `Gate.ciGrade`                  | grading       | Maps a gate verdict to the shared CI convention.                                    |
 
 ## A worked suite
 
-`evals/agent/` in this repository is a committed suite built on these modules.
-It evaluates the Smithers agent itself, offline against a scripted model, and
-gates the run on a committed baseline. Run it with `node evals/agent/run.ts`.
+[`evals/agent`](https://github.com/smithersai/smithers/tree/main/evals/agent)
+is a suite built on these modules that evaluates the Smithers agent from
+[@smthrs/agent](https://agent.smithers.sh/reference/api/). Each case is a whole agent run against a scripted
+model with no network access, reduced to one observation, and two scorers grade
+it: one asks whether the run did what the case declares, the other asks whether
+the observation is well formed at all. The run is gated on a committed
+baseline. For the shape of that pipeline in your own code, see
+[Gate a run in CI](/guides/gate-a-run-in-ci/).

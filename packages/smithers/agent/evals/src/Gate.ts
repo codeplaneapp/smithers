@@ -4,8 +4,14 @@
  *
  * @since 0.1.0
  */
-import { combine, expectScores, grade, type ScoreSample, type Verdict } from "@smthrs/testing/ScoreGate"
-import type { ScoreGateError } from "@smthrs/testing/TestingError"
+import {
+  combine,
+  expectScores,
+  grade,
+  type ScoreGateError,
+  type ScoreSample,
+  type Verdict
+} from "@smthrs/scorers/ScoreGate"
 import * as Effect from "effect/Effect"
 import type { Report } from "./Regression.ts"
 
@@ -78,7 +84,7 @@ const findings = (report: Report): ReadonlyArray<string> => [
 ]
 
 /**
- * Checks thresholds through `/testing`'s shared ScoreGate arithmetic.
+ * Checks thresholds through `@smthrs/scorers`' shared ScoreGate arithmetic.
  *
  * The threshold gates always run: an unobserved case cannot excuse the cases
  * that were observed. Faults and findings are kept apart, and the verdict

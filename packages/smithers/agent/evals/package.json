@@ -6,7 +6,6 @@
   "smthrs": {
     "group": "agent"
   },
-  "private": true,
   "description": "Fixed-suite evaluation, baselines, regression reports, and score gates for flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
@@ -36,9 +35,17 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Baseline": "./src/Baseline.ts",
+    "./CaseExecutor": "./src/CaseExecutor.ts",
+    "./EvalError": "./src/EvalError.ts",
+    "./Gate": "./src/Gate.ts",
+    "./Regression": "./src/Regression.ts",
+    "./Report": "./src/Report.ts",
+    "./Runner": "./src/Runner.ts",
+    "./Suite": "./src/Suite.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -54,6 +61,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "next",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -61,13 +69,53 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Baseline": {
+        "types": "./dist/esm/Baseline.d.ts",
+        "import": "./dist/esm/Baseline.js",
+        "require": "./dist/cjs/Baseline.js"
+      },
+      "./CaseExecutor": {
+        "types": "./dist/esm/CaseExecutor.d.ts",
+        "import": "./dist/esm/CaseExecutor.js",
+        "require": "./dist/cjs/CaseExecutor.js"
+      },
+      "./EvalError": {
+        "types": "./dist/esm/EvalError.d.ts",
+        "import": "./dist/esm/EvalError.js",
+        "require": "./dist/cjs/EvalError.js"
+      },
+      "./Gate": {
+        "types": "./dist/esm/Gate.d.ts",
+        "import": "./dist/esm/Gate.js",
+        "require": "./dist/cjs/Gate.js"
+      },
+      "./Regression": {
+        "types": "./dist/esm/Regression.d.ts",
+        "import": "./dist/esm/Regression.js",
+        "require": "./dist/cjs/Regression.js"
+      },
+      "./Report": {
+        "types": "./dist/esm/Report.d.ts",
+        "import": "./dist/esm/Report.js",
+        "require": "./dist/cjs/Report.js"
+      },
+      "./Runner": {
+        "types": "./dist/esm/Runner.d.ts",
+        "import": "./dist/esm/Runner.js",
+        "require": "./dist/cjs/Runner.js"
+      },
+      "./Suite": {
+        "types": "./dist/esm/Suite.d.ts",
+        "import": "./dist/esm/Suite.js",
+        "require": "./dist/cjs/Suite.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -81,26 +129,29 @@
   },
   "dependencies": {
     "@smthrs/core": "1.0.0-rc.0",
-    "@smthrs/scorers": "workspace:*",
-    "@smthrs/testing": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "@smthrs/scorers": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@smthrs/testing": "1.0.0-rc.0",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }

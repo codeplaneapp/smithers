@@ -101,7 +101,7 @@ Two wiring mistakes fail outside the `EvalError` channel:
 - `CaseExecutor.make` with no callback throws a `TypeError` synchronously.
   Pass a function, or an object with a `run` or `execute` callback.
 - `Gate.check` with a threshold outside [0, 1] fails with a `ScoreGateError`,
-  code `invalid_threshold`, from [@smthrs/testing](https://testing.smithers.sh/reference/api/). Catch it in
+  code `invalid_threshold`, from [@smthrs/scorers/ScoreGate](https://scorers.smithers.sh/reference/api/). Catch it in
   the error channel and report it.
 
 ## Symptoms

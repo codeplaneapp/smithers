@@ -35,9 +35,12 @@ describe("documentation", () => {
     expect([...rows].sort()).toEqual([...exported()].sort())
   })
 
-  it("keeps the package README pointing at the colocated reference", () => {
+  // The README is what npm renders, and the package's "files" list does not
+  // ship docs/, so the reference it points a reader at has to be the published
+  // site rather than a path that is absent from the tarball.
+  it("keeps the package README pointing at the published reference", () => {
     const readme = read("../README.md")
-    expect(readme).toContain("docs/api.md")
+    expect(readme).toContain("https://evals.smithers.sh/reference/api/")
     expect(readme).not.toContain("npm install")
   })
 

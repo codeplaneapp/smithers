@@ -26,9 +26,9 @@ records ordered by an injective encoding of `(suite, case, scorer, stepKey)`,
 and a trailing newline. Two runs over the same inputs produce byte-identical
 baseline files, so the committed artifact diffs cleanly.
 
-Do not record over a broken run. The worked suite refuses to update its
-baseline when any case failed, because a baseline recorded over a failed case
-ratifies the absence of a measurement:
+Do not record over a broken run. Guard the update path so it refuses when any
+case failed, because a baseline recorded over a failed case ratifies the absence
+of a measurement:
 
 ```ts
 const failures = run.cases.filter((result) => result.error !== undefined)

@@ -6,8 +6,24 @@ Fixed-suite evaluation for flows: it connects target execution and scorer runner
 to validated suites, committed baselines, regression comparison, reports, and CI
 gates.
 
-The package is workspace-private at 1.0.0-rc.0 and is **not published to npm**.
-It is consumed from inside this repository; `evals/agent` is the worked suite.
+A unit test asserts equality. A flow that calls a model produces an answer that
+is rarely equal to anything, only better or worse than the last one. This package
+scores the answer, compares the score with a committed baseline, and turns the
+comparison into a CI exit code.
+
+Runtime grading belongs to `@smthrs/scorers/ScoreGate`: score samples, verdicts,
+threshold checks, CI grades, and `ScoreGateError` share one pure contract.
+`@smthrs/testing/ScoreGate` is its test facade and also supplies a fixed-suite
+runner. Runtime evaluation code imports scorers directly.
+
+## Install
+
+The package is at 1.0.0-rc.0 and is not on the npm registry yet. It is a
+workspace package of https://github.com/smithersai/smithers, so you use it from
+a package in a clone of that repository. The steps are at
+https://evals.smithers.sh/installation/.
+
+## Example
 
 ```ts
 import { Flow } from "@smthrs/core"
@@ -36,18 +52,11 @@ const program = Effect.gen(function*() {
 ```
 
 `Runner.run` needs only `CaseExecutor`: scoring runs in process by default.
+Baselines, regression comparison, reports, and gates complete the loop;
+https://evals.smithers.sh/quickstart/ walks all of it end to end.
 
-## Documentation
+## Reference
 
-`docs/api.md` is the reference, and the JSDoc in `src/` is its source. Read it
-for the pipeline, the step-key rule that decides a regression from
-nondeterminism, the stable failure codes, the batch-runner protocol, and the
-declared size and concurrency limits.
-
-## Development
-
-```sh
-pnpm --filter @smthrs/evals test     # vitest, 100% coverage thresholds
-pnpm --filter @smthrs/evals check    # tsc over src and test
-pnpm --filter @smthrs/evals lint     # eslint + dprint
-```
+https://evals.smithers.sh/reference/api/ documents every export, the stable
+failure codes, the batch-runner protocol, the step-key rule that separates a
+regression from nondeterminism, and the declared size and concurrency limits.

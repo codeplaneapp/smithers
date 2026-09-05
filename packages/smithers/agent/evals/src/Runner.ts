@@ -71,7 +71,7 @@ export interface ScoreRequest {
 }
 
 /**
- * A blocking scorer job, matching `/scorers/Runner`.
+ * A blocking scorer job, matching the `Runner` module of `@smthrs/scorers`.
  *
  * @category models
  * @since 0.1.0
@@ -79,7 +79,7 @@ export interface ScoreRequest {
 export type ScoreJob = ScorerRunner.Job
 
 /**
- * Structural adapter for `/scorers`' blocking batch runner.
+ * Structural adapter for `@smthrs/scorers`' blocking batch runner.
  *
  * A runner that implements `runBatchCorrelated` tags every observation with
  * its job identity and may return results in any order. A runner that implements
@@ -355,7 +355,7 @@ const executeInline = (job: ScoreJob): Effect.Effect<ScoreObservation> =>
  * Builds the in-process batch runner a run scores with by default.
  *
  * Each job's scorer runs in the current process, its result is checked by
- * `/scorers`' own `Scorer.validate`, and a scorer that fails becomes an
+ * `@smthrs/scorers`' own `Scorer.validate`, and a scorer that fails becomes an
  * inconclusive observation naming its cause rather than failing the run. It
  * honours the {@link ScoreBatchRunner} protocol, so it is also the reference
  * a custom adapter can be compared against.
