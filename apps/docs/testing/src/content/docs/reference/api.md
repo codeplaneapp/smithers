@@ -13,7 +13,8 @@ import { Conformance, EngineSubject, TestLayers } from "@smthrs/testing"
 import * as TestLayers from "@smthrs/testing/TestLayers"
 ```
 
-Two modules are reachable only by subpath. `Vitest` is ESM only, because
+Three modules are reachable only by subpath. `TestHost` is the deterministic
+host bundle and stays explicit at `@smthrs/testing/TestHost`. `Vitest` is ESM only, because
 `vitest` refuses to load through `require()` and a barrel that carried it would
 break `require("@smthrs/testing")` for every CommonJS consumer of the assertion
 helpers. `Faults` is a set of real, machine-global process primitives rather
@@ -921,9 +922,9 @@ type HostSuiteError =
 ```
 
 The channel names the typed contract violation plus the incidental host
-failures a supported capability's own probe can produce. It used to be
-`unknown`, so a runner could not tell "this host violates the contract" from
-"the scratch write failed because the disk is full".
+failures a supported capability's own probe can produce, rather than widening
+to `unknown`, so a runner can tell "this host violates the contract" from "the
+scratch write failed because the disk is full".
 
 ## ModelLike
 
@@ -1039,9 +1040,8 @@ interface Fixture {
 const Fixture: Schema.Struct<{ calls: Schema.Array<...> }>
 ```
 
-The interface and the schema share one name and are one contract, held together
-by the package's own `FixtureSchema` test, which compares the key set of every
-level of both shapes so a field added to one and not the other fails `tsc`.
+The interface and the schema share one name and are one contract: every level
+of both shapes carries the same key set.
 
 The schema is narrower in exactly one place, deliberately: a tool's
 `parameters` is `Record<string, unknown>` in the interface, mirroring the model
@@ -1085,12 +1085,11 @@ sort recursively, array order is retained, and non-JSON values are rejected
 with a typed `FixtureEncodingError` naming the offending path. A value nested
 more than 128 levels deep is rejected rather than overflowing the stack.
 
-It returns the canonical **encoding** rather than a fixed-length hash, and the
-name is the one historical wart in the module. A fixture cache selects the
-recorded call to replay by this value, so a hash collision would replay another
-conversation's response as this one's; the package owns no synchronous
-cryptographic hash, and a non-cryptographic one buys shorter keys at the cost
-of a wrong answer nothing would detect.
+It returns the canonical **encoding** rather than a fixed-length hash, despite
+the name. A fixture cache selects the recorded call to replay by this value, so
+a hash collision would replay another conversation's response as this one's;
+the package owns no synchronous cryptographic hash, and a non-cryptographic one
+buys shorter keys at the cost of a wrong answer nothing would detect.
 
 ### Fixture.index
 
@@ -1269,6 +1268,13 @@ when the test must assert that exactly the recorded calls happened.
 
 ## ScoreGate
 
+`@smthrs/testing/ScoreGate` re-exports the pure grading contract from
+`@smthrs/scorers/ScoreGate` and adds the fixed-suite runner and `ciGrade`
+report helper. Runtime applications import scorers directly; testing stays a
+development dependency. `TestingError.ScoreGateError`, `ScoreGateCode`, and
+`InvalidScoreSample` re-export the same class and schemas from scorers, so
+constructor identity, tags, fields, and existing test imports are preserved.
+
 Fixed-suite score gates and their three-way verdicts.
 
 ### ScoreGate.ScoreSample
@@ -1430,9 +1436,7 @@ behind a clean pass.
 
 Every typed failure this package raises, and the closed unions of stable codes
 they carry. Consumers match on codes, never on message prose. Every literal is
-`snake_case` except four inherited verbatim from the 0.x codes consumers
-already match on: `REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`,
-`TASK_TIMEOUT`, and `RALPH_MAX_REACHED`.
+`snake_case`.
 
 ### The code unions
 
@@ -1499,6 +1503,13 @@ ran the original flow on the original payload would give a caller no signal
 that its arguments were ignored, on the seam that defines engine conformance.
 `expected` and `actual` are bounded renderings, never the payloads themselves.
 
+`RalphMaxReachedError` reports a bounded loop that ran its whole iteration
+budget without its exit condition ever holding. `loopId` names the loop and
+`maxIterations` is the bound it reached. A subject whose engine has no loop
+runtime never raises it; the code stays in the union so a subject that does can
+report exhaustion as a typed failure rather than as a successful final
+iteration.
+
 ### The boundary unions
 
 ```ts
@@ -1516,8 +1527,11 @@ const RewindBoundary: Schema.Literals<[
 const InvalidScoreSample: Schema.Struct<{ case; stepKey; scorer; value }>
 ```
 
-The two boundary unions name the points at which a conformance subject can
-inject a commit or rewind failure. Each has a matching decoded type.
+The two boundary unions name where a commit or a rewind was when it failed.
+`TransactionCommitError` carries a `TransactionBoundary` and
+`RewindFailureError` carries a `RewindBoundary`, so a pin can tell a failed
+journal truncation from a failed snapshot restore without parsing a message.
+Each union has a matching decoded type.
 
 ### TestingError.EngineSubjectError
 

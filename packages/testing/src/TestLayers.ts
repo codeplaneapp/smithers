@@ -8,7 +8,6 @@
  */
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import * as Kernel from "@smthrs/kernel"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -20,6 +19,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { EngineSubject } from "./EngineSubject.ts"
 import { ModelLike } from "./ModelLike.ts"
+import * as TestHost from "./TestHost.ts"
 import { CapabilityContractError } from "./TestingError.ts"
 
 const denied = (capability: string, operation: string): CapabilityContractError =>

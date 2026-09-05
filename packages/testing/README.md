@@ -1,42 +1,58 @@
 # @smthrs/testing
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://testing.smithers.sh
 
-Testing and conformance library for flows. It provides layered engine and model
-doubles, pure plan and journal assertions, restart and parity suites, Vitest
-adapters, and deterministic score gates.
+Testing and conformance library for Smithers flows. It provides layered engine
+and model doubles, pure plan and journal assertions, restart and parity suites,
+Vitest adapters, and deterministic score gates.
+
+`@smthrs/testing/ScoreGate` re-exports the pure grading contract from
+`@smthrs/scorers/ScoreGate` and adds the fixed-suite runner and `ciGrade`
+report helper. Runtime applications import scorers directly; testing stays a
+development dependency. `TestingError.ScoreGateError`, `ScoreGateCode`, and
+`InvalidScoreSample` re-export the same class and schemas from scorers, so
+constructor identity, tags, fields, and existing test imports are preserved.
+
+## Install
 
 ```sh
-npm install --save-dev @smthrs/testing
+npm install --save-dev @smthrs/testing@next effect@4.0.0-rc.112
 ```
 
-`vitest` and `@effect/vitest` are optional peers, needed only by the `Vitest`
-adapter. Everything else runs under any runner, because an assertion is an
-ordinary `Effect` and a conformance case is a plain value.
+The 1.0 release candidates publish under the `next` tag, and the first one is
+not on npm yet: until it is, build from a clone of
+[the repository](https://github.com/smithersai/smithers).
+
+`effect` is a required peer at exactly `4.0.0-rc.112`. `vitest` and
+`@effect/vitest` are optional peers, needed only by the `Vitest` adapter.
+Everything else runs under any runner, because an assertion is an ordinary
+`Effect` and a conformance case is a plain value. Node.js 22.19.0 or later is
+required.
 
 ## What is in it
-
-The package under test supplies the deterministic services a run needs:
-`@smthrs/kernel` ships `TestHost`, `@smthrs/journal` ships `TestJournal`. This
-package supplies what a test then says about the run those services produced,
-and the doubles the run executes against.
 
 - **Assertions** over the artifacts a flow produces: `PlanAssertions` for a
   built plan, `JournalAssertions` for a journal, `Divergence` for the first
   attributable difference between two journals, `ScoreGate` for graded eval
   suites.
 - **Layer bundles** that make a tier explicit: `TestLayers.unit` for the unit
-  tier, `TestLayers.poisoned` for plan-time purity.
+  tier, `TestLayers.poisoned` for plan-time purity, and `TestHost` for a fully
+  deterministic host surface.
 - **Conformance suites** an implementation must pass: `Conformance.coreSuite`
   for any engine, `HostSuite.hostSuite` for any Host bundle.
 - **Doubles**: `MemoryEngine` and `RestartableEngine` as reference engines,
   `FlowEngineLike` as the adapter that runs the same pins against the real
   engine, and `RecordedModel`, `RecordingModel`, and `CachedModel` as the
   record-and-replay model loop.
+
+`@smthrs/testing/TestHost` supplies the deterministic host services a run
+needs, while `@smthrs/journal` supplies `TestJournal`. This package also
+supplies what a test says about the run those services produced and the doubles
+the run executes against.
 
 Every module, every export, and the contract of each is at
 <https://testing.smithers.sh/reference/api/>.
@@ -85,17 +101,23 @@ const modelLayer = Layer.unwrap(
 The package reads no environment variable, so how a suite decides to record
 stays the suite's business. Two rules the recorder follows, because a fixture is
 executable state: an interrupted or dead call is not recorded, because a
-truncated stream would replay as an aborted turn; and a call the kernel refused
-is not recorded either, because the provider never saw it.
+truncated stream would replay as an aborted turn; and a call the `@smthrs/kernel`
+permission kernel refused is not recorded either, because the provider never saw
+it.
 
 `RecordedModel` is the strict double instead: it claims each recorded call once,
 matches by request shape with `modelId` erased, and dies on a request the
 fixture does not describe.
 
-## Two modules stay off the root barrel
+## Three modules stay off the root barrel
 
 The root entry point exports one namespace per module, and each is also
-importable from `@smthrs/testing/<Module>`. Two are reachable only by subpath.
+importable from `@smthrs/testing/<Module>`. Three are reachable only by
+subpath.
+
+`TestHost` is the deterministic host bundle: an in-memory filesystem, scripted
+interpreter, `TestClock`, and seeded PRNG. It remains a subpath so importing
+generic assertion helpers does not initialize test-only platform services.
 
 `Vitest` is ESM only. `vitest` refuses to load through `require()`, so a barrel
 that carried it would break `require("@smthrs/testing")` for every CommonJS
@@ -105,9 +127,7 @@ consumer of the assertion helpers.
 `killProcess` sends a real signal to a real pid and waits for the operating
 system to reap it, `parentPid` and `waitForReparent` read the orphan a kill
 leaves behind, and `skewClock` moves the wall clock a durable timer is measured
-against. Every package's fault tier imports one implementation from
-`@smthrs/testing/Faults`, so "the process is really gone" means the same thing
-in all of them.
+against. Importing it by subpath keeps that decision visible at the import site.
 
 ```ts
 import { isAlive, killProcess, waitForReparent } from "@smthrs/testing/Faults"
@@ -116,9 +136,9 @@ await killProcess(engine.process)
 const reparented = await waitForReparent(orphan, engine.process.pid!)
 ```
 
-A suite that uses `Faults` to kill somebody else's engine belongs in that
-package's `test/faults` tree, behind a `Smithers.FaultSuite` target and a
-`vitest.faults.config.ts` with `fileParallelism: false`.
+Pids, process groups, and ports are machine global, so give a suite that uses
+`Faults` its own tree and its own runner config: `fileParallelism: false`, a
+finite timeout, and coverage off.
 
 `@smthrs/testing/package.json` is also exported. `internal/*` and nested
 `*/index` subpaths are not public.

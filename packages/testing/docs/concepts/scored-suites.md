@@ -8,6 +8,13 @@ sidebar:
 A score gate answers a question with a threshold, and the interesting part is
 what happens when it cannot answer at all.
 
+`@smthrs/testing/ScoreGate` re-exports the pure grading contract from
+`@smthrs/scorers/ScoreGate` and adds the fixed-suite runner and `ciGrade`
+report helper. Runtime applications import scorers directly; testing stays a
+development dependency. `TestingError.ScoreGateError`, `ScoreGateCode`, and
+`InvalidScoreSample` re-export the same class and schemas from scorers, so
+constructor identity, tags, fields, and existing test imports are preserved.
+
 `ScoreGate.Verdict` has three members:
 
 ```ts

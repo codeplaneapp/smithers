@@ -1,6 +1,6 @@
+import { runHostContract } from "@smthrs/kernel/test/contract"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as TestHost from "../../src/test/TestHost.ts"
-import { runHostContract } from "./HostContract.ts"
+import * as TestHost from "../../src/TestHost.ts"
 
 runHostContract(
   "TestHost",

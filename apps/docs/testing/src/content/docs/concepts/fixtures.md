@@ -20,7 +20,7 @@ order, and rejects anything that is not JSON with a typed
 `FixtureEncodingError` naming the path of the offending value. It returns the
 canonical **encoding** rather than a fixed-length hash.
 
-The name is the one historical wart in the module, and the choice behind it is
+The name says digest and the value is the encoding, and the mismatch is
 deliberate. A cache selects the recorded call to replay by this value, and a
 hash collision would replay another conversation's response as this one's. The
 package owns no synchronous cryptographic hash, and a non-cryptographic one

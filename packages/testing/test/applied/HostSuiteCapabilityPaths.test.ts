@@ -6,7 +6,7 @@
  * including the report shape when a provider fails without any stable code.
  */
 import * as Jj from "@smthrs/jj"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import { Clock, Effect, Layer, Random } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"

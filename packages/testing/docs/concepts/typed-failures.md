@@ -26,10 +26,8 @@ own schema: `TestingError.PlanAssertionCode`,
 `TestingError.JournalAssertionCode`, and `TestingError.ScoreGateCode`.
 `TestingError.Code` is those three plus every standalone code, as one union.
 
-Every literal is `snake_case`, with four exceptions that are shouted:
-`REPLAY_HARNESS_MISMATCH`, `EXACTLY_ONCE_UNSUPPORTED`, `TASK_TIMEOUT`, and
-`RALPH_MAX_REACHED` are inherited verbatim from the 0.x codes consumers already
-match on. Every new code is `snake_case`.
+Every literal is `snake_case`, without exception, so a consumer never has to
+remember which family spells its codes differently.
 
 ## No unknown channel on a conformance seam
 

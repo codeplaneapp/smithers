@@ -55,11 +55,11 @@ yield * journal.effect("publish").journaledAtMostOnce()
 yield * journal.effect("publish").idempotencyKey("publish-1")
 ```
 
-That separation is the whole point of the sub-vocabulary. `journaledAtMostOnce`
-used to answer success when the journal carried the key only as an ordinary
-step, because zero effect entries is trivially "at most once". A test could
-then claim an at-most-once external effect was journaled when the engine
-journaled no effect at all under that key, which is the exact claim the
+That separation is the whole point of the sub-vocabulary. A journal carrying
+the key only as an ordinary step fails `journaledAtMostOnce` with
+`effect_kind_mismatch` rather than passing on zero effect entries. Passing
+would let a test claim an at-most-once external effect was journaled when the
+engine journaled no effect at all under that key, which is the exact claim the
 vocabulary exists to make.
 
 A key that appears nowhere still satisfies `journaledAtMostOnce`: nothing was

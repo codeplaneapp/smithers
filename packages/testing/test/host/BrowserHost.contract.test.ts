@@ -14,15 +14,15 @@ import { afterAll, beforeAll, describe, expect, it } from "@effect/vitest"
 import { Jj } from "@smthrs/jj"
 import type { SyncFsLike } from "@smthrs/jj/browser/WasiFs"
 import { runHostContract } from "@smthrs/kernel/test/contract"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import type * as BrowserChildProcessSpawner from "@smthrs/platform-browser/BrowserChildProcessSpawner"
+import * as BrowserHost from "@smthrs/platform-browser/BrowserHost"
 import * as Effect from "effect/Effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as fsModule from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import type * as BrowserChildProcessSpawner from "../../src/BrowserChildProcessSpawner/index.ts"
-import * as BrowserHost from "../../src/BrowserHost.ts"
+import * as TestHost from "../../src/TestHost.ts"
 
 type BashResult = Awaited<ReturnType<BrowserChildProcessSpawner.JustBashLike["exec"]>>
 
@@ -77,7 +77,7 @@ const rootedSyncFs = (hostRoot: string): SyncFsLike => {
   }
 }
 
-const wasmPath = fileURLToPath(new URL("../../../jj/wasm/flows_jj.wasm", import.meta.url))
+const wasmPath = fileURLToPath(new URL("../../../smithers/flows/jj/wasm/flows_jj.wasm", import.meta.url))
 if (!fsModule.existsSync(wasmPath)) {
   throw new Error(
     "[BrowserHost.contract] packages/smithers/flows/jj/wasm/flows_jj.wasm is required for the real BrowserHost "

@@ -1,4 +1,4 @@
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import { Effect } from "effect"
 import { describe, it } from "vitest"
 import * as HostSuite from "../../src/HostSuite.ts"

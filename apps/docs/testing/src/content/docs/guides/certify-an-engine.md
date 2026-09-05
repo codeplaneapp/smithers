@@ -48,10 +48,9 @@ rather than naming an implementation:
 | `FlowEngineLike.layer()`       | The subject alone, for a composition that already provides `FlowRuntime` and `Crypto`. |
 
 The durable runtime is `EngineStore.layer({ owner, journalSource })` from
-[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/). That package is not a dependency
-of `@smthrs/testing` and must not become one, so the durable application
-belongs to a suite that already has it. Supplying the layer is the whole
-connection: the case list does not change.
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/). `@smthrs/testing` does not depend
+on that package, so you install it and pass the layer yourself. Supplying the
+layer is the whole connection: the case list does not change.
 
 `layerMemory` keeps every execution, action, and journal entry in process
 memory, so it certifies semantics and not durability. "Replay" under it means

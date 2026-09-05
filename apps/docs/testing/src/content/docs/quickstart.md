@@ -17,8 +17,11 @@ against it. Nothing is stubbed but the storage.
 - A package with the test dependencies installed:
 
 ```bash
-pnpm add -D @smthrs/testing vitest @effect/vitest
+pnpm add -D @smthrs/testing@next effect@4.0.0-rc.112 vitest @effect/vitest@4.0.0-rc.112
 ```
+
+Both `effect` packages are exact peer pins. [Installation](/installation/)
+says why, and what to do until the release candidate reaches npm.
 
 ## Register the suite
 

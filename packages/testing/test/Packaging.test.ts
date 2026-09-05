@@ -33,16 +33,20 @@ describe("the export map", () => {
     expect(entry).not.toHaveProperty("require")
   })
 
-  it("declares ./Vitest ahead of the wildcard, so the wildcard cannot answer it", () => {
+  it("uses explicit entrypoints so a fallback cannot re-expose Vitest to CommonJS", () => {
     for (const exports of [manifest.exports, manifest.publishConfig.exports]) {
-      const keys = Object.keys(exports)
-      expect(keys.indexOf("./Vitest")).toBeLessThan(keys.indexOf("./*"))
+      expect(exports["./*"]).toBeUndefined()
+      expect(Object.entries(exports).filter(([key, value]) => key.includes("*") && value !== null)).toEqual([])
     }
   })
 
   it("keeps a require condition for every other module", () => {
-    const wildcard = manifest.publishConfig.exports["./*"] as Record<string, string>
-    expect(wildcard.require).toBe("./dist/cjs/*.js")
+    for (const [key, value] of Object.entries(manifest.publishConfig.exports)) {
+      if (value === null || key === "./package.json" || key === "./Vitest") continue
+      const entry = value as Record<string, string>
+      expect(entry.require, key).toBe(entry.import?.replace("./dist/esm/", "./dist/cjs/"))
+      expect(entry.require, key).toMatch(/^\.\/dist\/cjs\/.+\.js$/)
+    }
   })
 
   // True only because the module no longer writes into `@effect/vitest`'s

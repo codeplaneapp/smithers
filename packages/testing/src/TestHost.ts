@@ -13,13 +13,13 @@
  */
 import type { Jj } from "@smthrs/jj"
 import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
+import * as HttpClient from "@smthrs/kernel/HttpClient"
 import * as BrowserChildProcessSpawner from "@smthrs/platform-browser/BrowserChildProcessSpawner"
 import * as BrowserFileSystem from "@smthrs/platform-browser/BrowserFileSystem"
 import { type FileSystem, Layer, Path, Random } from "effect"
 import { TestClock } from "effect/testing"
 import type { HttpClient as EffectHttpClient } from "effect/unstable/http/HttpClient"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import * as HttpClient from "../HttpClient.ts"
 
 /** POSIX-normalize so `/a/b`, `/a/b/`, and `/a/./b` are one key in the store. */
 const normalize = (path: string): string => {

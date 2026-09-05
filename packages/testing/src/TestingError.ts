@@ -12,8 +12,18 @@
  * @since 0.0.0
  */
 import type { CancelRequestFailed, FlowCycleDetected } from "@smthrs/flow/FlowRuntime"
+import { ScoreGateCode } from "@smthrs/scorers/ScoreGate"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+
+/**
+ * The runtime grading schemas and error class, re-exported with their original
+ * names and constructor identity for test consumers.
+ *
+ * @since 0.0.0
+ * @category errors
+ */
+export { InvalidScoreSample, ScoreGateCode, ScoreGateError } from "@smthrs/scorers/ScoreGate"
 
 const constantCode = <const C extends string>(code: C) =>
   Schema.Literal(code).pipe(Schema.withConstructorDefault(Effect.succeed(code)))
@@ -72,28 +82,6 @@ export const JournalAssertionCode = Schema.Literals([
  * @category codes
  */
 export type JournalAssertionCode = typeof JournalAssertionCode.Type
-
-/**
- * Codes raised by fixed-suite score gates.
- *
- * @since 0.0.0
- * @category codes
- */
-export const ScoreGateCode = Schema.Literals([
-  "invalid_threshold",
-  "invalid_score",
-  "mean_below_threshold",
-  "min_below_threshold",
-  "case_below_threshold"
-])
-
-/**
- * The decoded form of {@link ScoreGateCode}.
- *
- * @since 0.0.0
- * @category codes
- */
-export type ScoreGateCode = typeof ScoreGateCode.Type
 
 /**
  * Every stable code any testing error can carry, as one closed union.
@@ -299,48 +287,6 @@ export class ConformanceSkipped extends Schema.TaggedError<ConformanceSkipped>()
   pin: Schema.String,
   capability: Schema.String,
   reason: Schema.String
-}) {}
-
-/**
- * One score observation a gate rejected, identified the way `ScoreSample`
- * identifies it, so a suite of five hundred samples names the scorer that
- * produced the bad value rather than reporting a bare number.
- *
- * @since 0.0.0
- * @category codes
- */
-export const InvalidScoreSample = Schema.Struct({
-  case: Schema.String,
-  stepKey: Schema.String,
-  scorer: Schema.String,
-  value: Schema.Number
-})
-
-/**
- * The decoded form of {@link InvalidScoreSample}.
- *
- * @since 0.0.0
- * @category codes
- */
-export type InvalidScoreSample = typeof InvalidScoreSample.Type
-
-/**
- * A score sample did not satisfy a configured gate, or a gate was misused.
- *
- * `threshold` and `actual` are optional because not every code has both:
- * `invalid_threshold` has no observation and `invalid_score` has no threshold,
- * and a placeholder `0` in either position is a number a consumer would read
- * as meaningful. `samples` names every rejected observation for
- * `invalid_score`, so a run with ten bad scorers is diagnosed in one pass.
- *
- * @since 0.0.0
- * @category errors
- */
-export class ScoreGateError extends Schema.TaggedError<ScoreGateError>()("ScoreGateError", {
-  code: ScoreGateCode,
-  threshold: Schema.optional(Schema.Number),
-  actual: Schema.optional(Schema.Number),
-  samples: Schema.optional(Schema.Array(InvalidScoreSample))
 }) {}
 
 /**

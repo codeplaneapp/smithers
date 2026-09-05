@@ -21,6 +21,8 @@
  */
 import * as JjService from "@smthrs/jj"
 import type { Jj } from "@smthrs/jj"
+import * as CommandLine from "@smthrs/kernel/CommandLine"
+import { runHostContract } from "@smthrs/kernel/test/contract"
 import * as BrowserFileSystem from "@smthrs/platform-browser/BrowserFileSystem"
 import { Effect, Layer, Path, Sink, Stream } from "effect"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
@@ -35,9 +37,7 @@ import {
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
 import { expect } from "vitest"
-import * as CommandLine from "../../src/CommandLine.ts"
-import { makeMemoryFs } from "../../src/test/TestHost.ts"
-import { runHostContract } from "./HostContract.ts"
+import { makeMemoryFs } from "../../src/TestHost.ts"
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()

@@ -1,4 +1,3 @@
-import * as HarnessEngineLike from "@smthrs/harness/EngineLike"
 import { Effect } from "effect"
 import * as EngineSubject from "../src/EngineSubject.ts"
 import * as TestingError from "../src/TestingError.ts"
@@ -17,7 +16,7 @@ describe("EngineSubject", () => {
     expect("sealStep" in subject).toBe(false)
     expect("splice" in subject).toBe(false)
     expect("suspend" in subject).toBe(false)
-    expect(HarnessEngineLike.EngineLike.key).toBe("/harness/EngineLike")
+    expect(EngineSubject.EngineSubject.key).not.toBe("/harness/EngineLike")
     expect(EngineSubject.EngineSubject.key).toBe("flows/testing/EngineSubject")
   })
 

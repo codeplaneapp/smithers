@@ -1,103 +1,131 @@
 ---
 title: "@smthrs/testing"
-description: "The assertion and conformance vocabulary for flows: plan and journal assertions, engine and host conformance suites, record-and-replay model doubles, deterministic score gates, and real process faults."
+description: "The testing and conformance library for Smithers flows: plan and journal assertions, engine and host conformance suites, record-and-replay model doubles, and deterministic score gates."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/testing/docs/README.md"
 ---
 
-`@smthrs/testing` is the half of a flow test that asserts.
+`@smthrs/testing` is the test library for code built on Smithers flows. It
+supplies the three things a flow test needs and a general test framework does
+not: assertions that read a built plan and a written journal, conformance
+suites an engine or a host bundle has to pass, and model doubles that record a
+provider call once and replay it on every run after.
 
-The package under test supplies the deterministic services a run needs:
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) ships `TestHost`, [`@smthrs/journal`](https://journal.smithers.sh/reference/api/)
-ships `TestJournal`. This package supplies what a test then says about the run
-those services produced, and the doubles the run executes against.
+It is not a test runner. Every assertion is an ordinary `Effect` and every
+conformance case is a plain value, so any runner can register them. A thin
+vitest adapter ships alongside for the runner most projects already use.
 
-It holds no runner. Every assertion is an ordinary `Effect`, every conformance
-case is a value a runner registers, and `Vitest` is a thin adapter. A suite
-built on another runner loses that one module and keeps everything else.
+## Why you would reach for it
 
-## Who uses this package
+A durable flow is hard to test with a return value. The claims that matter are
+about the shape of the run: that a repeated idempotency key returns the first
+execution instead of starting a second, that a resume replays the completed
+prefix instead of re-running it, that the losing branch of a race is
+interrupted and journaled as `aborted`. None of that is visible from what the
+flow returned. It is visible in the plan the flow built and the journal the run
+wrote, and this package gives you a vocabulary for both.
 
-Engine and host authors run the conformance suites to prove an implementation
-obeys the contract. Flow authors assert on the plan a flow builds and the
-journal a run writes. Agent and eval authors replay recorded model calls
-instead of paying a provider, and gate a scored suite in CI.
+The second problem is the model. A step that calls a provider is slow,
+nondeterministic, and billed. `CachedModel` records the first call to a fixture
+file and replays it forever after, so the same test runs offline and gives the
+same answer twice.
 
 ## Install
 
 ```bash
-pnpm add -D @smthrs/testing
+pnpm add -D @smthrs/testing@next effect@4.0.0-rc.112
 ```
 
-`vitest` and `@effect/vitest` are optional peers, needed only by the `Vitest`
-adapter. See [Installation](/installation/).
+The 1.0 release candidates publish under the `next` tag, and the first one is
+not on npm yet: until it is, build from a clone of
+[the repository](https://github.com/smithersai/smithers). `vitest` and
+`@effect/vitest` are optional peers, needed only by the `Vitest` adapter.
+Node.js 22.19.0 or later is required. [Installation](/installation/) has the
+rest.
 
-## The smallest real assertion
+## Certify an engine in fifteen lines
 
-An engine journal is a list of entries, and `expectJournal` answers about it in
-`index` order:
+`Conformance.coreSuite()` is nine black-box pins covering identity,
+interruption, replay, and race. Point them at an implementation and they run:
 
 ```ts
-import { JournalAssertions } from "@smthrs/testing"
+import { Conformance, EngineSubject, FlowEngineLike } from "@smthrs/testing"
+import { describe, it } from "@smthrs/testing/Vitest"
 import * as Effect from "effect/Effect"
 
-const check = Effect.gen(function*() {
-  const journal = JournalAssertions.expectJournal(yield* engine.journal(executionId))
-  yield* journal.executedInOrder(["read", "review", "publish"])
-  yield* journal.terminal("completed")
-  // Answers about journaled external effects only, never about a step that
-  // happens to share the key.
-  yield* journal.effect("publish").journaledAtMostOnce()
+const subject = FlowEngineLike.layerMemory
+
+describe("engine conformance", () => {
+  for (const conformanceCase of Conformance.coreSuite()) {
+    it.scoped(conformanceCase.name, () =>
+      Effect.flatMap(EngineSubject.EngineSubject, conformanceCase.run).pipe(
+        Effect.provide(subject)
+      ))
+  }
 })
 ```
 
-Each assertion fails with a typed error carrying a stable `code`, so a test
-matches on `step_not_executed` rather than on the prose of a message.
+`FlowEngineLike.layerMemory` is the only line naming an implementation.
+Swapping it is how the same nine cases certify a different engine. Use
+`it.scoped` or `it.effect`, not `it.live`: the race and interrupt pins advance
+a `TestClock`, so under the real clock they wait on a clock nothing is moving.
 
-## The package at a glance
+The [Quickstart](/quickstart/) walks the same file and shows what each pin
+proved.
 
-The root entry point exports one namespace per module, and each is also
-importable from `@smthrs/testing/<Module>`. `Vitest` and `Faults` are the two
-exceptions: both are reachable only by subpath, for the reasons their rows
-give.
+## What is in the box
 
-| Namespace                                        | What it is                                                                               |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `TestLayers`                                     | The tier bundles: `unit` for a deterministic run, `poisoned` for plan-time purity.       |
-| `PlanAssertions`, `Plan`, `PlanLike`             | Pure assertions over a built plan graph, and the projection they read.                   |
-| `JournalAssertions`, `Divergence`                | Assertions over a journal, and the first attributable difference between two.            |
-| `Conformance`, `EngineSubject`                   | The mandatory engine suite, and the black-box port every subject implements.             |
-| `MemoryEngine`, `RestartableEngine`              | The reference in-memory engine, and the restart and hard-kill controls over one store.   |
-| `FlowEngineLike`                                 | The same conformance port over the real engine from [`@smthrs/engine`](https://engine.smithers.sh/reference/api/).     |
-| `HostSuite`                                      | The shared Host capability suite, parameterized by a declared profile.                   |
-| `Fixture`, `FixtureStore`                        | The recorded-call format, its canonical replay identity, and the memory and file stores. |
-| `CachedModel`, `RecordedModel`, `RecordingModel` | Record a live model, replay a fixture strictly, or do both behind one seam.              |
-| `ModelLike`                                      | The provider-neutral model seam a fixture is written against.                            |
-| `ScoreGate`                                      | Fixed-suite score gates, three-way verdicts, and the CI exit codes they map to.          |
-| `TestingError`                                   | Every typed failure and the closed union of stable codes they carry.                     |
-| `Vitest`                                         | The Effect-aware registrars. ESM only, and deliberately absent from the root barrel.     |
-| `Faults`                                         | Real signals to real pids for the fault tier. Off the barrel because it is not a double. |
+- **Assertions** over the artifacts a flow produces: `PlanAssertions` for a
+  built plan, `JournalAssertions` for a journal, `Divergence` for the first
+  attributable difference between two journals, and `ScoreGate` for graded
+  eval suites.
+- **Conformance suites** an implementation has to pass: `Conformance.coreSuite`
+  for any engine, `HostSuite.hostSuite` for any Host bundle.
+- **Doubles**: `MemoryEngine` and `RestartableEngine` as reference engines,
+  `FlowEngineLike` as the adapter that runs the same pins against a real
+  engine, and `RecordedModel`, `RecordingModel`, and `CachedModel` as the
+  record-and-replay model loop.
+- **Layer bundles** that make a test tier explicit: `TestLayers.unit` for the
+  unit tier, `TestLayers.poisoned` for plan-time purity.
+- **Fault primitives** under `@smthrs/testing/Faults`, which are not doubles:
+  `killProcess` sends a real signal to a real pid, and `skewClock` moves the
+  wall clock a durable timer is measured against.
 
-Every export of every namespace, with signatures and errors, is on the
-[API reference](/reference/api/).
+## Where this sits
 
-## Where to go next
+`@smthrs/testing` has no parent package. It sits beside the runtime it tests
+rather than inside it, which is why nothing in the Smithers runtime depends on
+it: you install it as a dev dependency and it reads the same public types your
+own code does.
 
-- [Installation](/installation/): peers, import forms, and what is not public.
-- [Quickstart](/quickstart/): certify an engine against the core suite in
-  fifteen lines.
-- Guides: [register an Effect test body](/guides/register-effect-tests/),
-  [assert what a flow planned](/guides/assert-a-plan/),
-  [assert what a run journaled](/guides/assert-a-journal/),
-  [replay a model instead of calling one](/guides/replay-a-model/),
-  [certify an engine](/guides/certify-an-engine/),
-  [certify a host bundle](/guides/certify-a-host/),
-  [gate a scored suite](/guides/gate-a-scored-suite/), and
-  [inject a real process fault](/guides/inject-a-process-fault/).
-- Concepts: [test tiers](/concepts/test-tiers/),
-  [typed failures](/concepts/typed-failures/),
-  [the engine subject seam](/concepts/engine-subject/),
-  [conformance suites](/concepts/conformance/),
-  [fixtures and replay identity](/concepts/fixtures/), and
-  [scored suites](/concepts/scored-suites/).
-- [Troubleshooting](/troubleshooting/): the failures this package reports,
-  what causes each one, and what to change.
+Each part of the library answers for one part of the runtime, and each of those
+packages documents the types the assertions read:
+
+| To test                                               | Use                                                                                      |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| An engine, or your own runtime binding                | `Conformance`, `EngineSubject`, `FlowEngineLike`, over [`@smthrs/engine`](https://engine.smithers.sh/reference/api/)   |
+| A durable engine binding rather than an in-memory one | `FlowEngineLike.layerOver`, over [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/)             |
+| The plan a flow builds before anything runs           | `PlanAssertions`, over [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) and [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)       |
+| The history a run wrote                               | `JournalAssertions` and `Divergence`, over [`@smthrs/journal`](https://journal.smithers.sh/reference/api/)             |
+| A capability-gated host bundle                        | `HostSuite`, over [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)                                        |
+| A step that calls a model provider                    | `CachedModel`, `RecordedModel`, and `RecordingModel`, over [`@smthrs/model`](https://model.smithers.sh/reference/api/) |
+| A graded eval suite                                   | `ScoreGate`, alongside [`@smthrs/evals`](https://evals.smithers.sh/reference/api/)                                     |
+
+`@smthrs/testing/TestHost` supplies the deterministic host services a run
+needs, while [`@smthrs/journal`](https://journal.smithers.sh/reference/api/) supplies `TestJournal`. This
+package also supplies what a test says about the run those services produced.
+
+If you arrived here without knowing what a flow is, start at the top of the
+tree: [`@smthrs/cli`](https://cli.smithers.sh/reference/api/) is the `smithers` command line, and
+[`@smthrs/flow`](https://flow.smithers.sh/reference/api/) is the authoring model everything else executes.
+
+## Next steps
+
+- [Installation](/installation/): the import forms, the optional peers, and
+  the three modules that stay off the root barrel.
+- [Quickstart](/quickstart/): run the nine conformance pins and read what
+  each one proved.
+- [Test tiers](/concepts/test-tiers/): why a harness here is a layer set
+  rather than a class.
+- [Replay a model](/guides/replay-a-model/): record once, replay forever,
+  and the calls the recorder refuses to write.
+- [API reference](/reference/api/): every module and every export.

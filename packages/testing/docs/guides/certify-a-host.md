@@ -39,8 +39,8 @@ is reported through the typed `expectedCode` and `actualCode` fields of
 Each case is a value with a `name` and a `run`, so registration is a loop:
 
 ```ts
-import * as TestHost from "@smthrs/kernel/test/TestHost"
 import { HostSuite } from "@smthrs/testing"
+import * as TestHost from "@smthrs/testing/TestHost"
 import { Effect } from "effect"
 import { describe, it } from "vitest"
 
@@ -89,10 +89,10 @@ the bundle's platform has no `/tmp`:
 const profileWithScratch = { ...profile, fileSystemScratchPath: "/var/tmp/host-suite-probe.txt" }
 ```
 
-The earlier default was a relative `.flows-host-suite-value.txt`, resolved
-against the caller's working directory. A real host bundle wrote into, and
-force-deleted from, the repository working tree, and two suites in one
-directory raced on the same fixed name.
+The default is absolute and unique for two reasons. A relative name resolves
+against the caller's working directory, so a real host bundle would write into,
+and force-delete from, your working tree. A fixed name makes two suites running
+in one directory race on one file.
 
 ## Clock and randomness are checked behaviorally
 
@@ -108,13 +108,13 @@ host failures a supported capability's own probe can produce: a
 `PlatformError` from the scratch write, a `JjFailure` from a jj command, an
 `HttpClientError` from the probe request.
 
-The channel used to be `unknown`, which meant a runner could not tell "this
-host violates the contract" from "the scratch write failed because the disk is
-full".
+The channel names that closed union rather than widening to `unknown`, so a
+runner can tell "this host violates the contract" from "the scratch write
+failed because the disk is full".
 
 ## Related
 
 - [Conformance suites](../concepts/conformance.md): why an unsupported
   capability is a declared outcome.
-- [`@smthrs/kernel`](/api/kernel) ships `TestHost`, the deterministic bundle
-  this suite is developed against; see [its testing page](/pkg/kernel/testing).
+- `@smthrs/testing/TestHost` is the deterministic bundle this suite is
+  developed against; the kernel supplies the contract it certifies.

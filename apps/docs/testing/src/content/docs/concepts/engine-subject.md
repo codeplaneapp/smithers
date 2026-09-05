@@ -58,9 +58,9 @@ recorded result. Both kinds replay their recorded outcome.
 - **Unsealed is occurrence identity.** Duplicate declared keys run and journal
   separately.
 
-For a key that occurs exactly once the two are indistinguishable, which is why
-the older wording, "whether a replay may reuse a recorded result", read as a
-re-execution switch it never was.
+For a key that occurs exactly once the two are indistinguishable. Read `sealed`
+as a choice between two identities, never as a switch that turns replay on or
+off.
 
 `FlowEngineLike` maps this onto the real engine directly: a sealed step
 declares its spec key as the activity idempotency key, so the engine derives

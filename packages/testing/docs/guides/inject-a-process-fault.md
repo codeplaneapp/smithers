@@ -31,14 +31,16 @@ fault it never caused.
 ## Wait for the state you are asserting on
 
 A fault landing is asynchronous. `waitFor` polls a predicate until it holds, or
-fails with a message naming what it waited for:
+fails with a message naming what it waited for. Poll evidence the process under
+test wrote down, such as an append-only marker file it opens on boot:
 
 ```ts
-await waitFor(
-  () => fixture.marker(markers.secondStarted) !== undefined,
-  "the second action to start",
-  60_000
-)
+import * as fs from "node:fs"
+
+const markerLog = "/tmp/flow-run-markers.log"
+const markers = () => fs.existsSync(markerLog) ? fs.readFileSync(markerLog, "utf8") : ""
+
+await waitFor(() => markers().includes("second-started"), "the second action to start", 60_000)
 ```
 
 Every helper takes an optional timeout as its last argument.
@@ -88,36 +90,40 @@ an explicit skew instead. `restore` is idempotent.
 Pids, process groups, ports, and the durable database under a fixture are
 machine global. A fault suite therefore gets its own tier:
 
-- Put the cases in the package's `test/faults` tree.
-- Declare the tier with a `Smithers.FaultSuite` target.
-- Give it a `vitest.faults.config.ts` with `fileParallelism: false`, a finite
+- Put the cases in their own tree, such as `test/faults`, so the default suite
+  never picks them up.
+- Give that tree its own vitest config with `fileParallelism: false`, a finite
   `testTimeout`, and coverage disabled, because the work happens in child
   processes this one never instruments.
 
-A case that kills somebody else's engine belongs in that package's fault tree,
-not here. This package's own `Faults` suite is the exception and stays in
-`test/`: it signals only pids it spawned itself, so it reaches no neighbouring
-suite, and staying there is what keeps `src/Faults.ts` inside the package's
-100% coverage denominator.
+A suite that signals only pids it spawned itself can reach no neighbouring
+suite, so it is safe to leave in the default tree. A case that kills a process
+another suite owns is not: it belongs with the code that owns that process.
 
 ## Admit the run before you claim anything
 
-A kill proves something only if the thing it killed was really running. The
-repository's fault cases boot the shipped product against the fixture first,
-assert the state they are about to disturb, then inject:
+A kill proves something only if the thing it killed was really running. Boot
+the real process, wait until it reaches the state you are about to disturb,
+assert that state, and only then inject:
 
 ```ts
-await probeEngineChild({ ...fixture })
+import { spawn } from "node:child_process"
+import { expect } from "vitest"
 
-const engine = spawnEngineChild({ ...fixture, mode: "execute" })
-await engine.handshake
-await waitFor(() => fixture.marker(markers.secondStarted) !== undefined, "the second action to start", 60_000)
+const child = spawn(process.execPath, ["./run-flow.mjs"], {
+  env: { ...process.env, MARKER_LOG: markerLog }
+})
 
-expect(fixture.marker(markers.firstDone)).toBeDefined()
-expect(fixture.marker(markers.secondDone)).toBeUndefined()
+await waitFor(() => markers().includes("second-started"), "the second action to start", 60_000)
 
-await killProcess(engine.process)
+expect(markers()).toContain("first-done")
+expect(markers()).not.toContain("second-done")
+
+await killProcess(child)
 ```
+
+`killProcess` takes anything carrying a `pid`, so a `ChildProcess` handle goes
+straight in.
 
 Read the durable evidence out of an append-only file the killed process could
 not have rewritten, and out of the run's own journal. Anything read from the

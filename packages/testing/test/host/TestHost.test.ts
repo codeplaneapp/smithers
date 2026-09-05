@@ -1,12 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import { isJjError, Jj } from "@smthrs/jj"
+import * as HttpClient from "@smthrs/kernel/HttpClient"
 import * as BrowserFileSystem from "@smthrs/platform-browser/BrowserFileSystem"
 import { Clock, Effect, FileSystem, Random, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import * as HttpClient from "../src/HttpClient.ts"
-import * as TestHost from "../src/test/TestHost.ts"
+import * as TestHost from "../../src/TestHost.ts"
 
 const decoder = new TextDecoder()
 

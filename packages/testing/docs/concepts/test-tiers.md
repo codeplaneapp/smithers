@@ -46,25 +46,23 @@ const built = PlanAssertions.expectPure(Plan.planOf(review, { pr: 4821 })).pipe(
 )
 ```
 
-Rejection is a **defect**, never a recoverable failure, and that distinction is
-the whole design. Two earlier shapes were unsound:
+Rejection is a **defect**, never a recoverable failure, and the shape of the
+refusal is what makes that stick. A poisoned service throws a
+`CapabilityContractError` from the property getter itself. It fires on a data
+read as loudly as on a method call, and `Effect.catchTag` cannot reach it.
 
-- A service that answered every property with a function made a synchronous
-  data read succeed. `Path.sep` came back as a function rather than `"/"`, so
-  code that interpolated it produced garbage and the purity gate reported
-  nothing.
-- A service whose methods returned `Effect.fail` made the refusal catchable. A
-  plan body that wrapped a host read in `Effect.catch`, `Effect.option`, or
-  `Effect.result`, which is ordinary in fallback-shaped code, swallowed the
-  violation, and the purity gate reported the plan as pure.
+Two weaker shapes would not hold. A service that answers every property with a
+function lets a synchronous data read succeed: `Path.sep` comes back as a
+function rather than `"/"`, code that interpolates it produces garbage, and the
+purity gate reports nothing. A service whose methods return `Effect.fail` makes
+the refusal catchable: a plan body that wraps a host read in `Effect.catch`,
+`Effect.option`, or `Effect.result`, which is ordinary in fallback-shaped code,
+swallows the violation, and the gate reports the plan as pure.
 
-The poisoned services throw a `CapabilityContractError` from the property
-getter instead. It fires on a data read as loudly as on a method call, and
-`Effect.catchTag` cannot reach it. A small set of property names answers
-`undefined` rather than throwing, because a runtime reads them to classify a
-value rather than to use it: `then`, `toJSON`, `valueOf`, `$$typeof`,
-`asymmetricMatch`, and the rest. That is what lets a poisoned service still be
-stored, logged, and awaited past.
+A small set of property names answers `undefined` rather than throwing, because
+a runtime reads them to classify a value rather than to use it: `then`,
+`toJSON`, `valueOf`, `$$typeof`, `asymmetricMatch`, and the rest. That is what
+lets a poisoned service still be stored, logged, and awaited past.
 
 `Clock` and `Random` are `Context.Reference`s with ambient defaults, so their
 poisoning can never appear in a layer's output type.
@@ -79,16 +77,15 @@ real signal to a real pid and waits for the operating system to reap it;
 `parentPid` and `waitForReparent` read the orphan a kill leaves behind; and
 `skewClock` moves the wall clock a durable timer is measured against.
 
-Because those effects are machine global, a fault suite is its own tier: it
-lives in the package's `test/faults` tree, behind a `Smithers.FaultSuite`
-target and a `vitest.faults.config.ts` with `fileParallelism: false`. Two
-suites that spawn and kill processes cannot share a worker, because pids,
-ports, and process groups are process global.
+Because those effects are machine global, a fault suite is its own tier. Keep
+its cases in a separate tree, such as `test/faults`, and run them from their
+own config with `fileParallelism: false`. Two suites that spawn and kill
+processes cannot share a worker, because pids, ports, and process groups are
+process global.
 
-This package's own `Faults` suite is the exception and stays in `test/`. It
-signals only pids it spawned itself, so it can reach no neighbouring suite, and
-staying there is what keeps `src/Faults.ts` inside the package's 100% coverage
-denominator.
+A fault suite that signals only pids it spawned itself can reach no
+neighbouring suite, so it is safe to leave in the default tree. One that kills
+a process another suite owns is not.
 
 See [Inject a real process fault](../guides/inject-a-process-fault.md).
 

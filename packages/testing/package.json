@@ -39,9 +39,35 @@
       "types": "./src/Vitest.ts",
       "import": "./src/Vitest.ts"
     },
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./CachedModel": "./src/CachedModel.ts",
+    "./Conformance": "./src/Conformance.ts",
+    "./Divergence": "./src/Divergence.ts",
+    "./EngineSubject": "./src/EngineSubject.ts",
+    "./Faults": "./src/Faults.ts",
+    "./Fixture": "./src/Fixture.ts",
+    "./FixtureStore": "./src/FixtureStore.ts",
+    "./FlowEngineLike": "./src/FlowEngineLike.ts",
+    "./HostSuite": "./src/HostSuite.ts",
+    "./JournalAssertions": "./src/JournalAssertions.ts",
+    "./MemoryEngine": "./src/MemoryEngine.ts",
+    "./ModelLike": "./src/ModelLike.ts",
+    "./Plan": "./src/Plan.ts",
+    "./PlanAssertions": "./src/PlanAssertions.ts",
+    "./PlanLike": "./src/PlanLike.ts",
+    "./RecordedModel": "./src/RecordedModel.ts",
+    "./RecordingModel": "./src/RecordingModel.ts",
+    "./RestartableEngine": "./src/RestartableEngine.ts",
+    "./ScoreGate": "./src/ScoreGate.ts",
+    "./TestHost": "./src/TestHost.ts",
+    "./TestLayers": "./src/TestLayers.ts",
+    "./TestingError": "./src/TestingError.ts",
+    "./index": "./src/index.ts",
+    "./pins/Identity": "./src/pins/Identity.ts",
+    "./pins/Interrupt": "./src/pins/Interrupt.ts",
+    "./pins/Race": "./src/pins/Race.ts",
+    "./pins/Replay": "./src/pins/Replay.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -69,13 +95,143 @@
         "types": "./dist/esm/Vitest.d.ts",
         "import": "./dist/esm/Vitest.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./CachedModel": {
+        "types": "./dist/esm/CachedModel.d.ts",
+        "import": "./dist/esm/CachedModel.js",
+        "require": "./dist/cjs/CachedModel.js"
+      },
+      "./Conformance": {
+        "types": "./dist/esm/Conformance.d.ts",
+        "import": "./dist/esm/Conformance.js",
+        "require": "./dist/cjs/Conformance.js"
+      },
+      "./Divergence": {
+        "types": "./dist/esm/Divergence.d.ts",
+        "import": "./dist/esm/Divergence.js",
+        "require": "./dist/cjs/Divergence.js"
+      },
+      "./EngineSubject": {
+        "types": "./dist/esm/EngineSubject.d.ts",
+        "import": "./dist/esm/EngineSubject.js",
+        "require": "./dist/cjs/EngineSubject.js"
+      },
+      "./Faults": {
+        "types": "./dist/esm/Faults.d.ts",
+        "import": "./dist/esm/Faults.js",
+        "require": "./dist/cjs/Faults.js"
+      },
+      "./Fixture": {
+        "types": "./dist/esm/Fixture.d.ts",
+        "import": "./dist/esm/Fixture.js",
+        "require": "./dist/cjs/Fixture.js"
+      },
+      "./FixtureStore": {
+        "types": "./dist/esm/FixtureStore.d.ts",
+        "import": "./dist/esm/FixtureStore.js",
+        "require": "./dist/cjs/FixtureStore.js"
+      },
+      "./FlowEngineLike": {
+        "types": "./dist/esm/FlowEngineLike.d.ts",
+        "import": "./dist/esm/FlowEngineLike.js",
+        "require": "./dist/cjs/FlowEngineLike.js"
+      },
+      "./HostSuite": {
+        "types": "./dist/esm/HostSuite.d.ts",
+        "import": "./dist/esm/HostSuite.js",
+        "require": "./dist/cjs/HostSuite.js"
+      },
+      "./JournalAssertions": {
+        "types": "./dist/esm/JournalAssertions.d.ts",
+        "import": "./dist/esm/JournalAssertions.js",
+        "require": "./dist/cjs/JournalAssertions.js"
+      },
+      "./MemoryEngine": {
+        "types": "./dist/esm/MemoryEngine.d.ts",
+        "import": "./dist/esm/MemoryEngine.js",
+        "require": "./dist/cjs/MemoryEngine.js"
+      },
+      "./ModelLike": {
+        "types": "./dist/esm/ModelLike.d.ts",
+        "import": "./dist/esm/ModelLike.js",
+        "require": "./dist/cjs/ModelLike.js"
+      },
+      "./Plan": {
+        "types": "./dist/esm/Plan.d.ts",
+        "import": "./dist/esm/Plan.js",
+        "require": "./dist/cjs/Plan.js"
+      },
+      "./PlanAssertions": {
+        "types": "./dist/esm/PlanAssertions.d.ts",
+        "import": "./dist/esm/PlanAssertions.js",
+        "require": "./dist/cjs/PlanAssertions.js"
+      },
+      "./PlanLike": {
+        "types": "./dist/esm/PlanLike.d.ts",
+        "import": "./dist/esm/PlanLike.js",
+        "require": "./dist/cjs/PlanLike.js"
+      },
+      "./RecordedModel": {
+        "types": "./dist/esm/RecordedModel.d.ts",
+        "import": "./dist/esm/RecordedModel.js",
+        "require": "./dist/cjs/RecordedModel.js"
+      },
+      "./RecordingModel": {
+        "types": "./dist/esm/RecordingModel.d.ts",
+        "import": "./dist/esm/RecordingModel.js",
+        "require": "./dist/cjs/RecordingModel.js"
+      },
+      "./RestartableEngine": {
+        "types": "./dist/esm/RestartableEngine.d.ts",
+        "import": "./dist/esm/RestartableEngine.js",
+        "require": "./dist/cjs/RestartableEngine.js"
+      },
+      "./ScoreGate": {
+        "types": "./dist/esm/ScoreGate.d.ts",
+        "import": "./dist/esm/ScoreGate.js",
+        "require": "./dist/cjs/ScoreGate.js"
+      },
+      "./TestHost": {
+        "types": "./dist/esm/TestHost.d.ts",
+        "import": "./dist/esm/TestHost.js",
+        "require": "./dist/cjs/TestHost.js"
+      },
+      "./TestLayers": {
+        "types": "./dist/esm/TestLayers.d.ts",
+        "import": "./dist/esm/TestLayers.js",
+        "require": "./dist/cjs/TestLayers.js"
+      },
+      "./TestingError": {
+        "types": "./dist/esm/TestingError.d.ts",
+        "import": "./dist/esm/TestingError.js",
+        "require": "./dist/cjs/TestingError.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./pins/Identity": {
+        "types": "./dist/esm/pins/Identity.d.ts",
+        "import": "./dist/esm/pins/Identity.js",
+        "require": "./dist/cjs/pins/Identity.js"
+      },
+      "./pins/Interrupt": {
+        "types": "./dist/esm/pins/Interrupt.d.ts",
+        "import": "./dist/esm/pins/Interrupt.js",
+        "require": "./dist/cjs/pins/Interrupt.js"
+      },
+      "./pins/Race": {
+        "types": "./dist/esm/pins/Race.d.ts",
+        "import": "./dist/esm/pins/Race.js",
+        "require": "./dist/cjs/pins/Race.js"
+      },
+      "./pins/Replay": {
+        "types": "./dist/esm/pins/Replay.d.ts",
+        "import": "./dist/esm/pins/Replay.js",
+        "require": "./dist/cjs/pins/Replay.js"
+      }
     }
   },
   "scripts": {
@@ -96,12 +252,14 @@
     "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/model": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/platform-browser": "1.0.0-rc.0",
+    "@smthrs/scorers": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0"
   },
   "peerDependencies": {
-    "@effect/vitest": "4.0.0-rc.108",
-    "effect": "4.0.0-rc.108",
-    "vitest": "^4.1.0"
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "vitest": "^4.1.9"
   },
   "peerDependenciesMeta": {
     "@effect/vitest": {
@@ -112,23 +270,22 @@
     }
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@smthrs/harness": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }
