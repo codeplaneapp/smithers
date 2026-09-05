@@ -1,4 +1,7 @@
-# LlmLint
+---
+title: "LlmLint"
+description: "Reviews changed files with a model against a rubric, and fails on findings."
+---
 
 Reviews changed files with a model against a rubric and fails on findings.
 
@@ -88,8 +91,8 @@ Beyond the usual fields, this target contributes:
 
 | Channel | Type                                                                                 |
 | ------- | ------------------------------------------------------------------------------------ |
-| Success | `Report` — `{files: Array<string>, findings: Array<Finding>}`                        |
-| Error   | `ReviewError` — a union of `ClaudeCliMissing`, `LlmReviewError`, and `FindingsError` |
+| Success | `Report`: `{files: Array<string>, findings: Array<Finding>}`                        |
+| Error   | `ReviewError`: a union of `ClaudeCliMissing`, `LlmReviewError`, and `FindingsError` |
 
 ```ts
 Finding = { file: string, line: number, severity: Severity, message: string }
@@ -113,8 +116,8 @@ Finding = { file: string, line: number, severity: Severity, message: string }
 
 `review` is its own verb, and the aggregate `ci` does not plan it. Two facts
 force that. The target expands `changes` at PLAN time, so a checkout without
-the base revision — every `actions/checkout` without `fetch-depth: 0` on a pull
-request — kills the whole plan, not just this node. And it spawns a model CLI,
+the base revision, which is every `actions/checkout` without `fetch-depth: 0` on
+a pull request, kills the whole plan rather than only this node. And it spawns a model CLI,
 which a hosted runner has neither the binary nor a credential for. So
 `smithers-build lint '//...'`, `test`, `build`, `docs`, and `ci` never select a
 review target, and `verbGate` refuses one reached through a dependency edge as
@@ -122,8 +125,8 @@ well. Run them by name:
 
 ```sh
 smithers-build review '//...'
-smithers-build review '//packages/smithers/flows/journal:durableIdentityGuard'
-smithers-build //packages/smithers/flows/journal:durableIdentityGuard   # the bare-label form
+smithers-build review '//packages/core:reviewChangedFiles'
+smithers-build //packages/core:reviewChangedFiles   # the bare-label form
 ```
 
 An exact label under another verb is the ordinary `UnsupportedVerbError`.

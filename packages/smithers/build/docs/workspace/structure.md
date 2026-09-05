@@ -1,4 +1,10 @@
-# Workspace structure
+---
+title: "Workspace structure"
+description: "Discovery, PACKAGE.ts placement, package boundaries, lazy evaluation, default-target synthesis, and the directories that stay host state."
+---
+
+Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
+
 
 A smithers build workspace is a directory tree containing `PACKAGE.ts` files. The
 workspace root is whatever `--workspace` points at, and it defaults to the
@@ -31,7 +37,7 @@ the directory in the first place: git is not installed or not executable, and
 the directory is not inside a worktree. A walk of the tree is a complete answer
 to both.
 
-Every other failure is reported — a repository this process cannot read, an
+Every other failure is reported: a repository this process cannot read, an
 object-store corruption, a listing too large for the 64 MiB subprocess buffer, a
 git that was killed. Falling back on those would hide a real fault behind a
 listing that looks fine and is missing files, and a workspace missing files
@@ -43,7 +49,7 @@ git reports paths relative to the repository root, and `-z` output is never
 quoted, so a path that is absolute, rooted, traversing, empty, or carrying a NUL
 or a backslash is not something git found in this workspace. One such entry
 fails the whole listing rather than being filtered out of it: a listing that
-framed one entry wrong is not a listing to trust the rest of. The same target
+framed one entry wrong is not a listing to trust the rest of. The same rule
 applies to `git diff --name-only` output, which reaches a digest and a patch
 argument.
 
@@ -61,10 +67,10 @@ A `PACKAGE.ts` file defines a package. Its package path is its directory relativ
 to the workspace root; the root `PACKAGE.ts` defines the package with the empty
 path, addressed as `//`.
 
-```
+```text
 PACKAGE.ts                     -> //
-packages/smithers/flows/flow/PACKAGE.ts       -> //packages/smithers/flows/flow
-packages/smithers/flows/flow/test/PACKAGE.ts  -> //packages/smithers/flows/flow/test
+packages/greeter/PACKAGE.ts       -> //packages/greeter
+packages/greeter/test/PACKAGE.ts  -> //packages/greeter/test
 ```
 
 There is no `subpackages` target and no visibility system. Nesting a `PACKAGE.ts`
@@ -82,7 +88,7 @@ The workspace imports only the `PACKAGE.ts` modules a command needs.
 Imports are cached by the file a module is, not by the name it was reached
 under: the canonical path plus the device, inode, size, and modification time.
 Within one command the stamp does not move, so a module evaluates at most once
-and the target values it exports keep one identity — which is what the planner
+and the target values it exports keep one identity, which is what the planner
 uses to match a dependency to its label. Across commands in one process, a
 `PACKAGE.ts` that was edited is re-evaluated, and two workspaces that happen to
 share a path spelling never share a module.
@@ -105,7 +111,7 @@ Admitting a `PACKAGE.ts` is still a trust decision, not a sandbox: it is
 executable TypeScript that can read any file the user can read and spawn any
 process. A workspace you would not run `pnpm install` in is a workspace you must
 not point this CLI at. What the confinement targets guarantee is narrower and
-still worth having — the code that runs is code the workspace contains.
+still worth having: the code that runs is code the workspace contains.
 
 ## Package boundaries
 
@@ -128,12 +134,13 @@ A directory without its own `PACKAGE.ts` can still produce targets. The root
 every matching directory.
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 // PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
 export const packageDefaults = Smithers.PackageDefaults({
   directories: "packages/*",
-  macro: Smithers.StandardPackage
+  macro: buildAndCheckPackage
 })
 ```
 
@@ -170,6 +177,6 @@ machine.
 
 ## Next
 
-- [Writing BUILD files](writing-build-files.md)
+- [Writing build files](writing-build-files.md)
 - [Configuration](configuration.md)
 - [Labels](../concepts/labels.md)

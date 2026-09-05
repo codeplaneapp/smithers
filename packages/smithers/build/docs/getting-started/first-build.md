@@ -1,84 +1,100 @@
-# First build
+---
+title: "First build"
+description: "Write a workspace declaration and one PACKAGE.ts, then run query, graph, plan, build, test, lint, ci, and install against them."
+sidebar:
+  order: 2
+---
 
-This tutorial writes a root `PACKAGE.ts` and one package `PACKAGE.ts`, then runs the
-core query, graph, build, test, lint, CI, and install paths. It assumes the
-layout from [Install](install.md).
+Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-## 1. Declare the root
 
-The root `PACKAGE.ts` holds workspace-wide declarations: configuration, shared
-input values, the install target, and any default targets.
+This tutorial writes a workspace declaration and one package, then runs the core
+query, graph, build, test, lint, CI, and install paths. It assumes the layout
+from [Install](install.md).
 
-```ts
-// PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
+## 1. Declare the workspace
 
-export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
-
-export const runtime = Smithers.Runtime.Node({ version: ">=22.19.0" })
-export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0", runtime })
-
-export const nodeModules = Smithers.Install({ packageManager })
-
-export const rootJSDocConfig = Smithers.file("//eslint.jsdoc.js")
-```
-
-A workspace whose tools come from a Nix closure adds one more export beside
-these. It applies to every package below the root, and a package that exports
-its own overrides it. See [Environments](../concepts/environments.md).
+The workspace declaration names the repository, the cache directory, and the
+toolchain every target runs against. It lives in `.smithers/WORKSPACE.ts`, and
+it exports exactly one value named `Workspace`.
 
 ```ts
-export const environment = Smithers.Nix.Environment({ flake: Smithers.file("//flake.nix") })
-```
+// .smithers/WORKSPACE.ts
+import { Smithers as S } from "@smthrs/targets"
 
-`config` and `rootJSDocConfig` are not targets. `nodeModules` is: it becomes
-`//:nodeModules`, and `//` resolves to it because the default-target search tries
-`lib`, then `nodeModules`, then the package basename, then `default`. The
-runtime and package-manager declarations are inert data: nothing runs when the
-file is evaluated, and every tool-running target takes the manager as an attr,
-so switching either is one edit to this file.
+const packageJson = S.file("//package.json")
 
-## 2. Declare a package
+export const runtime = S.Runtime.Node({ version: ">=22.19.0" })
+export const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
 
-Point `StandardPackage` at a package directory, passing the toolchain the root
-file declared. It expands into six targets.
-
-```ts
-// packages/greeter/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../PACKAGE.ts"
-
-export const { lib, check, test, lint, fmt, docs } = Smithers.StandardPackage({
+export const Workspace = S.Workspace("demo", {
+  repository: "git+https://example.invalid/demo.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime,
   packageManager,
-  deps: [],
-  cwd: "packages/greeter"
+  nodeModules: S.Npm.NodeModules({ packageJson })
 })
 ```
 
-`cwd` is the workspace-relative directory every emitted tool runs in. The macro's
-defaults follow the Smithers layout: sources at `src/**/*.ts`, tests at
-`test/**/*.test.ts`, `tsc -p tsconfig.json`, Vitest with the package
-`vitest.config.ts`, and ESLint with the package `eslint.config.js` plus the root
-`eslint.jsdoc.js`.
+A workspace whose tools come from a Nix closure declares that instead of, or
+beside, the Node trio. See [Environments](../concepts/environments.md).
 
-The labels are `//packages/greeter:lib`, `//packages/greeter:check`,
-`//packages/greeter:test`, `//packages/greeter:lint`, `//packages/greeter:fmt`,
-and `//packages/greeter:docs`.
+```ts
+export const environment = S.Nix.Environment({ flake: S.file("//flake.nix") })
+```
+
+Nothing runs when the module is evaluated. Every declaration is inert data, and
+every tool-running target resolves the runtime and the package manager from this
+file at plan time, so switching either is one edit here.
+
+## 2. Declare a package
+
+A `PACKAGE.ts` exports one value named `Package`, whose `targets` map is what
+gives each target its label. `buildAndCheckPackage` expands one conventional
+TypeScript package into that map:
+
+```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
+// packages/greeter/PACKAGE.ts
+import { Smithers as S } from "@smthrs/targets"
+
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = buildAndCheckPackage({
+  deps: [],
+  cwd: "packages/greeter"
+})
+
+export const Package = S.Package({
+  targets: { check, circular, docs, docsFiles, fmt, lib, lint, test }
+})
+```
+
+`cwd` is the workspace-relative directory every emitted tool runs in. The
+macro's defaults follow one conventional layout: sources at `src/**/*.ts`, tests
+at `test/**/*.test.ts`, `tsc -p tsconfig.json`, Vitest with the package's
+`vitest.config.ts`, and ESLint with the package's `eslint.config.js`.
+
+The map keys are the target names, so the labels are `//packages/greeter:lib`,
+`//packages/greeter:check`, `//packages/greeter:test`, and one per remaining
+key. A target left out of the map has no label and is not addressable: omission
+is the only privacy mechanism.
 
 ## 3. Add an edge
 
-Import another package's target to declare a dependency.
+Import another package's `Package` value and take the target off it.
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 // packages/app/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../PACKAGE.ts"
-import { lib as greeter } from "../greeter/PACKAGE.ts"
+import { Smithers as S } from "@smthrs/targets"
+import { Package as greeter } from "../greeter/PACKAGE.ts"
 
-export const { lib, test, lint } = Smithers.StandardPackage({
-  packageManager,
-  deps: [greeter],
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = buildAndCheckPackage({
+  deps: [greeter.lib],
   cwd: "packages/app"
+})
+
+export const Package = S.Package({
+  targets: { check, circular, docs, docsFiles, fmt, lib, lint, test }
 })
 ```
 
@@ -91,16 +107,16 @@ appears anywhere. See [Dependencies](../concepts/dependencies.md).
 smithers-build query //...
 ```
 
-The result lists each discovered target with its target and the verbs it
-participates in:
+The result lists each discovered target with the definition it came from and
+the verbs it participates in:
 
-```
+```text
 query: //...
 targets:
-  - label: //:nodeModules
-    target: Install
-    kinds: [run]
   - label: //packages/app:lib
+    target: TsBuild
+    kinds: [build]
+  - label: //packages/greeter:lib
     target: TsBuild
     kinds: [build]
   ...
@@ -115,7 +131,7 @@ for JSON.
 smithers-build graph //packages/app:lib
 ```
 
-```
+```text
 //packages/app:lib (TsBuild)
 └─ //packages/greeter:lib (TsBuild)
 ```
@@ -139,11 +155,11 @@ smithers-build test //packages/greeter:test
 smithers-build lint //packages/...
 ```
 
-Each verb selects the targets whose target declares that kind, plans their
+Each verb selects the targets whose definition declares that kind, plans their
 transitive dependency closure, and executes it in dependency order with bounded
 parallelism. One status line per target goes to standard error:
 
-```
+```text
 //packages/greeter:lib  ran  1.4s
 //packages/app:lib  ran  0.9s
 2 targets: 0 hit, 2 ran, 0 failed, 0 skipped (2.3s)
@@ -173,6 +189,6 @@ setting and is not answered from the cross-run engine cache. See
 
 ## Next
 
-- [Writing BUILD files](../workspace/writing-build-files.md)
+- [Writing build files](../workspace/writing-build-files.md)
 - [Running targets](../workspace/running-targets.md)
 - [CLI reference](../reference/cli.md)

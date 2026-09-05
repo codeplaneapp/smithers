@@ -1,12 +1,11 @@
 {
   "name": "@smthrs/build",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "tooling"
   },
-  "private": true,
   "description": "Bazel-style TypeScript workflow orchestration with explicit pnpm installation",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
@@ -39,9 +38,9 @@
     "./Install": "./src/Install.ts",
     "./PackageManager": "./src/PackageManager.ts",
     "./Runtime": "./src/Runtime.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -52,8 +51,45 @@
     "dist/**/package.json",
     "README.md",
     "DESIGN.md",
-    "WIRING.md"
+    "WIRING.md",
+    "LICENSE",
+    "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "tag": "next",
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./Install": {
+        "types": "./dist/esm/Install.d.ts",
+        "import": "./dist/esm/Install.js",
+        "require": "./dist/cjs/Install.js"
+      },
+      "./PackageManager": {
+        "types": "./dist/esm/PackageManager.d.ts",
+        "import": "./dist/esm/PackageManager.js",
+        "require": "./dist/cjs/PackageManager.js"
+      },
+      "./Runtime": {
+        "types": "./dist/esm/Runtime.d.ts",
+        "import": "./dist/esm/Runtime.js",
+        "require": "./dist/cjs/Runtime.js"
+      },
+      "./internal/*": null,
+      "./*/index": null,
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
+    }
+  },
   "scripts": {
     "lint": "eslint src test infra terraform/modules/cache/service --max-warnings=0 && dprint check",
     "format": "dprint fmt",
@@ -66,25 +102,28 @@
   "dependencies": {
     "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
-    "@smthrs/plan": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "@smthrs/plan": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }

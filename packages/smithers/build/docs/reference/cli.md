@@ -1,21 +1,28 @@
-# CLI reference
+---
+title: "CLI reference"
+description: "Every smithers-build command, argument, option, output shape, and exit code."
+---
 
-```
+```text
 smithers-build <command> [args] [options]
 ```
 
 `smithers-build` is built with [incur](https://github.com/wevm/incur). Every command
 returns a structured result on standard output. Option names are the kebab-case
 form of their schema key, so `cacheDir` is `--cache-dir`. A boolean option that
-defaults to true is turned off with its `--no-` form. The behavior prose behind
-every command is colocated with the implementation in `packages/smithers/build/build-cli/docs/`;
-this page is the reference form and must agree with it.
+defaults to true is turned off with its `--no-` form. This page is the reference
+form; for the behavior behind each command, see the
+[`@smthrs/build-cli` documentation](/pkg/build-cli/cli).
 
-Commands: [`install`](#install), [`create-app`](#create-app), [`build`](#build),
-[`test`](#test), [`lint`](#lint), [`docs`](#docs), [`review`](#review),
-[`run`](#run), [`target`](#target), [`gitHooks`](#githooks), [`ci`](#ci),
-[`query`](#query), [`graph`](#graph). An argv whose first token starts with `//`
-or `:` is rewritten to `target <label>`, the bare-label form.
+Commands: [`cache`](#cache), [`show`](#show), [`targets`](#targets),
+[`info`](#show), [`explain`](#show), [`affected`](#affected),
+[`clean`](#clean), [`watch`](#watch), [`install`](#install),
+[`create-app`](#create-app), [`build`](#build), [`test`](#test),
+[`lint`](#lint), [`docs`](#docs), [`review`](#review), [`run`](#run),
+[`target`](#target), [`git-hooks`](#git-hooks), [`ci`](#ci),
+[`query`](#query), [`owners`](#owners), and [`graph`](#graph). An argv whose
+first token starts with `//` or `:` is rewritten to `target <label>`, the
+bare-label form.
 
 ## Common options
 
@@ -26,7 +33,8 @@ Every command except `create-app` accepts these.
 | `--workspace` | `-w`  | string | the process working directory | Workspace root containing `PACKAGE.ts` files                                                                          |
 | `--cache-dir` |       | string | unset                         | Workspace-relative cache directory. Overrides the root declaration; `install` requires the result to remain `.flows`. |
 
-`build`, `test`, `lint`, `docs`, `review`, `run`, `target`, and `ci` also accept:
+`affected`, `clean`, `watch`, `build`, `test`, `lint`, `docs`, `review`, `run`,
+`target`, and `ci` also accept:
 
 | Option                   | Alias | Type        | Default                    | Description                                                                            |
 | ------------------------ | ----- | ----------- | -------------------------- | -------------------------------------------------------------------------------------- |
@@ -58,6 +66,121 @@ Every command does the same three things before its own work.
 
 `install` stops there. The others then open the workspace index, which lists
 discoverable files.
+
+---
+
+## cache
+
+Inspects or removes local action-result entries. It never removes durable runs,
+artifacts, store data, or cache directories.
+
+```sh
+smithers-build cache status
+smithers-build cache prune --older-than-days 30 --dry-run
+smithers-build cache prune --older-than-days 30 --yes
+smithers-build cache clear --yes
+```
+
+`status` reports the cache path, entry count, bytes, and configured remote
+endpoint without reading credentials. `prune` selects entries older than 30
+days by default; `clear` selects every entry. A mutation requires `--yes`.
+`--dry-run` reports the candidates without deleting them. Removal is
+irreversible and fails closed if an entry, shard, or path changes while the
+command is running.
+
+Failures use `cache_status_failed`, `cache_prune_failed`, or
+`cache_clear_failed`.
+
+---
+
+## show
+
+Provides detailed, non-executing inspection commands.
+
+```sh
+smithers-build show target //packages/api:lib --verb build
+smithers-build show workspace
+smithers-build explain //packages/api:lib
+smithers-build info
+```
+
+`show target` reports a target's rule, kinds, owners, dependencies, inputs,
+outputs, effective mode, planned cache key, and local cache state. Its optional
+`--verb` is one of `build`, `test`, `lint`, `docs`, `review`, or `run`.
+`explain` returns the same target report. `show workspace` reports the resolved
+workspace, toolchains, runtime, package manager, sandboxes, cache endpoint, and
+host. `info` returns the same workspace report. None probes the remote cache or
+executes a target.
+
+Failures use `show_target_failed`, `explain_failed`, `show_workspace_failed`,
+or `info_failed`.
+
+---
+
+## targets
+
+Lists available targets, their rules, kinds, summaries, and any child-workspace
+refusal. Its optional pattern defaults to `//...`.
+
+```sh
+smithers-build targets
+smithers-build targets //packages/...
+```
+
+Failure code: `targets_failed`.
+
+---
+
+## affected
+
+Selects targets reached by changed files and reverse dependencies, then runs
+the requested verb. Repository-wide and unknown inputs conservatively select
+the graph.
+
+```sh
+smithers-build affected test //packages/... --base main
+smithers-build affected ci //... --files package.json --list
+```
+
+The first argument is `build`, `test`, `lint`, `docs`, `review`, `run`, or
+`ci`; the pattern defaults to `//...`. `--base` defaults to `HEAD`, while
+`--head` selects a committed comparison endpoint. Without `--head`, the
+working tree and untracked files are included. Repeatable `--files` bypasses
+Git discovery. `--list` reports roots and reasons without executing them.
+
+Failure code: `affected_failed`.
+
+---
+
+## clean
+
+Executes only declared `Clean` targets under an optional pattern, which
+defaults to `//...`. It fails instead of doing nothing when the selection has
+no `Clean` target.
+
+```sh
+smithers-build clean //packages/api/...
+```
+
+Failure code: `clean_failed`.
+
+---
+
+## watch
+
+Replans and reruns a verb in a fresh process when workspace inputs change,
+while ignoring `.git`, `node_modules`, the cache, and declared outputs.
+
+```sh
+smithers-build watch test //packages/api/... --debounce-ms 200
+smithers-build watch build //packages/api:lib --once
+```
+
+The first argument and optional pattern match [`affected`](#affected).
+`--debounce-ms` defaults to 200 and has a minimum of 20. `--once` runs one
+cycle and exits. Watch is deliberately unavailable over MCP. A failing
+one-shot cycle uses `watch_cycle_failed`; setup and watcher failures use
+`watch_failed`.
 
 ---
 
@@ -103,17 +226,15 @@ command that takes neither `--workspace` nor `--cache-dir`.
 
 ```sh
 smithers-build create-app my-app
-smithers-build create-app my-app --template aomi --no-link
 ```
 
 | Argument | Description                                        |
 | -------- | -------------------------------------------------- |
 | `dir`    | Directory to create; its name becomes the app name |
 
-| Option       | Alias | Type    | Default   | Description                                                                                        |
-| ------------ | ----- | ------- | --------- | -------------------------------------------------------------------------------------------------- |
-| `--template` | `-t`  | string  | `default` | Template name: `default` or `aomi`                                                                 |
-| `--link`     |       | boolean | `true`    | Point `@smthrs/*` dependencies at the checkout the templates came from; `--no-link` keeps versions |
+| Option       | Alias | Type   | Default   | Description   |
+| ------------ | ----- | ------ | --------- | ------------- |
+| `--template` | `-t`  | string | `default` | Template name |
 
 Failure: error code `create_app_failed`, exit code 1.
 
@@ -125,7 +246,7 @@ Executes the build targets a pattern selects.
 
 ```sh
 smithers-build build //...
-smithers-build build //packages/smithers/flows/flow:lib
+smithers-build build //packages/greeter:lib
 smithers-build build //packages/... --jobs 4
 smithers-build build //... --plan
 ```
@@ -136,7 +257,7 @@ smithers-build build //... --plan
 
 Options: the [common options](#common-options) plus the execution options.
 
-Selects targets whose target declares the `build` kind, plans their transitive
+Selects targets whose definition declares the `build` kind, plans their transitive
 dependency closure, and executes it.
 
 Result with `--plan`: a [plan](#plan-shape). Otherwise a
@@ -156,12 +277,12 @@ The `targets_failed` message reads `<n> of <m> targets failed`, with
 
 ## test
 
-Identical to [`build`](#build) except that it selects targets whose target declares
+Identical to [`build`](#build) except that it selects targets whose definition declares
 the `test` kind.
 
 ```sh
 smithers-build test //packages/...
-smithers-build test //packages/smithers/flows/flow:test
+smithers-build test //packages/greeter:test
 ```
 
 Failure codes: `test_failed` for planning errors, `targets_failed` for failed
@@ -171,7 +292,7 @@ targets. Exit code 1 for both.
 
 ## lint
 
-Identical to [`build`](#build) except that it selects targets whose target declares
+Identical to [`build`](#build) except that it selects targets whose definition declares
 the `lint` kind.
 
 ```sh
@@ -189,13 +310,13 @@ targets. Exit code 1 for both.
 
 ## docs
 
-Identical to [`build`](#build) except that it selects targets whose target
+Identical to [`build`](#build) except that it selects targets whose definition
 declares the `docs` kind. Documentation targets also run under [`ci`](#ci),
 whose merged graph plans them alongside lint, build, and test.
 
 ```sh
 smithers-build docs //...
-smithers-build docs //packages/smithers/flows/plan:docs --plan
+smithers-build docs //packages/core:docs --plan
 ```
 
 Failure codes: `docs_failed` for planning errors, `targets_failed` for failed
@@ -205,19 +326,18 @@ targets. Exit code 1 for both.
 
 ## review
 
-Identical to [`build`](#build) except that it selects targets whose target
+Identical to [`build`](#build) except that it selects targets whose definition
 declares the `review` kind: the model-assisted reviews (`LlmLint`).
 
 ```sh
 smithers-build review //...
-smithers-build review //packages/smithers/flows/journal:durableIdentityGuard
+smithers-build review //packages/core:reviewChangedFiles
 ```
 
 The aggregate [`ci`](#ci) leaves `review` alone, and so does every other verb: a
 review target is selected by this command and by nothing else. A review expands
-its `changes` git diff at PLAN time, so a checkout without the base revision — a
-shallow pull-request checkout, say — fails the whole plan rather than one
-target; and it spawns a model CLI an unattended runner has neither the binary
+its `changes` git diff at PLAN time, so a checkout without the base revision (a
+shallow pull-request checkout, say) fails the whole plan rather than one target; and it spawns a model CLI an unattended runner has neither the binary
 nor a credential for. The rule declares `verbGate: ["review"]` as well, so a
 review reached through a dependency edge under another verb is refused rather
 than silently planned.
@@ -233,7 +353,7 @@ targets. Exit code 1 for both.
 
 ## run
 
-Executes operational targets whose target declares the `run` kind. These targets
+Executes operational targets whose definition declares the `run` kind. These targets
 may deliberately mutate source files, delete generated paths, hold a watch
 process open, or request an externally gated release action, so `run` is never
 folded into `ci`.
@@ -261,15 +381,15 @@ irreversible-exec layer reports a target failure with `unresolved_action`.
 
 ## target
 
-Executes one build-system label under the verb its rule flavour implies — the
-bare-label form. An argv whose first token starts with `//` or `:` is rewritten
-to `target <label>`, so `smithers-build //packages/smithers/flows/flow:lint` is the same
+Executes one build-system label under the verb its definition implies. This is
+the bare-label form. An argv whose first token starts with `//` or `:` is rewritten
+to `target <label>`, so `smithers-build //packages/greeter:lint` is the same
 invocation. It requires a `WORKSPACE.ts` workspace and refuses a `PACKAGE.ts`
 workspace.
 
 ```sh
-smithers-build target //packages/smithers/flows/flow:lint
-smithers-build //packages/smithers/flows/flow:lint
+smithers-build target //packages/greeter:lint
+smithers-build //packages/greeter:lint
 ```
 
 | Argument | Description          |
@@ -289,19 +409,19 @@ In addition to the common execution options, `target` accepts:
 Failure codes: `target_failed` for planning errors, `targets_failed` for failed
 targets. Exit code 1 for both.
 
-See `packages/smithers/build/build-cli/docs/build-system.md` for `WORKSPACE.ts` discovery and
-the verbs build system supports.
+For `WORKSPACE.ts` discovery and the verbs the build system supports, see the
+[`@smthrs/build-cli` documentation](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli).
 
 ---
 
-## gitHooks
+## git-hooks
 
 Checks the `WORKSPACE.ts` `gitHooks` scripts against `.git/hooks`, or installs
 them with `--write`.
 
 ```sh
-smithers-build gitHooks
-smithers-build gitHooks --write
+smithers-build git-hooks
+smithers-build git-hooks --write
 ```
 
 | Option    | Alias | Type    | Default | Description                                         |
@@ -398,10 +518,10 @@ Never executes.
 
 ```sh
 smithers-build query //...
-smithers-build query //packages/smithers/flows/flow:lib
-smithers-build query 'deps(//packages/smithers/flows/engine:lib)'
-smithers-build query 'rdeps(//packages/smithers/flows/flow:lib)'
-smithers-build query 'owners(//packages/smithers/flows/flow:lib)'
+smithers-build query //packages/greeter:lib
+smithers-build query 'deps(//packages/app:lib)'
+smithers-build query 'rdeps(//packages/greeter:lib)'
+smithers-build query 'owners(//packages/greeter:lib)'
 ```
 
 | Argument | Description                                                           |
@@ -445,7 +565,7 @@ Failure: error code `query_failed`, exit code 1.
 Prints the target graph without executing it.
 
 ```sh
-smithers-build graph //packages/smithers/flows/engine:lib
+smithers-build graph //packages/app:lib
 smithers-build graph //packages/... --mermaid
 ```
 
@@ -555,11 +675,11 @@ Each report:
 One status line per settled target goes to standard error, followed by a summary
 line:
 
-```
-//packages/smithers/flows/flow:lib  hit  2ms
-//packages/smithers/flows/engine:lib  ran  3.1s
-//packages/smithers/flows/engine:test  failed  0.4s  {"_tag":"smithers-build/ExecError", ...}
-//packages/app:lib  skipped  0ms  dependency //packages/smithers/flows/engine:test did not succeed
+```text
+//packages/greeter:lib  hit  2ms
+//packages/app:lib  ran  3.1s
+//packages/app:test  failed  0.4s  {"_tag":"smithers-build/ExecError", ...}
+//packages/app:lib  skipped  0ms  dependency //packages/app:test did not succeed
 4 targets: 1 hit, 1 ran, 1 failed, 1 skipped (3.6s)
 ```
 
@@ -570,10 +690,13 @@ run.
 
 ## Environment variables
 
-| Variable               | Read by                                         | Effect                                                                                                         |
-| ---------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `SMITHERS_CACHE_URL`   | `packages/smithers/build/build-cli/src/main.ts` | Optional endpoint override for the root `RemoteCache` declaration. HTTPS is required except for loopback HTTP. |
-| `SMITHERS_CACHE_TOKEN` | `packages/smithers/build/build-cli/src/main.ts` | Default bearer-token variable for the HTTP cache. A declaration may name another variable.                     |
+| Variable               | Effect                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| `SMITHERS_CACHE_URL`   | Optional endpoint override for the declared `RemoteCache`. HTTPS is required except for loopback HTTP. |
+| `SMITHERS_CACHE_TOKEN` | Default bearer-token variable for the HTTP cache. A declaration may name another variable.             |
+
+The process entry point reads both, captures them, and clears them from its own
+environment, so a spawned tool never inherits either.
 
 ## Exit codes
 

@@ -1,7 +1,10 @@
-# CargoLint and CargoTest
+---
+title: "CargoLint and CargoTest"
+description: "The three Rust gates as declared targets: cargo fmt --check, cargo clippy, and cargo test."
+---
 
-The three checks a Rust workspace gates on — `cargo fmt --check`,
-`cargo clippy`, and `cargo test` — as declared targets. The flags that make a
+The three checks a Rust workspace gates on, `cargo fmt --check`,
+`cargo clippy`, and `cargo test`, as declared targets. The flags that make a
 check a gate rather than a fixer live in the target implementation, not at the
 call site.
 
@@ -82,7 +85,7 @@ renders the argv these targets run.
 Every clippy option defaults to `true`, which is the gate form: a declaration
 that wants less has to say so. `-D warnings` goes after `--`; passed before it,
 cargo reads it as one of its own and rejects it. `Cargo.Fmt()` has no option at
-all — a formatter that rewrites the tree is not a gate, and a target that could
+all: a formatter that rewrites the tree is not a gate, and a target that could
 be either would make every declaration a question about which one it is.
 
 ## Attributes
@@ -110,7 +113,7 @@ None. A gate's product is its exit code.
 
 ## See also
 
-- [ToolBuild](tool-build.md) — the escape hatch for a toolchain with no target
+- [ToolBuild](tool-build.md): the escape hatch for a toolchain with no target
   type of its own
-- [GithubCiGen](github-ci-gen.md) — derives `rustup toolchain install` from the
+- [GithubCiGen](github-ci-gen.md): derives `rustup toolchain install` from the
   same declaration

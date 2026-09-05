@@ -143,9 +143,9 @@ before the route is parsed. Its loopback-only development mode, which
 configures no token at all, is the one deployment shape without the split, and
 `variables.tf` cannot produce it.
 
-## Public read tokens on jjhub
+## Public read tokens on Smithers Cloud
 
-The jjhub-hosted cache makes the read credential a committed literal: a
+The Smithers Cloud-hosted cache makes the read credential a committed literal: a
 per-repository `smithers_cachero_…` token that can only read that
 repository's cache. That is the reader posture above taken to its conclusion.
 A reader is untrusted and the read credential is public within the

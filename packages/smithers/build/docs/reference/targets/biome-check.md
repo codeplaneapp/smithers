@@ -1,10 +1,13 @@
-# BiomeCheck
+---
+title: "BiomeCheck"
+description: "Runs Biome lint and format checks over a declared source set without writing files."
+---
 
 Runs Biome lint and format checks without writing files.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lint = Smithers.BiomeCheck({
   packageManager,
@@ -14,7 +17,7 @@ export const lint = Smithers.BiomeCheck({
   lint: true,
   format: true,
   unsafe: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -36,7 +39,7 @@ export const lint = Smithers.BiomeCheck({
 Up to two runs, both from `cwd`. The argvs are `PackageManager.exec` of the
 declared package manager. With the pnpm declaration:
 
-```
+```text
 pnpm exec biome check [--unsafe] --config-path=<config.path> <paths...>
 pnpm exec biome format --config-path=<config.path> <paths...>
 ```

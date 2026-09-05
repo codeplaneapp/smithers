@@ -1,4 +1,7 @@
-# Running targets
+---
+title: "Running targets"
+description: "How a verb selects targets, plans their dependency closure, and executes it, and what each verb covers."
+---
 
 A verb selects targets, plans their transitive dependency closure, and executes
 it. Targets carry no per-command shell scripts.
@@ -6,8 +9,8 @@ it. Targets carry no per-command shell scripts.
 ```sh
 smithers-build install --workspace .
 smithers-build build //packages/...
-smithers-build test //packages/smithers/flows/flow:test
-smithers-build lint //packages/smithers/flows/flow:lint
+smithers-build test //packages/greeter:test
+smithers-build lint //packages/greeter:lint
 smithers-build docs //...
 smithers-build run //:newPackage --name @scope/widget
 smithers-build ci //...
@@ -124,10 +127,10 @@ See [Verb-effective attrs](../concepts/targets.md#verb-effective-attrs).
 One line per settled target goes to standard error, followed by a summary:
 
 ```text
-//packages/smithers/flows/flow:lib  hit  2ms
-//packages/smithers/flows/engine:lib  ran  3.1s
-//packages/smithers/flows/engine:test  failed  0.4s  {"_tag":"smithers-build/ExecError", ...}
-//packages/app:lib  skipped  0ms  dependency //packages/smithers/flows/engine:test did not succeed
+//packages/greeter:lib  hit  2ms
+//packages/app:lib  ran  3.1s
+//packages/app:test  failed  0.4s  {"_tag":"smithers-build/ExecError", ...}
+//packages/app:lib  skipped  0ms  dependency //packages/app:test did not succeed
 4 targets: 1 hit, 1 ran, 1 failed, 1 skipped (3.6s)
 ```
 

@@ -1,17 +1,20 @@
-# Clean
+---
+title: "Clean"
+description: "Deletes explicitly declared generated paths."
+---
 
 Deletes explicitly declared generated paths.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { runtime } from "../../../../../../PACKAGE.ts"
+import { runtime } from "../../PACKAGE.ts"
 
 export const clean = Smithers.Clean({
   runtime,
   paths: ["dist", "coverage", "*.tsbuildinfo"],
   deps: [],
   includeNodeModules: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -31,7 +34,7 @@ One exec node running a static script that removes exactly the paths it receives
 as arguments. The argv is `Runtime.evaluate` of the declared runtime. With the
 Node declaration:
 
-```
+```text
 node -e "const fs = require('node:fs'); for (const target of process.argv.slice(1)) fs.rmSync(target, { recursive: true, force: true });" <paths...>
 ```
 

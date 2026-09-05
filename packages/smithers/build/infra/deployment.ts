@@ -250,7 +250,7 @@ export const workerStageOptions = (
  * @category constants
  * @since 0.1.0
  */
-export const cacheDatabaseOptions = { migrationsDir: "./worker/migrations" } as const
+export const cacheDatabaseOptions = { migrations: "./worker/migrations" } as const
 
 /**
  * The R2 resource configuration: the artifact lifecycle.

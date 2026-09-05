@@ -1,10 +1,13 @@
-# EsLint
+---
+title: "EsLint"
+description: "Runs ESLint over declared source sets with a flat config."
+---
 
 Runs ESLint over declared source sets with a flat config.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lint = Smithers.EsLint({
   packageManager,
@@ -13,7 +16,7 @@ export const lint = Smithers.EsLint({
   configs: [Smithers.file("eslint.config.js"), Smithers.file("//eslint.jsdoc.js")],
   maxWarnings: 0,
   fix: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -34,7 +37,7 @@ export const lint = Smithers.EsLint({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec eslint [--config <configs[0].path>] --max-warnings <maxWarnings> [--fix] <patterns...>
 ```
 
@@ -69,12 +72,12 @@ Collected from the attrs: every declaration in `sources`, plus every entry in
 
 ## Notes
 
-`StandardPackage` lints the source glob only, not tests. Its flat config declares
+`buildAndCheckPackage` lints the source glob only, not tests. Its flat config declares
 no coverage for test files, and ESLint 9 fails on a pattern whose matches are all
 unconfigured. A package whose config does cover tests can pass both globs, as
-`packages/smithers/flows/flow/PACKAGE.ts` does.
+`packages/greeter/PACKAGE.ts` does.
 
 ## See also
 
 - [BiomeCheck](biome-check.md) for the Biome equivalent
-- [StandardPackage](standard-package.md), which emits an `EsLint` `lint` target
+- [buildAndCheckPackage](standard-package.md), which emits an `EsLint` `lint` target

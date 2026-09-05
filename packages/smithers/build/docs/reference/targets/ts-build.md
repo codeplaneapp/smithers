@@ -1,11 +1,14 @@
-# TsBuild
+---
+title: "TsBuild"
+description: "Builds a JavaScript distribution for a TypeScript package with tsc -p or tsup."
+---
 
 Builds a JavaScript distribution for a TypeScript package with `tsc -p` or
 `tsup`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const lib = Smithers.TsBuild({
   packageManager,
@@ -16,7 +19,7 @@ export const lib = Smithers.TsBuild({
   tool: { name: "tsc" },
   format: "dual",
   outDir: "dist",
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -43,13 +46,13 @@ emit option, and `tsc` has no bundle to exclude a package from.
 The argv is `PackageManager.exec` of the declared package manager. For `tsc`,
 the tsconfig owns every emit option. With the pnpm declaration:
 
-```
+```text
 pnpm exec tsc -p <tsconfig.path>
 ```
 
 For `tsup`, the attributes map to flags:
 
-```
+```text
 pnpm exec tsup <entries...> --format <esm|cjs|esm,cjs> --out-dir <outDir> [--external <name>]...
 ```
 
@@ -94,4 +97,4 @@ zero without creating it fails the target.
 - [DtsBuild](dts-build.md) for declaration-only emit
 - [Typecheck](typecheck.md) for checking without emit
 - [ToolBuild](tool-build.md) for other toolchains
-- [StandardPackage](standard-package.md), which emits a `TsBuild` `lib` target
+- [buildAndCheckPackage](standard-package.md), which emits a `TsBuild` `lib` target

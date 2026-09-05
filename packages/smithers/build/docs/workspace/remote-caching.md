@@ -1,17 +1,20 @@
-# Remote caching
+---
+title: "Remote caching"
+description: "The two caches that carry the word remote, what each stores, and the /ac and /cas services behind them."
+---
 
 Two independent caches carry the word "remote". They store different things,
 speak different protocols, and are wired in different places. Read this page
 before choosing one.
 
-|                 | CLI result cache                                                  | Engine step cache and artifact CAS                                             |
-| --------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Stores          | The success value of one executed target                          | Keyed step results, plus the files a declared `TreeArtifact` boundary produced |
-| Keyed by        | The planner content key                                           | The engine step key                                                            |
-| Local tier      | JSON files under `<cacheDirectory>/cache`                         | The Smithers local step cache and artifact store                               |
-| Remote tier     | HTTP `/ac`, read-through                                          | HTTP `/ac` and `/cas`                                                          |
-| Wired by        | `packages/smithers/build/build-cli/src/Cache.ts`, when configured | Not composed by the smithers-build CLI today                                   |
-| Configured with | Root `RemoteCache`; `SMITHERS_CACHE_URL` overrides                | `RemoteCacheStore` and `RemoteArtifacts` layer options                         |
+|                 | CLI result cache                                   | Engine step cache and artifact CAS                                             |
+| --------------- | -------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Stores          | The success value of one executed target           | Keyed step results, plus the files a declared `TreeArtifact` boundary produced |
+| Keyed by        | The planner content key                            | The engine step key                                                            |
+| Local tier      | JSON files under `<cacheDirectory>/cache`          | The Smithers local step cache and artifact store                               |
+| Remote tier     | HTTP `/ac`, read-through                           | HTTP `/ac` and `/cas`                                                          |
+| Wired by        | The CLI's cache module, when one is configured     | Not composed by the smithers-build CLI today                                   |
+| Configured with | Root `RemoteCache`; `SMITHERS_CACHE_URL` overrides | `RemoteCacheStore` and `RemoteArtifacts` layer options                         |
 
 ## The CLI result cache remote tier
 
@@ -96,18 +99,20 @@ For generated CI, `cacheUrlSecret` optionally emits `SMITHERS_CACHE_URL`, so it
 has the same endpoint precedence as local use. `cacheTokenSecret` emits the
 bearer token under `cacheTokenEnv`, which defaults to `SMITHERS_CACHE_TOKEN`.
 
-## The jjhub-hosted cache
+## The Smithers Cloud-hosted cache
 
-jjhub serves this same protocol per repository at
+> **Coming soon.** Smithers Cloud has not been released yet; the discovery, the committed read token, and the endpoint below describe the interface ahead of general availability.
+
+Smithers Cloud serves this same protocol per repository at
 `https://api.jjhub.tech/api/repos/<owner>/<name>/build-cache`. Two things
-differ from the two services below. A checkout of a jjhub repository needs no
+differ from the two services below. A checkout of a Smithers Cloud repository needs no
 declaration at all: with no `RemoteCache` and no `SMITHERS_CACHE_URL`, the CLI
 discovers the repository from the git remote and reads anonymously. And the
-read credential can be committed: `Smithers.RemoteCache.jjhub({ repo,
+read credential can be committed: `Smithers.RemoteCache.smithersCloud({ repo,
 publicReadToken })` carries a per-repository public read token that can only
 read that one cache, so every clone and every pull-request job reads without a
 secret while publishing still needs `SMITHERS_CACHE_TOKEN`. See
-[The jjhub-hosted cache](jjhub-cache.md).
+[The Smithers Cloud-hosted cache](smithers-cloud-cache.md).
 
 ## The engine step cache services
 
@@ -169,9 +174,9 @@ The endpoint and its bearer token arrive as layer construction options. They are
 capabilities, so they never enter a step key or the journal.
 
 **The smithers-build CLI does not compose these engine layers.** Its target result
-cache uses the same `/ac` service directly. `packages/smithers/build/build-cli/src/Executor.ts` builds its
-runtime from the install layer, `ExecLive`, the catalog action layers, and an
-in-memory flow engine. Using remote engine artifacts still means composing
+cache uses the same `/ac` service directly. The executor builds its runtime from
+the install layer, `ExecLive`, the catalog action layers, and an in-memory flow
+engine. Using remote engine artifacts still means composing
 `RemoteCacheStore` and `RemoteArtifacts` into a flows runtime yourself.
 
 ### Self-hosted stack

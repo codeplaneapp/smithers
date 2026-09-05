@@ -1,0 +1,132 @@
+---
+title: "API reference"
+description: "The three modules @smthrs/build exports: the Install flow and its actions, the PackageManager layer seam, and the Runtime seam that holds a host to the declared interpreter."
+---
+
+`@smthrs/build` exports three namespaces from its root:
+
+```ts
+import { Install, PackageManager, Runtime } from "@smthrs/build"
+```
+
+Each is also a subpath, so `@smthrs/build/Install` imports the same module. The
+`internal/` subpath is not exported.
+
+The three answer three questions: which interpreter the host runs, which package
+manager does the work, and what the work is made of.
+
+## Install
+
+`Install.Install` is the flow. Its payload names the manager, its success value
+is a link manifest, and its error channel is `PackageManagerError`:
+
+```ts
+import * as Install from "@smthrs/build/Install"
+
+const flow = Install.Install // Flow<"smithers-build/install", { manager }, LinkManifest, PackageManagerError>
+```
+
+The body is pure. It records nodes and executes nothing, in one round, and the
+manager is a plan-time value rather than a measured one, which is what lets the
+body select exactly one fetch action statically.
+
+### Actions
+
+| Export      | Action id                           | What it does                                                                    |
+| ----------- | ----------------------------------- | ------------------------------------------------------------------------------- |
+| `Measure`   | `smithers-build/install/measure`    | Records the lockfile digest and the credential-free `.npmrc` digest.            |
+| `FetchPnpm` | `smithers-build/install/fetch/pnpm` | Populates `.flows/store/pnpm` from `pnpm-lock.yaml`, writing no `node_modules`. |
+| `FetchBun`  | `smithers-build/install/fetch/bun`  | The same declaration for `bun.lock`. Its layer refuses every operation.         |
+| `Link`      | `smithers-build/install/link`       | Reconciles `node_modules` from the populated store.                             |
+
+Every action uses an `expected` filesystem boundary, and none is admitted to a
+cross-run engine cache. A package-manager child process cannot freeze its
+lockfile and `.npmrc` across its own opens, and a linked tree is a graph of links
+into a host-local store, so restoring one from another machine would produce a
+tree pointing at nothing. `link` therefore always runs.
+
+### Values and layers
+
+| Export                                                     | What it is                                                                            |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `Content`                                                  | The schema of what an install is keyed on: manager, lockfile digest, `.npmrc` digest. |
+| `LinkManifest`                                             | The schema of the flow's success value.                                               |
+| `payloadFields`                                            | The payload fields, `{ manager }`.                                                    |
+| `executeMeasure`, `executeFetch`, `executeLink`            | The Effect implementations behind the three actions.                                  |
+| `MeasureLive`, `FetchPnpmLive`, `FetchBunLive`, `LinkLive` | One layer per action.                                                                 |
+| `layer`                                                    | All four merged, which is what an executor provides.                                  |
+
+## PackageManager
+
+`PackageManager.Service` is the two-verb contract every manager implements:
+`fetch` populates the store, `link` materializes `node_modules`. `verify`
+measures the host manager and fails when it does not satisfy the declared
+`requirement`; both verbs call it first.
+
+```ts
+import * as PackageManager from "@smthrs/build/PackageManager"
+
+const layer = PackageManager.layerPnpm({
+  projectRoot: "/abs/path/to/workspace",
+  requirement: "11.21.0"
+})
+```
+
+| Export                                                                                                                       | What it is                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PackageManager`                                                                                                             | The service tag, `smithers-build/PackageManager`.                                                                                                                |
+| `Service`                                                                                                                    | The contract: `name`, `projectRoot`, `storeDirectory`, `lockfileName`, `platformSensitive`, `requirement`, `version`, `verify`, `fetch`, `link`, `linkManifest`. |
+| `Options`                                                                                                                    | Layer options: `projectRoot`, `requirement`, and optional `environment`, `timeoutMs`, `executable`.                                                              |
+| `makePnpm`, `layerPnpm`                                                                                                      | The live pnpm implementation.                                                                                                                                    |
+| `makeBun`, `layerBun`                                                                                                        | The Bun seam. It resolves, then refuses with `code: "unsupported"`.                                                                                              |
+| `makeNoop`, `layerNoop`                                                                                                      | A service that satisfies the tag without touching a host, for tests.                                                                                             |
+| `PackageManagerError`, `ErrorCode`                                                                                           | The tagged error and its code union.                                                                                                                             |
+| `Name`                                                                                                                       | The manager union, `"pnpm"` or `"bun"`.                                                                                                                          |
+| `storeRoot`                                                                                                                  | `".flows/store"`, the fixed store parent.                                                                                                                        |
+| `maximumNpmrcBytes`, `maximumLockfileBytes`, `maximumPackageJsonBytes`, `defaultCommandTimeoutMs`, `maximumCommandTimeoutMs` | The bounds every read and every child process is held to.                                                                                                        |
+
+The Bun refusal is deliberate. Keeping the layer in the schema means an
+unsupported selection fails with a typed error instead of silently
+approximating a verified fetch.
+
+## Runtime
+
+`Runtime.Service` is the interpreter seam. It reports the declared
+`requirement`, the host `platform` it was built for, the measured `version`, and
+`verify`, which fails when the host does not satisfy the declaration.
+
+```ts
+import * as Runtime from "@smthrs/build/Runtime"
+
+const layer = Runtime.layerNode({
+  requirement: ">=22.19.0",
+  platform: { os: "linux", arch: "x64", libc: "glibc" }
+})
+```
+
+| Export                                                   | What it is                                                        |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `Runtime`                                                | The service tag, `smithers-build/Runtime`.                        |
+| `Service`, `Options`                                     | The contract and its layer options.                               |
+| `layerNode`, `layerBun`, `layerNoop`, `make`, `makeNoop` | Implementations.                                                  |
+| `satisfies`                                              | The comparator a declared requirement is checked with.            |
+| `RuntimeError`, `ErrorCode`                              | The tagged error and its code union.                              |
+| `Platform`, `Name`                                       | The host facts schema, and the runtime union `"node"` or `"bun"`. |
+| `probeTimeoutMs`, `maximumVersionOutputBytes`            | The bounds a version probe runs under.                            |
+
+The platform and the environment are options rather than reads of
+`globalThis.process`, so this module never touches the host outside a service
+call. A version probe selects only the executable-lookup variables out of the
+environment and gives the child nothing else.
+
+An exact pin never accepts a prerelease: `satisfies` compares
+`1.3.0-canary.2` as `1.3.0` for ordering, and states the prerelease rule
+separately rather than pretending the suffix was not there.
+
+## Related packages
+
+The declarations these services are configured from live in
+[`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets), and the executor that provides the layers
+lives in [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli). For the flow model itself, see
+[`@smthrs/flow`](/api/flow); for the command line everything sits under, see
+[`@smthrs/cli`](/api/cli).

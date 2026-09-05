@@ -173,7 +173,7 @@ describe("cache credential verification", () => {
     // The entry and the migrations the seams name exist where the graph
     // resolves them, relative to this directory.
     await expect(Fs.access(NodePath.join(infraRoot, workerEntry))).resolves.toBeUndefined()
-    await expect(Fs.readdir(NodePath.join(infraRoot, cacheDatabaseOptions.migrationsDir))).resolves.toEqual([
+    await expect(Fs.readdir(NodePath.join(infraRoot, cacheDatabaseOptions.migrations))).resolves.toEqual([
       "0001_initial.sql",
       "0002_bound_cache_rows.sql"
     ])

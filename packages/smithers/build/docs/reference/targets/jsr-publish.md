@@ -1,4 +1,7 @@
-# JsrPublish
+---
+title: "JsrPublish"
+description: "Publishes a package to JSR."
+---
 
 Publishes a package to JSR.
 
@@ -10,8 +13,8 @@ export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0",
 
 export const publishJsr = Smithers.JsrPublish({
   packageManager,
-  config: Smithers.file("//packages/smithers/flows/flow/jsr.json"),
-  sources: [Smithers.glob("//packages/smithers/flows/flow/src/**/*.ts")],
+  config: Smithers.file("//packages/greeter/jsr.json"),
+  sources: [Smithers.glob("//packages/greeter/src/**/*.ts")],
   deps: [publish],
   package: "@smthrs/flow",
   allowDirty: false,
@@ -40,7 +43,7 @@ Through the irreversible exec action, because publication changes external
 registry state. The argv is `PackageManager.dlx` of the declared package
 manager. With the pnpm declaration:
 
-```
+```text
 pnpm dlx jsr publish [--allow-dirty] [--dry-run]
 ```
 

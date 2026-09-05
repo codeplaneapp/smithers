@@ -1,10 +1,13 @@
-# DepsLint
+---
+title: "DepsLint"
+description: "Checks missing, unused, and undeclared dependencies with knip or depcheck."
+---
 
 Checks missing, unused, and undeclared dependencies with knip or depcheck.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager, runtime } from "../../../../../../PACKAGE.ts"
+import { packageManager, runtime } from "../../PACKAGE.ts"
 
 export const dependencyPolicy = Smithers.DepsLint({
   runtime,
@@ -15,7 +18,7 @@ export const dependencyPolicy = Smithers.DepsLint({
   tool: "knip",
   ignoreDependencies: ["@effect/platform-node"],
   ignoreBinaries: [],
-  cwd: "packages/smithers/flows/engine"
+  cwd: "packages/app"
 })
 ```
 
@@ -42,13 +45,13 @@ spellings below use the pnpm and Node declarations.
 **depcheck.** Both ignore lists are merged, deduplicated, and forwarded as one
 flag:
 
-```
+```text
 pnpm exec depcheck [--ignores=<a,b,c>]
 ```
 
 **knip with no ignores.** knip runs under its own config discovery:
 
-```
+```text
 pnpm exec knip --dependencies
 ```
 
@@ -56,7 +59,7 @@ pnpm exec knip --dependencies
 plan first writes a derived config, then runs knip against it. Two exec steps,
 ordered by the `after` field:
 
-```
+```text
 node -e <write program> <configPath> <configJson>      # from the workspace root
 pnpm exec knip --dependencies --config <path relative to cwd> # from cwd
 ```

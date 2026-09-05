@@ -1,12 +1,15 @@
-# NodeTest
+---
+title: "NodeTest"
+description: "Runs one JavaScript program as a test gate, where the program's exit code is the verdict."
+---
 
 Runs one JavaScript program as a test gate: the program's exit code is the
 verdict. Modelled on Bazel's `nodejs_test`.
 
 This is what a repository's shell-script gates become. `node --test
 scripts/pack-release.test.mjs`, `node scripts/browser-check.mjs`, and `bun
-e2e/run.ts` are all the same shape — a program that passes or fails — and each
-one is a target here, planned, keyed, addressable by label, and runnable locally
+e2e/run.ts` are all the same shape, a program that passes or fails, and each one
+is a target here, planned, keyed, addressable by label, and runnable locally
 by the name CI uses.
 
 ```ts
@@ -63,7 +66,7 @@ unchanged, for a target whose `cwd` is the package.
 
 ## Command
 
-```
+```text
 <runtime> <runner argv>
 ```
 
@@ -86,7 +89,7 @@ None. A gate's product is its exit code.
 
 ## See also
 
-- [NodeBinary](node-binary.md) — the build-verb counterpart
-- [StandardPackage](standard-package.md) — emits the conventional per-package
+- [NodeBinary](node-binary.md): the build-verb counterpart
+- [buildAndCheckPackage](standard-package.md): emits the conventional per-package
   circular-dependency guard as one of these
 - [GithubCiGen](github-ci-gen.md)

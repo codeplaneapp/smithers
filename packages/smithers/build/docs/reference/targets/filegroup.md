@@ -1,4 +1,7 @@
-# Filegroup
+---
+title: "Filegroup"
+description: "Names a set of files under one label, so other targets depend on the set instead of repeating its globs."
+---
 
 Names a set of files under one label so other targets depend on the set instead
 of repeating its globs. It follows Bazel's `filegroup`.
@@ -95,8 +98,8 @@ departures, recorded here and in the module JSDoc.
   package boundary.
 - **A non-group target in `srcs` contributes no files.** Bazel takes such a
   target's default output group. smithers build has no output-file model yet, so a
-  plain target in `srcs` stays an ordinary dependency edge — it is built before
-  the group and its key reaches the group's key — but it adds nothing to the
+  plain target in `srcs` stays an ordinary dependency edge, built before the
+  group and with its key reaching the group's key, but it adds nothing to the
   file list.
 
 ## See also

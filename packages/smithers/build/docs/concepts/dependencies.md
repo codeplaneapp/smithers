@@ -1,22 +1,29 @@
-# Dependencies
+---
+title: "Dependencies"
+description: "How importing a target from another PACKAGE.ts file becomes a dependency edge, and how edges reach key material, planning, and execution order."
+---
+
+Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
+
 
 A dependency edge is a direct import between `PACKAGE.ts` files. There are no label
 strings in target attributes.
 
 ```ts
-// packages/smithers/flows/engine/PACKAGE.ts
+import { buildAndCheckPackage } from "./package-targets.ts"
+// packages/app/PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 import { packageManager } from "../../PACKAGE.ts"
 import { lib as flow } from "../flow/PACKAGE.ts"
 
-export const { lib, test, lint } = Smithers.StandardPackage({
+export const { lib, test, lint } = buildAndCheckPackage({
   packageManager,
   deps: [flow],
-  cwd: "packages/smithers/flows/engine"
+  cwd: "packages/app"
 })
 ```
 
-`//packages/smithers/flows/engine:lib` now depends on `//packages/smithers/flows/flow:lib`.
+`//packages/app:lib` now depends on `//packages/greeter:lib`.
 
 ## How an edge is recorded
 
@@ -79,18 +86,19 @@ The conventional shape is one `lib` target per package, imported by dependent
 packages:
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 import { packageManager } from "../../PACKAGE.ts"
 import { lib as flow } from "../flow/PACKAGE.ts"
 import { lib as plan } from "../plan/PACKAGE.ts"
 
-export const { lib, test, lint } = StandardPackage({
+export const { lib, test, lint } = buildAndCheckPackage({
   packageManager,
   deps: [plan, flow],
-  cwd: "packages/smithers/flows/engine"
+  cwd: "packages/app"
 })
 ```
 
-`StandardPackage` threads those deps into the emitted targets: `lib` gets them
+`buildAndCheckPackage` threads those deps into the emitted targets: `lib` gets them
 directly, `check` and `test` get `[lib, ...deps]`, and `lint`, `fmt`, and
 `docs` get `[]` because checking one package's sources does not require another
 package to be built.
@@ -98,13 +106,13 @@ package to be built.
 ## Synthesized packages declare no edges
 
 Default-target synthesis passes one static `attrs` value to every matching
-directory. In the Smithers workspace that value is `{ deps: [] }`, so a synthesized
-package has no dependency edges even when its `package.json` names workspace
-siblings.
+directory. That value is fixed at declaration time, so when it carries
+`deps: []` a synthesized package has no dependency edges, even when its
+`package.json` names workspace siblings.
 
-`API-REVIEW.md` records this as open question 3: how synthesized packages should
-infer edges, for example from `package.json` workspace dependencies. Write a real
-`PACKAGE.ts` for a package that needs edges.
+How a synthesized package should infer its edges, for example from the
+`package.json` dependencies on workspace siblings, is an open design question.
+Write a real `PACKAGE.ts` for a package that needs edges.
 
 ## Ordering inside one target
 
@@ -118,7 +126,7 @@ ordering a material dependency the engine settles before dispatch.
 
 `captureOutputs` does exactly this, and `DepsLint` does it when it writes a
 generated knip config before running knip. See
-[Writing targets](../extending/writing-targets.md).
+[Writing target definitions](../extending/writing-targets.md).
 
 ## Next
 

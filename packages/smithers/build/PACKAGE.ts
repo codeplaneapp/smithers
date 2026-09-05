@@ -1,3 +1,4 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
 /**
  * Targets for the `@smthrs/build` package plus the declarations it
  * carried as a standalone workspace root:
@@ -14,7 +15,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const standard = Smithers.StandardPackage({ cwd: "packages/smithers/build" })
+const standard = BuildAndCheckTypeScriptPackage({ cwd: "packages/smithers/build" })
 
 const lib = standard.lib
 const check = standard.check
@@ -34,7 +35,7 @@ const docsFiles = standard.docsFiles
  * The package suite, with every prose surface its documentation contract
  * reads declared as key material.
  *
- * `StandardPackage.test` knows only `src/` and `test/`. `Docs.test.ts` also
+ * `BuildAndCheckTypeScriptPackage.test` knows only `src/` and `test/`. `Docs.test.ts` also
  * reads the package's Markdown, deployment declaration, self-hosted
  * credential configuration, and the CLI's command registrations in
  * `packages/smithers/build/build-cli/src/Cli.ts`. Leaving those paths undeclared let a cached
@@ -123,7 +124,7 @@ export const packageDefaults = Smithers.PackageDefaults({
   directories: "packages/{*,*/*,*/*/*}",
   marker: "package.json",
   macro: (attrs: { readonly cwd: string }) => {
-    const standard = Smithers.StandardPackage({ deps: [], cwd: attrs.cwd })
+    const standard = BuildAndCheckTypeScriptPackage({ deps: [], cwd: attrs.cwd })
     return {
       ...standard,
       packageJson: Smithers.PackageJson({

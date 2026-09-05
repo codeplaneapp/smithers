@@ -1,9 +1,14 @@
-# The jjhub-hosted cache
+---
+title: "The Smithers Cloud-hosted cache"
+description: "Zero-configuration cache discovery from a Smithers Cloud remote, the committed public read token, and how publishing stays credentialed."
+---
 
-jjhub (Smithers Cloud) hosts a build cache for every repository it serves. It
+> **Coming soon.** Smithers Cloud has not been released yet. This page describes the interface ahead of general availability; nothing here is reachable on a public account today.
+
+Smithers Cloud hosts a build cache for every repository it serves. It
 speaks the same `/ac` and `/cas` protocol as `build.smithers.sh` and the
 self-hosted Postgres service, so the CLI, the engine, and their tests do not
-know which backend answered. What jjhub adds is the credential model: a
+know which backend answered. What Smithers Cloud adds is the credential model: a
 repository commits a public read token, every clone and every CI job reads the
 shared cache with no secret at all, and publishing still needs a real
 credential.
@@ -12,14 +17,14 @@ credential.
 
 Nothing changes about the local tier. A local hit never touches the remote, a
 remote hit hydrates the local file, a put writes both, and any remote failure
-prints one warning and degrades the run to local-only. The jjhub cache is the
+prints one warning and degrades the run to local-only. The Smithers Cloud cache is the
 remote tier of the same read-through store.
 
-## Zero configuration in a jjhub checkout
+## Zero configuration in a Smithers Cloud checkout
 
 When the root `PACKAGE.ts` declares no remote cache and `SMITHERS_CACHE_URL` is
 unset, `smithers-build` looks at the workspace's git remotes (the colocated
-`.git/config`, then the jj git backend's config) for a jjhub host and uses
+`.git/config`, then the jj git backend's config) for a Smithers Cloud host and uses
 that repository's cache endpoint. Reads go out anonymously, which a public
 repository answers; a private repository refuses them with 401, and the store
 degrades to local-only with the usual single warning. The first time this
@@ -27,11 +32,11 @@ happens in a process the CLI says so on standard error and names the command
 that makes it permanent:
 
 ```text
-smthrs: using the jjhub build cache for acme/app (no declaration; anonymous reads, SMITHERS_CACHE_TOKEN publishes). Run `smthrs cache connect` to commit a read token.
+smthrs: using the Smithers Cloud build cache for acme/app (no declaration; anonymous reads, SMITHERS_CACHE_TOKEN publishes). Run `smthrs cache connect` to commit a read token.
 ```
 
-`SMITHERS_CACHE_DISCOVERY=0` turns discovery off. `SMITHERS_JJHUB_HOSTS` adds
-the hosts of a self-hosted deployment, and `SMITHERS_JJHUB_API_URL` its API
+`SMITHERS_CACHE_DISCOVERY=0` turns discovery off. `SMITHERS_CLOUD_HOSTS` adds
+the hosts of a self-hosted deployment, and `SMITHERS_CLOUD_API_URL` its API
 base.
 
 ## Committing a read token
@@ -44,18 +49,21 @@ mints a public read token for the repository and writes one line into the
 root `PACKAGE.ts`, after the imports:
 
 ```ts
-export const remoteCache = Smithers.RemoteCache.jjhub({ repo: "acme/app", publicReadToken: "smithers_cachero_…" })
+export const remoteCache = Smithers.RemoteCache.smithersCloud({
+  repo: "acme/app",
+  publicReadToken: "smithers_cachero_…"
+})
 ```
 
 Commit it. The token has exactly one power: reading `acme/app`'s cache. It is
 refused with `403` on every `PUT` and `DELETE` before the body is read, it is
 not accepted on any other repository's cache, and the general token loader
-never accepts its shape, so it authenticates nothing else on jjhub. A leaked
+never accepts its shape, so it authenticates nothing else on Smithers Cloud. A leaked
 one costs a rotation (`smthrs cache token revoke`, then `connect` again) and
 nothing more. This is the posture of an Nx read-only access token.
 
 `Smithers.RemoteCache.make` accepts the same `publicReadToken` option for a
-non-jjhub endpoint that enforces the same split. The literal is the only
+non-Smithers-Cloud endpoint that enforces the same split. The literal is the only
 credential that may appear in `PACKAGE.ts`: any string that is not a public read
 token is refused at declaration time, so a personal token pasted by mistake
 never lands in a committed file.
@@ -98,7 +106,7 @@ the repository; the cache routes themselves never accept one.
 
 ## Where the bytes live
 
-Action entries are rows in jjhub's Postgres, artifacts are objects in its blob
+Action entries are rows in Smithers Cloud's Postgres, artifacts are objects in its blob
 store under a repository-scoped key, and every row carries the repository id,
 so two repositories never share a namespace even when their keys collide. The
 bounds, status codes, first-writer-wins conflict semantics, fenced deletes,

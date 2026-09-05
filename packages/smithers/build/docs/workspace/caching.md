@@ -1,4 +1,7 @@
-# Caching
+---
+title: "Caching"
+description: "How a target's content key is built, what the result cache stores, when a lookup is admitted, and what re-keys a target."
+---
 
 Every target gets a content key. The executor looks the key up before running a
 cacheable target and stores the result after a green run.
@@ -32,8 +35,8 @@ function, an accessor property, a symbol-keyed or non-enumerable own property, a
 sparse array, and any object whose prototype is neither `Object.prototype` nor
 null all raise a `KeyMaterialError` and fail the plan. This replaced a
 `JSON.stringify` of a canonical form that mapped `undefined` to a sentinel
-string, `NaN` and `Infinity` to `null`, and a revisited object to `"<cycle>"` —
-each of which a legitimate attr value could also produce, so two different
+string, `NaN` and `Infinity` to `null`, and a revisited object to `"<cycle>"`.
+A legitimate attr value could also produce each of those, so two different
 targets could share one key.
 
 Two substitutions happen inside `inputs.attrs` before hashing:
@@ -44,7 +47,7 @@ Two substitutions happen inside `inputs.attrs` before hashing:
   The pattern text and path never reach the key directly; only the content
   digest does.
 
-`layers` and `capabilities` are hand-maintained tables in `packages/smithers/build/build-cli/src/Planner.ts`:
+`layers` and `capabilities` are hand-maintained tables in the planner:
 
 | Target             | `layers`                   | `capabilities`                      |
 | ------------------ | -------------------------- | ----------------------------------- |
@@ -61,8 +64,8 @@ the resolved store path, not from the flake's text, so two flakes that
 evaluate to one closure share keys and one flake evaluated by two nixpkgs
 pins does not.
 
-`API-REVIEW.md` records that executable targets should eventually derive both
-lists from the real flow graph and its resolved layers.
+Deriving both lists from the real flow graph and its resolved layers, instead of
+maintaining them by hand, is an open design question.
 
 ### Executable and environment identity
 
@@ -214,7 +217,7 @@ cache-directory token into a tool's argv.
 
 The unavoidable limit: Node exposes no portable descriptor-relative open, so an
 ancestor directory replaced by an outside-pointing link between a check and a
-later write is not detected. What is closed is the durable case — a workspace
+later write is not detected. What is closed is the durable case: a workspace
 whose cache directory is a link.
 
 ### Reads are bounded and untrusted
@@ -233,7 +236,7 @@ itself:
   `Content-Length` when declared and by accumulated bytes and chunk count while
   a chunked or streaming body is read. Local entries retain the 16 MiB ceiling.
 
-Every request to the remote — the fetch, its whole body, and the parse — runs
+Every request to the remote (the fetch, its whole body, and the parse) runs
 inside one deadline that is a real race against a timer, not only an
 `AbortSignal`. A `fetch` that ignores the signal, or a body that never
 completes, degrades the store to local-only instead of hanging the run.
@@ -243,7 +246,7 @@ completes, degrades the store to local-only instead of hanging the run.
 An entry answers for a target only when all of the following hold:
 
 - It decodes, and it names the requested key.
-- It names this target's target and this target's label. Key equality alone is
+- It names this target's definition and this target's label. Key equality alone is
   not identity: a store shared between workspaces, or a hostile remote, can
   file another action's result under a forged key.
 - `exitOk` is true. A stored red result is never replayed.
@@ -256,8 +259,8 @@ Anything else is a miss, and the target executes.
 
 ### Declared outputs are exact
 
-A target declares its output tree — a `cwd` and an ordered list of paths — as target
-metadata. `ToolBuild`, `TsBuild`, and `DtsBuild` all do. The declaration is
+A target declares its output tree, a `cwd` and an ordered list of paths, as
+target metadata. `ToolBuild`, `TsBuild`, and `DtsBuild` all do. The declaration is
 never read back out of attrs or out of a cache entry, so neither an untrusted
 entry nor a producing implementation gets to choose which paths are verified.
 
@@ -301,9 +304,9 @@ way an entry read does:
   and against the identity its parent observed, before and after its entries are
   read. A directory renamed mid-capture fails the output rather than publishing
   a manifest assembled from two trees.
-- The tree's metadata is capped — file count, nesting depth, per-path bytes, and
-  total path bytes — and passing a cap fails the whole output. There is never a
-  truncated manifest.
+- The tree's metadata is capped on file count, nesting depth, per-path bytes,
+  and total path bytes, and passing a cap fails the whole output. There is never
+  a truncated manifest.
 
 The unavoidable limit is the same one the cache directory has: Node exposes no
 portable descriptor-relative open, so the window between the last check and the
@@ -313,9 +316,9 @@ freedom; it is every check a portable Node API can make.
 
 ### Inputs are revalidated, not assumed
 
-The planner measures a target's declared inputs once. Everything after that —
-the key a hit is admitted under, the key a result is published under — is only
-sound while that measurement still holds, so it is taken again: before the
+The planner measures a target's declared inputs once. Everything after that (the
+key a hit is admitted under, the key a result is published under) is only sound
+while that measurement still holds, so it is taken again: before the
 lookup and execution, after output validation on the hit path, and after a
 successful execution. Paths and per-file digests are compared, not only how many
 files matched.
@@ -360,8 +363,8 @@ correctly, so a target whose `dist` directory was deleted re-executes.
 
 The planner computes the key but consults no cache. `--plan` output still reports
 `cacheLookup: "not-wired"` and `wouldRun: true` for every target. Those two
-fields are stale relative to `packages/smithers/build/build-cli/src/Executor.ts`, which performs the real
-lookup at execution time.
+fields are stale relative to the executor, which performs the real lookup at
+execution time.
 
 ## Next
 

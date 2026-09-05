@@ -1,10 +1,17 @@
-# Default targets
+---
+title: "Default targets"
+description: "PackageDefaults: synthesizing targets for directories with no PACKAGE.ts of their own, and the marker, unless, directories, and macro options."
+---
+
+Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
+
 
 A default target synthesizes targets for directories that have no `PACKAGE.ts` of
 their own. It is how one declaration covers every conventional package in a
 workspace.
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 // PACKAGE.ts
 import { Smithers } from "@smthrs/targets"
 
@@ -13,7 +20,7 @@ export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0",
 
 export const packageDefaults = Smithers.PackageDefaults({
   directories: "packages/*",
-  macro: Smithers.StandardPackage,
+  macro: buildAndCheckPackage,
   attrs: { packageManager }
 })
 ```
@@ -102,29 +109,27 @@ That is the intended upgrade path: start with a default target, and write a real
 
 ## Limitation: no edges
 
-Synthesis passes one static `attrs` value to every match. In the Smithers workspace
-that value is `{ packageManager }`, so every synthesized package runs the
-declared toolchain but has no dependency edges, even when its `package.json`
-names workspace siblings.
+Synthesis passes one static `attrs` value to every match, so a synthesized
+package carries no dependency edges even when its `package.json` names workspace
+siblings. Its targets still resolve the runtime and package manager from the
+workspace declaration; what they cannot get is an edge to a sibling.
 
 A synthesized package that needs edges gets a real `PACKAGE.ts`:
 
 ```ts
-// packages/smithers/flows/engine/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../PACKAGE.ts"
-import { lib as flow } from "../flow/PACKAGE.ts"
+import { buildAndCheckPackage } from "./package-targets.ts"
+// packages/app/PACKAGE.ts
+import { Smithers as S } from "@smthrs/targets"
+import { Package as greeter } from "../greeter/PACKAGE.ts"
 
-export const { lib, test, lint } = Smithers.StandardPackage({
-  packageManager,
-  deps: [flow],
-  cwd: "packages/smithers/flows/engine"
-})
+const { lib, test, lint } = buildAndCheckPackage({ deps: [greeter.lib], cwd: "packages/app" })
+
+export const Package = S.Package({ targets: { lib, test, lint } })
 ```
 
-`API-REVIEW.md` records this as open question 3: how synthesized packages should
-infer edges from each other, for example from `package.json` workspace
-dependencies.
+How synthesized packages should infer edges from each other, for example from
+the `package.json` dependencies on workspace siblings, is an open design
+question.
 
 ## Several declarations
 
@@ -133,10 +138,11 @@ they were discovered, and the first eligible one wins for a given directory.
 Scope them with disjoint globs or distinct markers:
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 export const nodePackages = PackageDefaults({
   directories: glob("packages/*", { exclude: ["packages/web-*"] }),
   marker: "package.json",
-  macro: StandardPackage,
+  macro: buildAndCheckPackage,
   attrs: { packageManager, deps: [] }
 })
 

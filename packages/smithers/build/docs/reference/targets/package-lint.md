@@ -1,11 +1,14 @@
-# PackageLint
+---
+title: "PackageLint"
+description: "Checks the published package surface with publint, and optionally the packed tarball's types with arethetypeswrong."
+---
 
 Checks the published package surface with publint, and optionally checks the
 packed tarball's types with arethetypeswrong.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const packageLint = Smithers.PackageLint({
   packageManager,
@@ -15,7 +18,7 @@ export const packageLint = Smithers.PackageLint({
   strict: true,
   pack: true,
   attw: true,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -37,7 +40,7 @@ export const packageLint = Smithers.PackageLint({
 Up to two runs, both from `cwd`. The argvs are `PackageManager.exec` of the
 declared package manager. With the pnpm declaration:
 
-```
+```text
 pnpm exec publint [--strict] [--pack false]
 pnpm exec attw --pack .
 ```

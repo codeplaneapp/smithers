@@ -1,10 +1,13 @@
-# Dprint
+---
+title: "Dprint"
+description: "Checks formatting with dprint check, or rewrites it with dprint fmt."
+---
 
 Checks formatting with `dprint check`, or rewrites it with `dprint fmt`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const fmt = Smithers.Dprint({
   packageManager,
@@ -12,7 +15,7 @@ export const fmt = Smithers.Dprint({
   deps: [],
   config: Smithers.file("dprint.json"),
   fix: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -32,7 +35,7 @@ export const fmt = Smithers.Dprint({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec dprint <check|fmt> --config <config.path>
 ```
 
@@ -70,7 +73,7 @@ Declare in `sources` every file the configuration covers. A file dprint
 formats but no declaration names is invisible to the key, so a change to it
 would reuse an earlier verdict.
 
-`StandardPackage` emits this as the `fmt` target over `src/**/*.ts` and
+`buildAndCheckPackage` emits this as the `fmt` target over `src/**/*.ts` and
 `test/**/*.ts` with `fix: false`, so the graph checks formatting and never
 rewrites it. Run the rewrite yourself with the package's own tooling, or
 declare a second target with `fix: true`.
@@ -79,4 +82,4 @@ declare a second target with `fix: true`.
 
 - [EsLint](es-lint.md), whose non-cacheable posture this target matches
 - [BiomeCheck](biome-check.md), which formats and lints in one tool
-- [StandardPackage](standard-package.md), which emits a `Dprint` `fmt` target
+- [buildAndCheckPackage](standard-package.md), which emits a `Dprint` `fmt` target

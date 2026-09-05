@@ -1,10 +1,13 @@
-# Labels
+---
+title: "Labels"
+description: "The //package:target label grammar, package default targets, relative :target labels, and recursive //... patterns."
+---
 
 A label identifies one target. Labels come only from a `PACKAGE.ts` file's path and
 one of its named exports.
 
-```
-//packages/smithers/flows/flow:lib
+```text
+//packages/greeter:lib
   ^^^^^^^^^^^^^ ^^^
   package path  target name
 ```
@@ -32,9 +35,9 @@ Backslashes become forward slashes. Leading and trailing slashes are stripped. A
 empty path and `.` both mean the workspace root. A path containing an empty, `.`,
 or `..` segment fails with `invalid package path`.
 
-```
-//packages/smithers/flows/flow      -> packages/smithers/flows/flow
-//packages/smithers/flows/flow/     -> packages/smithers/flows/flow
+```text
+//packages/greeter      -> packages/greeter
+//packages/greeter/     -> packages/greeter
 //                   -> (root)
 //packages/../flow   -> error
 ```
@@ -45,8 +48,8 @@ A bare `:target` resolves in the package containing the current working
 directory, computed relative to the workspace root.
 
 ```sh
-cd packages/smithers/flows/flow
-smithers-build test :test    # //packages/smithers/flows/flow:test
+cd packages/greeter
+smithers-build test :test    # //packages/greeter:test
 ```
 
 If the current directory is outside the workspace, or `--workspace` points
@@ -73,7 +76,7 @@ the default. Otherwise the label fails with
 `package //<path> has no unambiguous default target`.
 
 The root install target is conventionally named `nodeModules`, which is why `//`
-resolves to it in a workspace laid out like the Smithers repository.
+resolves to it in a workspace that follows the convention.
 
 ## Recursive patterns
 
@@ -83,7 +86,7 @@ plus every target synthesized by a matching default target for a directory in th
 subtree without its own `PACKAGE.ts`.
 
 The prefix is a path prefix, not a glob. `//packages/...` selects
-`packages/smithers/flows/flow`, `packages/smithers/flows/flow/internal`, and every other package beneath
+`packages/greeter`, `packages/greeter/internal`, and every other package beneath
 `packages/`.
 
 Recursive patterns are tolerant. A pattern that matches no target for a verb
@@ -119,9 +122,10 @@ If neither path resolves, the command fails with
 `could not derive a label for <target>; export it from a PACKAGE.ts file`. The fix is
 to export the target: a target that no `PACKAGE.ts` exports has no label.
 
-`API-REVIEW.md` records the stack-derived source path as an open API question.
+How a target learns its own source path, today by reading the construction
+stack, is an open design question.
 
 ## Next
 
-- [Targets and targets](targets.md)
+- [Target definitions and targets](targets.md)
 - [Querying](../workspace/querying.md)

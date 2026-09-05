@@ -1,4 +1,7 @@
-# Dev
+---
+title: "Dev"
+description: "Runs a long-lived development or watch command under the run verb."
+---
 
 Runs a long-lived development or watch command.
 
@@ -31,7 +34,7 @@ it explicitly.
 
 ## Command
 
-```
+```text
 <command> <args...>
 ```
 

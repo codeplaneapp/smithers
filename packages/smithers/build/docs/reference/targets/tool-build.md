@@ -1,4 +1,7 @@
-# ToolBuild
+---
+title: "ToolBuild"
+description: "Runs one arbitrary build command for Rust, Zig, native addons, or any other toolchain. The deliberate escape hatch."
+---
 
 Runs one arbitrary command for Rust, Zig, native addons, or any other toolchain.
 This is the deliberate escape hatch.
@@ -35,7 +38,7 @@ export const nativeLib = Smithers.ToolBuild({
 
 ## Command
 
-```
+```text
 <command> <args...>
 ```
 
@@ -153,4 +156,4 @@ target re-key every time. Keep it to deterministic settings.
 
 - [TsBuild](ts-build.md)
 - [Dev](dev.md) for a long-lived process
-- [Writing targets](../../extending/writing-targets.md)
+- [Writing target definitions](../../extending/writing-targets.md)

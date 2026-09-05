@@ -1,4 +1,7 @@
-# Install
+---
+title: "Install"
+description: "Produces node_modules for the package manager the workspace declared."
+---
 
 Produces `node_modules` for the declared package manager.
 

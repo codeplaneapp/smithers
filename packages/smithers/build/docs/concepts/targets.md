@@ -1,21 +1,27 @@
-# Targets and targets
+---
+title: "Target definitions and targets"
+description: "What a target definition is, what a target call returns, and the metadata that turns a flow into a node of the build graph."
+---
 
-A **target** is a callable definition. A **target** is what one call returns: a
-flow with planner metadata attached.
+A **target definition** is callable. A **target** is the opaque declaration that
+one call returns. Its attributes, dependency edges, schemas, and declared outputs
+belong to the package build graph.
 
-## A target is a flow
+## Declaration and execution
 
-`Target.make` builds an ordinary flows `Flow`:
+`Target.make` creates a target without Flow execution methods. Run declarations
+through the package executor, which resolves tools, dependencies, workspace
+configuration, and catalog-specific execution.
 
-- Its tag is the target id, for example `TsBuild`.
-- Its payload schema is the target's attrs schema.
-- Its success and error schemas are the target's declared channels.
-- Its body is the target's implementation, a pure plan-time function of the decoded
-  attrs.
+`Target.plan(target)` explicitly lowers the declaration's action implementation
+to a plan node. A host may embed an action-backed declaration in a Flow with
+`body: () => Target.plan(target)`. This does not resolve package dependencies or
+make package-only catalog rules executable by a bare Flow runtime: those rules
+lower to their typed `NotImplemented` action.
 
-The target call then attaches metadata under the symbol
-`Symbol.for("smithers-build/Target")`, non-enumerable and non-writable. That
-symbol is what makes the flow a target.
+The target carries metadata under `Symbol.for("smithers-build/Target")`,
+non-enumerable and non-writable. Its `_tag` preserves the declared id used in
+existing cache material.
 
 ```ts
 interface Metadata {
@@ -56,7 +62,7 @@ Calling a target is pure. In order:
    inputs. `PnpmWorkspace` uses this to declare its lockfile and manifests;
    `PackageJsonCheck` and `GithubCiGen` use it to declare their output file in
    check mode.
-4. The flow is constructed and metadata attached. Dependencies and inputs are
+4. The declaration is constructed and metadata attached. Dependencies and inputs are
    deduplicated, and `kinds` is deduplicated too.
 5. `cacheable` is resolved: a boolean, or the result of `cache(attrs)`, defaulting
    to `true`.
@@ -68,13 +74,11 @@ sequence.
 
 ## Target identity
 
-A target's id is its flow tag and its `target` metadata field. It appears in key
-material, in query and graph output, and in the planner's layer and capability
-tables.
-
-Two targets of the same target share the flow tag. That is why the executor gives
-each target a fresh in-memory runtime: registering both with one engine would
-alias their bodies. `API-REVIEW.md` records this as open question 1.
+A target's id is its `_tag` and its `target` metadata field. It appears in cache
+material, query and graph output, and planner capability tables. Multiple targets
+may use one definition and id; the package label and decoded attributes identify
+the individual graph nodes. Hosts lowering targets into flows choose their own
+flow registration and execution identities explicitly.
 
 ## Kinds
 
@@ -173,4 +177,4 @@ whose implementations the CLI executor does not provide. See
 
 - [Inputs](inputs.md)
 - [Dependencies](dependencies.md)
-- [Writing targets](../extending/writing-targets.md)
+- [Writing target definitions](../extending/writing-targets.md)

@@ -1,4 +1,7 @@
-# Changesets
+---
+title: "Changesets"
+description: "Reports Changesets release status, or applies versioning."
+---
 
 Reports Changesets status, or applies versioning.
 
@@ -41,14 +44,14 @@ Both argvs are `PackageManager.exec` of the declared package manager.
 
 `status` runs through the shared sealed exec action. With the pnpm declaration:
 
-```
+```text
 pnpm exec changeset status [--since <since>]
 ```
 
 `version` runs through the irreversible exec action, because it mutates manifests
 and changelogs. With the pnpm declaration:
 
-```
+```text
 pnpm exec changeset version
 ```
 

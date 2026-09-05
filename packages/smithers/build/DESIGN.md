@@ -73,11 +73,11 @@ same output verification.
 
 An action declaration has a retry tier and an effects boundary.
 
-| Tier           | Current planner behavior                                      |
-| -------------- | ------------------------------------------------------------- |
-| `sealed`       | Content-keyable and accepted by the planner                   |
-| `compensable`  | Rejected as non-content material by the current plan compiler |
-| `irreversible` | Rejected as non-content material by the current plan compiler |
+| Tier           | Current planner behavior                                        |
+| -------------- | --------------------------------------------------------------- |
+| `sealed`       | Content-keyable; shared reuse requires proven cache eligibility |
+| `compensable`  | Plannable; run-local execution with a restorable pre-image      |
+| `irreversible` | Plannable; run-local execution, no blind retries                |
 
 | Boundary   | Meaning                                                              |
 | ---------- | -------------------------------------------------------------------- |
@@ -85,9 +85,10 @@ An action declaration has a retry tier and an effects boundary.
 | `expected` | Declarations are expectations; deviations are observable, not proofs |
 
 Cross-run engine admission requires both a `sealed` tier and a `hard`
-boundary. The normal executor does not provide irreversible action layers.
-Release and publication rules therefore fail with `unresolved_action` instead
-of running through a cache-oriented execution path.
+boundary. The normal executor does not provide release/publication action
+layers. Those rules therefore fail with `unresolved_action` instead of running
+through a cache-oriented execution path. The explicit install link layer uses
+an irreversible tier because its ignored files are not snapshot-restorable.
 
 ## 5. Dependency installation
 
@@ -141,11 +142,11 @@ the complete host environment is never inherited.
 
 ### 5.2 Fetch and link boundaries
 
-| Action                                   | Tier     | Boundary   | Cross-run admitted |
-| ---------------------------------------- | -------- | ---------- | ------------------ |
-| `smithers-build/install/measure`         | `sealed` | `expected` | No                 |
-| `smithers-build/install/fetch/{manager}` | `sealed` | `expected` | No                 |
-| `smithers-build/install/link`            | `sealed` | `expected` | No                 |
+| Action                                   | Tier           | Boundary   | Cross-run admitted |
+| ---------------------------------------- | -------------- | ---------- | ------------------ |
+| `smithers-build/install/measure`         | `sealed`       | `expected` | No                 |
+| `smithers-build/install/fetch/{manager}` | `sealed`       | `expected` | No                 |
+| `smithers-build/install/link`            | `irreversible` | `expected` | No                 |
 
 Fetch declares `.flows/store/<manager>` as a `TreeArtifact` output and returns
 a `StoreManifest` digest over canonical environment identity. The current
@@ -154,7 +155,11 @@ root. The parent can verify a lockfile before and after the command but cannot
 freeze the path while the child opens it. A hard boundary would therefore be a
 false claim, so the tree is not replayed from a shared engine cache.
 
-Link materializes host-local `node_modules`. It always runs. A manager's hidden
+Link materializes host-local `node_modules`. Each new run reconciles it; a
+completed durable attempt replays within its existing run. Ordinary snapshots
+omit ignored dependency trees, so claiming compensation would promise a
+rollback they cannot perform. Link is `irreversible`, not `sealed`, and has no
+automatic retry or uncertain-crash recovery contract. A manager's hidden
 lockfile or modules manifest describes intended topology but cannot prove that
 every installed file still exists and is unmodified. The returned link digest
 combines the store identity, root package manifest, and manager evidence for

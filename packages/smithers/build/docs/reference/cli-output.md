@@ -1,4 +1,7 @@
-# Terminal output
+---
+title: "Terminal output"
+description: "What smithers-build prints while it runs: the --ui renderers, how auto picks one, and which stream each kind of output goes to."
+---
 
 What `smithers-build` prints while it runs, how it decides between a live display, a
 coloured log, and bare lines, and where each stream goes.
@@ -61,7 +64,7 @@ and both return the structured data instead whenever a program is reading.
 
 ## Anatomy of a run
 
-```
+```text
 ▸ //:all  5 targets · 16 jobs
 ✗ //:lintCheck    failed      20ms
     command failed (exit 1): /bin/sh -c echo 'src/App.tsx:12:5 error: unused variable foo' >&2; exit 1
@@ -96,8 +99,8 @@ visible in a CI log.
 
 ## Contract for executors
 
-`packages/smithers/build/build-cli/src/Reporter.ts` is the seam. An executor receives a
-`Reporter` and reports events; it never formats a line.
+The `Reporter` service is the seam. An executor receives one and reports events;
+it never formats a line.
 
 | Event                                     | Reported when                                                                                                                                                                  |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -156,7 +159,7 @@ frames are omitted.
 
 `smithers-build //src:lint --ui plain`, piped:
 
-```
+```text
 //src:srcs  ran  3ms
 //src:lint  failed  1.9s  command failed (exit 1): /usr/bin/sandbox-exec -p (version 1)(allow default)(deny network*)(allow network* (local unix-socket)) /Users/williamcory/artsy/force/node_modules/.bin/biome lint --no-errors-on-unmatched
 of consistent names through a code base.
@@ -173,7 +176,7 @@ retryable: false
 
 `smithers-build //src:lint --ui tty` on a terminal:
 
-```
+```text
 ▸ //src:lint  2 targets · 16 jobs
 ✓ //src:srcs               3ms
 ✗ //src:lint  failed      1.4s
@@ -189,7 +192,7 @@ Tasks: 1 ran, 1 failed, 2 total · Time: 1.9s
 
 `smithers-build //src/Server:test --ui tty`, second run, answered from the cache:
 
-```
+```text
 ▸ //src/Server:test  3 targets · 16 jobs
 ✓ //src/Server:srcs                                    1ms
   //src/Server:__private_ImportClosure_1  closure: 3061 files, 91 packages, 0 unresolved, 0 dynamic
@@ -201,7 +204,7 @@ Tasks: 2 ran, 1 cached, 3 total · Time: 4ms
 
 `smithers-build query '//...' --ui tty` on a terminal:
 
-```
+```text
 LABEL                                           TARGET                  KINDS
 //.github:ci                                    Github.Workflow         run lint
 //.github:danger                                Shell.Run               run
@@ -212,7 +215,7 @@ LABEL                                           TARGET                  KINDS
 
 `smithers-build graph '//src:build' --ui tty` on a terminal:
 
-```
+```text
 //src:build
   -data-> //src:buildClient
   -data-> //src:buildServer

@@ -1,4 +1,7 @@
-# Ownership
+---
+title: "Ownership"
+description: "Declaring package owners as inert data, how ownership inherits down a tree, and the CODEOWNERS and OWNERS files generated from it."
+---
 
 A package names who owns it the same way it names its targets: as inert data
 on the `S.Package` call. The declaration answers three questions the landing

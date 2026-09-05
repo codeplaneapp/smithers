@@ -1,4 +1,7 @@
-# Tsconfig
+---
+title: "Tsconfig"
+description: "Generates and drift-checks a tsconfig.json."
+---
 
 Generates and drift-checks a `tsconfig.json`.
 

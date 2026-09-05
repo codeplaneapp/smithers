@@ -1,27 +1,32 @@
-# What is smithers build
+---
+title: "What is smithers build"
+description: "The everything-is-a-flow model behind smithers build, and how it compares with Bazel, Turborepo, and nx."
+---
+
+Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
+
 
 smithers build orchestrates builds for TypeScript workspaces. It borrows Bazel's model:
 a workspace is a set of packages, a package declares targets, a target names its
 inputs and its dependencies, and a verb selects a set of targets to run.
 
-The difference is the authoring language. A `PACKAGE.ts` file is a plain TypeScript
-module. Its named exports are targets. There is no new configuration dialect, no
+The difference is the authoring language. A `PACKAGE.ts` file is a plain
+TypeScript module that exports one `Package` value, and the keys of its target
+map are the package's target names. There is no new configuration dialect, no
 Starlark, and no JSON pipeline file.
 
 ```ts
-// packages/smithers/flows/flow/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../PACKAGE.ts"
+import { buildAndCheckPackage } from "./package-targets.ts"
+// packages/greeter/PACKAGE.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const { lib, test, lint } = Smithers.StandardPackage({
-  packageManager,
-  deps: [],
-  cwd: "packages/smithers/flows/flow"
-})
+const { lib, test, lint } = buildAndCheckPackage({ deps: [], cwd: "packages/greeter" })
+
+export const Package = S.Package({ targets: { lib, test, lint } })
 ```
 
-That file declares three targets: `//packages/smithers/flows/flow:lib`, `//packages/smithers/flows/flow:test`,
-and `//packages/smithers/flows/flow:lint`.
+That file declares three targets: `//packages/greeter:lib`,
+`//packages/greeter:test`, and `//packages/greeter:lint`.
 
 ## Everything is a flow
 
@@ -43,7 +48,7 @@ Three consequences follow.
   model are all actions whose implementations arrive as Effect layers. Swapping
   npm for pnpm is a layer swap, not a branch.
 
-See [Targets and targets](../concepts/targets.md) and
+See [Target definitions and targets](../concepts/targets.md) and
 [Actions and boundaries](../concepts/actions-and-boundaries.md).
 
 ## Comparison
@@ -68,11 +73,11 @@ rather than running it unconfined. See
 
 ## The three packages
 
-| Package             | Source                                   | What it holds                                                                                                                                  |
-| ------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@smthrs/build`     | `packages/smithers/build/src/`           | Dependency installation as flows. Exports `Install` and `PackageManager`.                                                                      |
-| `@smthrs/targets`   | `packages/smithers/build/targets/src/`   | The `PACKAGE.ts` authoring surface: `Target.make`, `Input`, `Workspace`, `PackageDefaults`, `Exec`, `StandardPackage`, and the target catalog. |
-| `@smthrs/build-cli` | `packages/smithers/build/build-cli/src/` | The `smithers-build` CLI: workspace discovery, the planner, the executor, the cache, and query and graph output.                               |
+| Package                                                                                                   | What it holds                                                                                                                   |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [`@smthrs/build`](../api.md)                                                                              | Dependency installation as a flow, and the `PackageManager` and `Runtime` host seams.                                           |
+| [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets)     | The declaration surface: `Target.make`, `Input`, `Workspace`, `Package`, `PackageDefaults`, and the catalog. |
+| [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli) | The `smithers-build` CLI: workspace discovery, the planner, the executor, the caches, and query and graph output.               |
 
 ## Next
 

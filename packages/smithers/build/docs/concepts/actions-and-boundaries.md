@@ -1,4 +1,7 @@
-# Actions and boundaries
+---
+title: "Actions and boundaries"
+description: "How a target body records action calls, what the sealed, compensable, and irreversible tiers mean, and how a declared confinement is enforced."
+---
 
 A target body records plan nodes. The nodes that touch the world are **action
 calls**. An action is a declaration: a payload schema, a success schema, an error
@@ -7,21 +10,20 @@ as a layer.
 
 ## Tiers
 
-| Tier           | Meaning                                                              |
-| -------------- | -------------------------------------------------------------------- |
-| `sealed`       | Content-keyable. The plan compiler accepts it.                       |
-| `compensable`  | Requires compensation on retry.                                      |
-| `irreversible` | Must never be retried blindly, replayed, or run to populate a cache. |
+| Tier           | Meaning                                                                    |
+| -------------- | -------------------------------------------------------------------------- |
+| `sealed`       | Content-keyable; shared reuse also requires cache admission.               |
+| `compensable`  | Requires compensation on retry.                                            |
+| `irreversible` | Run-local recorded execution; never retried blindly or shared across runs. |
 
-`StepKey.fromKeyMaterial` fails with `non_content_material` for `compensable` and
-`irreversible` material, and `Plan.compile` keys every node, so a single
-non-sealed action makes a flow unplannable. Every action in the `Install` flow is
-therefore `sealed`, including link, which the design would otherwise declare
-`compensable`.
+`Plan.compile` accepts all tiers through `StepKey.planIdentity`. Only sealed
+material can become a cross-run content key; other tiers use run-local
+execution identities. A completed attempt can replay without executing again.
 
-`ExecIrreversible` is the exception, and it is not part of a plannable install
-flow. The release targets use it for runs that mutate manifests or external
-registries.
+Install link is `irreversible`: ignored `node_modules` files are outside normal
+workspace snapshots, so a compensable declaration would promise a rollback the
+runtime cannot perform. It has no automatic retry contract. Release targets
+use the separately provided `ExecIrreversible` for publication effects.
 
 ## Boundary modes
 
@@ -34,16 +36,16 @@ boundary mode.
 | `expected` | The declared set is what the action expects; an observed deviation is recorded, not failed. |
 
 `ActionPersistence` admits a result to the cross-run cache only when the tier is
-`sealed` **and** the boundary mode is `hard`. Boundary mode, not tier, is what
-keeps a result out of the shared cache.
+`sealed` **and** the boundary mode is `hard`, with the required evidence. Either
+a non-sealed tier or an `expected` boundary prevents shared-cache admission.
 
 ## The install boundaries
 
-| Action                                   | Tier     | Boundary   | Reads                              | Writes                                     | Cache-admissible |
-| ---------------------------------------- | -------- | ---------- | ---------------------------------- | ------------------------------------------ | ---------------- |
-| `smithers-build/install/measure`         | `sealed` | `expected` | `.npmrc`, every supported lockfile | none                                       | No               |
-| `smithers-build/install/fetch/{manager}` | `sealed` | `expected` | the manager's lockfile, `.npmrc`   | `TreeArtifact` at `.flows/store/<manager>` | No               |
-| `smithers-build/install/link`            | `sealed` | `expected` | `package.json`                     | none                                       | No               |
+| Action                                   | Tier           | Boundary   | Reads                              | Writes                                     | Cache-admissible |
+| ---------------------------------------- | -------------- | ---------- | ---------------------------------- | ------------------------------------------ | ---------------- |
+| `smithers-build/install/measure`         | `sealed`       | `expected` | `.npmrc`, every supported lockfile | none                                       | No               |
+| `smithers-build/install/fetch/{manager}` | `sealed`       | `expected` | the manager's lockfile, `.npmrc`   | `TreeArtifact` at `.flows/store/<manager>` | No               |
+| `smithers-build/install/link`            | `irreversible` | `expected` | `package.json`                     | root and nested `node_modules` trees       | No               |
 
 Fetch is shaped as the potentially shareable half, but it is not shared today.
 The absolute-root package-manager process can open the lockfile and `.npmrc`
@@ -114,7 +116,8 @@ at once and the engine refuses with `ConcurrentKeylessDispatch`.
 | `write-file`, `check-file`, `sync-package-json` | `sealed`       | Yes                          |
 | `check-workflow`, `check-docs`, `llm-review`    | `sealed`       | Yes                          |
 | `scaffold-package`, `not-implemented`           | `sealed`       | Yes                          |
-| `smithers-build/install/*`                      | `sealed`       | Yes, under pnpm              |
+| `smithers-build/install/measure`, `fetch/*`     | `sealed`       | Yes, under pnpm              |
+| `smithers-build/install/link`                   | `irreversible` | Yes, under pnpm              |
 | `smithers-build/exec-irreversible`              | `irreversible` | No                           |
 
 The ordinary implementations are re-exported from the `@smthrs/targets` package
@@ -143,13 +146,12 @@ Every tool run goes through one sandbox module, `ExecSandbox`, and every
 declared confinement is enforced or the target fails closed. Nothing logs
 "unenforced" and carries on.
 
-A target declares a policy: the default confinement, `{ network: "loopback" }`,
-`{ network: true }`, or the `"none"` opt-out. On the `PACKAGE.ts` surface
-that is the `sandbox` attr and the default is the confinement. On the
-`PACKAGE.ts` surface the root `Workspace({ sandbox })` declaration sets one
-policy for every tool-running target, and the default is `"none"` until a
-workspace declares otherwise, because the catalog's declared inputs are what
-the sandbox exposes and a workspace has to declare them completely first.
+A target declares a policy in its `sandbox` attr: `{}` for the default
+confinement, `{ network: "loopback" }`, `{ network: true }`, or the `"none"`
+opt-out. The workspace declaration's `sandboxes` option names the mechanisms
+those policies resolve to, and a workspace that declares none leaves
+build-target confinement off, because the catalog's declared inputs are what a
+sandbox exposes and a workspace has to declare them completely first.
 
 Under confinement a tool may read its declared read set and nothing else under
 the workspace: the target's expanded declared inputs, the outputs of every
@@ -218,5 +220,5 @@ tier. Only a confined run publishes to the shared tier; see
 ## Next
 
 - [Install](install.md)
-- [Writing targets](../extending/writing-targets.md)
+- [Writing target definitions](../extending/writing-targets.md)
 - [Remote caching](../workspace/remote-caching.md)

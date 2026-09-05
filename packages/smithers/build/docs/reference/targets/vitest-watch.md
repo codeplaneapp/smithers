@@ -1,10 +1,13 @@
-# VitestWatch
+---
+title: "VitestWatch"
+description: "Runs an interactive vitest watch session under the run verb."
+---
 
 Runs an interactive `vitest watch` session.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const testWatch = Smithers.VitestWatch({
   packageManager,
@@ -13,7 +16,7 @@ export const testWatch = Smithers.VitestWatch({
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -34,7 +37,7 @@ export const testWatch = Smithers.VitestWatch({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec vitest watch [--config <config.path>] --environment <environment>
 ```
 

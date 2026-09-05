@@ -1,118 +1,105 @@
-# Install
+---
+title: "Install"
+description: "What smithers build requires, how the three packages reach a workspace, and how to ignore the cache directory before the first run."
+sidebar:
+  order: 1
+---
 
-smithers build lives in the Smithers repository as three pnpm workspace packages:
+smithers build is three packages: `@smthrs/build`, the install flow and the host
+seams; [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets), the surface your declaration files
+import; and [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli), which supplies the
+`smithers-build` binary.
 
-```
-smithers/
-  PACKAGE.ts
-  packages/
-    build/        # @smthrs/build: Install, PackageManager, and Runtime
-    targets/      # @smthrs/targets: the PACKAGE.ts authoring surface
-    build-cli/    # @smthrs/build-cli: the smithers-build bin
-```
-
-All three are private workspace packages and none of them is published: the
-rc.0 release policy fixes `@smthrs/build` as private alongside
-`@smthrs/targets` and `@smthrs/build-cli`. A consumer reaches them through the
-workspace, never through a registry.
+All three publish together on the `next` dist-tag. No source checkout, local
+link, override, or vendored dependency is required.
 
 ## Requirements
 
-- Node.js 22.19 or newer.
-- pnpm. Catalog targets run their tools through whichever package manager the
-  workspace declares, and a declaration names pnpm or Bun. The install flow has
-  a live implementation only for pnpm today; a Bun declaration fails with a
+- Node.js 22.19.0 or newer, which is what the packages declare in `engines`.
+- An npm-compatible package manager. Your workspace declaration names the one
+  targets run their tools through: pnpm or Bun. The install flow
+  has a live implementation only for pnpm, and a Bun declaration fails with a
   typed `unsupported` error.
-- A git worktree. Discovery prefers `git ls-files`; outside a worktree it falls
-  back to a `.gitignore` walker.
+- Git, for the parts of a run that read the tree. Discovery prefers
+  `git ls-files`; outside a worktree it falls back to a `.gitignore` walker.
 
-## Link the authoring package
+## Add the dependencies
 
-The Smithers root manifest declares both the authoring package and CLI as
-devDependencies on the workspace:
+Declare the CLI and the authoring package as devDependencies of your workspace
+root:
+
+```bash
+pnpm add -D @smthrs/build-cli@next @smthrs/targets@next
+```
 
 ```json
-// smithers/package.json
 {
   "devDependencies": {
-    "@smthrs/build-cli": "workspace:*",
-    "@smthrs/targets": "workspace:*"
+    "@smthrs/build-cli": "1.0.0-rc.0",
+    "@smthrs/targets": "1.0.0-rc.0"
   }
 }
 ```
 
-`pnpm install` links both packages from the workspace. The CLI dependency
-exposes the `smithers-build` bin to `pnpm exec` at the workspace root.
+Install once. The `smithers-build` bin is then on `pnpm exec` at the workspace
+root:
 
-`PACKAGE.ts` files then import by bare specifier:
+```bash
+pnpm exec smithers-build --version
+```
+
+Declaration files import the authoring surface by bare specifier:
 
 ```ts
-// smithers/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
+import { Smithers as S } from "@smthrs/targets"
 ```
-
-## Install the CLI dependencies
-
-The CLI package depends on the Smithers engine packages, on
-`@smthrs/build`, and on `@smthrs/targets`. Published Smithers packages are
-pinned at the release version; the private ones are workspace links:
-
-```json
-// packages/smithers/build/build-cli/package.json
-{
-  "dependencies": {
-    "@smthrs/engine": "1.0.0-rc.0",
-    "@smthrs/flow": "1.0.0-rc.0",
-    "@smthrs/plan": "1.0.0-rc.0",
-    "@smthrs/build": "workspace:*",
-    "@smthrs/targets": "workspace:*"
-  }
-}
-```
-
-The root `pnpm install` installs and links them like every other workspace
-package.
 
 ## Run the CLI
 
-The bin entry is `smithers-build`, backed by `packages/smithers/build/build-cli/src/main.js`. That
-file is a JavaScript bootstrap: it loads `main.ts` through the programmatic
-`tsx` loader, which is also what evaluates `PACKAGE.ts` modules.
-
-```sh
+```bash
 # From the workspace root.
 pnpm exec smithers-build query //...
 ```
 
-Or point the CLI at the workspace explicitly from anywhere:
+Or point the CLI at a workspace explicitly, from anywhere:
 
-```sh
-smithers-build query //... --workspace /path/to/smithers
+```bash
+smithers-build query //... --workspace /path/to/workspace
 ```
 
 `--workspace` defaults to the process working directory. The current directory
-also determines which package a relative `:target` label resolves in. See
+also decides which package a relative `:target` label resolves in. See
 [Labels](../concepts/labels.md).
 
 ## Ignore the cache directory
 
 smithers build keeps its result cache and target scratch files under a
-workspace-relative directory, `.flows` by default. Add it to the workspace
-`.gitignore`, or declare the policy in the root `PACKAGE.ts` and let the CLI
-maintain the entry:
+workspace-relative directory. The workspace declaration names it:
 
 ```ts
-// smithers/PACKAGE.ts
-import { Smithers } from "@smthrs/targets"
+// .smithers/WORKSPACE.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
+const packageJson = S.file("//package.json")
+const runtime = S.Runtime.Node({ version: ">=22.19.0" })
+const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
+
+export const Workspace = S.Workspace("demo", {
+  repository: "git+https://example.invalid/demo.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime,
+  packageManager,
+  nodeModules: S.Npm.NodeModules({ packageJson })
+})
 ```
 
-See [Configuration](../workspace/configuration.md).
+Add that directory to your `.gitignore`. It is host state: discovery drops it,
+globs refuse to descend into it, and its name never reaches a content key. See
+[Configuration](../workspace/configuration.md).
 
-The ordinary target verbs may use another configured directory. The dedicated
-`smithers-build install` verb currently requires `.flows`, because its declared pnpm
-store boundary is fixed at `.flows/store/pnpm`.
+The ordinary target verbs accept another configured directory through
+`--cache-dir`. The dedicated `smithers-build install` verb requires `.flows`,
+because its declared pnpm store boundary is fixed at `.flows/store/pnpm`.
 
 ## Next
 

@@ -1,10 +1,13 @@
-# NodeBinary
+---
+title: "NodeBinary"
+description: "Runs one JavaScript program under the build verb: a program whose product is files rather than a verdict."
+---
 
 Runs one JavaScript program under the build verb: a program whose product is
 files rather than a verdict. Modelled on Bazel's `nodejs_binary`.
 
 The build-verb counterpart of [NodeTest](node-test.md). They are separate types
-because a target's participating verbs are fixed by its type — the planner
+because a target's participating verbs are fixed by its type. The planner
 selects by kind, so one type covering both would put a release-packing program
 in the graph of `smithers-build test`.
 
@@ -37,7 +40,7 @@ export const releasePack = Smithers.NodeBinary({
 
 ## Command
 
-```
+```text
 <runtime> <entry> <args...>
 ```
 
@@ -61,5 +64,5 @@ produced it.
 ## See also
 
 - [NodeTest](node-test.md)
-- [ToolBuild](tool-build.md) — the escape hatch for a toolchain with no target
+- [ToolBuild](tool-build.md): the escape hatch for a toolchain with no target
   type of its own

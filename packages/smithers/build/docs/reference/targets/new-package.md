@@ -1,4 +1,7 @@
-# NewPackage
+---
+title: "NewPackage"
+description: "Scaffolds the smallest package tree the workspace default target can discover."
+---
 
 Scaffolds the smallest package tree the workspace default target can discover.
 
@@ -24,7 +27,7 @@ smithers-build run //:newPackage --name @scope/widget
 | `version`         | `string`                  | `"0.1.0"`                    | Initial package version             |
 | `license`         | supported license literal | required                     | Initial manifest license            |
 | `fields`          | JSON record               | `{}`                         | Shared manifest template fields     |
-| `tsconfigExtends` | `string`                  | `"../../../../../../tsconfig.base.json"` | Generated tsconfig base             |
+| `tsconfigExtends` | `string`                  | `"../../tsconfig.base.json"` | Generated tsconfig base             |
 
 The name passes the same lowercase, scoped npm-name validation used by package
 manifest declarations. An existing destination is refused; scaffolding never

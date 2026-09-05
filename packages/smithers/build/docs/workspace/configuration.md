@@ -1,22 +1,42 @@
-# Configuration
+---
+title: "Configuration"
+description: "Where the cache directory comes from, what lives inside it, the confinement policy, and why the directory is never key material."
+---
 
-A workspace declares where the CLI keeps its cache and target scratch files,
-and the confinement its tool-running targets execute under. The root
-`PACKAGE.ts` file declares both.
+A workspace declares where the CLI keeps its cache and target scratch files, and
+the confinement its tool-running targets execute under. Both live in the
+workspace declaration.
 
 ```ts
-// PACKAGE.ts
-import { Workspace } from "@smthrs/targets/Config"
+// .smithers/WORKSPACE.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const config = Workspace({ cacheDirectory: ".flows", gitignored: true, sandbox: {} })
+const packageJson = S.file("//package.json")
+
+export const runtime = S.Runtime.Node({ version: ">=22.19.0" })
+export const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
+export const environment = S.Nix.Environment({ flake: S.file("//flake.nix") })
+
+export const Workspace = S.Workspace("demo", {
+  repository: "git+https://example.invalid/demo.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime,
+  packageManager,
+  nodeModules: S.Npm.NodeModules({ packageJson }),
+  sandboxes: S.Sandboxes({ default: S.Sandbox.Bubblewrap() })
+})
 ```
 
-`sandbox` is the policy every tool-running target executes under: `"none"`
-(the default), `{}` for the default confinement, `{ network: "loopback" }`, or
-`{ network: true }`. `sandboxes` names the mechanism when the platform's own is
-not wanted, for example `S.Sandboxes({ default: S.Sandbox.Docker({ image }) })`
-on a host without bubblewrap or seatbelt. See
+`sandboxes` names the confinement mechanisms available to targets. `default` is
+the one a target uses when it asks for confinement without naming another:
+`S.Sandbox.Bubblewrap()` on Linux, `S.Sandbox.Docker({ image })` where the
+platform's own mechanism is not wanted, and `S.Sandbox.None()` to turn
+build-target confinement off. See
 [Hermeticity](../concepts/actions-and-boundaries.md#hermeticity).
+
+`S.Workspace` validates its options and performs no I/O, so evaluating the
+module stays pure. For the full option list and every refusal, see
+[the workspace reference](../reference/config.md).
 
 Bubblewrap cannot expose host loopback without exposing the whole host network,
 so Linux refuses `{ network: "loopback" }`; use `{ network: true }` only as an
@@ -35,19 +55,19 @@ For the full schema and every validation target, see
 Every command settles the cache directory before it reads or writes anything.
 
 1. The `--cache-dir` flag.
-2. The `Workspace` declaration exported from the root `PACKAGE.ts`.
+2. The `cache` declaration in `WORKSPACE.ts`.
 3. `.flows`.
 
 Both the flag and the declaration go through the same validation, so an absolute
 path, a `..` segment, or an empty value fails the command regardless of where it
 came from.
 
-```sh
+```bash
 smithers-build build //... --cache-dir .smithers-build-cache
 ```
 
-`gitignored` comes only from the declaration. It is a workspace policy, not a
-per-run choice, so there is no flag for it.
+Add the resolved directory to your `.gitignore`. It holds replayable state that
+no commit should carry.
 
 ## What lives in the cache directory
 
@@ -60,27 +80,8 @@ per-run choice, so there is no flag for it.
 Package-manager stores are not controlled by this setting. They stay at
 `.flows/store/<manager>` because fetch declares those fixed paths as
 `TreeArtifact` boundaries. The `install` verb requires the default `.flows`
-configuration; build, test, lint, docs, run, query, graph, and CI may use a
+configuration; build, test, lint, docs, run, query, graph, and CI accept a
 custom directory.
-
-## The gitignore policy
-
-When the declaration sets `gitignored: true`, every command first ensures the
-root `.gitignore` carries an entry for the resolved directory.
-
-The write is idempotent. Any of these spellings already present leaves the file
-untouched, for a directory named `.flows`:
-
-```
-.flows
-.flows/
-/.flows
-/.flows/
-```
-
-A missing `.gitignore` is created with the entry alone. The entry the CLI writes
-is the anchored, trailing-slash form with glob metacharacters escaped, for
-example `/.flows/`.
 
 ## Why the directory is not key material
 
@@ -96,10 +97,10 @@ Three mechanisms keep it out.
 - **Glob expansion** receives the resolved directory explicitly and refuses to
   descend into it. A `file()` declaration that resolves inside it expands to an
   empty file list.
-- **Tool execution** never receives the real path in an action payload. `DepsLint`
-  emits the constant token `{smthrs:cache-directory}` at plan time, and
-  `ExecLive` substitutes the validated host directory into the argv immediately
-  before spawn.
+- **Tool execution** never receives the real path in an action payload.
+  `DepsLint` emits the constant token `{smthrs:cache-directory}` at plan time,
+  and the exec layer substitutes the validated host directory into the argv
+  immediately before spawn.
 
 ## Next
 

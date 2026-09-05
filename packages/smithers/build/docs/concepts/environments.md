@@ -1,11 +1,14 @@
-# Environments
+---
+title: "Environments"
+description: "Declaring the Nix closure that tool-running targets resolve their executables from, and what putting a toolchain in the key makes cacheable."
+---
 
-Where do the tools a target runs come from? Until now the honest answer was:
-from whatever the host has on `PATH`. A workspace declared its Node version and
-its package manager, and the CLI refused to run when the host did not satisfy
-them, but the executable that actually ran was still the host's. That is why
-almost every external-tool target was non-cacheable: the compiler that produced
-a result was not in the result's key.
+Where do the tools a target runs come from? Without an environment declaration,
+from whatever the host has on `PATH`. A workspace declares its Node version and
+its package manager, and the CLI refuses to run when the host does not satisfy
+them, but the executable that actually runs is still the host's. That is why
+almost every external-tool target is non-cacheable: the compiler that produced a
+result is not in the result's key.
 
 A Nix environment closes that gap. The workspace declares the closure its tools
 come from, once, the way it declares a runtime and a `node_modules` tree, and

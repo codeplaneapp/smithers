@@ -1,10 +1,13 @@
-# VitestCoverage
+---
+title: "VitestCoverage"
+description: "Runs vitest run with coverage enabled, and declares the report directory as an output."
+---
 
 Runs `vitest run` with coverage enabled and declares the report directory.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const coverage = Smithers.VitestCoverage({
   packageManager,
@@ -15,7 +18,7 @@ export const coverage = Smithers.VitestCoverage({
   provider: "v8",
   reportsDirectory: "coverage",
   thresholds: { branches: 80, functions: 80, lines: 80, statements: 80 },
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -38,7 +41,7 @@ export const coverage = Smithers.VitestCoverage({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec vitest run [--config <config.path>] \
   --coverage.enabled=true \
   --coverage.provider=<provider> \

@@ -1,4 +1,7 @@
-# Install
+---
+title: "Install"
+description: "The install flow: the measure round, the fetch and link split, and why a linked node_modules tree is never restored from another machine."
+---
 
 `smithers-build` expresses dependency installation as one flow with one round and
 three actions: measure, fetch, and link. A workspace declares pnpm or Bun.
@@ -38,11 +41,10 @@ PackageManager.layerPnpm({
 )
 ```
 
-The complete embedding also supplies `Install.layer` from
-`@smthrs/build`, an interpreter
-registration for `Install.Install`, a flow runtime, and Node filesystem,
-process, and crypto services. The CLI composition in
-`packages/smithers/build/build-cli/src/engine.ts` is the reference.
+The complete embedding also supplies `Install.layer` from `@smthrs/build`, an
+interpreter registration for `Install.Install`, a flow runtime, and Node
+filesystem, process, and crypto services. The CLI's own composition, in
+[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli), is the reference.
 
 ## One round
 
@@ -160,12 +162,19 @@ tree evidence, and returns:
 LinkManifest = { store: Digest, manifest: Digest, linked: true }
 ```
 
-Link always reconciles `node_modules`. A hidden lockfile or modules manifest
+Every new run reconciles `node_modules`; an already completed durable link
+attempt replays within its run. A hidden lockfile or modules manifest
 describes the graph a manager intended to create, but cannot prove that every
 package file is still present and unmodified. There is no
 `node_modules/.flows-link.json` freshness shortcut.
 
-The action uses an `expected` boundary and declares no materialized output.
+The action uses the `irreversible` tier and an `expected` boundary. Its write
+declaration names root and nested `node_modules` trees for scheduling, without
+publishing them as artifacts. Ignored dependency trees are not captured by ordinary
+workspace snapshots, so the runtime cannot promise to undo a partial link.
+There is no automatic retry or blind recovery of an uncertain attempt: inspect
+and reconcile the tree before starting a new run. Successful attempt replay
+does not itself verify or rebuild files changed after that attempt completed.
 `node_modules` is a host-local graph of links into the store and is never
 restored from another machine.
 

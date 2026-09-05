@@ -1,10 +1,13 @@
-# Vitest
+---
+title: "Vitest"
+description: "Runs a non-watch vitest run over a declared test set."
+---
 
 Runs a non-watch `vitest run` over a declared test set.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const test = Smithers.Vitest({
   packageManager,
@@ -14,7 +17,7 @@ export const test = Smithers.Vitest({
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
   passWithNoTests: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -37,7 +40,7 @@ export const test = Smithers.Vitest({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec vitest run [--config <config.path>] --environment <environment> [--coverage.enabled=false] [--passWithNoTests]
 ```
 
@@ -68,4 +71,4 @@ Collected from the attrs: every declaration in `tests` and `sources`, plus
 
 - [VitestCoverage](vitest-coverage.md) for coverage and thresholds
 - [VitestWatch](vitest-watch.md) for an interactive session
-- [StandardPackage](standard-package.md), which emits a `Vitest` `test` target
+- [buildAndCheckPackage](standard-package.md), which emits a `Vitest` `test` target

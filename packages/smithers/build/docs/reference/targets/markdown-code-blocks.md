@@ -1,4 +1,7 @@
-# Markdown.CodeBlocks
+---
+title: "Markdown.CodeBlocks"
+description: "Compiles every fenced code block of the declared languages in one Markdown page with tsc --strict, so a page cannot teach an API that does not ship."
+---
 
 Compiles every fenced code block of the declared languages in one Markdown
 page with `tsc --strict`, so a page cannot teach an API that does not ship.
@@ -62,10 +65,10 @@ file, the page's version wins.
 
 ## Command
 
-```
-<package manager> exec tsc --noEmit --ignoreConfig --strict --skipLibCheck
+```text
+<package manager> exec tsc --noEmit --strict --skipLibCheck
   --module Node16 --moduleResolution Node16 --allowImportingTsExtensions
-  --target es2024 --lib es2024,dom --types node --exactOptionalPropertyTypes <files...>
+  --target es2024 --lib es2024,dom,dom.iterable --types node --exactOptionalPropertyTypes <files...>
 ```
 
 ## Inputs
@@ -88,5 +91,5 @@ skipped`.
 
 ## See also
 
-- [DocsParity](docs-parity.md) — the README gate beside a package's code
-- [Typecheck](typecheck.md) — the same compiler over a package's own sources
+- [DocsParity](docs-parity.md): the README gate beside a package's code
+- [Typecheck](typecheck.md): the same compiler over a package's own sources

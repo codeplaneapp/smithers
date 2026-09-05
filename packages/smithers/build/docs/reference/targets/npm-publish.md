@@ -1,4 +1,7 @@
-# NpmPublish
+---
+title: "NpmPublish"
+description: "Publishes a package to an npm registry."
+---
 
 Publishes a package to an npm registry.
 
@@ -10,8 +13,8 @@ export const packageManager = Smithers.PackageManager.Pnpm({ version: "11.21.0",
 
 export const publish = Smithers.NpmPublish({
   packageManager,
-  packageJson: Smithers.file("//packages/smithers/flows/flow/package.json"),
-  artifacts: [Smithers.glob("//packages/smithers/flows/flow/dist/**/*")],
+  packageJson: Smithers.file("//packages/greeter/package.json"),
+  artifacts: [Smithers.glob("//packages/greeter/dist/**/*")],
   deps: [lib, packageLint],
   registry: "https://registry.npmjs.org",
   access: "public",
@@ -44,7 +47,7 @@ Through the irreversible exec action, because publication changes external
 registry state. The argv is `PackageManager.publish` of the declared package
 manager. With the pnpm declaration:
 
-```
+```text
 pnpm publish --registry <registry> --access <access> --tag <tag> --no-git-checks [--dry-run]
 ```
 

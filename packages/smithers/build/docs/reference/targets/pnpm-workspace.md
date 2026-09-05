@@ -1,4 +1,7 @@
-# PnpmWorkspace
+---
+title: "PnpmWorkspace"
+description: "Generates and drift-checks pnpm-workspace.yaml."
+---
 
 Generates and drift-checks `pnpm-workspace.yaml`.
 

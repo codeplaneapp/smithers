@@ -1,4 +1,7 @@
-# DocsParity
+---
+title: "DocsParity"
+description: "Checks that a package README has a level-one title and substantive prose."
+---
 
 Checks that a package README has a level-one title and substantive prose.
 
@@ -57,4 +60,4 @@ graph alongside lint, build, and test.
 ## See also
 
 - [Running targets](../../workspace/running-targets.md)
-- [Writing targets](../../extending/writing-targets.md)
+- [Writing target definitions](../../extending/writing-targets.md)

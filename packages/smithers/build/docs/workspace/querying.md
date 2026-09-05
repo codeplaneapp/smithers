@@ -1,4 +1,7 @@
-# Querying
+---
+title: "Querying"
+description: "The two verbs that inspect the graph without running anything: query lists targets and evaluates deps(), and graph renders the dependency graph."
+---
 
 Two verbs inspect the graph without running anything: `query` lists targets and
 evaluates `deps()`, and `graph` renders the dependency graph.
@@ -10,30 +13,30 @@ Pass a label or a pattern.
 ```sh
 smithers-build query //...
 smithers-build query //packages/...
-smithers-build query //packages/smithers/flows/flow:lib
+smithers-build query //packages/greeter:lib
 smithers-build query :lib
 ```
 
 The result carries the query string and one entry per target with its label, its
 target, and the verbs the target participates in.
 
-```
-query: //packages/smithers/flows/flow
+```text
+query: //packages/greeter
 targets:
-  - label: //packages/smithers/flows/flow:lib
+  - label: //packages/greeter:lib
     target: TsBuild
     kinds: [build]
 ```
 
 Only the `PACKAGE.ts` modules the pattern selects are evaluated. `//packages/...`
-loads every `PACKAGE.ts` under `packages/`; `//packages/smithers/flows/flow:lib` loads one.
+loads every `PACKAGE.ts` under `packages/`; `//packages/greeter:lib` loads one.
 
 An exact label selects one target, so listing a package prints its default
 target, not everything it exports:
 
 ```sh
-smithers-build query //packages/smithers/flows/flow      # the default target only
-smithers-build query //packages/smithers/flows/flow/...  # every target in the subtree
+smithers-build query //packages/greeter      # the default target only
+smithers-build query //packages/greeter/...  # every target in the subtree
 ```
 
 See [Labels](../concepts/labels.md).
@@ -43,20 +46,20 @@ See [Labels](../concepts/labels.md).
 `deps(label)` reports the transitive dependency closure of one target.
 
 ```sh
-smithers-build query 'deps(//packages/smithers/flows/engine:lib)'
+smithers-build query 'deps(//packages/app:lib)'
 ```
 
-```
-query: deps(//packages/smithers/flows/engine:lib)
-root: //packages/smithers/flows/engine:lib
+```text
+query: deps(//packages/app:lib)
+root: //packages/app:lib
 dependencies:
-  - //packages/smithers/flows/flow:lib
-  - //packages/smithers/flows/plan:lib
+  - //packages/greeter:lib
+  - //packages/core:lib
 edges:
-  - from: //packages/smithers/flows/plan:lib
-    to: //packages/smithers/flows/flow:lib
-  - from: //packages/smithers/flows/flow:lib
-    to: //packages/smithers/flows/engine:lib
+  - from: //packages/core:lib
+    to: //packages/greeter:lib
+  - from: //packages/greeter:lib
+    to: //packages/app:lib
 ```
 
 `dependencies` is the plan's target list with the root removed. `edges` are the
@@ -77,7 +80,7 @@ claims changes to what it depends on.
 smithers-build query 'rdeps(//lib:srcs)'
 ```
 
-```
+```text
 //lib:srcs is depended on by 2 targets
   //app:build
   //data:build
@@ -95,7 +98,7 @@ depends on.
 smithers-build query 'owners(//lib:srcs)'
 ```
 
-```
+```text
 //lib agents: human-approve
   libby                     approve  direct
   team:platform             approve  inherited from //
@@ -111,13 +114,13 @@ the [owners command](../reference/cli.md#owners). See
 pattern matches, regardless of its kinds.
 
 ```sh
-smithers-build graph //packages/smithers/flows/engine:lib
+smithers-build graph //packages/app:lib
 ```
 
-```
-//packages/smithers/flows/engine:lib (TsBuild)
-└─ //packages/smithers/flows/flow:lib (TsBuild)
-   └─ //packages/smithers/flows/plan:lib (TsBuild)
+```text
+//packages/app:lib (TsBuild)
+└─ //packages/greeter:lib (TsBuild)
+   └─ //packages/core:lib (TsBuild)
 ```
 
 The tree renders each root and recurses into its dependencies. A label the plan
@@ -131,10 +134,10 @@ without looping.
 smithers-build graph //packages/... --mermaid
 ```
 
-```
+```text
 flowchart LR
-  n_2f2f...["//packages/smithers/flows/plan:lib\nTsBuild"]
-  n_2f2f...["//packages/smithers/flows/flow:lib\nTsBuild"]
+  n_2f2f...["//packages/core:lib\nTsBuild"]
+  n_2f2f...["//packages/greeter:lib\nTsBuild"]
   n_2f2f... --> n_2f2f...
 ```
 

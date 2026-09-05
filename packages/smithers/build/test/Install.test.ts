@@ -1,5 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { Flow, Graph } from "@smthrs/flow"
+import * as FileSet from "@smthrs/plan/FileSet"
+import * as Plan from "@smthrs/plan/Plan"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Fs from "node:fs/promises"
@@ -95,6 +97,29 @@ const packageJsonDigest = (root: string) =>
   Effect.runPromise(PackageManager.packageJsonDigest(root).pipe(Effect.provide(NodeServices.layer)))
 
 describe("Install", () => {
+  it("plans the non-restorable link honestly instead of declaring it cacheable or compensable", async () => {
+    expect(Install.Link.tier).toBe("irreversible")
+    for (const manager of ["pnpm", "bun"] as const) {
+      const nodes = Graph.drafts(Graph.build(Install.Install, { manager }))
+      const plan = await Effect.runPromise(
+        Plan.compile({ planId: `install-${manager}`, flow: Install.Install._tag, nodes })
+          .pipe(Effect.provide(NodeServices.layer))
+      )
+      const links = plan.nodes.filter((node) => node.material.kind === "irreversible")
+      expect(links).toHaveLength(1)
+      for (const path of ["node_modules", "node_modules/dep/index.js", "packages/child/node_modules/dep/index.js"]) {
+        expect(
+          links[0]!.effects.writes.some((entry) =>
+            FileSet.expand([entry]).some((write) => FileSet.overlaps(write, path))
+          )
+        ).toBe(true)
+      }
+      expect(
+        await Effect.runPromise(Plan.verify(JSON.parse(JSON.stringify(plan))).pipe(Effect.provide(NodeServices.layer)))
+      ).toEqual(plan)
+    }
+  })
+
   it("keeps every absolute-root package-manager action out of the shared cache", () => {
     for (const action of [Install.FetchPnpm, Install.FetchBun]) {
       expect(Context.getUnsafe(action.annotations, Flow.EffectsDeclaration).boundaryMode).toBe("expected")

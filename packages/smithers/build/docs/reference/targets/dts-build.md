@@ -1,11 +1,14 @@
-# DtsBuild
+---
+title: "DtsBuild"
+description: "Emits TypeScript declarations with tsc --emitDeclarationOnly or tsup --dts-only."
+---
 
 Emits TypeScript declarations with `tsc --emitDeclarationOnly` or
 `tsup --dts-only`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const types = Smithers.DtsBuild({
   packageManager,
@@ -15,7 +18,7 @@ export const types = Smithers.DtsBuild({
   tsconfig: Smithers.file("tsconfig.build.json"),
   tool: { name: "tsc", declarationMap: true },
   outDir: "dist",
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -42,13 +45,13 @@ emitted tree matches the declared policy whatever the tsconfig says. The
 tsconfig still owns the destination, and `outDir` remains the declared capture
 path:
 
-```
+```text
 pnpm exec tsc -p <tsconfig.path> --declaration --emitDeclarationOnly --declarationMap <true|false>
 ```
 
 For `tsup`:
 
-```
+```text
 pnpm exec tsup <entries...> --dts-only --out-dir <outDir>
 ```
 

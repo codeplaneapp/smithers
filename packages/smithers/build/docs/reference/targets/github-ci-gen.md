@@ -1,9 +1,12 @@
-# GithubCiGen
+---
+title: "GithubCiGen"
+description: "Generates the GitHub Actions CI workflow from declared jobs, and fails on drift. No attribute anywhere accepts a command."
+---
 
 Generates the GitHub Actions CI workflow from declared jobs. The workflow is a
 generated root file on the same terms as `tsconfig.json`: PACKAGE.ts is the only
-description of the pipeline, `write` renders it, and `check` — the default —
-fails on drift. By contrast, `pnpm-workspace.yaml` is a hand-written planner
+description of the pipeline, `write` renders it, and `check`, the default, fails
+on drift. By contrast, `pnpm-workspace.yaml` is a hand-written planner
 input because pnpm may add settings outside the target schema.
 
 **A job declares what it requires and which targets it runs. Nothing in the
@@ -221,7 +224,7 @@ Branch protection lists them individually.
 | Name          | Type                | Default            | Description                                                                                                          |
 | ------------- | ------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | `name`        | `string`            | optional           | Operator-facing step name.                                                                                           |
-| `verb`        | `Verb.PipelineVerb` | required           | `Verb.Build`, `Verb.Test`, `Verb.Lint`, `Verb.Docs`, or `Verb.Ci` — the aggregate that plans every kind in one call. |
+| `verb`        | `Verb.PipelineVerb` | required           | `Verb.Build`, `Verb.Test`, `Verb.Lint`, `Verb.Docs`, or `Verb.Ci`, the aggregate that plans every kind in one call. |
 | `pattern`     | `string`            | required           | `//...`, `//pkg/...`, `//pkg`, `//pkg:target`, or `//:target`. Rendered as one single-quoted shell word.             |
 | `parallelism` | `number`            | the CLI's own size | `--jobs` bound, 1 to 256.                                                                                            |
 
@@ -241,7 +244,7 @@ a declaration that cannot be written.
 A gate is a claim about coverage that outlives the job list: "the docs verb
 still runs over the packages". It is checked against the declared steps, so it
 cannot be satisfied by a comment that happens to contain the right words, and a
-wider pattern does not satisfy a narrower gate — a different pattern is a
+wider pattern does not satisfy a narrower gate, because a different pattern is a
 different claim.
 
 ## CiToolchain
@@ -259,19 +262,19 @@ interpreters, and runs the install and every target step inside
 | `submodules`   | `boolean`             | `false`  | `actions/checkout@v4` with `submodules: recursive`.                                                                                                                                                       |
 | `install`      | `boolean`             | `true`   | The manager's setup action and its frozen, script-free install.                                                                                                                                           |
 | `runtimes`     | `Array<RuntimeSetup>` | `[]`     | `CiToolchain.Node({ runtime, release })` / `CiToolchain.Bun({ runtime, release })`.                                                                                                                       |
-| `rust`         | `RustSetup`           | optional | `CiToolchain.Rust({ toolchain })` — `rustup toolchain install`, plus the cache by default.                                                                                                                |
-| `jj`           | `JjSetup`             | optional | `CiToolchain.Jj({ release })` — the pinned jj-cli, and a colocated repository.                                                                                                                            |
-| `nix`          | `NixSetup`            | optional | `CiToolchain.Nix({ environment, installer?, substituter?, publicKey? })` — installs Nix and wraps every command in `nix develop`; refused beside `runtimes`, `rust`, `jj`, `ripgrep`, `go`, or `foundry`. |
-| `browser`      | `SystemBrowser`       | optional | `CiToolchain.Browser({ executable, reason })` — asserts the runner image ships it.                                                                                                                        |
+| `rust`         | `RustSetup`           | optional | `CiToolchain.Rust({ toolchain })`: `rustup toolchain install`, plus the cache by default.                                                                                                                |
+| `jj`           | `JjSetup`             | optional | `CiToolchain.Jj({ release })`: the pinned jj-cli, and a colocated repository.                                                                                                                            |
+| `nix`          | `NixSetup`            | optional | `CiToolchain.Nix({ environment, installer?, substituter?, publicKey? })`: installs Nix and wraps every command in `nix develop`; refused beside `runtimes`, `rust`, `jj`, `ripgrep`, `go`, or `foundry`. |
+| `browser`      | `SystemBrowser`       | optional | `CiToolchain.Browser({ executable, reason })`: asserts the runner image ships it.                                                                                                                        |
 | `workflowLint` | `WorkflowLint`        | optional | `CiToolchain.Actionlint({ release, workflows })`.                                                                                                                                                         |
-| `artifacts`    | `ArtifactUpload`      | optional | `CiToolchain.Artifacts({ artifact, sources })` — collect and upload.                                                                                                                                      |
+| `artifacts`    | `ArtifactUpload`      | optional | `CiToolchain.Artifacts({ artifact, sources })`: collect and upload.                                                                                                                                      |
 
 Every version a runner downloads is enumerated by the schema, for the reason
 `Runtime.NodeVersion` is enumerated: the set of versions a workspace may pin is
 reviewed, not free text. A pin that names a release the publisher does not have
 is a CI failure at 03:00; a pin outside the enumeration is a type error at the
-call site. Action references are constants of the implementation, never attrs —
-an action reference is an argv by another name.
+call site. Action references are constants of the implementation, never attrs,
+because an action reference is an argv by another name.
 
 ## Generation guarantees
 
@@ -307,7 +310,7 @@ Every refusal is a throw at plan time, before any file is written.
 Rendered scalars are quoted unless YAML reads them back as exactly the declared
 string. Every attribute is declared a `string`, so a value that would resolve to
 a boolean (`true`, `yes`, `off`), null (`null`, `~`), a number (`22`, `1e5`,
-`0x1A`, `0777`, `12:30`), or a timestamp (`2026-08-14`) is quoted — a workflow
+`0x1A`, `0777`, `12:30`), or a timestamp (`2026-08-14`) is quoted. A workflow
 named `true` would otherwise become the boolean `true`, and a branch `null` an
 empty entry. The target applies to KEYS too: a job id and a `with:`/`env:` name
 are declared strings as much as values are, so `no:`, `ON:`, and `Y:` are
@@ -318,7 +321,7 @@ their unquoted form byte for byte.
 label set (`[self-hosted, linux]`) stays a sequence, and each label is judged on
 its own terms, so `[self-hosted, null]` renders `[self-hosted, "null"]` rather
 than silently losing a label. A value that opens a flow collection without being
-that label set — `[self-hosted, my label]`, `{group: g, labels: [x]}`, `[]` — is
+that label set (`[self-hosted, my label]`, `{group: g, labels: [x]}`, `[]`) is
 **refused**, because quoting it would produce a single label no runner carries
 and a job that never picks up. An expression in a declared `runsOn` string
 (`${{ matrix.os }}`) is a quoted scalar, which GitHub still evaluates.
@@ -340,8 +343,8 @@ instead: the copies tolerate an empty source and the upload declares
 ### The workspace binary
 
 Every target step runs the workspace binary the declared install put in the
-tree — `pnpm exec smithers-build …`, `bun x smithers-build …` — so the CLI that runs is the one
-the lockfile pinned, never a fetched one. The pattern is rendered as one
+tree, as `pnpm exec smithers-build …` or `bun x smithers-build …`, so the CLI
+that runs is the one the lockfile pinned, never a fetched one. The pattern is rendered as one
 single-quoted shell word, a literal in every default GitHub Actions shell
 (`bash` on Linux and macOS, `pwsh` on Windows), so the runner cannot
 glob-expand or re-split it.
@@ -360,9 +363,9 @@ Write mode is non-cacheable.
 
 ## See also
 
-- [NodeTest](node-test.md) and [NodeBinary](node-binary.md) — the targets a
+- [NodeTest](node-test.md) and [NodeBinary](node-binary.md): the targets a
   script gate becomes
-- [CargoLint / CargoTest](cargo.md) — the targets a Rust gate becomes
-- [Writing BUILD files](../../workspace/writing-build-files.md#build-files-declare-targets-never-commands)
+- [CargoLint and CargoTest](cargo.md): the targets a Rust gate becomes
+- [Writing build files](../../workspace/writing-build-files.md#build-files-declare-targets-never-commands)
 - [Running targets](../../workspace/running-targets.md)
 - [Remote caching](../../workspace/remote-caching.md)

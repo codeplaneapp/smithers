@@ -1,4 +1,7 @@
-# Inputs
+---
+title: "Inputs"
+description: "The file(), glob(), and gitDiff() input declarations: how each resolves against a package, when the planner digests it, and what revalidation catches."
+---
 
 An input is a declaration of content a target depends on. Declaring it is pure;
 measuring it happens later.
@@ -53,10 +56,10 @@ that declared it. A value starting with `//` resolves from the workspace root
 instead.
 
 ```ts
-// In packages/smithers/flows/flow/PACKAGE.ts
-file("tsconfig.json") // packages/smithers/flows/flow/tsconfig.json
+// In packages/greeter/PACKAGE.ts
+file("tsconfig.json") // packages/greeter/tsconfig.json
 file("//eslint.jsdoc.js") // eslint.jsdoc.js
-glob("src/**/*.ts") // packages/smithers/flows/flow/src/**/*.ts
+glob("src/**/*.ts") // packages/greeter/src/**/*.ts
 ```
 
 The result is a normalized workspace-relative posix path. A value that escapes
@@ -64,7 +67,7 @@ the workspace throws `declared input escapes the workspace: <value>`.
 
 The package directory used here is the target's `PACKAGE.ts` directory, which is
 not the same thing as the target's `cwd` attribute. `cwd` is where the tool
-process starts. Both are usually the same directory, and `StandardPackage`
+process starts. Both are usually the same directory, and `buildAndCheckPackage`
 passes the package directory as `cwd`, but they are resolved independently.
 
 ## Glob expansion
@@ -88,8 +91,8 @@ The walk:
 ### Globs are package scoped
 
 Like Bazel, a glob only sees its own package. A recursive pattern declared in
-`packages/smithers/flows/flow` matches `packages/smithers/flows/flow/src/index.ts`, but stops before
-`packages/smithers/flows/flow/examples/index.ts` once `packages/smithers/flows/flow/examples/PACKAGE.ts` exists.
+`packages/greeter` matches `packages/greeter/src/index.ts`, but stops before
+`packages/greeter/examples/index.ts` once `packages/greeter/examples/PACKAGE.ts` exists.
 Those files belong to the subpackage's own targets; a target that wants them
 depends on that package's label instead.
 
@@ -98,10 +101,10 @@ never mistaken for a package marker on a case-insensitive filesystem.
 
 The target applies to every glob in every target. It also applies before the
 pattern's static-prefix directory: starting a walk at
-`packages/smithers/flows/flow/examples/src` does not bypass a `packages/smithers/flows/flow/examples/PACKAGE.ts`
+`packages/greeter/examples/src` does not bypass a `packages/greeter/examples/PACKAGE.ts`
 boundary. A `//`-rooted glob resolves its pattern from the workspace root but
-remains scoped to the declaring package: `//packages/smithers/flows/flow/src/**/*.ts` is legal
-from `packages/smithers/flows/flow`, while `//*.ts` is not. Depend on another package's label
+remains scoped to the declaring package: `//packages/greeter/src/**/*.ts` is legal
+from `packages/greeter`, while `//*.ts` is not. Depend on another package's label
 instead. This deliberately follows Bazel package boundaries; only `file()`
 keeps the smithers build extension that permits `//`-anchored cross-package file
 references.
@@ -198,7 +201,7 @@ export const rootJSDocConfig = file("//eslint.jsdoc.js")
 ```
 
 ```ts
-// packages/smithers/flows/flow/PACKAGE.ts
+// packages/greeter/PACKAGE.ts
 import { rootJSDocConfig } from "../../PACKAGE.ts"
 
 export const lint = EsLint({
@@ -231,8 +234,8 @@ matched.
 
 A declared input that changed, or that can no longer be read, fails the target.
 Dependents are blocked, nothing is published to the cache, and every other target
-still runs. The alternative — trusting the plan's measurement — would answer a
-hit under a key that no longer describes the tree, or publish a result under one.
+still runs. The alternative, trusting the plan's measurement, would answer a hit
+under a key that no longer describes the tree, or publish a result under one.
 
 See [Caching](../workspace/caching.md#inputs-are-revalidated-not-assumed) for
 the window this closes and the one syscall-level race that remains.
@@ -241,4 +244,4 @@ the window this closes and the one syscall-level race that remains.
 
 - [Dependencies](dependencies.md)
 - [Caching](../workspace/caching.md)
-- [Writing targets](../extending/writing-targets.md)
+- [Writing target definitions](../extending/writing-targets.md)

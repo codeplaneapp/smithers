@@ -1,4 +1,7 @@
-# FAQ
+---
+title: "FAQ"
+description: "Short answers about PACKAGE.ts evaluation, dependency edges, confinement, caching, and which smithers build targets execute today."
+---
 
 ## Is `PACKAGE.ts` really just TypeScript?
 
@@ -64,7 +67,11 @@ limited to admitted inputs, dependency outputs, and tool support paths such as
 `node_modules`; writes are limited to admitted outputs and private scratch
 paths. Networking is closed unless the policy explicitly opens it.
 
-Native bubblewrap and seatbelt confinement **does not hide host files outside
+Yes, where a policy asks for it. A target declares `sandbox`, and
+`sandbox: "none"` is the opt-out. The workspace declaration's `sandboxes`
+option names the mechanisms available, with `default` as the one a target that
+asks for confinement without naming another gets: bubblewrap on Linux, Docker
+where the workspace declares an image. Native bubblewrap and seatbelt confinement **does not hide host files outside
 the workspace** (apart from Linux's private `/tmp`). The real home's `.ssh`,
 `.aws`, and `SMITHERS_HOME` remain readable when outside those hidden roots.
 Redirecting `HOME` does not prevent a tool from opening their original paths.
@@ -85,12 +92,12 @@ graph of links into a host-local store, so restoring one from another machine
 would produce a tree pointing at nothing. See
 [Install](../concepts/install.md).
 
-## Why do two targets of the same target need separate runtimes?
+## Why do two targets of one definition need separate runtimes?
 
 A target is a flow tagged by target id. Two `TsBuild` targets share that tag, so
 registering both with one engine would alias their bodies. The executor gives
-each target a fresh in-memory runtime. `API-REVIEW.md` records this as an open
-API question.
+each target a fresh in-memory runtime. Whether that stays the answer is an open
+design question.
 
 ## Does `--plan` tell me whether a target is cached?
 

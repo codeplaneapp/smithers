@@ -19,16 +19,13 @@
     "test": "vitest run",
     "lint": "eslint worker scripts deployment.ts alchemy.run.ts --max-warnings=0 && dprint check"
   },
-  "dependencies": {
-    "alchemy": "2.0.0-beta.72",
-    "effect": "4.0.0-rc.108",
-    "@smthrs/canonical": "1.0.0-rc.0"
-  },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260814.1",
-    "@types/node": "25.9.5",
+    "@cloudflare/workers-types": "5.20260903.1",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "typescript": "6.0.3",
+    "alchemy": "2.0.0-beta.76",
+    "effect": "4.0.0-rc.112",
+    "typescript": "5.9.3",
     "vitest": "4.1.9",
     "eslint": "9.39.1",
     "typescript-eslint": "8.65.0",

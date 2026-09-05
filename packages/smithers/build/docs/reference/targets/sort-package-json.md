@@ -1,17 +1,20 @@
-# SortPackageJson
+---
+title: "SortPackageJson"
+description: "Validates or rewrites package.json key ordering with sort-package-json."
+---
 
 Validates or rewrites `package.json` key ordering with `sort-package-json`.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const manifestOrder = Smithers.SortPackageJson({
   packageManager,
   manifests: [Smithers.file("package.json")],
   deps: [],
   check: true,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -30,7 +33,7 @@ export const manifestOrder = Smithers.SortPackageJson({
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec sort-package-json [--check] <manifests...>
 ```
 

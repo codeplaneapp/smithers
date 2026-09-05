@@ -1,4 +1,7 @@
-# TypedocDocs
+---
+title: "TypedocDocs"
+description: "Generates API documentation with TypeDoc."
+---
 
 Generates API documentation with TypeDoc.
 
@@ -14,7 +17,7 @@ export const docs = Smithers.TypedocDocs({
   deps: [],
   tsconfig: Smithers.file("//tsconfig.json"),
   config: Smithers.file("//typedoc.json"),
-  entryPoints: [Smithers.file("//packages/smithers/flows/flow/src/index.ts")],
+  entryPoints: [Smithers.file("//packages/greeter/src/index.ts")],
   outDir: "//docs/api",
   plugin: ["typedoc-plugin-markdown"]
 })
@@ -40,7 +43,7 @@ There is no `cwd` attribute. The run always happens at the workspace root.
 The argv is `PackageManager.exec` of the declared package manager. With the
 pnpm declaration:
 
-```
+```text
 pnpm exec typedoc --out <outDir> --tsconfig <tsconfig.path> \
   [--options <config.path>] [--plugin <name>]... <entryPoints...>
 ```

@@ -1,4 +1,7 @@
-# Lockfile
+---
+title: "Lockfile"
+description: "Generates the lockfile for the package manager the workspace declared."
+---
 
 Generates the lockfile for the declared package manager.
 

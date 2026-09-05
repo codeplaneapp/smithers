@@ -1,4 +1,7 @@
-# ToolRun
+---
+title: "ToolRun"
+description: "Runs one arbitrary external command for its side effect: a deploy, a migration, a release upload."
+---
 
 Runs one arbitrary external command for its side effect: a deploy, a migration,
 a training-job launch, a release upload. This is the run-kind sibling of
@@ -31,7 +34,7 @@ export const sftLaunch = Smithers.ToolRun({
 
 Run it explicitly, and only through the `run` verb:
 
-```
+```text
 pnpm exec smithers-build run '//evals/authoring:sftLaunch'
 ```
 
@@ -41,13 +44,13 @@ Reach for `ToolRun` when an operation changes external state and has no file
 output to cache. It is the deliberate escape hatch for a one-off command, the
 way [ToolBuild](tool-build.md) is for a one-off build. When the operation has a
 stable identity, add a purpose-built target type instead: the release targets
-[NpmPublish](../../../targets/src/NpmPublish.ts) and `JsrPublish` are the
-worked examples, and adding a type is what the
-[no-raw-commands rule](../../../../../../CONTRIBUTING.md) asks for over reaching for
-this escape hatch. Do not use `ToolRun` for a check whose exit code is a
-verdict — that is a cacheable gate, so it is a [NodeTest](node-test.md),
-`Vitest`, or a lint target. Do not use it for a long-lived watch process — that
-is [Dev](dev.md).
+[NpmPublish](npm-publish.md) and [JsrPublish](jsr-publish.md) are the worked
+examples, and adding a type is what
+[build files declare targets, never commands](../../workspace/writing-build-files.md#build-files-declare-targets-never-commands)
+asks for over reaching for this escape hatch. Do not use `ToolRun` for a check
+whose exit code is a verdict: that is a cacheable gate, so it is a
+[NodeTest](node-test.md), `Vitest`, or a lint target. Do not use it for a
+long-lived watch process, which is [Dev](dev.md).
 
 ## Attributes
 
@@ -65,7 +68,7 @@ is [Dev](dev.md).
 
 ## Command
 
-```
+```text
 <command> <args...>
 ```
 
@@ -81,8 +84,7 @@ A credential is declared with `Smithers.Secret("ENV_NAME")`, never as a literal
 in `env`. The value is read from the named environment variable at execution
 time and substituted into the child process by the proxy, so it appears in
 neither the recorded plan nor the content key. A `ToolRun` that a coding agent
-runs still receives the credential; a plan a human reads never shows it. See
-[Secret](../../../targets/src/Secret.ts).
+runs still receives the credential; a plan a human reads never shows it.
 
 ## Channels
 
@@ -128,4 +130,4 @@ The command is spawned directly, never through a shell, so shell features
 - [ToolBuild](tool-build.md) for a cached build that produces file outputs
 - [Dev](dev.md) for a long-lived process
 - [NodeTest](node-test.md) for a gate whose exit code is a verdict
-- [Writing targets](../../extending/writing-targets.md)
+- [Writing target definitions](../../extending/writing-targets.md)

@@ -1,11 +1,18 @@
-# PackageJson
+---
+title: "PackageJson"
+description: "Declares package.json in PACKAGE.ts and expands it into separate check, write, and model-refresh targets."
+---
+
+Examples importing `buildAndCheckPackage` use the [local helper defined here](standard-package.md). Create that file in your repository before using those examples.
+
 
 Declares `package.json` in `PACKAGE.ts` and expands it into separate check, write,
 and LLM-refresh targets.
 
 ```ts
+import { buildAndCheckPackage } from "./package-targets.ts"
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const template = Smithers.PackageJsonTemplate.make({
   license: "MIT",
@@ -14,7 +21,7 @@ export const template = Smithers.PackageJsonTemplate.make({
   scripts: Smithers.PackageJsonTemplate.standardScripts
 })
 
-const standard = Smithers.StandardPackage({ packageManager, cwd: "packages/widget" })
+const standard = buildAndCheckPackage({ packageManager, cwd: "packages/widget" })
 
 export const packageJson = Smithers.PackageJson({
   name: "@smthrs/widget",

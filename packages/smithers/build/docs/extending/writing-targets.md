@@ -1,10 +1,13 @@
-# Writing targets
+---
+title: "Writing target definitions"
+description: "Target.make: the attrs schema, the pure plan-time implementation, declared inputs and outputs, verb-effective attrs, and typed failures."
+---
 
 `Target.make(id, options)` creates a callable target definition. The result is a
 function from attributes to a target, carrying `id`, `attrs`, and `kinds`.
 
 ```ts
-// packages/smithers/build/targets/src/Typecheck.ts
+// Typecheck.ts, in @smthrs/targets
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import * as Exec from "./Exec.ts"
@@ -143,7 +146,7 @@ Target.runTool({ cwd, argv: buildArgv(attrs) }).pipe(
 
 Two keyless dispatches of one action at the same time are refused with
 `ConcurrentKeylessDispatch`. Sequencing is what prevents it: give
-`Node.andThen` the next action call itself, or pass the first step's planned
+`Node.andThen` the next action call itself, or use `Node.bindPlanned` to pass the first step's planned
 result into the second payload's `after` field, so the ordering is a material
 dependency. `captureOutputs` takes the first route.
 
@@ -189,7 +192,7 @@ lists the whole target.
 Two limits of the plan AST decide the shape above, and a target that ignores them
 fails at execution rather than at build time:
 
-- The builder form of `Node.andThen`, and `Node.map`, keep their plan-time
+- `Node.bindPlanned`, and `Node.map`, keep their plan-time
   function in a side table the AST loses on its way to the engine. Executing a
   target built from either refuses with `incomplete_graph` or `missing_operation`.
   Give `Node.andThen` a node, and let the last action's own success type be what
@@ -305,17 +308,17 @@ See [Actions and boundaries](../concepts/actions-and-boundaries.md).
 
 ## Registering the target
 
-Export it from `packages/smithers/build/targets/src/index.ts`:
+Export it from the package that holds your catalog:
 
 ```ts
 /** @category targets @since 0.1.0 */
 export { Typecheck } from "./Typecheck.ts"
 ```
 
-If the target needs non-default key material, add it to the `layers` or
-`capabilities` table in `packages/smithers/build/build-cli/src/Planner.ts`. Both tables are hand-maintained
-today; `API-REVIEW.md` records that they should eventually be derived from the
-real flow graph.
+If the target needs non-default key material, add it to the planner's `layers`
+or `capabilities` table in [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli). Both tables
+are hand-maintained today; deriving them from the real flow graph is an open
+design question.
 
 Then add a page under [the target catalog](../reference/targets/README.md).
 

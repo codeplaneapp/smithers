@@ -1,4 +1,7 @@
-# Target catalog
+---
+title: "Target catalog"
+description: "Every target in @smthrs/targets, one page each, with attribute tables, declared inputs, channels, and execution status."
+---
 
 Every target in `@smthrs/targets`. Each page lists the target's attributes, its
 declared inputs, its success and error channels, and whether it executes today.
@@ -79,8 +82,6 @@ exists for future additions and is unused. See
 | Target                       | Kinds  | Cacheable | Status   | Summary                                                |
 | ---------------------------- | ------ | --------- | -------- | ------------------------------------------------------ |
 | [DocsParity](docs-parity.md) | `docs` | Always    | Executes | Requires a substantive README beside a package's code. |
-| [Docs.Page](docs-page.md) | `docs` | Never | Executes | Writes one documentation page with an agent; `ci` never selects it. |
-| [Docs.Check](docs-check.md) | `lint`, `docs` | Check form | Executes | Fails when a committed agent-written page is older than its inputs, or was hand-edited. |
 | [Markdown.CodeBlocks](markdown-code-blocks.md) | `build`, `test` | Always | Executes | Compiles a page's fenced code blocks; `title=` fences concatenate into files, `fragment` fences are skipped. |
 
 `PackageJson` uses separate targets for checking and source-tree writes.
@@ -113,7 +114,7 @@ under `build`, `test`, or `lint`. It is still addressable by label, listed by
 
 | Name                                                                     | Summary                                                                     |
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| [StandardPackage](standard-package.md)                                   | Expands one conventional TypeScript package into `lib`, `test`, and `lint`. |
+| [buildAndCheckPackage](standard-package.md)                                   | Expands one conventional TypeScript package into `lib`, `test`, and `lint`. |
 | [PackageJsonTemplate](package-json-gen.md#templates-and-merge-semantics) | Holds inert workspace-wide manifest defaults.                               |
 
 ## Authoring surface
@@ -122,7 +123,7 @@ These modules are not targets. They are documented elsewhere.
 
 | Module            | Documented in                                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
-| `Target`          | [Writing targets](../../extending/writing-targets.md), [Targets and targets](../../concepts/targets.md) |
+| `Target`          | [Writing target definitions](../../extending/writing-targets.md), [Target definitions and targets](../../concepts/targets.md) |
 | `Input`           | [Inputs](../../concepts/inputs.md)                                                                      |
 | `Exec`            | [Actions and boundaries](../../concepts/actions-and-boundaries.md)                                      |
 | `Workspace`       | [Workspace reference](../config.md)                                                                     |

@@ -14,15 +14,15 @@
  * | ------- | ------ | -------- | ------------------------------- |
  * | measure | sealed | expected | no                              |
  * | fetch/* | sealed | expected | no                              |
- * | link    | sealed | expected | no                              |
+ * | link    | irreversible | expected | no                        |
  *
- * Every tier is `sealed` because `Plan.compile` refuses to key anything else:
- * `StepKey.fromKeyMaterial` fails with `non_content_material` for
- * `compensable` and `irreversible` declarations, so an `Action` declared at
- * either tier makes the flow unplannable. The `expected` boundary mode is what
- * keeps measure and link out of the cross-run cache, because
+ * All effect tiers can be planned. Measure and fetch use `expected` boundaries,
+ * which keep them out of the cross-run cache, because
  * `ActionPersistence` admits a result only when the tier is `sealed` AND the
- * boundary mode is `hard`. No install action currently uses that mode.
+ * boundary mode is `hard`. Link uses a run-local identity and cannot publish
+ * a cache entry regardless of boundary mode. It is not compensable: ordinary
+ * workspace snapshots omit ignored `node_modules` trees and cannot restore a
+ * half-finished link. No automatic retry or blind crash recovery is promised.
  *
  * A `node_modules` tree is a graph of links into a local store, so
  * restoring one from another machine would produce a tree whose entries point
@@ -242,15 +242,14 @@ export const FetchBun = makeFetch("smithers-build/install/fetch/bun", "bun.lock"
 /**
  * Materializes `node_modules` from the already-populated store.
  *
- * Its `expected` boundary is what keeps it out of the cross-run cache;
- * `compensable` would say the same thing about retry semantics but would make
- * the flow unplannable, so the tier stays `sealed`. See the module doc. Its
- * step key still supports local freshness checks: an unchanged key lets the
- * same run, or the next run on this machine, skip the work.
- * Its write set is empty on purpose. The current boundary contract turns
- * declared writes into materialized artifacts, so naming `node_modules` would
- * violate the target that this tree is never cached. An isolated sandbox may
- * observe the write as an expected-set deviation without failing the action.
+ * Its `irreversible` tier keeps it out of the cross-run cache. Here the
+ * boundary is the restorable workspace, not the physical project directory:
+ * ignored dependency trees are outside a normal snapshot. A completed attempt
+ * replays within its run; a new run reconciles the tree again. An uncertain
+ * interrupted attempt requires operator reconciliation, not a blind retry.
+ * Its expected write set names root and nested dependency trees for conflict
+ * ordering. A non-sealed write declaration does not publish file artifacts,
+ * so the planner can see these mutations without caching the installed tree.
  *
  * @category actions
  * @since 0.1.0
@@ -263,14 +262,11 @@ export const Link = Action.make("smithers-build/install/link", {
   },
   success: LinkManifest,
   error: PackageManager.PackageManagerError,
-  tier: "sealed"
+  tier: "irreversible"
 })
   .annotate(Flow.EffectsDeclaration, {
     reads: ["package.json"],
-    // A declared output is also materialized evidence in the current engine.
-    // Naming node_modules here would cache the tree as file artifacts. The
-    // expected boundary instead records sandbox-observed writes as a deviation.
-    writes: [],
+    writes: [{ _tag: "Glob", include: ["**/node_modules", "**/node_modules/**"] }],
     boundaryMode: "expected"
   })
 
@@ -344,7 +340,7 @@ const measureFetchLink = <R>(
   | Action.Requirement<"smithers-build/install/link">
 > =>
   Measure.call({ manager }).pipe(
-    Node.andThen((content) => fetch(content).pipe(Node.andThen((store) => Link.call({ content, store }))))
+    Node.bindPlanned((content) => fetch(content).pipe(Node.bindPlanned((store) => Link.call({ content, store }))))
   )
 
 /**

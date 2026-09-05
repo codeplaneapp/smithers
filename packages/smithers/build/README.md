@@ -2,16 +2,16 @@
 
 **Documentation:** https://smithers-build.smithers.sh
 
-`@smthrs/build` is a Bazel-style build orchestrator for TypeScript
-workspaces.
-`PACKAGE.ts` files are ordinary TypeScript modules whose named exports are
-targets. Rules declare inputs, outputs, capabilities, cacheability, and the
-flow that implements the target; imports between build files form dependency
-edges.
+`@smthrs/build` expresses dependency installation as a keyed flow, and holds a
+host to the interpreter and package manager the workspace declared. It is one
+of the three packages that make up smithers build, a Bazel-style build
+orchestrator for TypeScript workspaces: `PACKAGE.ts` modules declare targets,
+a `WORKSPACE.ts` module declares the toolchain once, and imports between
+declaration files form dependency edges.
 
 The complete user documentation lives in [`docs/`](docs/README.md). It covers
-workspace authoring, every CLI verb, the rule catalog, caching, and the install
-flow.
+workspace authoring, every CLI verb, the target catalog, caching, and the
+install flow.
 
 ## Current execution model
 
@@ -73,20 +73,25 @@ custom workspace-relative cache directory.
 
 ## Cache directory
 
-The root `PACKAGE.ts` may declare where target results and rule scratch files
+The workspace declaration says where target results and target scratch files
 live:
 
 ```ts
-import { Smithers } from "@smthrs/targets"
+// .smithers/WORKSPACE.ts
+import { Smithers as S } from "@smthrs/targets"
 
-export const config = Smithers.Workspace({ cacheDirectory: ".flows", gitignored: true })
+export const Workspace = S.Workspace("demo", {
+  repository: "git+https://example.invalid/demo.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime,
+  packageManager,
+  nodeModules
+})
 ```
 
 Precedence is `--cache-dir`, then the declaration, then `.flows`. The value is
 bounded, control-free, workspace-relative text; absolute paths, parent
-traversal, oversized segments, and malformed Unicode are refused. When
-`gitignored` is true, the CLI updates the root `.gitignore` with a bounded,
-descriptor-stable, atomic read-modify-write.
+traversal, oversized segments, and malformed Unicode are refused.
 
 The resolved directory is host state and never enters a target key. Discovery
 and globs exclude it, as well as the fixed `.flows/store` install tree.
@@ -96,10 +101,15 @@ and globs exclude it, as well as the fixed `.flows/store` install tree.
 Declare an endpoint without embedding a credential:
 
 ```ts
-import { Smithers } from "@smthrs/targets"
+// .smithers/WORKSPACE.ts
+const remote = S.RemoteCache.make({ endpoint: "https://build.smithers.sh" })
 
-export const remoteCache = Smithers.RemoteCache.make({
-  endpoint: "https://build.smithers.sh"
+export const Workspace = S.Workspace("demo", {
+  repository: "git+https://example.invalid/demo.git",
+  cache: S.Cache({ directory: ".flows", remote }),
+  runtime,
+  packageManager,
+  nodeModules
 })
 ```
 
@@ -108,15 +118,15 @@ reading from publishing declares the split form instead, and the two values
 arrive through `SMITHERS_CACHE_READ_TOKEN` and `SMITHERS_CACHE_WRITE_TOKEN`:
 
 ```ts
-export const remoteCache = Smithers.RemoteCache.make({
+const remote = S.RemoteCache.make({
   endpoint: "https://build.smithers.sh",
-  read: Smithers.Secret("SMITHERS_CACHE_READ_TOKEN"),
-  write: Smithers.Secret("SMITHERS_CACHE_WRITE_TOKEN")
+  read: S.Secret("SMITHERS_CACHE_READ_TOKEN"),
+  write: S.Secret("SMITHERS_CACHE_WRITE_TOKEN")
 })
 ```
 
-A bearer value must arrive through an environment variable and never enters
-`PACKAGE.ts`, a target key, or a stored entry. `SMITHERS_CACHE_URL` can override
+A bearer value must arrive through an environment variable and never enters a
+declaration file, a target key, or a stored entry. `SMITHERS_CACHE_URL` can override
 the declared HTTPS endpoint for one process. See
 [remote caching](docs/workspace/remote-caching.md) for which job gets which
 credential, and `infra/CACHE-TRUST.md` for the trust model the split exists to

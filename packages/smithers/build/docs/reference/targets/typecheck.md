@@ -1,10 +1,13 @@
-# Typecheck
+---
+title: "Typecheck"
+description: "Checks a package with tsc --noEmit or TypeScript build mode."
+---
 
 Checks a package with `tsc --noEmit` or TypeScript build mode.
 
 ```ts
 import { Smithers } from "@smthrs/targets"
-import { packageManager } from "../../../../../../PACKAGE.ts"
+import { packageManager } from "../../PACKAGE.ts"
 
 export const typecheck = Smithers.Typecheck({
   packageManager,
@@ -13,7 +16,7 @@ export const typecheck = Smithers.Typecheck({
   tsconfig: Smithers.file("tsconfig.json"),
   buildMode: false,
   incremental: false,
-  cwd: "packages/smithers/flows/flow"
+  cwd: "packages/greeter"
 })
 ```
 
@@ -34,13 +37,13 @@ export const typecheck = Smithers.Typecheck({
 The argv is `PackageManager.exec` of the declared package manager. Plain mode,
 with the pnpm declaration:
 
-```
+```text
 pnpm exec tsc -p <tsconfig.path> --noEmit [--incremental]
 ```
 
 Build mode, for project references:
 
-```
+```text
 pnpm exec tsc -b <tsconfig.path> [--force]
 ```
 
@@ -73,7 +76,7 @@ summary.
 
 ## Notes
 
-`StandardPackage` emits a `Typecheck` target as `check`, over the package's
+`buildAndCheckPackage` emits a `Typecheck` target as `check`, over the package's
 `tsconfig.test.json`. Call `Typecheck` directly when a package needs a
 different project or mode than the macro's convention.
 
