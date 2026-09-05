@@ -31,14 +31,16 @@ if it is not open already. An entry that carries the field with any other value
 second vocabulary for "cleared": the run's next status entry says something
 else, and the condition is gone.
 
-Entries the detector does not name are ignored entirely, which is what stops a
-monitor beat from closing an approval wait. `eventTypes` narrows further, for a
-field two different producers write under different meanings.
+An entry that does not carry the field at all is ignored entirely, which is what
+stops a health report from closing an approval wait. `eventTypes` narrows
+further, for a field two different producers write under different meanings.
 
-`Alerts.defaultDetectors` covers the four conditions a control plane journals out
-of the box: `waiting-approval`, `failed`, `stalled`, and `quota-parked`. A
-policy's own `detectors` are merged over them, so a deployment that journals a
-different vocabulary supplies its own rather than forking the module.
+`Alerts.defaultDetectors` ships four conditions, each of them one field and one
+value: `waiting-approval` and `failed` read `status`, `stalled` reads `health`,
+and `quota-parked` reads `waitingReason` for `quota`. Those are the fields
+[`@smthrs/control`](https://control.smithers.sh/reference/api/) writes. A policy's own `detectors` are merged
+over them, so a deployment that journals a different vocabulary names its own
+rather than forking the module.
 
 Only a condition the policy has a rule for is watched at all, and only own
 properties count: a detector named `toString` reads no evidence off

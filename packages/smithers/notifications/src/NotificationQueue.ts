@@ -357,6 +357,15 @@ const drainSource = (targetLineageId: string, boundary: string): JournalEvent.So
  * fence to hand over, and both records are first-writer-wins on their own
  * identity instead.
  *
+ * The capacity guard is a conditional write at the storage layer, not a check
+ * against a fold one process happened to load: the fold, the guard, and the
+ * admission record are decided and written inside ONE `journal.transact`
+ * write transaction, which the durable writer serializes against every other
+ * writer of the database and replays when a concurrent writer commits between
+ * the guard's reads and the insert. Two processes admitting to one full queue
+ * therefore produce one admission and one `rejected-full`, never two
+ * admissions.
+ *
  * @param options the pending capacity, defaulting to `NotificationState.defaultCapacity`
  * @category layers
  * @since 1.0.0
@@ -368,13 +377,17 @@ export const layerWith = (
     NotificationQueue,
     Effect.gen(function*() {
       const journal = yield* Journal.Journal
+      // Orders this layer's own fibers so one process never runs two of its
+      // admissions or drains against the fold cache at once. It is
+      // process-local by construction and is NOT what enforces capacity or
+      // drain identity across processes: those are the conditional writes
+      // inside `journal.transact`, decided and committed in one serialized
+      // write transaction.
       const operations = yield* Semaphore.make(1)
       const capacity = options.capacity ?? NotificationState.defaultCapacity
-      // Folded history per run. A fold reads the cached value, pages only what
-      // has been committed since, and writes a fresh, self-consistent pair
-      // back. An interleaved fold can therefore replace a newer entry with an
-      // older one, which costs the next call one extra page and can never
-      // report a state the journal does not hold.
+      // Only committed folds may be shared. A transaction reads its own
+      // inserts, but its read-back is still provisional until the OUTERMOST
+      // commit; neither a retry nor a later caller may dedupe against it.
       const folded = new Map<string, Loaded>()
 
       const load = (runId: JournalEvent.RunId): Effect.Effect<Loaded, Journal.JournalError> =>
@@ -422,88 +435,112 @@ export const layerWith = (
           const loaded: Loaded = { state, admissions, promotions, cursor }
           // Re-inserting moves the run to the end, so the key evicted below is
           // always the least recently folded one.
-          folded.delete(runId)
-          folded.set(runId, loaded)
-          if (folded.size > maximumCachedRuns) folded.delete(folded.keys().next().value!)
+          yield* journal.whenCommitted(Effect.sync(() => {
+            folded.delete(runId)
+            folded.set(runId, loaded)
+            if (folded.size > maximumCachedRuns) folded.delete(folded.keys().next().value!)
+          }))
           return loaded
+        })
+
+      /**
+       * One conditional admission: the duplicate check, the capacity guard,
+       * and the admission record, decided and written inside ONE journal
+       * write transaction.
+       *
+       * This is the queue's conditional insert, the same read-guarded write
+       * the journal itself uses for its dedupe and fence conditions: the
+       * guard's reads and the insert share one serialized write transaction,
+       * and the durable writer replays the whole body when a concurrent
+       * writer commits between them. A decision a stale fold produced can
+       * therefore never commit — the replay re-folds against the committed
+       * state and a queue that filled meanwhile refuses — however many
+       * processes share the database. The process-local `operations`
+       * semaphore orders this layer's own fibers only; it is not what
+       * enforces capacity across processes.
+       */
+      const admitInTransaction = (
+        runId: JournalEvent.RunId,
+        admitted: NotificationModel.Notification
+      ): Effect.Effect<AdmissionReceipt, Journal.JournalError | NotificationError> =>
+        Effect.gen(function*() {
+          const loaded = yield* load(runId)
+          const prior = loaded.admissions.get(admitted.id)
+          if (prior !== undefined) {
+            if (!sameNotification(prior.notification, admitted)) {
+              return yield* new NotificationError({
+                code: "notification_id_reused",
+                notificationId: admitted.id,
+                message: `Notification id ${admitted.id} was already admitted with different content`
+              })
+            }
+            return {
+              notificationId: admitted.id,
+              decision: prior.decision,
+              seq: prior.seq,
+              duplicate: true
+            }
+          }
+
+          const admission = NotificationState.admit(
+            loaded.state,
+            admitted,
+            loaded.cursor === undefined ? 0 : loaded.cursor + 1
+          )
+          if (admission.decision === "rejected-full") {
+            // Nothing is journaled. A rejection recorded as an admission
+            // would match on every later attempt and burn the id forever,
+            // so the queue refuses in the receipt alone and the caller may
+            // admit again once a boundary has drained.
+            return {
+              notificationId: admitted.id,
+              decision: admission.decision,
+              seq: undefined,
+              duplicate: false
+            }
+          }
+
+          const receipt = yield* journal.emitDurableUnfenced(
+            new JournalEvent.Input({
+              runId,
+              sourceId: admissionSource(admitted.id),
+              sourceSeq: JournalEvent.SourceSeq.make(0),
+              // The sequence is derived from the notification's own id, so
+              // a collision IS this admission observed twice. Comparing
+              // bytes instead would fail the second writer over `decision`,
+              // a field neither caller supplied and each derives from the
+              // fill level it happened to load at.
+              dedupe: "identity",
+              eventType: NotificationEvent.AdmittedEventType,
+              payload: { notification: admitted, decision: admission.decision }
+            })
+          )
+          const committed = (yield* load(runId)).admissions.get(admitted.id)
+          if (committed === undefined) {
+            // Only reachable when the emit deduped against an entry this
+            // queue did not write, so nothing was committed and there is
+            // no admission to report.
+            return yield* new NotificationError({
+              code: "notification_id_reused",
+              notificationId: admitted.id,
+              message: `The journal identity for notification ${admitted.id} holds an event this queue did not write`
+            })
+          }
+          return {
+            notificationId: admitted.id,
+            decision: committed.decision,
+            seq: committed.seq,
+            duplicate: receipt._tag === "Duplicate"
+          }
         })
 
       return make({
         admit: Effect.fn("NotificationQueue.admit")((rawRunId, notification) =>
           Effect.gen(function*() {
             const admitted = yield* validated(notification)
-            return yield* operations.withPermits(1)(journal.transact(Effect.gen(function*() {
-              const runId = JournalEvent.RunId.make(rawRunId)
-              const loaded = yield* load(runId)
-              const prior = loaded.admissions.get(admitted.id)
-              if (prior !== undefined) {
-                if (!sameNotification(prior.notification, admitted)) {
-                  return yield* new NotificationError({
-                    code: "notification_id_reused",
-                    notificationId: admitted.id,
-                    message: `Notification id ${admitted.id} was already admitted with different content`
-                  })
-                }
-                return {
-                  notificationId: admitted.id,
-                  decision: prior.decision,
-                  seq: prior.seq,
-                  duplicate: true
-                }
-              }
-
-              const admission = NotificationState.admit(
-                loaded.state,
-                admitted,
-                loaded.cursor === undefined ? 0 : loaded.cursor + 1
-              )
-              if (admission.decision === "rejected-full") {
-                // Nothing is journaled. A rejection recorded as an admission
-                // would match on every later attempt and burn the id forever,
-                // so the queue refuses in the receipt alone and the caller may
-                // admit again once a boundary has drained.
-                return {
-                  notificationId: admitted.id,
-                  decision: admission.decision,
-                  seq: undefined,
-                  duplicate: false
-                }
-              }
-
-              const receipt = yield* journal.emitDurableUnfenced(
-                new JournalEvent.Input({
-                  runId,
-                  sourceId: admissionSource(admitted.id),
-                  sourceSeq: JournalEvent.SourceSeq.make(0),
-                  // The sequence is derived from the notification's own id, so
-                  // a collision IS this admission observed twice. Comparing
-                  // bytes instead would fail the second writer over `decision`,
-                  // a field neither caller supplied and each derives from the
-                  // fill level it happened to load at.
-                  dedupe: "identity",
-                  eventType: NotificationEvent.AdmittedEventType,
-                  payload: { notification: admitted, decision: admission.decision }
-                })
-              )
-              const committed = (yield* load(runId)).admissions.get(admitted.id)
-              if (committed === undefined) {
-                // Only reachable when the emit deduped against an entry this
-                // queue did not write, so nothing was committed and there is
-                // no admission to report.
-                return yield* new NotificationError({
-                  code: "notification_id_reused",
-                  notificationId: admitted.id,
-                  message:
-                    `The journal identity for notification ${admitted.id} holds an event this queue did not write`
-                })
-              }
-              return {
-                notificationId: admitted.id,
-                decision: committed.decision,
-                seq: committed.seq,
-                duplicate: receipt._tag === "Duplicate"
-              }
-            })))
+            return yield* operations.withPermits(1)(
+              journal.transact(admitInTransaction(JournalEvent.RunId.make(rawRunId), admitted))
+            )
           })
         ),
         drain: Effect.fn("NotificationQueue.drain")((input) =>

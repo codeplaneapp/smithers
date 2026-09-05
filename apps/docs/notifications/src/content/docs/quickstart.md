@@ -23,8 +23,11 @@ pnpm add @smthrs/notifications @smthrs/journal
 
 ## Write the notifications
 
-A notification names the run lineage it is for, carries the provenance of
-whoever wrote it, and declares how it may be delivered. Create `quickstart.ts`:
+A notification names what will read it, carries the provenance of whoever wrote
+it, and declares how it may be delivered. `targetLineageId` is that first part:
+an opaque address for the run, or for one branch of the run that closes turns of
+its own. The queue only compares it for equality, so `"run-1/root"` below is a
+readable choice rather than a required format. Create `quickstart.ts`:
 
 ```ts
 import type { Notification } from "@smthrs/notifications/Notification"

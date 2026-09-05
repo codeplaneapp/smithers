@@ -208,14 +208,14 @@ The pure bounded queue: the same rules with no I/O and no journal. Import from
 The journal event types this package owns. Import from
 `@smthrs/notifications/NotificationEvent`.
 
-| Export              | Value or shape                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------ |
-| `AdmittedEventType` | `"flows/notifications/Admitted"`. Frozen: the value is durable in every engine database.         |
-| `PromotedEventType` | `"flows/notifications/Promoted"`. Frozen for the same reason.                                    |
-| `AdmissionDecision` | `"admitted" \| "coalesced" \| "rejected-full"`. The one declaration of the admission vocabulary. |
-| `Admitted`          | `{ notification: Notification; decision: AdmissionDecision }`.                                   |
-| `Promoted`          | `{ boundary: string; targetLineageId: string; ids: ReadonlyArray<string> }`.                     |
-| `Event`             | `Admitted \| Promoted`.                                                                          |
+| Export              | Value or shape                                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `AdmittedEventType` | `"flows/notifications/Admitted"`. Frozen: the value is already durable in every journal this package has written to. |
+| `PromotedEventType` | `"flows/notifications/Promoted"`. Frozen for the same reason.                                                        |
+| `AdmissionDecision` | `"admitted" \| "coalesced" \| "rejected-full"`. The one declaration of the admission vocabulary.                     |
+| `Admitted`          | `{ notification: Notification; decision: AdmissionDecision }`.                                                       |
+| `Promoted`          | `{ boundary: string; targetLineageId: string; ids: ReadonlyArray<string> }`.                                         |
+| `Event`             | `Admitted \| Promoted`.                                                                                              |
 
 A `rejected-full` decision is never written. The queue refuses a full queue in
 the receipt alone, so the notification id stays admissible once a boundary

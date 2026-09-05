@@ -8,13 +8,15 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/notifications
+pnpm add @smthrs/notifications @smthrs/journal
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Its two runtime dependencies,
-[`effect`](https://effect.website) and [`@smthrs/journal`](/api/journal),
-install with it.
+CommonJS with TypeScript declarations. It is built on
+[`effect`](https://effect.website) and [`@smthrs/journal`](/api/journal). Declare
+`@smthrs/journal` in your own package as well: the compositions below import it
+directly, and a strict package manager resolves only the dependencies you have
+named.
 
 ## Provide a journal
 

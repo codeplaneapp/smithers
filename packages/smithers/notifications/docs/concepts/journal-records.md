@@ -16,12 +16,10 @@ the first one admitted to.
 | `NotificationEvent.AdmittedEventType` | `flows/notifications/Admitted` | One notification and the decision the queue made about it.    |
 | `NotificationEvent.PromotedEventType` | `flows/notifications/Promoted` | Which notification ids one boundary of one lineage delivered. |
 
-Both spellings are slashes and a PascalCase leaf, where every other event type
-in this repository is dot separated and lowercase. The divergence is deliberate:
-the values are already durable in every engine database, and renaming them would
-silently stop matching the projections that consumers key on. `test/WireFormat.test.ts`
-asserts the literal strings and the literal stored JSON, so a well-meaning
-correction fails loudly instead of orphaning history.
+Both spellings are frozen wire format. The values are already durable in every
+database that has run this package, and renaming them would silently stop
+matching the projections that consumers key on. Treat both strings, and the JSON
+stored under them, as fixed.
 
 An `Admitted` payload is `{ notification, decision }`. A `Promoted` payload is
 `{ boundary, targetLineageId, ids }`.

@@ -109,10 +109,11 @@ become changes that apply from the next turn, and are deliberately not announced
 to the model: telling it "your seat changed" would spend a turn on bookkeeping
 when changing the seat is what the operator asked for.
 
-A `Tools` steer is answered out loud rather than dropped. The cell-first loop
-declares no provider tools, so there is nothing to activate; the run is told, in
-the transcript, that an operator asked for those tools and that its authority is
-the flows it can already call.
+A `Tools` steer is answered out loud rather than dropped. That harness gives the
+model no provider tools at all, so there is nothing to activate; the run is told,
+in the transcript, that an operator asked for those tools and that its authority
+is the flows it can already call. A host that does hand the model provider tools
+decides for itself what the item activates.
 
 ## Next
 

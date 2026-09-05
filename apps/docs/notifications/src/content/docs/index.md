@@ -1,118 +1,147 @@
 ---
 title: "@smthrs/notifications"
-description: "The durable notification queue: admit a message to a run exactly once, drain it at a turn boundary, and page about a run that has been stuck too long."
+description: "A durable queue for telling a running agent something: admit a message from any process, and deliver it only at a point in the run where reading it is safe."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/notifications/docs/README.md"
 ---
 
-`@smthrs/notifications` carries a message to a run that is already running.
+`@smthrs/notifications` is a durable queue for telling a running agent
+something. Any process admits a message at any time, and the run collects what
+it may deliver at a boundary of its own choosing, so an instruction never lands
+in the middle of a turn.
 
-A run in flight is not listening. The operator who steers it, the parent run
-that signals it, and the supervisor that pages about it all write from a
-different process, at a moment when interrupting the run would change what the
-model is looking at while it is looking at it. This package holds what they
-said until the run reaches a point where it can read it, and it holds it in the
-journal, so a host that dies between the writing and the reading loses nothing.
+## The problem it solves
 
-The service has three methods:
+An agent that has been working for twenty minutes is not something you can call
+a function on. An operator wants to redirect it, a supervisor wants to raise an
+alarm, a parent run wants to pass down a result. Writing any of those straight
+into the model's context changes what the model is reading while it is reading
+it, and holding them in memory loses them when the process restarts.
 
-- `admit` records one notification against a run, exactly once, and answers with
-  what the queue decided.
-- `drain` promotes what one boundary of one lineage may deliver, and answers
-  with the notifications the durable record commits to.
-- `pending` reports what a run has been told that no boundary has delivered yet.
+This package pulls the two halves apart and puts a journal between them:
 
-`Alerts` points the same machinery at the run itself. A policy reads a run's
-journal, and a condition that has stayed open longer than its rule allows
-becomes a coalesced system event on this queue and a page to a sink.
+- **Admission** is the writer's moment. Any process admits a notification at any
+  time. The queue records it durably and answers with a receipt.
+- **Promotion** is the reader's moment. The run asks, at a point where reading a
+  new instruction is safe, what this boundary may deliver.
 
-## Who uses this package
+Nothing happens in between, and both halves survive a restart. The queue keeps
+no state of its own: it folds each run's state back out of the two journal
+records it writes, so a second process over the same database answers for a run
+the first one admitted to.
 
-A control plane admits: [`@smthrs/control`](https://control.smithers.sh/reference/api/) turns an operator's
-steer into a `human-steer` notification. A harness drains:
-[`@smthrs/harness`](https://harness.smithers.sh/reference/api/) reads the queue at each turn boundary and
-turns what it gets into inserts and seat changes. A supervisor alerts: the
-`Alerts` runtime reads the journal a monitor writes and pages about what has
-been wrong too long. All three depend on this package, and none of them depends
-on the others, which is why the vocabulary they share lives here.
+Reach for it when you need durable, attributed delivery into a long-running
+process, and when losing a message or delivering it twice would both be wrong:
+operator steering, an idle-time follow-up queue, coalesced system events, or
+alerts about a run that has been stuck too long.
 
 ## Install
 
 ```bash
-pnpm add @smthrs/notifications
+npm install @smthrs/notifications @smthrs/journal
 ```
 
-The queue needs a `Journal.Journal` from [`@smthrs/journal`](https://journal.smithers.sh/reference/api/) to be
-durable. For the layer stack a real composition builds, see
-[Installation](/installation/).
+Node.js 22.19.0 or later. `@smthrs/journal` is where the durable records go, and
+the example below imports it directly. See [Installation](/installation/) for
+the SQLite composition a deployment uses.
 
-## The smallest real example
+## Admit a message, deliver it at a turn boundary
 
-Admitting a steer is one call, and the receipt says what happened to it:
+The journal here is the production SQLite one over an in-memory database, so
+nothing is stubbed and nothing needs configuring:
 
 ```ts
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { NotificationQueue } from "@smthrs/notifications"
+import type { Notification } from "@smthrs/notifications/Notification"
 import * as Effect from "effect/Effect"
 
-const steer = Effect.gen(function*() {
+const steer: Notification = {
+  _tag: "human-steer",
+  id: "message-1",
+  delivery: "steer",
+  targetLineageId: "run-1/root",
+  provenance: {
+    sourceRunId: "operator",
+    sourceLineageId: "operator",
+    sourceTurn: 0,
+    sourceActor: "human:will"
+  },
+  payload: { kind: "Message", body: "look at the failing test first" }
+}
+
+const program = Effect.gen(function*() {
   const queue = yield* NotificationQueue.NotificationQueue
-  const receipt = yield* queue.admit("run-1", {
-    _tag: "human-steer",
-    id: "message-1",
-    delivery: "steer",
-    targetLineageId: "run-1",
-    provenance: {
-      sourceRunId: "operator",
-      sourceLineageId: "operator",
-      sourceTurn: 0,
-      sourceActor: "human:will"
-    },
-    payload: { kind: "Message", body: "look at the failing test first" }
+
+  // Whoever is steering, whenever they say it.
+  yield* queue.admit("run-1", steer)
+
+  // The run, at a point where reading a new instruction is safe.
+  const receipt = yield* queue.drain({
+    runId: "run-1",
+    targetLineageId: "run-1/root",
+    boundary: "turn-1",
+    wouldIdle: true
   })
-  return receipt.decision
+  return receipt.notifications.map((notification) => notification.id)
 })
+
+console.log(
+  await Effect.runPromise(
+    program.pipe(
+      Effect.provide(NotificationQueue.layer),
+      Effect.provide(TestJournal.layer()),
+      Effect.scoped,
+      Effect.orDie
+    )
+  )
+)
 ```
 
-`receipt.decision` is `admitted`, `coalesced`, or `rejected-full`, and reading
-it is not optional: a full queue retains nothing and journals nothing, so a
-caller that treats the receipt as an acknowledgement loses the message in
-silence. See [Handle a full queue](/guides/handle-a-full-queue/).
+```text
+[ 'message-1' ]
+```
 
-For a run that admits, drains, and prints what the boundary delivered, see the
-[Quickstart](/quickstart/).
+`id` is your idempotency key: admitting it twice with the same content is one
+notification. `boundary` is the delivery's identity: draining `turn-1` again
+reads the committed record back and reports the same notifications with
+`duplicate: true`, rather than deciding a second time and disagreeing.
+`targetLineageId` is the address of the reader, which the queue only compares for
+equality: pass the run id when a run has one reader, and the branch's id when it
+has several. See
+[Admission and promotion](/concepts/admission-and-promotion/).
 
-## The package at a glance
+## How it relates to the smithers CLI
 
-The root entry point exports these namespaces, and each is also importable from
-`@smthrs/notifications/<Module>`:
+This package is one of the pieces behind [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), the `smthrs`
+command line that plans, runs, and inspects durable flows. Running
+`smthrs steer <run-id> --message "..."` admits a `human-steer` notification to
+this queue under a stable message id, and the run reads it when its next turn
+closes. `smthrs ps` fills in each run's pending steer count from the same fold
+`drain` uses, which is why a listing never reports a delivered message as still
+waiting.
 
-| Namespace           | What it is                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------- |
-| `NotificationQueue` | The durable service: `admit`, `drain`, `pending`, and the journal-backed layer behind them.             |
-| `Notification`      | The three notification shapes, their delivery classes, and the provenance every one carries.            |
-| `NotificationState` | The pure bounded queue: admission, coalescing, and promotion, with no I/O.                              |
-| `NotificationEvent` | The two journal records the queue writes, and the decoder that reads them back out of a shared journal. |
-| `Projection`        | A journal projection that re-derives pending notifications from those records.                          |
-| `SteerPayload`      | The steering vocabulary a control plane writes and a harness reads.                                     |
-| `Alerts`            | Run conditions that outlive a delay, turned into coalesced, delivered-once notifications.               |
-
-Every export of every namespace, with its signature and what each parameter
-means, is on the [API reference](/reference/api/).
+Neither package needs the other. Install `@smthrs/cli` for the operator-facing
+command line and everything under it. Install this package when you are building
+the host on the other side: the code that decides where a turn boundary is and
+asks the queue what it may deliver there. [`@smthrs/harness`](https://harness.smithers.sh/reference/api/)
+is the one Smithers ships, and it drains this queue at every boundary.
 
 ## Where to go next
 
-- [Installation](/installation/): requirements, the journal a composition
-  adds, and the import forms.
-- [Quickstart](/quickstart/): admit two notifications and drain them at a
-  turn boundary, over an in-memory journal.
-- Concepts: [admission and promotion](/concepts/admission-and-promotion/),
-  [the journal records](/concepts/journal-records/), and
-  [how alerting decides](/concepts/alerting/).
-- Guides: [steer a run](/guides/steer-a-run/),
-  [drain at a turn boundary](/guides/drain-at-a-turn-boundary/),
-  [handle a full queue](/guides/handle-a-full-queue/),
-  [report what a run is waiting on](/guides/report-pending-notifications/),
-  [alert on a stuck run](/guides/alert-on-a-stuck-run/),
-  [send alerts to a webhook](/guides/send-alerts-to-a-webhook/), and
-  [test against the queue](/guides/testing/).
-- [Troubleshooting](/troubleshooting/): the failures this package reports,
-  what causes each one, and what to change.
+- [Installation](/installation/): the journal, the HTTP client the webhook
+  sink needs, and the import forms.
+- [Quickstart](/quickstart/): admit a steer and a follow-up, drain both, and
+  read what each step decided.
+- [Admission and promotion](/concepts/admission-and-promotion/): delivery
+  classes, coalescing, the capacity bound, the turn cutoff, and the drain
+  identity.
+- [The journal records](/concepts/journal-records/): the two durable events,
+  why replay never re-decides, and what a projection may assume.
+- [How alerting decides](/concepts/alerting/): why an alert is a function of
+  journal time, and why delivery is at-least-once.
+- [Steer a run](/guides/steer-a-run/) and
+  [Drain at a turn boundary](/guides/drain-at-a-turn-boundary/): the writing
+  half and the reading half.
+- [API reference](/reference/api/): every export, with its signature.
+- [Troubleshooting](/troubleshooting/): what each symptom means and what to
+  change.

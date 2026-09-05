@@ -51,7 +51,8 @@
  * @since 0.1.0
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
-import { Clock, Context, Duration, Effect, Layer, Result, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Result, Schema } from "effect"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import type * as NotificationModel from "./Notification.ts"
@@ -378,12 +379,14 @@ export const decide = (
  *
  * `sink_rejected` is an answer that refused the page, `sink_unreachable` a
  * request that never got one, and `sink_timeout` one that got no answer inside
- * the sink's bound.
+ * the sink's bound. `sink_misconfigured` is an endpoint the sink may not POST
+ * to at all; it is raised when the layer is built, before any alert exists,
+ * so it never reaches a journal.
  *
  * @category models
  * @since 1.0.0
  */
-export const FailureCode = Schema.Literals(["sink_rejected", "sink_unreachable", "sink_timeout"])
+export const FailureCode = Schema.Literals(["sink_rejected", "sink_unreachable", "sink_timeout", "sink_misconfigured"])
 
 /**
  * Why a sink did not take an alert.
@@ -474,12 +477,67 @@ export const layerNoop: Layer.Layer<Sink> = Layer.succeed(Sink)({ deliver: () =>
 export const defaultWebhookTimeout: Duration.Duration = Duration.seconds(10)
 
 /**
+ * The one check the webhook endpoint gets before an alert is ever built on
+ * it.
+ *
+ * The url is operator config rather than runtime input, so there is no SSRF
+ * vector to close here; the scheme bound is what keeps a credential the
+ * deployment set in `headers` from being handed to a scheme that is not HTTP
+ * at all. A `file:` or `javascript:` url is a config bug, and it fails the
+ * composition the way an impossible policy rule does. The error names no
+ * url: the value can carry basic-auth credentials, and an error is logged.
+ */
+const webhookUrl = (raw: string): Effect.Effect<string, AlertError> =>
+  Effect.suspend(() => {
+    const misconfigured = new AlertError({
+      code: "sink_misconfigured",
+      message: "Alert webhook url must be an absolute http: or https: URL"
+    })
+    let parsed: URL
+    try {
+      parsed = new URL(raw)
+    } catch {
+      return Effect.fail(misconfigured)
+    }
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? Effect.succeed(raw)
+      : Effect.fail(misconfigured)
+  })
+
+/**
+ * Runs a webhook request with redirect following switched off at the fetch
+ * transport.
+ *
+ * The request carries whatever credential the deployment put in `headers`,
+ * and a transport that follows a 3xx re-sends those headers to an origin the
+ * deployment never named. Every other fetch default the composition set is
+ * kept; only the redirect mode is forced. A 3xx therefore surfaces to the
+ * status rule, which calls it `sink_rejected`: a redirecting pager endpoint
+ * is a misconfiguration to fix, not an address to forward credentials to.
+ */
+const followingNoRedirects = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.flatMap(
+    Effect.serviceOption(FetchHttpClient.RequestInit),
+    (init) =>
+      Effect.provideService(effect, FetchHttpClient.RequestInit, {
+        ...(Option.isSome(init) ? init.value : {}),
+        redirect: "manual"
+      })
+  )
+
+/**
  * A sink that POSTs each alert to one webhook.
  *
  * The body is the alert plus its {@link alertId}, and the same id is sent as
  * an `Idempotency-Key` header, because the package requires the receiver to
  * dedupe on it and a body without it cannot. The header is set after the
  * caller's headers, so it is the one this sink sends.
+ *
+ * The endpoint must be an absolute `http:` or `https:` URL, checked when the
+ * layer is built, and the request is made with redirect following disabled:
+ * the caller's headers can carry a credential, and a followed redirect would
+ * re-send them to an origin the deployment never named. A 3xx answer is a
+ * refusal like any other non-2xx, not a forwarding instruction.
  *
  * A non-2xx response is a failure, not a delivery, and an endpoint that never
  * answers is a failure after `timeout`. Paging is exactly the case where a
@@ -501,18 +559,20 @@ export const layerWebhook = (
   Layer.effect(
     Sink,
     Effect.gen(function*() {
+      const url = yield* Effect.orDie(webhookUrl(options.url))
       const client = yield* HttpClient.HttpClient
       const timeout = options.timeout ?? defaultWebhookTimeout
       return {
         deliver: (alert) =>
           client.execute(
-            HttpClientRequest.post(options.url).pipe(
+            HttpClientRequest.post(url).pipe(
               (request) =>
                 options.headers === undefined ? request : HttpClientRequest.setHeaders(request, options.headers),
               HttpClientRequest.setHeader("Idempotency-Key", alertId(alert)),
               HttpClientRequest.bodyJsonUnsafe({ ...alert, alertId: alertId(alert) })
             )
           ).pipe(
+            followingNoRedirects,
             Effect.flatMap((response) =>
               response.status >= 200 && response.status < 300
                 ? Effect.void

@@ -10,8 +10,9 @@
  */
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
-import { Duration, Effect, Layer } from "effect"
+import { Cause, Duration, Effect, Exit, Layer, Option } from "effect"
 import { TestClock } from "effect/testing"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpBody from "effect/unstable/http/HttpBody"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
@@ -593,6 +594,103 @@ describe("Alerts.layerWebhook", () => {
 
     expect(observed.refused.failed.map((alert) => alert.condition)).toEqual(["waiting-approval"])
     expect(observed.detail).toMatchObject({ code: "sink_timeout" })
+  })
+
+  it("refuses an endpoint that is not an http: or https: URL when the layer is built", async () => {
+    const client = Layer.succeed(HttpClient.HttpClient)(
+      HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("", { status: 200 })))
+      )
+    )
+    const build = (url: string) =>
+      Effect.runPromise(
+        Layer.build(Alerts.layerWebhook({ url })).pipe(Effect.provide(client), Effect.scoped, Effect.exit)
+      )
+
+    const accepted = await build("http://pager.test/alerts")
+    expect(Exit.isSuccess(accepted)).toBe(true)
+    const misconfiguration = (url: string) =>
+      Effect.runPromise(
+        Layer.build(Alerts.layerWebhook({ url })).pipe(
+          Effect.provide(client),
+          Effect.scoped,
+          Effect.sandbox,
+          Effect.flip
+        )
+      )
+    for (
+      const url of [
+        "ftp://pager.test/alerts",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "ws://pager.test/alerts",
+        "//pager.test/alerts",
+        "not a url"
+      ]
+    ) {
+      const error = Cause.squash(await misconfiguration(url))
+      expect(error).toBeInstanceOf(Alerts.AlertError)
+      expect((error as Alerts.AlertError).code).toBe("sink_misconfigured")
+      // The url can carry basic-auth credentials; the refusal never echoes it.
+      expect((error as Alerts.AlertError).message).not.toContain(url)
+    }
+  })
+
+  it("answers a redirect with a refusal and never re-sends the credential headers", async () => {
+    const seen: Array<{ url: string; redirect: string | undefined; credentials: string | undefined }> = []
+    const client = Layer.succeed(HttpClient.HttpClient)(
+      HttpClient.make((request) =>
+        Effect.map(Effect.serviceOption(FetchHttpClient.RequestInit), (init) => {
+          seen.push({
+            url: request.url,
+            redirect: Option.isSome(init) ? init.value.redirect : undefined,
+            credentials: Option.isSome(init) ? init.value.credentials : undefined
+          })
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(null, { status: 302, headers: { location: "https://collector.test/credentials" } })
+          )
+        })
+      )
+    )
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sink = yield* Alerts.Sink
+        return yield* Effect.result(sink.deliver({
+          runId,
+          condition: "waiting-approval",
+          since: 0,
+          firedAt: 0,
+          severity: "warning",
+          coalescingKey: Alerts.coalescingKey(runId, "waiting-approval")
+        }))
+      }).pipe(
+        Effect.provide(
+          Alerts.layerWebhook({
+            url: "https://pager.test/alerts",
+            headers: { authorization: "Bearer token", "x-api-key": "secret" }
+          }).pipe(Layer.provide(client))
+        ),
+        // Fetch defaults the composition set survive; only the redirect mode
+        // is forced.
+        Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include" }),
+        Effect.scoped
+      )
+    )
+
+    // The request carries the deployment's credentials, so the transport is
+    // told not to follow: a 3xx is a refused page, and the redirect target
+    // never sees a request.
+    expect(result._tag).toBe("Failure")
+    expect(result._tag === "Failure" ? result.failure : undefined).toMatchObject({
+      code: "sink_rejected",
+      status: 302
+    })
+    expect(seen).toEqual([{
+      url: "https://pager.test/alerts",
+      redirect: "manual",
+      credentials: "include"
+    }])
   })
 
   it("takes a 2xx answer and nothing on either side of it", async () => {

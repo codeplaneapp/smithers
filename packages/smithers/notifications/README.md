@@ -1,7 +1,7 @@
 # @smthrs/notifications
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://notifications.smithers.sh
@@ -9,8 +9,11 @@ all Smithers packages share one Effect runtime.
 Durable notification queue, admission policy, and journal projection for flows. It models human and system notifications, derives queue state from journal events, and drains eligible work at harness boundaries.
 
 ```sh
-npm install @smthrs/notifications
+npm install @smthrs/notifications @smthrs/journal
 ```
+
+Node.js 22.19.0 or later. `@smthrs/journal` holds the durable records, and the
+example below imports it directly, so declare it in your own package too.
 
 ## Public API
 
@@ -39,8 +42,12 @@ deliberately does not repeat it.
   admissible, and the caller admits it again once a boundary has drained.
   `admit` does not fail on a full queue. `NotificationQueue.layerWith` raises
   or lowers the bound for one composition.
+- `targetLineageId` is the address of whatever will read the notification: the
+  run, or one branch of it that closes turns of its own. The queue treats it as
+  an opaque string and only compares it for equality, so pass the run id when a
+  run has one reader and the branch's id when it has several.
 - The unit of drain is the triple `(runId, targetLineageId, boundary)`. Two
-  lineages closing a turn under the same boundary name are two drains, recorded
+  addresses closing a turn under the same boundary name are two drains, recorded
   separately. `DrainInput.cutoffSeq` holds a steer admitted mid-turn until the
   next boundary.
 - `NotificationError.code` is the stable half to branch on:

@@ -19,6 +19,22 @@ Keeping the two apart is the point of the package. A notification that arrived
 mid-turn and reached the model immediately would change what the model is
 looking at while it is looking at it.
 
+## What a notification is addressed to
+
+Every notification carries `targetLineageId`, and it is the address of the
+reading half: the run itself, or one branch of the run that opens and closes
+turns of its own. The queue treats the value as an opaque string and only ever
+compares it for equality, so its shape is the host's choice. A host with no
+branches passes the run id and is done. A host with branches passes the id of the
+branch the running code belongs to, so a message meant for one branch is not
+consumed by another that never asked for it. The samples on these pages use
+`"run-1/root"`, which keeps the run and the branch visible in one string.
+[`@smthrs/harness`](/api/harness) takes the value as
+`Notifications.layer({ runId, lineageId })` and passes its own.
+
+`provenance` is the other half of the addressing: `targetLineageId` says who
+reads it, and `provenance.sourceActor` says who wrote it.
+
 ## Two delivery classes
 
 Every notification declares how it may reach the model, and `Notification.admissionClass`

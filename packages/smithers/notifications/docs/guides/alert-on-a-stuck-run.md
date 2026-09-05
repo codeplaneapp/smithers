@@ -49,16 +49,18 @@ export const wedged: Alerts.Policy = {
     "wedged-node": {
       field: "health",
       value: "wedged-node",
-      eventTypes: ["control.monitor.beat"]
+      eventTypes: ["supervisor.heartbeat"]
     }
   }
 }
 ```
 
-`eventTypes` matters more than it looks. Without it, every entry carrying a
-`health` field is evidence, including the monitor's own heal record, which names
-the same health and would re-open the condition the next beat closed. Narrow to
-the entries that actually report the condition.
+`eventTypes` matters more than it looks. Without it, every entry in the run's
+journal carrying a `health` field is evidence, including entries some other
+writer keys the same way for its own reasons, and any value other than
+`wedged-node` closes the condition. One unrelated writer between two heartbeats
+therefore restarts the clock, and a run that is wedged the whole time never
+outlives the delay. Narrow to the entries that actually report the condition.
 
 Your `detectors` are merged over `Alerts.defaultDetectors`, so naming one of the
 four built-in conditions replaces its detector and leaves the rest alone.

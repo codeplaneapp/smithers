@@ -66,9 +66,11 @@ const over = (filename: string, capacity: number) =>
   )
 ```
 
-`test/NotificationQueueRestart.test.ts` and `test/AlertsRestart.test.ts` use
-exactly this shape: the drain identity, the pending fold, and a capacity refusal
-are all properties of what was written, not of a live process.
+Build the first stack, admit and drain, close its scope, then build a second
+stack over the same filename and assert on what it reads back. That shape is
+what proves the claims worth proving: the drain identity, the pending fold, and
+a capacity refusal are all properties of what was written, not of a live
+process.
 
 ## The explicit absences
 
@@ -155,5 +157,5 @@ about behavior rather than about a return value:
 - `Alerts.failedEventType`, one per alert per failure code.
 
 Counting them is what distinguishes "the alert was suppressed" from "the alert
-was never raised", and "the webhook is down" from "the webhook is down and we
-appended a row per tick for an hour".
+was never raised", and "the webhook is down" from "the webhook is down and one
+row per tick piled up for an hour".
