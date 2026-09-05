@@ -32,7 +32,7 @@ const compile = Action.withCache(
     success: Schema.String,
     tier: "sealed",
     idempotencyKey: "build/compile/v1",
-    metadata: { readSet: [], writeSet: [], boundaryMode: "hard" },
+    fileBoundary: { readSet: [], writeSet: [], boundaryMode: "hard" },
     execute: Effect.sync(() => "dist/server.js")
   }),
   { ttlMs: 15 * 60_000, scope: "shared" }
@@ -58,7 +58,7 @@ and `Action.CachePolicyAnnotation` is the key it is carried under.
 
 ## Declare the file boundary
 
-An action's `metadata` carries its `Action.FileBoundary`, and the engine folds
+An action's typed `fileBoundary` declares its `Action.FileBoundary`, and the engine folds
 that boundary into the key rather than trusting a caller-supplied field:
 
 | Field          | Meaning                                                                                                                                   |
@@ -78,9 +78,12 @@ vocabulary those sets are written in: named groups of declarations,
 Bazel-style include and exclude patterns, and a directory output captured and
 replayed as one tree artifact.
 
-`metadata` is an option of the inline form of `Action.make`. A declared action
-carries `idempotencyKey` and a cache policy but no `metadata`, so an action whose
-result should cross runs is dispatched inline from inside an implementation.
+Both inline and declared actions accept `fileBoundary`. Declared actions may
+compute it from decoded payload fields, and can derive `idempotencyKey` from
+the same payload. They also accept `retryPolicy` and `interruptRetryPolicy`.
+The attached implementation receives these policies directly; no nested inline
+action is needed. A new typed boundary is validated before dispatch. Historical
+inline `metadata` boundary declarations remain readable for existing callers.
 
 ## Declare the composition's environment
 

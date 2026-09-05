@@ -13,6 +13,22 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 /**
+ * A handler registration does not attest the declaration's implementation version.
+ *
+ * @category errors
+ * @since 0.1.0
+ */
+export class ImplementationVersionMismatch extends Schema.TaggedError<ImplementationVersionMismatch>()(
+  "@smthrs/flow/ImplementationVersionMismatch",
+  {
+    actionName: Schema.String,
+    declaredVersion: Schema.NullOr(Schema.String),
+    registeredVersion: Schema.NullOr(Schema.String),
+    message: Schema.String
+  }
+) {}
+
+/**
  * Marker an action implementation or adapter raises for an infrastructure
  * event it wants the action's `interruptRetryPolicy` to retry. Shipped engines
  * do not synthesize it from ordinary fiber interruption.

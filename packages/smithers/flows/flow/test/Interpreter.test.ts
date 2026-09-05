@@ -125,7 +125,7 @@ describe("Interpreter.layer", () => {
         success: Schema.Number,
         body: ({ path }) =>
           Read.call({ path }).pipe(
-            Node.andThen((result) => Write.call({ path: result.files[1]!, value: result.value })),
+            Node.bindPlanned((result) => Write.call({ path: result.files[1]!, value: result.value })),
             Node.map((written) => written * 2)
           )
       })
@@ -344,7 +344,7 @@ describe("Interpreter node variants", () => {
         success: Schema.Number,
         body: ({ path }) =>
           Node.all({ left: Read.call({ path }), right: Node.succeed(2) }).pipe(
-            Node.andThen((both) => Sum.call({ values: [both.left.value, both.right], label: path }))
+            Node.bindPlanned((both) => Sum.call({ values: [both.left.value, both.right], label: path }))
           )
       })
 
@@ -588,7 +588,8 @@ describe("Interpreter refusals", () => {
       const Half = Flow.make("interpreter/half-wired", {
         payload: { path: Schema.String },
         success: Schema.Number,
-        body: ({ path }) => Read.call({ path }).pipe(Node.andThen((result) => Missing.call({ path: result.files[0]! })))
+        body: ({ path }) =>
+          Read.call({ path }).pipe(Node.bindPlanned((result) => Missing.call({ path: result.files[0]! })))
       })
 
       expect(yield* refusal(Interpreter.interpret(Half, { path: "counter.txt" }))).toMatchObject({
@@ -599,7 +600,7 @@ describe("Interpreter refusals", () => {
 
   it.effect("refuses a graph whose topology is incomplete", () =>
     Effect.gen(function*() {
-      const lost = detached(Node.succeed(1).pipe(Node.andThen(() => Node.succeed(2))))
+      const lost = detached(Node.succeed(1).pipe(Node.bindPlanned(() => Node.succeed(2))))
 
       expect(yield* refusal(Interpreter.interpret(lost))).toMatchObject({
         error: { _tag: "@smthrs/flow/InterpreterError", code: "incomplete_graph", flow: "node", node: "root" }
@@ -689,6 +690,8 @@ describe("a flow's behavior is its body", () => {
       | "incomplete_graph"
       | "duplicate_node_id"
       | "unresolved_action"
+      | "implementation_version_mismatch"
+      | "missing_implementation_version"
       | "unresolved_reference"
       | "unsupported_call"
       | "missing_operation"
@@ -830,7 +833,7 @@ describe("Interpreter concurrency", () => {
         layer,
         Interpreter.interpret(
           Parking.call({ name: "shared" }).pipe(
-            Node.andThen((shared) =>
+            Node.bindPlanned((shared) =>
               Node.all({
                 left: Sum.call({ values: [shared], label: "left" }),
                 right: Sum.call({ values: [shared], label: "right" }),
@@ -876,7 +879,7 @@ describe("Interpreter concurrency", () => {
         layer,
         Effect.exit(Interpreter.interpret(
           Parking.call({ name: "shared" }).pipe(
-            Node.andThen((shared) =>
+            Node.bindPlanned((shared) =>
               Node.all({
                 use: Sum.call({ values: [shared], label: "use" }),
                 doomed: Failing.call({ name: "doomed" })
@@ -902,7 +905,7 @@ describe("Interpreter concurrency", () => {
         layer,
         Interpreter.interpret(
           Parking.call({ name: "shared" }).pipe(
-            Node.andThen((shared) =>
+            Node.bindPlanned((shared) =>
               Node.all({
                 use: Sum.call({ values: [shared], label: "use" }),
                 doomed: Failing.call({ name: "doomed" })

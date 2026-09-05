@@ -36,7 +36,7 @@ const Parent = Flow.make("counter/parent", {
   body: ({ path }) =>
     Node.all({ left: Read.call({ path }), right: Node.succeed(1) }).pipe(
       Node.map((both) => both.right),
-      Node.andThen((seed) => Child.call({ path, seed }))
+      Node.bindPlanned((seed) => Child.call({ path, seed }))
     )
 })
 
@@ -205,7 +205,7 @@ describe("Graph.build planned values", () => {
       success: Schema.Unknown,
       body: ({ path }) =>
         Read.call({ path }).pipe(
-          Node.andThen((result) =>
+          Node.bindPlanned((result) =>
             Node.all({
               written: Write.call({ path: result.files[0]!, value: result.value }),
               summed: Sum.call({ values: [result.value, result.value] })
@@ -314,7 +314,7 @@ describe("Graph.build planned values", () => {
       success: Schema.String,
       body: ({ path }) =>
         Increment.call({ path }).pipe(
-          Node.andThen((value) => {
+          Node.bindPlanned((value) => {
             continued++
             return Write.call({ path, value }).pipe(
               Node.branch({
@@ -344,7 +344,7 @@ describe("Graph.build planned values", () => {
       success: Schema.String,
       body: ({ path }) =>
         Read.call({ path }).pipe(
-          Node.andThen((result) => Node.succeed(`${result.value}`))
+          Node.bindPlanned((result) => Node.succeed(`${result.value}`))
         )
     })
     expect(() => Graph.build(flow, { path: "counter.txt" })).toThrowError(expect.objectContaining({
@@ -547,7 +547,7 @@ describe("Graph.build annotations", () => {
 
 describe("Graph.build diagnostics", () => {
   it("records a continuation that did not answer with a node instead of throwing", () => {
-    const broken = Node.andThen(
+    const broken = Node.bindPlanned(
       Node.succeed(1),
       (() => 42) as unknown as (value: Planned.Planned<number>) => Node.Node<number>
     )
@@ -569,7 +569,7 @@ describe("Graph.build diagnostics", () => {
 
   it("treats an AST that lost its side tables as leaves, and records its lost continuation", () => {
     const graph = Graph.build(detached(
-      Read.call({ path: "counter.txt" }).pipe(Node.andThen(() => Child.call({ path: "counter.txt", seed: 1 })))
+      Read.call({ path: "counter.txt" }).pipe(Node.bindPlanned(() => Child.call({ path: "counter.txt", seed: 1 })))
     ))
 
     expect(Graph.diagnostics(graph)).toHaveLength(1)
@@ -1072,7 +1072,7 @@ describe("Graph.build into a plan", () => {
           body: Node.capture({ delta }, ({ path }) =>
             Increment.call({ path }).pipe(
               Node.map(Node.capture({ delta }, (value: number) => value + delta)),
-              Node.andThen(Node.capture({ path }, (value) => Write.call({ path, value })))
+              Node.bindPlanned(Node.capture({ path }, (value) => Write.call({ path, value })))
             ))
         })
       const before = yield* compile(

@@ -11,9 +11,10 @@
  * is the engine's single retry decision point: the core default a pluggable
  * `resolveRetry` resolution can later dispatch in front of.
  *
- * The terminal failures below use the `@smthrs/flow/` tags settled for
+ * The historical terminal-failure schemas below use the `@smthrs/flow/` tags settled for
  * 1.0.0-rc.0. The release candidate makes no compatibility promise to 0.x
- * journals, and these tags freeze at the RC.
+ * journals, and these tags freeze at the RC. Current action dispatch preserves
+ * the final declared failure when a retry policy is spent.
  *
  * Vault: [[Failure Policy]] (`docs/specs/Concepts/Failure Policy.md`) and
  * [[Engine Hardening Round 1]]
@@ -218,7 +219,8 @@ export const giveUp = (reason: GiveUp["reason"]): RetryDecision => ({
 })
 
 /**
- * A retry sequence crossed the policy's `expirationMs` wall-clock bound.
+ * A historical retry sequence crossed its `expirationMs` wall-clock bound.
+ * Current dispatch preserves the final declared failure instead of emitting this defect.
  *
  * @category errors
  * @since 0.1.0
@@ -237,7 +239,8 @@ export class RetryPolicyExpired extends Schema.TaggedError<RetryPolicyExpired>()
 ) {}
 
 /**
- * A retry sequence exhausted the policy's `maxAttempts` bound.
+ * A historical retry sequence exhausted its `maxAttempts` bound.
+ * Current dispatch preserves the final declared failure instead of emitting this defect.
  *
  * @category errors
  * @since 0.1.0

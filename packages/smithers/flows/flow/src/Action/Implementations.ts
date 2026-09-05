@@ -38,6 +38,7 @@ import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type { Scope } from "effect/Scope"
 import type { FlowInstance } from "../FlowRuntime/FlowInstance.ts"
 import type { FlowRuntime } from "../FlowRuntime/FlowRuntime.ts"
@@ -56,10 +57,22 @@ import type { FlowRuntime } from "../FlowRuntime/FlowRuntime.ts"
  */
 export interface Implementation {
   readonly name: string
+  /** Semantic version attested by the implementation registration. */
+  readonly implementationVersion?: string | undefined
   readonly action: (
     payload: unknown
   ) => Effect.Effect<unknown, unknown, Crypto.Crypto | FlowRuntime | FlowInstance>
 }
+
+/**
+ * Two implementations competed for one action tag without an explicit override.
+ * @category errors
+ * @since 0.1.0
+ */
+export class DuplicateImplementation extends Schema.TaggedError<DuplicateImplementation>()(
+  "@smthrs/flow/Action/DuplicateImplementation",
+  { name: Schema.String }
+) {}
 
 /**
  * Service holding the declared action implementations a composition wired
@@ -80,16 +93,19 @@ export class Implementations extends Context.Service<
   {
     /**
      * Files an implementation under its action tag for the lifetime of the
-     * registering scope. A later registration of the same tag replaces the
-     * earlier one, and closing the registering scope restores what it
-     * replaced. Which of two merged layers is later is not a guarantee Effect
+     * registering scope. A conflicting registration dies unless `override: true` explicitly replaces the
+     * earlier one, and closing the registering scope exposes the newest
+     * registration whose scope is still open. Which of two merged layers is later is not a guarantee Effect
      * makes, so a substitution replaces the implementation layer in the
      * composition rather than stacking a second one on top of it — and a
      * NESTED provision that reaches this same table through layer
      * memoization shadows the enclosing entry only while it lives, instead
      * of leaking its replacement into the enclosing composition.
      */
-    readonly add: (implementation: Implementation) => Effect.Effect<void, never, Scope>
+    readonly add: (
+      implementation: Implementation,
+      options?: { readonly override?: boolean }
+    ) => Effect.Effect<void, never, Scope>
 
     /**
      * The implementation registered for an action tag, if a layer supplied
@@ -114,30 +130,29 @@ export class Implementations extends Context.Service<
  */
 export const layerImplementations: Layer.Layer<Implementations> = Layer.effect(Implementations)(
   Effect.sync(() => {
-    const registered = new Map<string, Implementation>()
+    const registered = new Map<string, Array<{ readonly implementation: Implementation }>>()
     return Implementations.of({
-      add: (implementation) =>
+      add: (implementation, options) =>
         Effect.suspend(() => {
-          const previous = registered.get(implementation.name)
-          registered.set(implementation.name, implementation)
-          // The registration lives exactly as long as the layer build scope
-          // that filed it. `Effect.provide` forks the enclosing memo map, so a
-          // nested provision reuses THIS table rather than building its own;
-          // restoring on scope close is what keeps that reuse a shadow instead
-          // of a leak. Finalizers run in reverse registration order, so
-          // stacked same-tag replacements unwind to exactly what each one
-          // replaced.
+          const entries = registered.get(implementation.name) ?? []
+          if (entries.length > 0 && options?.override !== true && entries.at(-1)?.implementation !== implementation) {
+            return Effect.die(new DuplicateImplementation({ name: implementation.name }))
+          }
+          // Ownership belongs to this registration, not the implementation
+          // object: two scopes may file the very same implementation. Sibling
+          // scopes can close in either order, so a captured predecessor is not
+          // proof that its resources are still alive when an override closes.
+          const entry = { implementation }
+          entries.push(entry)
+          registered.set(implementation.name, entries)
           return Effect.addFinalizer(() =>
             Effect.sync(() => {
-              // A sibling scope may have replaced this entry and may outlive
-              // this one; its own finalizer owns that restoration.
-              if (registered.get(implementation.name) !== implementation) return
-              if (previous === undefined) registered.delete(implementation.name)
-              else registered.set(implementation.name, previous)
+              entries.splice(entries.indexOf(entry), 1)
+              if (entries.length === 0) registered.delete(implementation.name)
             })
           )
         }),
-      get: (name) => Effect.sync(() => Option.fromNullishOr(registered.get(name)))
+      get: (name) => Effect.sync(() => Option.fromNullishOr(registered.get(name)?.at(-1)?.implementation))
     })
   })
 )

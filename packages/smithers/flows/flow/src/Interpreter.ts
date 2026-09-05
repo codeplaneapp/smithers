@@ -57,7 +57,7 @@ import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
-import { type Implementation, Implementations } from "./Action/Implementations.ts"
+import { type Implementation, Implementations, layerImplementations } from "./Action/Implementations.ts"
 import { DispatchSite } from "./Action/StepIdentity.ts"
 import type { Any as AnyFlow, AnyStructSchema, AnyWithProps, Flow } from "./Flow/Flow.ts"
 import * as Outcome from "./Flow/Outcome.ts"
@@ -77,7 +77,10 @@ const OutcomeValueTypeId = Symbol.for("@smthrs/flow/Flow/OutcomeValue")
  * Every code names something the run cannot recover from on its own: a graph
  * whose topology is incomplete, an action with no implementation wired up, a
  * call the interpreter does not execute, and a deferred function that did not
- * survive serialization beside its AST.
+ * survive serialization beside its AST. `missing_implementation_version`
+ * names a content-reusable action that lacks the canonical version contract;
+ * `implementation_version_mismatch` names a declaration and registry that
+ * disagree. Both are preflight failures, before action dispatch.
  *
  * @category errors
  * @since 0.1.0
@@ -89,6 +92,8 @@ export class InterpreterError extends Schema.TaggedError<InterpreterError>()(
       "incomplete_graph",
       "duplicate_node_id",
       "unresolved_action",
+      "implementation_version_mismatch",
+      "missing_implementation_version",
       "unresolved_reference",
       "unsupported_call",
       "missing_operation"
@@ -183,7 +188,10 @@ export const childExecutionId = (
  *
  * The graph is built first and in full — planning is a pure function of the
  * declarations and the payload, so the whole shape of the round is known before
- * the first action runs — and then driven.
+ * the first action runs — and then driven. The low-level default permits
+ * process-local callbacks; pass `callbackIdentity: "stable"` for reproducible
+ * callback identity. {@link layerWithImplementations} selects that policy by
+ * default.
  *
  * @since 0.1.0
  * @category constructors
@@ -192,6 +200,14 @@ export const interpret = (
   flowOrNode: Parameters<typeof Graph.build>[0],
   payload?: unknown,
   options: Graph.BuildOptions = {}
+): Effect.Effect<Interpretation, unknown, Services> => interpretWithPolicy(flowOrNode, payload, options, false)
+
+/** The canonical composition requires versions before permitting content-key reuse. @private */
+const interpretWithPolicy = (
+  flowOrNode: Parameters<typeof Graph.build>[0],
+  payload: unknown,
+  options: Graph.BuildOptions,
+  requireReusableVersions: boolean
 ): Effect.Effect<Interpretation, unknown, Services> =>
   Effect.gen(function*() {
     const table = yield* Implementations
@@ -304,6 +320,38 @@ export const interpret = (
             "this interpreter layer: an implementation files itself with the table that is in scope " +
             "while IT is built, so a table merged beside it, or a second one built above it, is not the " +
             "table this driver reads."
+        )
+      }
+      const declaration = Node.declaration(node.ast)
+      const declaredVersion = ownDataProperty(declaration, "implementationVersion")
+      if (requireReusableVersions) {
+        const tier = ownDataProperty(declaration, "tier")
+        if (tier === undefined) {
+          return yield* refuse(
+            "incomplete_graph",
+            node.id,
+            `Action "${node.ast.action}" lost its declaration, so its implementation identity cannot be checked. ` +
+              "Build the canonical composition from the authored action nodes."
+          )
+        }
+        if (
+          tier === "sealed" && ownDataProperty(declaration, "idempotencyKey") !== undefined &&
+          declaredVersion === undefined
+        ) {
+          return yield* refuse(
+            "missing_implementation_version",
+            node.id,
+            `Sealed action "${node.ast.action}" declares an idempotency key and can reuse recorded content. ` +
+              "Declare implementationVersion on Action.make and attest the same version in toLayer."
+          )
+        }
+      }
+      if (declaredVersion !== implementation.value.implementationVersion) {
+        return yield* refuse(
+          "implementation_version_mismatch",
+          node.id,
+          `Action "${node.ast.action}" does not match its registered implementationVersion. ` +
+            "Register the declared version and start a newly planned execution when its semantics change."
         )
       }
       implementations.set(node.ast.action, implementation.value)
@@ -440,6 +488,15 @@ export const interpret = (
       function*(node: Graph.GraphNode) {
         const children = sources.get(node.id) ?? []
         const ast = node.ast
+        if (ast._tag === "AndThen" && ast.next !== undefined) {
+          // An explicit sequence is a success boundary for the WHOLE next
+          // subtree. Joining first and then concurrently lets a nested All,
+          // Map, or inline call start effects before its prerequisite settles.
+          // bindPlanned is distinct: it declares data dependencies and can
+          // expose independent work while the producer is still running.
+          yield* settle(children[0]!)
+          return yield* settle(children[1]!)
+        }
         if (ast._tag === "Branch") {
           // The predicate decides on the REAL value, and only the arm it chose
           // is settled. Both arms are still in the plan; the untaken one is
@@ -680,6 +737,11 @@ const settle = (value: unknown): Effect.Effect<unknown, never, FlowInstance> => 
  * driver does for a plan read back out of a journal. `Flow.execute` is where
  * the requirements are asked for.
  *
+ * This low-level registration keeps the `process-local` callback policy for
+ * compatibility. Select `callbackIdentity: "stable"`, or use
+ * {@link layerWithImplementations}, to refuse unstable callbacks before
+ * dispatch. Without that selection it makes no reproducible-plan guarantee.
+ *
  * @since 0.1.0
  * @category layers
  */
@@ -691,6 +753,18 @@ export const layer = <
 >(
   flow: Flow<Tag, Payload, Success, Error, any>,
   options: Graph.BuildOptions = {}
+) => makeLayer(flow, options, false)
+
+/** Registers one interpreter policy without changing the low-level compatibility surface. @private */
+const makeLayer = <
+  Tag extends string,
+  Payload extends AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top
+>(
+  flow: Flow<Tag, Payload, Success, Error, any>,
+  options: Graph.BuildOptions,
+  requireReusableVersions: boolean
 ): Layer.Layer<
   never,
   never,
@@ -709,7 +783,7 @@ export const layer = <
       flow,
       ((payload: Payload["Type"]) =>
         Effect.flatMap(
-          interpret(flow, payload, options),
+          interpretWithPolicy(flow, payload, options, requireReusableVersions),
           (interpretation) => settle(interpretation.value)
         )) as (payload: Payload["Type"], executionId: string) => Effect.Effect<
           Success["Type"],
@@ -718,3 +792,54 @@ export const layer = <
         >
     )
   }))
+
+/**
+ * Composes one flow and its implementation layers around one isolated registry.
+ *
+ * The implementation layer must provide every action requirement carried by the
+ * flow. Callback identity defaults to `stable`: raw callbacks are refused before
+ * dispatch, with a diagnostic naming the callback and `Node.capture`. Captures
+ * must cover semantic configuration and implementation versions, including
+ * behavior reached through imports. Explicit `callbackIdentity: "process-local"`
+ * is available for local experimentation, without a reproducible-plan claim.
+ * Sealed actions with an idempotency key must declare `implementationVersion`
+ * and register that exact version. This rule is independent of callback policy:
+ * those declarations can reuse recorded content even if their code changes.
+ * Keyless sealed actions use invocation identity; compensable and irreversible
+ * actions do not use content-key caching. Their versions remain optional.
+ * Versions must cover semantic handler and service changes; callback stability
+ * cannot establish that declaration's completeness.
+ *
+ * The interpreter validates all named graph actions before dispatching any
+ * of them. Conflicting registrations fail while the layer builds; use an explicit
+ * `toLayer(handler, { override: true })` only for intentional scoped substitution.
+ *
+ * @category layers
+ * @since 0.1.0
+ */
+export const layerWithImplementations = <
+  Tag extends string,
+  Payload extends AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires,
+  Provided,
+  E,
+  R
+>(
+  flow: Flow<Tag, Payload, Success, Error, Requires>,
+  implementations:
+    & Layer.Layer<Provided, E, R>
+    & (
+      [NoInfer<Requires>] extends [Provided] ? unknown
+        : { readonly missingActionImplementations: Exclude<Requires, Provided> }
+    ),
+  options: Graph.BuildOptions = {}
+) =>
+  Layer.merge(
+    implementations,
+    makeLayer(flow, { ...options, callbackIdentity: options.callbackIdentity ?? "stable" }, true)
+  )
+    .pipe(
+      Layer.provide(Layer.fresh(layerImplementations))
+    )

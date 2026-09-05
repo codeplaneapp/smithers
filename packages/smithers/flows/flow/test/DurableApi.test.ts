@@ -1,0 +1,287 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Action, Flow, FlowRuntime, Interpreter, RetryPolicy } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
+import { Cause, Context, Effect, Exit, Layer, Option, Schema } from "effect"
+import { withCrypto } from "./Crypto.ts"
+import { layerMemory } from "./MemoryFlowRuntime.ts"
+
+const Read = Action.make("DurableApi/read", { payload: { value: Schema.String }, success: Schema.String })
+const pipeline = Flow.make("DurableApi/pipeline", {
+  payload: { value: Schema.String },
+  success: Schema.String,
+  idempotencyKey: () => "fixed",
+  body: Node.capture(
+    { action: Read.name, implementationVersion: "DurableApi/v1" },
+    (payload: { readonly value: string }) => Read.call(payload)
+  )
+})
+
+const configured = (handler: (payload: { readonly value: string }) => Effect.Effect<string>) =>
+  Interpreter.layerWithImplementations(pipeline, Read.toLayer(handler)).pipe(Layer.provideMerge(layerMemory))
+
+describe("explicit execution identity", () => {
+  it.effect("refuses an invalid explicit key before starting work", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        let runs = 0
+        const exit = yield* Effect.exit(
+          pipeline.ensure({ value: "same" }, { key: undefined as never }).pipe(
+            Effect.provide(configured(() =>
+              Effect.sync(() => {
+                runs++
+                return "bad"
+              })
+            ))
+          )
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Schema.SchemaError)
+        expect(runs).toBe(0)
+      })
+    ))
+
+  it.effect("execute starts independent equal unkeyed requests by default", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        let runs = 0
+        const unkeyed = Flow.make("DurableApi/unkeyed", {
+          payload: { value: Schema.String },
+          success: Schema.String,
+          body: Node.capture(
+            { action: Read.name, implementationVersion: "DurableApi/v1" },
+            (payload: { readonly value: string }) => Read.call(payload)
+          )
+        })
+        const runtime = Interpreter.layerWithImplementations(
+          unkeyed,
+          Read.toLayer(({ value }) =>
+            Effect.sync(() => {
+              runs++
+              return value
+            })
+          )
+        )
+          .pipe(Layer.provideMerge(layerMemory))
+        yield* Effect.gen(function*() {
+          expect(yield* unkeyed.execute({ value: "same" })).toBe("same")
+          expect(yield* unkeyed.execute({ value: "same" })).toBe("same")
+          const captured = yield* unkeyed.execute({ value: "same" }, { discard: true })
+          expect(yield* unkeyed.execute({ value: "same" }, { executionId: captured })).toBe("same")
+          expect(runs).toBe(3)
+        }).pipe(Effect.provide(runtime))
+      })
+    ))
+
+  it.effect("starts independent equal requests and explicitly rejoins a caller key", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        let runs = 0
+        const result = yield* Effect.gen(function*() {
+          const first = yield* pipeline.start({ value: "same" })
+          const second = yield* pipeline.start({ value: "same" })
+          expect(first).not.toBe(second)
+          expect(yield* pipeline.execute({ value: "same" }, { executionId: first })).toBe("same")
+          expect(yield* pipeline.execute({ value: "same" }, { executionId: second })).toBe("same")
+          const third = yield* pipeline.ensure({ value: "same" }, { key: "request-3" })
+          const rejoined = yield* pipeline.ensure({ value: "same" }, { key: "request-3" })
+          expect(third).toBe(rejoined)
+          expect(yield* pipeline.execute({ value: "same" }, { executionId: third })).toBe("same")
+          const existing = yield* pipeline.poll(third)
+          expect(Option.isSome(existing)).toBe(true)
+          return [first, second, third]
+        }).pipe(Effect.provide(configured(({ value }) =>
+          Effect.sync(() => {
+            runs++
+            return value
+          })
+        )))
+        expect(new Set(result).size).toBe(3)
+        expect(runs).toBe(3)
+      })
+    ))
+})
+
+describe("declared durable policy", () => {
+  it.effect("propagates payload-derived identity, typed file boundary, and retry policy on annotated copies", () => {
+    const policy = RetryPolicy.make({ initialMs: 1, factor: 1, maxMs: 1, maxAttempts: 3 })
+    const mark = Context.Reference<string>("DurableApi/mark", { defaultValue: () => "default" })
+    const declared = Action.make("DurableApi/files", {
+      payload: { value: Schema.Number },
+      success: Schema.Number,
+      idempotencyKey: ({ value }) => ({ value }),
+      fileBoundary: ({ value }) => ({ readSet: [], writeSet: [`result-${value}.txt`], boundaryMode: "hard" }),
+      retryPolicy: policy
+    })
+    return Effect.gen(function*() {
+      const observed: Action.Any[] = []
+      const capturing = Layer.succeed(FlowRuntime.FlowRuntime)(
+        {
+          register: (_flow: Flow.Any, handler: (payload: { value: number }) => Action.Any) =>
+            Effect.sync(() => {
+              observed.push(handler({ value: 2 }))
+            })
+        } as unknown as FlowRuntime.FlowRuntime["Service"]
+      )
+      for (
+        const copy of [declared, declared.annotate(mark, "one"), declared.annotateMerge(Context.make(mark, "two"))]
+      ) {
+        yield* Effect.void.pipe(
+          Effect.provide(copy.toLayer(({ value }) => Effect.succeed(value)).pipe(Layer.provide(capturing)))
+        )
+      }
+      expect(observed).toHaveLength(3)
+      for (const action of observed) {
+        expect(action.idempotencyKey).toEqual({ value: 2 })
+        expect(action.retryPolicy).toBe(policy)
+        expect(action.fileBoundary).toEqual({ readSet: [], writeSet: ["result-2.txt"], boundaryMode: "hard" })
+        expect(action.metadata).toEqual(action.fileBoundary)
+      }
+      const inline = Action.make({
+        name: "DurableApi/inline",
+        execute: Effect.void,
+        fileBoundary: { readSet: [], writeSet: [], boundaryMode: "hard" }
+      })
+      expect(inline.metadata).toEqual(inline.fileBoundary)
+    })
+  })
+
+  it.effect("accepts a fixed declared boundary and preserves static identities", () => {
+    const declared = Action.make("DurableApi/fixed", {
+      payload: {},
+      implementationVersion: "fixed/v1",
+      idempotencyKey: "static",
+      fileBoundary: { readSet: [], writeSet: [], boundaryMode: "hard" }
+    })
+    const flow = Flow.make("DurableApi/fixed-flow", {
+      payload: {},
+      body: Node.capture(
+        { action: declared.name, implementationVersion: "DurableApi/fixed/v1" },
+        () => declared.call({})
+      )
+    })
+    return withCrypto(
+      flow.execute({}).pipe(Effect.provide(
+        Interpreter.layerWithImplementations(
+          flow,
+          declared.toLayer(() => Effect.void, { implementationVersion: "fixed/v1" })
+        ).pipe(
+          Layer.provideMerge(layerMemory)
+        )
+      ))
+    )
+  })
+})
+
+describe("implementation composition", () => {
+  it.effect("keeps independently composed handlers isolated when they share a runtime", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        const first = Flow.make("DurableApi/isolated-first", {
+          payload: { value: Schema.String },
+          success: Schema.String,
+          body: Node.capture(
+            { action: Read.name, implementationVersion: "DurableApi/v1" },
+            (payload: { readonly value: string }) => Read.call(payload)
+          )
+        })
+        const second = Flow.make("DurableApi/isolated-second", {
+          payload: { value: Schema.String },
+          success: Schema.String,
+          body: Node.capture(
+            { action: Read.name, implementationVersion: "DurableApi/v1" },
+            (payload: { readonly value: string }) => Read.call(payload)
+          )
+        })
+        const runtime = Layer.merge(
+          Interpreter.layerWithImplementations(first, Read.toLayer(() => Effect.succeed("first"))),
+          Interpreter.layerWithImplementations(second, Read.toLayer(() => Effect.succeed("second")))
+        ).pipe(Layer.provideMerge(layerMemory))
+        yield* Effect.gen(function*() {
+          expect(yield* Effect.serviceOption(Action.Implementations)).toEqual(Option.none())
+          expect(yield* first.execute({ value: "same" })).toBe("first")
+          expect(yield* second.execute({ value: "same" })).toBe("second")
+        }).pipe(Effect.provide(runtime))
+      })
+    ))
+
+  it.effect("rejects conflicting registrations before executing work", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        let runs = 0
+        const implementations = Layer.merge(
+          Read.toLayer(() =>
+            Effect.sync(() => {
+              runs++
+              return "first"
+            })
+          ),
+          Read.toLayer(() =>
+            Effect.sync(() => {
+              runs++
+              return "second"
+            })
+          )
+        )
+        const exit = yield* Effect.exit(
+          pipeline.execute({ value: "x" }).pipe(Effect.provide(
+            Interpreter.layerWithImplementations(pipeline, implementations).pipe(Layer.provideMerge(layerMemory))
+          ))
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBeInstanceOf(Action.DuplicateImplementation)
+        expect(runs).toBe(0)
+      })
+    ))
+
+  it.effect("isolates composed registries and preflights missing graph handlers", () =>
+    withCrypto(
+      Effect.gen(function*() {
+        expect(yield* pipeline.execute({ value: "x" }).pipe(Effect.provide(configured(() => Effect.succeed("first")))))
+          .toBe("first")
+        expect(yield* pipeline.execute({ value: "x" }).pipe(Effect.provide(configured(() => Effect.succeed("second")))))
+          .toBe("second")
+        const other = Action.make("DurableApi/missing", { payload: {}, success: Schema.String })
+        let runs = 0
+        const both = Flow.make("DurableApi/both", {
+          payload: {},
+          success: Schema.Struct({ one: Schema.String, two: Schema.String }),
+          body: Node.capture({ actions: [Read.name, other.name], implementationVersion: "DurableApi/both/v1" }, () =>
+            Node.all({ one: Read.call({ value: "one" }), two: other.call({}) }))
+        })
+        const incomplete = Read.toLayer(() =>
+          Effect.sync(() => {
+            runs++
+            return "one"
+          })
+        )
+        const exit = yield* Effect.exit(
+          both.execute({}).pipe(Effect.provide(
+            Interpreter.layerWithImplementations(
+              both,
+              incomplete as Layer.Layer<
+                Action.Requirement<"DurableApi/read"> | Action.Requirement<"DurableApi/missing">,
+                never,
+                FlowRuntime.FlowRuntime
+              >
+            ).pipe(Layer.provideMerge(layerMemory))
+          ))
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.squash(exit.cause)).toMatchObject({ code: "unresolved_action" })
+        }
+        expect(runs).toBe(0)
+      })
+    ))
+})
+
+const negativeTypes = () => {
+  // @ts-expect-error The composition must provide the flow's action requirements.
+  Interpreter.layerWithImplementations(pipeline, Layer.empty)
+  Action.make("DurableApi/invalid-boundary", {
+    payload: {},
+    // @ts-expect-error Boundaries validate their mode at authoring time.
+    fileBoundary: { readSet: [], writeSet: [], boundaryMode: "weak" }
+  })
+}
+void negativeTypes

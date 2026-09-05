@@ -134,7 +134,7 @@ describe("WaitFor parks", () => {
       error: WaitFor.WaitForRequestInvalid,
       body: ({ name }) =>
         Mark.call({ label: "before" }).pipe(
-          Node.andThen(() => WaitFor.action.call({ name }))
+          Node.bindPlanned(() => WaitFor.action.call({ name }))
         )
     })
     const executionId = "waitFor-gated"

@@ -204,31 +204,18 @@ describe("Flow execution identities", () => {
   )
 })
 
-describe("the default execution-id source", () => {
-  effect("dies with ExecutionIdRequired before engine invocation", () => {
-    let invoked = 0
-    const layer = layerWired(
-      Layer.mergeAll(
-        Echo.toLayer(({ value }) =>
-          Effect.sync(() => {
-            invoked++
-            return value
-          })
-        ),
-        Interpreter.layer(Anonymous)
-      )
-    )
+describe("the explicit payload-derived execution-id source", () => {
+  const derivedEffect = (name: string, body: () => Effect.Effect<void, unknown, Crypto.Crypto>) =>
+    effect(name, () => body().pipe(Effect.provide(Flow.layerExecutionIds(Flow.derived))))
+  derivedEffect("runs a flow that named no identity at all, and answers with its value", () =>
+    Effect.gen(function*() {
+      // The whole point: this is `yield* F.execute(payload)`, with no
+      // executionId, no idempotencyKey, and no layer wiring identity.
+      const value = yield* Anonymous.execute({ value: "unnamed" })
+      expect(value).toBe("unnamed")
+    }).pipe(Effect.provide(AnonymousLayer)))
 
-    return Effect.gen(function*() {
-      const exit = yield* Anonymous.execute({ value: "unnamed" }).pipe(Effect.exit)
-      expect(Exit.isFailure(exit)).toBe(true)
-      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
-      expect(Exit.isFailure(exit) && exit.cause.toString()).toContain("ExecutionIdRequired")
-      expect(invoked).toBe(0)
-    }).pipe(Effect.provide(layer))
-  })
-
-  effect("derives one stable id per (flow tag, payload) pair when explicitly installed", () =>
+  derivedEffect("derives one stable id per (flow tag, payload) pair", () =>
     Effect.gen(function*() {
       const first = yield* Anonymous.executionId({ value: "stable" })
       const second = yield* Anonymous.executionId({ value: "stable" })
@@ -286,7 +273,7 @@ describe("the default execution-id source", () => {
     }).pipe(Effect.provide(layer))
   })
 
-  effect("the derived id agrees with the execution id", () =>
+  derivedEffect("agrees with the id execute runs under", () =>
     Effect.gen(function*() {
       const predicted = yield* Anonymous.executionId({ value: "agreed" })
       const executionId = yield* Anonymous.execute({ value: "agreed" }, { discard: true })
@@ -296,7 +283,7 @@ describe("the default execution-id source", () => {
       Effect.provide(Flow.layerExecutionIds(Flow.derived))
     ))
 
-  effect("dies before engine invocation when the payload has no canonical form", () => {
+  derivedEffect("dies before engine invocation when the payload has no canonical form", () => {
     const Unreached = Action.make("ExecutionId/unreached", {
       payload: { value: Schema.String },
       success: Schema.String

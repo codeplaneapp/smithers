@@ -90,12 +90,14 @@ the elapsed time since the first attempt:
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `RetryAfter(delayMs)`    | The engine sleeps and dispatches attempt `n + 1`. An irreversible action with no `idempotencyKey` dies with `IrreversibleRetryRequiresIdempotencyKey` instead. |
 | `GiveUp("nonRetryable")` | The original typed failure propagates unchanged.                                                                                                               |
-| `GiveUp("exhausted")`    | The dispatch dies with `RetryPolicy.RetryAttemptsExhausted`.                                                                                                   |
-| `GiveUp("expired")`      | The dispatch dies with `RetryPolicy.RetryPolicyExpired`.                                                                                                       |
+| `GiveUp("exhausted")`    | The final declared failure propagates unchanged.                                                                                                               |
+| `GiveUp("expired")`      | The final declared failure propagates unchanged.                                                                                                               |
 
-Both terminal outcomes are defects, not typed failures. A body cannot catch
-them with `Node.catch`, because a spent policy is a statement that the work
-cannot proceed rather than an outcome the caller was told to expect.
+A spent retry policy preserves the action's error channel. `Node.catch` and
+ordinary typed Effect recovery can handle the final failure. The execution span
+records `retry.stopReason` and `retry.attempt`; adding retries does not turn a
+business failure into a defect. Previously persisted exhaustion defects remain
+historical outcomes and are not rewritten.
 
 A durable engine persists the first attempt's start time and the attempt
 sequence, so `expirationMs` is measured from the true first attempt and a

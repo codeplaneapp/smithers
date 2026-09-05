@@ -8,18 +8,17 @@
  * once, for every flow it drives, which is why it is a context reference and
  * not another option on `execute`.
  *
- * The default dies with {@link ExecutionIdRequired}; identity must be a
- * deliberate caller, flow-author, or host decision. A host that wants equal
- * payloads to mean the same work installs {@link derived} explicitly with
- * {@link layerExecutionIds}. A host for which two equal payloads are unrelated
- * installs its own source and scopes identity to what makes runs related.
+ * The default mints a fresh cryptographic UUID for every unkeyed invocation.
+ * Equal payloads are independent requests. To reattach after a crash, retain
+ * the returned execution id, declare an idempotency key, or explicitly install
+ * the `derived` source. Changing this default does not rewrite stored ids.
  *
  * @since 0.1.0
  */
 import { Sha256 } from "@smthrs/crypto"
 import { DerivedKey } from "@smthrs/keys"
 import * as Context from "effect/Context"
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -65,7 +64,7 @@ const canonicalKey = (
   )
 
 /**
- * The default source: a deterministic id over the flow tag and the payload's
+ * An opt-in deterministic source over the flow tag and the payload's
  * canonical form.
  *
  * Same tag and same encoded payload derive the same id, which is exactly the
@@ -90,9 +89,17 @@ export const derived: ExecutionIdSource = {
 }
 
 /**
- * Context reference carrying the host's execution-id source. Its default dies
- * with {@link ExecutionIdRequired}, so payload-derived identity is always
- * opt-in.
+ * Mints independent execution ids for unkeyed requests using host cryptography.
+ * @category constructors
+ * @since 0.1.0
+ */
+export const fresh: ExecutionIdSource = {
+  mint: () => Effect.flatMap(Crypto.Crypto, (crypto) => Effect.orDie(crypto.randomUUIDv4))
+}
+
+/**
+ * Context reference carrying the host's execution-id source, defaulting to
+ * {@link fresh}.
  *
  * @category idempotency
  * @since 0.1.0
@@ -100,9 +107,7 @@ export const derived: ExecutionIdSource = {
 export const CurrentExecutionIds = Context.Reference<ExecutionIdSource>(
   "@smthrs/flow/Flow/CurrentExecutionIds",
   {
-    defaultValue: () => ({
-      mint: (flow) => Effect.die(new ExecutionIdRequired({ flowName: flow._tag }))
-    })
+    defaultValue: () => fresh
   }
 )
 
@@ -111,11 +116,9 @@ export const CurrentExecutionIds = Context.Reference<ExecutionIdSource>(
  *
  * **When to use**
  *
- * Use {@link derived} when equal encoded payloads of one flow are one piece of
- * work. Use a custom source when a session, request, or workspace is what
- * relates invocations. Callers that name an `executionId` and flows that
- * declare an `idempotencyKey` are unaffected: both are decided before the
- * source is consulted.
+ * Install `derived` when equal payloads deliberately identify the same work,
+ * or provide a host-specific identity source. Explicit caller execution ids
+ * and declared idempotency keys take precedence over this source.
  *
  * @category idempotency
  * @since 0.1.0

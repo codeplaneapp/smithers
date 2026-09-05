@@ -76,6 +76,23 @@ requirements would have to name its own requirements inside them, and the type
 would not be finite. Dropping it is sound because a handoff ends this execution
 and the next round runs under its own driver's context.
 
+## Cancelling a logical run
+
+Keep the execution ID returned at admission. `flow.interrupt(id)` requests
+cancellation across the logical run, even after that round has handed off;
+using a later round ID reaches the same lineage. A completed predecessor is
+historical evidence, not proof the whole job is complete. Its recorded handoff
+is not rewritten as a cancellation.
+
+Cancellation reaches linked children, including children created by earlier
+rounds and their handoff successors. A fork's ancestry does not, by itself,
+create a cancellation link. The durable engine serializes intent with handoff
+admission; the memory engine retains intent before admitting a later round.
+Returning from `interrupt` means the request was recorded, not that user cleanup
+or an owner in another process has finished. It is permanent; `resume` does not
+undo it. Low-level `poll(id)` still reads the named round's result, not a
+consolidated logical-run observation.
+
 ## The round budget
 
 `Flow.make`'s `maxRounds` bounds one lineage. It is a budget, not loop detection:

@@ -83,7 +83,7 @@ describe("combinators union what their parts require", () => {
     const mapped = Charge.call({ cents: 1 }).pipe(Node.map((value) => value + 1))
     expectTypeOf<Node.Services<typeof mapped>>().toEqualTypeOf<ChargeNeeded>()
 
-    const sequenced = Charge.call({ cents: 1 }).pipe(Node.andThen(() => Refund.call({ cents: 2 })))
+    const sequenced = Charge.call({ cents: 1 }).pipe(Node.bindPlanned(() => Refund.call({ cents: 2 })))
     expectTypeOf<Node.Services<typeof sequenced>>().toEqualTypeOf<ChargeNeeded | RefundNeeded>()
   })
 
@@ -186,7 +186,7 @@ describe("requirements travel the way the plan does", () => {
     payload: { cents: Schema.Number },
     success: Schema.String,
     error: Schema.String,
-    body: ({ cents }) => Inner.call({ cents }).pipe(Node.andThen(() => Audit.call({ note: "ok" })))
+    body: ({ cents }) => Inner.call({ cents }).pipe(Node.bindPlanned(() => Audit.call({ note: "ok" })))
   })
 
   it("propagates transitively through an inline call", () => {
@@ -253,7 +253,7 @@ describe("system actions require nothing of a caller", () => {
       error: Schema.Union([Sleep.SleepRequestInvalid, WaitFor.WaitForRequestInvalid]),
       body: ({ millis }) =>
         Sleep.action.call({ millis }).pipe(
-          Node.andThen(() => WaitFor.action.call({ name: "approval" }))
+          Node.bindPlanned(() => WaitFor.action.call({ name: "approval" }))
         )
     })
 
@@ -277,7 +277,7 @@ describe("toLayer provides the requirement it mints", () => {
         Layer.provideMerge(Action.layerImplementations),
         Layer.provideMerge(layerMemory)
       )
-      const inner = Duplicate.toLayer(({ value }) => Effect.succeed(value + 2)).pipe(
+      const inner = Duplicate.toLayer(({ value }) => Effect.succeed(value + 2), { override: true }).pipe(
         Layer.provideMerge(Action.layerImplementations),
         Layer.provideMerge(layerMemory)
       )
@@ -306,17 +306,15 @@ describe("toLayer provides the requirement it mints", () => {
 
   it.effect("leaves a successor registration in place when an earlier sibling scope closes first", () =>
     Effect.gen(function*() {
-      // Scoped restoration unwinds LIFO through finalizers. When scopes close
-      // OUT of order, an earlier registration must not clobber the successor
-      // that replaced it: only the filed implementation restores what it
-      // itself replaced.
+      // Closing a sibling must neither clobber a live successor nor let that
+      // successor later resurrect an implementation whose scope is closed.
       const table = yield* Action.Implementations
       const older: Action.Implementation = { name: "requirement/sibling", action: () => Effect.succeed(1) }
       const newer: Action.Implementation = { name: "requirement/sibling", action: () => Effect.succeed(2) }
       const olderScope = yield* Scope.make()
       const newerScope = yield* Scope.make()
       yield* table.add(older).pipe(Scope.provide(olderScope))
-      yield* table.add(newer).pipe(Scope.provide(newerScope))
+      yield* table.add(newer, { override: true }).pipe(Scope.provide(newerScope))
 
       yield* Scope.close(olderScope, Exit.void)
       const surviving = yield* table.get("requirement/sibling")
@@ -324,10 +322,7 @@ describe("toLayer provides the requirement it mints", () => {
       const unwound = yield* table.get("requirement/sibling")
 
       expect(Option.isSome(surviving) && surviving.value).toBe(newer)
-      // The newer registration's finalizer restores what IT replaced. The
-      // restoration is structural — the table maps names to implementations
-      // and does not track a restored entry's own lifetime.
-      expect(Option.isSome(unwound) && unwound.value).toBe(older)
+      expect(unwound).toEqual(Option.none())
     }).pipe(Effect.provide(Action.layerImplementations)))
 
   it.effect("answers with the same implementation the name-keyed table holds", () =>

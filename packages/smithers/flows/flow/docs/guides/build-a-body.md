@@ -67,7 +67,7 @@ const checks = (target: string) =>
 
 const report = (target: string) =>
   checks(target).pipe(
-    Node.andThen((settled) => Report.call({ lint: settled.lint, types: settled.types }))
+    Node.bindPlanned((settled) => Report.call({ lint: settled.lint, types: settled.types }))
   )
 ```
 

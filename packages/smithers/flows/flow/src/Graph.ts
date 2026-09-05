@@ -162,6 +162,18 @@ export interface LayerRequest {
 export interface BuildOptions {
   readonly resolveLayers?: ((request: LayerRequest) => Iterable<string>) | undefined
   /**
+   * `stable` refuses process-local flow bodies, mappers, predicates, and
+   * continuation builders before drafts can be compiled or actions driven.
+   * Declare every semantic capture with `Node.capture`; include an explicit
+   * implementation version for imported behavior not represented by the
+   * callback source. The default, `process-local`, supports inspection and
+   * experimentation but does not promise reproducible plan identity.
+   *
+   * This validates callback identity only. Action implementations and resolved
+   * layers still need their own semantic identity contract.
+   */
+  readonly callbackIdentity?: "stable" | "process-local" | undefined
+  /**
    * The address the entry node is recorded under, `root` by default. A plan
    * grows by appending, and `Plan.append` refuses an id it already holds, so an
    * elaboration built for an existing plan names its own root.
@@ -200,6 +212,7 @@ export interface Graph {
  */
 interface ActionDeclaration {
   readonly name: string
+  readonly implementationVersion?: string | undefined
   readonly payloadSchema: Schema.Top
   readonly successSchema: Schema.Top
   readonly errorSchema: Schema.Top
@@ -827,6 +840,8 @@ interface Visit {
   readonly substitutions: ReadonlyMap<string, string>
   readonly stack: ReadonlyArray<Flow.Any>
   readonly prerequisite: string | undefined
+  /** Explicit andThen success barriers inherited by the entire subtree. */
+  readonly barriers: ReadonlyArray<string>
 }
 
 /**
@@ -851,6 +866,24 @@ export const build = (
   const observedIds = new Set<string>()
   const observedEdges: Array<Edge> = []
   const observedDiagnostics: Array<GraphBuildError> = []
+
+  const observeIdentity = (node: string, field: string, identity: Node.FunctionIdentity | undefined): void => {
+    if (
+      options.callbackIdentity !== "stable" ||
+      (identity !== undefined && identity.algorithm !== "sha256-source-ephemeral/v4")
+    ) return
+    observedDiagnostics.push(
+      new GraphBuildError({
+        code: "unstable_callback",
+        node,
+        path: [field],
+        message:
+          `Callback ${field} at "${node}" has ${identity === undefined ? "unavailable" : "process-local"} identity ` +
+          "and cannot enter a stable graph. " +
+          "Use Node.capture with every semantic capture, including the version of imported implementation behavior."
+      })
+    )
+  }
 
   /**
    * The explicit walk stack. Every step is a thunk; expanding a node pushes
@@ -950,6 +983,7 @@ export const build = (
     readonly priority: number | undefined
     readonly substitutions: ReadonlyMap<string, string>
     readonly stack: ReadonlyArray<Flow.Any>
+    readonly barriers: ReadonlyArray<string>
     readonly dependencies: Array<string>
     readonly inputs: ReadonlyArray<KeyMaterial.InputRef>
   }): void => {
@@ -975,6 +1009,8 @@ export const build = (
       })
     }
     const recordCall = (): void => {
+      const bodyIdentity = call.declaration === undefined ? undefined : Node.functionIdentity(call.declaration.body)
+      observeIdentity(call.id, "body", bodyIdentity)
       record({
         id: call.id,
         kind: "FlowCall",
@@ -997,7 +1033,7 @@ export const build = (
             // produced. A call the graph keeps as a LEAF — an explicit boundary,
             // a handoff — has no such node, and its own digest is the only thing
             // an edited body can move.
-            body: Node.functionIdentity(call.declaration.body)
+            body: bodyIdentity
           }
         },
         inputs,
@@ -1034,7 +1070,8 @@ export const build = (
           priority: call.priority,
           substitutions: call.substitutions,
           stack: [...call.stack, target],
-          prerequisite: undefined
+          prerequisite: undefined,
+          barriers: call.barriers
         }),
       () => {
         dependencies.push(spliced)
@@ -1065,7 +1102,7 @@ export const build = (
           code: "invalid_continuation",
           node: id,
           path: [],
-          message: `Node.andThen at "${id}" no longer holds its continuation builder, so its continuation is ` +
+          message: `Node.bindPlanned at "${id}" no longer holds its continuation builder, so its continuation is ` +
             "missing from the graph. An AST that crossed a serialization boundary left that side table behind."
         })
       )
@@ -1078,7 +1115,7 @@ export const build = (
         code: "invalid_continuation",
         node: id,
         path: [],
-        message: `Node.andThen at "${id}" did not produce a Node, so its continuation is missing from the graph.`
+        message: `Node.bindPlanned at "${id}" did not produce a Node, so its continuation is missing from the graph.`
       })
     )
     return undefined
@@ -1107,6 +1144,7 @@ export const build = (
     const child = (childAst: Node.Ast, childId: string, options: {
       readonly substitutions?: ReadonlyMap<string, string>
       readonly prerequisite?: string | undefined
+      readonly barriers?: ReadonlyArray<string>
     } = {}): Visit => ({
       ast: childAst,
       id: childId,
@@ -1116,10 +1154,14 @@ export const build = (
       priority,
       substitutions: options.substitutions ?? substitutions,
       stack,
-      prerequisite: options.prerequisite
+      prerequisite: options.prerequisite,
+      barriers: options.barriers ?? request.barriers
     })
 
     if (request.prerequisite !== undefined) depend(request.prerequisite, "continuation")
+    for (const barrier of request.barriers) {
+      if (barrier !== request.prerequisite) depend(barrier, "continuation")
+    }
 
     switch (ast._tag) {
       case "FlowCall": {
@@ -1136,6 +1178,7 @@ export const build = (
           priority,
           substitutions,
           stack,
+          barriers: request.barriers,
           dependencies,
           inputs
         })
@@ -1162,7 +1205,10 @@ export const build = (
             declaration: declared === undefined ? undefined : {
               payload: schemaIdentity(declared.payloadSchema),
               success: schemaIdentity(declared.successSchema),
-              error: schemaIdentity(declared.errorSchema)
+              error: schemaIdentity(declared.errorSchema),
+              ...(declared.implementationVersion === undefined
+                ? {}
+                : { implementationVersion: declared.implementationVersion })
             }
           },
           inputs: [...payloadInputs(payload, id), ...inputs],
@@ -1240,6 +1286,7 @@ export const build = (
         return
       }
       case "Map": {
+        observeIdentity(id, "mapper", ast.mapper)
         const first = `${id}.map`
         sequence([
           () => expand(child(ast.first, first)),
@@ -1263,6 +1310,7 @@ export const build = (
         return
       }
       case "AndThen": {
+        observeIdentity(id, "continuation", ast.continuation)
         const first = `${id}.andThen`
         sequence([
           () => expand(child(ast.first, first)),
@@ -1274,7 +1322,14 @@ export const build = (
             if (next === undefined) return
             const thenId = `${id}.then`
             sequence([
-              () => expand(child(next, thenId, { prerequisite: first })),
+              () =>
+                expand(child(next, thenId, {
+                  prerequisite: first,
+                  // Explicit andThen sequences every descendant, not only the
+                  // result/join node. bindPlanned remains a dependency builder:
+                  // independent members can run while a referenced producer runs.
+                  barriers: ast.next === undefined ? request.barriers : [...request.barriers, first]
+                })),
               () => depend(thenId, "value")
             ])
           },
@@ -1297,6 +1352,7 @@ export const build = (
         return
       }
       case "Branch": {
+        observeIdentity(id, "predicate", ast.predicate)
         const first = `${id}.branch`
         // DECIDED: each Branch AST carries its own
         // subject token. An outer subject captured inside a nested arm must
@@ -1379,7 +1435,8 @@ export const build = (
       priority: undefined,
       substitutions: new Map(),
       stack: [],
-      prerequisite: undefined
+      prerequisite: undefined,
+      barriers: []
     })
   } else {
     const entry = hydrate(payload, new Map(), root)
@@ -1402,6 +1459,7 @@ export const build = (
       priority: undefined,
       substitutions: new Map(),
       stack: [],
+      barriers: [],
       dependencies: [],
       inputs: []
     })

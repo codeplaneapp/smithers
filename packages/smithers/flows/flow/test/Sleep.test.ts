@@ -125,8 +125,8 @@ describe("Sleep parks", () => {
       error: Sleep.SleepRequestInvalid,
       body: ({ millis }) =>
         Mark.call({ label: "before" }).pipe(
-          Node.andThen(() => Sleep.action.call({ millis })),
-          Node.andThen(() => Mark.call({ label: "after" }))
+          Node.bindPlanned(() => Sleep.action.call({ millis })),
+          Node.bindPlanned(() => Mark.call({ label: "after" }))
         )
     })
     const executionId = "sleep-durable"
@@ -164,8 +164,8 @@ describe("Sleep parks", () => {
       error: Sleep.SleepRequestInvalid,
       body: () =>
         Sleep.action.call({ millis: 600_000 }).pipe(
-          Node.andThen(() => Sleep.action.call({ millis: 600_000 })),
-          Node.andThen(() => Mark.call({ label: "done" }))
+          Node.bindPlanned(() => Sleep.action.call({ millis: 600_000 })),
+          Node.bindPlanned(() => Mark.call({ label: "done" }))
         )
     })
     const executionId = "sleep-twice"
@@ -207,8 +207,8 @@ describe("Sleep parks", () => {
       error: Sleep.SleepRequestInvalid,
       body: () =>
         Mark.call({ label: "before" }).pipe(
-          Node.andThen(() => Sleep.action.call({ millis: 600_000 })),
-          Node.andThen(() => Mark.call({ label: "after" }))
+          Node.bindPlanned(() => Sleep.action.call({ millis: 600_000 })),
+          Node.bindPlanned(() => Mark.call({ label: "after" }))
         )
     })
     const executionId = "sleep-rearm"

@@ -106,14 +106,12 @@ value captured from a different build.
 
 **Symptom.** A run dies before it starts, naming the flow.
 
-**Cause.** No `executionId` was given, the flow declares no `idempotencyKey`,
-and the default ambient source refuses to guess. When the opt-in derived source
-is installed, this also means the payload has no canonical form: a non-finite
+**Cause.** The opt-in derived source is installed and the payload has no canonical form: a non-finite
 number, a lone surrogate, or a cycle.
 
 **Fix.** Pass an explicit `executionId`, declare an `idempotencyKey` on the flow,
-`Flow.layerExecutionIds(Flow.derived)` when payload identity is intentional, or
-with a custom source when the host has its own rule.
+or use `Flow.layerExecutionIds(Flow.fresh)` for a new invocation. For intentional
+payload identity, correct the payload so it can be canonicalized.
 
 ### `Action.ConcurrentKeylessDispatch`
 
@@ -198,15 +196,13 @@ token of the one attempt that is waiting.
 raise `maxAttempts`, or declare `onTimeout: "return-last"` when the last reading
 is good enough.
 
-### `RetryAttemptsExhausted` or `RetryPolicyExpired`, and `Node.catch` will not catch them
+### Typed recovery after retries
 
-**Cause.** Both are defects, not typed failures. A spent policy is a statement
-that the work cannot proceed, rather than an outcome the caller was told to
-expect.
-
-**Fix.** Handle them at the execution boundary, or widen the policy. If the
-failure is one the caller should handle, list its tag in `nonRetryable` so the
-original typed failure propagates instead.
+Exhausted or expired action policies propagate the final declared failure.
+Use `Node.catch` or ordinary Effect recovery for that error. A historical run
+recorded before this change may still contain RetryAttemptsExhausted or
+RetryPolicyExpired as its immutable outcome; restarting that same execution
+does not rewrite history.
 
 ### `FlowRuntime.FlowExecutionNotFound`
 

@@ -16,8 +16,8 @@ whole execution, and the key of one dispatch inside it.
 1. The `executionId` the caller named on `execute`.
 2. The flow's declared `idempotencyKey`, JSON-tuple framed with the flow tag and
    hashed.
-3. The ambient `Flow.CurrentExecutionIds` source. Its default dies with
-   `Flow.ExecutionIdRequired`, so a host must choose an identity policy.
+3. The ambient `Flow.CurrentExecutionIds` source. Its default, `Flow.fresh`,
+   mints a cryptographic UUID, so equal unkeyed requests start independent work.
 
 A declared key beats the ambient source because it is the narrower statement:
 this author said what makes two invocations of _this_ flow the same, where the
@@ -33,31 +33,36 @@ flow tag:
 const derivedIdentity = Flow.layerExecutionIds(Flow.derived)
 ```
 
-Install a custom source when a request, session, or workspace defines which
-invocations are the same:
+Install the deterministic `derived` source only when equal payloads deliberately
+identify one request. Its existing codec, canonicalization and hash framing are
+unchanged, so this is also the migration path for callers that need to reattach
+to historical automatically derived executions.
 
 ```ts
 import { Flow } from "@smthrs/flow"
-import * as Effect from "effect/Effect"
 
-const perTenant = Flow.layerExecutionIds({
-  mint: (flow, payload) => Effect.succeed(`${flow._tag}:${(payload as { tenant: string }).tenant}`)
-})
+const intentionalPayloadIdentity = Flow.layerExecutionIds(Flow.derived)
 ```
+
+`flow.start(payload)` always creates fresh work and returns its id, including
+when the declaration carries an idempotency key. `flow.ensure(payload, { key })`
+returns the id of an explicitly keyed new or existing execution. After a crash,
+reattach with the saved id or the same explicit key; calling unkeyed `execute`
+again starts new work. Read a run with `poll(id)`, or await it with
+`execute(payload, { executionId: id })`.
 
 Callers that name an `executionId` and flows that declare an `idempotencyKey` are
 unaffected, because both are decided before the source is consulted.
 
 ### When identity cannot be derived
 
-`Flow.ExecutionIdRequired` is a defect, not a typed failure. The default source
-raises it whenever neither the caller nor the flow declaration selected an id.
-The opt-in derived source also raises it when the payload has no canonical
-form: a non-finite number, a lone surrogate, or a cycle. Both die before the
+`Flow.ExecutionIdRequired` is a defect, not a typed failure. The opt-in derived source raises it when the payload has no canonical
+form: a non-finite number, a lone surrogate, or a cycle. Derivation fails before the
 engine is invoked, because a run under the wrong id is worse than a run that
 does not start.
 
-`Flow.executionId(payload)` precomputes the same id. It dies when the payload
+`Flow.executionId(payload)` asks the configured source for an id. With the fresh
+source, pass that returned id explicitly to `execute`; asking again mints a new id. It dies when the payload
 fails the flow's own schema, where `Flow.execute` fails with a typed
 `Schema.SchemaError` for the same input. Precompute an id only for a payload you
 have already validated.

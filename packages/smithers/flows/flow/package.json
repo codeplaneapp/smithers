@@ -45,9 +45,19 @@
     "./FlowRuntime": "./src/FlowRuntime/index.ts",
     "./FlowRuntime/*": null,
     "./StepIdentity": "./src/Action/StepIdentity.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./DurableClock": "./src/DurableClock.ts",
+    "./DurableDeferred": "./src/DurableDeferred.ts",
+    "./DurableQueue": "./src/DurableQueue.ts",
+    "./Graph": "./src/Graph.ts",
+    "./HumanTask": "./src/HumanTask.ts",
+    "./Interpreter": "./src/Interpreter.ts",
+    "./Poll": "./src/Poll.ts",
+    "./RetryPolicy": "./src/RetryPolicy.ts",
+    "./Sleep": "./src/Sleep.ts",
+    "./WaitFor": "./src/WaitFor.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -110,13 +120,63 @@
         "import": "./dist/esm/Action/StepIdentity.js",
         "require": "./dist/cjs/Action/StepIdentity.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./DurableClock": {
+        "types": "./dist/esm/DurableClock.d.ts",
+        "import": "./dist/esm/DurableClock.js",
+        "require": "./dist/cjs/DurableClock.js"
+      },
+      "./DurableDeferred": {
+        "types": "./dist/esm/DurableDeferred.d.ts",
+        "import": "./dist/esm/DurableDeferred.js",
+        "require": "./dist/cjs/DurableDeferred.js"
+      },
+      "./DurableQueue": {
+        "types": "./dist/esm/DurableQueue.d.ts",
+        "import": "./dist/esm/DurableQueue.js",
+        "require": "./dist/cjs/DurableQueue.js"
+      },
+      "./Graph": {
+        "types": "./dist/esm/Graph.d.ts",
+        "import": "./dist/esm/Graph.js",
+        "require": "./dist/cjs/Graph.js"
+      },
+      "./HumanTask": {
+        "types": "./dist/esm/HumanTask.d.ts",
+        "import": "./dist/esm/HumanTask.js",
+        "require": "./dist/cjs/HumanTask.js"
+      },
+      "./Interpreter": {
+        "types": "./dist/esm/Interpreter.d.ts",
+        "import": "./dist/esm/Interpreter.js",
+        "require": "./dist/cjs/Interpreter.js"
+      },
+      "./Poll": {
+        "types": "./dist/esm/Poll.d.ts",
+        "import": "./dist/esm/Poll.js",
+        "require": "./dist/cjs/Poll.js"
+      },
+      "./RetryPolicy": {
+        "types": "./dist/esm/RetryPolicy.d.ts",
+        "import": "./dist/esm/RetryPolicy.js",
+        "require": "./dist/cjs/RetryPolicy.js"
+      },
+      "./Sleep": {
+        "types": "./dist/esm/Sleep.d.ts",
+        "import": "./dist/esm/Sleep.js",
+        "require": "./dist/cjs/Sleep.js"
+      },
+      "./WaitFor": {
+        "types": "./dist/esm/WaitFor.d.ts",
+        "import": "./dist/esm/WaitFor.js",
+        "require": "./dist/cjs/WaitFor.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -134,27 +194,27 @@
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

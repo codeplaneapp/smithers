@@ -8,7 +8,7 @@
 import { Sha256 } from "@smthrs/crypto"
 import * as Node from "@smthrs/plan/Node"
 import * as Context from "effect/Context"
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { FlowRuntime } from "../FlowRuntime/FlowRuntime.ts"
@@ -126,6 +126,22 @@ const Proto = {
         { captureStackTrace: false }
       )
     ) as any
+  },
+  start(this: AnyWithProps, payload: unknown) {
+    return Effect.flatMap(
+      Crypto.Crypto,
+      (crypto) =>
+        Effect.flatMap(
+          Effect.orDie(crypto.randomUUIDv4),
+          (executionId) => this.execute(payload, { executionId, discard: true })
+        )
+    )
+  },
+  ensure(this: AnyWithProps, payload: unknown, options: { readonly key: string }) {
+    return Schema.decodeUnknownEffect(Schema.String)(options.key).pipe(
+      Effect.flatMap((key) => Effect.orDie(Schema.decodeUnknownEffect(Sha256)(JSON.stringify([this._tag, key])))),
+      Effect.flatMap((executionId) => this.execute(payload, { executionId, discard: true }))
+    )
   },
   poll(this: Flow<string, AnyStructSchema, Schema.Top, Schema.Top, any>, executionId: string) {
     return Effect.flatMap(FlowRuntime, (engine) => engine.poll(this, executionId)).pipe(

@@ -9,9 +9,8 @@ This quickstart runs one flow end to end on the in-memory engine. Nothing here
 touches a database or the network, and the result arrives as a typed value
 decoded by the schema you declared.
 
-The runnable original is
-[`examples/src/01-define-and-run.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/01-define-and-run.ts)
-in the repository.
+A runnable copy of this program is published in the Smithers examples,
+[`01-define-and-run.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/01-define-and-run.ts).
 
 ## Prerequisites
 
@@ -19,7 +18,7 @@ in the repository.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/flow @smthrs/engine effect @effect/platform-node
+pnpm add @smthrs/flow@next @smthrs/engine@next effect@4.0.0-rc.112 @effect/platform-node
 ```
 
 ## Declare the action and the flow

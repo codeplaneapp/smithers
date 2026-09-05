@@ -1,5 +1,18 @@
 # @smthrs/flow
 
+## [Unreleased]
+
+### Fixed
+
+- Explicit `Node.andThen` now gates its entire next subtree on upstream
+  success. Nested combinations, maps, inline flows, branches, catches and
+  sequences no longer start actions before the first node finishes or after
+  it fails. Graph drafts propagate that prerequisite to every descendant.
+  Affected compiled keys/digests change and require a newly approved plan;
+  old executions are not silently rewritten. `bindPlanned` retains its data-
+  dependency semantics and can expose independent work concurrently. This
+  does not close compiled/public scheduler parity or unfinished-run migration.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Breaking Changes

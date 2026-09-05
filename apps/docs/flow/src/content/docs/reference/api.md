@@ -65,11 +65,11 @@ Identity has three sources, consulted in this order:
 
 1. the `executionId` the caller named on `execute`;
 2. the `idempotencyKey` the flow declared, hashed together with the flow tag;
-3. the ambient `CurrentExecutionIds` source, whose default dies with `ExecutionIdRequired`.
+3. the ambient `CurrentExecutionIds` source, whose default `fresh` mints a new cryptographic UUID.
 
-`layerExecutionIds(source)` replaces the third. Install `layerExecutionIds(derived)` when equal encoded payloads of one flow are one piece of work, or install a custom source when a request, session, or workspace defines identity. Callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
+`layerExecutionIds(source)` replaces the third. Install `derived` when equal payloads deliberately name one piece of work; callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
 
-`ExecutionIdRequired` is a defect, not a typed failure. The default source raises it when neither the caller nor the flow selected an id; the opt-in derived source raises it when the payload has no canonical form, for example a non-finite number, a lone surrogate, or a cycle. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `Schema.SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
+`ExecutionIdRequired` is a defect, not a typed failure. The opt-in derived source raises it when the payload has no canonical form, for example a non-finite number, a lone surrogate, or a cycle. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `Schema.SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
 
 ### Results
 
@@ -91,27 +91,27 @@ Scope helpers are `scope`, `provideScope`, `addFinalizer`, `withRollback`, and `
 
 `Action.make(options)` defines a named effect with success and error schemas, a `tier`, idempotency identity, metadata, annotations, an optional `retryPolicy`, and an optional `interruptRetryPolicy`. `Action.make(tag, options)` is the declared form: pure data whose implementation attaches later through `toLayer`. `Action.makeSystem` is the declared form that mints no requirement, which is how `Sleep`, `WaitFor`, `HumanTask`, and `Poll` ship implementations with the engine instead of pushing a layer obligation onto their callers.
 
-| Export                                                                           | Purpose                                                                                                                                                                                                                                                                                                   |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Tier`                                                                           | `sealed`, `compensable`, or `irreversible`                                                                                                                                                                                                                                                                |
-| `InfraInterrupt`                                                                 | marker an action adapter explicitly fails with for an infrastructure event it wants `interruptRetryPolicy` to retry; shipped engines do not synthesize it from fiber interruption                                                                                                                         |
-| `InfraInterruptRetriesExhausted`                                                 | the typed identity an exhausted `interruptRetryPolicy` dies with, carrying the action, the attempts, and the final interrupt                                                                                                                                                                              |
-| `IrreversibleRetryRequiresIdempotencyKey`                                        | an irreversible action retried without a declared key                                                                                                                                                                                                                                                     |
-| `ConcurrentKeylessDispatch`                                                      | two live dispatches of one keyless allocation scope                                                                                                                                                                                                                                                       |
-| `UncanonicalIdempotencyKey`                                                      | a caller-declared object-form `idempotencyKey` carrying material canonical serialization rejects, such as a `Date`, an `undefined`, a class instance, or a `Redacted`. It surfaces as a typed, non-retryable recorded completion naming the offending path, never as an untyped fiber defect (issue #151) |
-| `retry(effect, options)`                                                         | Effect retry with durable attempt context                                                                                                                                                                                                                                                                 |
-| `raceAll(name, actions)`                                                         | a durable action race, persisting one winner                                                                                                                                                                                                                                                              |
-| `idempotencyKey(name, options?)`                                                 | the run-local invocation key                                                                                                                                                                                                                                                                              |
-| `DispatchSite`                                                                   | the structural node address the interpreter scopes one dispatch to                                                                                                                                                                                                                                        |
-| `CurrentCacheEnvironment`                                                        | the complete `{ layers, capabilities }` a sealed cache key is computed under. It is hashed separately from caller-owned identity, and when it is absent the engine scopes the key to the current execution                                                                                                |
-| `CachePolicy` and `withCache`                                                    | a declaration-level annotation bounding the age of a reusable sealed result                                                                                                                                                                                                                               |
-| `FileInput`, `FileBoundary`, `BoundaryMode`, `Filegroup`, `Glob`, `TreeArtifact` | the file-boundary vocabulary an action declares its reads and writes with                                                                                                                                                                                                                                 |
+| Export                                                                           | Purpose                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Tier`                                                                           | `sealed`, `compensable`, or `irreversible`                                                                                                                                                                                                                                                   |
+| `InfraInterrupt`                                                                 | marker an action adapter explicitly fails with for an infrastructure event it wants `interruptRetryPolicy` to retry; shipped engines do not synthesize it from fiber interruption                                                                                                                                                                                                                   |
+| `InfraInterruptRetriesExhausted`                                                 | the typed identity an exhausted `interruptRetryPolicy` dies with, carrying the action, the attempts, and the final interrupt                                                                                                                                                                 |
+| `IrreversibleRetryRequiresIdempotencyKey`                                        | an irreversible action retried without a declared key                                                                                                                                                                                                                                        |
+| `ConcurrentKeylessDispatch`                                                      | two live dispatches of one keyless allocation scope                                                                                                                                                                                                                                          |
+| `UncanonicalIdempotencyKey`                                                      | a caller-declared object-form `idempotencyKey` carrying material canonical serialization rejects, such as a `Date`, an `undefined`, a class instance, or a `Redacted`. It surfaces as a typed, non-retryable recorded completion naming the offending path, never as an untyped fiber defect |
+| `retry(effect, options)`                                                         | Effect retry with durable attempt context                                                                                                                                                                                                                                                    |
+| `raceAll(name, actions)`                                                         | a durable action race, persisting one winner                                                                                                                                                                                                                                                 |
+| `idempotencyKey(name, options?)`                                                 | the run-local invocation key                                                                                                                                                                                                                                                                 |
+| `DispatchSite`                                                                   | the structural node address the interpreter scopes one dispatch to                                                                                                                                                                                                                           |
+| `CurrentCacheEnvironment`                                                        | the complete `{ layers, capabilities }` a sealed cache key is computed under. It is hashed separately from caller-owned identity, and when it is absent the engine scopes the key to the current execution                                                                                   |
+| `CachePolicy` and `withCache`                                                    | a declaration-level annotation bounding the age of a reusable sealed result                                                                                                                                                                                                                  |
+| `FileInput`, `FileBoundary`, `BoundaryMode`, `Filegroup`, `Glob`, `TreeArtifact` | the file-boundary vocabulary an action declares its reads and writes with                                                                                                                                                                                                                    |
 
-`CurrentAttempt` is the one-based durable attempt. `CurrentOrdinal` carries an `OrdinalSlot` (`{ values, cursors }`) rather than a number: the engine allocates each dispatch's ordinal under its declaration-identity scope and pins it per scope by dispatch position, so every attempt of one `Action.retry` sequence reuses its own action's ordinals even when the block dispatches several distinct actions or one declaration several times (issues #73, #84, #100). Nested blocks share the pinned `values` with the enclosing block (issue #108) but own a private `cursors` view seeded at block entry and merged back on exit, so a concurrent sibling block's attempt boundary never rewinds another block's mid-flight cursor (issue #116). Concurrent dispatch of one allocation scope is refused with `ConcurrentKeylessDispatch` for every ordinal-keyed action, keyless or keyed at a non-sealed tier, because arrival order would otherwise assign the ordinals; only a sealed action with an `idempotencyKey`, which is a pure cache key, may overlap on the same declared key, and distinct keys are distinct scopes that overlap freely (issues #111, #130).
+`CurrentAttempt` is the one-based durable attempt. `CurrentOrdinal` carries an `OrdinalSlot` (`{ values, cursors }`) rather than a number: the engine allocates each dispatch's ordinal under its declaration-identity scope and pins it per scope by dispatch position, so every attempt of one `Action.retry` sequence reuses its own action's ordinals even when the block dispatches several distinct actions or one declaration several times. Nested blocks share the pinned `values` with the enclosing block but own a private `cursors` view seeded at block entry and merged back on exit, so a concurrent sibling block's attempt boundary never rewinds another block's mid-flight cursor. Concurrent dispatch of one allocation scope is refused with `ConcurrentKeylessDispatch` for every ordinal-keyed action, keyless or keyed at a non-sealed tier, because arrival order would otherwise assign the ordinals; only a sealed action with an `idempotencyKey`, which is a pure cache key, may overlap on the same declared key, and distinct keys are distinct scopes that overlap freely.
 
 An action is itself an `Effect`; `action.execute` bypasses engine recording and should normally be used only by engine implementations.
 
-Sealed idempotency identity has two forms. A string is namespaced by the action name and the declared schemas. An object is caller-owned canonical JSON and stays stable across action renames. The engine separately adds the complete cache environment and any file boundary derived from `metadata`, so caller identity cannot override runtime facts.
+Sealed idempotency identity has two forms. A string is namespaced by the action name and the declared schemas. An object is caller-owned canonical JSON and stays stable across action renames. The engine separately adds the complete cache environment and any typed `fileBoundary` (or historical boundary `metadata`), so caller identity cannot override runtime facts.
 
 ## Durable primitives
 
@@ -142,6 +142,20 @@ A call node's key material folds in the declared schemas as their JSON Schema do
 ## `Interpreter`
 
 `Interpreter.layer(flow)` registers a flow with the runtime and installs the handler that drives its body. `Interpreter.interpret(flowOrNode, payload, options)` is that drive on its own, for a body you want to run without registering it.
+
+Explicit `Node.andThen(next)` waits for upstream success before starting any
+part of `next`, including actions inside an `all`, `map`, branch, catch, nested
+sequence, or inline flow. Upstream failure or interruption does not activate
+that subtree. `Graph.build` carries the same prerequisite into every descendant
+draft. `Node.bindPlanned` is different: it builds data dependencies, so members
+that do not use the reference may run concurrently with its producer.
+
+The subtree-barrier correction changes compiled identities for affected nested
+sequences. Newly plan and approve changed work; this is not an unfinished-run
+migration or undo of effects an older runtime already started too early. It
+also does not make the interpreter consume the compiled scheduler's filesystem
+conflict edges, priorities or admission limits; that execution-path integration
+remains a separate release requirement.
 
 | Export             | Purpose                                                                                                       |
 | ------------------ | ------------------------------------------------------------------------------------------------------------- |
@@ -268,7 +282,7 @@ A `RetryPolicy` is a plain value, so the next retry delay is derived from a pers
 
 `nextDelay` is total even for a policy that never went through `make`, which is what a policy decoded from a persisted row is: a non-finite attempt, elapsed time, bound, or computed delay answers `None` rather than handing the engine a negative or `NaN` duration to sleep for.
 
-`decide` classifies non-retryable errors here and nowhere else, by the policy's declared tags and by `defaultNonRetryable`, which lists the integrity verdicts that must reach the driver unretried under every policy. `RetryPolicyExpired` and `RetryAttemptsExhausted` are the terminal failures, each with a stable code.
+`decide` classifies non-retryable errors here and nowhere else, by the policy's declared tags and by `defaultNonRetryable`, which lists the integrity verdicts that must reach the driver unretried under every policy. Exhaustion and expiration preserve the final declared failure. The older `RetryPolicyExpired` and `RetryAttemptsExhausted` schemas remain available for interpreting historical outcomes.
 
 ## `StepIdentity`
 
@@ -302,3 +316,21 @@ No shipped runtime reads `FlowInstance.awaitedDeferreds`. It is reserved for a r
 - [Troubleshooting](/troubleshooting/): the same failures, sorted by symptom.
 - [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) implements the `FlowRuntime` port, and [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) makes it durable.
 - [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) owns the `Node` and `FileSet` vocabulary a body is written in.
+
+## Explicit execution and registration
+
+`flow.start(payload)` starts fresh work and returns its execution id, even for
+identical payloads or a declaration with an idempotency key.
+`flow.ensure(payload, { key })` starts or joins explicitly keyed work and returns
+its id. Use `poll(id)` to observe it, or `execute(payload, { executionId: id })`
+to await it. The default unkeyed `execute` now starts fresh work. To reattach after a crash,
+retain and pass the execution id, declare an idempotency key, or deliberately
+install `Flow.layerExecutionIds(Flow.derived)`. Existing stored key encodings are
+unchanged; the library does not rewrite historical runs.
+
+`Interpreter.layerWithImplementations(flow, implementationLayer)` builds the
+interpreter and all action implementations against one isolated registry. Its
+types require every action named by the flow; runtime graph preflight rejects
+missing handlers before dispatch. Conflicting same-tag registrations fail during
+layer construction. Intentional scoped substitution uses
+`action.toLayer(handler, { override: true })`.

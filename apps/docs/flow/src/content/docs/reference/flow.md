@@ -6,10 +6,10 @@ order: 10
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/flow/docs/reference/flow.md"
 ---
 
-Install the package and the exact `effect` version it pins:
+Install the package with its exact `effect` peer:
 
 ```bash
-pnpm add @smthrs/flow@next effect@4.0.0-rc.108
+pnpm add @smthrs/flow@next effect@4.0.0-rc.112
 ```
 
 ## Entry points
@@ -395,7 +395,7 @@ Creates a token from an explicit flow and execution id, for a resolver outside t
 - **Signature:** `tokenFromPayload(self: DurableDeferred<Success, Error>, options: { readonly flow: W; readonly payload: Flow.PayloadSchema<W>["~type.make.in"] }): Effect.Effect<Token, never, Crypto.Crypto>`
 - **Since:** `0.1.0`
 
-Creates a token by deriving the execution id from the flow payload. The flow must declare `idempotencyKey`; without it, the default execution-id source dies. Use `tokenFromExecutionId` for an explicitly named execution.
+Creates a token by deriving the execution id from the flow payload. Declare an `idempotencyKey` or install the opt-in derived source for stable payload identity. The default fresh source mints a new id on each call; use `tokenFromExecutionId` with a saved id to address an existing execution.
 
 ### `DurableDeferred.done`
 
@@ -541,19 +541,28 @@ Whether a flow suspends when it encounters any error. A suspended execution is r
 - **Type:** `Schema.TaggedError` with fields `code: "execution_id_required"` and `flowName: string`
 - **Since:** `0.1.0`
 
-A flow execution has no selected identity. The default ambient source dies with this defect when neither the caller nor the flow declaration selected an id; the opt-in `derived` source also dies with it when the payload has no canonical form.
+The opt-in `derived` source dies with this defect when the payload has no canonical form. The default source mints a fresh UUID when the caller and declaration do not select an id.
 
 ### `Flow.derived`
 
 - **Type:** `ExecutionIdSource`
 - **Since:** `0.1.0`
 
-The opt-in payload-derived execution-id source. It encodes the payload with the flow's own codec, canonicalizes it under RFC 8785, hashes it with SHA-256, and hashes that key together with the flow tag inside a JSON tuple. The same tag and encoded payload derive the same id. Install it with `layerExecutionIds(derived)`. The preimage encoding freezes at rc.0.
+The opt-in deterministic execution-id source. It encodes the payload with the flow's own codec, canonicalizes it under RFC 8785, hashes it with SHA-256, and hashes that key together with the flow tag inside a JSON tuple. The same tag and encoded payload derive the same id. The preimage encoding freezes at rc.0.
+
+### `Flow.fresh`
+
+- **Type:** `ExecutionIdSource`
+- **Since:** `0.1.0`
+
+The default execution-id source. Every invocation mints an independent cryptographic
+UUID. Save the returned execution id to reattach after a crash, or explicitly
+choose a declared idempotency key, `ensure`, or the `derived` source.
 
 ### `Flow.CurrentExecutionIds`
 
 - **Type:** `Context.Reference<ExecutionIdSource>`
-- **Default:** dies with `ExecutionIdRequired`
+- **Default:** `fresh`
 - **Since:** `0.1.0`
 
 The host's execution-id source. Its identifier is `"@smthrs/flow/Flow/CurrentExecutionIds"`.
@@ -729,7 +738,7 @@ Executing a flow would close a cycle in the persisted parent-execution chain. `p
 - **Type:** `Context.Service` keyed `"@smthrs/flow/FlowRuntime/FlowInstance"`
 - **Since:** `0.1.0`
 
-One execution's state: `executionId`, `lineageId`, `flow`, a `scope` closed only when the flow completes, the mutable `suspended`, `interrupted`, `waiting`, `handoff`, and `cause` fields, the optional `awaitedDeferreds` set, and `actionState`. This package declares the contract; a runtime constructs the value. No runtime shipped in this repository reads `awaitedDeferreds`: a completion wakes a parked run through `FlowRuntime.resume`.
+One execution's state: `executionId`, `lineageId`, `flow`, a `scope` closed only when the flow completes, the mutable `suspended`, `interrupted`, `waiting`, `handoff`, and `cause` fields, the optional `awaitedDeferreds` set, and `actionState`. This package declares the contract; a runtime constructs the value. No shipped runtime reads `awaitedDeferreds`: a completion wakes a parked run through `FlowRuntime.resume`.
 
 ### `FlowRuntime.DeferredDoneIfWaitingOutcome`
 
@@ -1415,7 +1424,7 @@ Every failure the package defines is a `Schema.TaggedError` carrying a stable `c
 | `@smthrs/flow/ConcurrentKeylessDispatch`               | Two ordinal-keyed invocations of one allocation scope are in flight at once.                                         | `code`, `actionName`                                                    |
 | `@smthrs/flow/UncanonicalIdempotencyKey`               | A caller-declared object-form `idempotencyKey` carries material canonical serialization rejects.                     | `code`, `actionName`, `reason`, `path`, `message`                       |
 | `@smthrs/flow/DurableDeferred/TokenInvalid`            | A completion token does not parse, or names a different deferred than the surface it was submitted through.          | `code`, `message`                                                       |
-| `@smthrs/flow/ExecutionIdRequired`                     | No caller, declaration, or ambient source selected an id, or opt-in derivation could not canonicalize the payload.   | `code`, `flowName`                                                      |
+| `@smthrs/flow/ExecutionIdRequired`                     | Opt-in derivation could not canonicalize the payload.   | `code`, `flowName`                                                      |
 | `@smthrs/flow/MaxRoundsExceeded`                       | A trampoline lineage opens a round past its flow's `maxRounds` budget.                                               | `code`, `flowName`, `lineageId`, `maxRounds`, `roundOrdinal`, `message` |
 | `@smthrs/flow/CancelRequestFailed`                     | `interrupt` cannot durably record its cancellation request, or a durable engine is asked for `interruptUnsafe`.      | `code`, `executionId`, `reason`                                         |
 | `@smthrs/flow/FlowCycleDetected`                       | Executing a flow would close a cycle in the persisted parent-execution chain.                                        | `code`, `path`                                                          |
@@ -1466,65 +1475,10 @@ Provide a runtime that implements `FlowRuntime`, then run `Deploy.execute({ id: 
 
 ## See also
 
-- [`@smthrs/engine`](https://smithers.sh/docs/reference/api/engine/), which implements the `FlowRuntime` port
-- [`@smthrs/engine-store`](https://smithers.sh/docs/reference/api/engine-store/), which makes that implementation durable
-- [`@smthrs/plan`](https://smithers.sh/docs/reference/api/plan/), whose `Node` and `FileSet` vocabulary a body is written in
-- [`@smthrs/crypto`](https://smithers.sh/docs/reference/api/crypto/) and [`@smthrs/keys`](https://smithers.sh/docs/reference/api/keys/), the digest and key derivations identity is built from
+- [`@smthrs/engine`](https://engine.smithers.sh/reference/api/), which implements the `FlowRuntime` port
+- [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), which makes that implementation durable
+- [`@smthrs/plan`](https://plan.smithers.sh/reference/api/), whose `Node` and `FileSet` vocabulary a body is written in
+- [`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/) and [`@smthrs/keys`](https://keys.smithers.sh/reference/api/), the digest and key derivations identity is built from
 - [Durable execution](https://smithers.sh/docs/concepts/durable-execution/), for why a journaled side effect resumes
 - [Flows, actions, and plans](https://smithers.sh/docs/concepts/flows-actions-plans/), for the division between a body and an implementation
 - [Retries](https://smithers.sh/docs/concepts/retries/), for how a policy value becomes a durable decision
-
-## Sources
-
-- `packages/smithers/flows/flow/package.json`
-- `packages/smithers/flows/flow/README.md`
-- `packages/smithers/flows/flow/docs/api.md`
-- `packages/smithers/flows/flow/docs/README.md`
-- `packages/smithers/flows/flow/src/index.ts`
-- `packages/smithers/flows/flow/src/Action/index.ts`
-- `packages/smithers/flows/flow/src/Action/Action.ts`
-- `packages/smithers/flows/flow/src/Action/BoundaryMode.ts`
-- `packages/smithers/flows/flow/src/Action/CacheEnvironment.ts`
-- `packages/smithers/flows/flow/src/Action/Context.ts`
-- `packages/smithers/flows/flow/src/Action/Errors.ts`
-- `packages/smithers/flows/flow/src/Action/FileBoundary.ts`
-- `packages/smithers/flows/flow/src/Action/Filegroup.ts`
-- `packages/smithers/flows/flow/src/Action/FileInput.ts`
-- `packages/smithers/flows/flow/src/Action/Glob.ts`
-- `packages/smithers/flows/flow/src/Action/idempotencyKey.ts`
-- `packages/smithers/flows/flow/src/Action/Implementations.ts`
-- `packages/smithers/flows/flow/src/Action/make.ts`
-- `packages/smithers/flows/flow/src/Action/raceAll.ts`
-- `packages/smithers/flows/flow/src/Action/retry.ts`
-- `packages/smithers/flows/flow/src/Action/StepIdentity.ts`
-- `packages/smithers/flows/flow/src/Action/TreeArtifact.ts`
-- `packages/smithers/flows/flow/src/Action/TypeId.ts`
-- `packages/smithers/flows/flow/src/DurableClock.ts`
-- `packages/smithers/flows/flow/src/DurableDeferred.ts`
-- `packages/smithers/flows/flow/src/DurableQueue.ts`
-- `packages/smithers/flows/flow/src/Flow/index.ts`
-- `packages/smithers/flows/flow/src/Flow/Annotations.ts`
-- `packages/smithers/flows/flow/src/Flow/ExecutionIdRequired.ts`
-- `packages/smithers/flows/flow/src/Flow/ExecutionIds.ts`
-- `packages/smithers/flows/flow/src/Flow/Flow.ts`
-- `packages/smithers/flows/flow/src/Flow/make.ts`
-- `packages/smithers/flows/flow/src/Flow/MaxRoundsExceeded.ts`
-- `packages/smithers/flows/flow/src/Flow/Outcome.ts`
-- `packages/smithers/flows/flow/src/Flow/Result.ts`
-- `packages/smithers/flows/flow/src/Flow/Runtime.ts`
-- `packages/smithers/flows/flow/src/Flow/TypeId.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/index.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/CancelRequestFailed.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/FlowCycleDetected.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/FlowExecutionNotFound.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/FlowInstance.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/FlowRuntime.ts`
-- `packages/smithers/flows/flow/src/FlowRuntime/WaitingAnnotation.ts`
-- `packages/smithers/flows/flow/src/Graph.ts`
-- `packages/smithers/flows/flow/src/HumanTask.ts`
-- `packages/smithers/flows/flow/src/Interpreter.ts`
-- `packages/smithers/flows/flow/src/Poll.ts`
-- `packages/smithers/flows/flow/src/RetryPolicy.ts`
-- `packages/smithers/flows/flow/src/Sleep.ts`
-- `packages/smithers/flows/flow/src/WaitFor.ts`
-- `packages/smithers/flows/plan/src/FileSet.ts`

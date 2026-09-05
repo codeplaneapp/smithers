@@ -9,8 +9,13 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/flow@next effect@4.0.0-rc.108
+pnpm add @smthrs/flow@next effect@4.0.0-rc.112
 ```
+
+The Smithers 1.0 release candidates publish under the `next` dist tag, so the tag
+is required. The first candidate is not on npm yet; until it is, build the
+package from a clone of
+[the repository](https://github.com/smithersai/smithers).
 
 `effect` is a runtime dependency of this package and installs with it. Add it to
 your own dependencies at the same version anyway: your declarations import
@@ -54,7 +59,7 @@ This package declares the `FlowRuntime` port and implements none of it, so a
 composition that runs a flow adds an engine and a platform crypto service:
 
 ```bash
-pnpm add @smthrs/engine @effect/platform-node
+pnpm add @smthrs/engine@next @effect/platform-node
 ```
 
 - [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) implements `FlowRuntime`. Its

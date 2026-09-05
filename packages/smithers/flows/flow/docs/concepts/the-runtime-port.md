@@ -56,7 +56,7 @@ the mutable `suspended`, `interrupted`, `waiting`, `handoff`, and `cause` fields
 an optional `awaitedDeferreds` set, and `actionState`. This package declares the
 contract; a runtime constructs the value.
 
-No runtime shipped in this repository reads `awaitedDeferreds`. It is reserved
+No Smithers engine reads `awaitedDeferreds` today. It is reserved
 for a runtime that wants to preempt a suspension when a completion lands in the
 read-to-park window. Today a completion wakes a parked run through
 `FlowRuntime.resume`.

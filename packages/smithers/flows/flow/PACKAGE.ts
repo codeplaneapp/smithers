@@ -1,9 +1,9 @@
 /**
- * Standard package targets, written as `StandardPackage` desugared into its
+ * Standard package targets, written as `BuildAndCheckTypeScriptPackage` desugared into its
  * six target calls.
  *
  * These targets are executable and must stay equivalent to what
- * `StandardPackage({ cwd: "packages/smithers/flows/flow", deps: [plan] })`
+ * `BuildAndCheckTypeScriptPackage({ cwd: "packages/smithers/flows/flow", deps: [plan] })`
  * emits; the file exists to show the expansion, not to diverge from it.
  */
 import { Smithers } from "@smthrs/targets"
@@ -102,7 +102,7 @@ const docsSources = Smithers.Filegroup({
   cwd
 })
 
-/** The package documentation as a file group, the `docsFiles` target `StandardPackage` emits. */
+/** The package documentation as a file group, the `docsFiles` target `BuildAndCheckTypeScriptPackage` emits. */
 const docsFiles = Smithers.Filegroup({
   srcs: [Smithers.glob("docs/**/*.md"), Smithers.file("README.md"), Smithers.file("package.json")],
   cwd

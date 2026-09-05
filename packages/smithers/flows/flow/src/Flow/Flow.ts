@@ -191,9 +191,9 @@ export interface Flow<
    *
    * Identity comes from the first source that has one: the `executionId`
    * option, the flow's declared `idempotencyKey`, then the ambient
-   * `CurrentExecutionIds` source. Its default dies with
-   * `ExecutionIdRequired`; install `layerExecutionIds(derived)` explicitly to
-   * derive identity from the flow tag and encoded payload.
+   * `CurrentExecutionIds` source, whose default mints a fresh UUID. Equal
+   * unkeyed payloads start independent executions. Retain the execution id or
+   * opt into a derived source to reattach after a crash.
    *
    * A payload that fails the flow's own schema is a typed
    * `Schema.SchemaError` failure carrying the offending field path — caller
@@ -215,6 +215,32 @@ export interface Flow<
     | Success["DecodingServices"]
     | Error["DecodingServices"]
   >
+
+  /**
+   * Starts a fresh execution and returns its id. Equal payloads start independent
+   * executions; declared and ambient idempotency policies are intentionally bypassed.
+   * Observe the execution with `poll`, or await it using `execute` with this id.
+   */
+  readonly start: (payload: Payload["~type.make.in"]) => Effect.Effect<
+    string,
+    Schema.SchemaError | FlowCycleDetected,
+    | FlowRuntime
+    | Crypto.Crypto
+    | Requires
+    | Payload["EncodingServices"]
+    | Success["DecodingServices"]
+    | Error["DecodingServices"]
+  >
+
+  /**
+   * Starts or joins the execution identified by this flow tag and an explicit
+   * caller key, returning its id. Reusing a key is an explicit retry/reattachment
+   * decision. Existing persisted key encodings remain unchanged.
+   */
+  readonly ensure: (
+    payload: Payload["~type.make.in"],
+    options: { readonly key: string }
+  ) => ReturnType<Flow<Tag, Payload, Success, Error, Requires>["start"]>
 
   /**
    * Poll the current status of a flow execution.
@@ -272,9 +298,9 @@ export interface Flow<
    *
    * That is the flow's `idempotencyKey` when it declares one, and the ambient
    * `CurrentExecutionIds` source otherwise. It dies with `ExecutionIdRequired`
-   * when the source cannot name the invocation. The default source always
-   * raises it; the opt-in `derived` source raises it when the payload has no
-   * canonical form.
+   * when the opt-in `derived` source cannot canonicalize the payload. The default
+   * source mints a fresh UUID on each call; pass the returned id explicitly to
+   * `execute` to select that invocation.
    *
    * A payload this flow's own schema refuses also dies as a defect here. This
    * differs from `execute`, which fails with a typed `Schema.SchemaError` for

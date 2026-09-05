@@ -16,6 +16,7 @@ import type { Scope } from "effect/Scope"
 import type { AnyStructSchema } from "../Flow/Flow.ts"
 import type { FlowInstance, FlowRuntime } from "../FlowRuntime/index.ts"
 import type * as RetryPolicy from "../RetryPolicy.ts"
+import type { FileBoundary } from "./FileBoundary.ts"
 import type { Implementation } from "./Implementations.ts"
 import type { TypeId } from "./TypeId.ts"
 
@@ -51,7 +52,9 @@ export const IdempotencyKey = Schema.Union([
  *
  * A string is namespaced by the action declaration. A JSON object is
  * caller-owned and remains stable across action renames. Runtime
- * environment and filesystem facts are always added by the engine.
+ * environment and filesystem facts are always added by the engine. An explicit
+ * implementation version is also separate engine key material; a caller-owned
+ * object cannot mask it with a field of the same name.
  *
  * @category models
  * @since 0.1.0
@@ -112,13 +115,25 @@ export interface Declared<
 > {
   readonly [TypeId]: typeof TypeId
   readonly name: Tag
+  /**
+   * Semantic implementation identity. Changing it requires a newly planned
+   * execution; it is not an in-place upgrade of a persisted run. Canonical
+   * composition requires it for sealed actions with an idempotency key.
+   * Invocation-scoped actions may omit it; low-level keyed legacy callers
+   * retain their old handler-reuse contract when it is absent.
+   */
+  readonly implementationVersion: string | undefined
   readonly payloadSchema: Payload
   readonly successSchema: Success
   readonly errorSchema: Error
   readonly tier: Tier
-  readonly idempotencyKey: IdempotencyKey | undefined
+  readonly idempotencyKey: IdempotencyKey | ((payload: Payload["Type"]) => IdempotencyKey) | undefined
   /** Allows multiple legitimate sealed results to race under one cache key. */
   readonly nondeterministic: true | undefined
+  /** Durable retry policy applied to every implementation invocation. */
+  readonly retryPolicy: RetryPolicy.RetryPolicy | undefined
+  /** Filesystem declaration, optionally derived from the decoded payload. */
+  readonly fileBoundary: FileBoundary | ((payload: Payload["Type"]) => FileBoundary) | undefined
   readonly annotations: Context.Context<never>
   /**
    * The context key this declaration's implementation is provided under, and
@@ -137,7 +152,11 @@ export interface Declared<
   ) => Node.Node<Success["Type"], Error["Type"], Requires>
   /**
    * Attaches the implementation and yields the layer that provides this
-   * declaration's {@link Requirement}.
+   * declaration's {@link Requirement}. A versioned declaration requires the
+   * same `implementationVersion` here; a mismatch throws
+   * `ImplementationVersionMismatch` before registration. The version must cover
+   * handler semantics and semantic service/configuration changes, not merely a
+   * package publication label. Source text is never inferred as that identity.
    *
    * Let inference name the returned layer's requirements. The requirement
    * channel is what a composition trusts: a layer type that under-declares it
@@ -159,7 +178,12 @@ export interface Declared<
    * ```
    */
   readonly toLayer: <R>(
-    execute: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>
+    execute: (payload: Payload["Type"]) => Effect.Effect<Success["Type"], Error["Type"], R>,
+    options?: {
+      readonly override?: boolean
+      /** Must exactly match the declaration, including absence on legacy declarations. */
+      readonly implementationVersion?: string | undefined
+    }
   ) => Layer.Layer<
     Requires,
     never,
@@ -200,6 +224,7 @@ export interface Action<
 {
   readonly [TypeId]: typeof TypeId
   readonly name: string
+  readonly implementationVersion?: string | undefined
   readonly successSchema: Success
   readonly errorSchema: Error
   readonly exitSchema: Schema.Exit<Success, Error, Schema.Defect>
@@ -210,6 +235,8 @@ export interface Action<
   /** Allows multiple legitimate sealed results to race under one cache key. */
   readonly nondeterministic: true | undefined
   readonly metadata: unknown
+  /** Typed filesystem boundary used by the durable engine. */
+  readonly fileBoundary: FileBoundary | undefined
   readonly retryPolicy: RetryPolicy.RetryPolicy | undefined
   annotate<I, S>(
     key: Context.Key<I, S>,
@@ -256,12 +283,15 @@ export interface Action<
 export interface Any {
   readonly [TypeId]: typeof TypeId
   readonly name: string
+  readonly implementationVersion?: string | undefined
   readonly executeEncoded: Effect.Effect<any, any, any>
   readonly annotations: Context.Context<never>
   readonly tier: Tier
   readonly idempotencyKey: IdempotencyKey | undefined
   readonly nondeterministic: true | undefined
   readonly metadata: unknown
+  /** Typed filesystem boundary used by the durable engine. */
+  readonly fileBoundary: FileBoundary | undefined
   readonly retryPolicy: RetryPolicy.RetryPolicy | undefined
 }
 
@@ -275,6 +305,7 @@ export interface Any {
 export interface AnyWithProps {
   readonly [TypeId]: typeof TypeId
   readonly name: string
+  readonly implementationVersion?: string | undefined
   readonly successSchema: Schema.Top
   readonly errorSchema: Schema.Top
   readonly executeEncoded: Effect.Effect<any, any, any>
@@ -282,5 +313,7 @@ export interface AnyWithProps {
   readonly idempotencyKey: IdempotencyKey | undefined
   readonly nondeterministic: true | undefined
   readonly metadata: unknown
+  /** Typed filesystem boundary used by the durable engine. */
+  readonly fileBoundary: FileBoundary | undefined
   readonly retryPolicy: RetryPolicy.RetryPolicy | undefined
 }

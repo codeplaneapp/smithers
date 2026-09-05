@@ -10,10 +10,12 @@ A flow's `body` is a pure function from the decoded payload to a
 and returns a description that `Graph.build` can walk without dispatching a
 single step.
 
-That is the property everything durable in this package rests on. A plan built
-twice from the same declaration and the same payload is the same plan, with the
-same node addresses, so a re-driven round lands on the steps it already settled
-instead of on new ones.
+Reproducible plans require complete, stable declaration identities as well as
+the same payload. Use `Node.capture` to declare semantic captures and imported
+implementation versions, and select stable callback validation. The low-level
+process-local callback policy permits inspection but does not promise the same
+plan across processes. Stable node addresses alone do not prove unchanged
+behavior.
 
 ## What a body may not do
 
@@ -27,9 +29,9 @@ depend on anything the digest cannot observe. In practice:
 - No work that genuinely wants opaque code. That work is an action, and its
   implementation attaches as a layer.
 
-`Flow.make` cannot enforce purity, but the failure mode is loud rather than
-silent: a body that reads something the digest cannot see plans one way under one
-wiring and another way under another, and the recorded keys stop matching.
+`Flow.make` cannot enforce purity or verify capture completeness. An omitted
+semantic input can change behavior without changing a key, allowing stale
+replay. Do not rely on a key mismatch to detect undeclared behavior changes.
 
 ## Planned values
 
@@ -45,7 +47,7 @@ import { Node } from "@smthrs/plan"
 
 // Allowed: the placeholder is passed on, and `report.summary` records a path.
 Build.call({ target: "site" }).pipe(
-  Node.andThen((report) => Publish.call({ summary: report.summary }))
+  Node.bindPlanned((report) => Publish.call({ summary: report.summary }))
 )
 ```
 
@@ -65,15 +67,16 @@ or identity, never the result. Decide on real values with `Node.branch`.
 A body is written in [`@smthrs/plan`](/api/plan)'s `Node` combinators, and each
 one has a job:
 
-| Combinator                                | What it is for                                                                                                         |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `Node.succeed(value)`                     | A constant, for a body that settles without a step.                                                                    |
-| `Node.all({ ... })`                       | Independent children, settled concurrently, keyed by name. Width is fixed here, at plan time.                          |
-| `Node.map(node, f)`                       | Computation on a step result. The function is digested, not run; it executes later on the real value.                  |
-| `Node.andThen(node, build)`               | Sequencing. The builder is evaluated once against a placeholder, so the downstream topology is known before execution. |
-| `Node.branch(node, { if, then, else })`   | A decision. Both arms are built once at plan time and both are stored.                                                 |
-| `Node.catch(node, { onFailure, error? })` | Recovery. The failure arm is topology too, and a schema narrows which failures it handles.                             |
-| `Node.priority(node, n)`                  | Scheduling order for ready work. It never enters key material, so raising it cannot invalidate a recorded result.      |
+| Combinator                                | What it is for                                                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `Node.succeed(value)`                     | A constant, for a body that settles without a step.                                                               |
+| `Node.all({ ... })`                       | Independent children, settled concurrently, keyed by name. Width is fixed here, at plan time.                     |
+| `Node.map(node, f)`                       | Computation on a step result. The function is digested, not run; it executes later on the real value.             |
+| `Node.andThen(node, next)`                | A success barrier: no part of the next subtree starts until the first node succeeds.                              |
+| `Node.bindPlanned(node, build)`           | Builds data dependencies from a placeholder. Independent descendants may run concurrently with the producer.      |
+| `Node.branch(node, { if, then, else })`   | A decision. Both arms are built once at plan time and both are stored.                                            |
+| `Node.catch(node, { onFailure, error? })` | Recovery. The failure arm is topology too, and a schema narrows which failures it handles.                        |
+| `Node.priority(node, n)`                  | Scheduling order for ready work. It never enters key material, so raising it cannot invalidate a recorded result. |
 
 A `map` that decides what happens next is a `branch` written wrongly. Both a
 branch's arms and a catch's failure arm contribute their requirements to the
@@ -87,10 +90,12 @@ fixed when the plan is built. Fanning out over something a step discovered is no
 this. End the round and carry the list in the next flow's payload, where it is
 real data. See [Trampoline rounds](./trampoline-rounds.md).
 
-Bounding concurrency is the same move at a smaller scale: one `Node.all` per
-batch, where each batch takes the previous batch's results as payload. The
-reference is what sequences them, and an operator reading the plan sees exactly
-how many steps can be in flight.
+For explicit batches, sequence whole `Node.all` subtrees with `Node.andThen`.
+Members within an opened batch remain concurrent. A `bindPlanned` reference
+orders its consumers, not every independent member of the continuation; it is
+not a whole-batch admission barrier. This manual batching is distinct from the
+compiled scheduler's admission caps, which the public interpreter does not yet
+consume.
 
 ## What the build refuses
 

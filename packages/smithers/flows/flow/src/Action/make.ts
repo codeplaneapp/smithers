@@ -21,8 +21,9 @@ import { FlowRuntime } from "../FlowRuntime/FlowRuntime.ts"
 import type * as RetryPolicy from "../RetryPolicy.ts"
 import type { Action, Declared, IdempotencyKey, Requirement, Tier } from "./Action.ts"
 import { CurrentAttempt } from "./Context.ts"
-import { InfraInterruptRetriesExhausted } from "./Errors.ts"
+import { ImplementationVersionMismatch, InfraInterruptRetriesExhausted } from "./Errors.ts"
 import type { InfraInterrupt } from "./Errors.ts"
+import { FileBoundary } from "./FileBoundary.ts"
 import { type Implementation, Implementations } from "./Implementations.ts"
 import { TypeId } from "./TypeId.ts"
 
@@ -39,6 +40,7 @@ const makeInline = <
   Error extends Schema.Constraint = Schema.Never
 >(options: {
   readonly name: string
+  readonly implementationVersion?: string | undefined
   readonly success?: Success | undefined
   readonly error?: Error | undefined
   readonly execute: Effect.Effect<Success["Type"], Error["Type"], R>
@@ -46,10 +48,14 @@ const makeInline = <
   readonly idempotencyKey?: IdempotencyKey | undefined
   readonly nondeterministic?: true | undefined
   readonly metadata?: unknown
+  readonly fileBoundary?: FileBoundary | undefined
   readonly interruptRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
   readonly retryPolicy?: RetryPolicy.RetryPolicy | undefined
   readonly annotations?: Context.Context<never> | undefined
 }): Action<Success, Error, Exclude<R, FlowInstance | FlowRuntime | Scope>> => {
+  const implementationVersion = options.implementationVersion === undefined
+    ? undefined
+    : Schema.decodeUnknownSync(Schema.NonEmptyString)(options.implementationVersion)
   const successSchema = options.success ?? (Schema.Void as any as Success)
   const errorSchema = options.error ?? (Schema.Never as any as Error)
   const successSchemaJson = Schema.toCodecJson(successSchema)
@@ -69,6 +75,7 @@ const makeInline = <
     }),
     [TypeId]: TypeId,
     name: options.name,
+    implementationVersion,
     successSchema,
     errorSchema,
     exitSchema: Schema.Exit(successSchemaJson, errorSchemaJson, Schema.Defect()),
@@ -77,7 +84,8 @@ const makeInline = <
     tier: options.tier ?? "sealed",
     idempotencyKey: options.idempotencyKey,
     nondeterministic: options.nondeterministic,
-    metadata: options.metadata,
+    metadata: options.fileBoundary === undefined ? options.metadata : FileBoundary.make(options.fileBoundary),
+    fileBoundary: options.fileBoundary === undefined ? undefined : FileBoundary.make(options.fileBoundary),
     retryPolicy: options.retryPolicy,
     annotate(tag: Context.Key<any, any>, value: any) {
       return makeInline({
@@ -108,11 +116,21 @@ const makeDeclared = <
   Error extends Schema.Top = Schema.Never
 >(tag: Tag, options: {
   readonly payload: Payload
+  readonly implementationVersion?: string | undefined
   readonly success?: Success | undefined
   readonly error?: Error | undefined
   readonly tier?: Tier | undefined
-  readonly idempotencyKey?: IdempotencyKey | undefined
+  readonly idempotencyKey?:
+    | IdempotencyKey
+    | ((payload: (Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload)["Type"]) => IdempotencyKey)
+    | undefined
   readonly nondeterministic?: true | undefined
+  readonly retryPolicy?: RetryPolicy.RetryPolicy | undefined
+  readonly interruptRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+  readonly fileBoundary?:
+    | FileBoundary
+    | ((payload: (Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload)["Type"]) => FileBoundary)
+    | undefined
   readonly annotations?: Context.Context<never> | undefined
 }): Declared<
   Tag,
@@ -124,6 +142,9 @@ const makeDeclared = <
   const payloadSchema = (Schema.isSchema(options.payload)
     ? options.payload
     : Schema.Struct(options.payload)) as PayloadSchema
+  const implementationVersion = options.implementationVersion === undefined
+    ? undefined
+    : Schema.decodeUnknownSync(Schema.NonEmptyString)(options.implementationVersion)
   const successSchema = options.success ?? (Schema.Void as unknown as Success)
   const errorSchema = options.error ?? (Schema.Never as unknown as Error)
   const annotations = options.annotations ?? Context.empty()
@@ -136,12 +157,15 @@ const makeDeclared = <
   const self: Declared<Tag, PayloadSchema, Success, Error> = {
     [TypeId]: TypeId,
     name: tag,
+    implementationVersion,
     payloadSchema,
     successSchema,
     errorSchema,
     tier: options.tier ?? "sealed",
     idempotencyKey: options.idempotencyKey,
     nondeterministic: options.nondeterministic,
+    retryPolicy: options.retryPolicy,
+    fileBoundary: options.fileBoundary,
     annotations,
     requirement,
     annotate(key: Context.Key<any, any>, value: any) {
@@ -159,7 +183,15 @@ const makeDeclared = <
     call(payload) {
       return Node.actionCall<Success["Type"], Error["Type"]>(self, tag, payload)
     },
-    toLayer(execute) {
+    toLayer(execute, registrationOptions) {
+      if (registrationOptions?.implementationVersion !== implementationVersion) {
+        throw new ImplementationVersionMismatch({
+          actionName: tag,
+          declaredVersion: implementationVersion ?? null,
+          registeredVersion: registrationOptions?.implementationVersion ?? null,
+          message: `Action "${tag}" requires its declared implementationVersion at registration.`
+        })
+      }
       // The flow form of this action: same tag, same schemas, and a body that
       // is the one call to it. Registering that flow is what lets a caller
       // `execute` the action as a durable execution of its own, and the body
@@ -181,11 +213,19 @@ const makeDeclared = <
       const action = (payload: PayloadSchema["Type"]) =>
         makeInline({
           name: tag,
+          implementationVersion,
           success: successSchema,
           error: errorSchema,
           tier: self.tier,
-          idempotencyKey: self.idempotencyKey,
+          idempotencyKey: typeof self.idempotencyKey === "function"
+            ? self.idempotencyKey(payload)
+            : self.idempotencyKey,
           nondeterministic: self.nondeterministic,
+          retryPolicy: options.retryPolicy,
+          interruptRetryPolicy: options.interruptRetryPolicy,
+          fileBoundary: typeof options.fileBoundary === "function"
+            ? options.fileBoundary(payload)
+            : options.fileBoundary,
           annotations,
           execute: execute(payload)
         })
@@ -218,10 +258,11 @@ const makeDeclared = <
           ).pipe(Effect.updateContext((input) => Context.merge(services, input) as Context.Context<any>))
         const implementation: Implementation = {
           name: tag,
+          ...(implementationVersion === undefined ? {} : { implementationVersion }),
           action: provided as Implementation["action"]
         }
         const table = yield* Effect.serviceOption(Implementations)
-        if (Option.isSome(table)) yield* table.value.add(implementation)
+        if (Option.isSome(table)) yield* table.value.add(implementation, registrationOptions)
         return implementation
       }))
       return Layer.merge(
@@ -250,11 +291,21 @@ export const make: {
     Error extends Schema.Top = Schema.Never
   >(tag: Tag, options: {
     readonly payload: Payload
+    readonly implementationVersion?: string | undefined
     readonly success?: Success | undefined
     readonly error?: Error | undefined
     readonly tier?: Tier | undefined
-    readonly idempotencyKey?: IdempotencyKey | undefined
+    readonly idempotencyKey?:
+      | IdempotencyKey
+      | ((payload: (Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload)["Type"]) => IdempotencyKey)
+      | undefined
     readonly nondeterministic?: true | undefined
+    readonly retryPolicy?: RetryPolicy.RetryPolicy | undefined
+    readonly interruptRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+    readonly fileBoundary?:
+      | FileBoundary
+      | ((payload: (Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload)["Type"]) => FileBoundary)
+      | undefined
     readonly annotations?: Context.Context<never> | undefined
   }): Declared<
     Tag,
@@ -268,6 +319,7 @@ export const make: {
     Error extends Schema.Constraint = Schema.Never
   >(options: {
     readonly name: string
+    readonly implementationVersion?: string | undefined
     readonly success?: Success | undefined
     readonly error?: Error | undefined
     readonly execute: Effect.Effect<Success["Type"], Error["Type"], R>
@@ -275,6 +327,7 @@ export const make: {
     readonly idempotencyKey?: IdempotencyKey | undefined
     readonly nondeterministic?: true | undefined
     readonly metadata?: unknown
+    readonly fileBoundary?: FileBoundary | undefined
     readonly interruptRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
     readonly retryPolicy?: RetryPolicy.RetryPolicy | undefined
     readonly annotations?: Context.Context<never> | undefined
@@ -309,11 +362,18 @@ export const makeSystem = <
   Error extends Schema.Top = Schema.Never
 >(tag: Tag, options: {
   readonly payload: Payload
+  readonly implementationVersion?: string | undefined
   readonly success?: Success | undefined
   readonly error?: Error | undefined
   readonly tier?: Tier | undefined
   readonly idempotencyKey?: IdempotencyKey | undefined
   readonly nondeterministic?: true | undefined
+  readonly retryPolicy?: RetryPolicy.RetryPolicy | undefined
+  readonly interruptRetryPolicy?: Schedule.Schedule<any, unknown> | undefined
+  readonly fileBoundary?:
+    | FileBoundary
+    | ((payload: (Payload extends Schema.Struct.Fields ? Schema.Struct<Payload> : Payload)["Type"]) => FileBoundary)
+    | undefined
   readonly annotations?: Context.Context<never> | undefined
 }): Declared<
   Tag,
