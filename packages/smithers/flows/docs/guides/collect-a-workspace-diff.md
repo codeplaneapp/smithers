@@ -40,9 +40,9 @@ Each entry is a `DiffEntry`: a `path` and the file's `bytes` as a
 Nothing on the host is modified. `result.diff` is a value you decide what to do
 with: write it into a workspace, attach it to a review, or throw it away.
 
-Smithers 0.x had a `reviewDiffs` gate that held changed bundles until a person
-accepted them. That gate is a recorded follow-up and does not ship here, so a
-host that wants review builds it around this value.
+Nothing holds the diff for a person to accept first. A host that wants review
+builds it around this value: hold `result.diff`, show it, and apply it when
+someone accepts.
 
 ## Change detection compares sizes
 
@@ -61,8 +61,8 @@ nested path arrives as its files.
 
 ## Bound what comes back
 
-The limits are shared with the result readback and default to the 0.x bundle
-bounds. Any bound you omit keeps its default.
+The limits are shared with the result readback. Any bound you omit keeps its
+default.
 
 | Bound         | Default | What it caps                                      |
 | ------------- | ------- | ------------------------------------------------- |

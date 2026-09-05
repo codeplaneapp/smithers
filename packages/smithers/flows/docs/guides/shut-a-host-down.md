@@ -30,6 +30,8 @@ runs on.
 The default is `SIGINT` and `SIGTERM`.
 
 ```ts
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+
 const host = NodeRuntime.layerHost(
   {
     filename: ".flows/engine.db",
@@ -45,8 +47,15 @@ An empty list installs no handler at all, for a program that owns its own signal
 wiring:
 
 ```ts
-signals: ;
-;[]
+const unhandled = NodeRuntime.layerHost(
+  {
+    filename: ".flows/engine.db",
+    workspaceRoot: ".",
+    owner: { hostId: "worker-1" },
+    signals: []
+  },
+  registerFlows
+)
 ```
 
 Every listener the host installs is removed when the scope closes, so a test
@@ -73,7 +82,15 @@ be an integer from 0 through `NodeRuntime.maximumShutdownTimeoutMs`
 one-millisecond timer).
 
 ```ts
-shutdownTimeoutMs: 5_000
+const impatient = NodeRuntime.layerHost(
+  {
+    filename: ".flows/engine.db",
+    workspaceRoot: ".",
+    owner: { hostId: "worker-1" },
+    shutdownTimeoutMs: 5_000
+  },
+  registerFlows
+)
 ```
 
 A shutdown that finishes on time is never held open by its own deadline timer.

@@ -111,9 +111,9 @@ describe("vitest coverage isolation conformance", () => {
       const manifest = JSON.parse(readFileSync(join(packagesDir, name, "package.json"), "utf8")) as {
         readonly private?: boolean
         readonly smthrs?: { readonly group?: string }
-        readonly exports?: Record<string, string>
+        readonly exports?: Record<string, string | Record<string, string> | null>
         readonly publishConfig?: {
-          readonly exports?: Record<string, string | Record<string, string>>
+          readonly exports?: Record<string, string | Record<string, string> | null>
         }
       }
       expect(manifest.exports?.["."]).toBe("./src/index.ts")
@@ -126,7 +126,11 @@ describe("vitest coverage isolation conformance", () => {
         })
         return
       }
-      expect(manifest.exports?.["./*"]).toBe("./src/*.ts")
+      if (manifest.private !== true) {
+        expect(manifest.exports?.["./*"]).toBeUndefined()
+        expect(Object.entries(manifest.exports ?? {}).filter(([key, target]) => key.includes("*") && target !== null))
+          .toEqual([])
+      }
       // A third carve-out, derived rather than named, and only from the
       // publication half of this cell. `scripts/pack-release.mjs:43` skips a
       // manifest that is `private` or outside the `engine` and `agent`
@@ -148,7 +152,8 @@ describe("vitest coverage isolation conformance", () => {
         ).toBe("tooling")
         return
       }
-      for (const subpath of [".", "./*"] as const) {
+      expect(Object.keys(publication ?? {}).sort()).toEqual(Object.keys(manifest.exports ?? {}).sort())
+      for (const subpath of [".", ...(manifest.exports?.["./*"] === undefined ? [] : ["./*"])]) {
         const target = publication?.[subpath]
         expect(target).toEqual({
           types: subpath === "." ? "./dist/esm/index.d.ts" : "./dist/esm/*.d.ts",
@@ -277,10 +282,37 @@ describe("vitest coverage isolation conformance", () => {
     }
   })
 
+  // HostContract executes adapter behavior in testing's suite. This is one
+  // exact transfer between two measured gates, not an unowned exclusion.
+  const delegatedCoverage = (
+    name: string,
+    pattern: string,
+    destinationSource = configs.find((config) => config.name === "testing")?.source ?? ""
+  ): boolean => {
+    if (name !== "smithers/flows/kernel" || pattern !== "src/test/HostContract.ts") return false
+    const coverage = block(destinationSource, "coverage") ?? ""
+    const thresholds = block(coverage, "thresholds") ?? ""
+    const categories = [...thresholds.matchAll(/\b(branches|functions|lines|statements):\s*(\d+)/g)]
+    const includes = /\binclude\s*:\s*\[([^\]]*)\]/.exec(coverage)?.[1] ?? ""
+    return isFile(join(packagesDir, name, pattern)) &&
+      /\benabled:\s*true/.test(coverage) && /\bprovider:\s*"v8"/.test(coverage) &&
+      !/\bexclude\s*:/.test(coverage) &&
+      includes.includes("\"../smithers/flows/kernel/src/test/HostContract.ts\"") &&
+      categories.length === 4 && categories.every((match) => match[2] === "100") &&
+      thresholds.replace(/\b(?:branches|functions|lines|statements):\s*100\s*,?/g, "").trim() === ""
+  }
+
   const assertCoverageDenominator = (name: string, source: string) => {
-    expect(source).toMatch(/coverage:\s*\{[^]*?enabled:\s*true/)
-    expect(source).toMatch(/include:\s*\[\s*"src\/\*\*(?:\/\*\.ts)?"\s*\]/)
-    expect(source).toMatch(/provider:\s*"v8"/)
+    const coverage = block(source, "coverage")
+    expect(coverage, `packages/${name}/vitest.config.ts has no readable coverage block`).not.toBeNull()
+    expect(coverage).toMatch(/\benabled:\s*true/)
+    expect(coverage).toMatch(/\bprovider:\s*"v8"/)
+    const included = [...(/\binclude\s*:\s*\[([^\]]*)\]/.exec(coverage ?? "")?.[1] ?? "")
+      .matchAll(/"([^"]+)"/g)].map((match) => match[1]!)
+    expect(included.some((entry) => entry === "src/**" || entry === "src/**/*.ts")).toBe(true)
+    // Additional positive entries widen the denominator (testing also owns
+    // kernel's HostContract). Negated entries would silently subtract files.
+    expect(included.filter((entry) => entry.startsWith("!"))).toEqual([])
     // A test-runner `test.exclude` is legitimate (for example fixture source
     // that is not a test). An exclusion inside the coverage block shrinks the
     // production denominator, with one exception that does the opposite: a
@@ -291,24 +323,67 @@ describe("vitest coverage isolation conformance", () => {
     // nested suite already covers to 100%. Only a `<dir>/**` naming a real
     // nested package is allowed, so the exemption expires with the nesting and
     // can never be spelled to hide this package's own source.
-    const coverage = block(source, "coverage") ?? ""
     const excluded = [
-      ...(/\bexclude\s*:\s*\[([^\]]*)\]/.exec(coverage)?.[1] ?? "").matchAll(/"([^"]+)"/g)
+      ...(/\bexclude\s*:\s*\[([^\]]*)\]/.exec(coverage ?? "")?.[1] ?? "").matchAll(/"([^"]+)"/g)
     ].flatMap((match) => match[1] === undefined ? [] : [match[1]])
     expect(
-      coverage === "" || !/\bexclude\s*:/.test(coverage) || excluded.length > 0,
+      !/\bexclude\s*:/.test(coverage ?? "") || excluded.length > 0,
       `packages/${name}/vitest.config.ts declares a coverage exclusion this cell cannot read`
     ).toBe(true)
     expect(
-      excluded.filter((entry) => excludedPackage(name, entry) === null),
-      `packages/${name}/vitest.config.ts carries a coverage exclusion that names no other package; ` +
-        "an exclusion may only remove another package's tree, never this package's own production source"
+      excluded.filter((entry) => excludedPackage(name, entry) === null && !delegatedCoverage(name, entry)),
+      `packages/${name}/vitest.config.ts carries an unowned coverage exclusion; ` +
+        "an exclusion must name another package's tree or the checked HostContract handoff"
     ).toEqual([])
     expect(source).not.toMatch(/\bautoUpdate\s*:/)
     expect(source).not.toMatch(/\ball\s*:/)
     expect(source).not.toMatch(/\bextension\s*:/)
     expect(source).not.toMatch(/\bignoreClassMethods\s*:/)
   }
+
+  it("reads coverage settings inside their block and rejects denominator mutations", () => {
+    const coverage = `coverage: { enabled: true, provider: "v8", include: ["src/**"] }`
+    expect(block(`// without coverage: a comment {\n${coverage}`, "coverage")).toContain("enabled: true")
+    expect(block("coverage: { enabled: true", "coverage")).toBeNull()
+    assertCoverageDenominator("testing", coverage)
+    assertCoverageDenominator(
+      "testing",
+      coverage.replace("[\"src/**\"]", "[\"src/**\", \"../smithers/flows/kernel/src/test/HostContract.ts\"]")
+    )
+    for (
+      const mutated of [
+        coverage.replace("\"src/**\"", "\"src/One.ts\""),
+        coverage.replace("[\"src/**\"]", "[\"src/**\", \"!src/Hidden.ts\"]"),
+        coverage.replace("enabled: true", "enabled: false"),
+        coverage.replace("provider: \"v8\"", "provider: \"istanbul\""),
+        coverage.replace(" }", ", exclude: [\"src/Hidden.ts\"] }"),
+        coverage.replace(" }", ", exclude: [\"**/testing/**\"] }"),
+        coverage.replace(" }", ", exclude: omittedFiles }")
+      ]
+    ) {
+      expect(() => assertCoverageDenominator("testing", `test: { include: ["src/**"] }, ${mutated}`)).toThrow()
+    }
+  })
+
+  it("requires the exact HostContract handoff to retain its full destination gate", () => {
+    const destination = configs.find((config) => config.name === "testing")!.source
+    expect(delegatedCoverage("smithers/flows/kernel", "src/test/HostContract.ts", destination)).toBe(true)
+    expect(delegatedCoverage("smithers/flows/kernel", "src/test/**", destination)).toBe(false)
+    expect(delegatedCoverage("smithers/flows/flow", "src/test/HostContract.ts", destination)).toBe(false)
+    for (
+      const mutated of [
+        destination.replace("\"../smithers/flows/kernel/src/test/HostContract.ts\"", "\"../another.ts\""),
+        destination.replace("enabled: true", "enabled: false"),
+        destination.replace("branches: 100", "branches: 99"),
+        destination.replace(
+          "coverage: {",
+          "coverage: { exclude: [\"../smithers/flows/kernel/src/test/HostContract.ts\"],"
+        )
+      ]
+    ) {
+      expect(delegatedCoverage("smithers/flows/kernel", "src/test/HostContract.ts", mutated)).toBe(false)
+    }
+  })
 
   /**
    * The aggregate categories inside a `thresholds` block, with any per-file
@@ -438,19 +513,15 @@ describe("vitest coverage isolation conformance", () => {
   )
 
   it.each(packages.map((name) => ({ name })))(
-    "$name pins the test script CI actually invokes (issue #158)",
+    "$name retains a real Vitest test script (issue #158)",
     ({ name }) => {
-      // CI runs the root `pnpm test`, which recursively runs every workspace's
-      // test script: a package that deletes or stubs its `scripts.test` is
-      // silently never run while every config-level assertion above stays
-      // green. The script CI invokes is therefore pinned here to the exact
-      // canonical value every package ships — plain `vitest`, whose default
-      // command in non-interactive CI is a single run with the package's own
-      // config (and its 100% coverage gate) applied.
+      // The recursive developer entry point must retain the package's own
+      // config and coverage gate. CI selects PACKAGE.ts test targets; its
+      // actual pattern and target runner are checked separately.
       const manifest = JSON.parse(readFileSync(join(packagesDir, name, "package.json"), "utf8")) as {
         readonly scripts?: Record<string, string>
       }
-      expect(manifest.scripts?.test, `packages/${name}/package.json scripts.test`).toBe("vitest")
+      expect(manifest.scripts?.test, `packages/${name}/package.json scripts.test`).toMatch(/^vitest(?: run)?$/)
     }
   )
 
@@ -637,19 +708,19 @@ describe("vitest coverage isolation conformance", () => {
     // The gates used to be `pnpm run check`, `pnpm run lint`, `pnpm run
     // circular`, `pnpm run browser`, and `pnpm test` — five recursive scripts
     // named as raw strings in PACKAGE.ts. They are targets now, so what is pinned
-    // is the verb-and-pattern invocation that plans them: `smithers-build ci` over the
+    // is the verb-and-pattern invocation that plans them: `smthrs ci` over the
     // package graph covers lib, check, test, lint, fmt, docs, and circular for
     // every package, and the browser contract is its own labelled target.
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
+    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86$/m)
     expect(ci).toMatch(/^\s*- run: pnpm install --frozen-lockfile --ignore-scripts$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build ci '\/\/packages\/\.\.\.'/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs ci '\/\/packages\/\.\.\.'/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts\/\.\.\.'$/m)
     // Browser support is a hard requirement met through layers; the browser
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/scripts:browserContract'$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:browserContract'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.'$/m)
     // The Bun compatibility matrix. It used to be `//ci/...`, a directory whose
     // only content was one Vitest target per package, declared from outside the
     // package it re-ran, and then a dedicated `bun` job running
@@ -660,7 +731,9 @@ describe("vitest coverage isolation conformance", () => {
     // because dropping the runtime from either toolchain would make the suites
     // fail to run rather than silently skip.
     expect(ci).not.toContain("//ci/...")
-    const bunSetup = ci.split(/^  (?=\S)/m).filter((job) => job.includes("oven-sh/setup-bun@v2"))
+    const bunSetup = ci.split(/^  (?=\S)/m).filter((job) =>
+      job.includes("oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6")
+    )
     expect(bunSetup.length).toBeGreaterThanOrEqual(2)
     expect(bunSetup.some((job) => job.startsWith("test:"))).toBe(true)
     expect(bunSetup.some((job) => job.startsWith("packages:"))).toBe(true)
@@ -677,7 +750,7 @@ describe("vitest coverage isolation conformance", () => {
     // deliverable landed: case 22's terminal-log half was the one gate red by
     // design, the redacting logger closed it, and the matrix is 67 of 67.
     expect(ci).not.toContain("//e2e:")
-    expect(ci).toMatch(/^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.:faults' --jobs 1$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1$/m)
     // And it gates. `continue-on-error: true` is the single line that makes a
     // lane advisory, so a matrix that runs but cannot fail the pipeline is
     // exactly the state this deliverable left behind, and it would read as
@@ -725,7 +798,7 @@ describe("vitest coverage isolation conformance", () => {
 `
     )
     // One rendering of the step, shared by every platform.
-    expect(ci.split("run: pnpm exec smithers-build test '//packages/...'").length - 1).toBe(1)
+    expect(ci.split("run: pnpm exec smthrs test '//packages/...'").length - 1).toBe(1)
     // The lanes the matrix replaced are gone, not renamed alongside it.
     expect(ci).not.toContain("node-macos")
     expect(ci).not.toContain("node-windows")
@@ -744,7 +817,7 @@ describe("vitest coverage isolation conformance", () => {
     const commands = [...ci.matchAll(/^\s*(?:- )?run: (?!\|)(.+)$/gm)].map((match) => match[1]!)
     expect(commands.length).toBeGreaterThan(0)
     const derived = [
-      /^pnpm exec smithers-build (?:build|test|lint|docs|review|ci) '\/\/[^']*'( --jobs \d+)?$/,
+      /^pnpm exec smthrs (?:build|test|lint|docs|review|ci) '\/\/[^']*'( --jobs \d+)?$/,
       /^pnpm install --frozen-lockfile --ignore-scripts$/,
       /^rustup toolchain install$/,
       /^jj git init --colocate$/
@@ -769,11 +842,14 @@ describe("vitest coverage isolation conformance", () => {
       readonly packageManager?: string
     }
     expect(root.packageManager).toMatch(/^pnpm@\d+\.\d+\.\d+$/)
-    expect(release).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
+    expect(release).toMatch(/^\s*- uses: pnpm\/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86$/m)
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
-    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@v6$/m)
-    expect(release).toContain("pnpm publish \"$PACK_DIR/$tarball\"")
-    expect(release).toContain("pnpm view \"$spec\" version")
+    expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86$/m)
+    expect(release).toContain("node scripts/publish-release.mjs \"$PACK_DIR\"")
+    const restore = release.indexOf("Restore and verify archived release candidate")
+    expect(restore).toBeGreaterThan(smoke)
+    expect(publish).toBeGreaterThan(restore)
+    expect(release).toContain("node scripts/restore-release.mjs \"$PACK_DIR\"")
     // The published set and its order are read out of the pack manifest, so a
     // restated package list cannot drift from what was packed. `scripts/
     // pack-release.test.mjs` holds the rest of that conformance suite.
@@ -781,6 +857,13 @@ describe("vitest coverage isolation conformance", () => {
     expect(release).not.toContain("publish_if_missing")
     const packScript = readFileSync(join(packagesDir, "..", "scripts", "pack-release.mjs"), "utf8")
     const smokeScript = readFileSync(join(packagesDir, "..", "scripts", "smoke-release.mjs"), "utf8")
+    const publishScript = readFileSync(join(packagesDir, "..", "scripts", "publish-release.mjs"), "utf8")
+    expect(publishScript).toContain("join(directory, \"release-manifest.json\")")
+    expect(publishScript).toContain("const pending = await preflight(directory, candidate, options)")
+    expect(publishScript).toContain("for (const entry of pending)")
+    expect(publishScript).toContain("execFileSync(\"pnpm\", [\"publish\", tarball, \"--provenance\"")
+    expect(publishScript).toContain("[\"view\", spec, \"dist.integrity\", \"--json\"]")
+    expect(publishScript).toContain("evidence.candidateIntegrity !== candidateIntegrity(candidate)")
     expect(packScript).toContain("publicationManifest(manifest)")
     expect(packScript).toContain("\"pnpm\",")
     expect(packScript).toContain("\"pack\"")
@@ -859,8 +942,7 @@ describe("vitest coverage isolation conformance", () => {
       // disagree with its key after a reach into private state; and
       // `SqlControlRuntime` defends the SQLite driver's nested error objects,
       // the PostgreSQL and MySQL "missing table" phrasings rc.0 never meets,
-      // a `RETURNING` row the same statement just inserted, an ancestor walk
-      // that only revisits ids it already stored, an absent decoded input the
+      // a `RETURNING` row the same statement just inserted, an absent decoded input the
       // card refuses first, and an approval-token read that finds neither the
       // row it inserted nor the one already there.
       "smithers/control/src/Cancellation.ts": 1,
@@ -887,18 +969,11 @@ describe("vitest coverage isolation conformance", () => {
       // mapping always converts to a non-null object. Both guards keep the
       // redacted diagnostic path total across future parser upgrades.
       "smithers/flows/core/src/internal/skillFrontmatter.ts": 2,
-      // Three unreachable-by-construction branches in the plan scheduler: the
-      // ready-set can never be empty while work is pending (the compiler
-      // rejects cycles), the dispatch key is built from strings so
-      // canonicalization cannot reject it, and the merge node's elaboration
-      // cannot hit any of `Plan.append`'s four refusals. Six more sit on the
-      // per-file pinning and produced-match expansion paths: five
-      // host-refusal translations that share the typed boundary-unavailable
-      // path the prepare-failure tests exercise, and the no-FileSystem
-      // refusal in `expandProducedMatches`, unreachable because
-      // `observeReads` already failed the run for the same glob when no
-      // FileSystem was composed.
-      "smithers/flows/engine-store/src/PlanScheduler.ts": 9,
+      // Four guards remain after filesystem failures gained durable-settlement
+      // tests: producer-covered globs already required FileSystem; dispatched
+      // values come from sealed, settled nodes; merge elaboration cannot hit
+      // Plan.append's refusals; and acyclic pending work has a ready node.
+      "smithers/flows/engine-store/src/PlanScheduler.ts": 4,
       // One `else` arm in recursive enumeration: special entries (symlinks,
       // sockets) are neither materializable leaves nor prunable scaffolding
       // and are intentionally discarded.
@@ -944,14 +1019,6 @@ describe("vitest coverage isolation conformance", () => {
       // match, so the fallback only discharges the optional type on a
       // capture.
       "smithers/agent/harness/src/CellTurn.ts": 1,
-      // `transpileModule` reports syntactic diagnostics only, and attaches a
-      // source file and a position to every one of them; the position came
-      // from the same text this splits. The third is the normalizer's
-      // nameless-class guard: a top-level class with no name is only spellable
-      // as `export default class {}`, and module syntax is refused before the
-      // normalizer runs. All three discharge optional types rather than
-      // reachable states.
-      "smithers/agent/harness/src/CellValidation.ts": 3,
       // Four are limits: `withDefaults` fills each declared limit from
       // `defaultLimits`, so the optional chains, the coalesces and the heap
       // ceiling's `else` never take their fallbacks. One is the realm's

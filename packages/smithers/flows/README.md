@@ -1,79 +1,135 @@
 # @smthrs/flows
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://flows.smithers.sh
 
-Convenience barrel for the complete durable flows architecture. Each package
-is re-exported as a namespace so consumers can opt into one dependency
-without flattening neighboring service constructors; `namespaces` lists those
-runtime namespace names.
+The whole [Smithers](https://smithers.sh) durable flow engine in one dependency.
+It re-exports every engine package under a single import, and it adds the two
+modules a Node program needs to run flows for real: `NodeRuntime`, which stands
+a durable engine up over local SQLite, and `SandboxedFlow`, which runs a child
+flow's own code on a machine you provision.
 
-```sh
-pnpm add @smthrs/flows@next
-```
+A flow records each step in a journal as it completes, so a process that dies
+mid-flight replays what already finished and resumes at the first step that did
+not.
+
+## Availability
+
+`@smthrs/flows` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](https://flows.smithers.sh/installation/) covers how to depend on
+it from a checkout, the Node.js and `effect` versions it requires, and the
+platform packages the barrel leaves to you.
+
+## A flow that survives a restart
+
+This program declares one recorded step, runs it on a durable host, and prints
+the result.
 
 ```ts
-import { Engine, EngineStore, Journal, Kernel } from "@smthrs/flows"
+import { Action, Flow, Interpreter } from "@smthrs/flows"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
+
+/** A step declaration is data: a name and the schemas either side of it. */
+const FetchReadme = Action.make("demo/FetchReadme", {
+  payload: { repo: Schema.String },
+  success: Schema.Number
+})
+
+/** A flow is a plan over declarations, compiled before any of it runs. */
+const CountBytes = Flow.make("demo/CountBytes", {
+  payload: { repo: Schema.String },
+  success: Schema.Number,
+  body: (payload) => FetchReadme.call(payload)
+})
+
+/** The code arrives as a layer, separately from the declaration. */
+const registerFlows = Interpreter.layer(CountBytes).pipe(
+  Layer.provideMerge(
+    FetchReadme.toLayer(({ repo }) =>
+      Effect.promise(async () => {
+        const response = await fetch(`https://api.github.com/repos/${repo}/readme`)
+        return (await response.text()).length
+      })
+    )
+  ),
+  Layer.provideMerge(Action.layerImplementations)
+)
+
+/** One call builds the database, the journal, the guarded host, and the engine. */
+const host = NodeRuntime.layerHost(
+  { filename: ".flows/engine.db", workspaceRoot: ".", owner: { hostId: "demo" } },
+  registerFlows
+)
+
+const main = CountBytes.execute({ repo: "smithersai/smithers" }, { executionId: "demo-1" })
+  .pipe(Effect.provide(host), Effect.scoped)
+
+console.log(await Effect.runPromise(main))
 ```
 
-## Public API
+Run it once and it calls GitHub. Run it a second time, unchanged, and it prints
+the same number without calling GitHub: `executionId` names one execution, and
+the engine answers a completed one from the journal on disk.
 
-| Namespace                                                                                                                                                                          | Re-exported package                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `Artifacts`                                                                                                                                                                        | `@smthrs/artifacts`                                   |
-| `Canonical`                                                                                                                                                                        | `@smthrs/canonical`                                   |
-| `Capability`                                                                                                                                                                       | `@smthrs/capability`                                  |
-| `Crypto`                                                                                                                                                                           | `@smthrs/crypto`                                      |
-| `Database`                                                                                                                                                                         | `@smthrs/database`                                    |
-| `Engine`                                                                                                                                                                           | `@smthrs/engine`                                      |
-| `EngineStore`                                                                                                                                                                      | `@smthrs/engine-store`                                |
-| `Action`, `DurableClock`, `DurableDeferred`, `DurableQueue`, `Flow`, `FlowRuntime`, `Graph`, `HumanTask`, `Interpreter`, `Poll`, `RetryPolicy`, `Sleep`, `StepIdentity`, `WaitFor` | `@smthrs/flow` (re-exported flat)                     |
-| `Jj`                                                                                                                                                                               | `@smthrs/jj`                                          |
-| `Journal`                                                                                                                                                                          | `@smthrs/journal`                                     |
-| `Kernel`                                                                                                                                                                           | `@smthrs/kernel`                                      |
-| `Keys`                                                                                                                                                                             | `@smthrs/keys`                                        |
-| `Observability`                                                                                                                                                                    | `@smthrs/observability`                               |
-| `Plan`                                                                                                                                                                             | `@smthrs/plan`                                        |
-| `RunStore`                                                                                                                                                                         | `@smthrs/run-store`                                   |
-| `Sandbox`                                                                                                                                                                          | `@smthrs/sandbox`                                     |
-| `StepCache`                                                                                                                                                                        | `@smthrs/step-cache`                                  |
-| `Sync`                                                                                                                                                                             | `@smthrs/sync`                                        |
-| `TimeTravel`                                                                                                                                                                       | `@smthrs/time-travel` (service key, re-exported flat) |
+## What the barrel exports
 
-Namespacing preserves APIs such as `Kernel.ChildProcessSpawner.layerNoop` and
-`RunStore.RunStore.layer`. Depend on an individual package when a narrower
-dependency surface is preferable.
+[`@smthrs/flow`](https://flow.smithers.sh) is re-exported flat, so `Action`,
+`DurableClock`, `DurableDeferred`, `DurableQueue`, `Flow`, `FlowRuntime`,
+`Graph`, `HumanTask`, `Interpreter`, `Poll`, `RetryPolicy`, `Sleep`,
+`StepIdentity`, and `WaitFor` sit at the top level. Writing a flow is the point
+of the library, and `Flows.Flow.Flow.make` would be noise.
+
+Every other engine package is a namespace, the way `effect`'s own index does
+it, so `Kernel.ChildProcessSpawner.layerNoop` and `RunStore.RunStore.layer`
+still read as themselves rather than collapsing into one shared namespace.
+`namespaces` is the sorted runtime list of every name the barrel exports, and
+the [API reference](https://flows.smithers.sh/reference/api/) has the full
+table. Depend on an individual engine package instead when a narrower
+dependency surface is worth the extra imports.
 
 The `@smthrs/platform-*` bundles are deliberately absent, for the same reason
 `effect`'s index does not re-export `@effect/platform-node`: a platform bundle
-is chosen by the program that runs, not by the library it depends on.
+is chosen by the program that runs, not by the library it depends on. Platform
+implementations and test doubles are imported from their own packages, among
+them `@smthrs/platform-node`, `@smthrs/testing/TestHost`,
+`@smthrs/database/node/NodeDatabase`, and `@smthrs/journal/test/TestJournal`.
 
-## The barrel is a browser entry point
+## Bundling is not durable execution
 
-`@smthrs/flows` bundles for a browser, and `pnpm run browser` gates it along
-with every package root it re-exports.
-[RC support matrix](https://smithers.sh/docs/reference/support-matrix/)
-links the browser bundle contract and lists runtime evidence limits.
+The root entry point bundles for a browser, and so does every package root it
+re-exports. What bundles is authoring and inspection: declaring flows, reading a
+plan, decoding a journal event.
+[Installation](https://flows.smithers.sh/installation/) names which entry points
+carry that guarantee, and
+[`@smthrs/platform-browser`](https://platform-browser.smithers.sh) is the host a
+tab runs them on.
 
-Bundling is not durable execution. The rc.0 durable engine is supported only on
-Node.js >= 22.19.0 with local SQLite. Browser support is bundle-only, with no
-durable flows even when another SQL client is supplied. Deno and edge runtimes
-are not supported.
+[RC support matrix](https://smithers.sh/docs/reference/support-matrix/) lists runtime evidence limits.
 
-Platform implementations are never re-exported through the namespaces here
-either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,
-`@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`, or
-`@smthrs/journal/test/TestJournal` directly. See
-[browser support](https://smithers.sh/architecture/browser-support).
+Durable execution is a separate claim. It is supported only on Node.js 22.19.0
+or later with local SQLite; a browser or edge runtime is not a supported durable
+host even when you supply another SQL client. Both Node-only modules are
+subpaths precisely so importing the root never opens `node:sqlite`.
 
 ## The Node runtime
 
-`@smthrs/flows/NodeRuntime` is the one module here that a host program calls
-to stand a durable engine up. `layer` composes storage and the engine and
-leaves the host to the caller; `layerHost` supplies the host too:
+`@smthrs/flows/NodeRuntime` is the module a host program calls to stand a
+durable engine up. `layerHost` decides the whole composition; `layer`, `make`,
+and `storage` hand progressively more of it back to the caller.
+
+The driver-neutral root installs no platform adapter. Select these optional
+prerequisites before importing `NodeRuntime`:
+
+```sh
+pnpm add @smthrs/platform-node@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 ```ts
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
@@ -89,23 +145,24 @@ const runtime = NodeRuntime.layerHost(
 ```
 
 That call adds the contained Node host, the kernel's guarded host surface over
-an unattended `GrantStore`, the default step boundary and workspace sandbox, a
+an unattended grant store, the default step boundary and workspace sandbox, a
 process-table liveness probe, and signal handling that releases every run the
 host owns before it shuts down.
-
-The runtime journal queue is fixed at 1,024 entries and rejects overflow. Jj
-snapshot bookkeeping uses an engine-private service; `HostOptions.rules`
-governs only action-facing host access. Signal names are validated and
-deduplicated before installation, and `shutdownTimeoutMs` must be an integer
-from 0 through 2,147,483,647. A second signal, or a shutdown exceeding that
-deadline, exits with the signal's default status.
+[Stand up a durable Node runtime](https://flows.smithers.sh/guides/stand-up-a-node-runtime/)
+compares the four entry points and says which one a given program should call.
 
 ## Documentation
 
-- [Quickstart](https://flows.smithers.sh/quickstart/): a durable flow on SQLite,
-  end to end.
-- [Stand up a durable Node runtime](https://flows.smithers.sh/guides/stand-up-a-node-runtime/):
-  `layerHost`, `layer`, `make`, and `storage`.
+The published site is https://flows.smithers.sh.
+
+- [Quickstart](https://flows.smithers.sh/quickstart/): one flow end to end on a
+  real durable engine, including the capability its body needs.
+- [The aggregate surface](https://flows.smithers.sh/concepts/aggregate-surface/):
+  why the authoring names are flat, the infrastructure packages are namespaces,
+  and the platform bundles are absent.
 - [Run a child flow in a sandbox](https://flows.smithers.sh/guides/run-a-child-flow-in-a-sandbox/):
-  the `SandboxedFlow` tier.
-- [API reference](https://flows.smithers.sh/reference/api/): every public export.
+  the tier where the child's own code executes on another machine.
+- [API reference](https://flows.smithers.sh/reference/api/): every public
+  export, with the options each entry point takes.
+- [Troubleshooting](https://flows.smithers.sh/troubleshooting/): every typed
+  refusal these modules raise, and what to change.

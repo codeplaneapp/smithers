@@ -16,11 +16,9 @@ session.
 
 `@smthrs/flows/SandboxedFlow` is the tier above it. The child flow's **own
 code** executes inside the guest. Its TypeScript never runs in the parent's
-process. Smithers 0.x had this tier as the `<Sandbox workflow={child}>`
-component; the 1.0 shape keeps that component's runner protocol and its
-environment variable names, and drops two of its mistakes. A provider is a
-`Sandbox.Provider` value passed in, never a string looked up in a registry, and
-the authoring is `Flow.make` and `Action.make`, never a component.
+process. A provider is a `Sandbox.Provider` value you pass in, never a string
+looked up in a registry, and the authoring is `Flow.make` and `Action.make`, so
+a sandboxed child is declared the same way every other flow is.
 
 ## The five steps
 
@@ -32,7 +30,7 @@ workdir.
 | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | bundle  | esbuild bundles the `entry` module (`platform: "node"`, ESM) together with the guest runner into one self-contained `.smithers-sandbox/bundle.mjs`.                                                                                                                                            |
 | request | The host writes `.smithers-sandbox/request.json`, holding `{ flow, executionId, payload }`: the flow's tag, the session key as the guest execution id, and the payload encoded through `Schema.toCodecJson` of the flow's payload schema.                                                      |
-| run     | The guest runtime (`node` by default) runs the bundle with the workdir as its working directory and `SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH` set. Those are the 0.x variable names.                                                                                  |
+| run     | The guest runtime (`node` by default) runs the bundle with the workdir as its working directory and `SMITHERS_SANDBOX_REQUEST_PATH` and `SMITHERS_SANDBOX_RESULT_PATH` set.                                                                                                                    |
 | guest   | The runner finds the flow by tag among the entry module's exports, decodes the payload, runs the flow, and writes `.smithers-sandbox/result.json`: `{ status: "succeeded", output }` with the success value encoded through the success schema's JSON codec, or `{ status: "failed", error }`. |
 | result  | The host refuses a non-zero exit, a missing or unparseable result, and a result over the limits, then decodes `output` through the same codec. Every refusal is a typed `SandboxedFlowError`.                                                                                                  |
 
@@ -63,9 +61,10 @@ durable action. An in-guest SQLite journal would put `node:sqlite`, the
 migration ladder, and a `Jj` stub into every bundle without changing the
 durability the parent can observe.
 
-The guest's digests still have to agree with the host's, because a child
-execution id derived in the guest for a `.child()` boundary must be the same
-SHA-256 the host would derive from the same material. The suite pins that.
+The guest's digests still agree with the host's: a child execution id derived in
+the guest for a `.child()` boundary is the same SHA-256 the host would derive
+from the same material, so a nested child is identified identically on either
+side of the machine boundary.
 
 ## Failures split two ways
 
@@ -91,8 +90,10 @@ The runtime the bundle is started with has to be on the guest's `PATH`: `node`
 `alpine` does not.
 
 The entry's imports of `effect`, `@smthrs/flow`, and `@smthrs/engine` must
-resolve to the same installation the host's `@smthrs/flows` uses, which the
-single-version rule already guarantees inside a workspace.
+resolve to the same installation the host's `@smthrs/flows` uses. One installed
+version of each in the project that bundles the entry is what gives you that;
+two copies of `effect` in one bundle produce a schema that refuses its own
+payload.
 
 ## A session key is an exclusive claim
 

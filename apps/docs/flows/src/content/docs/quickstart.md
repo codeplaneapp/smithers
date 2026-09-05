@@ -13,13 +13,12 @@ run of it that answers without reading the file again.
 
 ## Prerequisites
 
-- Node.js 22.19.0 or later.
-- A package with the barrel installed:
-
-```bash
-pnpm add @smthrs/flows@next
-```
-
+- Node.js 22.19.0 or later. It runs the TypeScript file below directly, with no
+  build step and no loader flag.
+- A package that depends on `@smthrs/flows` and sets `"type": "module"`, because
+  the program ends in a top-level `await`. The package is not on npm at
+  1.0.0-rc.0; [Installation](/installation/) covers how to depend on it from
+  a checkout.
 - A workspace directory with something to read:
 
 ```bash
@@ -134,7 +133,14 @@ export const main = ReadNoteFlow.execute(
 console.log(await Effect.runPromise(main))
 ```
 
-Run the file with your TypeScript runner. It prints the file's contents:
+Run it:
+
+```bash
+node quickstart.ts
+```
+
+Node strips the type annotations itself, so this is the whole build. It prints
+the file's contents:
 
 ```text
 the note

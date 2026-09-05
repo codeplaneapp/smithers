@@ -49,10 +49,11 @@ different reason. `TimeTravel` is a service key rather than a namespace, so
 `TimeTravel.layer` provides it. The rest of that package, including `Frame`,
 `TimeTravelStore`, and `EffectBoundary`, is reached through the package itself.
 
-The two re-export styles are held disjoint by a test: if `@smthrs/flow` ever
-exported a name an engine package already claims, the explicit namespace export
-would shadow the flat one and a public export would silently vanish. That
-assertion is what catches it.
+The two re-export styles never collide. If `@smthrs/flow` ever exported a name
+an engine package already claims, the explicit namespace export would shadow the
+flat one and a public export would vanish without a compile error, so the
+package treats the two name sets as disjoint and holds them that way across
+releases.
 
 ## `namespaces` is the barrel's only runtime value
 
@@ -61,12 +62,13 @@ import { namespaces } from "@smthrs/flows"
 ```
 
 It is the sorted list of every name the barrel exports, covering both styles.
-A test derives the expected list from the `smthrs.group` field of every
-`package.json` under `packages/`, so adding an engine package to the repository
-fails that test until the barrel re-exports it. Three kinds of package are
-excluded by design: the barrel itself, the `platform-*` bundles, and every
-package outside the `engine` group, which is to say the agent release surface
-and the build tooling.
+Use it to enumerate the surface at runtime, in a documentation generator or a
+conformance check of your own.
+
+The list is the whole engine and nothing else. Three kinds of package stay out
+of it by design: the barrel itself, the `platform-*` bundles, and every
+`@smthrs` package that is not part of the engine, such as the agent surface and
+the build tooling.
 
 ## The platform bundles are deliberately absent
 
@@ -77,19 +79,18 @@ the program that runs, not by the library it depends on. Pulling all three in
 would make one import resolve `node:child_process`, ZenFS, and Bun at once.
 
 The same rule holds one level down. Platform implementations never appear
-through the namespaces either: reach `@smthrs/kernel/test/TestHost`,
+through the namespaces either: reach `@smthrs/testing/TestHost`,
 `@smthrs/database/node/NodeDatabase`, and `@smthrs/journal/test/TestJournal`
 through their own packages.
 
 ## Bundling for a browser is not durable execution
 
-The root entry point bundles for a browser, and every package root it
-re-exports is held to that by the repository's browser gate. What that buys is
-authoring and inspection: declaring flows, reading a plan, decoding a journal
-event.
+The root entry point bundles for a browser, and so does every package root it
+re-exports. What that buys is authoring and inspection: declaring flows, reading
+a plan, decoding a journal event.
 
-Durable execution is a separate claim, and in this release it is supported only
-on Node.js 22.19.0 or later with local SQLite. Supplying another SQL client does
+Durable execution is a separate claim: it is supported only on Node.js 22.19.0
+or later with local SQLite. Supplying another SQL client does
 not make a browser or an edge runtime a supported durable host. This is exactly
 why the two Node-only modules are subpaths: importing `@smthrs/flows` never
 opens `node:sqlite`, and importing `@smthrs/flows/NodeRuntime` always does.

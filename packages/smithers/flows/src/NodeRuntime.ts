@@ -76,6 +76,8 @@ export interface Options {
    * one-argument check that ignores the context still satisfies this.
    */
   readonly isAlive: Ownership.LivenessCheck
+  /** Routes shared-store runs to the host configured for their workspace. */
+  readonly canExecute?: ((row: RunStore.RunRow) => Effect.Effect<boolean>) | undefined
 }
 
 /**
@@ -120,6 +122,7 @@ interface ValidatedOptions {
   readonly workspaceRoot: string
   readonly owner: Readonly<{ readonly hostId: string }>
   readonly isAlive: Ownership.LivenessCheck
+  readonly canExecute?: ((row: RunStore.RunRow) => Effect.Effect<boolean>) | undefined
 }
 
 /** Captures one absolute, immutable runtime configuration at API entry. */
@@ -134,12 +137,17 @@ const validate = (options: Options): ValidatedOptions => {
   if (typeof isAlive !== "function") {
     throw invalidConfiguration("isAlive", "NodeRuntime isAlive must be a function")
   }
+  const canExecute = options.canExecute
+  if (canExecute !== undefined && typeof canExecute !== "function") {
+    throw invalidConfiguration("canExecute", "NodeRuntime canExecute must be a function when supplied")
+  }
   const absoluteFilename = resolve(filename)
   return Object.freeze({
     filename: absoluteFilename,
     workspaceRoot: resolve(workspaceRoot),
     owner: Object.freeze({ hostId }),
-    isAlive
+    isAlive,
+    canExecute
   })
 }
 
@@ -217,7 +225,8 @@ const composition = <
   const engine = EngineStore.layer({
     owner: validated.owner,
     journalSource: `${validated.owner.hostId}-engine`,
-    isAlive: validated.isAlive
+    isAlive: validated.isAlive,
+    canExecute: validated.canExecute
   }).pipe(Layer.provideMerge(execution))
   // The registry is built BETWEEN the engine and the registration phase, so a
   // registration that reads a catalog off it — `@smthrs/registry`'s

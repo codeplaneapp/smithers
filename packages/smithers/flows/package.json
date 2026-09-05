@@ -35,9 +35,11 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./NodeRuntime": "./src/NodeRuntime.ts",
+    "./SandboxedFlow": "./src/SandboxedFlow.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +63,23 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./NodeRuntime": {
+        "types": "./dist/esm/NodeRuntime.d.ts",
+        "import": "./dist/esm/NodeRuntime.js",
+        "require": "./dist/cjs/NodeRuntime.js"
+      },
+      "./SandboxedFlow": {
+        "types": "./dist/esm/SandboxedFlow.d.ts",
+        "import": "./dist/esm/SandboxedFlow.js",
+        "require": "./dist/cjs/SandboxedFlow.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -99,37 +111,40 @@
     "@smthrs/step-cache": "1.0.0-rc.0",
     "@smthrs/sync": "1.0.0-rc.0",
     "@smthrs/time-travel": "1.0.0-rc.0",
-    "@smthrs/platform-node": "1.0.0-rc.0",
-    "esbuild": "0.28.1"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
+    "esbuild": "0.28.2"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@smthrs/agent": "1.0.0-rc.0",
-    "@smthrs/cli": "1.0.0-rc.0",
+    "@effect/language-service": "0.87.2",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
     "@smthrs/control": "1.0.0-rc.0",
     "@smthrs/model": "1.0.0-rc.0",
     "@smthrs/notifications": "1.0.0-rc.0",
+    "@smthrs/platform-node": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
-    "@smthrs/testing": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
     "microsandbox": "0.6.16",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "@smthrs/platform-node": "1.0.0-rc.0",
+    "effect": "4.0.0-rc.112"
+  },
+  "peerDependenciesMeta": {
+    "@smthrs/platform-node": {
+      "optional": true
+    }
   }
 }

@@ -307,14 +307,16 @@ const bundlerSpecifier = "esbuild"
 const loadBundler = (): Promise<Bundler> => import(bundlerSpecifier) as Promise<Bundler>
 
 /**
- * The guest runner beside this module, as source when this module runs as
- * source and as the built file when it runs from `dist`.
+ * The source runner in development, and the built ESM runner in a release.
+ * The guest is always bundled as ESM, including when its host uses CommonJS;
+ * feeding the CJS runner to that bundle would leave Node built-in requires
+ * without a require function in the isolated guest.
  */
 const runnerPath = (): string => {
   const here = import.meta.url
-  /* v8 ignore next -- the `.js` arm runs only from `dist`, where this module has been built */
-  const extension = here.endsWith(".ts") ? ".ts" : ".js"
-  return fileURLToPath(new URL(`./internal/SandboxedFlowGuest${extension}`, here))
+  /* v8 ignore next -- release smoke executes the built arm through both module conditions */
+  const runner = here.endsWith(".ts") ? "./internal/SandboxedFlowGuest.ts" : "../esm/internal/SandboxedFlowGuest.js"
+  return fileURLToPath(new URL(runner, here))
 }
 
 /** The bundle's main: the entry's exports and the guest environment, handed to the runner. */

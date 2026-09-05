@@ -1,24 +1,42 @@
 ---
 title: "Installation"
-description: "Install @smthrs/flows, its Node requirement, its three import forms, the platform package it deliberately leaves to you, and when to depend on individual engine packages instead."
+description: "Depend on @smthrs/flows from a checkout, its Node and effect requirements, its three import forms, the platform packages the barrel leaves to the program that runs, and when to depend on individual engine packages instead."
 sidebar:
   order: 1
 ---
 
-## Install the package
+## Get the package
 
-```bash
-pnpm add @smthrs/flows@next
+`@smthrs/flows` is not published to npm at 1.0.0-rc.0, so `pnpm add
+@smthrs/flows` does not resolve. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers). Clone that
+repository, install its dependencies, and declare the package where you need
+it:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/flows": "workspace:*"
+  }
+}
 ```
 
-The `next` tag is where the 1.0 release candidates publish. Installing the
-barrel installs all nineteen engine packages it re-exports, plus
-[`effect`](https://effect.website) and `esbuild`, which `SandboxedFlow` uses to
-bundle a guest entry module.
+Depending on the barrel brings in the nineteen engine packages it re-exports,
+`effect`, and `esbuild`, which `SandboxedFlow` uses to bundle a guest entry
+module. Node host and SQLite adapters are optional and are selected below.
 
-Durable execution requires Node.js 22.19.0 or later with local SQLite, which is
-what `package.json` declares in `engines`. The package ships as ESM and
-CommonJS with TypeScript declarations.
+## Requirements
+
+- Node.js 22.19.0 or later with local SQLite, which is what `package.json`
+  declares in `engines`. That is what durable execution needs, and it is also
+  what runs a `.ts` file directly, with no build step.
+- [`effect`](https://effect.website) 4.0.0-rc.112, as an exact peer dependency.
+  This is an Effect library throughout: a flow's payload and result are Effect
+  schemas, an action's implementation is an `Effect`, and a host is a `Layer`.
+  Pin the same version in the consuming project, so the service tags and
+  schemas this package exports are the same classes the project constructs.
+
+The package ships as ESM and CommonJS with TypeScript declarations.
 
 ## Import forms
 
@@ -48,35 +66,46 @@ chosen by the program that runs, not by the library it depends on. Re-exporting
 all three would make one import resolve `node:child_process`, ZenFS, and Bun at
 once.
 
-Add the one your program runs on:
-
-```bash
-pnpm add @smthrs/platform-node
-```
+There is one platform package per runtime:
 
 - [`@smthrs/platform-node`](/api/platform-node) supplies the Node host,
-  containment, process reaping, and the liveness probe.
-  `NodeRuntime.layerHost` already builds on it, so a program that uses
-  `layerHost` needs no platform import of its own.
+  containment, process reaping, and the liveness probe. It is an optional peer
+  required by `NodeRuntime`, including `NodeRuntime.layerHost`.
 - [`@smthrs/platform-bun`](/api/platform-bun) supplies the Bun host.
 - [`@smthrs/platform-browser`](/api/platform-browser) supplies a browser host
   for authoring and inspection.
 
+For `@smthrs/flows/NodeRuntime`, select the Node host and SQLite driver:
+
+```bash
+pnpm add @smthrs/platform-node@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
+```
+
+Compose a host yourself and you declare the platform package you compose
+against, the same way you declared the barrel:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/platform-node": "workspace:*"
+  }
+}
+```
+
 Test doubles are reached the same way, through their own packages:
-`@smthrs/kernel/test/TestHost`, `@smthrs/database/node/NodeDatabase`,
+`@smthrs/testing/TestHost`, `@smthrs/database/node/NodeDatabase`,
 `@smthrs/journal/test/TestJournal`.
 
 ## Bundling for a browser is not durable execution
 
-The root entry point bundles for a browser, and the repository's browser gate
-holds every re-exported package root to that. What bundles is the authoring and
-inspection surface: you can declare flows, read a plan, and decode a journal
-event in a browser.
+The root entry point bundles for a browser, and so does every package root it
+re-exports. What bundles is the authoring and inspection surface: you can
+declare flows, read a plan, and decode a journal event in a browser.
 
-Durable execution is a different claim, and it is Node-only in this release.
-A browser or edge runtime is not a supported durable host even when you supply
-another SQL client. Both Node-only modules are subpaths precisely so importing
-the root never opens `node:sqlite`.
+Durable execution is a different claim: it needs Node.js 22.19.0 or later and
+local SQLite. A browser or edge runtime is not a supported durable host even
+when you supply another SQL client. Both Node-only modules are subpaths
+precisely so importing the root never opens `node:sqlite`.
 
 ## When to depend on individual packages instead
 

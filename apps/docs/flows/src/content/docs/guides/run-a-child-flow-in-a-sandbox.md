@@ -75,6 +75,7 @@ const greet = Effect.gen(function*() {
 `entry` is a `file:` URL or an absolute path. `provider` is a
 `Sandbox.Provider` value that you pass in: there is no string registry, no
 lookup by name, and no environment variable default.
+[Choose a provider](#choose-a-provider) below builds the local one.
 
 The remaining options are all optional:
 
@@ -141,16 +142,40 @@ provider for a machine at all.
 
 ## Choose a provider
 
-Providers come from [`@smthrs/sandbox`](https://sandbox.smithers.sh/reference/api/), which ships several,
-including `DirectorySandbox` for a local scratch directory. Any value with an
-`acquire` method satisfies `Sandbox.Provider`, so wrapping one to count
+Providers come from [`@smthrs/sandbox`](https://sandbox.smithers.sh/reference/api/), which the barrel
+re-exports as the `Sandbox` namespace. It ships several, and
+`DirectorySandbox` is the one to start with: its machines are scratch
+directories on this host, so the whole placement path runs with no container
+runtime. It takes the filesystem and the spawner as values, which a Node
+program reads from its own host services:
+
+```ts
+import { Sandbox } from "@smthrs/flows"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+
+const makeProvider = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const spawner = yield* ChildProcessSpawner
+  return Sandbox.DirectorySandbox.make({ fs, spawner, root: "/var/tmp/smithers" })
+})
+```
+
+A directory is a workspace boundary, not a security boundary: nothing confines
+the guest process to it. Swap in `Sandbox.ContainerSandbox` or a vendor
+provider where isolation matters.
+
+Any value with an `acquire` method satisfies the provider contract, which
+through the barrel is `Sandbox.Sandbox.Provider`: the package's own `Sandbox`
+module sits one level below its namespace. Wrapping a provider to count
 acquisitions or inject a fault is a few lines:
 
 ```ts
-import type { Sandbox } from "@smthrs/sandbox"
+import type { Sandbox } from "@smthrs/flows"
 
 let acquisitions = 0
-const counted: Sandbox.Provider = {
+const counted: Sandbox.Sandbox.Provider = {
   acquire: (session) => {
     acquisitions++
     return underlying.acquire(session)

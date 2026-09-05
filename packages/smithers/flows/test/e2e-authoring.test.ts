@@ -355,7 +355,7 @@ const StageTwo = Flow.make("e2e/stage-two", {
   success: Schema.Number,
   body: ({ value }) =>
     Stage.call({ label: "two", value }).pipe(
-      Node.andThen((next) => StageThree.to({ value: next }))
+      Node.bindPlanned((next) => StageThree.to({ value: next }))
     )
 })
 
@@ -364,7 +364,7 @@ const StageOne = Flow.make("e2e/stage-one", {
   success: Schema.Number,
   body: ({ value }) =>
     Stage.call({ label: "one", value }).pipe(
-      Node.andThen((next) => StageTwo.to({ value: next }))
+      Node.bindPlanned((next) => StageTwo.to({ value: next }))
     )
 })
 
@@ -471,7 +471,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
         Increment.call({ value }).pipe(
           // The cast is the point: the brand makes this a compile error, and
           // the proxy is what stops it when a cast has erased the brand.
-          Node.andThen((next) => Increment.call({ value: (next as unknown as number) + 1 }))
+          Node.bindPlanned((next) => Increment.call({ value: (next as unknown as number) + 1 }))
         )
     })
 
@@ -512,7 +512,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
           success: Schema.Number,
           body: ({ value }) =>
             Increment.call({ value }).pipe(
-              Node.andThen((next) => Node.succeed((next as unknown as { valueOf: () => number }).valueOf()))
+              Node.bindPlanned((next) => Node.succeed((next as unknown as { valueOf: () => number }).valueOf()))
             )
         }),
         { value: 0 }
@@ -525,7 +525,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
           success: Schema.Number,
           body: ({ value }) =>
             Increment.call({ value }).pipe(
-              Node.andThen((next) => Node.succeed(Number((next as unknown as { toString: () => string }).toString())))
+              Node.bindPlanned((next) => Node.succeed(Number((next as unknown as { toString: () => string }).toString())))
             )
         }),
         { value: 0 }
@@ -538,7 +538,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
           success: Schema.Number,
           body: ({ value }) =>
             Increment.call({ value }).pipe(
-              Node.andThen((next) => Node.succeed((next as unknown as () => number)()))
+              Node.bindPlanned((next) => Node.succeed((next as unknown as () => number)()))
             )
         }),
         { value: 0 }
@@ -566,7 +566,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
           success: Schema.Number,
           body: ({ value }) =>
             Shaped.call({ value }).pipe(
-              Node.andThen((shaped) => Node.succeed((shaped.count as unknown as number) + 1))
+              Node.bindPlanned((shaped) => Node.succeed((shaped.count as unknown as number) + 1))
             )
         }),
         { value: 0 }
@@ -596,7 +596,7 @@ describe("a body is refused for computing on a value that does not exist yet", (
         // touched at plan time. This is the half of the rule that must WORK.
         body: ({ value }) =>
           Counted.call({ value }).pipe(
-            Node.andThen((counted) => Increment.call({ value: counted.count }))
+            Node.bindPlanned((counted) => Increment.call({ value: counted.count }))
           )
       })
 
@@ -791,8 +791,8 @@ const Napping = Flow.make("e2e/napping", {
   error: Sleep.SleepRequestInvalid,
   body: ({ millis }) =>
     Mark.call({ label: "before" }).pipe(
-      Node.andThen(() => Sleep.action.call({ millis })),
-      Node.andThen(() => Mark.call({ label: "after" }))
+      Node.bindPlanned(() => Sleep.action.call({ millis })),
+      Node.bindPlanned(() => Mark.call({ label: "after" }))
     )
 })
 
@@ -802,7 +802,7 @@ const Gated = Flow.make("e2e/gated", {
   error: WaitFor.WaitForRequestInvalid,
   body: ({ name }) =>
     Mark.call({ label: "before" }).pipe(
-      Node.andThen(() => WaitFor.action.call({ name }))
+      Node.bindPlanned(() => WaitFor.action.call({ name }))
     )
 })
 

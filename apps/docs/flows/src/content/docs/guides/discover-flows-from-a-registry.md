@@ -19,8 +19,10 @@ registry; `Executable.layer` is the registration that turns every discovered
 descriptor into a registered durable flow.
 
 ```ts
+import { Action } from "@smthrs/flows"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import * as Executable from "@smthrs/registry/Executable"
+import * as Layer from "effect/Layer"
 
 const registration = Executable.layer({ delegates: [Agent, Shell] }).pipe(
   Layer.provideMerge(Action.layerImplementations)
@@ -41,9 +43,8 @@ const host = NodeRuntime.layerHost(
 and the rest of the discovery model, belongs to that package:
 [run a discovered flow](https://registry.smithers.sh/guides/run-a-discovered-flow/).
 
-Omitting the third argument is exactly the previous behavior. The registration
-phase runs with no catalog, and your flows come from whatever
-`Interpreter.layer` calls you wrote by hand.
+Omit the third argument and the registration phase runs with no catalog: your
+flows are whatever `Interpreter.layer` calls you wrote by hand.
 
 ## The build order is the whole contract
 
