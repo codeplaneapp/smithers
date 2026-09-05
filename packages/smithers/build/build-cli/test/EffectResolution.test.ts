@@ -5,10 +5,8 @@
  * workspace that declares no `type` evaluates PACKAGE.ts and WORKSPACE.ts
  * through the CommonJS bridge on the Node version this repository pins
  * (22.19.0); a newer Node keeps the same file on the ES-module path. The
- * ES-module hook re-parents the CLI-owned bare specifiers and lets tsx map
- * `./x.js` onto `x.ts`. These assert the CommonJS resolver does both as well,
- * so a declaration module means the same thing in either format and on either
- * Node version.
+ * ES-module hook re-parents the CLI-owned bare specifiers. CommonJS uses
+ * ordinary installed dependencies and tsx maps `./x.js` onto `x.ts`.
  */
 import * as Fs from "node:fs/promises"
 import { createRequire } from "node:module"
@@ -29,6 +27,15 @@ beforeAll(async () => {
   outside = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-effect-resolution-")))
   await Fs.mkdir(NodePath.join(outside, "src"), { recursive: true })
   await Fs.mkdir(NodePath.join(outside, "environments"), { recursive: true })
+  await Fs.mkdir(NodePath.join(outside, "node_modules", "@smthrs"), { recursive: true })
+  const require = createRequire(import.meta.url)
+  for (const name of ["effect", "@smthrs/targets"]) {
+    await Fs.symlink(
+      NodePath.dirname(require.resolve(`${name}/package.json`)),
+      NodePath.join(outside, "node_modules", name),
+      "dir"
+    )
+  }
   await Fs.writeFile(NodePath.join(outside, "src", "PACKAGE.ts"), "export const Package = {}\n", "utf8")
 })
 
@@ -37,7 +44,7 @@ afterAll(async () => {
 })
 
 describe("the CommonJS resolver a bridged declaration module gets", () => {
-  it("resolves the CLI-owned specifiers from the CLI, not from the requester", () => {
+  it("resolves the installed shared dependencies from the requester", () => {
     const require = createRequire(NodePath.join(outside, "WORKSPACE.ts"))
     expect(require.resolve("@smthrs/targets")).toContain(NodePath.join("packages", "smithers", "build", "targets"))
     expect(require.resolve("effect")).toContain(NodePath.join("node_modules", "effect"))

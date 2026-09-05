@@ -1,15 +1,35 @@
 {
   "name": "@smthrs/build-cli",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "tooling"
   },
-  "private": true,
   "description": "Executes PACKAGE.ts target graphs with content-addressed caching",
+  "homepage": "https://github.com/smithersai/smithers",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smithersai/smithers.git",
+    "directory": "packages/smithers/build/build-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/smithersai/smithers/issues"
+  },
+  "tags": [
+    "typescript",
+    "effect",
+    "build",
+    "cli"
+  ],
+  "keywords": [
+    "typescript",
+    "effect",
+    "build",
+    "cli"
+  ],
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "sideEffects": [
     "./src/main.js",
@@ -22,55 +42,398 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
+    "./effect-resolution": "./src/effect-resolution.js",
     "./internal/*": null,
-    "./index": null
+    "./index": null,
+    "./Affected": "./src/Affected.ts",
+    "./AgentFake": "./src/AgentFake.ts",
+    "./AgentSession": "./src/AgentSession.ts",
+    "./Ansi": "./src/Ansi.ts",
+    "./AnvilExec": "./src/AnvilExec.ts",
+    "./Audience": "./src/Audience.ts",
+    "./Cache": "./src/Cache.ts",
+    "./CacheAdmin": "./src/CacheAdmin.ts",
+    "./Cli": "./src/Cli.ts",
+    "./CreateApp": "./src/CreateApp.ts",
+    "./Diagnostic": "./src/Diagnostic.ts",
+    "./DockerExec": "./src/DockerExec.ts",
+    "./Entry": "./src/Entry.ts",
+    "./Environment": "./src/Environment.ts",
+    "./Executor": "./src/Executor.ts",
+    "./FetchExec": "./src/FetchExec.ts",
+    "./FoundryExec": "./src/FoundryExec.ts",
+    "./GitCommit": "./src/GitCommit.ts",
+    "./GitHooks": "./src/GitHooks.ts",
+    "./GitSubmoduleExec": "./src/GitSubmoduleExec.ts",
+    "./GithubRender": "./src/GithubRender.ts",
+    "./GoExec": "./src/GoExec.ts",
+    "./GraphOutput": "./src/GraphOutput.ts",
+    "./Label": "./src/Label.ts",
+    "./MarkdownCodeBlocks": "./src/MarkdownCodeBlocks.ts",
+    "./MemoryBackend": "./src/MemoryBackend.ts",
+    "./NixExec": "./src/NixExec.ts",
+    "./OutputStream": "./src/OutputStream.ts",
+    "./OverlayExec": "./src/OverlayExec.ts",
+    "./Owners": "./src/Owners.ts",
+    "./PackageDiscovery": "./src/PackageDiscovery.ts",
+    "./PackageError": "./src/PackageError.ts",
+    "./PackageExec": "./src/PackageExec.ts",
+    "./PackageIndex": "./src/PackageIndex.ts",
+    "./PackageLoader": "./src/PackageLoader.ts",
+    "./PackageTree": "./src/PackageTree.ts",
+    "./Planner": "./src/Planner.ts",
+    "./Query": "./src/Query.ts",
+    "./RepoResolution": "./src/RepoResolution.ts",
+    "./Reporter": "./src/Reporter.ts",
+    "./Resolver": "./src/Resolver.ts",
+    "./RspackRunner": "./src/RspackRunner.ts",
+    "./ServiceSupervisor": "./src/ServiceSupervisor.ts",
+    "./StampExec": "./src/StampExec.ts",
+    "./TargetExecution": "./src/TargetExecution.ts",
+    "./Watch": "./src/Watch.ts",
+    "./Workspace": "./src/Workspace.ts",
+    "./WorkspaceLoader": "./src/WorkspaceLoader.ts",
+    "./WorkspaceToolchain": "./src/WorkspaceToolchain.ts",
+    "./effect-resolution.d": null,
+    "./engine": "./src/engine.ts",
+    "./main": "./src/main.ts"
   },
   "files": [
     "src/**/*.js",
     "src/**/*.ts",
-    "README.md"
+    "docs/**",
+    "dist/**/*.js",
+    "dist/**/*.js.map",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.ts.map",
+    "dist/**/package.json",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "tag": "next",
+    "exports": {
+      "./package.json": "./package.json",
+      ".": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./effect-resolution": {
+        "types": "./dist/esm/effect-resolution.d.ts",
+        "import": "./dist/esm/effect-resolution.js",
+        "require": "./dist/cjs/effect-resolution.js"
+      },
+      "./internal/*": null,
+      "./index": null,
+      "./Affected": {
+        "types": "./dist/esm/Affected.d.ts",
+        "import": "./dist/esm/Affected.js",
+        "require": "./dist/cjs/Affected.js"
+      },
+      "./AgentFake": {
+        "types": "./dist/esm/AgentFake.d.ts",
+        "import": "./dist/esm/AgentFake.js",
+        "require": "./dist/cjs/AgentFake.js"
+      },
+      "./AgentSession": {
+        "types": "./dist/esm/AgentSession.d.ts",
+        "import": "./dist/esm/AgentSession.js",
+        "require": "./dist/cjs/AgentSession.js"
+      },
+      "./Ansi": {
+        "types": "./dist/esm/Ansi.d.ts",
+        "import": "./dist/esm/Ansi.js",
+        "require": "./dist/cjs/Ansi.js"
+      },
+      "./AnvilExec": {
+        "types": "./dist/esm/AnvilExec.d.ts",
+        "import": "./dist/esm/AnvilExec.js",
+        "require": "./dist/cjs/AnvilExec.js"
+      },
+      "./Audience": {
+        "types": "./dist/esm/Audience.d.ts",
+        "import": "./dist/esm/Audience.js",
+        "require": "./dist/cjs/Audience.js"
+      },
+      "./Cache": {
+        "types": "./dist/esm/Cache.d.ts",
+        "import": "./dist/esm/Cache.js",
+        "require": "./dist/cjs/Cache.js"
+      },
+      "./CacheAdmin": {
+        "types": "./dist/esm/CacheAdmin.d.ts",
+        "import": "./dist/esm/CacheAdmin.js",
+        "require": "./dist/cjs/CacheAdmin.js"
+      },
+      "./Cli": {
+        "types": "./dist/esm/Cli.d.ts",
+        "import": "./dist/esm/Cli.js",
+        "require": "./dist/cjs/Cli.js"
+      },
+      "./CreateApp": {
+        "types": "./dist/esm/CreateApp.d.ts",
+        "import": "./dist/esm/CreateApp.js",
+        "require": "./dist/cjs/CreateApp.js"
+      },
+      "./Diagnostic": {
+        "types": "./dist/esm/Diagnostic.d.ts",
+        "import": "./dist/esm/Diagnostic.js",
+        "require": "./dist/cjs/Diagnostic.js"
+      },
+      "./DockerExec": {
+        "types": "./dist/esm/DockerExec.d.ts",
+        "import": "./dist/esm/DockerExec.js",
+        "require": "./dist/cjs/DockerExec.js"
+      },
+      "./Entry": {
+        "types": "./dist/esm/Entry.d.ts",
+        "import": "./dist/esm/Entry.js",
+        "require": "./dist/cjs/Entry.js"
+      },
+      "./Environment": {
+        "types": "./dist/esm/Environment.d.ts",
+        "import": "./dist/esm/Environment.js",
+        "require": "./dist/cjs/Environment.js"
+      },
+      "./Executor": {
+        "types": "./dist/esm/Executor.d.ts",
+        "import": "./dist/esm/Executor.js",
+        "require": "./dist/cjs/Executor.js"
+      },
+      "./FetchExec": {
+        "types": "./dist/esm/FetchExec.d.ts",
+        "import": "./dist/esm/FetchExec.js",
+        "require": "./dist/cjs/FetchExec.js"
+      },
+      "./FoundryExec": {
+        "types": "./dist/esm/FoundryExec.d.ts",
+        "import": "./dist/esm/FoundryExec.js",
+        "require": "./dist/cjs/FoundryExec.js"
+      },
+      "./GitCommit": {
+        "types": "./dist/esm/GitCommit.d.ts",
+        "import": "./dist/esm/GitCommit.js",
+        "require": "./dist/cjs/GitCommit.js"
+      },
+      "./GitHooks": {
+        "types": "./dist/esm/GitHooks.d.ts",
+        "import": "./dist/esm/GitHooks.js",
+        "require": "./dist/cjs/GitHooks.js"
+      },
+      "./GitSubmoduleExec": {
+        "types": "./dist/esm/GitSubmoduleExec.d.ts",
+        "import": "./dist/esm/GitSubmoduleExec.js",
+        "require": "./dist/cjs/GitSubmoduleExec.js"
+      },
+      "./GithubRender": {
+        "types": "./dist/esm/GithubRender.d.ts",
+        "import": "./dist/esm/GithubRender.js",
+        "require": "./dist/cjs/GithubRender.js"
+      },
+      "./GoExec": {
+        "types": "./dist/esm/GoExec.d.ts",
+        "import": "./dist/esm/GoExec.js",
+        "require": "./dist/cjs/GoExec.js"
+      },
+      "./GraphOutput": {
+        "types": "./dist/esm/GraphOutput.d.ts",
+        "import": "./dist/esm/GraphOutput.js",
+        "require": "./dist/cjs/GraphOutput.js"
+      },
+      "./Label": {
+        "types": "./dist/esm/Label.d.ts",
+        "import": "./dist/esm/Label.js",
+        "require": "./dist/cjs/Label.js"
+      },
+      "./MarkdownCodeBlocks": {
+        "types": "./dist/esm/MarkdownCodeBlocks.d.ts",
+        "import": "./dist/esm/MarkdownCodeBlocks.js",
+        "require": "./dist/cjs/MarkdownCodeBlocks.js"
+      },
+      "./MemoryBackend": {
+        "types": "./dist/esm/MemoryBackend.d.ts",
+        "import": "./dist/esm/MemoryBackend.js",
+        "require": "./dist/cjs/MemoryBackend.js"
+      },
+      "./NixExec": {
+        "types": "./dist/esm/NixExec.d.ts",
+        "import": "./dist/esm/NixExec.js",
+        "require": "./dist/cjs/NixExec.js"
+      },
+      "./OutputStream": {
+        "types": "./dist/esm/OutputStream.d.ts",
+        "import": "./dist/esm/OutputStream.js",
+        "require": "./dist/cjs/OutputStream.js"
+      },
+      "./OverlayExec": {
+        "types": "./dist/esm/OverlayExec.d.ts",
+        "import": "./dist/esm/OverlayExec.js",
+        "require": "./dist/cjs/OverlayExec.js"
+      },
+      "./Owners": {
+        "types": "./dist/esm/Owners.d.ts",
+        "import": "./dist/esm/Owners.js",
+        "require": "./dist/cjs/Owners.js"
+      },
+      "./PackageDiscovery": {
+        "types": "./dist/esm/PackageDiscovery.d.ts",
+        "import": "./dist/esm/PackageDiscovery.js",
+        "require": "./dist/cjs/PackageDiscovery.js"
+      },
+      "./PackageError": {
+        "types": "./dist/esm/PackageError.d.ts",
+        "import": "./dist/esm/PackageError.js",
+        "require": "./dist/cjs/PackageError.js"
+      },
+      "./PackageExec": {
+        "types": "./dist/esm/PackageExec.d.ts",
+        "import": "./dist/esm/PackageExec.js",
+        "require": "./dist/cjs/PackageExec.js"
+      },
+      "./PackageIndex": {
+        "types": "./dist/esm/PackageIndex.d.ts",
+        "import": "./dist/esm/PackageIndex.js",
+        "require": "./dist/cjs/PackageIndex.js"
+      },
+      "./PackageLoader": {
+        "types": "./dist/esm/PackageLoader.d.ts",
+        "import": "./dist/esm/PackageLoader.js",
+        "require": "./dist/cjs/PackageLoader.js"
+      },
+      "./PackageTree": {
+        "types": "./dist/esm/PackageTree.d.ts",
+        "import": "./dist/esm/PackageTree.js",
+        "require": "./dist/cjs/PackageTree.js"
+      },
+      "./Planner": {
+        "types": "./dist/esm/Planner.d.ts",
+        "import": "./dist/esm/Planner.js",
+        "require": "./dist/cjs/Planner.js"
+      },
+      "./Query": {
+        "types": "./dist/esm/Query.d.ts",
+        "import": "./dist/esm/Query.js",
+        "require": "./dist/cjs/Query.js"
+      },
+      "./RepoResolution": {
+        "types": "./dist/esm/RepoResolution.d.ts",
+        "import": "./dist/esm/RepoResolution.js",
+        "require": "./dist/cjs/RepoResolution.js"
+      },
+      "./Reporter": {
+        "types": "./dist/esm/Reporter.d.ts",
+        "import": "./dist/esm/Reporter.js",
+        "require": "./dist/cjs/Reporter.js"
+      },
+      "./Resolver": {
+        "types": "./dist/esm/Resolver.d.ts",
+        "import": "./dist/esm/Resolver.js",
+        "require": "./dist/cjs/Resolver.js"
+      },
+      "./RspackRunner": {
+        "types": "./dist/esm/RspackRunner.d.ts",
+        "import": "./dist/esm/RspackRunner.js",
+        "require": "./dist/cjs/RspackRunner.js"
+      },
+      "./ServiceSupervisor": {
+        "types": "./dist/esm/ServiceSupervisor.d.ts",
+        "import": "./dist/esm/ServiceSupervisor.js",
+        "require": "./dist/cjs/ServiceSupervisor.js"
+      },
+      "./StampExec": {
+        "types": "./dist/esm/StampExec.d.ts",
+        "import": "./dist/esm/StampExec.js",
+        "require": "./dist/cjs/StampExec.js"
+      },
+      "./TargetExecution": {
+        "types": "./dist/esm/TargetExecution.d.ts",
+        "import": "./dist/esm/TargetExecution.js",
+        "require": "./dist/cjs/TargetExecution.js"
+      },
+      "./Watch": {
+        "types": "./dist/esm/Watch.d.ts",
+        "import": "./dist/esm/Watch.js",
+        "require": "./dist/cjs/Watch.js"
+      },
+      "./Workspace": {
+        "types": "./dist/esm/Workspace.d.ts",
+        "import": "./dist/esm/Workspace.js",
+        "require": "./dist/cjs/Workspace.js"
+      },
+      "./WorkspaceLoader": {
+        "types": "./dist/esm/WorkspaceLoader.d.ts",
+        "import": "./dist/esm/WorkspaceLoader.js",
+        "require": "./dist/cjs/WorkspaceLoader.js"
+      },
+      "./WorkspaceToolchain": {
+        "types": "./dist/esm/WorkspaceToolchain.d.ts",
+        "import": "./dist/esm/WorkspaceToolchain.js",
+        "require": "./dist/cjs/WorkspaceToolchain.js"
+      },
+      "./effect-resolution.d": null,
+      "./engine": {
+        "types": "./dist/esm/engine.d.ts",
+        "import": "./dist/esm/engine.js",
+        "require": "./dist/cjs/engine.js"
+      },
+      "./main": {
+        "types": "./dist/esm/main.d.ts",
+        "import": "./dist/esm/main.js",
+        "require": "./dist/cjs/main.js"
+      }
+    }
+  },
   "scripts": {
     "lint": "eslint src --max-warnings=0 && dprint check",
     "format": "dprint fmt",
+    "build": "node scripts/build.mjs",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
     "circular": "node scripts/circular.mjs",
-    "test": "vitest"
+    "test": "vitest",
+    "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
+    "@clack/prompts": "1.7.0",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "@smthrs/build": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0",
-    "@smthrs/create-app": "workspace:*",
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/create-app": "1.0.0-rc.0",
     "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/keys": "1.0.0-rc.0",
+    "@smthrs/journal": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
-    "@smthrs/build": "workspace:*",
-    "effect": "4.0.0-rc.108",
-    "ignore": "7.0.6",
+    "@smthrs/targets": "1.0.0-rc.0",
+    "effect": "4.0.0-rc.112",
+    "ignore": "7.0.8",
     "incur": "0.5.1",
+    "jsonc-parser": "3.3.1",
     "minimatch": "10.2.6",
-    "@smthrs/targets": "workspace:*",
-    "tsx": "4.23.12",
-    "typescript": "6.0.3"
+    "tsx": "4.23.13",
+    "typescript": "7.0.2"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@eslint/js": "9.39.1",
-    "@rsbuild/core": "1.2.3",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@eslint/js": "9.39.5",
+    "@rsbuild/core": "2.2.3",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript-eslint": "8.65.0",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }

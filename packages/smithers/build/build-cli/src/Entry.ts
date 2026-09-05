@@ -9,6 +9,7 @@
  *
  * @since 0.1.0
  */
+import * as Audience from "./Audience.ts"
 import { makeCli, normalizeArgv } from "./Cli.ts"
 import type * as Reporter from "./Reporter.ts"
 
@@ -21,6 +22,7 @@ import type * as Reporter from "./Reporter.ts"
 export interface Host {
   readonly argv: ReadonlyArray<string>
   readonly env: Record<string, string | undefined>
+  readonly stdin?: { readonly isTTY?: boolean | undefined } | undefined
   readonly stdout: Reporter.Terminal
   readonly stderr: Reporter.Terminal
   /**
@@ -50,6 +52,12 @@ export interface Host {
  * @since 0.1.0
  */
 export const main = async (host: Host): Promise<void> => {
+  const presentation = Audience.fromArguments(host.argv, {
+    env: host.env,
+    stdin: host.stdin?.isTTY === true,
+    stdout: host.stdout.isTTY,
+    stderr: host.stderr.isTTY
+  })
   const cacheUrl = host.env["SMITHERS_CACHE_URL"]
   const cacheToken = host.env["SMITHERS_CACHE_TOKEN"]
   delete host.env["SMITHERS_CACHE_URL"]
@@ -84,8 +92,12 @@ export const main = async (host: Host): Promise<void> => {
       environment: host.env,
       stdout: host.stdout,
       stderr: host.stderr,
+      presentation,
       exit
-    }).serve([...normalizeArgv(host.argv)], { exit, stdout: (text) => host.stdout.write(text) })
+    }).serve(Audience.incurArguments(normalizeArgv(host.argv), presentation), {
+      exit,
+      stdout: (text) => host.stdout.write(text)
+    })
   } finally {
     host.removeListener("SIGINT", onSigint)
     host.removeListener("SIGTERM", onSigterm)

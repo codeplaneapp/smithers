@@ -1,20 +1,34 @@
 ---
 title: "Output and renderers"
-description: "Two output channels: the structured envelope on standard output for programs, and one of three progress renderers on standard error for people, plus how --ui auto chooses."
+description: "Shared human/agent detection, quiet machine results, and live task progress without mixing output channels."
 sidebar:
   order: 3
 ---
+
+The shared `Audience` policy separates **who is reading** from **how results are
+encoded**. Verified harness markers select agent mode even inside a PTY; humans
+receive progress eagerly, while agents receive concise Incur results and useful
+next commands with progress silent by default. CI and non-interactive pipes use
+conservative machine output. Detection never changes permissions or approvals.
+
+Override with `--audience human|agent|auto` or `SMITHERS_AUDIENCE`. `--silent`
+suppresses progress, not results, errors, or explicitly requested logs;
+`--quiet` remains available where previously supported, with legacy alias output
+unchanged; prefer `--silent` across groups. `--verbose` opts agents into plain
+progress. MCP always stays machine-clean. See the
+[verified harness registry](../reference/agent-detection.md).
 
 The CLI writes to two streams and never mixes them.
 
 **Standard output belongs to the structured envelope.** incur prints the
 command's return value there, TOON by default, or JSON, YAML, Markdown, or
-JSONL under `--format`. A program reading `smithers-build query --format json`
+JSONL under `--format`. A program reading `smthrs query --format json`
 sees exactly the envelope and nothing else.
 
 **Standard error belongs to progress.** A reporter turns execution events into
-whatever the selected renderer draws. Because progress never touches standard
-output, `--format json` is never contaminated by a spinner.
+whatever the selected renderer draws. Humans see task lifecycle and log feedback
+as work happens; Clack supplies live feedback and prompts. Because progress never
+touches standard output, `--format json` is never contaminated by a spinner.
 
 ## The three renderers
 
@@ -24,32 +38,23 @@ output, `--format json` is never contaminated by a spinner.
 | `stream` | The same events with colour, glyphs, and aligned columns, and still no cursor motion.     |
 | `tty`    | Draws in place: running targets spin at the bottom, settled targets scroll above them.    |
 
-`plain` prints exactly the lines the executors have always printed, which is
-what pipes, CI logs, and the existing tests read. `stream` is safe wherever
-colour is, including a log file that will be read later. `tty` works the way
-Bazel's progress bar and Nx's dynamic renderer do.
+`plain` is appropriate for stable captured logs. `stream` is safe wherever
+colour is; `tty` provides the live running-task view familiar from Bazel and Nx.
 
 ## How auto resolves
 
-`--ui` takes `auto`, `tty`, `stream`, or `plain`, and defaults to `auto`. An
-explicit mode always wins. Under `auto`, the resolution runs in this order and
-stops at the first match:
+`--ui` takes `auto`, `tty`, `stream`, or `plain`, and defaults to `auto`. It
+selects the target renderer within the audience policy; it cannot override agent
+silence or `--silent`. `SMTHRS_UI` supplies an environment preference.
 
-1. `SMTHRS_UI` names a mode, in the manner of Turborepo's `TURBO_UI` and Nx's
-   `NX_TUI`.
-2. An explicit `--format` means a program is reading, so `plain`.
-3. `NO_COLOR` is set, or `TERM=dumb`, so `plain`.
-4. `CI` is set: `plain`, unless `FORCE_COLOR` asks for colour, in which case
-   `stream`, because a cursor must never move in a log.
-5. Both streams are terminals: `tty`.
-6. Standard error alone is a terminal, or `FORCE_COLOR` is set under a pipe:
-   `stream`.
-7. Anything else: `plain`.
+Terminal capabilities control animation; CI and `TERM=dumb` avoid cursor motion,
+and `NO_COLOR` disables color. Redirected progress degrades to stable lines.
+These hints do not identify an agent. An explicit JSON format controls standard
+output independently, so a human can still follow progress on standard error.
 
 ## What a person sees instead of the envelope
 
-When a human renderer is selected and incur agrees standard output belongs to
-the person rather than to an agent, the CLI renders the result as text on
+When the audience policy selects unstructured human output, the CLI renders the result as text on
 standard output and returns no envelope data. `query`, `graph`, and `owners`
 each have a text form for exactly this: aligned columns for a listing, a tree
 for a graph, a table for owners.
@@ -71,10 +76,24 @@ data.
 Ask for the format you want and read standard output:
 
 ```bash
-pnpm exec smithers-build query 'deps(//packages/smithers/flows/flow:lib)' --format json
-pnpm exec smithers-build ci '//packages/...' --plan --format json
-pnpm exec smithers-build graph '//packages/...' --mermaid > graph.mmd
+smthrs query 'deps(//packages/api:lib)' --format json
+smthrs ci '//packages/...' --plan --format json
+smthrs runs logs <run-id> --follow --format jsonl
 ```
 
-An explicit `--format` also forces the `plain` renderer, so progress on
-standard error stays parseable and the two streams can be captured separately.
+Agent history pulls without `--follow` default to 100 events and incremental
+JSONL. Use `--limit 1..10000` for a different page size and `--after <sequence>`
+for the next page; a bounded result includes the continuation command. Following
+has no default event limit, but an explicit `--limit` still applies.
+
+Use `--silent` to suppress unsolicited progress, or `--ui plain` for stable
+target-progress lines. The two streams can always be captured separately.
+
+## Embedding and maintenance
+
+`Audience.resolve` takes injected environment and stream facts and returns one
+policy for results, progress, and prompting. `Audience.fromArguments` handles
+executable presentation flags; `Audience.incurArguments` selects structured
+formatting for harness-owned PTYs without changing process streams. Renderers
+consume this policy instead of maintaining separate detection logic. Add only
+source-verified markers, with false-positive tests alongside them.

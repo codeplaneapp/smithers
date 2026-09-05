@@ -4,17 +4,23 @@
  * Every command returns structured data for incur's envelope. Progress and
  * the human-facing rendering of that data go through {@link Reporter}: a
  * person at a terminal sees a live or coloured account on standard error and
- * a tree or table on standard output, while a pipe, a CI log, or an explicit
- * `--format` sees exactly the plain lines and the envelope it always did.
+ * a tree or table on standard output. Agents and CI get quiet structured
+ * results with follow-up commands; an explicit format changes data encoding,
+ * independently of a human's progress display.
  *
  * @since 0.1.0
  */
+import metadata from "@smthrs/build-cli/package.json" with { type: "json" }
 import * as Config from "@smthrs/targets/Config"
+import * as Input from "@smthrs/targets/Input"
 import * as Target from "@smthrs/targets/Target"
 import { Cli, z } from "incur"
 import * as NodePath from "node:path"
+import * as Affected from "./Affected.ts"
 import * as Ansi from "./Ansi.ts"
+import * as Audience from "./Audience.ts"
 import { normalizePublishNamespace } from "./Cache.ts"
+import * as CacheAdmin from "./CacheAdmin.ts"
 import * as CreateApp from "./CreateApp.ts"
 import * as Diagnostic from "./Diagnostic.ts"
 import * as Executor from "./Executor.ts"
@@ -29,6 +35,7 @@ import * as Planner from "./Planner.ts"
 import * as Query from "./Query.ts"
 import * as RepoResolution from "./RepoResolution.ts"
 import * as Reporter from "./Reporter.ts"
+import * as Watch from "./Watch.ts"
 import { type RemoteCacheAccess, remoteCacheOf, type ResolvedRemoteCache } from "./Workspace.ts"
 
 const workspaceOption = z.object({
@@ -39,6 +46,7 @@ const workspaceOption = z.object({
 })
 
 const executionOptions = workspaceOption.extend({
+  verbose: z.boolean().default(false).describe("Show plain progress for agent and pipe consumers"),
   plan: z.boolean().default(false).describe("Print the inert plan instead of executing"),
   jobs: z.number().int().min(1).optional().describe(
     "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work"
@@ -73,20 +81,30 @@ const patternArgument = z.object({
 
 /** The options every command accepts, parsed before the command is resolved. */
 const globalOptions = z.object({
+  audience: z.enum(["auto", "human", "agent"]).default("auto").describe(
+    "Presentation audience; auto detects agent harnesses, CI, and terminals"
+  ),
+  silent: z.boolean().default(false).describe("Suppress progress; retain the result and actionable failures"),
   ui: z.enum(Reporter.uiModes).default("auto").describe(
     "Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; " +
-      "auto picks tty on a terminal and plain under a pipe, CI, NO_COLOR, or an explicit --format"
+      "auto shows live human progress; agent, --silent, pipe and dumb-terminal policies take precedence"
   )
 })
 
-/** The flags every command shares. */
-interface WorkspaceFlags {
+/** The flags every command shares.
+ * @category models
+ * @since 0.1.0
+ */
+export interface WorkspaceFlags {
   readonly workspace: string
   readonly cacheDir?: string | undefined
 }
 
-/** The flags shared by commands that execute targets. */
-interface ExecutionFlags extends WorkspaceFlags {
+/** The flags shared by commands that execute targets.
+ * @category models
+ * @since 0.1.0
+ */
+export interface ExecutionFlags extends WorkspaceFlags {
   readonly plan: boolean
   readonly jobs?: number | undefined
   readonly includeExclusive?: boolean | undefined
@@ -108,6 +126,9 @@ interface ExecutionFlags extends WorkspaceFlags {
  * @slop
  */
 export interface RuntimeConfig {
+  readonly cliName?: string | undefined
+  readonly cliVersion?: string | undefined
+  readonly cliDescription?: string | undefined
   readonly cacheUrl?: string | undefined
   readonly cacheToken?: string | undefined
   readonly signal?: AbortSignal | undefined
@@ -119,6 +140,7 @@ export interface RuntimeConfig {
   readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   readonly stdout?: Reporter.Terminal | undefined
   readonly stderr?: Reporter.Terminal | undefined
+  readonly presentation?: Audience.Policy | undefined
   readonly exit?: ((code: number) => void) | undefined
 }
 
@@ -126,16 +148,30 @@ export interface RuntimeConfig {
 interface Presentation {
   readonly agent: boolean
   readonly formatExplicit: boolean
-  readonly globals: { readonly ui: Reporter.UiMode }
+  readonly options?: { readonly workspace?: string | undefined; readonly verbose?: boolean | undefined } | undefined
+  readonly globals: {
+    readonly ui?: Reporter.UiMode | undefined
+    readonly audience?: "auto" | "human" | "agent" | undefined
+    readonly silent?: boolean | undefined
+  }
 }
 
 /** incur's error result constructor, as the command context exposes it. */
+interface NextCommand {
+  readonly command: string
+  readonly description: string
+  readonly options?: Record<string, string> | undefined
+}
+
 type ErrorResult = (options: {
   readonly code: string
   readonly exitCode?: number | undefined
   readonly message: string
   readonly retryable?: boolean | undefined
+  readonly cta?: { readonly commands: Array<NextCommand>; readonly description?: string | undefined } | undefined
 }) => never
+
+type SuccessResult = (data: unknown, meta?: { cta: { commands: Array<NextCommand> } }) => never
 
 const environmentOf = (config: RuntimeConfig): Ansi.Environment => config.environment ?? process.env
 
@@ -160,28 +196,52 @@ const terminalsOf = (
   stderr: config.stderr ?? Reporter.terminalOf(process.stderr)
 })
 
+const policyFor = (context: Presentation, config: RuntimeConfig): Audience.Policy => {
+  const base = config.presentation
+  const { stdout, stderr } = terminalsOf(config)
+  const protocol = context.agent && context.formatExplicit && Object.keys(context.globals ?? {}).length === 0
+  const override = context.globals.audience === "human" || context.globals.audience === "agent"
+    ? context.globals.audience
+    : undefined
+  const policy = Audience.resolve({
+    env: environmentOf(config),
+    stdout: stdout.isTTY,
+    stderr: stderr.isTTY,
+    audience: override ?? base?.audience ?? "auto",
+    mcp: protocol || base?.source === "mcp",
+    silent: context.globals.silent === true || (override === undefined && base?.progress === "silent"),
+    verbose: context.options?.verbose === true || (base?.audience === "agent" && base.progress !== "silent"),
+    formatExplicit: context.formatExplicit || base?.structured === true
+  })
+  return base !== undefined && override === undefined && !protocol
+    ? { ...policy, source: base.source, harnesses: base.harnesses }
+    : policy
+}
+
 /**
  * The renderer one command draws with. Execution progress goes to standard
  * error, so both streams are consulted; a tree or table goes to standard
  * output, so only that stream matters.
  */
 const rendererFor = (context: Presentation, config: RuntimeConfig, bound: "stdout" | "stderr"): Reporter.Renderer => {
+  const policy = policyFor(context, config)
+  if (policy.audience === "agent" || policy.progress === "silent" || policy.progress === "plain") return "plain"
   const { stderr, stdout } = terminalsOf(config)
   const streams = bound === "stderr"
     ? { stdout: stdout.isTTY, stderr: stderr.isTTY }
     : { stdout: stdout.isTTY, stderr: stdout.isTTY }
-  return Reporter.resolveRenderer(context.globals.ui, environmentOf(config), streams, context.formatExplicit)
+  return Reporter.resolveRenderer(context.globals.ui ?? "auto", environmentOf(config), streams)
 }
 
-/** Whether a person is reading: a human renderer, and incur agrees standard output is theirs. */
-const forPeople = (context: Presentation, renderer: Reporter.Renderer): boolean =>
-  renderer !== "plain" && !context.agent
+/** Human result ownership is audience policy, never Incur's TTY-only agent heuristic. */
+const forPeople = (context: Presentation, config: RuntimeConfig): boolean => !policyFor(context, config).structured
 
 const reporterFor = (context: Presentation, config: RuntimeConfig): Reporter.Reporter =>
   Reporter.make({
     renderer: rendererFor(context, config, "stderr"),
     terminal: terminalsOf(config).stderr,
-    env: environmentOf(config)
+    env: environmentOf(config),
+    presentation: policyFor(context, config)
   })
 
 /**
@@ -194,10 +254,11 @@ const present = <A>(
   data: A,
   render: (style: Ansi.Palette) => string
 ): A | undefined => {
-  const renderer = rendererFor(context, config, "stdout")
-  if (!forPeople(context, renderer)) return data
+  if (!forPeople(context, config)) return data
   const { stdout } = terminalsOf(config)
-  stdout.write(`${render(Ansi.palette(environmentOf(config), stdout.isTTY))}\n`)
+  const env = environmentOf(config)
+  const palette = rendererFor(context, config, "stdout") === "plain" ? Ansi.none : Ansi.palette(env, stdout.isTTY)
+  stdout.write(`${render(palette)}\n`)
   return undefined
 }
 
@@ -263,7 +324,7 @@ const remoteCacheAccess = (
         publishNamespace
       }
     case "anonymous": {
-      // Discovered from the jjhub remote with nothing committed: reads go out
+      // Discovered from the Smithers Cloud remote with nothing committed: reads go out
       // bare (a public repository answers them), and a credential in the
       // environment, when one is there, serves both directions.
       const token = tokenAt(credentials.writeTokenEnv)
@@ -274,8 +335,10 @@ const remoteCacheAccess = (
 
 /**
  * Opens the target index rooted by the nearest WORKSPACE.ts declaration.
+ * @category querying
+ * @since 0.1.0
  */
-const openPackageIndex = async (
+export const openPackageIndex = async (
   flags: WorkspaceFlags,
   runtime: RuntimeConfig = {}
 ): Promise<PackageIndex.PackageIndex> => {
@@ -299,7 +362,7 @@ const openPackageIndex = async (
     signal: runtime.signal
   })
   const loaded = await PackageLoader.load(discovery)
-  return PackageIndex.PackageIndex.make(loaded, process.cwd())
+  return PackageIndex.PackageIndex.make(loaded, NodePath.resolve(flags.workspace))
 }
 
 /** Evaluates a query against the target index. */
@@ -460,8 +523,12 @@ const plannedTarget = (target: Planner.PlannedTarget): Planner.PlannedTarget => 
   ...(target.nixEnvironment === undefined ? {} : { nixEnvironment: target.nixEnvironment })
 })
 
-/** The mode and invocation flags the PACKAGE.ts execution surface accepts. */
-interface ModeFlags {
+/** The mode and invocation flags the PACKAGE.ts execution surface accepts.
+ * @category models
+ * @since 0.1.0
+ */
+export interface ModeFlags {
+  readonly name?: string | undefined
   readonly write?: boolean | undefined
   readonly fix?: boolean | undefined
   readonly message?: string | undefined
@@ -485,8 +552,10 @@ const parseInputs = (entries: ReadonlyArray<string> | undefined): Readonly<Recor
 
 /**
  * Runs one execution verb through the build executor.
+ * @category execution
+ * @since 0.1.0
  */
-const runPackageVerb = async (
+export const runPackageVerb = async (
   verb: PackageExec.PackageVerb,
   pattern: string,
   flags: ExecutionFlags & ModeFlags,
@@ -521,7 +590,7 @@ const runPackageVerb = async (
     sweep: flags.sweep,
     inputs: parseInputs(flags.input),
     environment: config.environment,
-    packageName: "name" in flags && typeof flags.name === "string" ? flags.name : undefined
+    packageName: flags.name
   })
 }
 
@@ -548,8 +617,11 @@ const runGitHooks = async (
   return { mode: "check", clean: report.clean, entries: report.entries }
 }
 
-/** Plans one verb and executes it unless `--plan` asked for the inert print. */
-const runVerb = async (
+/** Plans one verb and executes it unless `--plan` asked for the inert print.
+ * @category execution
+ * @since 0.1.0
+ */
+export const runVerb = async (
   verb: "build" | "test" | "lint" | "run" | "docs" | "review",
   pattern: string,
   flags: ExecutionFlags & ModeFlags,
@@ -681,12 +753,27 @@ const failureMessage = (summary: Executor.Summary): string =>
  * An inert plan is always data.
  */
 const settle = <A extends Outcome>(
-  context: Presentation & { readonly error: ErrorResult },
+  context: Presentation & { readonly error: ErrorResult; readonly ok: SuccessResult },
   config: RuntimeConfig,
-  reporter: Reporter.Reporter,
   outcome: A
 ): A | undefined => {
-  const people = forPeople(context, reporter.renderer)
+  const policy = policyFor(context, config)
+  const people = forPeople(context, config) && policy.progress !== "silent"
+  const failed = isSummary(outcome) ? outcome.results.filter((row) => row.status === "failed") : []
+  const firstLabel = failed[0]?.label ?? (isSummary(outcome) ? outcome.results[0]?.label : undefined)
+  const workspace = context.options?.workspace
+  const commandOptions = workspace === undefined ? {} : { workspace: `'${workspace.replaceAll("'", "'\\''")}'` }
+  const commands: Array<NextCommand> = [
+    ...(firstLabel === undefined
+      ? []
+      : [{
+        command: `explain '${firstLabel.replaceAll("'", "'\\''")}'`,
+        description: "Inspect the target and its dependencies",
+        options: commandOptions
+      }]),
+    { command: "targets", description: "Discover available targets", options: commandOptions },
+    { command: "cache status", description: "Inspect local cache usage", options: commandOptions }
+  ]
   if (failedSummary(outcome)) {
     if (people && config.exit !== undefined) {
       config.exit(1)
@@ -696,11 +783,12 @@ const settle = <A extends Outcome>(
       code: "targets_failed",
       exitCode: 1,
       message: failureMessage(outcome),
-      retryable: false
+      retryable: false,
+      cta: { commands }
     })
   }
   if (people && isSummary(outcome)) return undefined
-  return outcome
+  return context.ok(outcome, { cta: { commands } })
 }
 
 /**
@@ -708,7 +796,7 @@ const settle = <A extends Outcome>(
  * run ends, so a live renderer always hands the terminal back.
  */
 const executeCommand = async <A extends Outcome>(
-  context: Presentation & { readonly error: ErrorResult },
+  context: Presentation & { readonly error: ErrorResult; readonly ok: SuccessResult },
   config: RuntimeConfig,
   code: string,
   body: (reporter: Reporter.Reporter) => Promise<A>
@@ -722,8 +810,223 @@ const executeCommand = async <A extends Outcome>(
   } finally {
     reporter.close()
   }
-  return settle(context, config, reporter, outcome)
+  return settle(context, config, outcome)
 }
+
+const optionalPattern = z.object({ pattern: z.string().default("//...").describe("Target label or recursive pattern") })
+const targetKinds = ["build", "test", "lint", "docs", "review", "run", "ci"] as const
+const selectionArgs = z.object({
+  verb: z.enum(targetKinds).describe("Target verb to execute"),
+  pattern: z.string().default("//...").describe("Target label or recursive pattern")
+})
+
+const cacheDirectoryOf = (index: PackageIndex.PackageIndex, flags: WorkspaceFlags): string =>
+  flags.cacheDir === undefined ? index.workspace.cache.directory : Config.normalizeCacheDirectory(flags.cacheDir)
+
+const workspaceInfo = async (flags: WorkspaceFlags, config: RuntimeConfig) => {
+  const index = await openPackageIndex(flags, config)
+  const cacheDirectory = cacheDirectoryOf(index, flags)
+  const remote = remoteCacheOf(index.workspace.cache.remote, config.cacheUrl)
+  return {
+    name: index.workspace.name,
+    root: index.root,
+    declaration: await PackageDiscovery.workspaceFileOf(index.root),
+    currentPackage: index.currentPackage,
+    repository: index.workspace.repository,
+    packages: new Set(index.targets().map((row) => row.packagePath)).size,
+    targets: index.targets().length,
+    runtime: index.workspace.runtime,
+    packageManager: index.workspace.packageManager,
+    toolchains: index.workspace.toolchains,
+    sandboxProviders: Object.keys(index.workspace.sandboxes?.sandboxes ?? {}),
+    cache: { directory: NodePath.join(index.root, cacheDirectory, "cache"), remote: remote?.endpoint ?? null },
+    host: { node: process.version, platform: process.platform, arch: process.arch },
+    cli: { name: config.cliName ?? "smithers-build", version: config.cliVersion ?? metadata.version }
+  }
+}
+
+/** Plans the union once, preserving CI's lint-first deduplication and dependency scheduling. */
+const runSelected = async (
+  index: PackageIndex.PackageIndex,
+  labels: ReadonlyArray<string>,
+  verb: (typeof targetKinds)[number] | "auto",
+  pattern: string,
+  flags: ExecutionFlags,
+  config: RuntimeConfig,
+  reporter: Reporter.Reporter
+): Promise<Executor.Summary | PackageExec.PlanReport> => {
+  const options = {
+    index,
+    cacheDirectory: cacheDirectoryOf(index, flags),
+    remoteCache: remoteCacheAccess(remoteCacheOf(index.workspace.cache.remote, config.cacheUrl), config),
+    jobs: flags.jobs,
+    readCache: flags.cache,
+    signal: config.signal,
+    reporter,
+    environment: config.environment,
+    plan: flags.plan
+  }
+  const plans: Array<PackageExec.PackagePlan> = []
+  const selectedLabels = new Set(labels)
+  const resolutionCache: RepoResolution.ResolutionCache = new Map()
+  const rows = await Promise.all(
+    index.resolve(pattern).map(async (row) => ({
+      row,
+      kinds: await RepoResolution.effectiveKinds(index, row.target, resolutionCache)
+    }))
+  )
+  for (const kind of verb === "ci" ? ciKinds : [verb]) {
+    const eligible = rows.filter((entry) => kind === "auto" || entry.kinds.includes(kind))
+    const patterns = eligible.length > 0 && eligible.every((entry) => selectedLabels.has(entry.row.label))
+      ? [pattern]
+      : eligible.filter((entry) => selectedLabels.has(entry.row.label)).map((entry) => entry.row.label)
+    for (const label of patterns) {
+      try {
+        plans.push(await PackageExec.plan({ ...options, verb: kind, pattern: label, unattended: verb === "ci" }))
+      } catch (cause) {
+        if (!(cause instanceof Planner.UnsupportedVerbError)) throw cause
+      }
+    }
+  }
+  const nodes = new Map<string, PackageExec.PackageNode>()
+  for (const plan of plans) for (const node of plan.workList) if (!nodes.has(node.label)) nodes.set(node.label, node)
+  const combined: PackageExec.PackagePlan = {
+    roots: [...new Set(plans.flatMap((plan) => plan.roots))],
+    workList: [...nodes.values()],
+    nodes,
+    closures: new Map(plans.flatMap((plan) => [...plan.closures]))
+  }
+  if (flags.plan) {
+    return {
+      verb,
+      pattern,
+      roots: combined.roots,
+      targets: combined.workList.map((node) => ({
+        label: node.label,
+        rule: node.rule,
+        mode: node.mode,
+        key: node.keyPreview,
+        cacheable: node.cacheable,
+        dependencies: node.dependencies,
+        ...(node.refusal === undefined ? {} : { refusal: node.refusal })
+      }))
+    }
+  }
+  return PackageExec.execute(combined, { ...options, verb, pattern })
+}
+
+const showTarget = async (
+  label: string,
+  flags: WorkspaceFlags & { readonly verb?: Target.Kind | undefined },
+  config: RuntimeConfig
+) => {
+  const index = await openPackageIndex(flags, config)
+  const rows = index.resolve(label)
+  if (rows.length !== 1) throw new Error("show target requires one exact or default target")
+  const row = rows[0]!
+  const metadata = Target.metadata(row.target)
+  const planned = await PackageExec.plan({
+    index,
+    pattern: row.label,
+    verb: flags.verb ?? "auto",
+    cacheDirectory: cacheDirectoryOf(index, flags),
+    plan: true,
+    signal: config.signal,
+    environment: config.environment
+  })
+  const node = planned.nodes.get(planned.roots[0]!)!
+  const cached = await CacheAdmin.inspect(index.root, cacheDirectoryOf(index, flags), node.keyPreview)
+  const candidate = cached?.exitOk && cached.label === node.label && cached.target === node.target
+  return {
+    label: row.label,
+    rule: metadata.target,
+    kinds: metadata.kinds,
+    summary: metadata.summary,
+    package: row.packagePath,
+    mode: node.mode,
+    owners: Owners.packageOwners(index, row.packagePath).map((owner) => ({ owner: owner.owner, role: owner.role })),
+    dependencies: node.dependencies,
+    inputs: node.declaredInputs,
+    outputs: node.declaredOutputs,
+    cache: {
+      key: node.keyPreview,
+      cacheable: node.cacheable,
+      local: candidate ? "candidate" : "miss",
+      storedAt: candidate ? cached.storedAt : undefined,
+      reason: !node.cacheable ? "Target is not cacheable" : candidate
+        ? "Local result exists; execution still validates outputs and dependency results"
+        : "No successful local result matches this target and key",
+      executionKey: node.keyTemplate === undefined ? "planned" : "depends-on-runtime-graph",
+      remote: "not-probed"
+    },
+    keyInputs: { layers: node.keyMaterial.layers, capabilities: node.keyMaterial.capabilities },
+    refusal: node.refusal
+  }
+}
+
+const cacheCli = (config: RuntimeConfig) =>
+  Cli.create("cache", { description: "Inspect and maintain local action-result caches" })
+    .command("status", {
+      description: "Report cache size and configured remote without exposing credentials",
+      options: workspaceOption,
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const cacheDirectory = cacheDirectoryOf(index, context.options)
+          const entries = await CacheAdmin.entries(index.root, cacheDirectory)
+          const remote = remoteCacheOf(index.workspace.cache.remote, config.cacheUrl)
+          return {
+            scope: "local-action-results",
+            directory: NodePath.join(index.root, cacheDirectory, "cache"),
+            exists: await CacheAdmin.directory(index.root, cacheDirectory) !== undefined,
+            entries: entries.length,
+            bytes: entries.reduce((sum, entry) => sum + entry.bytes, 0),
+            remote: remote === undefined ? null : { endpoint: remote.endpoint, health: "not-probed" }
+          }
+        } catch (cause) {
+          return context.error({ code: "cache_status_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("prune", {
+      description: "Remove local action results older than the retention window",
+      options: workspaceOption.extend({
+        olderThanDays: z.number().min(0).default(30),
+        dryRun: z.boolean().default(false),
+        yes: z.boolean().default(false)
+      }),
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          return await CacheAdmin.remove({
+            root: index.root,
+            cacheDirectory: cacheDirectoryOf(index, context.options),
+            olderThanDays: context.options.olderThanDays,
+            dryRun: context.options.dryRun,
+            yes: context.options.yes
+          })
+        } catch (cause) {
+          return context.error({ code: "cache_prune_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("clear", {
+      description: "Remove all local action results; durable runs and artifacts are preserved",
+      options: workspaceOption.extend({ dryRun: z.boolean().default(false), yes: z.boolean().default(false) }),
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          return await CacheAdmin.remove({
+            root: index.root,
+            cacheDirectory: cacheDirectoryOf(index, context.options),
+            dryRun: context.options.dryRun,
+            yes: context.options.yes
+          })
+        } catch (cause) {
+          return context.error({ code: "cache_clear_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
 
 /**
  * Creates the configured smithers-build CLI.
@@ -733,16 +1036,210 @@ const executeCommand = async <A extends Outcome>(
  * @slop
  */
 export const makeCli = (config: RuntimeConfig = {}) =>
-  Cli.create("smithers-build", {
-    description: "Execute declared targets and install the workspace with flows",
-    version: "0.1.0",
+  Cli.create(config.cliName ?? "smithers-build", {
+    description: config.cliDescription ?? "Execute declared targets and install the workspace with flows",
+    version: config.cliVersion ?? metadata.version,
     globals: globalOptions
   })
+    .command(cacheCli(config))
+    .command(
+      Cli.create("show", { description: "Inspect targets and workspace configuration" })
+        .command("target", {
+          description: "Show a target's inputs, outputs, dependencies, owners and cache identity",
+          args: z.object({ label: z.string() }),
+          options: workspaceOption.extend({
+            verb: z.enum(["build", "test", "lint", "docs", "review", "run"]).optional()
+          }),
+          async run(context) {
+            try {
+              return await showTarget(context.args.label, context.options, config)
+            } catch (cause) {
+              return context.error({ code: "show_target_failed", message: Diagnostic.describe(cause) })
+            }
+          }
+        })
+        .command("workspace", {
+          description: "Show the resolved workspace, toolchain, cache and sandbox configuration",
+          options: workspaceOption,
+          async run(context) {
+            try {
+              return await workspaceInfo(context.options, config)
+            } catch (cause) {
+              return context.error({ code: "show_workspace_failed", message: Diagnostic.describe(cause) })
+            }
+          }
+        })
+    )
+    .command("targets", {
+      description: "List available targets with their kinds and summaries",
+      args: optionalPattern,
+      options: workspaceOption,
+      async run(context) {
+        try {
+          const result = await packageQuery(await openPackageIndex(context.options, config), context.args.pattern)
+          return present(context, config, result, (style) => Query.text(result, style))
+        } catch (cause) {
+          return context.error({ code: "targets_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("info", {
+      description: "Report workspace and host configuration for diagnosis",
+      options: workspaceOption,
+      async run(context) {
+        try {
+          return await workspaceInfo(context.options, config)
+        } catch (cause) {
+          return context.error({ code: "info_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("explain", {
+      description: "Explain a target's actual planned cache key and local cache state",
+      args: z.object({ label: z.string() }),
+      options: workspaceOption.extend({ verb: z.enum(["build", "test", "lint", "docs", "review", "run"]).optional() }),
+      async run(context) {
+        try {
+          return await showTarget(context.args.label, context.options, config)
+        } catch (cause) {
+          return context.error({ code: "explain_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("affected", {
+      description: "Execute targets affected by changed files, conservatively including ambient inputs",
+      args: selectionArgs,
+      options: executionOptions.extend({
+        base: z.string().default("HEAD").describe("Git base revision"),
+        head: z.string().optional().describe(
+          "Git head revision; defaults to the working tree including untracked files"
+        ),
+        files: z.array(z.string()).optional().describe("Explicit changed paths instead of Git discovery"),
+        list: z.boolean().default(false).describe("List selected roots and reasons without executing")
+      }),
+      async run(context) {
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const files = await Affected.changedPaths(index.root, context.options)
+          const changed = Affected.select(index, context.args.pattern, files)
+          const kinds = context.args.verb === "ci" ? ciKinds : [context.args.verb]
+          const resolutionCache: RepoResolution.ResolutionCache = new Map()
+          const eligibility = await Promise.all(changed.targets.map(async (target) => ({
+            target,
+            kinds: await RepoResolution.effectiveKinds(index, index.resolve(target.label)[0]!.target, resolutionCache)
+          })))
+          const selection = {
+            ...changed,
+            targets: eligibility.filter((entry) => kinds.some((kind) => entry.kinds.includes(kind))).map((entry) =>
+              entry.target
+            )
+          }
+          if (context.options.list) return selection
+          return await executeCommand(context, config, "affected_failed", (reporter) =>
+            runSelected(
+              index,
+              selection.targets.map((target) => target.label),
+              context.args.verb,
+              context.args.pattern,
+              context.options,
+              config,
+              reporter
+            ))
+        } catch (cause) {
+          return context.error({ code: "affected_failed", message: Diagnostic.describe(cause) })
+        }
+      }
+    })
+    .command("clean", {
+      description: "Execute only declared Clean targets selected by the pattern",
+      args: optionalPattern,
+      options: executionOptions,
+      run: (context) =>
+        executeCommand(context, config, "clean_failed", async (reporter) => {
+          const index = await openPackageIndex(context.options, config)
+          const labels = index.resolve(context.args.pattern).filter((row) =>
+            Target.metadata(row.target).target === "Clean"
+          ).map((row) => row.label)
+          if (labels.length === 0) throw new Error(`no declared Clean targets selected by ${context.args.pattern}`)
+          return runSelected(index, labels, "auto", context.args.pattern, context.options, config, reporter)
+        })
+    })
+    .command("watch", {
+      mcp: false,
+      description: "Replan and rerun a target graph when workspace files change",
+      args: selectionArgs,
+      options: executionOptions.extend({
+        debounceMs: z.number().int().min(20).default(200),
+        once: z.boolean().default(false).describe("Run one cycle and exit")
+      }),
+      async run(context) {
+        const reporter = reporterFor(context, config)
+        try {
+          const index = await openPackageIndex(context.options, config)
+          const ignored = [cacheDirectoryOf(index, context.options)]
+          for (const row of index.targets()) {
+            const outputs = Target.metadata(row.target).outputs
+            if (outputs !== undefined) {
+              for (const path of outputs.paths) {
+                ignored.push(Input.resolvePath(outputs.cwd, path))
+              }
+            }
+          }
+          const args = [
+            context.args.verb,
+            context.args.pattern.startsWith(":") ? index.resolve(context.args.pattern)[0]!.label : context.args.pattern,
+            "--audience",
+            policyFor(context, config).audience,
+            ...(policyFor(context, config).progress === "silent" ? ["--silent"] : []),
+            ...(context.options.verbose ? ["--verbose"] : []),
+            ...(context.options.plan ? ["--plan"] : []),
+            ...(context.options.jobs === undefined ? [] : ["--jobs", String(context.options.jobs)]),
+            ...(context.options.cache ? [] : ["--no-cache"]),
+            ...(context.options.cacheDir === undefined ? [] : ["--cache-dir", context.options.cacheDir])
+          ]
+          const streams = terminalsOf(config)
+          const result = await Watch.run({
+            root: index.root,
+            args,
+            ignored,
+            signal: config.signal,
+            environment: {
+              ...environmentOf(config),
+              ...(config.cacheUrl === undefined ? {} : { SMITHERS_CACHE_URL: config.cacheUrl }),
+              ...(config.cacheToken === undefined ? {} : { SMITHERS_CACHE_TOKEN: config.cacheToken })
+            },
+            debounceMs: context.options.debounceMs,
+            once: context.options.once,
+            stdout: (text) => {
+              if (context.options.plan && policyFor(context, config).audience === "human") reporter.note(text)
+            },
+            stderr: (text) => streams.stderr.write(text),
+            cycleCompleted: (cycle) => {
+              if (cycle.exitCode === 0) reporter.note(`Watch cycle ${cycle.number} complete`)
+              else reporter.warn(`Watch cycle ${cycle.number} failed (exit ${cycle.exitCode})\n${cycle.output.trim()}`)
+            }
+          })
+          if (context.options.once && result.exitCode !== 0) {
+            return context.error({
+              code: "watch_cycle_failed",
+              message: "Watch execution failed",
+              exitCode: result.exitCode
+            })
+          }
+          return result
+        } catch (cause) {
+          return context.error({ code: "watch_failed", message: Diagnostic.describe(cause) })
+        } finally {
+          reporter.close()
+        }
+      }
+    })
     .command("install", {
       description: "Plan and execute the install Flow under the toolchain the workspace declares",
       options: workspaceOption,
       alias: { workspace: "w" },
       async run(context) {
+        const reporter = reporterFor(context, config)
         try {
           const index = await openPackageIndex(context.options, config)
           const installs = index.targets().filter((row) =>
@@ -769,10 +1266,10 @@ export const makeCli = (config: RuntimeConfig = {}) =>
             verb: "run",
             pattern: installs[0]!.label,
             environment: config.environment,
-            signal: config.signal
+            signal: config.signal,
+            reporter
           })
-          if ("ok" in summary && !summary.ok) throw new Error(failureMessage(summary))
-          return summary
+          return settle(context, config, summary)
         } catch (cause) {
           return context.error({
             code: "install_failed",
@@ -780,6 +1277,8 @@ export const makeCli = (config: RuntimeConfig = {}) =>
             message: Diagnostic.describe(cause),
             retryable: false
           })
+        } finally {
+          reporter.close()
         }
       }
     })
@@ -787,18 +1286,14 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       description: "Scaffold a Smithers app from a @smthrs/create-app template",
       args: z.object({ dir: z.string().describe("Directory to create; its name becomes the app name") }),
       options: z.object({
-        template: z.string().default("default").describe("Template name: default or aomi"),
-        link: z.boolean().default(true).describe(
-          "Point @smthrs/* dependencies at the checkout the templates came from; --no-link keeps versions"
-        )
+        template: z.string().default("default").describe("Template name")
       }),
       alias: { template: "t" },
       async run(context) {
         try {
           return await CreateApp.scaffold({
             directory: context.args.dir,
-            template: context.options.template,
-            link: context.options.link
+            template: context.options.template
           })
         } catch (cause) {
           return context.error({
@@ -911,7 +1406,8 @@ export const makeCli = (config: RuntimeConfig = {}) =>
           return outcome
         })
     })
-    .command("gitHooks", {
+    .command("git-hooks", {
+      aliases: ["gitHooks"],
       description: "Check the WORKSPACE.ts gitHooks scripts against .git/hooks, or install them with --write",
       options: workspaceOption.extend({
         write: z.boolean().default(false).describe("Install the rendered hook scripts into .git/hooks")

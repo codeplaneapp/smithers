@@ -71,6 +71,20 @@ chain.
 
 ## A package failed to load
 
+**`declaration_dependency_mismatch: <package> resolves to ...`**
+
+A declaration or a relative helper selects a different physical runtime
+package from the CLI. The message includes both manifest paths. Install the
+matching workspace dependencies, remove a linked package's private runtime
+copies, and invoke the CLI installed in that workspace. Two copies at the
+same version can still have different schema sentinels and continuation tables.
+
+**`declaration_dependency_unresolved: cannot resolve <package> ...`**
+
+The dependency check could not complete. Install the workspace dependencies
+and check the original cause for filesystem or package-resolution errors.
+See [Declaration loading](./concepts/declaration-loading.md).
+
 **`two targets carry one label: <label>`** and
 **`two labels collide case-insensitively: <a> and <b>`**
 
@@ -229,9 +243,8 @@ renders. `smithers-build gitHooks --write` installs the rendered scripts.
 
 ## The scaffold refused
 
-See [Scaffold an app](./guides/scaffold-an-app.md) for the four `create-app`
-refusals, and for why a scaffold from a source checkout might report an empty
-`linked` list.
+See [Scaffold an app](./guides/scaffold-an-app.md) for the `create-app`
+refusals and the package versions copied into a new app.
 
 ## Progress output looks wrong
 

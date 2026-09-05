@@ -38,7 +38,14 @@ export default defineConfig({
         "src/RspackRunner.ts": { statements: 82, branches: 72, functions: 68, lines: 85 },
         "src/DockerExec.ts": { statements: 77, branches: 58, functions: 80, lines: 82 },
         "src/GoExec.ts": { statements: 70, branches: 55, functions: 73, lines: 73 },
-        "src/StampExec.ts": { statements: 96, branches: 90, functions: 100, lines: 96 }
+        "src/StampExec.ts": { statements: 96, branches: 90, functions: 100, lines: 96 },
+        // Fetch's extracted backend starts above its pre-move measured
+        // 89.62/89.80/72.22/94.74 coverage. Planner and adapters are complete.
+        "src/FetchExec.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
+        "src/internal/CoreRuleSelection.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
+        "src/internal/rules/FetchPlan.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
+        "src/internal/rules/FetchRule.ts": { statements: 100, branches: 100, functions: 100, lines: 100 },
+        "src/internal/rules/FetchExecutor.ts": { statements: 90, branches: 90, functions: 73, lines: 95 }
       }
     }
   }

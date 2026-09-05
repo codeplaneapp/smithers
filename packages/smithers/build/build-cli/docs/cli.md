@@ -7,15 +7,14 @@ description: "Every smithers-build command, argument, option, exit code, and err
 smithers-build <command> [arguments] [options]
 ```
 
-`makeCli` registers fourteen commands. `normalizeArgv` adds a fifteenth
-spelling: an argv whose first token starts with `//` or `:` is rewritten to
-`target <label>`, so `smithers-build //packages/smithers/flows/flow:lint` runs
-the bare-label form.
+`makeCli` registers 23 commands, including the `gitHooks` alias and grouped
+`cache` and `show` surfaces. `normalizeArgv` adds another spelling: an argv
+whose first token starts with `//` or `:` is rewritten to `target <label>`, so
+`smithers-build //packages/api:lint` runs the bare-label form.
 
 Option names are the kebab-case form of their schema key, so `cacheDir` is
 `--cache-dir`. A boolean option that defaults to true is turned off with its
-`--no-` form, so `--cache` becomes `--no-cache` and `--link` becomes
-`--no-link`.
+`--no-` form, so `--cache` becomes `--no-cache`.
 
 ## Workspace options
 
@@ -33,12 +32,13 @@ in the workspace declaration, then `.flows`. See
 
 ## Execution options
 
-`build`, `test`, `lint`, `docs`, `review`, `run`, `target`, and `ci` add these
-to the workspace options.
+`affected`, `clean`, `watch`, `build`, `test`, `lint`, `docs`, `review`, `run`,
+`target`, and `ci` add these to the workspace options.
 
 | Option                   | Alias | Type       | Default          | Meaning                                                           |
 | ------------------------ | ----- | ---------- | ---------------- | ----------------------------------------------------------------- |
 | `--plan`                 |       | boolean    | `false`          | Print the inert plan and execute nothing.                         |
+| `--verbose`              |       | boolean    | `false`          | Show plain progress for agents and pipe consumers.              |
 | `--jobs`                 | `-j`  | integer 1+ | host parallelism | Maximum concurrent targets.                                       |
 | `--include-exclusive`    |       | boolean    | `false`          | Include exclusive targets in wildcard `ci` and `test` selections. |
 | `--cache` / `--no-cache` |       | boolean    | `true`           | Consult the cache before running. `--no-cache` still publishes.   |
@@ -50,12 +50,17 @@ Exclusive targets run alone after ready ordinary work drains, regardless of
 
 ## Global options
 
-`--ui <auto|tty|stream|plain>` is the one global `smithers-build` adds. It
-picks the renderer that draws progress on standard error: `tty` draws in
-place, `stream` colours without moving the cursor, `plain` prints bare lines,
-and `auto` resolves from the environment and the streams. It never changes the
-structured envelope on standard output. See
-[Output and renderers](./concepts/output.md).
+`--audience <auto|human|agent>` selects the consumer experience; `auto` detects
+verified harness markers and terminal capabilities. `SMITHERS_AUDIENCE` supplies
+the environment override. Humans receive progress eagerly; agents receive
+concise Incur results and useful next commands, with progress silent by default.
+
+`--silent` suppresses progress, not results or failures. The public CLI retains
+`--quiet` on commands that previously supported it; it is not a global target
+option. Execution commands accept `--verbose` to enable plain progress for agents.
+`--ui <auto|tty|stream|plain>` chooses the target-progress style within the
+audience policy: it does not override silence or alter result encoding.
+See [Output and renderers](./concepts/output.md).
 
 The CLI is built on [incur](https://github.com/wevm/incur), which supplies the
 rest on every command: `--help`, `--version`, `--json`,
@@ -90,7 +95,7 @@ green.
 
 ```bash
 pnpm exec smithers-build test '//packages/...'
-pnpm exec smithers-build lint '//packages/smithers/flows/flow:lint'
+pnpm exec smithers-build lint '//packages/api:lint'
 ```
 
 `--fix` lets an agent lint target write inside its declared `fixes` write set.
@@ -138,7 +143,7 @@ tasks, and commits.
 
 ```bash
 pnpm exec smithers-build run '//:changelog'
-pnpm exec smithers-build run '//evals/authoring:sftLaunch'
+pnpm exec smithers-build run '//packages/api:publish'
 ```
 
 `--name` supplies a package name to scaffold targets. The three invocation
@@ -150,8 +155,8 @@ Executes one label under the verb its rule flavour implies, and is what a bare
 label resolves to:
 
 ```bash
-pnpm exec smithers-build target '//packages/smithers/flows/flow:lint'
-pnpm exec smithers-build '//packages/smithers/flows/flow:lint'
+pnpm exec smithers-build target '//packages/api:lint'
+pnpm exec smithers-build '//packages/api:lint'
 ```
 
 It is the one way to run a `review` target without naming the verb, and the
@@ -177,13 +182,13 @@ target does.
 
 These take the workspace options and execute no targets.
 
-| Command    | Argument    | Own options     |
-| ---------- | ----------- | --------------- |
-| `install`  |             |                 |
-| `query`    | `<expr>`    |                 |
-| `graph`    | `<pattern>` | `--mermaid, -m` |
-| `owners`   | `[paths…]`  | `--diff, -d`    |
-| `gitHooks` |             | `--write`       |
+| Command     | Argument    | Own options     |
+| ----------- | ----------- | --------------- |
+| `install`   |             |                 |
+| `query`     | `<expr>`    |                 |
+| `graph`     | `<pattern>` | `--mermaid, -m` |
+| `owners`    | `[paths…]`  | `--diff, -d`    |
+| `git-hooks` |             | `--write`       |
 
 ### install
 
@@ -205,9 +210,9 @@ Lists labels, or evaluates one of three functions.
 
 ```bash
 pnpm exec smithers-build query '//packages/...'
-pnpm exec smithers-build query 'deps(//packages/smithers/flows/flow:lib)'
-pnpm exec smithers-build query 'rdeps(//packages/smithers/flows/flow:lib)'
-pnpm exec smithers-build query 'owners(//packages/smithers/flows/flow:lib)'
+pnpm exec smithers-build query 'deps(//packages/api:lib)'
+pnpm exec smithers-build query 'rdeps(//packages/api:lib)'
+pnpm exec smithers-build query 'owners(//packages/api:lib)'
 ```
 
 A label or pattern lists each selected target with its rule, its kinds, and
@@ -240,7 +245,7 @@ Resolves owners, reasons, and the agent policy for workspace paths, or for
 every path a diff touches.
 
 ```bash
-pnpm exec smithers-build owners packages/smithers/flows/flow/src/Flow.ts
+pnpm exec smithers-build owners packages/api/src/server.ts
 pnpm exec smithers-build owners --diff main
 ```
 
@@ -248,19 +253,65 @@ pnpm exec smithers-build owners --diff main
 `S.gitDiff(base)` expands. The command needs at least one path, from the
 argument list or from `--diff`.
 
-### gitHooks
+### git-hooks
+
+`gitHooks` remains an alias for `git-hooks`.
 
 Renders the hook scripts the workspace declaration binds and compares them
 byte for byte against `.git/hooks`.
 
 ```bash
-pnpm exec smithers-build gitHooks
-pnpm exec smithers-build gitHooks --write
+pnpm exec smithers-build git-hooks
+pnpm exec smithers-build git-hooks --write
 ```
 
 Drift is a red exit that names each drifting file and its status, like every
 other generated file. `--write` installs the rendered scripts and reports what
 it wrote.
+
+## Inspection and maintenance
+
+These commands inspect the workspace or operate on explicitly bounded local
+state.
+
+| Command          | Arguments          | Own options                               |
+| ---------------- | ------------------ | ----------------------------------------- |
+| `cache status`   |                    |                                           |
+| `cache prune`    |                    | `--older-than-days`, `--dry-run`, `--yes` |
+| `cache clear`    |                    | `--dry-run`, `--yes`                      |
+| `show target`    | `<label>`          | `--verb`                                  |
+| `show workspace` |                    |                                           |
+| `targets`        | `[pattern]`        |                                           |
+| `info`           |                    |                                           |
+| `explain`        | `<label>`          | `--verb`                                  |
+| `affected`       | `<verb> [pattern]` | `--base`, `--head`, `--files`, `--list`   |
+| `clean`          | `[pattern]`        |                                           |
+| `watch`          | `<verb> [pattern]` | `--debounce-ms`, `--once`                 |
+
+`cache status` reports the local action-result count and size plus the remote
+endpoint without exposing credentials. `cache prune` selects entries older
+than 30 days by default; `cache clear` selects all entries. Deletion requires
+`--yes`, while `--dry-run` writes nothing. Only individual local action-result
+files are removed; durable runs, artifacts, stores, and directories remain.
+Deletion is irreversible and fails closed if a path changes mid-operation.
+
+`show target` reports the rule, kinds, dependencies, owners, inputs, outputs,
+planned key, and local cache state for one target. `explain` returns the same
+report. `show workspace` and `info` report resolved workspace and host
+configuration. These commands do not execute targets or probe the remote
+cache. `targets` lists the available target surface and defaults to `//...`.
+
+`affected` accepts `build`, `test`, `lint`, `docs`, `review`, `run`, or `ci`.
+It compares `--base` (default `HEAD`) with `--head`, or with the working tree
+and untracked files when `--head` is absent. Repeatable `--files` bypasses Git
+discovery, and `--list` explains the selection without executing it. Unknown
+or ambient inputs conservatively select the graph.
+
+`clean` executes only declared `Clean` targets and refuses an empty selection.
+`watch` runs the selected verb in fresh child processes, cancels stale work,
+and replans after a change. It ignores `.git`, `node_modules`, cache state, and
+declared outputs. `--debounce-ms` defaults to 200 with a minimum of 20;
+`--once` performs one cycle. Watch is deliberately unavailable through MCP.
 
 ## Scaffolding
 
@@ -272,13 +323,11 @@ than reading a workspace.
 
 ```bash
 pnpm exec smithers-build create-app my-app
-pnpm exec smithers-build create-app my-app --template aomi
 ```
 
-| Option                 | Alias | Type    | Default   | Meaning                                                                 |
-| ---------------------- | ----- | ------- | --------- | ----------------------------------------------------------------------- |
-| `--template`           | `-t`  | string  | `default` | Template name. `default` and `aomi` ship today.                         |
-| `--link` / `--no-link` |       | boolean | `true`    | Point `@smthrs/*` dependencies at the checkout the templates came from. |
+| Option       | Alias | Type   | Default   | Meaning       |
+| ------------ | ----- | ------ | --------- | ------------- |
+| `--template` | `-t`  | string | `default` | Template name |
 
 The directory's own name becomes the app name, so it must match
 `[a-z0-9][a-z0-9._-]*`. The directory must not exist or must be empty. See
@@ -318,19 +367,19 @@ A structured failure carries a code alongside its message.
 
 ## Environment
 
-| Variable                                | Read by                                                                    |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| `SMITHERS_CACHE_URL`                    | Overrides the declared remote-cache endpoint for this process.             |
-| `SMITHERS_CACHE_TOKEN`                  | The default remote-cache credential.                                       |
-| `SMITHERS_CACHE_NAMESPACE`              | The trust domain results publish into. Unset means the trusted domain.     |
-| `SMITHERS_JJHUB_API_URL`                | Overrides the jjhub API base that zero-config cache discovery reads.       |
-| `SMITHERS_JJHUB_HOSTS`                  | Extra comma-separated hosts whose git remotes identify a jjhub repository. |
-| `SMTHRS_UI`                             | The renderer, when `--ui` is `auto`.                                       |
-| `SMTHRS_SHARD`                          | `<index>/<total>` selecting one shard of a sharded target.                 |
-| `SMTHRS_AGENT_FAKE`                     | A script file that replaces the real agent CLI, for deterministic tests.   |
-| `SMTHRS_AGENT_TIMEOUT_MS`               | The agent session timeout.                                                 |
-| `SMTHRS_DEBUG_KEYS`                     | A file every node's key material is appended to, for cache-key forensics.  |
-| `NO_COLOR`, `TERM`, `CI`, `FORCE_COLOR` | Renderer selection under `--ui auto`.                                      |
+| Variable                                | Read by                                                                             |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `SMITHERS_CACHE_URL`                    | Overrides the declared remote-cache endpoint for this process.                      |
+| `SMITHERS_CACHE_TOKEN`                  | The default remote-cache credential.                                                |
+| `SMITHERS_CACHE_NAMESPACE`              | The trust domain results publish into. Unset means the trusted domain.              |
+| `SMITHERS_CLOUD_API_URL`                | Overrides the Smithers Cloud API base that zero-config cache discovery reads.       |
+| `SMITHERS_CLOUD_HOSTS`                  | Extra comma-separated hosts whose git remotes identify a Smithers Cloud repository. |
+| `SMTHRS_UI`                             | The renderer, when `--ui` is `auto`.                                                |
+| `SMTHRS_SHARD`                          | `<index>/<total>` selecting one shard of a sharded target.                          |
+| `SMTHRS_AGENT_FAKE`                     | A script file that replaces the real agent CLI, for deterministic tests.            |
+| `SMTHRS_AGENT_TIMEOUT_MS`               | The agent session timeout.                                                          |
+| `SMTHRS_DEBUG_KEYS`                     | A file every node's key material is appended to, for cache-key forensics.           |
+| `NO_COLOR`, `TERM`, `CI`, `FORCE_COLOR` | Renderer selection under `--ui auto`.                                               |
 
 `SMITHERS_CACHE_URL` and `SMITHERS_CACHE_TOKEN` are read once by the process
 entry point and deleted from the environment before any declaration module
@@ -340,7 +389,7 @@ spawned tool.
 
 ## Runtime
 
-The package requires Node 22.19 or newer. `src/main.js` installs the Effect
+The package requires Node 22.19+ (Node 22) or 24.11+. `src/main.js` installs the Effect
 module resolution hook and boots the programmatic `tsx` loader that ships as a
 CLI dependency, which then loads the CLI's own modules and the workspace's
 `WORKSPACE.ts` and `PACKAGE.ts` declarations. See

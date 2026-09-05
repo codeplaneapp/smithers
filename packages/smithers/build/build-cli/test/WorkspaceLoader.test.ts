@@ -19,7 +19,7 @@ const workspace = S.Workspace("unit", {
   nodeModules: S.Npm.NodeModules({ packageJson: S.file("//package.json") })
 })
 
-const check = S.Shell.Test({ command: "true" })
+const check = S.Shell.Test({ shell: "true" })
 
 /** Runs the validator and returns the routing code it throws. */
 const thrownCode = (namespace: unknown): string => {

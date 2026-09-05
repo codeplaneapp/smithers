@@ -1,24 +1,10 @@
-/**
- * Standard package targets for a private, unbuilt package.
- *
- * This package ships no distribution: it is `private: true`, its `bin` runs
- * `src/main.js` directly, and its tsconfig sets `noEmit`, so the synthesized
- * TsBuild `lib` target could never produce the `dist` tree it declares. `lib`
- * is therefore a Typecheck over the package tsconfig — the same compiler run
- * the build would perform, minus the emit — and keeps the conventional label
- * so dependents and the default-target convention are unchanged.
- *
- * The tsconfig used to declare `outDir`, `declaration`, and `declarationMap`
- * with no `noEmit` anywhere, so `pnpm check` wrote a real `dist/esm` tree and
- * the sentence above was simply false; `package.json` also carried a
- * `publishConfig` pointing at `dist/esm` and `dist/cjs` trees no target built.
- * Both are gone.
- */
+/** Standard package targets for the published build CLI. */
 import { Smithers } from "@smthrs/targets"
 import { rootInvariantsConfig, rootJSDocConfig } from "../../../../PACKAGE.ts"
 
 const cwd = "packages/smithers/build/build-cli"
 const sources = Smithers.glob("src/**/*.ts")
+const javascript = Smithers.glob("src/**/*.js")
 const tests = Smithers.glob("test/**/*.test.ts")
 
 /**
@@ -43,17 +29,19 @@ const prose = Smithers.glob("docs/*.md")
  */
 const sweep = Smithers.glob("scripts/package-api-sweep.*")
 
-const lib = Smithers.Typecheck({
-  srcs: [sources],
+const lib = Smithers.TsBuild({
+  srcs: [sources, javascript],
+  entries: [Smithers.file("src/index.ts")],
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
-  buildMode: false,
-  incremental: false,
+  tool: { name: "program", entry: Smithers.file("scripts/build.mjs") },
+  format: "dual",
+  outDir: "dist",
   cwd
 })
 
 const check = Smithers.Typecheck({
-  srcs: [sources, Smithers.glob("test/**/*.ts")],
+  srcs: [sources, javascript, Smithers.glob("test/**/*.ts")],
   deps: [lib],
   tsconfig: Smithers.file("tsconfig.test.json"),
   buildMode: false,
@@ -63,7 +51,7 @@ const check = Smithers.Typecheck({
 
 const test = Smithers.Vitest({
   tests: [tests],
-  sources: [sources, fixtures, routedFixture, prose, sweep],
+  sources: [sources, javascript, fixtures, routedFixture, prose, sweep],
   deps: [lib],
   config: Smithers.file("vitest.config.ts"),
   environment: "node",
@@ -72,7 +60,7 @@ const test = Smithers.Vitest({
 })
 
 const lint = Smithers.EsLint({
-  sources: [sources],
+  sources: [sources, javascript],
   deps: [],
   configs: [Smithers.file("eslint.config.js"), rootJSDocConfig, rootInvariantsConfig],
   maxWarnings: 0,
@@ -81,7 +69,7 @@ const lint = Smithers.EsLint({
 })
 
 const fmt = Smithers.Dprint({
-  sources: [sources, Smithers.glob("test/**/*.ts")],
+  sources: [sources, javascript, Smithers.glob("test/**/*.ts")],
   deps: [],
   config: Smithers.file("dprint.json"),
   fix: false,
@@ -96,7 +84,7 @@ const docs = Smithers.DocsParity({
 
 /**
  * The package's documentation as a file group (`docs/**`, the README, and
- * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * package.json), matching the filegroup BuildAndCheckTypeScriptPackage emits. The docs-site
  * content sync in `apps/docs/build-cli/PACKAGE.ts` depends on it by label,
  * the one way an input reaches across a package boundary.
  */
@@ -113,7 +101,7 @@ const docsFiles = Smithers.Filegroup({
  */
 const circular = Smithers.NodeTest({
   runner: Smithers.entrypoint(Smithers.file("scripts/circular.mjs")),
-  srcs: [sources],
+  srcs: [sources, javascript],
   deps: [],
   cwd
 })

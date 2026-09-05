@@ -28,6 +28,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -134,6 +135,7 @@ const serve = async (
   }) as typeof process.stderr.write
   try {
     await makeCli({
+      presentation: executionPresentation,
       environment: options.environment ?? { ...process.env, SMTHRS_AGENT_FAKE: "fake.json" }
     }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
@@ -265,7 +267,7 @@ describe("Agent.Diff dispatch", () => {
   const diffPackage = (port: number): string =>
     `import { Smithers as S } from "@smthrs/targets"
 const srcs = S.Filegroup({ srcs: S.glob(["src/**"]) })
-const gate = S.Shell.Test({ command: "test -f out/generated.txt" })
+const gate = S.Shell.Test({ shell: "test -f out/generated.txt" })
 const fix = S.Agent.Diff({
   prompt: S.file("//prompt.md"),
   payload: { issue: S.Input.String("issue id") },
@@ -278,7 +280,7 @@ const never = S.Agent.Diff({
   prompt: S.file("//prompt.md"),
   data: [srcs],
   changes: ["out/**"],
-  gates: [S.Shell.Test({ command: "false" })],
+  gates: [S.Shell.Test({ shell: "false" })],
   maxRounds: 1,
 })
 const escape = S.Agent.Diff({ prompt: S.file("//prompt.md"), data: [srcs], changes: ["out/**"], gates: [], maxRounds: 1 })
@@ -294,7 +296,7 @@ const gated = S.Agent.Diff({
   prompt: S.file("//prompt.md"),
   data: [srcs],
   changes: ["out/**"],
-  gates: [S.Shell.Run({ command: "touch ran.txt" })],
+  gates: [S.Shell.Run({ shell: "touch ran.txt" })],
   maxRounds: 1,
 })
 const approved = S.Agent.Diff({
@@ -436,10 +438,10 @@ describe("Agent.Diff service gates", () => {
     `import { Smithers as S } from "@smthrs/targets"
 const srcs = S.Filegroup({ srcs: S.glob(["src/**"]) })
 const svc = S.Shell.Serve({
-  command: ${JSON.stringify(`${node} -e '${server}' ${port}`)},
+  shell: ${JSON.stringify(`${node} -e '${server}' ${port}`)},
   readiness: { port: ${port} },
 })
-const smoke = S.Shell.Test({ command: ${
+const smoke = S.Shell.Test({ shell: ${
       JSON.stringify(`${node} -e '${probe}' ${port}`)
     }, services: [svc], sandbox: { network: true } })
 const served = S.Agent.Diff({
@@ -487,7 +489,7 @@ export const Package = S.Package({ targets: { srcs, svc, smoke, served } })
 
 describe("Github.CiGen dispatch and gitHooks", () => {
   const rootPackage = `import { Smithers as S } from "@smthrs/targets"
-const check = S.Shell.Test({ command: "touch check-ran.txt" })
+const check = S.Shell.Test({ shell: "touch check-ran.txt" })
 export const Package = S.Package({ targets: { check } })
 `
   const githubPackage = `import { Smithers as S } from "@smthrs/targets"
@@ -593,8 +595,8 @@ export const Package = S.Package({ targets: { ci, github } })
 
 describe("Git.Commit dispatch", () => {
   const commitPackage = `import { Smithers as S } from "@smthrs/targets"
-const gate = S.Shell.Test({ command: "true" })
-const redGate = S.Shell.Test({ command: "false" })
+const gate = S.Shell.Test({ shell: "true" })
+const redGate = S.Shell.Test({ shell: "false" })
 const commit = S.Git.Commit({ gates: [gate], message: "chore: declared" })
 const agentCommit = S.Git.Commit({ gates: [gate], message: S.Agents.luna })
 const blocked = S.Git.Commit({ gates: [redGate], message: "chore: never" })
@@ -696,7 +698,7 @@ describe("Github.Pr dispatch", () => {
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const gate = S.Shell.Test({ command: "true" })
+const gate = S.Shell.Test({ shell: "true" })
 const prNoToken = S.Github.Pr({ gates: [gate] })
 const github = S.HttpSecret(S.Secret("GITHUB_TOKEN"), ["https://api.github.com"])
 const pr = S.Github.Pr({ gates: [gate], secrets: [github] })

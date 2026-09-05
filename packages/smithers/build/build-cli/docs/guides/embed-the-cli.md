@@ -13,7 +13,8 @@ the binary runs, with every ambient fact supplied rather than read.
 `makeCli(config)` returns the configured CLI. `serve` takes the argv:
 
 ```ts
-import { makeCli, normalizeArgv } from "@smthrs/build-cli"
+import { makeCli } from "@smthrs/build-cli"
+import { normalizeArgv } from "@smthrs/build-cli/Cli"
 import * as Reporter from "@smthrs/build-cli/Reporter"
 
 const lines: Array<string> = []
@@ -58,7 +59,8 @@ only a process owner may make, so `makeCli` never sets one. Supply the setter
 when you own the process; omit it when you want the structured error back
 instead.
 
-`normalizeArgv` is separate on purpose. Apply it if you want the bare-label
+`normalizeArgv` lives on `@smthrs/build-cli/Cli` rather than in the root
+barrel, and it is separate on purpose. Apply it if you want the bare-label
 form (`["//:greet"]` becoming `["target", "//:greet"]`); skip it if your
 wrapper has its own argv rules.
 

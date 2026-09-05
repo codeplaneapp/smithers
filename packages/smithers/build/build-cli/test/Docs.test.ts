@@ -67,7 +67,7 @@ describe("docs/cli.md", () => {
     const written = doc.match(/registers (\w+) commands/)
     expect(written, "docs/cli.md no longer states how many commands makeCli registers").not.toBeNull()
     expect(
-      numberWords.indexOf(written![1]!),
+      /^\d+$/.test(written![1]!) ? Number(written![1]) : numberWords.indexOf(written![1]!),
       `docs/cli.md counts ${written![1]} commands, the CLI registers ${commands.size}`
     )
       .toBe(commands.size)

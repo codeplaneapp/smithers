@@ -21,7 +21,9 @@ The nearest ancestor holding either one is the workspace root. A directory
 with neither, and no ancestor with either, fails the command with
 `not a workspace; create .smithers/WORKSPACE.ts`.
 
-The workspace declaration is evaluated before anything else is read. It names
+The loader first scans the workspace's static relative imports and checks for
+conflicting runtime installations. It then evaluates the workspace declaration
+before walking the package tree. The declaration names
 the shared facts of the tree: the runtime, the package manager, the toolchains,
 the sandbox mechanisms, the cache directory and its remote, the git hook
 bindings, and the opaque child repositories. Two of those, the cache directory
@@ -102,7 +104,7 @@ rather than silently absent.
   not list a target, no verb will find it either, and the fault is in
   discovery, not in the verb.
 - For the rules a `PACKAGE.ts` is built from, see
-  [`@smthrs/targets`](/api/targets) and the
+  [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets) and the
   [build-file guide](/pkg/smithers-build/workspace/writing-build-files).
 - For what happens once targets are selected, see
   [Target execution](./execution.md).

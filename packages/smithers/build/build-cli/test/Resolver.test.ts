@@ -175,6 +175,22 @@ describe("cjs resolution", () => {
 })
 
 describe("tsconfig paths resolution", () => {
+  it.each(["null", "[]", "42", "\"text\""])("rejects a non-object JSONC config: %s", async (text) => {
+    await write("tsconfig.json", text)
+    await expect(loadResolverConfig({ workspaceRoot: root })).rejects.toThrow("must be a JSONC object")
+  })
+
+  it.each(["", "// comments only\n", "{ /* comments */ \"compilerOptions\": {}, }"])(
+    "accepts empty or commented JSONC configuration: %s",
+    async (text) => {
+      await write("tsconfig.json", text)
+      const config = await loadResolverConfig({ workspaceRoot: root })
+      expect(config.paths).toEqual([])
+      expect(config.baseUrl).toBeUndefined()
+      expect(config.sources).toHaveLength(1)
+    }
+  )
+
   it("resolves paths patterns and baseUrl fallbacks", async () => {
     await write(
       "tsconfig.json",

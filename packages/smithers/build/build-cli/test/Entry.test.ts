@@ -48,7 +48,7 @@ export const Workspace = S.Workspace("fixture", {
     root,
     "PACKAGE.ts",
     `import { Smithers as S } from "@smthrs/targets"
-const good = S.Shell.Test({ command: "true" })
+const good = S.Shell.Test({ shell: "true" })
 export const Package = S.Package({ targets: { good } })
 `
   )
@@ -122,7 +122,8 @@ describe("Entry.main", () => {
     expect(fake.owned("SIGINT")).toBe(0)
     expect(fake.owned("SIGTERM")).toBe(0)
     expect(fake.stdout.text()).toContain("ok: true")
-    expect(fake.stderr.text()).toContain("//:good  ran")
+    expect(fake.stderr.text()).not.toContain("//:good  ran")
+    expect(fake.stderr.text()).not.toContain("\u001b[")
   })
 
   it("records the exit code of a failed command", async () => {

@@ -57,19 +57,23 @@ import * as Diagnostic from "./Diagnostic.ts"
 import * as DockerExec from "./DockerExec.ts"
 import { declaredToolchain, runInstall } from "./engine.ts"
 import * as Executor from "./Executor.ts"
-import * as FetchExec from "./FetchExec.ts"
 import * as FoundryExec from "./FoundryExec.ts"
 import * as GitCommit from "./GitCommit.ts"
 import * as GithubRender from "./GithubRender.ts"
 import * as GitSubmoduleExec from "./GitSubmoduleExec.ts"
 import * as GoExec from "./GoExec.ts"
 import { collectTargets } from "./internal/Attrs.ts"
+import * as CoreRuleSelection from "./internal/CoreRuleSelection.ts"
 import * as Path from "./internal/Path.ts"
+import type * as RuleContract from "./internal/RuleContract.ts"
+import * as FetchPlan from "./internal/rules/FetchPlan.ts"
+import * as FetchRule from "./internal/rules/FetchRule.ts"
 import { posix, sha256Hex } from "./internal/Text.ts"
 import * as Label from "./Label.ts"
 import * as MarkdownCodeBlocks from "./MarkdownCodeBlocks.ts"
 import * as MemoryBackend from "./MemoryBackend.ts"
 import * as NixExec from "./NixExec.ts"
+import * as OutputStream from "./OutputStream.ts"
 import * as OverlayExec from "./OverlayExec.ts"
 import * as OwnersResolution from "./Owners.ts"
 import type * as PackageIndexModule from "./PackageIndex.ts"
@@ -101,7 +105,7 @@ export const PACKAGE_EXECUTION_FORMAT = 2
  * @category models
  * @since 0.1.0
  */
-export type Mode = "execute" | "check" | "write"
+export type Mode = RuleContract.Mode
 
 /**
  * The invocation surface: a CLI verb, or `auto` for the bare-label form
@@ -264,192 +268,25 @@ export const keyMaterialWithGraph = (template: Planner.KeyMaterial, key: string)
 }
 
 /**
- * One reduced `S.Test` operand as the executor evaluates it.
- *
+ * One planned PACKAGE.ts node, with a rule-specific execution contract.
  * @category models
  * @since 0.1.0
  */
-export type TestOperandPlan =
-  | { readonly kind: "sources"; readonly sources: ReadonlyArray<Compose.AnchoredSource> }
-  | { readonly kind: "closure"; readonly entries: ReadonlyArray<Compose.AnchoredSource> }
-  | { readonly kind: "bundler-files"; readonly label: string }
+export type PackageNode = RuleContract.PlannedRule
 
 /**
- * The per-rule execution data a lane node carries beyond the shared shell
- * fields. Exactly one variant per lane rule; `undefined` for the W2 core
- * rules.
- *
+ * Reduced file-algebra operand shared with the rule contracts.
  * @category models
  * @since 0.1.0
  */
-export type LaneData =
-  | {
-    readonly kind: "serve"
-    readonly readiness?: ServiceSupervisor.Readiness | undefined
-    readonly health?: ServiceSupervisor.Health | undefined
-    readonly stop?: ServiceSupervisor.Stop | undefined
-  }
-  | { readonly kind: "docker-service"; readonly attrs: (typeof Docker.ServeAttrs)["Type"] }
-  | { readonly kind: "anvil-fork"; readonly attrs: (typeof Anvil.ForkAttrs)["Type"] }
-  | { readonly kind: "closure"; readonly entries: ReadonlyArray<Compose.AnchoredSource> }
-  | { readonly kind: "files-test"; readonly left: TestOperandPlan; readonly right: TestOperandPlan }
-  | { readonly kind: "files-digest"; readonly targetLabel: string; readonly expectedPath: string }
-  | { readonly kind: "bundler-resolve"; readonly payload: BundlerTarget.ResolvePayload }
-  | { readonly kind: "bundler-build"; readonly payload: BundlerTarget.BuildPayload; readonly graphLabel: string }
-  | {
-    readonly kind: "agent"
-    readonly flavor: "lint" | "diff" | "pr"
-    readonly payload: AgentTarget.LintPayload | AgentTarget.DiffPayload
-    /** Structural gate identity → planned gate label, in declared order. */
-    readonly gateLabels: ReadonlyArray<readonly [string, string]>
-    /** Planned labels of the `data` members that are targets (filegroups the prompt renders). */
-    readonly dataLabels: ReadonlyArray<string>
-  }
-  | { readonly kind: "git-commit" }
-  | { readonly kind: "ci-gen" }
-  | { readonly kind: "github-decl" }
-  | { readonly kind: "github-pr" }
-  | { readonly kind: "npm-pack"; readonly manifestPath: string }
-  | {
-    readonly kind: "native-file"
-    readonly flavor: "copy" | "literal"
-    readonly source?: string
-    readonly sourceLabel?: string
-    readonly text?: string
-  }
-  | { readonly kind: "submodules"; readonly plan: GitSubmoduleExec.Plan }
-  | {
-    readonly kind: "markdown-code-blocks"
-    readonly file: string
-    readonly languages: ReadonlyArray<string>
-    /** Pages whose titled fences are written beside the page's files, never compiled on their own. */
-    readonly context: ReadonlyArray<string>
-  }
-  | {
-    readonly kind: "docs-check"
-    /** Workspace-relative path of the committed stamp sidecar. */
-    readonly stamp: string
-    /** Workspace-relative path of the generated page the stamp judges. */
-    readonly output: string
-    /** Provenance recorded in the stamp and never compared. */
-    readonly producer: string | undefined
-    /**
-     * The `inputs` attr as the planner resolved it: every file row, with the
-     * digest the plan keyed on, sorted by path. Computed at plan time so the
-     * verdict reads the same bytes the node's own key does.
-     */
-    readonly files: ReadonlyArray<Input.FileDigest>
-  }
-  | { readonly kind: "published"; readonly manifestPath: string }
-  | { readonly kind: "api-compat" }
-  | { readonly kind: "overlay" }
-  | { readonly kind: "outward"; readonly required: ReadonlyArray<string> }
-  | { readonly kind: "inert" }
-  | { readonly kind: "memory-retain" }
-  | {
-    readonly kind: "cargo"
-    /** One resolved cargo argv per selected crate; empty when the crate set is. */
-    readonly commands: ReadonlyArray<ReadonlyArray<string>>
-    /** Files this target delivers, workspace-relative; `Cargo.Fetch` only. */
-    readonly outFiles: ReadonlyArray<string>
-    /** The crate set this target expanded to, when it declared one. */
-    readonly crates: ReadonlyArray<CrateRow> | undefined
-    /** The workspace-relative binaries this build produces, for tool edges. */
-    readonly binaries: ReadonlyArray<string>
-  }
-  | {
-    readonly kind: "repo-target"
-    readonly resolution: RepoResolution.Resolution
-    readonly git: RepoResolution.GitState
-  }
+export type TestOperandPlan = RuleContract.TestOperandPlan
 
 /**
- * One planned PACKAGE.ts node. Structurally a {@link Planner.PlannedTarget}
- * so the existing scheduler accepts the work list unchanged.
- *
+ * Native execution payloads owned by the internal rule contract.
  * @category models
  * @since 0.1.0
  */
-export interface PackageNode extends Planner.PlannedTarget {
-  readonly rule: string
-  readonly mode: Mode
-  readonly packagePath: string
-  /** The declaration object itself, for rule bodies that consume validated attrs. */
-  readonly declaration: Target.AnyTarget
-  /** Labels of the Serve targets this node's `services` attr acquires. */
-  readonly serviceDeps: ReadonlyArray<string>
-  readonly lane: LaneData | undefined
-  /**
-   * Bundler builds only: the key material with the graph dependency's key
-   * left as {@link graphKeySentinel}. Execution derives the effective key
-   * from it once the resolved graph digest is known.
-   */
-  readonly keyTemplate: Planner.KeyMaterial | undefined
-  readonly refusal: string | undefined
-  readonly sandbox: "none" | { readonly network?: boolean | "loopback" | undefined } | undefined
-  readonly secrets: ReadonlyArray<Secret.HttpCredential>
-  readonly argv: ReadonlyArray<string> | undefined
-  /** Tool outputs are identified after their producers settle, before cache lookup. */
-  readonly targetExecutablePaths?: ReadonlyArray<string>
-  /** Shell.Test fan-out count; each shard owns a distinct key and execution. */
-  readonly shards: number
-  /** Declaration-specific process timeout, already reduced to milliseconds. */
-  readonly timeoutMs: number
-  /**
-   * The workspace-relative directory the tool spawns in. Tools default to
-   * the workspace root; Foundry and Npm.Pack select their package directory.
-   */
-  readonly cwd: string
-  readonly env: Readonly<Record<string, string>>
-  /**
-   * Environment names whose declared value is a workspace-relative path made
-   * absolute immediately before spawn. The relative form is what keys the
-   * node, so two checkouts of the same tree agree on the key while each child
-   * still receives a path it can use.
-   */
-  readonly absoluteEnv: ReadonlyArray<string>
-  readonly bunTemplate:
-    | { readonly template: string; readonly consts: Readonly<Record<string, string>>; readonly bunPath: string }
-    | undefined
-  readonly writeSet: ReadonlyArray<string>
-  /**
-   * Workspace-relative paths a rule discovered for itself that the spawned
-   * tool must be able to read.
-   *
-   * A rule whose work is named by import patterns rather than by `S.file`
-   * declarations — `Go.*` is the one today — has no declared inputs to derive
-   * a read set from, so it reports the closure it planned over here and the
-   * confinement admits exactly that.
-   */
-  readonly readSet: ReadonlyArray<string>
-  /**
-   * Absolute host paths outside the workspace the spawned tool reads:
-   * resolved native executable directories and local submodule repositories.
-   * The confinement binds each read-only.
-   */
-  readonly externalReads: ReadonlyArray<string>
-  readonly outDirs: ReadonlyArray<string>
-  readonly outFiles: ReadonlyArray<string>
-  /** Consumer-scoped source substitutions applied only in a scratch workspace. */
-  readonly overlays: ReadonlyArray<OverlayExec.Replacement>
-  readonly emit:
-    | ReadonlyArray<{
-      readonly path: string
-      readonly value: { readonly kind: "bytes"; readonly text: string } | {
-        readonly kind: "link"
-        readonly target: string
-      }
-    }>
-    | undefined
-  /** Generate stdout form: workspace-relative destination for captured stdout. */
-  readonly stdoutPath: string | undefined
-  readonly members: ReadonlyArray<string>
-  readonly aliasOf: string | undefined
-  readonly materializeOf: string | undefined
-  readonly gateDeps: ReadonlyArray<string>
-  readonly cleanOutDirs: ReadonlyArray<string>
-  readonly cleanPaths: ReadonlyArray<string>
-}
+export type LaneData = RuleContract.LaneData
 
 /**
  * The inert plan report `--plan` prints for PACKAGE.ts workspaces.
@@ -931,21 +768,11 @@ const moduleVersion = async (root: string, packageName: string): Promise<string 
 }
 
 /**
- * One crate of an expanded crate set: the manifest that declares it, the name
- * it declares, and that manifest's content digest.
- *
- * The digest is key material: a crate set is a view over what the manifests
- * say, so an edit to a manifest that changes membership — or that changes the
- * metadata a filter reads — re-keys every target that ran over the set.
- *
+ * One resolved crate and its manifest digest, owned by the rule contract.
  * @category models
  * @since 0.1.0
  */
-export interface CrateRow {
-  readonly manifest: string
-  readonly name: string | undefined
-  readonly digest: string
-}
+export type CrateRow = RuleContract.CrateRow
 
 /** Expands one `S.Cargo.AppSet` declaration to its member crates. */
 const appSetCrates = async (
@@ -1798,12 +1625,12 @@ const visit = async (
     ? attrMember(attrs, "shards") as number
     : 1
   // A shard runs because the selector reaches the test runner as an argument.
-  // The `command` form spawns `/bin/sh -c <text>`, whose next operand is `$0`,
+  // The `shell` form spawns `/bin/sh -c <text>`, whose next operand is `$0`,
   // not an argument to the runner: fanning it out would run the identical
   // command once per shard and report every one of them green.
-  if (shards > 1 && typeof attrMember(attrs, "command") === "string") {
+  if (shards > 1 && typeof attrMember(attrs, "shell") === "string") {
     noteRefusal(
-      `Shell.Test shards cannot fan out a command-form declaration; ` +
+      `Shell.Test shards cannot fan out a shell-form declaration; ` +
         `the shard selector has no argv slot in "/bin/sh -c". Declare bin, bun, or script instead`
     )
   }
@@ -1844,11 +1671,14 @@ const visit = async (
   const overlays = overlayResolution.replacements
   if (overlayResolution.refusal !== undefined) noteRefusal(overlayResolution.refusal)
 
+  let selection: RuleContract.Selection | undefined
   if (rule === "Fetch" && refusal === undefined) {
-    const plannedFetch = FetchExec.plan({ packagePath, target })
-    sandbox = plannedFetch.sandbox
-    outFiles.push(...plannedFetch.outFiles)
-    if (plannedFetch.refusal !== undefined) noteRefusal(plannedFetch.refusal)
+    const plannedFetch = FetchRule.contract.plan({ packagePath, target })
+    sandbox = FetchPlan.sandbox
+    if (plannedFetch.ok) {
+      selection = plannedFetch.value
+      outFiles.push(...selection.outFiles)
+    } else noteRefusal(plannedFetch.refusal)
   }
 
   if (rule === "TsBuild") {
@@ -2011,7 +1841,7 @@ const visit = async (
       if (typeof declaredEnv === "object" && declaredEnv !== null) env = { ...(declaredEnv as Record<string, string>) }
     } else if (typeof command === "string") {
       const payload = Shell.execPayload({
-        command,
+        shell: command,
         env: attrMember(attrs, "env") as Shell.ExecAttrs["env"],
         secrets: attrMember(attrs, "secrets") as Shell.ExecAttrs["secrets"]
       })
@@ -2347,25 +2177,42 @@ const visit = async (
   }
   const gateLabelsOf = (gates: ReadonlyArray<Target.AnyTarget>): ReadonlyArray<readonly [string, string]> =>
     gates.map((gate) => [AgentTarget.targetIdentity(gate), labelFor(gate)] as const)
-  let lane: LaneData | undefined
   switch (rule) {
+    case "Fetch":
+      break
     case "Shell.Serve": {
       const serveAttrs = attrs as (typeof Shell.ServeAttrs)["Type"]
-      lane = { kind: "serve", readiness: serveAttrs.readiness, health: serveAttrs.health, stop: serveAttrs.stop }
+      const command = CoreRuleSelection.argvOf(argv)
+      if (command !== undefined) {
+        selection = {
+          family: "service",
+          rule,
+          argv: command,
+          lane: { kind: "serve", readiness: serveAttrs.readiness, health: serveAttrs.health, stop: serveAttrs.stop }
+        }
+      }
       break
     }
     case "Docker.Serve":
     case "Docker.Service":
-      lane = { kind: "docker-service", attrs: attrs as (typeof Docker.ServeAttrs)["Type"] }
+      selection = {
+        family: "service",
+        rule,
+        lane: { kind: "docker-service", attrs: attrs as (typeof Docker.ServeAttrs)["Type"] }
+      }
       break
     case "Anvil.Fork":
-      lane = { kind: "anvil-fork", attrs: attrs as (typeof Anvil.ForkAttrs)["Type"] }
+      selection = {
+        family: "service",
+        rule,
+        lane: { kind: "anvil-fork", attrs: attrs as (typeof Anvil.ForkAttrs)["Type"] }
+      }
       break
     case "ImportClosure": {
       const closureAttrs = attrs as (typeof Compose.ImportClosureAttrs)["Type"]
       const entries = Compose.closureEntrySources(closureAttrs.entries, implementationContext)
       if (typeof entries === "string") noteRefusal(`ImportClosure: ${entries}`)
-      else lane = { kind: "closure", entries }
+      else selection = { family: "files", rule, lane: { kind: "closure", entries } }
       break
     }
     case "Test": {
@@ -2373,10 +2220,14 @@ const visit = async (
       if (testAttrs.expect._tag === "FilesDigest") {
         if (testAttrs.toBe === "empty") noteRefusal("Files.digest must compare to a declared file")
         else {
-          lane = {
-            kind: "files-digest",
-            targetLabel: labelFor(testAttrs.expect.target),
-            expectedPath: Input.resolvePath(packagePath, testAttrs.toBe.path)
+          selection = {
+            family: "files",
+            rule,
+            lane: {
+              kind: "files-digest",
+              targetLabel: labelFor(testAttrs.expect.target),
+              expectedPath: Input.resolvePath(packagePath, testAttrs.toBe.path)
+            }
           }
         }
         break
@@ -2389,17 +2240,21 @@ const visit = async (
       const right = testOperandPlan(testAttrs.expect.right)
       if (typeof left === "string") noteRefusal(`Test: ${left}`)
       else if (typeof right === "string") noteRefusal(`Test: ${right}`)
-      else lane = { kind: "files-test", left, right }
+      else selection = { family: "files", rule, lane: { kind: "files-test", left, right } }
       break
     }
     case "Bundler.Rspack.resolve": {
       const resolveAttrs = attrs as (typeof BundlerTarget.ResolveAttrs)["Type"]
-      lane = {
-        kind: "bundler-resolve",
-        payload: {
-          configPath: Input.resolvePath(packagePath, resolveAttrs.config.path),
-          entries: [...resolveAttrs.entries],
-          mode: "development"
+      selection = {
+        family: "bundler",
+        rule,
+        lane: {
+          kind: "bundler-resolve",
+          payload: {
+            configPath: Input.resolvePath(packagePath, resolveAttrs.config.path),
+            entries: [...resolveAttrs.entries],
+            mode: "development"
+          }
         }
       }
       break
@@ -2414,49 +2269,65 @@ const visit = async (
       }
       const buildOutDirs = buildAttrs.outDirs.map((dir) => Input.resolvePath(packagePath, dir))
       outDirs.push(...buildOutDirs)
-      lane = {
-        kind: "bundler-build",
-        graphLabel: labelFor(buildAttrs.graph),
-        payload: {
-          configPath: Input.resolvePath(packagePath, buildAttrs.config.path),
-          environment: buildAttrs.environment,
-          mode: buildAttrs.mode,
-          env: buildAttrs.env === undefined ? {} : { ...buildAttrs.env },
-          outDirs: buildOutDirs
+      selection = {
+        family: "bundler",
+        rule,
+        lane: {
+          kind: "bundler-build",
+          graphLabel: labelFor(buildAttrs.graph),
+          payload: {
+            configPath: Input.resolvePath(packagePath, buildAttrs.config.path),
+            environment: buildAttrs.environment,
+            mode: buildAttrs.mode,
+            env: buildAttrs.env === undefined ? {} : { ...buildAttrs.env },
+            outDirs: buildOutDirs
+          }
         }
       }
       break
     }
     case "Agent.Lint": {
       const lintAttrs = attrs as (typeof AgentTarget.LintAttrs)["Type"]
-      lane = {
-        kind: "agent",
-        flavor: "lint",
-        payload: AgentTarget.lintPayload(lintAttrs, implementationContext),
-        gateLabels: [],
-        dataLabels: dataLabelsOf(lintAttrs.data, depLabels)
+      selection = {
+        family: "agent",
+        rule,
+        lane: {
+          kind: "agent",
+          flavor: "lint",
+          payload: AgentTarget.lintPayload(lintAttrs, implementationContext),
+          gateLabels: [],
+          dataLabels: dataLabelsOf(lintAttrs.data, depLabels)
+        }
       }
       break
     }
     case "Agent.Diff": {
       const diffAttrs = attrs as (typeof AgentTarget.DiffAttrs)["Type"]
-      lane = {
-        kind: "agent",
-        flavor: "diff",
-        payload: AgentTarget.diffPayload(diffAttrs, implementationContext),
-        gateLabels: gateLabelsOf(diffAttrs.gates),
-        dataLabels: dataLabelsOf(diffAttrs.data, depLabels)
+      selection = {
+        family: "agent",
+        rule,
+        lane: {
+          kind: "agent",
+          flavor: "diff",
+          payload: AgentTarget.diffPayload(diffAttrs, implementationContext),
+          gateLabels: gateLabelsOf(diffAttrs.gates),
+          dataLabels: dataLabelsOf(diffAttrs.data, depLabels)
+        }
       }
       break
     }
     case "Agent.Pr": {
       const prAttrs = attrs as (typeof AgentTarget.PrAttrs)["Type"]
-      lane = {
-        kind: "agent",
-        flavor: "pr",
-        payload: AgentTarget.prPayload(prAttrs, implementationContext),
-        gateLabels: gateLabelsOf(prAttrs.gates),
-        dataLabels: dataLabelsOf(prAttrs.data, depLabels)
+      selection = {
+        family: "agent",
+        rule,
+        lane: {
+          kind: "agent",
+          flavor: "pr",
+          payload: AgentTarget.prPayload(prAttrs, implementationContext),
+          gateLabels: gateLabelsOf(prAttrs.gates),
+          dataLabels: dataLabelsOf(prAttrs.data, depLabels)
+        }
       }
       break
     }
@@ -2465,12 +2336,16 @@ const visit = async (
       // shape, same candidate/gate loop, so it rides the diff lane and no
       // second agent runtime exists.
       const pageAttrs = attrs as DocsPage.PageAttrs
-      lane = {
-        kind: "agent",
-        flavor: "diff",
-        payload: DocsPage.pagePayload(pageAttrs, implementationContext),
-        gateLabels: gateLabelsOf(pageAttrs.gates),
-        dataLabels: dataLabelsOf(DocsPage.dataOf(pageAttrs), depLabels)
+      selection = {
+        family: "agent",
+        rule,
+        lane: {
+          kind: "agent",
+          flavor: "diff",
+          payload: DocsPage.pagePayload(pageAttrs, implementationContext),
+          gateLabels: gateLabelsOf(pageAttrs.gates),
+          dataLabels: dataLabelsOf(DocsPage.dataOf(pageAttrs), depLabels)
+        }
       }
       break
     }
@@ -2496,27 +2371,31 @@ const visit = async (
         break
       }
       writeSet.push(stampPath)
-      lane = {
-        kind: "docs-check",
-        stamp: stampPath,
-        output: pagePath,
-        producer: checkAttrs.producer,
-        files: resolved
+      selection = {
+        family: "stamp",
+        rule,
+        lane: {
+          kind: "docs-check",
+          stamp: stampPath,
+          output: pagePath,
+          producer: checkAttrs.producer,
+          files: resolved
+        }
       }
       break
     }
     case "Git.Commit":
-      lane = { kind: "git-commit" }
+      selection = { family: "outward", rule, lane: { kind: "git-commit" } }
       break
     case "Github.CiGen":
-      lane = { kind: "ci-gen" }
+      selection = { family: "generated", rule, lane: { kind: "ci-gen" } }
       break
     case "Github.Setup":
     case "Github.Workflow":
-      lane = { kind: "github-decl" }
+      selection = { family: "value", rule, lane: { kind: "github-decl" } }
       break
     case "Github.Pr":
-      lane = { kind: "github-pr" }
+      selection = { family: "outward", rule, lane: { kind: "github-pr" } }
       break
     case "Npm.Pack": {
       if (context.managerBinary === undefined) {
@@ -2545,22 +2424,30 @@ const visit = async (
       cwd = NodePath.posix.dirname(manifestPath)
       argv = [context.managerBinary, "pack"]
       outFiles.push(Input.resolvePath(cwd, tarball))
-      lane = { kind: "npm-pack", manifestPath }
+      selection = { family: "files", rule, lane: { kind: "npm-pack", manifestPath } }
       break
     }
     case "Copy": {
       const copyAttrs = attrs as (typeof NodeArtifact.CopyAttrs)["Type"]
       const destination = Input.resolvePath(packagePath, copyAttrs.to)
       outFiles.push(destination)
-      lane = Target.isTarget(copyAttrs.from)
-        ? { kind: "native-file", flavor: "copy", sourceLabel: labelFor(copyAttrs.from) }
-        : { kind: "native-file", flavor: "copy", source: Input.resolvePath(packagePath, copyAttrs.from.path) }
+      selection = {
+        family: "files",
+        rule,
+        lane: Target.isTarget(copyAttrs.from)
+          ? { kind: "native-file", flavor: "copy", sourceLabel: labelFor(copyAttrs.from) }
+          : { kind: "native-file", flavor: "copy", source: Input.resolvePath(packagePath, copyAttrs.from.path) }
+      }
       break
     }
     case "Literal": {
       const literalAttrs = attrs as (typeof NodeArtifact.LiteralAttrs)["Type"]
       outFiles.push(Input.resolvePath(packagePath, literalAttrs.path))
-      lane = { kind: "native-file", flavor: "literal", text: literalAttrs.content }
+      selection = {
+        family: "files",
+        rule,
+        lane: { kind: "native-file", flavor: "literal", text: literalAttrs.content }
+      }
       break
     }
     case "Git.Submodules":
@@ -2599,7 +2486,7 @@ const visit = async (
       writeSet.push(".git")
       externalReads.push(...submodulePlan.sources)
       sandbox = { network: true }
-      lane = { kind: "submodules", plan: submodulePlan }
+      selection = { family: "repository", rule, lane: { kind: "submodules", plan: submodulePlan } }
       break
     }
     case "Changesets.Version": {
@@ -2610,7 +2497,7 @@ const visit = async (
         break
       }
       argv = [context.managerBinary, "exec", "changeset", "version"]
-      lane = { kind: "inert" }
+      selection = { family: "value", rule, lane: { kind: "inert" } }
       break
     }
     case "Size.Budgets": {
@@ -2621,7 +2508,7 @@ const visit = async (
         break
       }
       argv = [context.managerBinary, "exec", "size-limit"]
-      lane = { kind: "inert" }
+      selection = { family: "value", rule, lane: { kind: "inert" } }
       break
     }
     case "Markdown.CodeBlocks": {
@@ -2632,18 +2519,21 @@ const visit = async (
         break
       }
       const codeAttrs = attrs as (typeof NodeArtifact.CodeBlocksAttrs)["Type"]
-      lane = {
-        kind: "markdown-code-blocks",
-        file: Input.resolvePath(packagePath, codeAttrs.file.path),
-        languages: [...codeAttrs.lang],
-        context: (codeAttrs.context ?? []).map((page) => Input.resolvePath(packagePath, page.path))
+      selection = {
+        family: "files",
+        rule,
+        lane: {
+          kind: "markdown-code-blocks",
+          file: Input.resolvePath(packagePath, codeAttrs.file.path),
+          languages: [...codeAttrs.lang],
+          context: (codeAttrs.context ?? []).map((page) => Input.resolvePath(packagePath, page.path))
+        }
       }
       argv = [
         context.managerBinary,
         "exec",
         "tsc",
         "--noEmit",
-        "--ignoreConfig",
         "--strict",
         "--skipLibCheck",
         "--module",
@@ -2662,7 +2552,7 @@ const visit = async (
         "--target",
         "es2024",
         "--lib",
-        "es2024,dom",
+        "es2024,dom,dom.iterable",
         "--types",
         "node",
         "--exactOptionalPropertyTypes"
@@ -2693,32 +2583,32 @@ const visit = async (
       outDirs.push(output)
       argv = [context.managerBinary, "dlx", "pacote@21.0.0", "extract", manifest.name, output]
       sandbox = { network: true }
-      lane = { kind: "published", manifestPath }
+      selection = { family: "repository", rule, lane: { kind: "published", manifestPath } }
       break
     }
     case "Api.Compat":
-      lane = { kind: "api-compat" }
+      selection = { family: "files", rule, lane: { kind: "api-compat" } }
       break
     case "Overlay":
-      lane = { kind: "overlay" }
+      selection = { family: "files", rule, lane: { kind: "overlay" } }
       break
     case "Cron":
-      lane = { kind: "inert" }
+      selection = { family: "value", rule, lane: { kind: "inert" } }
       break
     case "Npm.Downstream":
-      lane = { kind: "inert" }
+      selection = { family: "value", rule, lane: { kind: "inert" } }
       break
     case "Npm.Publish":
     case "Changesets.Publish":
-      lane = { kind: "outward", required: ["NPM_TOKEN"] }
+      selection = { family: "outward", rule, lane: { kind: "outward", required: ["NPM_TOKEN"] } }
       break
     case "Github.Release":
     case "Github.Pages":
     case "Git.Pr":
-      lane = { kind: "outward", required: ["GITHUB_TOKEN"] }
+      selection = { family: "outward", rule, lane: { kind: "outward", required: ["GITHUB_TOKEN"] } }
       break
     case "Memory.Retain":
-      lane = { kind: "memory-retain" }
+      selection = { family: "outward", rule, lane: { kind: "memory-retain" } }
       break
     case "Cargo.Fetch":
     case "Cargo.Build":
@@ -2728,22 +2618,32 @@ const visit = async (
     case "Cargo.Deny":
     case "Cargo.Fmt":
     case "Cargo.Doc":
-      lane = {
-        kind: "cargo",
-        commands: commands ?? [],
-        outFiles: cargoOutFiles,
-        crates: cargoCrates,
-        binaries: rule === "Cargo.Build" ? Cargo.binaries(attrs) : []
+      selection = {
+        family: "language",
+        rule,
+        lane: {
+          kind: "cargo",
+          commands: commands ?? [],
+          outFiles: cargoOutFiles,
+          crates: cargoCrates,
+          binaries: rule === "Cargo.Build" ? Cargo.binaries(attrs) : []
+        }
       }
       break
     case "Repo.Target":
       if (repositoryResolution !== undefined && repositoryState !== undefined) {
-        lane = { kind: "repo-target", resolution: repositoryResolution, git: repositoryState }
+        selection = {
+          family: "repository",
+          rule,
+          lane: { kind: "repo-target", resolution: repositoryResolution, git: repositoryState }
+        }
       }
       break
     default:
-      lane = undefined
+      break
   }
+
+  const lane = selection?.lane
 
   // Invoker preconditions settle at plan time, before any session, probe, or
   // gate runs: a missing or undeclared payload input is a typed needs-input
@@ -2754,7 +2654,7 @@ const visit = async (
   // the name of a check. Each is visible in `--plan` and costs nothing.
   if (lane?.kind === "agent" && lane.flavor !== "lint") {
     const decoded = Effect.runSyncExit(
-      AgentSession.decodePayloadValues((lane.payload as AgentTarget.DiffPayload).payloadSpec, context.inputs)
+      AgentSession.decodePayloadValues(lane.payload.payloadSpec, context.inputs)
     )
     if (Exit.isFailure(decoded)) {
       const value: unknown = Cause.squash(decoded.cause)
@@ -2792,6 +2692,9 @@ const visit = async (
     // is the one spelling that reaches pnpm from here.
     if (context.managerBinary === "pnpm" && (argv[1] === "exec" || argv[1] === "run")) {
       argv = [argv[0]!, "--config.verifyDepsBeforeRun=false", ...argv.slice(1)]
+      if (selection?.family === "service" && selection.rule === "Shell.Serve") {
+        selection = { ...selection, argv: [argv[0]!, ...argv.slice(1)] }
+      }
     }
   }
   if (attrMember(attrs, "approval") === "required") {
@@ -3054,6 +2957,15 @@ const visit = async (
       `=== ${label}\n${Planner.encodeKeyMaterial(previewMaterial)}\n`
     )
   }
+  // Only complete native payloads become ordinary planned nodes. Failed
+  // reductions have an explicit non-executable variant and keep their refusal.
+  if (selection === undefined && refusal === undefined) selection = CoreRuleSelection.select(rule, argv)
+  const chosen: RuleContract.Selection | RuleContract.Refused = selection ?? {
+    family: "refused",
+    rule,
+    lane: undefined,
+    refusal: refusal ?? `${rule} planned no executable`
+  }
   const node: PackageNode = {
     label,
     target: rule,
@@ -3082,12 +2994,10 @@ const visit = async (
         variables: context.nixEnvironment.variables
       }
     }),
-    rule,
     mode,
     packagePath,
     declaration: target,
     serviceDeps,
-    lane,
     keyTemplate,
     refusal,
     sandbox,
@@ -3112,7 +3022,8 @@ const visit = async (
     materializeOf,
     gateDeps,
     cleanOutDirs,
-    cleanPaths
+    cleanPaths,
+    ...chosen
   }
   context.visiting.delete(target)
   context.nodes.set(label, node)
@@ -3721,6 +3632,11 @@ export const execute = async (
       expectedExitCodes: [0],
       timeoutMs: node.timeoutMs
     }
+    const output = OutputStream.make({
+      write: (stream, text) => reporter.toolOutput(node.label, stream, text),
+      environment: { ...(options.environment ?? process.env), ...resolved.env },
+      sensitiveNames: credentialNames
+    })
     const exit = await Effect.runPromiseExit(
       Exec.run({
         workspaceRoot,
@@ -3740,10 +3656,10 @@ export const execute = async (
             onStdout: (chunk: Uint8Array) => process.stdout.write(chunk),
             onStderr: (chunk: Uint8Array) => process.stderr.write(chunk)
           }
-          : {})
+          : { onStdout: output.onStdout, onStderr: output.onStderr })
       }, payload),
       { signal }
-    )
+    ).finally(output.close)
     if (Exit.isSuccess(exit)) {
       if (node.stdoutPath !== undefined) {
         const destination = NodePath.join(workspaceRoot, ...node.stdoutPath.split("/"))
@@ -5130,22 +5046,17 @@ export const execute = async (
           return await runBuild(node, signal)
         }
         case "Fetch": {
-          if (node.outFiles.length !== 1) return fail("Fetch planned no single output file")
+          if (node.family !== "fetch") return fail("Fetch planned no single output file")
           const cached = await cacheGet(node)
           if (cached !== undefined && await restoreBuild(node, cached.output)) return green("hit")
-          const result = await FetchExec.execute({
-            root,
-            target: node.declaration,
-            outFile: node.outFiles[0]!,
-            signal
-          })
+          const result = await FetchRule.contract.execute(node, { root, signal })
           log(`${node.label}  fetched ${result.bytes} byte(s)`)
           await captureBuild(node, node.keyPreview)
           return green("ran")
         }
         case "Shell.Test":
         case "Foundry.Test": {
-          if (node.rule === "Shell.Test" && node.shards > 1) {
+          if (node.rule === "Shell.Test" && node.family === "process" && node.shards > 1) {
             // Through the same environment seam the rest of the executor reads,
             // so an injected environment selects a shard exactly like CI does.
             const selected = environment["SMTHRS_SHARD"]
@@ -5168,7 +5079,7 @@ export const execute = async (
                 ...node,
                 label: `${node.label}#${suffix}`,
                 keyPreview: sha256Hex(`${node.keyPreview}\0shard:${suffix}`),
-                argv: [...(node.argv ?? []), `--shard=${suffix}`],
+                argv: [node.argv[0], ...node.argv.slice(1), `--shard=${suffix}`],
                 env: { ...node.env, VITE_SHARD_ID: String(shard) },
                 shards: 1
               }
@@ -5208,7 +5119,7 @@ export const execute = async (
           }
           const cached = await cacheGet(node)
           if (cached !== undefined && await restoreBuild(node, cached.output)) return green("hit")
-          const destination = NodePath.join(root, ...node.outFiles[0]!.split("/"))
+          const destination = NodePath.join(root, ...node.outFiles[0].split("/"))
           await Fs.mkdir(NodePath.dirname(destination), { recursive: true })
           if (node.lane.flavor === "literal") {
             await Fs.writeFile(destination, node.lane.text ?? "", "utf8")
@@ -5344,7 +5255,7 @@ export const execute = async (
             return fail(`no ${lane.languages.join("/")} code blocks found in ${lane.file}`)
           }
           // The blocks compile from inside the declaring package, not from the
-          // workspace cache directory: `tsc --ignoreConfig` resolves a bare
+          // workspace cache directory: compiling explicit roots resolves a bare
           // specifier by walking up from the file, so a block that imports the
           // package's own dependencies, or the package itself by name through
           // its `exports`, only resolves when the scratch file sits below the
@@ -5375,7 +5286,7 @@ export const execute = async (
             files.push(posix(NodePath.relative(root, path)))
           }
           if (files.length > 0) {
-            const checked = await spawnNode({ ...node, argv: [...(node.argv ?? []), ...files] }, root, signal)
+            const checked = await spawnNode(node, root, signal, [...(node.argv ?? []), ...files])
             if (!checked.ok) return fail(checked.error ?? "Markdown code-block parse failed")
           }
           log(
@@ -5719,7 +5630,7 @@ export const execute = async (
           // One declaration, two modes: `--fix` (or `--write`) reaches the
           // runner as the payload mode; the plan keyed the node on it.
           const payload: AgentTarget.LintPayload = {
-            ...(node.lane.payload as AgentTarget.LintPayload),
+            ...node.lane.payload,
             mode: node.mode === "write" ? "fix" : "check"
           }
           const counted = countedSessions(sessionsOf())
@@ -5758,7 +5669,7 @@ export const execute = async (
           return runCandidateNode(
             node,
             node.lane.flavor,
-            node.lane.payload as AgentTarget.DiffPayload,
+            node.lane.payload,
             node.lane.gateLabels,
             signal
           )
@@ -5910,6 +5821,11 @@ export const execute = async (
               }
             }
           }
+          const output = OutputStream.make({
+            write: (stream, text) => reporter.toolOutput(node.label, stream, text),
+            environment: { ...(options.environment ?? process.env), ...node.env },
+            sensitiveNames: credentialNames
+          })
           const exit = await runTarget(
             root,
             cacheDirectory,
@@ -5920,8 +5836,9 @@ export const execute = async (
             options.packageName,
             signal,
             node.nixEnvironment,
-            sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory)
-          )
+            sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory),
+            output
+          ).finally(output.close)
           if (Exit.isFailure(exit)) return outcomeOfTargetFailure(node.label, exit.cause)
           const produced = await verifyTargetOutputs(node, exit.value, signal)
           if (produced !== undefined) return fail(produced)
@@ -6064,7 +5981,12 @@ export const execute = async (
         try: () => Executor.schedule(planned.workList, jobs, runOne, options.signal),
         catch: (cause) => cause
       })
-    }))
+    })).pipe(Effect.provideService(ServiceSupervisor.Output, (spec) =>
+      OutputStream.make({
+        write: (stream, text) => reporter.toolOutput(spec.key, stream, text),
+        environment: { ...(options.environment ?? process.env), ...spec.env },
+        sensitiveNames: credentialNames
+      })))
   )
   supervisorRef.current = undefined
   await store.close().catch(() => undefined)

@@ -8,6 +8,9 @@ sidebar:
 The planner decides what runs. The executor decides what a running target is
 allowed to touch, and puts the tree back when it oversteps.
 
+The [rule contract architecture](./rule-contracts.md) maps the shared services
+and the family planners and executors that use them.
+
 ## Write-set confinement
 
 A target that mutates the tree declares what it may write. Every such run is

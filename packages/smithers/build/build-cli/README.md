@@ -27,8 +27,8 @@ runtimes, package managers, toolchains, sandbox mechanisms, and caching. Each
 package exports exactly one `S.Package({ targets })`, selected through
 Bazel-style labels.
 
-This package is private. It is the implementation behind the `smithers-build`
-binary, not a library anyone installs.
+Install the current release candidate with
+`pnpm add -D @smthrs/build-cli@next @smthrs/targets@next`.
 
 ## Documentation
 
@@ -37,6 +37,8 @@ The full site is at https://build-cli.smithers.sh, generated from
 
 - [Installation](./docs/installation.md) and
   [Quickstart](./docs/quickstart.md).
+- [Declaration loading](./docs/concepts/declaration-loading.md): shared runtime
+  dependencies, conflict diagnostics, module formats, and evaluation lifetime.
 - [Commands](./docs/cli.md): every command, argument, option, exit code, and
   environment variable.
 - Concepts: [the invocation pipeline](./docs/concepts/invocation.md),
@@ -44,6 +46,8 @@ The full site is at https://build-cli.smithers.sh, generated from
   [output and renderers](./docs/concepts/output.md),
   [caching](./docs/concepts/caching.md), and
   [target execution](./docs/concepts/execution.md).
+- [Rule contracts and ownership](./docs/concepts/rule-contracts.md): the
+  declaration boundary, shared execution services, and staged family extraction.
 - Guides: [selecting targets](./docs/guides/select-targets.md),
   [inspecting a workspace](./docs/guides/inspect-a-workspace.md),
   [remote caching](./docs/guides/share-a-remote-cache.md),

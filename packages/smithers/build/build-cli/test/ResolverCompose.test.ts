@@ -1,5 +1,6 @@
 import { FlowEngine } from "@smthrs/engine"
-import { Action, type Flow, Interpreter } from "@smthrs/flow"
+import { Action, Flow, Interpreter } from "@smthrs/flow"
+import type * as Node from "@smthrs/plan/Node"
 import * as Compose from "@smthrs/targets/Compose"
 import { Filegroup } from "@smthrs/targets/Filegroup"
 import { glob } from "@smthrs/targets/Input"
@@ -9,7 +10,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -25,17 +26,14 @@ const write = async (relative: string, text: string): Promise<void> => {
   await Fs.writeFile(path, text, "utf8")
 }
 
-type Executable = Flow.Flow<
-  string,
-  Schema.Struct<{}>,
-  typeof Schema.Unknown,
-  typeof Schema.Unknown,
-  never
->
-
 /** Executes one directly-constructed target through the resolver layers. */
 const run = (target: Target.AnyTarget) => {
-  const flow = target as unknown as Executable
+  const flow = Flow.make("resolver-test", {
+    payload: {},
+    success: Schema.Unknown,
+    error: Schema.Unknown,
+    body: () => Target.plan(target) as Node.Node<unknown, unknown, never>
+  })
   const runtime = Layer.mergeAll(
     ImportClosureLive({ workspaceRoot: root }),
     CheckFilesDifferenceLive({ workspaceRoot: root }),

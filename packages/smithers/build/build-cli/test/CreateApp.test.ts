@@ -1,9 +1,8 @@
 /**
  * `smithers-build create-app` copies a directory and substitutes one placeholder, so
  * what these tests hold down is the part a copy cannot get right by itself: the
- * refusals, the name substitution reaching every file kind, and the `link:`
- * rewrite that makes a scaffold from a checkout installable before the
- * `@smthrs/*` packages are published.
+ * refusals, name substitution reaching every file kind, and preservation of
+ * the release versions carried by the template.
  */
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
@@ -16,18 +15,11 @@ const temporary = async (prefix: string): Promise<string> =>
   Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), prefix)))
 
 /**
- * A two-file template inside a checkout whose packages nest, so `link:` has
- * something to find and has to find it by name.
- *
- * The layout mirrors this repository: the template ships inside
- * `packages/smithers/create-app`, and `@smthrs/targets` lives at
- * `packages/smithers/build/targets`, which `packages/<name after the scope>`
- * would never reach.
+ * A minimal template in the same nested layout as the real package.
  */
-const fixture = async (): Promise<{ readonly root: string; readonly templates: string }> => {
+const fixture = async (): Promise<{ readonly templates: string }> => {
   const root = await temporary("smthrs-create-app-")
   const createApp = NodePath.join(root, "packages", "smithers", "create-app")
-  const targets = NodePath.join(root, "packages", "smithers", "build", "targets")
   const templateDir = NodePath.join(createApp, "template", "demo")
   await Fs.mkdir(NodePath.join(templateDir, "app"), { recursive: true })
   await Fs.writeFile(
@@ -35,8 +27,12 @@ const fixture = async (): Promise<{ readonly root: string; readonly templates: s
     JSON.stringify(
       {
         name: "__APP_NAME__",
-        dependencies: { "@smthrs/create-app": "0.1.0", "@smthrs/targets": "0.1.0", effect: "4.0.0-rc.108" },
-        devDependencies: { "@smthrs/absent": "0.1.0", typescript: "6.0.3" }
+        dependencies: {
+          "@smthrs/create-app": "1.0.0-rc.0",
+          "@smthrs/targets": "1.0.0-rc.0",
+          effect: "4.0.0-rc.112"
+        },
+        devDependencies: { typescript: "7.0.2" }
       },
       null,
       2
@@ -45,18 +41,7 @@ const fixture = async (): Promise<{ readonly root: string; readonly templates: s
   await Fs.writeFile(NodePath.join(templateDir, "README.md"), "# __APP_NAME__\n")
   await Fs.writeFile(NodePath.join(templateDir, "app", "page.tsx"), "export default () => \"__APP_NAME__\"\n")
   await Fs.writeFile(NodePath.join(templateDir, "logo.svg"), "<svg><!-- __APP_NAME__ --></svg>")
-  // The two packages `link:` should find. `@smthrs/absent` is in no directory
-  // here, so it must keep its declared version.
-  await Fs.writeFile(
-    NodePath.join(createApp, "package.json"),
-    JSON.stringify({ name: "@smthrs/create-app", version: "0.1.0" })
-  )
-  await Fs.mkdir(targets, { recursive: true })
-  await Fs.writeFile(
-    NodePath.join(targets, "package.json"),
-    JSON.stringify({ name: "@smthrs/targets", version: "0.1.0" })
-  )
-  return { root, templates: NodePath.join(createApp, "template") }
+  return { templates: NodePath.join(createApp, "template") }
 }
 
 describe("templates", () => {
@@ -85,28 +70,17 @@ describe("scaffold", () => {
     expect(await Fs.readFile(NodePath.join(directory, "logo.svg"), "utf8")).toContain("__APP_NAME__")
   })
 
-  it("links the @smthrs packages the checkout carries, and only those", async () => {
+  it("preserves the release dependency versions", async () => {
     const source = await fixture()
     const directory = NodePath.join(await temporary("smthrs-scaffold-"), "ledger")
-    const report = await scaffold({ directory, template: "demo", templateRoot: source.templates })
+    await scaffold({ directory, template: "demo", templateRoot: source.templates })
 
-    expect(report.linked).toEqual(["@smthrs/create-app", "@smthrs/targets"])
     const manifest = JSON.parse(await Fs.readFile(NodePath.join(directory, "package.json"), "utf8")) as {
       readonly dependencies: Record<string, string>
-      readonly devDependencies: Record<string, string>
     }
-    expect(manifest.dependencies["@smthrs/create-app"]).toBe(
-      `link:${NodePath.join(source.root, "packages", "smithers", "create-app")}`
-    )
-    // Found by the name its manifest declares, not by its path: this one is
-    // two directories deeper than the scope suggests.
-    expect(manifest.dependencies["@smthrs/targets"]).toBe(
-      `link:${NodePath.join(source.root, "packages", "smithers", "build", "targets")}`
-    )
-    // A package the checkout does not carry keeps its version, and a
-    // non-@smthrs dependency is never touched.
-    expect(manifest.devDependencies["@smthrs/absent"]).toBe("0.1.0")
-    expect(manifest.dependencies["effect"]).toBe("4.0.0-rc.108")
+    expect(manifest.dependencies["@smthrs/create-app"]).toBe("1.0.0-rc.0")
+    expect(manifest.dependencies["@smthrs/targets"]).toBe("1.0.0-rc.0")
+    expect(manifest.dependencies["effect"]).toBe("4.0.0-rc.112")
   })
 
   it("leaves a dirty template's build output behind", async () => {
@@ -121,18 +95,6 @@ describe("scaffold", () => {
 
     expect(report.files).toBe(4)
     await expect(Fs.access(NodePath.join(directory, "node_modules"))).rejects.toThrow()
-  })
-
-  it("keeps the declared versions under --no-link", async () => {
-    const source = await fixture()
-    const directory = NodePath.join(await temporary("smthrs-scaffold-"), "ledger")
-    const report = await scaffold({ directory, template: "demo", templateRoot: source.templates, link: false })
-
-    expect(report.linked).toEqual([])
-    const manifest = JSON.parse(await Fs.readFile(NodePath.join(directory, "package.json"), "utf8")) as {
-      readonly dependencies: Record<string, string>
-    }
-    expect(manifest.dependencies["@smthrs/create-app"]).toBe("0.1.0")
   })
 
   it("names the templates it has when asked for one it does not", async () => {

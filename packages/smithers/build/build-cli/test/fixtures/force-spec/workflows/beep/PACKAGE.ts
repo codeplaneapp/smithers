@@ -2,7 +2,7 @@
 import { Smithers as S } from "@smthrs/targets"
 
 const beep = S.Shell.Run({
-  command: "afplay /System/Library/Sounds/Glass.aiff",
+  shell: "afplay /System/Library/Sounds/Glass.aiff",
   sandbox: "none",
 })
 

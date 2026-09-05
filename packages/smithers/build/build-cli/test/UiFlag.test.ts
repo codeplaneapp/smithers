@@ -11,6 +11,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest"
 import * as Ansi from "../src/Ansi.ts"
+import * as Audience from "../src/Audience.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import type * as Reporter from "../src/Reporter.ts"
 
@@ -50,8 +51,8 @@ export const Workspace = S.Workspace("fixture", {
     root,
     "PACKAGE.ts",
     `import { Smithers as S } from "@smthrs/targets"
-const good = S.Shell.Test({ command: "true" })
-const bad = S.Shell.Test({ command: "false" })
+const good = S.Shell.Test({ shell: "true" })
+const bad = S.Shell.Test({ shell: "false" })
 export const Package = S.Package({ targets: { good, bad } })
 `
   )
@@ -98,6 +99,12 @@ const serve = async (root: string, args: ReadonlyArray<string>, isTTY: boolean):
   const environment = { ...process.env, NO_COLOR: "1", CI: undefined, SMTHRS_UI: undefined, FORCE_COLOR: undefined }
   await makeCli({
     environment,
+    presentation: Audience.fromArguments(args, {
+      env: {},
+      stdin: isTTY,
+      stdout: isTTY,
+      stderr: isTTY
+    }),
     stdout,
     stderr,
     exit: (code) => {
@@ -137,12 +144,10 @@ describe("--ui at a terminal", () => {
     expect(served.exitCode).toBe(0)
     expect(served.recorded).toBeUndefined()
     expect(served.envelope).toBe("")
-    expect(served.stderr.startsWith(Ansi.hideCursor)).toBe(true)
-    expect(served.stderr.endsWith(Ansi.showCursor)).toBe(true)
-    const lines = served.stderr.split("\n").map((line) => Ansi.strip(line).replace(/\s+/g, " ").trim())
-    expect(lines).toContain("▸ //:good 1 target · " + `${served.stderr.match(/(\d+) jobs/)?.[1]} jobs`)
-    expect(lines.some((line) => /^✓ \/\/:good \d+(?:\.\d)?m?s$/.test(line))).toBe(true)
-    expect(lines.some((line) => /^Tasks: 1 ran, 1 total · Time: /.test(line))).toBe(true)
+    const output = Ansi.strip(served.stderr)
+    expect(output).toContain("Running //:good")
+    expect(output).toMatch(/\/\/:good {2}ran {2}\d+(?:\.\d)?m?s/)
+    expect(output).toContain("1 targets: 0 hit, 1 ran, 0 failed, 0 skipped")
   })
 
   it("explains a red run in one line, records exit 1, and skips incur's error block", async () => {
@@ -150,16 +155,15 @@ describe("--ui at a terminal", () => {
     const served = await serve(root, ["//:bad", "--ui", "tty"], true)
     expect(served.recorded).toBe(1)
     expect(served.envelope).toBe("")
-    expect(served.stderr).toContain("✗ 1 of 1 targets failed: //:bad")
-    expect(served.stderr).toMatch(/✗ \/\/:bad\s+failed/)
+    expect(served.stderr).toContain("1 targets: 0 hit, 0 ran, 1 failed, 0 skipped")
+    expect(served.stderr).toMatch(/\/\/:bad\s+failed/)
   })
 
-  it("keeps the structured error for --ui plain even at a terminal", async () => {
+  it("keeps human result ownership with a plain terminal renderer", async () => {
     pretendTTY(true)
     const served = await serve(root, ["//:bad", "--ui", "plain"], true)
-    expect(served.exitCode).toBe(1)
-    expect(served.recorded).toBeUndefined()
-    expect(served.envelope).toContain("targets_failed")
+    expect(served.recorded).toBe(1)
+    expect(served.envelope).toBe("")
     expect(served.stderr).toContain("//:bad  failed")
     expect(served.stderr).toContain("1 targets: 0 hit, 0 ran, 1 failed, 0 skipped")
     expect(served.stderr).not.toContain("✗")
@@ -170,7 +174,7 @@ describe("--ui at a terminal", () => {
     const served = await serve(root, ["//:good", "--ui", "stream", "--format", "json"], true)
     expect(served.exitCode).toBe(0)
     expect(JSON.parse(served.envelope)).toMatchObject({ ok: true, counts: { ran: 1 } })
-    expect(served.stderr).toContain("✓ //:good")
+    expect(served.stderr).toMatch(/\/\/:good\s+ran/)
   })
 
   it("renders query and graph as text on standard output", async () => {
@@ -186,9 +190,9 @@ describe("--ui at a terminal", () => {
 })
 
 describe("--ui under a pipe", () => {
-  it("prints the plain lines and the toon envelope by default", async () => {
+  it("prints plain progress for an explicitly verbose pipe consumer", async () => {
     pretendTTY(false)
-    const served = await serve(root, ["//:good"], false)
+    const served = await serve(root, ["//:good", "--verbose"], false)
     expect(served.exitCode).toBe(0)
     const lines = served.stderr.split("\n")
     // Find the run line rather than assume its index. Whether a

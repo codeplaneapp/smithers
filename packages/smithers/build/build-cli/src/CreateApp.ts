@@ -6,10 +6,6 @@
  * through Node rather than knowing a path. Scaffolding is a file copy plus one
  * substitution: `__APP_NAME__` becomes the directory's own name.
  *
- * The `@smthrs/*` packages a template depends on are not published yet, so a
- * copy made from a source checkout rewrites those specifiers to `link:` paths
- * into that checkout. `link: false` keeps the declared versions.
- *
  * @since 0.1.0
  */
 import * as NodeFs from "node:fs/promises"
@@ -36,8 +32,6 @@ export interface ScaffoldReport {
   readonly name: string
   readonly template: string
   readonly files: number
-  /** Dependency names rewritten to `link:` paths, empty when nothing was linked. */
-  readonly linked: ReadonlyArray<string>
 }
 
 /**
@@ -52,8 +46,6 @@ export interface ScaffoldOptions {
   readonly template?: string | undefined
   /** Template directory. Defaults to the one inside the resolved `@smthrs/create-app`. */
   readonly templateRoot?: string | undefined
-  /** Rewrite `@smthrs/*` dependencies to `link:` paths. Defaults to whether a checkout was found. */
-  readonly link?: boolean | undefined
 }
 
 /**
@@ -82,59 +74,6 @@ export const templateRoot = (): string => {
 export const templates = async (root: string): Promise<ReadonlyArray<string>> => {
   const entries = await NodeFs.readdir(root, { withFileTypes: true })
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
-}
-
-/**
- * The `packages` directory of the checkout `@smthrs/create-app` was resolved
- * from, or undefined when it came from a registry install.
- *
- * Found by walking up from the template directory rather than by counting two
- * segments off it. Packages nest: this one sits at
- * `<repo>/packages/smithers/create-app`, so the fixed
- * `dirname(dirname(root))` answered `<repo>/packages/smithers`, whose base name
- * is not `packages`, and every scaffold cut from this repository reported
- * `linked: []` while its manifest kept version ranges no registry serves.
- * An installed copy sits under `node_modules` and has no checkout to link to.
- */
-const checkoutPackages = (root: string): string | undefined => {
-  if (root.split(NodePath.sep).includes("node_modules")) return undefined
-  let current = NodePath.dirname(root)
-  for (;;) {
-    if (NodePath.basename(current) === "packages") return current
-    const parent = NodePath.dirname(current)
-    if (parent === current) return undefined
-    current = parent
-  }
-}
-
-/**
- * Every package in the checkout, keyed by the name its manifest declares.
- *
- * A package's directory is not its identity: `@smthrs/flow` lives at
- * `packages/smithers/flows/flow` and `@smthrs/targets` at
- * `packages/smithers/build/targets`, so `packages/<name after the scope>` finds
- * neither. The walk descends the whole tree and reads each name instead.
- */
-const workspacePackages = async (packages: string): Promise<ReadonlyMap<string, string>> => {
-  const found = new Map<string, string>()
-  const walk = async (directory: string): Promise<void> => {
-    const entries = await NodeFs.readdir(directory, { withFileTypes: true }).catch(() => [])
-    try {
-      const manifest = JSON.parse(
-        await NodeFs.readFile(NodePath.join(directory, "package.json"), "utf8")
-      ) as { readonly name?: string }
-      if (typeof manifest.name === "string" && !found.has(manifest.name)) found.set(manifest.name, directory)
-    } catch {
-      // Not a package directory, or a manifest that does not parse. Keep walking.
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (entry.name === "node_modules" || entry.name === "dist" || entry.name.startsWith(".")) continue
-      await walk(NodePath.join(directory, entry.name))
-    }
-  }
-  await walk(packages)
-  return found
 }
 
 /**
@@ -170,38 +109,6 @@ const copy = async (from: string, to: string, name: string): Promise<number> => 
   return files
 }
 
-interface Manifest {
-  dependencies?: Record<string, string>
-  devDependencies?: Record<string, string>
-}
-
-/**
- * Rewrites every `@smthrs/*` specifier in the scaffolded manifest to a `link:`
- * path inside `packages`, and answers with the names it rewrote.
- *
- * A dependency the checkout does not carry keeps its declared version, so a
- * template that names a published package is left alone.
- */
-const linkWorkspace = async (directory: string, packages: string): Promise<ReadonlyArray<string>> => {
-  const path = NodePath.join(directory, "package.json")
-  const manifest = JSON.parse(await NodeFs.readFile(path, "utf8")) as Manifest
-  const workspace = await workspacePackages(packages)
-  const linked: Array<string> = []
-  for (const field of ["dependencies", "devDependencies"] as const) {
-    const block = manifest[field]
-    if (block === undefined) continue
-    for (const dependency of Object.keys(block)) {
-      if (!dependency.startsWith("@smthrs/")) continue
-      const local = workspace.get(dependency)
-      if (local === undefined) continue
-      block[dependency] = `link:${local}`
-      linked.push(dependency)
-    }
-  }
-  if (linked.length > 0) await NodeFs.writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`)
-  return linked.sort()
-}
-
 /**
  * Copies one template into a new directory.
  *
@@ -234,8 +141,5 @@ export const scaffold = async (options: ScaffoldOptions): Promise<ScaffoldReport
   if (existing.length > 0) throw new Error(`${directory} is not empty`)
 
   const files = await copy(NodePath.join(root, template), directory, name)
-  const packages = checkoutPackages(root)
-  const link = options.link ?? packages !== undefined
-  const linked = link && packages !== undefined ? await linkWorkspace(directory, packages) : []
-  return { directory, name, template, files, linked }
+  return { directory, name, template, files }
 }

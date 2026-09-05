@@ -16,7 +16,11 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "rootDir": "src",
-    "noEmit": true,
+    "outDir": "dist/esm",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "inlineSources": true,
     "rewriteRelativeImportExtensions": true,
     "types": ["node"],
     "plugins": [

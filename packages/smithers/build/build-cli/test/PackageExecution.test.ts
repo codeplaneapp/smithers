@@ -6,6 +6,7 @@ import * as NodePath from "node:path"
 import { afterAll, describe, expect, it, vi } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { PACKAGE_EXECUTION_FORMAT, takesExclusiveTreePermit } from "../src/PackageExec.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -64,7 +65,7 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -106,7 +107,7 @@ describe("bare-label execution and verb mapping", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { hello: S.Shell.Run({ command: "true" }) } })
+export const Package = S.Package({ targets: { hello: S.Shell.Run({ shell: "true" }) } })
 `
     )
     commitAll(root)
@@ -168,7 +169,7 @@ writeFileSync(join(here, "out.txt"), readFileSync(join(here, "source.txt"), "utf
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
     )
@@ -193,7 +194,7 @@ export const Package = S.Package({ targets: { fmt } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
     )
@@ -213,7 +214,7 @@ export const Package = S.Package({ targets: { fmt } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { hello: S.Shell.Run({ command: "true" }) } })
+export const Package = S.Package({ targets: { hello: S.Shell.Run({ shell: "true" }) } })
 `
     )
     commitAll(root)
@@ -231,7 +232,7 @@ describe("write-set enforcement", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf evil > other.txt", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf evil > other.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -255,7 +256,7 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && rm tracked.txt", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && rm tracked.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -275,7 +276,7 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf pwn > out/esc", changes: ["out/**"] })
+const bad = S.Shell.Diff({ shell: "printf pwn > out/esc", changes: ["out/**"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -304,7 +305,7 @@ describe("external-write confinement through escaping symlinks", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf pwned > linkdir/target.txt", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf pwned > linkdir/target.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -333,7 +334,7 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf pwned > linkdir/leak.txt", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf pwned > linkdir/leak.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -360,8 +361,8 @@ describe("mode-aware planning", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
-const aaa = S.Shell.Run({ command: "true", gates: [fmt] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
+const aaa = S.Shell.Run({ shell: "true", gates: [fmt] })
 export const Package = S.Package({ targets: { aaa, fmt } })
 `
     )
@@ -385,7 +386,7 @@ describe("write-set enforcement of gitignored paths", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf leak > ignored-leak.txt", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf leak > ignored-leak.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -415,7 +416,7 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -442,7 +443,7 @@ export const Package = S.Package({ targets: { bad } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const bad = S.Shell.Diff({
-  command: "printf rewritten > dist/a.js && printf partial > dist/b.js && exit 1",
+  shell: "printf rewritten > dist/a.js && printf partial > dist/b.js && exit 1",
   changes: ["dist/**"]
 })
 export const Package = S.Package({ targets: { bad } })
@@ -466,7 +467,7 @@ export const Package = S.Package({ targets: { bad } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const bad = S.Shell.Diff({
-  command: "printf b > out.txt && printf x > vendor/nested/new.txt && printf leak > leak.txt",
+  shell: "printf b > out.txt && printf x > vendor/nested/new.txt && printf leak > leak.txt",
   changes: ["out.txt"]
 })
 export const Package = S.Package({ targets: { bad } })
@@ -495,7 +496,7 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf y > vendor/nested/y.txt && exit 1", changes: ["vendor/**"] })
+const bad = S.Shell.Diff({ shell: "printf y > vendor/nested/y.txt && exit 1", changes: ["vendor/**"] })
 export const Package = S.Package({ targets: { bad } })
 `
     )
@@ -523,7 +524,7 @@ export const Package = S.Package({ targets: { bad } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
       )
@@ -586,7 +587,7 @@ export const Package = S.Package({ targets: { fmt } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
       )
@@ -618,7 +619,7 @@ export const Package = S.Package({ targets: { fmt } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
       )
@@ -642,7 +643,7 @@ export const Package = S.Package({ targets: { fmt } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
       )
@@ -670,7 +671,7 @@ export const Package = S.Package({ targets: { fmt } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const bad = S.Shell.Diff({ command: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
+const bad = S.Shell.Diff({ shell: "printf b > out.txt && printf leaked > .env", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { bad } })
 `
       )
@@ -699,7 +700,7 @@ export const Package = S.Package({ targets: { bad } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const bad = S.Shell.Diff({
-  command: "printf b > out.txt && printf o > target/leak.o && printf leak > scratch/leak.txt",
+  shell: "printf b > out.txt && printf o > target/leak.o && printf leak > scratch/leak.txt",
   changes: ["out.txt"]
 })
 export const Package = S.Package({ targets: { bad } })
@@ -732,9 +733,9 @@ export const Package = S.Package({ targets: { bad } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const aaa = S.Shell.Diff({ command: "printf first > dist/a.js", changes: ["dist/**"] })
+const aaa = S.Shell.Diff({ shell: "printf first > dist/a.js", changes: ["dist/**"] })
 const bbb = S.Shell.Diff({
-  command: "printf broken > dist/a.js && printf partial > dist/b.js && exit 1",
+  shell: "printf broken > dist/a.js && printf partial > dist/b.js && exit 1",
   changes: ["dist/**"]
 })
 export const Package = S.Package({ targets: { aaa, bbb } })
@@ -764,7 +765,7 @@ export const Package = S.Package({ targets: { aaa, bbb } })
         root,
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
-const fmt = S.Shell.Diff({ command: "printf b > out.txt", changes: ["out.txt"] })
+const fmt = S.Shell.Diff({ shell: "printf b > out.txt", changes: ["out.txt"] })
 export const Package = S.Package({ targets: { fmt } })
 `
       )
@@ -866,7 +867,7 @@ describe("artifact store", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const dist = S.Shell.Build({ command: "mkdir -p dist && printf art > dist/a.txt", outDirs: ["dist"] })
+const dist = S.Shell.Build({ shell: "mkdir -p dist && printf art > dist/a.txt", outDirs: ["dist"] })
 export const Package = S.Package({ targets: { dist } })
 `
     )
@@ -944,7 +945,7 @@ export const Package = S.Package({ targets: { dist } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "true" }) } })
+export const Package = S.Package({ targets: { check: S.Shell.Test({ shell: "true" }) } })
 `
     )
     commitAll(root)
@@ -976,19 +977,19 @@ export const Package = S.Package({ targets: { check: S.Shell.Test({ script: S.fi
     expect(second.logs).toContain("//:check  hit")
   })
 
-  it("refuses a command-form shard fan-out instead of running the same command N times", async () => {
+  it("refuses a shell-form shard fan-out instead of running the same command N times", async () => {
     const root = await temporaryWorkspace()
     await write(root, "WORKSPACE.ts", workspaceModule())
     await write(
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "true", shards: 3 }) } })
+export const Package = S.Package({ targets: { check: S.Shell.Test({ shell: "true", shards: 3 }) } })
 `
     )
     commitAll(root)
     const planned = await serve(root, ["//:check", "--plan"])
-    expect(planned.output).toContain("Shell.Test shards cannot fan out a command-form declaration")
+    expect(planned.output).toContain("Shell.Test shards cannot fan out a shell-form declaration")
   })
 
   it("spawns a declared script under the interpreter its extension names, under either rule", async () => {
@@ -1178,7 +1179,7 @@ export const Workspace = S.Workspace("pnpmfixture", {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "true" }) } })
+export const Package = S.Package({ targets: { check: S.Shell.Test({ shell: "true" }) } })
 `
     )
     commitAll(root)
@@ -1244,7 +1245,7 @@ export const Package = S.Package({ targets: { dist } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const dist = S.Shell.Build({ command: "cache-compiler", outDirs: ["dist"] })
+const dist = S.Shell.Build({ shell: "cache-compiler", outDirs: ["dist"] })
 export const Package = S.Package({ targets: { dist } })
 `
     )
@@ -1270,7 +1271,7 @@ export const Package = S.Package({ targets: { dist } })
     await write(root, "WORKSPACE.ts", workspaceModule())
     const declaration = (flavor: string) =>
       `import { Smithers as S } from "@smthrs/targets"
-const dist = S.Shell.Build({ command: "true", outDirs: ["dist"], env: { FLAVOR: "${flavor}" } })
+const dist = S.Shell.Build({ shell: "true", outDirs: ["dist"], env: { FLAVOR: "${flavor}" } })
 export const Package = S.Package({ targets: { dist } })
 `
     await write(root, "PACKAGE.ts", declaration("one"))
@@ -1321,10 +1322,10 @@ export const Package = S.Package({ targets: { tool: S.Shell.Test({ bin: S.NodeMo
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const confined = S.Shell.Run({ command: "true" })
-const loopback = S.Shell.Run({ command: "true", sandbox: { network: "loopback" } })
-const networked = S.Shell.Run({ command: "true", sandbox: { network: true } })
-const open = S.Shell.Run({ command: "true", sandbox: "none" })
+const confined = S.Shell.Run({ shell: "true" })
+const loopback = S.Shell.Run({ shell: "true", sandbox: { network: "loopback" } })
+const networked = S.Shell.Run({ shell: "true", sandbox: { network: true } })
+const open = S.Shell.Run({ shell: "true", sandbox: "none" })
 export const Package = S.Package({ targets: { confined, loopback, networked, open } })
 `
     )
@@ -1352,7 +1353,7 @@ describe("secrets", () => {
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const push = S.Shell.Run({
-  command: "true",
+  shell: "true",
   secrets: [S.HttpSecret(S.Secret("SMTHRS_TEST_ABSENT_SECRET"), ["https://example.test"])]
 })
 export const Package = S.Package({ targets: { push } })
@@ -1386,7 +1387,7 @@ export const Package = S.Package({ targets: { push } })
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
 const push = S.Shell.Run({
-  command: ${JSON.stringify(command)},
+  shell: ${JSON.stringify(command)},
   secrets: [S.HttpSecret(S.Secret("SMTHRS_TEST_BOUNDARY_SECRET"), ["http://127.0.0.1:${port}"])],
   sandbox: "none"
 })
@@ -1417,7 +1418,7 @@ describe.runIf(process.platform === "darwin")("sandbox enforcement (macOS)", () 
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const probe = S.Shell.Test({ command: ${
+const probe = S.Shell.Test({ shell: ${
         JSON.stringify(
           `cat '${hostFiles}/.ssh/fixture' '${hostFiles}/.aws/fixture' '${hostFiles}/smithers/fixture' > /dev/null`
         )
@@ -1444,9 +1445,9 @@ export const Package = S.Package({ targets: { probe } })
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
 const fetchCommand = "curl -sf http://127.0.0.1:${port}/ > /dev/null"
-const confined = S.Shell.Run({ command: fetchCommand })
-const networked = S.Shell.Run({ command: fetchCommand, sandbox: { network: true } })
-const open = S.Shell.Run({ command: fetchCommand, sandbox: "none" })
+const confined = S.Shell.Run({ shell: fetchCommand })
+const networked = S.Shell.Run({ shell: fetchCommand, sandbox: { network: true } })
+const open = S.Shell.Run({ shell: fetchCommand, sandbox: "none" })
 export const Package = S.Package({ targets: { confined, networked, open } })
 `
       )
@@ -1485,13 +1486,13 @@ export const Package = S.Package({ targets: { confined, networked, open } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const confined = S.Shell.Run({ command: ${
+const confined = S.Shell.Run({ shell: ${
         JSON.stringify(`${process.execPath} listen.cjs`)
       }, data: [S.file("listen.cjs")] })
-const loopback = S.Shell.Run({ command: ${
+const loopback = S.Shell.Run({ shell: ${
         JSON.stringify(`${process.execPath} listen.cjs`)
       }, data: [S.file("listen.cjs")], sandbox: { network: "loopback" } })
-const egress = S.Shell.Run({ command: "curl -sf --max-time 5 https://example.com/ > /dev/null", sandbox: { network: "loopback" } })
+const egress = S.Shell.Run({ shell: "curl -sf --max-time 5 https://example.com/ > /dev/null", sandbox: { network: "loopback" } })
 export const Package = S.Package({ targets: { confined, egress, loopback } })
 `
     )
@@ -1513,8 +1514,8 @@ describe("suite aggregation", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const good = S.Shell.Test({ command: "true" })
-const bad = S.Shell.Test({ command: "false" })
+const good = S.Shell.Test({ shell: "true" })
+const bad = S.Shell.Test({ shell: "false" })
 const all = S.Suite({ tests: [good, bad] })
 export const Package = S.Package({ targets: { all, bad, good } })
 `
@@ -1664,8 +1665,8 @@ describe("data-edge law", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const side = S.Shell.Run({ command: "true" })
-const consumer = S.Shell.Test({ command: "true", data: [side] })
+const side = S.Shell.Run({ shell: "true" })
+const consumer = S.Shell.Test({ shell: "true", data: [side] })
 export const Package = S.Package({ targets: { consumer, side } })
 `
     )

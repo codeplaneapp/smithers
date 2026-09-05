@@ -20,6 +20,7 @@ import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import * as PackageExec from "../src/PackageExec.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
 import * as PackageLoader from "../src/PackageLoader.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -106,7 +107,7 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv([...args, "--workspace", root])], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv([...args, "--workspace", root])], {
       exit: (code) => {
         exitCode = code
       },
@@ -151,7 +152,7 @@ const schemaPinned = S.Fetch({
   out: ${JSON.stringify(out)},
 })
 const schemaDrift = S.Shell.Test({
-  command: "diff -q schema.graphql schema.upstream.graphql",
+  shell: "diff -q schema.graphql schema.upstream.graphql",
   data: [schemaPinned, schema],
 })
 export const Package = S.Package({ targets: { schema, schemaPinned, schemaDrift } })
@@ -506,7 +507,7 @@ describe("the declared remote cache reaches the build system", () => {
         "data/PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
 const credentialProbe = S.Shell.Test({
-  command: 'test -z "$FIXTURE_CACHE_READ_TOKEN" && test -z "$FIXTURE_CACHE_WRITE_TOKEN" && test "$MARKER" = kept',
+  shell: 'test -z "$FIXTURE_CACHE_READ_TOKEN" && test -z "$FIXTURE_CACHE_WRITE_TOKEN" && test "$MARKER" = kept',
   env: {
     FIXTURE_CACHE_READ_TOKEN: "leaked-read",
     FIXTURE_CACHE_WRITE_TOKEN: "leaked-write",

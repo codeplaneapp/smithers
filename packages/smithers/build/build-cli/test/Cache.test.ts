@@ -525,7 +525,12 @@ describe("openCache", () => {
       reads.push(caches[(index + 1) % caches.length]!.get(result.key))
     }))
 
-    for (const entry of await Promise.all(reads)) expect(entry).toEqual(result)
+    // A replacement may exhaust the reader's bounded identity retries. That
+    // is a safe miss, but an observed hit must always contain a whole entry.
+    for (const entry of await Promise.all(reads)) {
+      if (entry !== null) expect(entry).toEqual(result)
+    }
+    for (const cache of caches) expect(await cache.get(result.key)).toEqual(result)
     expect(await Fs.readdir(NodePath.join(root, ".flows/cache/al"))).toEqual(["alpha.json"])
     expect(JSON.parse(await Fs.readFile(NodePath.join(root, ".flows/cache/al/alpha.json"), "utf8")))
       .toEqual(result)

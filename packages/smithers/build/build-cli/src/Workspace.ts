@@ -58,7 +58,7 @@ export type ResolvedRemoteCacheCredentials =
   /** Reads use a committed public read token; writes read `writeTokenEnv`. */
   | { readonly _tag: "public"; readonly publicReadToken: string; readonly writeTokenEnv: string }
   /**
-   * No declaration: the endpoint was discovered from the jjhub remote. Reads
+   * No declaration: the endpoint was discovered from the Smithers Cloud remote. Reads
    * go out anonymously (a public repository answers them) unless
    * `writeTokenEnv` holds a credential, which then serves both directions.
    */
@@ -74,17 +74,17 @@ export type ResolvedRemoteCacheCredentials =
 export interface ResolvedRemoteCache {
   readonly endpoint: string
   readonly credentials: ResolvedRemoteCacheCredentials
-  /** Present when the endpoint came from the workspace's jjhub remote, not a declaration. */
-  readonly discovered?: DiscoveredJjhubRepository | undefined
+  /** Present when the endpoint came from the workspace's Smithers Cloud remote, not a declaration. */
+  readonly discovered?: DiscoveredSmithersCloudRepository | undefined
 }
 
 /**
- * A repository found on a jjhub remote of the workspace.
+ * A repository found on a Smithers Cloud remote of the workspace.
  *
  * @category models
  * @since 0.1.0
  */
-export interface DiscoveredJjhubRepository {
+export interface DiscoveredSmithersCloudRepository {
   readonly repo: string
   readonly host: string
 }
@@ -152,13 +152,13 @@ export interface RemoteCacheAccess extends ResolvedRemoteCache {
  */
 
 /**
- * The hosts whose remotes identify a jjhub repository. `SMITHERS_JJHUB_HOSTS`
+ * The hosts whose remotes identify a Smithers Cloud repository. `SMITHERS_CLOUD_HOSTS`
  * (comma separated) adds a self-hosted deployment's hosts.
  *
  * @category discovery
  * @since 0.1.0
  */
-export const defaultJjhubHosts: ReadonlyArray<string> = [
+export const defaultSmithersCloudHosts: ReadonlyArray<string> = [
   "jjhub.tech",
   "api.jjhub.tech",
   "ssh.jjhub.tech",
@@ -170,39 +170,41 @@ const remoteSection = /^\s*\[remote\s+"([^"]+)"\]\s*$/
 const urlLine = /^\s*url\s*=\s*(.+?)\s*$/
 const scpLike = /^(?:[^@\s]+@)?([^:/\s]+):([^\s]+)$/
 
-const jjhubHostsOf = (environment: Readonly<Record<string, string | undefined>>): ReadonlySet<string> => {
-  const extra = (environment["SMITHERS_JJHUB_HOSTS"] ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(
+const smithersCloudHostsOf = (environment: Readonly<Record<string, string | undefined>>): ReadonlySet<string> => {
+  const extra = (environment["SMITHERS_CLOUD_HOSTS"] ?? "").split(",").map((host) => host.trim().toLowerCase()).filter(
     (host) => host !== ""
   )
-  return new Set([...defaultJjhubHosts, ...extra])
+  return new Set([...defaultSmithersCloudHosts, ...extra])
 }
 
 /**
- * The cache endpoint of a repository on jjhub. `SMITHERS_JJHUB_API_URL`
+ * The cache endpoint of a repository on Smithers Cloud. `SMITHERS_CLOUD_API_URL`
  * overrides the API base for a self-hosted deployment.
  *
  * @category discovery
  * @since 0.1.0
  */
-export const jjhubCacheEndpoint = (
+export const smithersCloudCacheEndpoint = (
   repo: string,
   environment: Readonly<Record<string, string | undefined>>
 ): string => {
-  const base = RemoteCache.normalizeEndpoint(environment["SMITHERS_JJHUB_API_URL"] ?? RemoteCache.defaultJjhubApiBase)
+  const base = RemoteCache.normalizeEndpoint(
+    environment["SMITHERS_CLOUD_API_URL"] ?? RemoteCache.defaultSmithersCloudApiBase
+  )
   const [owner, name] = repo.split("/") as [string, string]
   return `${base}/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/build-cache`
 }
 
 /**
- * Parses one remote URL into `owner/name` when its host is a jjhub host.
+ * Parses one remote URL into `owner/name` when its host is a Smithers Cloud host.
  *
  * @category discovery
  * @since 0.1.0
  */
-export const parseJjhubRemote = (
+export const parseSmithersCloudRemote = (
   url: string,
-  hosts: ReadonlySet<string> = new Set(defaultJjhubHosts)
-): DiscoveredJjhubRepository | undefined => {
+  hosts: ReadonlySet<string> = new Set(defaultSmithersCloudHosts)
+): DiscoveredSmithersCloudRepository | undefined => {
   const trimmed = url.trim()
   let host: string | undefined
   let path: string | undefined
@@ -257,23 +259,23 @@ const readRemoteUrls = async (
 }
 
 /**
- * Finds the jjhub repository a workspace's `origin` (or any) remote points
+ * Finds the Smithers Cloud repository a workspace's `origin` (or any) remote points
  * at, reading the colocated `.git/config` first and the jj git backend's
  * config second. Never spawns git or jj.
  *
  * @category discovery
  * @since 0.1.0
  */
-export const discoverJjhubRepository = async (
+export const discoverSmithersCloudRepository = async (
   root: string,
   environment: Readonly<Record<string, string | undefined>>
-): Promise<DiscoveredJjhubRepository | undefined> => {
-  const hosts = jjhubHostsOf(environment)
+): Promise<DiscoveredSmithersCloudRepository | undefined> => {
+  const hosts = smithersCloudHostsOf(environment)
   for (const relative of [".git/config", ".jj/repo/store/git/config"]) {
     const remotes = await readRemoteUrls(NodePath.join(root, relative))
     const ordered = [...remotes.filter((r) => r.name === "origin"), ...remotes.filter((r) => r.name !== "origin")]
     for (const remote of ordered) {
-      const found = parseJjhubRemote(remote.url, hosts)
+      const found = parseSmithersCloudRemote(remote.url, hosts)
       if (found !== undefined) return found
     }
   }

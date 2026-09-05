@@ -9,6 +9,7 @@ import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, afterEach, describe, expect, it } from "vitest"
+import * as Audience from "../src/Audience.ts"
 import { makeCli, normalizeArgv, type RuntimeConfig } from "../src/Cli.ts"
 import type * as Reporter from "../src/Reporter.ts"
 
@@ -53,8 +54,8 @@ export const Workspace = S.Workspace("fixture", {
     root,
     "PACKAGE.ts",
     `import { Smithers as S } from "@smthrs/targets"
-const good = S.Shell.Test({ command: "true" })
-const bad = S.Shell.Test({ command: "false" })
+const good = S.Shell.Test({ shell: "true" })
+const bad = S.Shell.Test({ shell: "false" })
 const pair = S.Suite({ tests: [good, bad] })
 const all = S.Suite({ tests: [pair, good] })
 const docs = S.DocsParity({ readme: S.file("README.md"), deps: [], minimumProseCharacters: 20 })
@@ -101,7 +102,14 @@ const serve = async (
   let exitCode = 0
   let recorded: number | undefined
   let envelope = ""
-  const environment = { ...process.env, NO_COLOR: "1", CI: undefined, SMTHRS_UI: undefined, FORCE_COLOR: undefined }
+  const environment = {
+    ...process.env,
+    SMITHERS_AUDIENCE: isTTY ? "human" : "agent",
+    NO_COLOR: "1",
+    CI: undefined,
+    SMTHRS_UI: undefined,
+    FORCE_COLOR: undefined
+  }
   await makeCli(configure({
     environment,
     stdout,
@@ -130,6 +138,44 @@ afterEach(() => {
 })
 
 describe("PACKAGE.ts branches", () => {
+  it("shows human watch progress without duplicating successful child envelopes", async () => {
+    const root = await packageFixture()
+    const good = await serve(root, ["watch", "test", "//:good", "--once"], true)
+    expect(good.exitCode).toBe(0)
+    expect(good.stderr).toContain("//:good")
+    expect(good.stderr).toContain("Watch cycle 1 complete")
+    expect(good.stderr).not.toContain("durationMs:")
+    expect(good.stderr).not.toContain("counts:")
+    const bad = await serve(root, ["watch", "test", "//:bad", "--once"], true)
+    expect(bad.exitCode).toBe(1)
+    expect(bad.stderr).toContain("Watch cycle 1 failed")
+    expect(bad.stderr).toContain("targets_failed")
+  })
+
+  it("keeps agent target execution quiet on a PTY and includes useful follow-up commands", async () => {
+    const root = await packageFixture()
+    const served = await serve(root, ["//:good", "--audience", "agent", "--ui", "tty"], true)
+    expect(served.exitCode).toBe(0)
+    expect(served.stderr).toBe("")
+    expect(served.envelope).toContain("ok: true")
+    expect(served.envelope).toContain("explain")
+    expect(served.envelope).toContain("cache status")
+    expect(served.envelope).toContain(root)
+  })
+
+  it("keeps explicitly encoded human results structured while showing progress", async () => {
+    const root = await packageFixture()
+    const served = await serve(root, ["//:good", "--json"], true, (config) => ({
+      ...config,
+      presentation: Audience.resolve({ env: {}, audience: "human", stdout: true, stderr: true })
+    }))
+    expect(served.exitCode).toBe(0)
+    expect(served.stdout).toBe("")
+    expect(() => JSON.parse(served.envelope)).not.toThrow()
+    expect(served.stderr).toContain("Running //:good")
+    expect(served.stderr).not.toContain("\u001b[")
+  })
+
   it("answers deps() with the closure, visiting a shared member once, and refuses a pattern", async () => {
     const root = await packageFixture()
     pretendTTY(true)
@@ -183,7 +229,8 @@ describe("PACKAGE.ts branches", () => {
     expect(served.exitCode).toBe(1)
     expect(served.recorded).toBeUndefined()
     expect(served.envelope).toContain("Error (targets_failed): 1 of 1 targets failed")
-    expect(served.stderr).toContain("✗ 1 of 1 targets failed: //:bad")
+    expect(served.stderr).toContain("//:bad  failed")
+    expect(served.stderr).not.toContain("\u001b[")
   })
 
   it("runs ci and docs through the PACKAGE.ts index", async () => {

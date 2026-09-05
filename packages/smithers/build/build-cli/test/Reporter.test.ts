@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from "vitest"
 import * as Ansi from "../src/Ansi.ts"
+import * as Audience from "../src/Audience.ts"
 import type * as Executor from "../src/Executor.ts"
 import * as Reporter from "../src/Reporter.ts"
 
@@ -79,6 +80,68 @@ const replay = (reporter: Reporter.Reporter): void => {
 }
 
 const collapse = (line: string): string => Ansi.strip(line).replace(/\s+/g, " ").trim()
+
+describe("audience-aware progress", () => {
+  it("keeps an agent on a PTY quiet even with an explicit tty renderer", () => {
+    const term = terminal(true)
+    const reporter = Reporter.make({
+      renderer: "tty",
+      terminal: term,
+      presentation: Audience.resolve({ env: { CLAUDECODE: "1" }, stdout: true, stderr: true })
+    })
+    replay(reporter)
+    expect(term.text()).toContain("//:gamma  failed")
+    expect(term.text()).toContain("disk full")
+    expect(term.text()).not.toContain("//:alpha  ran")
+    expect(term.text()).not.toContain("4 targets:")
+    expect(term.text()).not.toContain("\u001b[")
+  })
+
+  it("uses Clack framing and eager task starts for humans without color or cursor motion", () => {
+    const term = terminal(true)
+    const env = { NO_COLOR: "1" }
+    replay(Reporter.make({
+      renderer: "tty",
+      terminal: term,
+      env,
+      presentation: Audience.resolve({ env, audience: "human", stdout: true, stderr: true })
+    }))
+    expect(term.text()).toContain("lint //...")
+    expect(term.text()).toContain("Running //:alpha")
+    expect(term.text()).toContain("4 targets:")
+    expect(term.text()).not.toContain("\u001b[")
+  })
+
+  it("never emits cursor motion on redirected or dumb human terminals", () => {
+    for (const [isTTY, env] of [[false, {}], [true, { TERM: "dumb" }]] as const) {
+      const term = terminal(isTTY)
+      replay(Reporter.make({
+        renderer: "tty",
+        terminal: term,
+        env,
+        presentation: Audience.resolve({ env, audience: "human", stdout: isTTY, stderr: isTTY })
+      }))
+      expect(term.text()).toContain("Running //:alpha")
+      expect(term.text()).not.toContain("\u001b[")
+    }
+  })
+
+  it("honors human silence and bounds repeated diagnostics", () => {
+    const term = terminal(true)
+    const reporter = Reporter.make({
+      renderer: "tty",
+      terminal: term,
+      presentation: Audience.resolve({ env: {}, audience: "human", silent: true, stdout: true, stderr: true })
+    })
+    reporter.begin(run)
+    reporter.targetStarted("//:alpha")
+    reporter.toolOutput("//:alpha", "stdout", "chatty output")
+    expect(term.text()).toBe("")
+    for (let index = 0; index < 100; index++) reporter.warn("x".repeat(1000))
+    expect(term.text().length).toBeLessThan(9000)
+    expect(term.text()).toContain("omitted")
+  })
+})
 
 describe("Reporter.formatDuration", () => {
   it("prints milliseconds below one second and tenths above", () => {

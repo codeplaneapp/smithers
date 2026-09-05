@@ -4,6 +4,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const temporaryDirectories: Array<string> = []
 afterAll(async () => {
@@ -30,14 +31,14 @@ export const Workspace = S.Workspace("node-lane", {
 
 const packageModule = `import { Smithers as S } from "@smthrs/targets"
 const manifest = S.file("//package.json")
-const gate = S.Shell.Test({ command: "true" })
+const gate = S.Shell.Test({ shell: "true" })
 const pack = S.Npm.Pack({ manifest, data: [S.file("//input.txt")] })
 const literal = S.Literal({ path: "out/literal.txt", content: "literal" })
 const copy = S.Copy({ from: S.file("//input.txt"), to: "out/copied.txt" })
 const markdown = S.Markdown.CodeBlocks({ file: S.file("//README.md"), lang: ["ts"] })
 const version = S.Changesets.Version({ config: S.file("//changeset.json"), changes: ["version.txt"] })
 const size = S.Size.Budgets({ manifest })
-const digestBuild = S.Shell.Build({ command: "mkdir -p digest && printf hi > digest/a.txt", outDirs: ["digest"] })
+const digestBuild = S.Shell.Build({ shell: "mkdir -p digest && printf hi > digest/a.txt", outDirs: ["digest"] })
 const digest = S.Test({ expect: S.Files.digest(digestBuild), toBe: S.file("//digest-baseline.json") })
 const cron = S.Cron({ schedule: "0 6 * * 1", run: [gate] })
 const ci = S.Github.Ci({
@@ -47,7 +48,7 @@ const ci = S.Github.Ci({
 const overlayBase = S.Filegroup({ srcs: [S.file("//overlay/base.txt")] })
 const overlay = S.Overlay({ base: overlayBase, replace: { "overlay/base.txt": S.file("//overlay/replacement.txt") } })
 const overlayBuild = S.Shell.Build({
-  command: "mkdir -p overlay-out && cp overlay/base.txt overlay-out/result.txt",
+  shell: "mkdir -p overlay-out && cp overlay/base.txt overlay-out/result.txt",
   data: [overlay],
   outDirs: ["overlay-out"]
 })
@@ -56,7 +57,7 @@ const overlayConflict = S.Overlay({
   replace: { "overlay/base.txt": S.file("//input.txt") }
 })
 const overlayConflictBuild = S.Shell.Build({
-  command: "mkdir -p conflict-out && cp overlay/base.txt conflict-out/result.txt",
+  shell: "mkdir -p conflict-out && cp overlay/base.txt conflict-out/result.txt",
   data: [overlay, overlayConflict],
   outDirs: ["conflict-out"]
 })
@@ -64,7 +65,7 @@ const overlayConflictBuild = S.Shell.Build({
 // private to the build, so this consumer must see the real source bytes.
 const overlayOutputs = S.Filegroup({ srcs: [overlayBuild] })
 const overlayDownstream = S.Shell.Test({
-  command: "grep -qx base overlay/base.txt && grep -qx replacement overlay-out/result.txt",
+  shell: "grep -qx base overlay/base.txt && grep -qx replacement overlay-out/result.txt",
   data: [overlayOutputs]
 })
 // A rule with no overlay scratch mount: the substitution cannot be honoured,
@@ -225,7 +226,7 @@ const serve = async (root: string, args: ReadonlyArray<string>) => {
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => void (exitCode = code),
       stdout: (text) => void (output += text)
     })

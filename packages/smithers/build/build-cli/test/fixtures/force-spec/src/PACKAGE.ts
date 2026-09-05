@@ -163,7 +163,7 @@ const scan = S.Shell.Run({
 })
 
 const openConsentModal = S.Shell.Run({
-  command: "open 'http://localhost:5000?otreset=false&otpreview=true&otgeo=gb'",
+  shell: "open 'http://localhost:5000?otreset=false&otpreview=true&otgeo=gb'",
 })
 
 const typeCheck = S.Shell.Test({
@@ -211,7 +211,7 @@ const deadCode = S.Shell.Test({
 })
 
 const cleanRelay = S.Shell.Run({
-  command: 'rm -rf "$TMPDIR"/RelayFindGraphQLTags-*',
+  shell: 'rm -rf "$TMPDIR"/RelayFindGraphQLTags-*',
 })
 
 const analyticsLint = S.Agent.Lint({

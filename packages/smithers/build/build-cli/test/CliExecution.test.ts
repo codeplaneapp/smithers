@@ -37,7 +37,7 @@ const packageModule = `import { Smithers as S } from "@smthrs/targets"
 const runtime = S.Runtime.Node({ version: ">=22.19.0" })
 const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
 const install = S.Install({ packageManager })
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo hi" }), install } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo hi" }), install } })
 `
 
 const temporaryWorkspace = async (): Promise<string> =>
@@ -117,7 +117,7 @@ describe("PACKAGE.ts CLI", () => {
       root,
       ".mycache/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { ghost: S.Shell.Run({ command: "echo ghost" }) } })
+export const Package = S.Package({ targets: { ghost: S.Shell.Run({ shell: "echo ghost" }) } })
 `
     )
     const { exitCode, output } = await serve(root, ["query", "//..."])
@@ -135,7 +135,7 @@ export const Package = S.Package({ targets: { ghost: S.Shell.Run({ command: "ech
       root,
       ".flagcache/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { ghost: S.Shell.Run({ command: "echo ghost" }) } })
+export const Package = S.Package({ targets: { ghost: S.Shell.Run({ shell: "echo ghost" }) } })
 `
     )
     const { exitCode, output } = await serve(root, ["query", "//...", "--cache-dir", ".flagcache"])

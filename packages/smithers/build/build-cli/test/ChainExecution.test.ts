@@ -8,6 +8,7 @@ import { afterAll, describe, expect, it } from "vitest"
 import * as AnvilExec from "../src/AnvilExec.ts"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import * as DockerExec from "../src/DockerExec.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const fixture = NodePath.resolve(import.meta.dirname, "fixtures/chain-exec")
 const temporaryDirectories: Array<string> = []
@@ -109,7 +110,11 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({ environment }).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation, environment }).serve([
+      ...normalizeArgv(args),
+      "--workspace",
+      root
+    ], {
       exit: (code) => {
         exitCode = code
       },
@@ -675,7 +680,7 @@ const fork = S.Anvil.Fork({
   port: ${forkPort}
 })
 const consumer = S.Shell.Test({
-  command: ${
+  shell: ${
           JSON.stringify(
             `curl -fsS -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' http://127.0.0.1:${forkPort} | grep -q '"result"'`
           )

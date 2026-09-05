@@ -23,6 +23,7 @@ import * as NodeNet from "node:net"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
+import * as OutputStream from "../src/OutputStream.ts"
 import * as ServiceSupervisor from "../src/ServiceSupervisor.ts"
 
 const fixtureDir = NodePath.resolve(import.meta.dirname, "fixtures/service-supervisor")
@@ -94,6 +95,32 @@ const acquireFlipped = (
     const supervisor = yield* ServiceSupervisor.make
     return yield* Effect.flip(supervisor.acquire(spec))
   }))) as Promise<ServiceSupervisor.ServiceError>
+
+describe("service progress", () => {
+  it("streams service progress without changing the captured service tail", async () => {
+    const lines: Array<string> = []
+    const tail = await run(
+      Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire({
+          key: "//:streamed-service",
+          cwd: fixtureDir,
+          argv: [process.execPath, "-e", "console.log('ready private-value'); setInterval(() => {}, 1000)"],
+          stop: { signal: "SIGTERM", grace: "100ms" }
+        })
+        yield* Effect.tryPromise(() => waitFor(() => handle.outputTail().includes("ready private-value"), 10_000))
+        return handle.outputTail()
+      })).pipe(Effect.provideService(ServiceSupervisor.Output, () =>
+        OutputStream.make({
+          write: (_stream, text) => lines.push(text),
+          environment: { TOKEN: "private-value" }
+        })))
+    )
+    expect(tail).toContain("ready private-value")
+    expect(lines.join("")).toContain("ready [REDACTED]")
+    expect(lines.join("")).not.toContain("private-value")
+  })
+})
 
 describe("parseDurationMs", () => {
   it("parses ms, s, m, and h", () => {

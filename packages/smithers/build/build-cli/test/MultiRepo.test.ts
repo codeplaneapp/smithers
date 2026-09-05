@@ -3,16 +3,19 @@
  * query metadata/refusals, real nested execution, and clean-tree caching.
  */
 import * as Input from "@smthrs/targets/Input"
+import * as RepoTarget from "@smthrs/targets/RepoTarget"
 import { execFile } from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { promisify } from "node:util"
 import { afterAll, describe, expect, it } from "vitest"
-import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { makeCli, normalizeArgv, openPackageIndex } from "../src/Cli.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import { isPackageError } from "../src/PackageError.ts"
 import * as PackageLoader from "../src/PackageLoader.ts"
+import * as RepoResolution from "../src/RepoResolution.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const executeFile = promisify(execFile)
 const fixture = NodePath.join(import.meta.dirname, "fixtures", "multi-repo")
@@ -79,7 +82,7 @@ const serveCli = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -95,6 +98,37 @@ const serveCli = async (
 }
 
 describe("opaque local repositories", () => {
+  it("memoizes undeclared repository refusals without starting a child", async () => {
+    const root = await workspace()
+    const index = await openPackageIndex({ workspace: root })
+    const target = RepoTarget.Target("missing", "//:test")
+    const cache: RepoResolution.ResolutionCache = new Map()
+    const first = RepoResolution.resolve(index, target, cache)
+    expect(RepoResolution.resolve(index, target, cache)).toBe(first)
+    expect(await first).toMatchObject({
+      kinds: [],
+      refusal: "Repo.Target repository \"missing\" is not declared in Workspace repos"
+    })
+  })
+
+  it("turns cancelled queries into refusals and rejects cancelled executions", async () => {
+    const root = await workspace()
+    const index = await openPackageIndex({ workspace: root })
+    const target = index.resolve("//:childTest")[0]!.target
+    const reason = new Error("repository operation cancelled")
+    const signal = AbortSignal.abort(reason)
+    const resolution = await RepoResolution.resolve(index, target, new Map(), signal)
+    expect(resolution.refusal).toContain(reason.message)
+    await expect(RepoResolution.execute(resolution, { signal })).rejects.toBe(reason)
+  })
+
+  it("reports a non-repository git lookup as a failure, never a clean cache key", async () => {
+    const root = await workspace()
+    const index = await openPackageIndex({ workspace: root })
+    const resolution = await RepoResolution.resolve(index, RepoTarget.Target("missing", "//:test"), new Map())
+    await expect(RepoResolution.gitState(resolution)).rejects.toThrow("could not read child repository HEAD")
+  })
+
   it("prunes declared repositories from package discovery", async () => {
     const root = await workspace()
     const declaration = await PackageLoader.loadWorkspaceDeclaration(root, "WORKSPACE.ts")

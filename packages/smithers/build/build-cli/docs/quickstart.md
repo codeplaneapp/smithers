@@ -8,7 +8,7 @@ sidebar:
 This walks one workspace from nothing to a cached run. It takes about five
 minutes and spawns one shell command.
 
-You need Node 22.19 or newer, git, and a checkout that carries
+You need Node 22.19+ (Node 22) or 24.11+, git, and a checkout that carries
 `@smthrs/build-cli` and `@smthrs/targets` as workspace dependencies. See
 [Installation](./installation.md).
 
@@ -47,7 +47,7 @@ Create `PACKAGE.ts` beside it. A package exports exactly one
 ```ts
 import { Smithers as S } from "@smthrs/targets"
 
-const greet = S.Shell.Test({ command: "echo hello" })
+const greet = S.Shell.Test({ shell: "echo hello" })
 
 export const Package = S.Package({ targets: { greet } })
 ```

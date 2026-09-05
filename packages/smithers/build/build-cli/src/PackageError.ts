@@ -35,6 +35,8 @@ export type Code =
   | "workspace_syntax_unsupported"
   | "module_compile_failed"
   | "module_import_failed"
+  | "declaration_dependency_unresolved"
+  | "declaration_dependency_mismatch"
   | "package_import_cycle"
   | "runtime_import_cycle"
   | "unsupported_module_specifier"

@@ -114,7 +114,7 @@ describe("filling a target's workspace attrs", () => {
   })
 
   it("returns the attrs untouched when the rule named none", () => {
-    const target = S.Shell.Test({ command: "true" })
+    const target = S.Shell.Test({ shell: "true" })
     const metadata = Target.metadata(target)
     expect(WorkspaceToolchain.fill(metadata.workspaceAttrs, metadata.attrs, toolchain)).toBe(metadata.attrs)
   })

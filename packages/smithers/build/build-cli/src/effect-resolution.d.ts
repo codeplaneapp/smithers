@@ -5,7 +5,8 @@
  */
 
 /**
- * Installs the CLI's single-instance Effect module resolver.
+ * Installs the remaining ESM identity/bootstrap resolvers and tsx's supported
+ * CommonJS loader once. CommonJS dependencies use ordinary Node resolution.
  *
  * @category loading
  * @since 0.1.0

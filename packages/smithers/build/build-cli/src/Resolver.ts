@@ -40,18 +40,21 @@ import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
+import { parse as parseJsonc, type ParseError, printParseErrorCode } from "jsonc-parser"
 import type { Dirent } from "node:fs"
 import * as NodeFs from "node:fs/promises"
 import { builtinModules } from "node:module"
 import * as NodePath from "node:path"
-import * as ts from "typescript"
+import { version as typescriptVersion } from "typescript"
+import * as ts from "typescript/unstable/ast"
 import type { CachedResult, CacheStore } from "./Cache.ts"
 import { jsExtensionSiblings } from "./internal/js-extension-siblings.js"
+import { parseModule } from "./internal/ParseModule.ts"
 import * as Path from "./internal/Path.ts"
 import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
 
 /**
- * Identity of this resolver implementation, combined with `ts.version` into
+ * Identity of this resolver implementation, combined with the compiler version into
  * every resolver-config digest. Bump the trailing number whenever extraction,
  * probing order, or row shape changes behaviour, so stale rows can never
  * answer for a different algorithm.
@@ -59,7 +62,7 @@ import { posix, sha256Hex as sha256 } from "./internal/Text.ts"
  * @category constants
  * @since 0.1.0
  */
-export const implementationFingerprint = "smthrs-resolver/1"
+export const implementationFingerprint = "smthrs-resolver/2"
 
 /**
  * Maximum files one closure may reach before it refuses loudly.
@@ -209,13 +212,17 @@ const readTsconfigChain = async (
     throw new ResolverConfigError(`tsconfig could not be read: ${relativePath}: ${failureMessage(cause)}`)
   }
   sources.push({ path: posix(NodePath.normalize(relativePath)), digest: sha256(text) })
-  const parsed = ts.parseConfigFileTextToJson(absolute, text)
-  if (parsed.error !== undefined) {
+  const errors: Array<ParseError> = []
+  const parsed: unknown = parseJsonc(text, errors, { allowTrailingComma: true, allowEmptyContent: true })
+  if (errors.length > 0) {
     throw new ResolverConfigError(
-      `tsconfig is not valid JSONC: ${relativePath}: ${ts.flattenDiagnosticMessageText(parsed.error.messageText, " ")}`
+      `tsconfig is not valid JSONC: ${relativePath}: ${printParseErrorCode(errors[0]!.error)}`
     )
   }
-  const config = parsed.config as Record<string, unknown>
+  if (parsed !== undefined && (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))) {
+    throw new ResolverConfigError(`tsconfig must be a JSONC object: ${relativePath}`)
+  }
+  const config = (parsed ?? {}) as Record<string, unknown>
   const extendsValue = config["extends"]
   if (extendsValue !== undefined) {
     if (typeof extendsValue !== "string" || !(extendsValue.startsWith("./") || extendsValue.startsWith("../"))) {
@@ -247,7 +254,7 @@ const readTsconfigChain = async (
  *
  * `tsconfig` names the workspace-relative tsconfig to honour; when omitted,
  * a root `tsconfig.json` is used when present and no tsconfig otherwise.
- * The file is read as JSONC through the TypeScript API; a single relative
+ * The file is read as JSONC; a single relative
  * `extends` chain is followed, later files overriding `baseUrl` and
  * replacing `paths` whole; every other `extends` form refuses loudly.
  *
@@ -319,7 +326,7 @@ export const loadResolverConfig = async (options: {
   }
   const configDigest = sha256(canonicalJson({
     fingerprint: implementationFingerprint,
-    tsVersion: ts.version,
+    tsVersion: typescriptVersion,
     sources,
     baseUrl: baseUrl ?? null,
     paths,
@@ -327,13 +334,6 @@ export const loadResolverConfig = async (options: {
     indexNames
   }))
   return { workspaceRoot, configDigest, baseUrl, paths, sources }
-}
-
-const scriptKindFor = (path: string): ts.ScriptKind => {
-  if (path.endsWith(".tsx")) return ts.ScriptKind.TSX
-  if (path.endsWith(".jsx")) return ts.ScriptKind.JSX
-  if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs")) return ts.ScriptKind.JS
-  return ts.ScriptKind.TS
 }
 
 const boundedText = (node: ts.Node, source: ts.SourceFile): string => {
@@ -359,7 +359,7 @@ const boundedText = (node: ts.Node, source: ts.SourceFile): string => {
  * @since 0.1.0
  */
 export const extractSpecifiers = (path: string, text: string): ReadonlyArray<ExtractedImport> => {
-  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, false, scriptKindFor(path))
+  const source = parseModule(path, text)
   const found: Array<ExtractedImport> = []
   const literalText = (expression: ts.Expression): string | undefined =>
     ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) ? expression.text : undefined
@@ -392,7 +392,7 @@ export const extractSpecifiers = (path: string, text: string): ReadonlyArray<Ext
         }
       }
     }
-    ts.forEachChild(node, visit)
+    node.forEachChild(visit)
   }
   visit(source)
   return found

@@ -26,6 +26,7 @@ import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
 import { graphKeySentinel, keyMaterialWithGraph } from "../src/PackageExec.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 /** Temp directories this file created; removed after the suite so a run leaves nothing in the OS temp dir. */
 const temporaryDirectories: Array<string> = []
@@ -88,7 +89,11 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({ signal: live.signal }).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation, signal: live.signal }).serve([
+      ...normalizeArgv(args),
+      "--workspace",
+      root
+    ], {
       exit: (code) => {
         exitCode = code
       },
@@ -156,7 +161,7 @@ const probeCommand = (url: string): string =>
 /** A fixture-server Serve declaration; `extra` joins the server's argv. */
 const serveDeclaration = (port: number, mark: string, extra: string, probes: string): string =>
   `S.Shell.Serve({
-  command: ${JSON.stringify(`${process.execPath} ${fixtureServer} --port ${port} --marker ${mark} ${extra}`)},
+  shell: ${JSON.stringify(`${process.execPath} ${fixtureServer} --port ${port} --marker ${mark} ${extra}`)},
   ${probes}
 })`
 
@@ -171,7 +176,7 @@ describe("services edge", () => {
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }`)}
-const probe = S.Shell.Test({ command: "true", services: [svc] })
+const probe = S.Shell.Test({ shell: "true", services: [svc] })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -192,7 +197,7 @@ export const Package = S.Package({ targets: { svc, probe } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }`)}
-const probe = S.Shell.Test({ command: "true", services: [svc], sandbox: "none" })
+const probe = S.Shell.Test({ shell: "true", services: [svc], sandbox: "none" })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -214,7 +219,7 @@ export const Package = S.Package({ targets: { svc, probe } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const svc = ${serveDeclaration(port, mark, "--delay-listen 500", `readiness: { port: ${port} }`)}
-const probe = S.Shell.Test({ command: ${
+const probe = S.Shell.Test({ shell: ${
         JSON.stringify(probeCommand(`http://127.0.0.1:${port}/health`))
       }, services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
@@ -242,7 +247,7 @@ export const Package = S.Package({ targets: { svc, probe } })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }`)}
-const probe = S.Shell.Test({ command: "exit 3", services: [svc], sandbox: { network: true } })
+const probe = S.Shell.Test({ shell: "exit 3", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -272,7 +277,7 @@ const svc = ${
           `readiness: { http: "http://127.0.0.1:${port}/health", timeout: "1s" }`
         )
       }
-const probe = S.Shell.Test({ command: "true", services: [svc], sandbox: { network: true } })
+const probe = S.Shell.Test({ shell: "true", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -309,7 +314,7 @@ const svc = ${
   health: { interval: "150ms", failures: 2 }`
         )
       }
-const probe = S.Shell.Test({ command: ${JSON.stringify(consumer)}, services: [svc], sandbox: { network: true } })
+const probe = S.Shell.Test({ shell: ${JSON.stringify(consumer)}, services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { svc, probe } })
 `
     )
@@ -374,7 +379,7 @@ export const Package = S.Package({ targets: { svc } })
       `import { Smithers as S } from "@smthrs/targets"
 const assets = S.Filegroup({ srcs: S.glob(["assets/**"]) })
 const svc = ${serveDeclaration(port, mark, "", `readiness: { port: ${port} }, data: [assets]`)}
-const probe = S.Shell.Test({ command: "true", services: [svc], sandbox: { network: true } })
+const probe = S.Shell.Test({ shell: "true", services: [svc], sandbox: { network: true } })
 export const Package = S.Package({ targets: { assets, svc, probe } })
 `
     )
@@ -402,7 +407,7 @@ describe("closure keying", () => {
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 const closure = S.ImportClosure({ entries: S.glob(["src/a.ts"]) })
-const t = S.Shell.Test({ command: "true", data: [closure] })
+const t = S.Shell.Test({ shell: "true", data: [closure] })
 export const Package = S.Package({ targets: { closure, t } })
 `
     )

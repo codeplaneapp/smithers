@@ -270,7 +270,7 @@ describe("ignore-blind discovery", () => {
       root,
       "generated/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo generated" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo generated" }) } })
 `
     )
     const index = await openIndex(root)
@@ -283,7 +283,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
     await write(
       root,
       "PACKAGE.ts",
-      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { root: S.Shell.Test({ command: "true" }) } })\n`
+      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { root: S.Shell.Test({ shell: "true" }) } })\n`
     )
     // A linked worktree carries a `.git` FILE; a clone carries a directory.
     // Both hold another tree's declarations, including old-form ones.
@@ -302,13 +302,13 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
     await write(
       root,
       "PACKAGE.ts",
-      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { root: S.Shell.Test({ command: "true" }) } })\n`
+      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { root: S.Shell.Test({ shell: "true" }) } })\n`
     )
     await write(root, "demo/WORKSPACE.ts", workspaceModule)
     await write(
       root,
       "demo/PACKAGE.ts",
-      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { nested: S.Shell.Test({ command: "true" }) } })\n`
+      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { nested: S.Shell.Test({ shell: "true" }) } })\n`
     )
     await expect(openIndex(root)).rejects.toMatchObject({ code: "nested_workspace_undeclared" })
   })
@@ -319,7 +319,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
     await write(
       root,
       ".smithers/PACKAGE.ts",
-      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { own: S.Shell.Test({ command: "true" }) } })\n`
+      `import { Smithers as S } from "@smthrs/targets"\nexport const Package = S.Package({ targets: { own: S.Shell.Test({ shell: "true" }) } })\n`
     )
     expect((await openIndex(root)).targets().map((row) => row.label)).toEqual(["//.smithers:own"])
   })
@@ -333,8 +333,8 @@ describe("error fixtures", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const a = S.Shell.Run({ command: "echo a" })
-const b = S.Shell.Run({ command: "echo b" })
+const a = S.Shell.Run({ shell: "echo a" })
+const b = S.Shell.Run({ shell: "echo b" })
 export const Package = S.Package({ targets: { Foo: a, foo: b } })
 `
     )
@@ -348,7 +348,7 @@ export const Package = S.Package({ targets: { Foo: a, foo: b } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const a = S.Shell.Run({ command: "echo a" })
+const a = S.Shell.Run({ shell: "echo a" })
 export const Package = S.Package({ targets: { first: a, second: a } })
 `
     )
@@ -363,7 +363,7 @@ export const Package = S.Package({ targets: { first: a, second: a } })
       "a/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { Package as b } from "../b/PACKAGE.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo a" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo a" }) } })
 `
     )
     await write(
@@ -371,7 +371,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       "b/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { Package as a } from "../a/PACKAGE.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo b" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo b" }) } })
 `
     )
     try {
@@ -392,7 +392,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const leaked = S.Shell.Run({ command: "echo leak" })
+export const leaked = S.Shell.Run({ shell: "echo leak" })
 export const Package = S.Package({ targets: {} })
 `
     )
@@ -421,7 +421,7 @@ export const Package = S.Package({ targets: {} })
       root,
       "tools/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo run" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo run" }) } })
 `
     )
     const index = await openIndex(root)
@@ -471,7 +471,7 @@ export const Package = S.Package({ targets: {} })
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { name } from "./util.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo hi" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo hi" }) } })
 `
     )
     try {
@@ -492,7 +492,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       "a/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { helper } from "./util.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: helper }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: helper }) } })
 `
     )
     await write(
@@ -507,7 +507,7 @@ export const helper = "echo a"
       "b/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { Package as a } from "../a/PACKAGE.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo b" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo b" }) } })
 `
     )
     try {
@@ -529,7 +529,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       root,
       "sub/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { srcs: S.Shell.Run({ command: "echo srcs" }) } })
+export const Package = S.Package({ targets: { srcs: S.Shell.Run({ shell: "echo srcs" }) } })
 `
     )
     await write(
@@ -537,7 +537,7 @@ export const Package = S.Package({ targets: { srcs: S.Shell.Run({ command: "echo
       "other/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { Package as sub } from "../Sub/PACKAGE.js"
-export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "echo check", data: [sub.srcs] }) } })
+export const Package = S.Package({ targets: { check: S.Shell.Test({ shell: "echo check", data: [sub.srcs] }) } })
 `
     )
     try {
@@ -561,7 +561,7 @@ export const Package = S.Package({ targets: { check: S.Shell.Test({ command: "ec
 // TODO: reuse the shared srcs from "../b/PACKAGE.js" once it stabilizes
 /* also never read from "./WORKSPACE.js" here */
 const note = 'not an import from "../b/PACKAGE.js"'
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: note }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: note }) } })
 `
     )
     await write(
@@ -569,7 +569,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: note }
       "b/PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
 import { Package as a } from "../a/PACKAGE.js"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo b" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo b" }) } })
 `
     )
     const index = await openIndex(root)
@@ -583,7 +583,7 @@ export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo 
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { dev: S.Shell.Serve({ command: "yarn start", readiness: { http: "/health" } }) } })
+export const Package = S.Package({ targets: { dev: S.Shell.Serve({ shell: "yarn start", readiness: { http: "/health" } }) } })
 `
     )
     try {
@@ -610,16 +610,16 @@ describe("helper modules and the load cache", () => {
       `import { Smithers as S } from "@smthrs/targets"
 import { commandText } from "./util.js"
 
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: commandText }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: commandText }) } })
 `
     )
     const first = await openIndex(root)
     const [firstRun] = first.resolve("//:run")
-    expect((Target.metadata(firstRun!.target).attrs as { command?: string }).command).toBe("echo first")
+    expect((Target.metadata(firstRun!.target).attrs as { shell?: string }).shell).toBe("echo first")
     await write(root, "util.ts", `export const commandText = "echo second"\n`)
     const second = await openIndex(root)
     const [secondRun] = second.resolve("//:run")
-    expect((Target.metadata(secondRun!.target).attrs as { command?: string }).command).toBe("echo second")
+    expect((Target.metadata(secondRun!.target).attrs as { shell?: string }).shell).toBe("echo second")
   })
 })
 
@@ -631,10 +631,10 @@ describe("edge classification through nested private locals", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const leaf = S.Shell.Test({ command: "echo leaf" })
-const privateInner = S.Suite({ tests: [S.Shell.Test({ command: "echo t", data: [leaf] })] })
+const leaf = S.Shell.Test({ shell: "echo leaf" })
+const privateInner = S.Suite({ tests: [S.Shell.Test({ shell: "echo t", data: [leaf] })] })
 const privateOuter = S.Suite({ tests: [privateInner] })
-const top = S.Shell.Run({ command: "echo top", data: [privateOuter] })
+const top = S.Shell.Run({ shell: "echo top", data: [privateOuter] })
 export const Package = S.Package({ targets: { top, leaf } })
 `
     )
@@ -653,7 +653,7 @@ describe("current package outside the workspace", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { run: S.Shell.Run({ command: "echo hi" }) } })
+export const Package = S.Package({ targets: { run: S.Shell.Run({ shell: "echo hi" }) } })
 `
     )
     const discovery = await PackageDiscovery.discover(root)

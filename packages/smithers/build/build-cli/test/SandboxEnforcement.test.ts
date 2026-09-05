@@ -119,8 +119,8 @@ describe.runIf(native)("sandbox enforcement", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const undeclared = S.Shell.Run({ command: "cat secret.txt" })
-const declared = S.Shell.Run({ command: "cat secret.txt", data: [S.file("secret.txt")] })
+const undeclared = S.Shell.Run({ shell: "cat secret.txt" })
+const declared = S.Shell.Run({ shell: "cat secret.txt", data: [S.file("secret.txt")] })
 export const Package = S.Package({ targets: { undeclared, declared } })
 `
     )
@@ -142,8 +142,8 @@ export const Package = S.Package({ targets: { undeclared, declared } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const undeclared = S.Shell.Run({ command: "printf pwned > note.txt" })
-const declared = S.Shell.Build({ command: "mkdir -p out && printf ok > out/note.txt", outDirs: ["out"] })
+const undeclared = S.Shell.Run({ shell: "printf pwned > note.txt" })
+const declared = S.Shell.Build({ shell: "mkdir -p out && printf ok > out/note.txt", outDirs: ["out"] })
 export const Package = S.Package({ targets: { undeclared, declared } })
 `
     )
@@ -173,8 +173,8 @@ export const Package = S.Package({ targets: { undeclared, declared } })
         "PACKAGE.ts",
         `import { Smithers as S } from "@smthrs/targets"
 const fetchCommand = "curl -sf --max-time 5 http://127.0.0.1:${port}/ > /dev/null"
-const confined = S.Shell.Run({ command: fetchCommand })
-const networked = S.Shell.Run({ command: fetchCommand, sandbox: { network: true } })
+const confined = S.Shell.Run({ shell: fetchCommand })
+const networked = S.Shell.Run({ shell: fetchCommand, sandbox: { network: true } })
 export const Package = S.Package({ targets: { confined, networked } })
 `
       )
@@ -195,7 +195,7 @@ export const Package = S.Package({ targets: { confined, networked } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const probe = S.Shell.Run({ command: ${
+const probe = S.Shell.Run({ shell: ${
         JSON.stringify(
           `test "$HOME" != ${
             JSON.stringify(Os.homedir())
@@ -222,8 +222,8 @@ export const Package = S.Package({ targets: { probe } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const confined = S.Shell.Run({ command: "true" })
-const open = S.Shell.Run({ command: "true", sandbox: "none" })
+const confined = S.Shell.Run({ shell: "true" })
+const open = S.Shell.Run({ shell: "true", sandbox: "none" })
 export const Package = S.Package({ targets: { confined, open } })
 `
     )
@@ -250,8 +250,8 @@ export const Package = S.Package({ targets: { confined, open } })
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const confined = S.Shell.Run({ command: "true", sandbox: {} })
-const open = S.Shell.Run({ command: "true", sandbox: "none" })
+const confined = S.Shell.Run({ shell: "true", sandbox: {} })
+const open = S.Shell.Run({ shell: "true", sandbox: "none" })
 export const Package = S.Package({ targets: { confined, open } })
 `
     )
@@ -278,9 +278,9 @@ describe.runIf(native && hasDocker)("docker mechanism", () => {
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-const declared = S.Shell.Run({ command: "cat secret.txt && cat /etc/alpine-release", data: [S.file("secret.txt")] })
-const undeclared = S.Shell.Run({ command: "cat secret.txt" })
-const egress = S.Shell.Run({ command: "wget -q -T 3 -O /dev/null http://example.com/", data: [] })
+const declared = S.Shell.Run({ shell: "cat secret.txt && cat /etc/alpine-release", data: [S.file("secret.txt")] })
+const undeclared = S.Shell.Run({ shell: "cat secret.txt" })
+const egress = S.Shell.Run({ shell: "wget -q -T 3 -O /dev/null http://example.com/", data: [] })
 export const Package = S.Package({ targets: { declared, undeclared, egress } })
 `
     )

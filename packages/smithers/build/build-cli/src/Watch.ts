@@ -1,0 +1,128 @@
+/** Dependency-aware execution in fresh processes, with cancellation on file changes.
+ * @since 0.1.0
+ */
+import { spawn } from "node:child_process"
+import { watch } from "node:fs"
+import { createRequire } from "node:module"
+import { fileURLToPath, pathToFileURL } from "node:url"
+
+/** Runs fresh CLI processes until interrupted, cancelling stale work when an input changes.
+ * @category execution
+ * @since 0.1.0
+ */
+export const run = async (options: {
+  readonly root: string
+  readonly args: ReadonlyArray<string>
+  readonly ignored: ReadonlyArray<string>
+  readonly signal?: AbortSignal | undefined
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
+  readonly debounceMs: number
+  readonly once: boolean
+  readonly stdout: (text: string) => void
+  readonly stderr: (text: string) => void
+  readonly cycleCompleted?:
+    | ((cycle: {
+      readonly number: number
+      readonly exitCode: number
+      readonly output: string
+    }) => void)
+    | undefined
+}) => {
+  options.signal?.throwIfAborted()
+  // The package bootstrap installs declaration identity hooks before importing
+  // any command modules, both in a checkout and in a compiled distribution.
+  const manifest = createRequire(import.meta.url).resolve("@smthrs/build-cli/package.json")
+  const entry = fileURLToPath(new URL("./src/main.js", pathToFileURL(manifest)))
+  const ignored = [".git", "node_modules", ...options.ignored].map((path) =>
+    path.replaceAll("\\", "/").replace(/\/$/, "")
+  )
+  let revision = 0
+  let cycles = 0
+  let exitCode = 0
+  let notify = () => {}
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let stopChild = () => {}
+  const watcher = options.once ? undefined : watch(options.root, { recursive: true }, (_event, filename) => {
+    if (filename === null) return
+    const path = filename.toString().replaceAll("\\", "/")
+    if (
+      path.split("/").includes("node_modules") ||
+      ignored.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+    ) return
+    clearTimeout(timer)
+    timer = setTimeout(() => {
+      revision += 1
+      stopChild()
+      notify()
+    }, options.debounceMs)
+  })
+  let watchError: Error | undefined
+  watcher?.on("error", (error) => {
+    watchError = error
+    stopChild()
+    notify()
+  })
+  const abort = () => {
+    stopChild()
+    notify()
+  }
+  options.signal?.addEventListener("abort", abort, { once: true })
+  try {
+    while (!options.signal?.aborted && watchError === undefined) {
+      const startedAt = revision
+      cycles += 1
+      exitCode = await new Promise<number>((resolve, reject) => {
+        let output = ""
+        const child = spawn(process.execPath, [entry, ...options.args, "--workspace", options.root], {
+          cwd: options.root,
+          env: options.environment ?? process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+          detached: process.platform !== "win32"
+        })
+        let killTimer: ReturnType<typeof setTimeout> | undefined
+        const kill = (signal: NodeJS.Signals) => {
+          if (child.pid === undefined) return
+          try {
+            if (process.platform === "win32") child.kill(signal)
+            else process.kill(-child.pid, signal)
+          } catch { /* The child may have settled between the event and the signal. */ }
+        }
+        stopChild = () => {
+          kill("SIGTERM")
+          killTimer ??= setTimeout(() => kill("SIGKILL"), 5000)
+          killTimer.unref()
+        }
+        child.stdout.on("data", (chunk: Buffer) => {
+          const text = chunk.toString()
+          if (options.cycleCompleted !== undefined) output = `${output}${text}`.slice(-16 * 1024)
+          options.stdout(text)
+        })
+        child.stderr.on("data", (chunk: Buffer) => options.stderr(chunk.toString()))
+        child.once("error", (error) => {
+          clearTimeout(killTimer)
+          reject(error)
+        })
+        child.once("close", (code) => {
+          clearTimeout(killTimer)
+          stopChild = () => {}
+          options.cycleCompleted?.({ number: cycles, exitCode: code ?? 1, output })
+          resolve(code ?? 1)
+        })
+        if (options.signal?.aborted) stopChild()
+      })
+      if (options.once) break
+      if (startedAt === revision && !options.signal?.aborted && watchError === undefined) {
+        await new Promise<void>((resolve) => {
+          notify = resolve
+        })
+      }
+    }
+    if (watchError !== undefined) throw watchError
+    return { cycles, exitCode, stopped: options.signal?.aborted ?? false }
+  } finally {
+    clearTimeout(timer)
+    watcher?.close()
+    options.signal?.removeEventListener("abort", abort)
+    stopChild()
+  }
+}

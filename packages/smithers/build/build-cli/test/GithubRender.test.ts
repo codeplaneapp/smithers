@@ -129,7 +129,7 @@ export const Workspace = S.Workspace("fixture", {
   await put(
     "PACKAGE.ts",
     `import { Smithers as S } from "@smthrs/targets"
-const build = S.Shell.Test({ command: "true" })
+const build = S.Shell.Test({ shell: "true" })
 export const Package = S.Package({ targets: { build } })
 `
   )
@@ -310,7 +310,7 @@ describe("check and write", () => {
 
 describe("graph-derived shard matrices", () => {
   it("renders a suite's Shell.Test shard fan-out into the job matrix", () => {
-    const test = S.Shell.Test({ command: "true", shards: 3 })
+    const test = S.Shell.Test({ shell: "true", shards: 3 })
     const suite = S.Suite({ tests: [test] })
     const workflow = S.Github.Workflow({ name: "verify", on: { pullRequest: true }, run: [suite] })
     const ciGen = S.Github.CiGen({ workflows: [workflow] })

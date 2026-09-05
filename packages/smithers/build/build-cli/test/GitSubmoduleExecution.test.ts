@@ -4,6 +4,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const temporaryDirectories: Array<string> = []
 afterAll(async () => {
@@ -34,7 +35,7 @@ const serve = async (root: string, args: ReadonlyArray<string>) => {
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(args), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv(args), "--workspace", root], {
       exit: (code) => void (exitCode = code),
       stdout: (text) => void (output += text)
     })

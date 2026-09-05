@@ -12,6 +12,7 @@ import { terminalOf } from "./Reporter.ts"
 await main({
   argv: process.argv.slice(2),
   env: process.env,
+  stdin: process.stdin,
   stdout: terminalOf(process.stdout),
   stderr: terminalOf(process.stderr),
   on: (signal, listener) => {

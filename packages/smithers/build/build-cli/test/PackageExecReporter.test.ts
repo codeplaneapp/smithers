@@ -31,7 +31,7 @@ const write = async (root: string, relative: string, text: string): Promise<void
 const git = (root: string, ...args: ReadonlyArray<string>): string =>
   NodeChildProcess.execFileSync("git", ["-C", root, ...args], { encoding: "utf8" })
 
-const fixture = async (): Promise<string> => {
+const fixture = async (goodCommand = "true"): Promise<string> => {
   const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-exec-reporter-")))
   temporaryDirectories.push(root)
   await write(
@@ -52,9 +52,9 @@ export const Workspace = S.Workspace("fixture", {
     root,
     "PACKAGE.ts",
     `import { Smithers as S } from "@smthrs/targets"
-const good = S.Shell.Test({ command: "true" })
-const bad = S.Shell.Test({ command: "false" })
-const downstream = S.Shell.Test({ command: "true", data: [bad] })
+const good = S.Shell.Test({ shell: ${JSON.stringify(goodCommand)} })
+const bad = S.Shell.Test({ shell: "false" })
+const downstream = S.Shell.Test({ shell: "true", data: [bad] })
 const all = S.Suite({ tests: [good, bad, downstream] })
 export const Package = S.Package({ targets: { good, bad, downstream, all } })
 `
@@ -88,6 +88,31 @@ const openIndex = async (root: string): Promise<PackageIndex> =>
   PackageIndex.make(await PackageLoader.load(await PackageDiscovery.discover(root)), root)
 
 describe("PackageExec reporter hooks", () => {
+  it("streams redacted child output before the target settles", async () => {
+    const root = await fixture("printf 'hello private-value\\n'; printf 'error detail\\n' >&2")
+    const reporter = recorder()
+    const summary = await PackageExec.run({
+      index: await openIndex(root),
+      cacheDirectory: ".flows",
+      verb: "auto",
+      pattern: "//:good",
+      readCache: false,
+      reporter,
+      environment: { ...process.env, API_TOKEN: "private-value" }
+    }) as Executor.Summary
+    expect(summary.ok).toBe(true)
+    const { events } = reporter
+    const stdout = events.findIndex((event) => event.startsWith("tool //:good stdout"))
+    const stderr = events.findIndex((event) => event.startsWith("tool //:good stderr"))
+    const finished = events.indexOf("finished //:good ran")
+    expect(stdout).toBeGreaterThan(-1)
+    expect(stderr).toBeGreaterThan(-1)
+    expect(stdout).toBeLessThan(finished)
+    expect(stderr).toBeLessThan(finished)
+    expect(events.join("\n")).toContain("hello [REDACTED]")
+    expect(events.join("\n")).not.toContain("private-value")
+  })
+
   it("reports begin, starts, finishes, and the summary in order and never starts a blocked node", async () => {
     const root = await fixture()
     const reporter = recorder()

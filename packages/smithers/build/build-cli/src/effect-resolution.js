@@ -38,23 +38,20 @@
  * these hooks were registered before tsx's loader was created. An evaluation
  * path that misses that window (a bootstrap that touches tsx first, or a
  * nested require from an already-CommonJS module) falls back to tsx's own
- * classification and evaluates it through the CommonJS bridge. There,
- * an `import` of a `file:` URL compiles to `require("file://...")` — valid
- * ESM, but accepted by the CommonJS resolver only on newer Node versions.
- * The `_resolveFilename` patch below converts a `file:` URL request to its
- * path first, so a URL import (for example one produced by
- * `import.meta.resolve`) behaves identically in both formats on every
- * supported Node version.
+ * classification and evaluates it through the CommonJS bridge. Registering
+ * tsx's public CommonJS loader once also covers nested, non-namespaced
+ * requires. tsx owns TypeScript and file-URL handling; this package does not
+ * patch Node's private CommonJS resolver. CommonJS callers must install their
+ * dependencies where ordinary Node resolution can find them.
  *
  * @since 0.1.0
  */
 import { randomUUID } from "node:crypto"
-import { createRequire, default as Module, registerHooks } from "node:module"
+import { createRequire, registerHooks } from "node:module"
 import * as NodePath from "node:path"
 import { fileURLToPath } from "node:url"
 import { register as registerCommonJs } from "tsx/cjs/api"
 import { register as registerModule } from "tsx/esm/api"
-import { jsExtensionSiblings } from "./internal/js-extension-siblings.js"
 
 const installation = Symbol.for("smthrs/effect-resolution-installed")
 const registration = Symbol.for("smthrs/effect-resolution-registration")
@@ -282,52 +279,7 @@ export const installEffectResolution = () => {
   // front of it. See the hook-order note above.
   registerHooks(formatHooks)
   globalThis[registration] = registerHooks(parentHooks)
-  // Everything above reaches the ES-module resolver only. On Node 22.19.0 --
-  // the version this repository pins and CI runs -- tsx routes a declaration
-  // module whose nearest package.json declares no `type` through a CommonJS
-  // virtual module, and every specifier that module names is then resolved by
-  // `Module._resolveFilename`, where none of the hooks apply. A newer Node
-  // keeps the same file on the ES-module path, so the two versions disagreed
-  // about what a workspace declares. The patch below gives the CommonJS
-  // resolver the same three rules:
-  //
-  //   1. A `file:` URL request becomes its path. Node 22's CommonJS resolver
-  //      rejects the URL form outright while newer versions convert it.
-  //   2. A CLI-owned bare specifier resolves from this file, so a workspace
-  //      that installs nothing still finds `@smthrs/targets` and the one
-  //      `effect` the engine's branded values came from.
-  //   3. A NodeNext `./x.js` specifier falls back to the TypeScript file next
-  //      to it. The fallback runs only after real resolution failed, so an
-  //      existing `.js` still wins and a specifier that resolves to nothing
-  //      still reports itself.
-  //
-  // Rule 2 resolves from `cliParentUrl` for the reason that constant exists: a
-  // copy of this file evaluated inside a tsx namespace must still name the one
-  // installation.
-  const resolveFilename = Module._resolveFilename
-  const self = fileURLToPath(cliParentUrl)
-  const cliParent = { id: self, filename: self, paths: Module._nodeModulePaths(NodePath.dirname(self)) }
-  Module._resolveFilename = function(request, parent, ...rest) {
-    const specifier = typeof request === "string" && request.startsWith("file:")
-      ? fileURLToPath(request)
-      : request
-    if (typeof specifier !== "string") return resolveFilename.call(this, specifier, parent, ...rest)
-    if (isCliOwned(specifier)) return resolveFilename.call(this, specifier, cliParent, ...rest)
-    try {
-      return resolveFilename.call(this, specifier, parent, ...rest)
-    } catch (unresolved) {
-      const suffix = Object.keys(jsExtensionSiblings).find((extension) => specifier.endsWith(extension))
-      if (suffix === undefined) throw unresolved
-      for (const sibling of jsExtensionSiblings[suffix]) {
-        try {
-          return resolveFilename.call(this, `${specifier.slice(0, -suffix.length)}${sibling}`, parent, ...rest)
-        } catch {
-          // The next sibling, then the original failure.
-        }
-      }
-      throw unresolved
-    }
-  }
+  registerCommonJs()
   Object.defineProperty(globalThis, installation, {
     configurable: false,
     enumerable: false,

@@ -5,14 +5,15 @@ sidebar:
   order: 1
 ---
 
-`@smthrs/build-cli` is `private: true` and publishes nothing. It reaches a
-workspace as a workspace dependency, never from a registry.
+`@smthrs/build-cli` and `@smthrs/targets` publish together on the `next`
+dist-tag. For the full picture of the three packages, see the
+[smithers build install page](/pkg/smithers-build/getting-started/install).
 
 ## Requirements
 
-- Node.js 22.19.0 or newer, which is what the package declares in `engines`.
-- A package manager that links workspace packages. The workspace declaration
-  names the one targets run their tools through, pnpm or Bun.
+- Node.js 22.19+ (Node 22) or 24.11+, which is what the package declares in `engines`.
+- An npm-compatible package manager. The workspace declaration names the one
+  targets run their tools through, pnpm or Bun.
 - Git, for the parts of a run that read the tree: write-set confinement, the
   gitignored census, `owners --diff`, and `Git.Commit` targets. Declaration
   discovery itself never asks git anything.
@@ -22,11 +23,15 @@ workspace as a workspace dependency, never from a registry.
 Declare the CLI and the authoring package as devDependencies of the workspace
 root:
 
+```bash
+pnpm add -D @smthrs/build-cli@next @smthrs/targets@next
+```
+
 ```json
 {
   "devDependencies": {
-    "@smthrs/build-cli": "workspace:*",
-    "@smthrs/targets": "workspace:*"
+    "@smthrs/build-cli": "1.0.0-rc.0",
+    "@smthrs/targets": "1.0.0-rc.0"
   }
 }
 ```
@@ -49,16 +54,17 @@ import { Smithers as S } from "@smthrs/targets"
 The `bin` entry is `src/main.js`, and it runs before any TypeScript is loaded.
 It does two things:
 
-1. Installs an Effect module resolution hook. Declarations and the flow engine
-   must share one `effect` module instance; linked development packages can
-   otherwise resolve physically separate peer copies whose schema internals
-   are not interoperable.
+1. Registers the declaration loaders, including tsx's CommonJS loader. The
+   current ESM loader still shares the CLI's runtime through resolve hooks.
+   Before evaluation, a separate check refuses conflicting physical workspace
+   installations instead of allowing the hooks to conceal them.
 2. Imports `src/main.ts` through the programmatic `tsx` loader that ships as a
    CLI dependency, which is what lets the CLI's own modules and your
    `WORKSPACE.ts` and `PACKAGE.ts` files be TypeScript with no build step.
 
-There is no compiled `dist` tree to install or keep fresh. The `files` field
-publishes `src/**` and the tsconfig sets `noEmit`.
+The public library entry points resolve to compiled ESM and CommonJS output.
+The executable keeps a small JavaScript bootstrap because it must register the
+TypeScript declaration loader before importing its command module.
 
 ## What declaration modules may contain
 
@@ -73,11 +79,17 @@ its name must be spelled exactly `WORKSPACE.ts` or `PACKAGE.ts`: the walk
 compares against the directory listing, so `Package.ts` is not found even on a
 case-insensitive filesystem.
 
-Declarations resolve `effect` and `@smthrs/targets` from the CLI package that
-owns the runtime, not from the workspace. That is what lets a globally
-installed `smithers-build` bootstrap a repository before its dependencies are
-installed, and what keeps one `effect` instance across the declarations, the
-planner, and the flow engine.
+The workspace and CLI must select the same physical `effect`, `@smthrs/targets`,
+`@smthrs/plan`, `@smthrs/core`, and `@smthrs/flow` installations wherever these
+packages are installed. Matching version strings alone are insufficient.
+`declaration_dependency_mismatch` names the importing file and both package
+locations. Install matching dependencies and invoke the workspace-local CLI.
+
+The existing ESM bootstrap path still permits missing workspace dependencies.
+CommonJS callers must supply their own dependencies through ordinary Node
+resolution. No private Node CommonJS resolver is patched by build-cli.
+For the checked boundary and evaluation lifetime, see
+[Declaration loading](./concepts/declaration-loading.md).
 
 ## Programmatic use
 

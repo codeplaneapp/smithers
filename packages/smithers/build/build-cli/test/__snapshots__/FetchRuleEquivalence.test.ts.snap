@@ -1,0 +1,146 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Fetch extraction goldens recorded through the original PackageExec path > preserves complete key material, output, provenance, report, and cache replay > pre-extraction plan 1`] = `
+{
+  "cacheable": true,
+  "inputs": [],
+  "key": "cc694c45d789c39b68d3d8c7207ab57af6be3202c1c71540aac2b159abd40d33",
+  "material": {
+    "body": {
+      "cwd": ".",
+      "executionFormat": 5,
+      "flow": "Fetch",
+      "mode": "execute",
+      "outputs": {
+        "dirs": [],
+        "files": [
+          "data/nested/payload.bin",
+        ],
+      },
+      "packageFormat": 2,
+      "schemas": {
+        "attrs": {
+          "definitions": {},
+          "dialect": "draft-2020-12",
+          "schema": {
+            "additionalProperties": false,
+            "properties": {
+              "out": {
+                "minLength": 1,
+                "type": "string",
+              },
+              "sha256": {
+                "minLength": 1,
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string",
+              },
+              "url": {
+                "minLength": 1,
+                "pattern": "^https?:\\/\\/\\S+$",
+                "type": "string",
+              },
+            },
+            "required": [
+              "url",
+              "sha256",
+              "out",
+            ],
+            "type": "object",
+          },
+        },
+        "error": {
+          "definitions": {},
+          "dialect": "draft-2020-12",
+          "schema": {
+            "not": {},
+          },
+        },
+        "success": {
+          "definitions": {},
+          "dialect": "draft-2020-12",
+          "schema": {
+            "type": "null",
+          },
+        },
+      },
+      "target": "Fetch",
+    },
+    "capabilities": [
+      "fs:read",
+      "proc:spawn",
+      "fs:write",
+      "net:open",
+    ],
+    "inputs": {
+      "ambient": {
+        "arch": "<arch>",
+        "implementation": "<implementation>",
+        "lockfile": null,
+        "node": "<node>",
+        "platform": "<platform>",
+      },
+      "attrs": {
+        "out": "nested/payload.bin",
+        "sha256": "5e9c817e9e2b2189ebe6ef26c1c3a8fb2910cfcce249a02c118e9f7d4e9c6e15",
+        "url": "https://fixture.invalid/payload.bin",
+      },
+      "declared": [],
+      "dependencies": [],
+      "overlays": [],
+      "repository": null,
+      "submodules": null,
+      "toolchain": [],
+      "writeSetState": null,
+    },
+    "layers": [],
+  },
+  "mode": "execute",
+  "outDirs": [],
+  "outFiles": [
+    "data/nested/payload.bin",
+  ],
+  "outputs": {
+    "cwd": ".",
+    "paths": [
+      "nested/payload.bin",
+    ],
+  },
+  "rule": "Fetch",
+  "sandbox": {
+    "network": true,
+  },
+  "services": [],
+}
+`;
+
+exports[`Fetch extraction goldens recorded through the original PackageExec path > preserves complete key material, output, provenance, report, and cache replay > pre-extraction provenance 1`] = `
+{
+  "exitOk": true,
+  "key": "cc694c45d789c39b68d3d8c7207ab57af6be3202c1c71540aac2b159abd40d33",
+  "label": "//data:pinned",
+  "output": {
+    "files": [
+      {
+        "digest": "5e9c817e9e2b2189ebe6ef26c1c3a8fb2910cfcce249a02c118e9f7d4e9c6e15",
+        "executable": false,
+        "path": "data/nested/payload.bin",
+      },
+    ],
+    "kind": "build",
+    "manifests": [],
+  },
+  "storedAt": "<storedAt>",
+  "target": "Fetch",
+}
+`;
+
+exports[`Fetch extraction goldens recorded through the original PackageExec path > preserves complete key material, output, provenance, report, and cache replay > pre-extraction report 1`] = `
+[
+  {
+    "key": "cc694c45d789c39b68d3d8c7207ab57af6be3202c1c71540aac2b159abd40d33",
+    "label": "//data:pinned",
+    "status": "ran",
+    "target": "Fetch",
+  },
+]
+`;

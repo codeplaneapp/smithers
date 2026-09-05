@@ -64,7 +64,7 @@ export const Package = S.Package({
   targets: {
     codeowners: S.Owners.Codeowners({ org: "acme" }),
     ownersTree: S.Owners.Tree({}),
-    run: S.Shell.Run({ command: "echo hi" }),
+    run: S.Shell.Run({ shell: "echo hi" }),
   },
 })
 `
@@ -87,7 +87,7 @@ export const Package = S.Package({ targets: { srcs: S.Filegroup({ srcs: S.glob([
 
 const appPackage = `import { Smithers as S } from "@smthrs/targets"
 import { Package as lib } from "../lib/PACKAGE.ts"
-const build = S.Shell.Test({ command: "echo build", data: [lib.srcs] })
+const build = S.Shell.Test({ shell: "echo build", data: [lib.srcs] })
 export const Package = S.Package({
   owners: { owners: ["appy"], upstream: "review" },
   targets: { build },
@@ -96,7 +96,7 @@ export const Package = S.Package({
 
 const dataPackage = `import { Smithers as S } from "@smthrs/targets"
 import { Package as lib } from "../lib/PACKAGE.ts"
-const build = S.Shell.Test({ command: "echo build", data: [lib.srcs] })
+const build = S.Shell.Test({ shell: "echo build", data: [lib.srcs] })
 export const Package = S.Package({
   owners: { owners: ["dan"], noparent: true, upstream: { mode: "approve", packages: ["//lib"] } },
   targets: { build },

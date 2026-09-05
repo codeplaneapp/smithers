@@ -29,7 +29,7 @@ const dockerServiceAlias = S.Docker.Service({
 })
 
 const dockerConsumer = S.Shell.Test({
-  command: "true",
+  shell: "true",
   services: [dockerService, dockerServiceAlias],
   sandbox: { network: true }
 })

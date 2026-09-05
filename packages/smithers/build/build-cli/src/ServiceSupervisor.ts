@@ -25,6 +25,7 @@
 import { inheritedEnvironmentNames } from "@smthrs/targets/Exec"
 import * as Secret from "@smthrs/targets/Secret"
 import * as SecretProxy from "@smthrs/targets/SecretProxy"
+import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -36,6 +37,17 @@ import * as NodeHttps from "node:https"
 import * as NodeNet from "node:net"
 import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
+import type * as OutputStream from "./OutputStream.ts"
+
+/**
+ * Optional command-scoped progress observers; service capture and readiness are independent.
+ * @category services
+ * @since 1.0.0
+ */
+export const Output = Context.Reference<(spec: ServiceSpec) => OutputStream.Observer | undefined>(
+  "smithers-build/ServiceOutput",
+  { defaultValue: () => () => undefined }
+)
 
 /**
  * The readiness probe of a Serve target: an open TCP port on the loopback
@@ -1152,6 +1164,8 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     }
     const secretBoundary = yield* serviceSecretBoundary(parsed.spec)
     const environment = { ...parsed.spec.env, ...secretBoundary.environment }
+    const observer = (yield* Output)(parsed.spec)
+    yield* Effect.addFinalizer(() => Effect.sync(() => observer?.close()))
     // Every hook and the service itself run in the declared cwd under this
     // environment; the probes run there too.
     const probeContext: ProbeContext = { cwd: parsed.spec.cwd, environment }
@@ -1176,8 +1190,14 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     const exited = new Promise<void>((resolve) => {
       resolveExited = resolve
     })
-    child.stdout?.on("data", (chunk: Buffer) => tail.append(chunk, stdoutDecoder))
-    child.stderr?.on("data", (chunk: Buffer) => tail.append(chunk, stderrDecoder))
+    child.stdout?.on("data", (chunk: Buffer) => {
+      tail.append(chunk, stdoutDecoder)
+      observer?.onStdout(chunk)
+    })
+    child.stderr?.on("data", (chunk: Buffer) => {
+      tail.append(chunk, stderrDecoder)
+      observer?.onStderr(chunk)
+    })
     child.on("error", (error: NodeJS.ErrnoException) => {
       state.exited = true
       resolveExited()

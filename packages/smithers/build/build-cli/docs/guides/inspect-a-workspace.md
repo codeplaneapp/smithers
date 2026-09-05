@@ -26,8 +26,8 @@ not list it, the fault is in discovery or in the pattern, not in the verb. See
 ## Read a dependency closure
 
 ```bash
-pnpm exec smithers-build query 'deps(//packages/smithers/flows/flow:lib)'
-pnpm exec smithers-build query 'rdeps(//packages/smithers/flows/flow:lib)'
+pnpm exec smithers-build query 'deps(//packages/api:lib)'
+pnpm exec smithers-build query 'rdeps(//packages/api:lib)'
 ```
 
 `deps` prints everything below a target, with its edges. `rdeps` prints every
@@ -51,9 +51,9 @@ is meant for a file or a renderer.
 ## Resolve ownership
 
 ```bash
-pnpm exec smithers-build owners packages/smithers/flows/flow/src/Flow.ts
+pnpm exec smithers-build owners packages/api/src/server.ts
 pnpm exec smithers-build owners --diff main
-pnpm exec smithers-build query 'owners(//packages/smithers/flows/flow:lib)'
+pnpm exec smithers-build query 'owners(//packages/api:lib)'
 ```
 
 `owners` takes paths and resolves each one to its owners, the reasons those
@@ -82,7 +82,7 @@ target you expected to hit is planned to run, its key moved, and
 ## Read any of it from a program
 
 ```bash
-pnpm exec smithers-build query 'deps(//packages/smithers/flows/flow:lib)' --format json
+pnpm exec smithers-build query 'deps(//packages/api:lib)' --format json
 ```
 
 An explicit `--format` sends the structured envelope to standard output and

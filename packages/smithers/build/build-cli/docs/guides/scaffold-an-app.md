@@ -1,6 +1,6 @@
 ---
 title: "Scaffold an app"
-description: "Create a Smithers app from a template with create-app: what the copy substitutes, when dependencies are rewritten to link: paths, and what the command refuses."
+description: "Create a Smithers app from a registry-installable template: what the copy substitutes and what the command refuses."
 sidebar:
   order: 4
 ---
@@ -14,11 +14,10 @@ pnpm exec smithers-build create-app my-app
 
 ## Pick a template
 
-Two templates ship in [`@smthrs/create-app`](/api/create-app):
+The public [`@smthrs/create-app`](/api/create-app) package ships one template:
 
 ```bash
 pnpm exec smithers-build create-app my-app --template default
-pnpm exec smithers-build create-app my-app --template aomi
 ```
 
 `--template, -t` defaults to `default`. An unknown name fails and lists the
@@ -44,44 +43,9 @@ Scaffolding is a file copy plus one substitution.
   used to land in every scaffolded app. `.smithers` is deliberately not on
   that list, because templates ship one.
 
-The report names the directory, the app name, the template, the number of
-files copied, and the dependencies it rewrote.
-
-## Linking against a checkout
-
-The `@smthrs/*` packages a template depends on are not published, so a scaffold
-cut from a source checkout rewrites those specifiers to `link:` paths into
-that checkout:
-
-```json
-{
-  "dependencies": {
-    "@smthrs/flow": "link:/path/to/smithers/packages/smithers/flows/flow"
-  }
-}
-```
-
-`--link` is on by default when the templates came from a checkout and off when
-they came from a registry install under `node_modules`. `--no-link` keeps the
-declared versions in either case.
-
-Two details decide whether linking finds anything, and both are about a tree
-whose shape is not fixed:
-
-- The checkout is found by walking up from the template directory for a
-  directory named `packages`, not by counting segments off it. Packages nest,
-  so this one at `<repo>/packages/smithers/create-app` would have answered
-  `<repo>/packages/smithers` under a fixed two-segment rule.
-- Each package is identified by the `name` its manifest declares, found by
-  walking the whole `packages` tree. A package's directory is not its
-  identity: `@smthrs/flow` lives at `packages/smithers/flows/flow` and
-  `@smthrs/targets` at `packages/smithers/build/targets`, so
-  `packages/<name after the scope>` finds neither.
-
-A dependency the checkout does not carry keeps its declared version, so a
-template naming a published package is left alone. When nothing is rewritten,
-`linked` is empty. Seeing an empty `linked` from a source checkout means the
-walk found no `packages` directory above the templates.
+The report names the directory, app name, template, and number of files copied.
+The template already pins the synchronized RC package versions, so scaffolding
+does not rewrite dependencies or create local links.
 
 ## What the command refuses
 

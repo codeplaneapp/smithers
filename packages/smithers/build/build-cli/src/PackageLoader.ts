@@ -37,13 +37,12 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { pathToFileURL } from "node:url"
 import * as Diagnostic from "./Diagnostic.ts"
-import { importDeclarationModule, installEffectResolution } from "./effect-resolution.js"
+import { importDeclarationModule } from "./effect-resolution.js"
+import { assertDeclarationDependencies } from "./internal/DeclarationDependencies.ts"
 import { byCodeUnit, posix } from "./internal/Text.ts"
 import type { Discovery } from "./PackageDiscovery.ts"
 import { PackageError } from "./PackageError.ts"
 import { validateWorkspaceModule } from "./WorkspaceLoader.ts"
-
-installEffectResolution()
 
 /**
  * One evaluated, validated PACKAGE.ts module.
@@ -531,6 +530,7 @@ const importGraph = async (discovery: Discovery): Promise<LoadedGraph> => {
 export const load = async (discovery: Discovery): Promise<LoadedGraph> => {
   const scan = await scanImports(discovery)
   checkCycles(scan, discovery.packageFiles)
+  assertDeclarationDependencies(scan.files.map((file) => NodePath.join(discovery.root, file)), { bootstrap: true })
   const digest = await graphDigest(discovery, scan.files)
   const key = `${discovery.root}\0${digest}`
   const existing = loads.get(key)
@@ -551,16 +551,12 @@ export const load = async (discovery: Discovery): Promise<LoadedGraph> => {
  * full load reports the real diagnostic. The evaluated namespace is
  * discarded — target identity always comes from the one real load.
  *
- * ## Why this is not a second evaluation
+ * ## Evaluation lifetime
  *
- * {@link load} imports the same WORKSPACE.ts again through its generated
- * entry module, which reads like duplicated work and is not: both imports name
- * the same file URL, so the ESM module registry evaluates the closure once and
- * hands the second import the same namespace. That is also what keeps target
- * identity intact — one module instance, one label per target — so the two
- * imports must stay addressed by URL rather than one of them reading the file
- * some cheaper way. What the probe does own is its own resolve and transform
- * pass, which the memo below collapses to one per workspace descriptor.
+ * The discovery probe and {@link load} use separate tsx namespaces. The full
+ * graph evaluates the workspace again, with its packages sharing that graph's
+ * namespace. The probe's target values are discarded. The memo below avoids
+ * repeating the probe within one process; it does not invalidate module caches.
  *
  * @category loading
  * @since 0.1.0
@@ -571,6 +567,15 @@ export const loadWorkspaceDeclaration = async (
 ): Promise<WorkspaceDeclaration.WorkspaceDeclaration> => {
   let namespace: unknown
   try {
+    const canonicalRoot = await Fs.realpath(root)
+    const scan = await scanImports({
+      root: canonicalRoot,
+      workspaceFile,
+      packageFiles: [],
+      cacheDirectory: "",
+      repositories: []
+    })
+    assertDeclarationDependencies(scan.files.map((file) => NodePath.join(canonicalRoot, file)), { bootstrap: true })
     namespace = await importDeclarationModule(
       pathToFileURL(NodePath.join(root, workspaceFile)).href,
       import.meta.url

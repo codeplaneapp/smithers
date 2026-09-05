@@ -116,7 +116,7 @@ exits 1 whatever the command was about to report.
 ## The install adapter
 
 From `@smthrs/build-cli` and `@smthrs/build-cli/engine`. This is the runtime
-adapter between the CLI and [`@smthrs/build`](/api/smithers-build); every
+adapter between the CLI and [`@smthrs/build`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build); every
 assumption about that package's exports lives in one file.
 
 ### runInstall
@@ -261,6 +261,22 @@ Query result models and their text rendering. From `@smthrs/build-cli/Query`.
 | `PackageOwners` | An `owners(label)` query: `{ query, package, owners, agentPolicy, upstream }`.                                  |
 | `text`          | `(result, style?: Ansi.Palette) => string`. Renders any of the four for a person.                               |
 
+## Audience
+
+Import `@smthrs/build-cli/Audience` for the shared, side-effect-free consumer
+policy used by target execution and durable control commands.
+
+`resolve(options?)` accepts an injected environment, terminal facts, audience
+override, formatting, MCP, and verbosity options. Its `Policy` records audience,
+selection source, matched harness names, structured-result preference, progress
+mode, and interactive capability; it never exposes environment values.
+
+`fromArguments(argv, options?)` resolves executable presentation flags without
+touching workspace state. `incurArguments(argv, policy)` selects Incur formatting
+for harness-owned PTYs, using incremental JSONL for logs. `markers` is the
+verified registry. Detection is never an authorization boundary; see
+[output policy](./concepts/output.md) and [marker evidence](./reference/agent-detection.md).
+
 ## Reporter
 
 The seam between execution and the terminal. From `@smthrs/build-cli/Reporter`.
@@ -293,22 +309,22 @@ the structured envelope, so `--format json` is never mixed with progress.
 
 Input expansion and remote-cache resolution. From `@smthrs/build-cli/Workspace`.
 
-| Export                           | Signature                                                                           | What it is                                                    |
-| -------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `ExpandedInput`                  | `{ declaration: Input.Declared; files: ReadonlyArray<FileDigest>; digest: string }` | One declared matcher after discovery and measurement.         |
-| `FileDigest`                     | `Input.FileDigest`                                                                  | A file and the digest that enters key material.               |
-| `declarationFileNames`           | `readonly ["PACKAGE.ts"]`                                                           | The only target declaration filename.                         |
-| `ResolvedRemoteCache`            | `{ endpoint; credentials; discovered? }`                                            | The remote-cache settings one command runs under.             |
-| `ResolvedRemoteCacheCredentials` | tagged union: `shared`, `split`, `public`, `anonymous`                              | Which credentials a workspace declared.                       |
-| `RemoteCacheAccess`              | `ResolvedRemoteCache` plus `readToken()`, `writeToken()`, `publishNamespace`        | A resolved cache with the readers that fetch its credentials. |
-| `credentialEnvNames`             | `(credentials) => ReadonlyArray<string>`                                            | Every environment name a resolved credential reads.           |
-| `remoteCacheOf`                  | `(declaration, endpointOverride?) => ResolvedRemoteCache \| undefined`              | Resolves a remote cache from an already-read declaration.     |
-| `normalizeOverrideEndpoint`      | `(value: string) => string`                                                         | Validates the `SMITHERS_CACHE_URL` override.                  |
-| `defaultJjhubHosts`              | `ReadonlyArray<string>`                                                             | The hosts whose remotes identify a jjhub repository.          |
-| `DiscoveredJjhubRepository`      | `{ repo: string; host: string }`                                                    | A repository found on a jjhub remote.                         |
-| `parseJjhubRemote`               | `(url: string, hosts?) => DiscoveredJjhubRepository \| undefined`                   | Parses one remote URL into `owner/name` on a jjhub host.      |
-| `discoverJjhubRepository`        | `(root, environment) => Promise<DiscoveredJjhubRepository \| undefined>`            | Finds the jjhub repository a workspace's remote points at.    |
-| `jjhubCacheEndpoint`             | `(repo: string, environment) => string`                                             | The cache endpoint of a repository on jjhub.                  |
+| Export                              | Signature                                                                           | What it is                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `ExpandedInput`                     | `{ declaration: Input.Declared; files: ReadonlyArray<FileDigest>; digest: string }` | One declared matcher after discovery and measurement.               |
+| `FileDigest`                        | `Input.FileDigest`                                                                  | A file and the digest that enters key material.                     |
+| `declarationFileNames`              | `readonly ["PACKAGE.ts"]`                                                           | The only target declaration filename.                               |
+| `ResolvedRemoteCache`               | `{ endpoint; credentials; discovered? }`                                            | The remote-cache settings one command runs under.                   |
+| `ResolvedRemoteCacheCredentials`    | tagged union: `shared`, `split`, `public`, `anonymous`                              | Which credentials a workspace declared.                             |
+| `RemoteCacheAccess`                 | `ResolvedRemoteCache` plus `readToken()`, `writeToken()`, `publishNamespace`        | A resolved cache with the readers that fetch its credentials.       |
+| `credentialEnvNames`                | `(credentials) => ReadonlyArray<string>`                                            | Every environment name a resolved credential reads.                 |
+| `remoteCacheOf`                     | `(declaration, endpointOverride?) => ResolvedRemoteCache \| undefined`              | Resolves a remote cache from an already-read declaration.           |
+| `normalizeOverrideEndpoint`         | `(value: string) => string`                                                         | Validates the `SMITHERS_CACHE_URL` override.                        |
+| `defaultSmithersCloudHosts`         | `ReadonlyArray<string>`                                                             | The hosts whose remotes identify a Smithers Cloud repository.       |
+| `DiscoveredSmithersCloudRepository` | `{ repo: string; host: string }`                                                    | A repository found on a Smithers Cloud remote.                      |
+| `parseSmithersCloudRemote`          | `(url: string, hosts?) => DiscoveredSmithersCloudRepository \| undefined`           | Parses one remote URL into `owner/name` on a Smithers Cloud host.   |
+| `discoverSmithersCloudRepository`   | `(root, environment) => Promise<DiscoveredSmithersCloudRepository \| undefined>`    | Finds the Smithers Cloud repository a workspace's remote points at. |
+| `smithersCloudCacheEndpoint`        | `(repo: string, environment) => string`                                             | The cache endpoint of a repository on Smithers Cloud.               |
 
 The credential readers exist so a token value is fetched only while an
 outbound request is being built, never held in a serializable field and never
@@ -319,35 +335,44 @@ part of a key.
 TypeScript import-closure resolution, and the two actions built on it. From
 `@smthrs/build-cli/Resolver`.
 
-| Export                      | Signature                                                                          | What it is                                                                     |
-| --------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `ResolverConfig`            | `{ workspaceRoot; configDigest; baseUrl; paths; sources }`                         | The configuration one closure resolves under.                                  |
-| `loadResolverConfig`        | `(options: { workspaceRoot; tsconfig? }) => Promise<ResolverConfig>`               | Loads it from the tsconfig chain.                                              |
-| `ResolverConfigError`       | class                                                                              | The tsconfig chain could not be read, or an entry lies outside the workspace.  |
-| `extractSpecifiers`         | `(path: string, text: string) => ReadonlyArray<ExtractedImport>`                   | Syntax-only extraction of import, export, require, and dynamic-import sites.   |
-| `ExtractedImport`           | `{ specifier: string; dynamic: boolean }`                                          | One extracted import site.                                                     |
-| `resolveSpecifier`          | `(config, reader, fromFile, site) => Promise<RowEdge>`                             | Resolves one import into an explicit row edge.                                 |
-| `RowEdge`                   | `{ specifier; status: EdgeStatus; resolved?; packageName? }`                       | One resolved specifier row.                                                    |
-| `EdgeStatus`                | `"resolved-file" \| "package" \| "builtin" \| "unresolved" \| "dynamic"`           | The outcome of resolving one specifier.                                        |
-| `FileRow`                   | `{ path; digest; edges }`                                                          | One file's digest plus every resolved specifier.                               |
-| `TreeView`                  | `{ root: string; kind(relativePath): Promise<EntryKind \| null> }`                 | The only filesystem surface resolution consumes.                               |
-| `EntryKind`                 | `"file" \| "dir" \| "other"`                                                       | What one workspace path is.                                                    |
-| `computeClosure`            | `(options: { config; entries; cache?; maximumFiles? }) => Promise<ClosureOutcome>` | The transitive import closure of the entries.                                  |
-| `ClosureOutcome`            | `{ result: Compose.ClosureResult; stats: ClosureStats }`                           | The deterministic result plus this run's counters.                             |
-| `ClosureStats`              | `{ parsed: number; cached: number }`                                               | Files extracted versus files answered from stored rows.                        |
-| `ClosureError`              | class                                                                              | A closure computation failed.                                                  |
-| `closureOfEntries`          | `(options: LiveOptions, entries) => Promise<Compose.ClosureResult>`                | Load, expand, and compute in one call.                                         |
-| `LiveOptions`               | `{ workspaceRoot; cacheDirectory?; tsconfig?; cache? }`                            | What the live bindings run under.                                              |
-| `expandAnchoredSources`     | `(options) => Promise<ReadonlyArray<string>>`                                      | Expands anchored sources to a sorted set of workspace-relative files.          |
-| `packageDirectoryOf`        | `(workspaceRoot: string, base: string) => string`                                  | Maps an anchored base onto its package path.                                   |
-| `operandPaths`              | `(options, operand, side) => Promise<ReadonlyArray<string>>`                       | Reduces one file-algebra operand to its path set.                              |
-| `rowCacheTarget`            | `"ImportClosureRow"`                                                               | The cache target resolver rows are stored under.                               |
-| `rowCacheKey`               | `(fileDigest: string, configDigest: string) => string`                             | One resolver row's cache key.                                                  |
-| `ImportClosureLive`         | `(options: LiveOptions) => Layer`                                                  | Implements the `smithers-build/import-closure` action.                         |
-| `CheckFilesDifferenceLive`  | `(options: LiveOptions) => Layer`                                                  | Implements `smithers-build/files-difference`.                                  |
-| `implementationFingerprint` | `"smthrs-resolver/1"`                                                              | This resolver's identity, combined with `ts.version` into every config digest. |
-| `maximumClosureFiles`       | `number`                                                                           | Maximum files one closure may reach.                                           |
-| `maximumModuleBytes`        | `number`                                                                           | Maximum bytes of one module admitted to the parser.                            |
+Parsing uses TypeScript 7's native compiler through its version-pinned
+`unstable` API. The compiler receives only the supplied module and a synthetic
+configuration in a closed virtual filesystem: no project configuration,
+libraries, or imported files are loaded, and no source is executed or emitted.
+Its process is closed after each parse. Syntax-error recovery is retained;
+JSONC configuration loading and workspace resolution are separate operations.
+Keep npm's platform-specific optional dependencies enabled so TypeScript's
+matching native executable is installed.
+
+| Export                      | Signature                                                                          | What it is                                                                             |
+| --------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `ResolverConfig`            | `{ workspaceRoot; configDigest; baseUrl; paths; sources }`                         | The configuration one closure resolves under.                                          |
+| `loadResolverConfig`        | `(options: { workspaceRoot; tsconfig? }) => Promise<ResolverConfig>`               | Loads it from the tsconfig chain.                                                      |
+| `ResolverConfigError`       | class                                                                              | The tsconfig chain could not be read, or an entry lies outside the workspace.          |
+| `extractSpecifiers`         | `(path: string, text: string) => ReadonlyArray<ExtractedImport>`                   | Syntax-only extraction of import, export, require, and dynamic-import sites.           |
+| `ExtractedImport`           | `{ specifier: string; dynamic: boolean }`                                          | One extracted import site.                                                             |
+| `resolveSpecifier`          | `(config, reader, fromFile, site) => Promise<RowEdge>`                             | Resolves one import into an explicit row edge.                                         |
+| `RowEdge`                   | `{ specifier; status: EdgeStatus; resolved?; packageName? }`                       | One resolved specifier row.                                                            |
+| `EdgeStatus`                | `"resolved-file" \| "package" \| "builtin" \| "unresolved" \| "dynamic"`           | The outcome of resolving one specifier.                                                |
+| `FileRow`                   | `{ path; digest; edges }`                                                          | One file's digest plus every resolved specifier.                                       |
+| `TreeView`                  | `{ root: string; kind(relativePath): Promise<EntryKind \| null> }`                 | The only filesystem surface resolution consumes.                                       |
+| `EntryKind`                 | `"file" \| "dir" \| "other"`                                                       | What one workspace path is.                                                            |
+| `computeClosure`            | `(options: { config; entries; cache?; maximumFiles? }) => Promise<ClosureOutcome>` | The transitive import closure of the entries.                                          |
+| `ClosureOutcome`            | `{ result: Compose.ClosureResult; stats: ClosureStats }`                           | The deterministic result plus this run's counters.                                     |
+| `ClosureStats`              | `{ parsed: number; cached: number }`                                               | Files extracted versus files answered from stored rows.                                |
+| `ClosureError`              | class                                                                              | A closure computation failed.                                                          |
+| `closureOfEntries`          | `(options: LiveOptions, entries) => Promise<Compose.ClosureResult>`                | Load, expand, and compute in one call.                                                 |
+| `LiveOptions`               | `{ workspaceRoot; cacheDirectory?; tsconfig?; cache? }`                            | What the live bindings run under.                                                      |
+| `expandAnchoredSources`     | `(options) => Promise<ReadonlyArray<string>>`                                      | Expands anchored sources to a sorted set of workspace-relative files.                  |
+| `packageDirectoryOf`        | `(workspaceRoot: string, base: string) => string`                                  | Maps an anchored base onto its package path.                                           |
+| `operandPaths`              | `(options, operand, side) => Promise<ReadonlyArray<string>>`                       | Reduces one file-algebra operand to its path set.                                      |
+| `rowCacheTarget`            | `"ImportClosureRow"`                                                               | The cache target resolver rows are stored under.                                       |
+| `rowCacheKey`               | `(fileDigest: string, configDigest: string) => string`                             | One resolver row's cache key.                                                          |
+| `ImportClosureLive`         | `(options: LiveOptions) => Layer`                                                  | Implements the `smithers-build/import-closure` action.                                 |
+| `CheckFilesDifferenceLive`  | `(options: LiveOptions) => Layer`                                                  | Implements `smithers-build/files-difference`.                                          |
+| `implementationFingerprint` | `"smthrs-resolver/2"`                                                              | This resolver's identity, combined with the compiler version into every config digest. |
+| `maximumClosureFiles`       | `number`                                                                           | Maximum files one closure may reach.                                                   |
+| `maximumModuleBytes`        | `number`                                                                           | Maximum bytes of one module admitted to the parser.                                    |
 
 ## ServiceSupervisor
 
@@ -464,13 +489,13 @@ The deterministic replacement for a real agent CLI. From
 
 The `create-app` implementation. From `@smthrs/build-cli/CreateApp`.
 
-| Export            | Signature                                               | What it is                                                                         |
-| ----------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `scaffold`        | `(options: ScaffoldOptions) => Promise<ScaffoldReport>` | Copies one template into a new directory.                                          |
-| `ScaffoldOptions` | `{ directory; template?; templateRoot?; link? }`        | `template` defaults to `default`; `link` defaults to whether a checkout was found. |
-| `ScaffoldReport`  | `{ directory; name; template; files; linked }`          | What one scaffold did. `linked` names the dependencies rewritten to `link:` paths. |
-| `templateRoot`    | `() => string`                                          | Locates the `template` directory of the installed `@smthrs/create-app`.            |
-| `templates`       | `(root: string) => Promise<ReadonlyArray<string>>`      | The template names a directory offers, sorted.                                     |
+| Export            | Signature                                               | What it is                                                              |
+| ----------------- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `scaffold`        | `(options: ScaffoldOptions) => Promise<ScaffoldReport>` | Copies one template into a new directory.                               |
+| `ScaffoldOptions` | `{ directory; template?; templateRoot? }`               | `template` defaults to `default`.                                       |
+| `ScaffoldReport`  | `{ directory; name; template; files }`                  | What one scaffold copied.                                               |
+| `templateRoot`    | `() => string`                                          | Locates the `template` directory of the installed `@smthrs/create-app`. |
+| `templates`       | `(root: string) => Promise<ReadonlyArray<string>>`      | The template names a directory offers, sorted.                          |
 
 ## GitCommit
 

@@ -43,10 +43,10 @@ pnpm exec smithers-build test '//packages/...'
 pnpm exec smithers-build test '//packages/...:faults'
 
 # one package's default target
-pnpm exec smithers-build test '//packages/smithers/flows/flow'
+pnpm exec smithers-build test '//packages/api'
 
 # one exact target
-pnpm exec smithers-build test '//packages/smithers/flows/flow:test'
+pnpm exec smithers-build test '//packages/api:test'
 
 # a target in the package holding the working directory
 pnpm exec smithers-build test ':test'
@@ -121,7 +121,7 @@ want a clean tree; a stale result is a key bug, and
 ## Run one label without naming a verb
 
 ```bash
-pnpm exec smithers-build '//packages/smithers/flows/flow:lint'
+pnpm exec smithers-build '//packages/api:lint'
 ```
 
 A first argument starting with `//` or `:` is rewritten to `target <label>`,

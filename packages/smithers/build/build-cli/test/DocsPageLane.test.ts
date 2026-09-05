@@ -10,6 +10,7 @@ import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const temporaryDirectories: Array<string> = []
 afterAll(async () => {
@@ -46,8 +47,8 @@ export const Workspace = S.Workspace("fixture", {
  */
 const packageModule = `import { Smithers as S } from "@smthrs/targets"
 const references = S.Filegroup({ srcs: S.glob(["references/**"]) })
-const unit = S.Shell.Test({ command: "true" })
-const rendered = S.Shell.Test({ command: "grep -q flow docs/flow.md", data: [S.file("//docs/flow.md")] })
+const unit = S.Shell.Test({ shell: "true" })
+const rendered = S.Shell.Test({ shell: "grep -q flow docs/flow.md", data: [S.file("//docs/flow.md")] })
 const page = S.Docs.Page({
   brief: S.file("//pages/flow/brief.md"),
   prompt: S.file("//prompts/reference.md"),
@@ -99,7 +100,10 @@ const serve = async (
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({ environment: { ...process.env, SMTHRS_AGENT_FAKE: "fake.json" } }).serve(
+    await makeCli({
+      presentation: executionPresentation,
+      environment: { ...process.env, SMTHRS_AGENT_FAKE: "fake.json" }
+    }).serve(
       [...normalizeArgv(args), "--workspace", root],
       {
         exit: (code) => {

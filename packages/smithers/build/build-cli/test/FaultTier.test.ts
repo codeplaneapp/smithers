@@ -43,7 +43,7 @@ export const Workspace = S.Workspace("fixture", {
       Path.join(root, cwd, "PACKAGE.ts"),
       `import { Smithers as S } from "@smthrs/targets"
 export const Package = S.Package({ targets: {
-  unit: S.Shell.Test({ command: "node --version" }),
+  unit: S.Shell.Test({ shell: "node --version" }),
   faults: S.FaultSuite({ cwd: "${cwd}", config: null }),
   chaos: S.FaultSuite({ cwd: "${cwd}", config: null })
 } })

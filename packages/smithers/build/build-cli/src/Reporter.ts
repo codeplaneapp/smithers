@@ -18,9 +18,13 @@
  *
  * @since 0.1.0
  */
+import * as Clack from "@clack/prompts"
 import { performance } from "node:perf_hooks"
+import { Writable } from "node:stream"
 import * as Ansi from "./Ansi.ts"
+import type * as Audience from "./Audience.ts"
 import type { Summary, TargetReport } from "./Executor.ts"
+import * as OutputStream from "./OutputStream.ts"
 
 /**
  * The `--ui` flag values. `auto` resolves to one of the other three from the
@@ -142,11 +146,9 @@ export interface RunStart {
 /**
  * The events execution reports.
  *
- * `note` carries the free-form progress lines the executors already write,
- * `label  message` for a line about one target and `smthrs: message` for a
- * line about the run. `toolOutput` is the hook for a child process's streams;
- * no executor streams a child today, `ExecLive` captures both pipes and
- * folds their tails into the failure message, so nothing calls it yet.
+ * `note` carries free-form progress lines. `toolOutput` receives a bounded,
+ * redacted observer view of child and service pipes; execution still captures
+ * both streams independently and folds their tails into failure results.
  * `close` restores the terminal and must run even when execution throws.
  *
  * @category models
@@ -239,6 +241,62 @@ export interface MakeOptions {
   readonly env?: Ansi.Environment | undefined
   readonly now?: (() => number) | undefined
   readonly interval?: number | false | undefined
+  readonly presentation?: Audience.Policy | undefined
+}
+
+/**
+ * Quiet progress retains bounded diagnostics, without flooding an agent's context.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const silent = (terminal: Terminal): Reporter => {
+  let written = 0
+  const diagnostic = (message: string): void => {
+    if (written >= 12) return
+    const clean = Ansi.strip(message).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
+    terminal.write(`${clean.slice(0, 640)}${clean.length > 640 ? " …" : ""}\n`)
+    written += 1
+    if (written === 12) {
+      terminal.write("Further progress diagnostics omitted; inspect the failed targets for details.\n")
+    }
+  }
+  return {
+    renderer: "plain",
+    begin: noop,
+    targetStarted: noop,
+    targetFinished: (report) => {
+      if (report.status === "failed") diagnostic(plainLine(report))
+    },
+    toolOutput: noop,
+    note: noop,
+    warn: diagnostic,
+    summary: noop,
+    close: noop
+  }
+}
+
+/** Human framing uses Clack through a private stream, never process-global streams. */
+const humanPlain = (terminal: Terminal): Reporter => {
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      terminal.write(Ansi.strip(String(chunk)))
+      callback()
+    }
+  })
+  const base = plain((line) => terminal.write(`${Ansi.strip(line)}\n`))
+  return {
+    ...base,
+    begin: (run) => {
+      const what = run.verb === "auto" ? run.pattern : `${run.verb} ${run.pattern}`
+      Clack.intro(what, { output })
+      Clack.log.info(`${run.targets.length} targets · ${run.jobs} jobs`, { output })
+    },
+    targetStarted: (label) => Clack.log.step(`Running ${label}`, { output }),
+    note: (line) => Clack.log.message(Ansi.strip(line), { output }),
+    warn: (line) => Clack.log.warn(Ansi.strip(line), { output }),
+    summary: (summary) => Clack.outro(plainSummary(summary), { output })
+  }
 }
 
 const glyph: Record<TargetReport["status"], string> = { ran: "✓", hit: "○", failed: "✗", skipped: "↷" }
@@ -280,6 +338,14 @@ const pretty = (options: MakeOptions, live: boolean): Reporter => {
   let hidden = false
   const running = new Map<string, number>()
   const prefixes = new Map<string, (text: string) => string>()
+  const clack = options.presentation?.audience === "human"
+  const output = new Writable({
+    write(chunk, _encoding, callback) {
+      const text = String(chunk)
+      terminal.write(c.enabled ? text : Ansi.strip(text))
+      callback()
+    }
+  })
 
   const restoreCursor = (): void => terminal.write(Ansi.showCursor)
 
@@ -400,12 +466,16 @@ const pretty = (options: MakeOptions, live: boolean): Reporter => {
       )
       const what = run.verb === "auto" ? run.pattern : `${run.verb} ${run.pattern}`
       const plural = total === 1 ? "target" : "targets"
+      if (clack) {
+        Clack.intro(c.bold(what), { output })
+        Clack.log.info(`${total} ${plural} · ${run.jobs} jobs`, { output })
+      }
       if (live) {
         hidden = true
         terminal.write(Ansi.hideCursor)
         process.once("exit", restoreCursor)
       }
-      paint([`${c.cyan("▸")} ${c.bold(what)}  ${c.dim(`${total} ${plural} · ${run.jobs} jobs`)}`])
+      if (!clack) paint([`${c.cyan("▸")} ${c.bold(what)}  ${c.dim(`${total} ${plural} · ${run.jobs} jobs`)}`])
     },
     targetStarted: (label) => {
       running.set(label, now())
@@ -428,6 +498,7 @@ const pretty = (options: MakeOptions, live: boolean): Reporter => {
       running.clear()
       stopTimer()
       paint(footer(summary))
+      if (clack) Clack.outro(summary.ok ? "Targets complete" : "Targets failed; see diagnostics above", { output })
     },
     close: () => {
       stopTimer()
@@ -451,7 +522,17 @@ const pretty = (options: MakeOptions, live: boolean): Reporter => {
  * @category constructors
  * @since 0.1.0
  */
-export const make = (options: MakeOptions): Reporter => {
+const makeRenderer = (options: MakeOptions): Reporter => {
+  if (options.presentation?.progress === "silent") return silent(options.terminal)
+  if (options.presentation !== undefined) {
+    const env = options.env ?? process.env
+    const unsafeLive = !options.terminal.isTTY || env["TERM"] === "dumb" || nonEmpty(env["NO_COLOR"])
+    if (options.presentation.audience === "agent" || unsafeLive || options.renderer === "plain") {
+      return options.presentation.audience === "human"
+        ? humanPlain(options.terminal)
+        : plain((line) => options.terminal.write(`${Ansi.strip(line)}\n`))
+    }
+  }
   switch (options.renderer) {
     case "plain":
       return plain((line) => options.terminal.write(`${line}\n`))
@@ -459,6 +540,28 @@ export const make = (options: MakeOptions): Reporter => {
       return pretty(options, false)
     case "tty":
       return pretty(options, true)
+  }
+}
+
+/**
+ * Builds one audience-aware renderer; all progress is redacted independently of results.
+ * @category constructors
+ * @since 0.1.0
+ */
+export const make = (options: MakeOptions): Reporter => {
+  const reporter = makeRenderer(options)
+  if (options.presentation === undefined) return reporter
+  const redact = OutputStream.redactor(options.env)
+  return {
+    ...reporter,
+    targetFinished: (report) =>
+      reporter.targetFinished({
+        ...report,
+        ...(report.error === undefined ? {} : { error: redact(report.error) })
+      }),
+    toolOutput: (label, stream, chunk) => reporter.toolOutput(label, stream, redact(chunk)),
+    note: (line) => reporter.note(redact(line)),
+    warn: (line) => reporter.warn(redact(line))
   }
 }
 

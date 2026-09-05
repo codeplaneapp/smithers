@@ -9,6 +9,7 @@ import * as Os from "node:os"
 import * as Path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import * as PackageExec from "../src/PackageExec.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
@@ -78,7 +79,7 @@ const serve = async (root: string) => {
     return true
   }) as typeof process.stderr.write
   try {
-    await makeCli({}).serve([...normalizeArgv(["//:dist"]), "--workspace", root], {
+    await makeCli({ presentation: executionPresentation }).serve([...normalizeArgv(["//:dist"]), "--workspace", root], {
       exit: (code) => {
         exitCode = code
       },
@@ -113,7 +114,7 @@ describe("executable cache identity", () => {
   it.each(["host", "command"])("admits the resolved %s tool and interpreter directories read-only", async (kind) => {
     const { root, tools } = await fixture(
       `S.Shell.Build({ ${
-        kind === "host" ? "bin: S.Host.bin(\"identity-compiler\")" : "command: \"identity-compiler\""
+        kind === "host" ? "bin: S.Host.bin(\"identity-compiler\")" : "shell: \"identity-compiler\""
       }, outDirs: ["dist"] })`
     )
     const installed = await directory()
@@ -150,7 +151,7 @@ if printf changed > '${installed}/value' 2>/dev/null; then exit 1; fi
 
   it("leaves the executable installation to a declared Docker image", async () => {
     const { root, tools } = await fixture(
-      "S.Shell.Build({ command: \"identity-compiler\", outDirs: [\"dist\"] })",
+      "S.Shell.Build({ shell: \"identity-compiler\", outDirs: [\"dist\"] })",
       "sandboxes: S.Sandboxes({ default: S.Sandbox.Docker({ image: \"node:22-bookworm\" }) }),"
     )
     await write(tools, "identity-compiler", "#!/bin/sh\nexit 0\n")
@@ -165,7 +166,7 @@ if printf changed > '${installed}/value' 2>/dev/null; then exit 1; fi
   })
 
   it("admits a tool directly in /tmp without mounting the private temp root", async () => {
-    const { root } = await fixture("S.Shell.Build({ command: \"true\", outDirs: [\"dist\"] })")
+    const { root } = await fixture("S.Shell.Build({ shell: \"true\", outDirs: [\"dist\"] })")
     const name = `${Path.basename(root)}.compiler`
     const binary = Path.join("/tmp", name)
     temporary.push(binary)
@@ -174,7 +175,7 @@ if printf changed > '${installed}/value' 2>/dev/null; then exit 1; fi
       root,
       "PACKAGE.ts",
       `import { Smithers as S } from "@smthrs/targets"
-export const Package = S.Package({ targets: { dist: S.Shell.Build({ command: "${binary}", outDirs: ["dist"] }) } })`
+export const Package = S.Package({ targets: { dist: S.Shell.Build({ shell: "${binary}", outDirs: ["dist"] }) } })`
     )
     const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
     const planned = await PackageExec.plan({
@@ -322,7 +323,7 @@ exec '${tools}/sdk/cargo' "$@"
 
   it.each(["shell", "generate"])("keys the %s TargetBin after its producer executes", async (kind) => {
     const { root, tools } = await fixture(
-      "S.Shell.Build({ command: \"true\", outDirs: [\"dist\"], sandbox: \"none\" })",
+      "S.Shell.Build({ shell: \"true\", outDirs: [\"dist\"], sandbox: \"none\" })",
       "toolchains: [S.Rust.Toolchain({ workspace: S.file(\"//Cargo.toml\"), cargo: \"cargo\", channel: \"stable\" })],"
     )
     await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
