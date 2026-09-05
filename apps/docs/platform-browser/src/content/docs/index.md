@@ -1,21 +1,30 @@
 ---
 title: "@smthrs/platform-browser"
-description: "The two Effect platform services a browser tab does not get for free: a FileSystem over a mounted ZenFS volume and a ChildProcessSpawner over an in-page bash interpreter, plus the closed BrowserHost bundle."
+description: "Effect's FileSystem and ChildProcessSpawner inside a browser tab, over a virtual filesystem the page mounts and a bash interpreter that runs in the page."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-browser/docs/README.md"
 ---
 
-`@smthrs/platform-browser` supplies the two platform services
-`@effect/platform-browser` does not ship.
+`@smthrs/platform-browser` gives a browser tab two Effect platform services it
+otherwise cannot have: `FileSystem`, over a virtual filesystem the page mounts,
+and `ChildProcessSpawner`, over a bash interpreter that runs inside the page.
+Code written against Effect's service tags runs in a tab without changing a
+line.
+
+## What it solves
 
 Effect's own browser platform package covers HTTP, sockets, workers, key-value
 storage, and crypto. It ships neither a `FileSystem` nor a
-`ChildProcessSpawner`, because a browser tab has no `node:fs` and cannot fork a
-process. A tab can have both anyway, given a virtual filesystem (ZenFS) and an
-in-page bash interpreter (just-bash). This package is that adapter pair,
-written the way [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) writes its own,
-plus `BrowserHost`: the complete closed Host bundle Smithers runs on.
+`ChildProcessSpawner`, because a tab has no `node:fs` and cannot fork a
+process. Any program that reads a file or runs a command stops at the browser:
+you rewrite it against a bespoke storage API, or you leave it on a server and
+talk to it over the network.
 
-## Who uses this package
+A tab can serve both, given two objects the page supplies itself: a virtual
+filesystem, such as ZenFS over IndexedDB, OPFS, or memory, and an in-page bash
+interpreter, such as just-bash. This package is the adapter pair that turns
+those two objects into Effect's services. Neither backend is a dependency here.
+Each arrives as a function argument, so the page chooses which storage backend
+is mounted, and your bundle carries no vendor code this package picked for you.
 
 A tab can run the memory engine, the platform adapters, and the capability
 kernel. Compose `BrowserHost` for the five host services, `BrowserServices`
@@ -31,97 +40,105 @@ or contained-host factories. Crypto is not bundled. Supply
 hashing. The artifact filesystem mode is `durability: "best-effort"` and
 `coordination: "process"`; the mount must implement `rename` and `utimes`.
 
+Both adapters state their limits rather than hiding them. A mounted volume has
+no symlink creation, no writable file handles, and no watcher, so those
+operations fail with a typed `PlatformError` instead of pretending to succeed,
+and the spawner refuses a process pipeline rather than silently running half of
+it. [Troubleshooting](/troubleshooting/) lists every refusal with the change
+that resolves it.
+
 ## Install
 
 ```bash
-pnpm add @smthrs/platform-browser
+pnpm add @smthrs/platform-browser@next effect@4.0.0-rc.112 @zenfs/core @zenfs/dom just-bash
 ```
 
-Neither `@zenfs/core` nor `just-bash` is a dependency here. Both arrive as
-structural slices, so the page decides which backend is mounted and which
-interpreter is wired to it. For what you supply and where it comes from, see
-[Installation](/installation/).
+The 1.0 release candidates publish under the `next` dist tag, and the first one
+is not on npm yet, so until it is you build the package from a clone.
+[Installation](/installation/) covers that, which backend each adapter needs,
+and the `effect` version the peer dependency pins.
 
-## The smallest real composition
+## Write a file in the tab, then count its lines with a command
+
+The snippet mounts one volume, writes a file through Effect's `FileSystem`,
+then counts its lines with `wc`, which runs in the tab:
 
 ```ts
-import { BrowserChildProcessSpawner, BrowserFileSystem, BrowserServices } from "@smthrs/platform-browser"
+import { BrowserServices } from "@smthrs/platform-browser"
+import { configureSingle, fs } from "@zenfs/core"
+import { IndexedDB } from "@zenfs/dom"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { Bash } from "just-bash"
 
-/** The page's own interpreter and its ZenFS promises API, on one mounted volume. */
-declare const bash: BrowserChildProcessSpawner.JustBashLike
-declare const fs: BrowserFileSystem.ZenFsPromisesLike
+await configureSingle({ backend: IndexedDB })
 
-const program = Effect.flatMap(
-  ChildProcessSpawner,
-  (spawner) => spawner.string(ChildProcess.make("cat", ["notes.txt"], { cwd: "/workspace" }))
-).pipe(Effect.provide(BrowserServices.layer({ bash, fs })))
+/** Two views of one volume: the interpreter's, and the promises API the adapter reads. */
+const layer = BrowserServices.layer({ bash: new Bash({ fs }), fs: fs.promises })
+
+const program = Effect.gen(function*() {
+  const fileSystem = yield* FileSystem.FileSystem
+  const spawner = yield* ChildProcessSpawner
+
+  yield* fileSystem.makeDirectory("/workspace", { recursive: true })
+  yield* fileSystem.writeFileString("/workspace/notes.txt", "one\ntwo\nthree\n")
+
+  return yield* spawner.string(
+    ChildProcess.make("wc", ["-l", "notes.txt"], { cwd: "/workspace" })
+  )
+})
+
+console.log(await Effect.runPromise(program.pipe(Effect.provide(layer), Effect.orDie)))
 ```
 
-`BrowserServices.layer` is a function, where `NodeServices.layer` is a value.
-That is the whole design in one signature: the tab owns which volume is mounted
-and which interpreter is wired to it, and the two must be the same filesystem or
-the spawner and the `FileSystem` service disagree about what exists. See
-[Injected backends](/concepts/injected-backends/).
+The program itself names nothing from this package. It asks for
+`FileSystem.FileSystem` and `ChildProcessSpawner`, so the same code runs under
+[`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) or
+[`@smthrs/platform-bun`](https://platform-bun.smithers.sh/reference/api/) unchanged.
 
-For a runnable first success in a real page, see the
-[Quickstart](/quickstart/).
+The one rule the design turns on is visible in the layer line: `bash` and `fs`
+are two views of a single mount. Build them over different mounts and nothing
+raises an error, because both objects are valid; the command simply reads a
+file the write never reached. [Injected backends](/concepts/injected-backends/)
+explains the rule, and the [Quickstart](/quickstart/) walks the same program
+end to end.
 
-## The package at a glance
+## How this fits with @smthrs/flows
 
-The root entry point exports four namespaces, and each is also importable from
-`@smthrs/platform-browser/<Module>`:
+[`@smthrs/flows`](https://flows.smithers.sh/reference/api/) is the durable flow engine these adapters were
+built for. A flow runs on a **host**, which is a closed set of five service
+tags: `FileSystem`, `Path`, `ChildProcessSpawner`, `Jj`, and `HttpClient`.
+Provide those five and a flow runs; where it runs is a composition detail the
+flow never sees. `@smthrs/flows` ships the Node host and the durable engine
+around it, and it deliberately re-exports no platform bundle, because the
+program that runs picks its own. `BrowserHost.layer` from this package is that
+pick for a tab: the same five tags, backed by a mount, an in-page interpreter,
+Effect's `fetch` client, and jj compiled to WebAssembly. See
+[The closed Host surface](/concepts/host-bundle/), and
+[Compose the browser host bundle](/guides/compose-the-host/) for the wiring.
 
-| Namespace                    | What it is                                                                                                            |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `BrowserFileSystem`          | Effect's `FileSystem` over a ZenFS-shaped promises API, plus the structural slices that API must satisfy.             |
-| `BrowserChildProcessSpawner` | Effect's `ChildProcessSpawner` over an in-page bash interpreter, plus the structural slice that interpreter provides. |
-| `BrowserServices`            | The aggregate of `ChildProcessSpawner`, `FileSystem`, and `Path`, mirroring `NodeServices`.                           |
-| `BrowserHost`                | The complete closed Host bundle: those three plus the wasm-backed `Jj` and Effect's fetch-backed `HttpClient`.        |
+You need none of that to use the two adapters on their own.
+`BrowserServices.layer` is an ordinary Effect platform layer, and a page that
+wants a filesystem and a shell can stop there.
 
-Every export, with signatures, is on the [API reference](/reference/api/).
+Above `@smthrs/flows` sits [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), the `smthrs` command that
+finds flows in a project, plans them, runs them, and reads their events back.
+It runs flows on a machine rather than in a tab, so it composes the Node host;
+this package is what the same engine uses when the page is the machine.
 
-## What a tab refuses
+## Next steps
 
-Both adapters are explicit about the gap between a tab and a machine, and every
-refusal below is a typed `PlatformError` rather than a silent wrong answer:
-
-- The spawner runs one command at a time, buffers its output, has no stdin, and
-  rejects process pipelines, extra file descriptors, a named shell, a detached
-  command, and `forceKillAfter`. See
-  [Run a command in a tab](/guides/run-a-command/).
-- The filesystem serves what a promises-shaped volume can serve. Symlink
-  creation, writable handles, watchers, and the `makeTemp*` family fail with
-  `PermissionDenied`. See
-  [Read and write files on a mounted volume](/guides/work-with-files/).
-- A redirect is never followed behind the capability kernel's back. In a tab it
-  returns an opaque response with status 0, because Fetch hides redirect details. See
-  [The closed Host surface](/concepts/host-bundle/).
-
-## The sibling hosts
-
-`BrowserHost` provides the same five service tags as
-[`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/)'s `NodeHost` and
-[`@smthrs/platform-bun`](https://platform-bun.smithers.sh/reference/api/)'s `BunHost`. Host-level programs can use those tags across all three. Durable execution
-still requires the Node database and runtime described above.
-
-## Where to go next
-
-- [Installation](/installation/): what you supply, the import forms, and the
-  browser bundle gate.
-- [Quickstart](/quickstart/): mount a volume, run a command, and read the
-  file back through both views.
-- Concepts: [injected backends](/concepts/injected-backends/),
-  [the isolation attestation](/concepts/isolation-attestation/), and
-  [the closed Host surface](/concepts/host-bundle/).
-- Guides: [compose the host bundle](/guides/compose-the-host/),
-  [run a command in a tab](/guides/run-a-command/), and
-  [read and write files](/guides/work-with-files/).
-- [The browser host contract](/contract/): the normative statement of where
-  this host diverges from `NodeHost`.
-- [Testing](/testing/): satisfy both slices with ordinary objects, and what
-  this package's own suite already pins.
-- [Troubleshooting](/troubleshooting/): the refusals both adapters report,
-  what causes each one, and what to change.
+- [Installation](/installation/): the backends you supply, the import forms,
+  and what bundles for a browser.
+- [Quickstart](/quickstart/): one mount, one command, one file, proven from
+  both sides.
+- [Injected backends](/concepts/injected-backends/): why the layers are
+  functions, and what the one-mount rule protects.
+- [Run a command in a tab](/guides/run-a-command/): working directories,
+  environment, buffered output, cancellation, and what the spawner refuses
+  rather than fakes.
+- [Read and write files on a mounted volume](/guides/work-with-files/): the
+  operations a mounted volume serves, and what the rest answer with.
+- [API reference](/reference/api/): every public export.

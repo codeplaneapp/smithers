@@ -1,6 +1,6 @@
 ---
 title: "API reference"
-description: "Browser implementations of Effect platform services backed by ZenFS and just-bash"
+description: "Every public export of @smthrs/platform-browser: the entry points, the two structural backend slices, what the filesystem serves and refuses, and where the spawner diverges from a process table."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-browser/docs/api.md"
 ---
 
@@ -39,8 +39,8 @@ exists.
 | `@smthrs/platform-browser/BrowserServices`            | [src/BrowserServices.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-browser/src/BrowserServices.ts)                                   | any      |
 | `@smthrs/platform-browser/BrowserHost`                | [src/BrowserHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-browser/src/BrowserHost.ts)                                           | any      |
 
-Every module is browser-bundleable; the root barrel and `BrowserHost` are both
-entry points `scripts/browser-check.mjs` executes.
+Every module bundles for a browser, `BrowserHost` included: nothing this
+package publishes resolves a `node:` built-in.
 
 ## The layers are functions
 
@@ -52,9 +52,8 @@ about what exists, and a command writes into a filesystem no reader can see. The
 signature makes the pairing the caller's explicit decision.
 
 Because the slices are structural, Node's own `node:fs/promises` satisfies
-`ZenFsPromisesLike`, which is what the test suite runs the filesystem contract
-against, so the adapter is exercised against a real directory rather than a
-double.
+`ZenFsPromisesLike`, so a test can exercise the adapter against a real directory
+rather than a double. See [Testing](/testing/).
 
 `BrowserFileSystem.layer` carries one further claim. The service it provides is
 marked, for [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/), as a volume that cannot address any
@@ -76,13 +75,9 @@ answer for a backend with no symlink creation, writable handles, or watchers:
 `open`, `sink`, `truncate`, `watch`, and the `makeTemp*`
 family fail rather than pretend to have succeeded. `sink` is in that list because
 the slice has no writable file handle to append through, so its incremental
-contract cannot be honoured. Each gap that turns out to matter becomes a ticket,
-not a silently-wrong implementation.
-
-Three of those wirings exist because `makeNoop` is not `make`: it hardcodes
-`readFileString`, `writeFileString`, and `exists` rather than deriving them from
-`readFile`, `writeFile`, and `access`, so leaving them alone would fail on files
-that plainly exist.
+contract cannot be honoured.
+[Read and write files on a mounted volume](/guides/work-with-files/#what-fails-and-how)
+gives the served operation to reach for in place of each one.
 
 The operations that are served honour their options rather than dropping them.
 
@@ -174,10 +169,10 @@ requires both.
 
 ## Browser support
 
-`@smthrs/platform-browser` is gated as a browser entry point by
-`scripts/browser-check.mjs` (`pnpm run browser`, and one CI step). No module
-under `src/` resolves a `node:` built-in; the package's build and documentation
-scripts do, and none of them ship in an entry point.
+Every entry point bundles for a browser. No published module resolves a `node:`
+built-in, `BrowserHost` included, because its `HttpClient` is Effect's `fetch`
+client rather than a Node transport, so a browser-mode bundle of the root entry
+point needs no polyfill and no `node:` shim.
 
 See [platform support](https://smithers.sh/docs/reference/api/#platform-support), the
 [`@smthrs/kernel` reference](https://kernel.smithers.sh/reference/api/), whose closed service list this

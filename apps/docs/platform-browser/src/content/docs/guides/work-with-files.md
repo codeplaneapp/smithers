@@ -74,8 +74,8 @@ watcher: `chmod`, `chown`, `copy`, `copyFile`, `glob`, `link`, `symlink`,
 `readLink`, `open`, `sink`, `truncate`, `watch`, and the
 four `makeTemp*` operations. `sink` is among them because the slice has no
 writable handle to append through, so its incremental contract cannot be
-honoured. Each gap that turns out to matter becomes a ticket, not a
-silently-wrong implementation.
+honoured. Copy a file by reading it and writing it back, and append with
+`writeFile({ flag: "a" })` where you would have reached for `sink`.
 
 Errors the backend throws are mapped onto the `PlatformError` tag that carries
 their meaning, with the original kept as the `cause`:

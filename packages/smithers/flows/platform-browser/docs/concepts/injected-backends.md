@@ -25,8 +25,8 @@ the adapter calls, under the names the real backend uses.
 Taking the instance rather than the package buys three things. The page decides
 which ZenFS backend is mounted, and when. The bundle carries no vendor code this
 package chose for it. And a test satisfies either slice with an object literal,
-which is how the suite runs the filesystem contract against a real directory
-through `node:fs/promises`.
+or runs the filesystem against a real directory by passing Node's own
+`node:fs/promises`.
 
 ## The one-mount rule
 

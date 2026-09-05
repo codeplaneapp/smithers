@@ -9,19 +9,29 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/platform-browser
+pnpm add @smthrs/platform-browser@next effect@4.0.0-rc.112
 ```
+
+The Smithers 1.0 release candidates publish under the `next` dist tag, so the
+tag is part of the command. The first candidate is not on npm yet; until it is,
+build the package from a clone of
+[the repository](https://github.com/smithersai/smithers).
+
+`effect` is a peer dependency declared at exactly `4.0.0-rc.112`, so install it
+yourself at that version. The services these adapters implement live in Effect 4
+(`effect/FileSystem`, `effect/Path`, and `effect/unstable/process`), Effect 3
+does not satisfy the peer range, and two copies of `effect` in one program are
+two sets of service tags.
 
 The package ships as ESM and CommonJS with TypeScript declarations, and its
 `engines` field asks for Node.js 22.19.0 or later, which is the toolchain that
-installs and builds it rather than a runtime the code needs. Its runtime
+installs and builds it rather than a runtime the code needs. Its other runtime
 dependencies install with it:
 
-| Dependency                         | Why it is here                                                                                                |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| [`effect`](https://effect.website) | The `FileSystem`, `Path`, `ChildProcessSpawner`, and `HttpClient` contracts these adapters implement.         |
-| [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)    | `CommandLine.render`, which produces the line the interpreter runs, and the filesystem isolation attestation. |
-| [`@smthrs/jj`](https://jj.smithers.sh/reference/api/)            | The wasm-backed `Jj` service the `BrowserHost` bundle composes.                                               |
+| Dependency                      | Why it is here                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) | `CommandLine.render`, which produces the line the interpreter runs, and the filesystem isolation attestation. |
+| [`@smthrs/jj`](https://jj.smithers.sh/reference/api/)         | The wasm-backed `Jj` service the `BrowserHost` bundle composes.                                               |
 
 ## What you supply
 
@@ -45,8 +55,8 @@ composition that splits them produces adapters that disagree about what exists.
 See [Injected backends](/concepts/injected-backends/).
 
 Because the slices are structural, a test satisfies them without either vendor
-package: Node's own `node:fs/promises` satisfies `ZenFsPromisesLike`, which is
-what this package's own suite runs the filesystem contract against. See
+package: Node's own `node:fs/promises` satisfies `ZenFsPromisesLike`, so a test
+can run against a real temp directory instead of a mock. See
 [Testing](/testing/).
 
 ## Import forms
@@ -73,16 +83,11 @@ one entry point each. `@smthrs/platform-browser/package.json` is exported.
 
 ## Browser bundles
 
-Every module here is browser-bundleable. No module under `src/` resolves a
-`node:` built-in, including `BrowserHost`, whose `HttpClient` is Effect's
-`fetch` client rather than a Node transport. Two gates hold that property:
-
-- `scripts/browser-check.mjs` at the repository root, run by `pnpm run browser`
-  and by one CI step, bundles this package's entry points with esbuild in
-  browser mode.
-- The package's own `test/BrowserBundle.test.ts` bundles the barrel and
-  `BrowserHost` and fails on a `node:` import, so a regression fails inside the
-  package that caused it.
+Every module here bundles for a browser. No published module resolves a `node:`
+built-in, `BrowserHost` included, whose `HttpClient` is Effect's `fetch` client
+rather than a Node transport, so no bundler asks you for a polyfill it cannot
+supply. Bundle the root entry point in browser mode to see it: nothing in the
+graph names a `node:` specifier.
 
 ## Next step
 

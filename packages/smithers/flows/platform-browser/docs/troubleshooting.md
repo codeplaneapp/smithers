@@ -247,8 +247,8 @@ anything above to follow.
 Request the final URL, or follow the hop through
 [`@smthrs/kernel`](/api/kernel)'s guarded `HttpClient.layer`, which rechecks
 every hop against the grant. The same bundle under Node or Bun sees the ordinary
-3xx instead, which is why the package's own network contract test can assert the
-invariant either way. See
+3xx instead, so a test that reproduces this outside a browser sees a status and a
+`location` rather than the opaque response. See
 [The closed Host surface](./concepts/host-bundle.md).
 
 ## Every jj operation reports not_installed

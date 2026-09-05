@@ -29,9 +29,9 @@ const read = Effect.flatMap(FileSystem.FileSystem, (fs) => fs.readFileString("/t
 Paths are absolute host paths here, because the volume is the machine. To give
 a test a boundary of its own, root the slice: wrap each member so it joins a
 temp directory in front of the path it was given, and answer `realpath` inside
-the virtual namespace by stripping the canonical host root back off. That is
-what this package's shared-mount contract test does, and it is the only way an
-assertion about a path cannot pass by accident.
+the virtual namespace by stripping the canonical host root back off. Then the
+test asserts the paths your program uses, such as `/workspace/notes.txt`, rather
+than whatever temp directory the machine handed it.
 
 ## Stub the interpreter with an object literal
 
@@ -152,36 +152,14 @@ composition. When a test wants Effect's `FileSystem` with no kernel claim
 attached, use `make`. See
 [The isolation attestation](./concepts/isolation-attestation.md).
 
-## What this package's own suite pins
+## Where to stop
 
-The suite runs under Vitest and again under Bun, so a runtime difference fails
-in the package that owns it:
-
-```bash
-pnpm --filter @smthrs/platform-browser test
-```
-
-It covers five areas:
-
-- **The host contract**, against `BrowserHost` three ways: the full bundle over
-  the committed `flows_jj.wasm`, the manual-redirect `HttpClient`, and one real
-  mount shared by the filesystem, the interpreter, and jj.
-- **The filesystem**, against a real temp directory for recursive listing,
-  permission checks, directory modes, symlink and relative canonicalization
-  including a `..` that follows a link, and bounded streaming with refused
-  bounds.
-- **The filesystem again, against stubs**, for every error tag, a looping
-  directory tree, a backend that misreports a read length, and backends that
-  keep the buffers they are handed and the containers they answer with, which
-  pin that bytes and names cross the boundary by value.
-- **The spawner**, for the rendered command line with hostile argv tokens, every
-  refused capability, and the abort boundary: an interpreter that ignores its
-  `AbortSignal` must not let a second run start, and a killed handle must report
-  a `PlatformError` rather than interrupt its caller.
-- **The barrel and the bundle**, for the namespace universe, the kernel
-  isolation attestation that `layer` makes and `make` does not, and an esbuild
-  browser-mode bundle of the barrel and `BrowserHost` that fails on a `node:`
-  import.
+Test your own code's use of these services, not the adapters underneath them.
+Everything these pages state as behaviour is fixed by the package: the options
+each filesystem operation honours, which backend error becomes which
+`PlatformError` tag, the fifteen operations that refuse, the rendered command
+line, and the one-run-at-a-time abort boundary. A test that re-asserts one of
+those is testing this package rather than your program.
 
 ## Related reading
 

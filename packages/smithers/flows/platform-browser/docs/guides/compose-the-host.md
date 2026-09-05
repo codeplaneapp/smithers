@@ -104,8 +104,7 @@ with the resulting opaque redirect.
 The mistake this composition can still make is handing `bash`, `fs`, and
 `jj.fs` views of different volumes. It produces no error, only disagreement, so
 assert it once in a test: write a file through `FileSystem`, read it back
-through a spawned command, and snapshot it with jj. That is exactly what this
-package's shared-mount contract test does, over one real directory. See
-[Testing](../testing.md).
+through a spawned command, and snapshot it with jj. If all three agree, the
+three arguments are one mount. See [Testing](../testing.md).
 
 Use one workspace per mount: the workspace root must be `/`.

@@ -60,10 +60,9 @@ status `0`, no headers, no body. The kernel's redirect loop has no `location` to
 read, so it returns the response as it stands. The opaque response succeeds with status 0, which callers must handle;
 the browser does not follow it to another origin.
 
-The same bundle running under Node or Bun, which is how the package's network
-contract test runs it, sees the ordinary 3xx with its `location` header instead.
-Both forms share the invariant the test asserts: the second origin is never
-contacted.
+The same bundle running under Node or Bun sees the ordinary 3xx with its
+`location` header instead. Both forms hold the same invariant: the host client
+never contacts the second origin on its own.
 
 ## Related reading
 
