@@ -100,8 +100,8 @@ describe("Alchemy-style declaration constructors", () => {
 
   it("applies one macro, lets declared attrs override cwd, and sorts supported declarations", () => {
     let received: Readonly<Record<string, unknown>> | undefined
-    const alpha = Shell.Test({ command: "alpha" })
-    const zulu = Shell.Test({ command: "zulu" })
+    const alpha = Shell.Test({ shell: "alpha" })
+    const zulu = Shell.Test({ shell: "zulu" })
     const declaration = PackageDefaults({
       directories: "packages/*",
       attrs: { cwd: "declared/cwd", feature: true },

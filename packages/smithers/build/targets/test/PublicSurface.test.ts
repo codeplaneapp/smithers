@@ -1,0 +1,122 @@
+import { Flow } from "@smthrs/flow"
+import * as Schema from "effect/Schema"
+import { existsSync, readFileSync } from "node:fs"
+import { createRequire } from "node:module"
+import { fileURLToPath } from "node:url"
+import { describe, expect, it } from "vitest"
+import * as Shell from "../src/Shell.ts"
+import * as S from "../src/Smithers.ts"
+import * as Target from "../src/Target.ts"
+
+const require = createRequire(import.meta.url)
+
+describe("published policy boundary", () => {
+  it("does not export or ship repository-specific policies", () => {
+    for (
+      const name of [
+        "StandardPackage",
+        "DurableIdentityGuard",
+        "DocsReferenceSync",
+        "JsdocTruthfulness",
+        "reviewPrompt"
+      ]
+    ) {
+      expect(name in S).toBe(false)
+    }
+    const manifest = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
+    expect(manifest.exports["./*"]).toBeUndefined()
+    expect(manifest.publishConfig.exports["./*"]).toBeUndefined()
+    expect("SafeFs" in S).toBe(false)
+    expect(Object.keys(S).some((name) => name.endsWith("Live"))).toBe(false)
+    for (const name of ["StandardPackage", "ReviewLint"]) {
+      expect(manifest.exports[`./${name}`]).toBeNull()
+      expect(manifest.publishConfig.exports[`./${name}`]).toBeNull()
+      expect(() => require.resolve(`@smthrs/targets/${name}`)).toThrow(/not defined by "exports"/)
+      expect(existsSync(fileURLToPath(new URL(`../src/${name}.ts`, import.meta.url)))).toBe(false)
+      for (const format of ["esm", "cjs"]) {
+        expect(existsSync(fileURLToPath(new URL(`../dist/${format}/${name}.js`, import.meta.url)))).toBe(false)
+      }
+    }
+    expect(typeof S.LlmLint).toBe("function")
+  })
+})
+
+describe("shell executable contract", () => {
+  it("preserves shell text and direct argument boundaries", () => {
+    expect(Shell.execPayload({ shell: "printf '%s' \"$HOME\"" }).argv).toEqual([
+      "/bin/sh",
+      "-c",
+      "printf '%s' \"$HOME\""
+    ])
+    expect(Shell.execPayload({ bin: S.Runtime.bin, args: ["--eval", "console.log('two words')", "a b", ""] }).argv)
+      .toEqual([Shell.toolToken(S.Runtime.bin), "--eval", "console.log('two words')", "a b", ""])
+  })
+
+  it.each([
+    {},
+    { shell: "node", args: ["--version"] },
+    { shell: "true", args: [] },
+    { shell: "true", runtimeArgs: [] },
+    { shell: "true", using: {} },
+    { shell: "true", bin: S.Runtime.bin },
+    { bun: "console.log(1)", args: ["lost"] },
+    { bun: "console.log(1)", runtimeArgs: ["lost"] },
+    { bin: S.Runtime.bin, using: {} },
+    { script: S.file("check.sh"), runtimeArgs: [] }
+  ])("rejects unsupported executable combinations at the schema boundary: %j", (attrs) => {
+    for (const schema of [Shell.BuildAttrs, Shell.TestAttrs, Shell.RunAttrs, Shell.ServeAttrs, Shell.DiffAttrs]) {
+      expect(() => Schema.decodeUnknownSync(schema)({ ...attrs, changes: [] })).toThrow()
+    }
+    expect(() => Shell.Test(attrs as never)).toThrow()
+    expect(() => Shell.execPayload(attrs as never)).toThrow()
+  })
+})
+
+describe("opaque target contract", () => {
+  it("exposes explicit lowering without inherited Flow execution methods", () => {
+    const target = S.Shell.Test({ shell: "true" })
+    expect(Target.isTarget(target)).toBe(true)
+    expect("@smthrs/flow/Flow" in target).toBe(false)
+    for (const name of ["execute", "asNode", "body", "poll", "resume", "executionId"]) {
+      expect(name in target).toBe(false)
+    }
+    expect(Target.plan(target).ast._tag).toBe("ActionCall")
+  })
+
+  it("lowers package-only catalog rules to their explicit unsupported action", () => {
+    const target = S.Shell.Serve({ shell: "node server.js" })
+    const ast = Target.plan(target).ast
+    expect(ast._tag).toBe("ActionCall")
+    if (ast._tag === "ActionCall") expect(ast.action).toBe("smithers-build/not-implemented")
+  })
+
+  it("rejects a marker-only object with no lowering implementation", () => {
+    expect(() => Target.plan({ _tag: "forged" } as never)).toThrow("target has no registered plan implementation")
+  })
+})
+
+// These assertions are compiled by tsconfig.test.json; they never execute.
+const authoringContract = () => {
+  const declaration = Shell.Test({ shell: "true" })
+  // @ts-expect-error Targets are opaque declarations, not executable flows.
+  declaration.execute({})
+  // @ts-expect-error Targets cannot masquerade as child flows.
+  declaration.asNode({})
+  // @ts-expect-error Flow interpreters require an explicit lowering host.
+  const flow: Flow.Any = declaration
+  void flow
+  // @ts-expect-error No selector.
+  Shell.Test({})
+  // @ts-expect-error Shell text cannot take argv arguments.
+  Shell.Test({ shell: "node", args: ["--version"] })
+  const conflicting = { shell: "node", bin: S.Runtime.bin }
+  // @ts-expect-error Exclusivity applies to non-literal arguments too.
+  Shell.Test(conflicting)
+  // @ts-expect-error Old ambiguous selector was removed.
+  Shell.Test({ command: "true" })
+  // @ts-expect-error Bun templates cannot take ignored runtime flags.
+  Shell.Test({ bun: "true", runtimeArgs: [] })
+  Shell.Test({ shell: "true" })
+  Shell.Test({ bin: S.Runtime.bin, args: ["--version"] })
+}
+void authoringContract

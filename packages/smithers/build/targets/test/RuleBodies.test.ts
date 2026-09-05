@@ -36,8 +36,8 @@ import { plannedArgv, plannedCalls, plannedValue } from "./plan.ts"
 import { packageManager, runtime } from "./toolchain.ts"
 
 const manifest = S.file("//package.json")
-const shellBuild = S.Shell.Build({ command: "true", outDirs: ["dist"] })
-const shellTest = S.Shell.Test({ command: "true" })
+const shellBuild = S.Shell.Build({ shell: "true", outDirs: ["dist"] })
+const shellTest = S.Shell.Test({ shell: "true" })
 
 describe("package-executor rules refuse under a bare Flow runtime", () => {
   const cases: ReadonlyArray<readonly [string, Target.AnyTarget]> = [
@@ -61,7 +61,7 @@ describe("package-executor rules refuse under a bare Flow runtime", () => {
     ],
     ["Repo.Target", S.Repo.Target("child", "//pkg:test")],
     ["Git.Submodule", S.Git.Submodule({ path: "vendor/x" })],
-    ["Shell.Serve", S.Shell.Serve({ command: "node server.js" })],
+    ["Shell.Serve", S.Shell.Serve({ shell: "node server.js" })],
     ["Github.Setup", S.Github.Setup({})]
   ]
 
@@ -431,7 +431,7 @@ describe("Shell bodies", () => {
   })
 
   it("runs a command through the shell and a script under the interpreter its extension names", () => {
-    expect(plannedArgv(S.Shell.Run({ command: "echo hi" }))).toEqual(["/bin/sh", "-c", "echo hi"])
+    expect(plannedArgv(S.Shell.Run({ shell: "echo hi" }))).toEqual(["/bin/sh", "-c", "echo hi"])
     expect(plannedArgv(S.Shell.Test({ script: S.file("scripts/check.sh") })).slice(0, 1)).toEqual(["/bin/sh"])
     expect(plannedArgv(S.Shell.Diff({ script: S.file("scripts/check.mjs"), changes: ["docs/api.md"] }))[0])
       .toBe(Exec.runtimeBinToken)
@@ -457,7 +457,7 @@ describe("Shell bodies", () => {
 
   it("carries the declared secrets and the build-system timeout on every shell exec", () => {
     const call = plannedCalls(S.Shell.Build({
-      command: "true",
+      shell: "true",
       outDirs: ["dist"],
       secrets: [S.HttpSecret(S.Secret("TOKEN"), ["https://api.example.invalid"])]
     }))[0]
@@ -466,10 +466,10 @@ describe("Shell bodies", () => {
   })
 
   it("refuses a declaration that names no executable or names two", () => {
-    expect(() => S.Shell.Run({} as never)).toThrow(/requires exactly one of bin, bun, command, script.*none/)
-    expect(() => S.Shell.Run({ command: "true", bun: "await 1" } as never))
-      .toThrow(/requires exactly one of bin, bun, command, script.*bun, command/)
-    expect(() => S.Shell.Build({ command: "true" } as never)).toThrow(/at least one outDirs or outFiles/)
+    expect(() => S.Shell.Run({} as never)).toThrow(/requires exactly one of bin, bun, shell, script.*none/)
+    expect(() => S.Shell.Run({ shell: "true", bun: "await 1" } as never))
+      .toThrow(/requires exactly one of bin, bun, shell, script.*bun, shell/)
+    expect(() => S.Shell.Build({ shell: "true" } as never)).toThrow(/at least one outDirs or outFiles/)
   })
 })
 

@@ -58,14 +58,6 @@ export * as Input from "./Input.ts"
 export * as Target from "./Target.ts"
 
 /**
- * Confined filesystem reads shared by discovery.
- *
- * @category namespace exports
- * @since 0.1.0
- */
-export * as SafeFs from "./SafeFs.ts"
-
-/**
  * Package manifest declarations, rendering, and target synthesis.
  *
  * @category namespace exports
@@ -129,23 +121,17 @@ export { Agents } from "./AgentTarget.ts"
 /** @category constructors @since 0.1.0 */
 export { PackageDefaults } from "./PackageDefaults.ts"
 /** @category actions @since 0.1.0 */
-export { Exec, ExecError, ExecLive } from "./Exec.ts"
-/** @category macros @since 0.1.0 */
-export { StandardPackage } from "./StandardPackage.ts"
+export { Exec, ExecError } from "./Exec.ts"
 /** @category macros @since 0.1.0 */
 export { BunSuite } from "./BunSuite.ts"
 /** @category macros @since 0.1.0 */
 export { FaultSuite } from "./FaultSuite.ts"
-/** @category macros @since 0.1.0 */
-export { DocsReferenceSync, DurableIdentityGuard, JsdocTruthfulness } from "./ReviewLint.ts"
-/** @category constants @since 0.1.0 */
-export { reviewPrompt } from "./ReviewLint.ts"
 /** @category targets @since 0.1.0 */
 export { Filegroup } from "./Filegroup.ts"
 /** @category targets @since 0.1.0 */
 export { Fetch } from "./Fetch.ts"
 /** @category actions @since 0.1.0 */
-export { ExpandFilegroup, ExpandFilegroupLive, FilegroupError } from "./Filegroup.ts"
+export { ExpandFilegroup, FilegroupError } from "./Filegroup.ts"
 /** @category guards @since 0.1.0 */
 export { isFilegroup } from "./Filegroup.ts"
 /** @category targets @since 0.1.0 */
@@ -185,7 +171,7 @@ export { PackageLint } from "./PackageLint.ts"
 /** @category targets @since 0.1.0 */
 export { DocsParity } from "./DocsParity.ts"
 /** @category actions @since 0.1.0 */
-export { CheckDocs, CheckDocsLive, DocsParityError } from "./DocsParity.ts"
+export { CheckDocs, DocsParityError } from "./DocsParity.ts"
 /** @category targets @since 0.1.0 */
 export { SortPackageJson } from "./SortPackageJson.ts"
 /** @category constructors @since 0.1.0 */
@@ -193,20 +179,18 @@ export { generated, PackageJson } from "./PackageJson.ts"
 /** @category targets @since 0.1.0 */
 export { PackageJsonCheck, PackageJsonWrite } from "./PackageJson.ts"
 /** @category actions @since 0.1.0 */
-export { SyncPackageJson, SyncPackageJsonLive } from "./PackageJson.ts"
+export { SyncPackageJson } from "./PackageJson.ts"
 /** @category targets @since 0.1.0 */
 export { NewPackage } from "./NewPackage.ts"
 /** @category actions @since 0.1.0 */
-export { ScaffoldPackage, ScaffoldPackageLive } from "./NewPackage.ts"
+export { ScaffoldPackage } from "./NewPackage.ts"
 /** @category actions @since 0.1.0 */
 export {
   CheckFile,
-  CheckFileLive,
   checkGeneratedFile,
   DriftError,
   WriteFile,
   WriteFileError,
-  WriteFileLive,
   writeGeneratedFile
 } from "./GeneratedFile.ts"
 /** @category targets @since 0.1.0 */
@@ -224,7 +208,7 @@ export { TypedocDocs } from "./TypedocDocumentation.ts"
 /** @category targets @since 0.1.0 */
 export { LlmLint } from "./LlmLint.ts"
 /** @category actions @since 0.1.0 */
-export { ClaudeCliMissing, FindingsError, LlmReview, LlmReviewError, LlmReviewLive } from "./LlmLint.ts"
+export { ClaudeCliMissing, FindingsError, LlmReview, LlmReviewError } from "./LlmLint.ts"
 /** @category targets @since 0.1.0 */
 export { Clean } from "./Compose.ts"
 /** @category targets @since 0.1.0 */
@@ -241,14 +225,7 @@ export { entrypoint, testRunner, testSuite } from "./NodeTest.ts"
 /** @category targets @since 0.1.0 */
 export { NodeBinary } from "./NodeBinary.ts"
 /** @category actions @since 0.1.0 */
-export {
-  CaptureOutputs,
-  CaptureOutputsLive,
-  measureOutput,
-  OutputError,
-  readOutputManifest,
-  verifyOutputs
-} from "./ToolBuild.ts"
+export { CaptureOutputs, measureOutput, OutputError, readOutputManifest, verifyOutputs } from "./ToolBuild.ts"
 
 /**
  * Declared JavaScript runtimes and the argv they run programs with.

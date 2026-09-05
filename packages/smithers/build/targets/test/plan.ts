@@ -72,10 +72,8 @@ const evaluate = (ast: Node.Ast, calls: Array<PlannedCall>): unknown => {
 
 /** Interprets one target's body against its own validated attrs. */
 const interpret = (target: Target.AnyTarget): { readonly calls: Array<PlannedCall>; readonly value: unknown } => {
-  const metadata = Target.metadata(target)
-  const body = (target as unknown as { readonly body: (attrs: unknown) => Node.Any }).body
   const calls: Array<PlannedCall> = []
-  const value = evaluate(body(metadata.attrs).ast, calls)
+  const value = evaluate(Target.plan(target).ast, calls)
   return { calls, value }
 }
 

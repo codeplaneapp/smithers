@@ -63,14 +63,15 @@ export const maximumExecutableLength = 256
 /**
  * Schema for the pnpm versions this workspace supports.
  *
- * The single entry is the version the root legacy declaration pins. A workspace that
- * wants another pin adds it here, which is the point: the set of versions a
- * legacy declaration file may write is reviewed, not free text.
+ * The entries are reviewed toolchain releases. The newest is the version the
+ * root workspace pins; retaining an older supported pin lets existing
+ * workspaces upgrade Smithers without rewriting their toolchain in the same
+ * change.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const PnpmVersion = Schema.Literals(["11.21.0"])
+export const PnpmVersion = Schema.Literals(["11.21.0", "11.25.0"])
 
 /**
  * The pnpm versions this workspace supports.

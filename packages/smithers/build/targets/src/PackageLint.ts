@@ -96,7 +96,7 @@ export const PackageLint = Target.make("PackageLint", {
       return publint.pipe(Node.map((result) => ({ publint: result, attw: null })))
     }
     return publint.pipe(
-      Node.andThen((publint) =>
+      Node.bindPlanned((publint) =>
         Target.runTool({
           cwd: attrs.cwd,
           argv: PackageManager.exec(attrs.packageManager, ["attw", "--pack", "."]),

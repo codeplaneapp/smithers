@@ -1447,5 +1447,9 @@ export const ExecLive = (options: {
   readonly environment?: ToolEnvironment | undefined
   /** The confinement every exec of this target runs under; see {@link ExecSandbox}. */
   readonly sandbox?: ExecSandbox.Request | undefined
+  /** Observer-only progress; result capture and failure tails are unchanged. */
+  readonly onStdout?: ((chunk: Uint8Array) => void) | undefined
+  /** Observer-only progress; result capture and failure tails are unchanged. */
+  readonly onStderr?: ((chunk: Uint8Array) => void) | undefined
 }): Layer.Layer<Action.Requirement<"smithers-build/exec">, never, FlowRuntime.FlowRuntime> =>
   Exec.toLayer((payload) => run(options, payload))

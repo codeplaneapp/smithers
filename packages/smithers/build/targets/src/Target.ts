@@ -1,9 +1,9 @@
 /**
- * Target declarations built on the flows Flow API.
+ * Opaque build declarations with an explicit plan-lowering boundary.
  *
  * @since 0.1.0
  */
-import { Action, Flow, type FlowRuntime } from "@smthrs/flow"
+import { Action, type Flow, type FlowRuntime } from "@smthrs/flow"
 import * as Node from "@smthrs/plan/Node"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
@@ -335,7 +335,8 @@ export interface Metadata {
 }
 
 /**
- * A Flow returned by a target invocation and exported from a legacy declaration file.
+ * An opaque build declaration. Execute it through the package executor;
+ * use {@link plan} only to lower its action-backed implementation explicitly.
  *
  * @category models
  * @since 0.1.0
@@ -346,8 +347,15 @@ export type Target<
   Success extends Schema.Top = Schema.Top,
   Error extends Schema.Top = Schema.Top,
   Requires = unknown
-> = Flow.Flow<Id, Attrs, Success, Error, Requires> & {
+> = {
+  readonly _tag: Id
   readonly [TargetTypeId]: Metadata
+  readonly [TargetTypes]?: {
+    readonly attrs: Attrs
+    readonly success: Success
+    readonly error: Error
+    readonly requires: Requires
+  }
 }
 
 /**
@@ -356,7 +364,39 @@ export type Target<
  * @category models
  * @since 0.1.0
  */
-export type AnyTarget = Flow.Any & { readonly [TargetTypeId]: Metadata }
+export type AnyTarget = { readonly _tag: string; readonly [TargetTypeId]: Metadata }
+
+declare const TargetTypes: unique symbol
+const PlanTypeId = Symbol.for("smithers-build/Target/plan")
+
+/**
+ * Lowers a target's validated declaration to its action plan without executing it.
+ *
+ * Package-executor-only rules produce a typed NotImplemented refusal in this
+ * plan. Dependencies, tool resolution and package services must be supplied by
+ * the package executor; this operation does not claim to execute those rules.
+ * A host can embed an action-backed target in a Flow with `body: () => plan(target)`.
+ *
+ * @category constructors
+ * @since 0.1.0
+ */
+export const plan = <
+  Id extends string,
+  Attrs extends Flow.AnyStructSchema,
+  Success extends Schema.Top,
+  Error extends Schema.Top,
+  Requires
+>(
+  target: Target<Id, Attrs, Success, Error, Requires>,
+  attrs?: Attrs["~type.make.in"]
+): Node.Node<Success["Type"], Error["Type"], Requires> => {
+  const descriptor = Object.getOwnPropertyDescriptor(target, PlanTypeId)
+  const implementation = descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
+  if (typeof implementation !== "function") throw new TypeError("target has no registered plan implementation")
+  return implementation(
+    attrs === undefined ? metadata(target).attrs : metadata(target).attrsSchema.make(attrs, strictMake)
+  ) as Node.Node<Success["Type"], Error["Type"], Requires>
+}
 
 /**
  * Opaque Effect Schema for direct target references in target attrs.
@@ -907,8 +947,9 @@ export const maximumAttrsMembers = 100_000
  * one value and plan another, so the author's object is read exactly once,
  * as data, and every later read is of this copy.
  *
- * Targets, dependency selectors, declared inputs, and any value with a
- * non-plain prototype pass through as opaque handles rather than being walked.
+ * Targets and dependency selectors retain their handle identity. Declared
+ * inputs are plain records and are copied so even an Unknown schema owns
+ * the data it will later freeze. Other non-plain values are refused.
  */
 const snapshotAttrs = (
   value: unknown,
@@ -920,12 +961,11 @@ const snapshotAttrs = (
     if (NodeUtil.isProxy(value)) throw new TypeError("target attrs must not contain a Proxy")
   }
   if (typeof value !== "object" || value === null) return value
-  if (isTarget(value) || isDependencySelector(value) || Input.isDeclared(value)) return value
+  if (isTarget(value) || isDependencySelector(value)) return value
   const prototype = Object.getPrototypeOf(value)
   const isPlainArray = Array.isArray(value) && prototype === Array.prototype
-  // A target, a dependency selector, and a declared input are the three
-  // handles the author legitimately passes through, and each is recognized
-  // above. Anything else carrying a prototype of its own used to pass through
+  // Targets and dependency selectors are recognized handles. Anything else
+  // carrying a prototype of its own used to pass through
   // unwalked, which let a class instance reach the schema with its accessors
   // intact: the decode invoked them, so the accessor guard this snapshot
   // exists to enforce was skipped for exactly the values that could defeat
@@ -969,14 +1009,14 @@ const snapshotAttrs = (
 /**
  * Freezes a decoded value and everything the target owns inside it.
  *
- * Targets, dependency selectors, and declared inputs are handles the author
- * still holds, so they are left alone; everything else here was produced by
- * {@link snapshotAttrs} or by the schema and belongs to this target.
+ * Targets and dependency selectors are handles the author still holds, so
+ * they are left alone. Declared input records, like the other plain data,
+ * were copied by {@link snapshotAttrs} or the schema and belong to this target.
  */
 const freezeOwned = (value: unknown): void => {
   if (typeof value !== "object" || value === null) return
   if (Object.isFrozen(value)) return
-  if (isTarget(value) || isDependencySelector(value) || Input.isDeclared(value)) return
+  if (isTarget(value) || isDependencySelector(value)) return
   const prototype = Object.getPrototypeOf(value)
   if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) return
   Object.freeze(value)
@@ -1280,8 +1320,7 @@ const sourceIdentity = (operation: unknown): Node.FunctionIdentity => {
 }
 
 /**
- * Creates a target whose attrs are the Flow payload schema and whose
- * implementation is the Flow's required pure plan-time body.
+ * Creates an opaque target with validated attrs and a pure plan implementation.
  *
  * @category constructors
  * @since 0.1.0
@@ -1404,12 +1443,7 @@ export const make = <
       kindViews.set(kind, view)
       return view
     }
-    const flow = Flow.make<Id, Attrs, Success, Error, Requires>(id, {
-      payload: options.attrs,
-      success: successSchema,
-      error: errorSchema,
-      body: (value) => options.implementation(value, context)
-    })
+    const target = { _tag: id }
     const value: Metadata = Object.freeze({
       target: id,
       implementationDigest,
@@ -1430,13 +1464,20 @@ export const make = <
       featured: presentation.featured,
       forKind
     })
-    Object.defineProperty(flow, TargetTypeId, {
+    Object.defineProperty(target, TargetTypeId, {
       configurable: false,
       enumerable: false,
       value,
       writable: false
     })
-    return flow as unknown as Target<Id, Attrs, Success, Error, Requires>
+    const declaration = target as unknown as Target<Id, Attrs, Success, Error, Requires>
+    Object.defineProperty(declaration, PlanTypeId, {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: (value: unknown) => options.implementation(value as Attrs["Type"], context)
+    })
+    return declaration
   }
   return Object.assign(definition, {
     id,

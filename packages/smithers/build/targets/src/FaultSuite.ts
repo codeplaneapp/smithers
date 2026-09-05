@@ -11,11 +11,7 @@ import { Vitest } from "./Vitest.ts"
 /**
  * Options accepted by {@link FaultSuite}.
  *
- * `cwd` is required rather than defaulted, for the same reason
- * `BunSuite` requires it: the macro exists to be declared inside a
- * package, and the workspace root is never the right directory for it. A
- * package spells its own directory here exactly the way its neighbouring
- * `StandardPackage` call does, for example `cwd: "packages/smithers/flows"`.
+ * `cwd` is the workspace-relative directory containing the package to test.
  *
  * @category models
  * @since 0.1.0
@@ -85,7 +81,7 @@ export interface Options {
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * const faults = Smithers.FaultSuite({ cwd: "packages/smithers/flows" })
+ * const faults = Smithers.FaultSuite({ cwd: "packages/core" })
  * ```
  *
  * @category macros

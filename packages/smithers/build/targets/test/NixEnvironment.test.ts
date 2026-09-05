@@ -206,7 +206,7 @@ describe("GithubCiGen with a Nix environment", () => {
     expect(rendered).not.toContain("actions/setup-node")
     expect(rendered).not.toContain("pnpm/action-setup")
     expect(rendered).toContain("nix develop .#ci --command pnpm install --frozen-lockfile --ignore-scripts")
-    expect(rendered).toContain("nix develop .#ci --command pnpm exec smithers-build ci '//packages/...' --jobs 2")
+    expect(rendered).toContain("nix develop .#ci --command pnpm exec smthrs ci '//packages/...' --jobs 2")
     expect(rendered).not.toContain("extra-conf")
   })
 

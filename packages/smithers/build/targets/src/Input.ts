@@ -14,6 +14,7 @@ import { minimatch } from "minimatch"
 import { createHash } from "node:crypto"
 import type { Dirent } from "node:fs"
 import * as NodePath from "node:path"
+import * as NodeUtil from "node:util/types"
 import * as Yaml from "yaml"
 import * as Config from "./Config.ts"
 import * as SafeFs from "./SafeFs.ts"
@@ -273,13 +274,57 @@ export const validateGitBase = (base: string): string => {
   return base
 }
 
+/** Applies the public schema only after the inspected fields are inert. */
+const isDeclaredSchema = Schema.is(Declared)
+
+/** The scalar and string-array fields the declared-input schemas may read. */
+const declaredFields: Readonly<Record<string, ReadonlyArray<string>>> = {
+  File: ["_tag", "path"],
+  Glob: ["_tag", "pattern", "exclude"],
+  GitDiff: ["_tag", "base", "paths", "added", "addedLines"],
+  PnpmWorkspace: ["_tag", "path"]
+}
+
 /**
- * Checks whether a value is a declared planner input.
+ * Checks a descriptor-only copy so schema recognition cannot invoke author
+ * getters or proxy traps before the target construction boundary sees them.
  *
  * @category guards
  * @since 0.1.0
  */
-export const isDeclared = Schema.is(Declared)
+export const isDeclared = <I>(value: I): value is I & Declared => {
+  if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return false
+  const tag = Object.getOwnPropertyDescriptor(value, "_tag")
+  if (
+    tag === undefined || !("value" in tag) || typeof tag.value !== "string" ||
+    !Object.hasOwn(declaredFields, tag.value)
+  ) return false
+  const prototype = Object.getPrototypeOf(value)
+  if (prototype !== Object.prototype && prototype !== null) return false
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  if (Object.values(descriptors).some((descriptor) => !("value" in descriptor))) return false
+  const copy: Record<string, unknown> = Object.create(null)
+  for (const field of declaredFields[tag.value]!) {
+    const descriptor = descriptors[field]
+    if (descriptor === undefined) continue
+    const member: unknown = descriptor.value
+    if (typeof member !== "object" || member === null) {
+      copy[field] = member
+      continue
+    }
+    if (NodeUtil.isProxy(member) || !Array.isArray(member) || Object.getPrototypeOf(member) !== Array.prototype) {
+      return false
+    }
+    const items: Array<unknown> = []
+    for (let index = 0; index < member.length; index++) {
+      const item = Object.getOwnPropertyDescriptor(member, String(index))
+      if (item === undefined || !("value" in item)) return false
+      items.push(item.value)
+    }
+    copy[field] = items
+  }
+  return isDeclaredSchema(copy)
+}
 
 const posix = (value: string): string => value.split(NodePath.sep).join("/")
 

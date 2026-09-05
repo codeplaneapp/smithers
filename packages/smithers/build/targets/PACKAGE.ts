@@ -1,12 +1,4 @@
-/**
- * Standard package targets for a private, unbuilt package.
- *
- * This package ships no distribution, so the synthesized TsBuild `lib` target
- * could never produce the `dist` tree it declares. `lib` is therefore a
- * Typecheck, which passes `--noEmit` on the same tsconfig the build would
- * compile, and keeps the conventional label so dependents and the
- * default-target convention are unchanged.
- */
+/** Standard package targets for the published target authoring surface. */
 import { Smithers } from "@smthrs/targets"
 import { docsWriter, referenceStyle, rootInvariantsConfig, rootJSDocConfig } from "../../../../PACKAGE.ts"
 
@@ -14,12 +6,14 @@ const cwd = "packages/smithers/build/targets"
 const sources = Smithers.glob("src/**/*.ts")
 const tests = Smithers.glob("test/**/*.test.ts")
 
-const lib = Smithers.Typecheck({
+const lib = Smithers.TsBuild({
   srcs: [sources],
+  entries: [Smithers.file("src/index.ts")],
   deps: [],
   tsconfig: Smithers.file("tsconfig.json"),
-  buildMode: false,
-  incremental: false,
+  tool: { name: "program", entry: Smithers.file("scripts/build.mjs") },
+  format: "dual",
+  outDir: "dist",
   cwd
 })
 
@@ -87,7 +81,7 @@ const docsSources = Smithers.Filegroup({
 
 /**
  * The package's documentation as a file group (`docs/**`, the README, and
- * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * package.json), matching the filegroup BuildAndCheckTypeScriptPackage emits. The docs-site
  * content sync in `apps/docs/targets/PACKAGE.ts` depends on it by label, the
  * one way an input reaches across a package boundary.
  */

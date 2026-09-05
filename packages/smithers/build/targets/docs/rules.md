@@ -1,15 +1,17 @@
-<!-- Hand-maintained. `scripts/docs.mjs` and `docs/Manifest.ts` generated this
-     file until the rc.0 docs-tooling dissolution removed them; a rule that is
-     added, re-verbed, or made cacheable has to be edited in here by hand until
-     a generator is declared again. -->
+---
+title: "Catalog rules"
+description: "Every rule in the @smthrs/targets catalog, with the verbs it joins, whether its result may be replayed from the cache, whether it declares an output tree, and which route executes it."
+---
 
-# Catalog rules
+Every rule this package declares, with the verbs it participates in, whether
+its results may be replayed from the cache, whether it declares an output tree,
+and which route executes it.
 
-Every rule `Target.make` declares in this package, with the verbs it
-participates in, whether its results may be replayed from the cache,
-whether it declares an output tree, and which route executes it. A
-`package executor` rule plans `Target.notImplemented` as its Flow body, so
-running one under a bare Flow runtime fails loudly instead of doing nothing.
+The route matters when you trace a failure. A `flow body` rule plans its own
+work through the shared `Exec` action, so a Flow runtime alone can run it. A
+`package executor` rule plans `Target.notImplemented` when explicitly lowered with `Target.plan` and is
+dispatched natively by [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli), so running one
+under a bare Flow runtime fails loudly instead of doing nothing.
 
 | Rule                     | Module            | Verbs              | Cacheable | Declares outputs | Route            |
 | ------------------------ | ----------------- | ------------------ | --------- | ---------------- | ---------------- |
@@ -43,6 +45,8 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `Docker.Push`            | Docker            | run                | no        | no               | package executor |
 | `Docker.Serve`           | Docker            | run                | no        | no               | package executor |
 | `Docker.Service`         | Docker            | run                | no        | no               | package executor |
+| `Docs.Check`             | DocsCheck         | lint, docs         | yes       | no               | package executor |
+| `Docs.Page`              | DocsPage          | docs               | no        | no               | flow body        |
 | `DocsParity`             | DocsParity        | docs               | yes       | no               | flow body        |
 | `Dprint`                 | Dprint            | lint               | no        | no               | flow body        |
 | `DtsBuild`               | DtsBuild          | build              | no        | yes              | flow body        |
@@ -115,4 +119,4 @@ running one under a bare Flow runtime fails loudly instead of doing nothing.
 | `VitestCoverage`         | VitestCoverage    | test               | no        | yes              | flow body        |
 | `VitestWatch`            | VitestWatch       | run                | no        | no               | flow body        |
 
-101 rules.
+103 rules.

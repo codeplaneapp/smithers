@@ -8,7 +8,6 @@ import * as PackageExec from "../../build-cli/src/PackageExec.ts"
 import { PackageIndex } from "../../build-cli/src/PackageIndex.ts"
 import * as PackageLoader from "../../build-cli/src/PackageLoader.ts"
 import * as DocsParity from "../src/DocsParity.ts"
-import { StandardPackage } from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
 import { packageManager } from "./toolchain.ts"
 
@@ -174,21 +173,6 @@ describe("DocsParity", () => {
   })
 })
 
-describe("StandardPackage", () => {
-  const targets = StandardPackage({ packageManager, deps: [], cwd: "packages/smithers/flows/plan" })
-
-  it("emits a docs target beside lib, test, and lint", () => {
-    expect(Target.metadata(targets.docs).target).toBe("DocsParity")
-    expect(Target.metadata(targets.docs).kinds).toEqual(["docs"])
-  })
-
-  it("keeps docs as a separately planned target kind", () => {
-    for (const target of [targets.lib, targets.test, targets.lint]) {
-      expect(Target.metadata(target).kinds).not.toContain("docs")
-    }
-  })
-})
-
 describe("DocsParity execution", () => {
   it("confines and bounds README reads", async () => {
     const root = await Fs.realpath(await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-docs-read-")))
@@ -244,7 +228,7 @@ describe("DocsParity execution", () => {
           `import * as S from "${rulesModule}"\n` +
             `const runtime = S.Runtime.Node({ version: ">=22.19.0" })\n` +
             `const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })\n` +
-            `const { docs } = S.StandardPackage({ packageManager, deps: [], cwd: "packages/${name}" })\n` +
+            `const docs = S.DocsParity({ readme: S.file("README.md"), deps: [], cwd: "packages/${name}" })\n` +
             `export const Package = S.Package({ targets: { docs } })\n`
         )
       }
@@ -269,7 +253,8 @@ describe("DocsParity execution", () => {
 
       expect("ok" in summary && summary.ok).toBe(false)
       if (!("results" in summary)) throw new Error("docs execution returned a plan")
-      expect(summary.results.find((entry) => entry.label === "//packages/complete:docs")?.status).toBe("ran")
+      const complete = summary.results.find((entry) => entry.label === "//packages/complete:docs")
+      expect(complete?.status, JSON.stringify(complete)).toBe("ran")
       expect(summary.results.find((entry) => entry.label === "//packages/stub:docs")?.status).toBe("failed")
     } finally {
       await Fs.rm(root, { recursive: true, force: true })

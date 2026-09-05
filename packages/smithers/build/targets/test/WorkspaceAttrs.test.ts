@@ -15,7 +15,6 @@ import * as Input from "../src/Input.ts"
 import { entrypoint, NodeTest } from "../src/NodeTest.ts"
 import * as PackageManager from "../src/PackageManager.ts"
 import * as Runtime from "../src/Runtime.ts"
-import { StandardPackage } from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
 import { TsBuild } from "../src/TsBuild.ts"
 import { Typecheck } from "../src/Typecheck.ts"
@@ -141,30 +140,5 @@ describe("a declared runtime overrides the interpreter without naming a manager"
     expect(PackageManager.under(packageManager, runtime)).toBe(packageManager)
     expect(PackageManager.under(packageManager, bun)?.name).toBe("bun")
     expect(PackageManager.under(undefined, bun)?.name).toBe("bun")
-  })
-})
-
-describe("StandardPackage leaves the manager to the workspace", () => {
-  it("every emitted target declares none and expects one filled in", () => {
-    const standard = StandardPackage({ cwd: "packages/example" })
-    for (const target of [standard.lib, standard.check, standard.test, standard.lint, standard.fmt]) {
-      const metadata = Target.metadata(target)
-      expect((metadata.attrs as { readonly packageManager?: unknown }).packageManager).toBeUndefined()
-      expect([...metadata.workspaceAttrs]).toContain("packageManager")
-    }
-    expect((Target.metadata(standard.circular).attrs as { readonly runtime?: unknown }).runtime).toBeUndefined()
-    expect([...Target.metadata(standard.circular).workspaceAttrs]).toEqual(["runtime"])
-  })
-
-  it("a caller that names a manager still gets it", () => {
-    const standard = StandardPackage({ packageManager, cwd: "packages/example" })
-    expect(plannedArgv(standard.check)).toEqual([
-      "pnpm",
-      "exec",
-      "tsc",
-      "-p",
-      "tsconfig.test.json",
-      "--noEmit"
-    ])
   })
 })

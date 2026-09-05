@@ -14,7 +14,7 @@ import * as Shell from "../src/Shell.ts"
 import * as Target from "../src/Target.ts"
 import { plannedCalls } from "./plan.ts"
 
-const command = Shell.Test({ command: "true" })
+const command = Shell.Test({ shell: "true" })
 
 describe("composition wrappers", () => {
   it("gives an alias its own node while preserving the target kinds and dependency", () => {

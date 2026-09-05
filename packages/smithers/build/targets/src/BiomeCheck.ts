@@ -132,7 +132,7 @@ export const BiomeCheck = Target.make("BiomeCheck", {
       return checked.pipe(Node.map((check) => ({ check, format: null })))
     }
     return checked.pipe(
-      Node.andThen((check) =>
+      Node.bindPlanned((check) =>
         Target.runTool({
           cwd: attrs.cwd,
           argv: PackageManager.exec(attrs.packageManager, ["biome", "format", ...shared]),

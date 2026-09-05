@@ -130,7 +130,7 @@ export const DepsLint = Target.make("DepsLint", {
       cwd: ".",
       argv: Runtime.evaluate(attrs.runtime, writeProgram, [configPath, config])
     }).pipe(
-      Node.andThen((written) =>
+      Node.bindPlanned((written) =>
         Target.runTool({
           cwd: attrs.cwd,
           argv: PackageManager.exec(attrs.packageManager, ["knip", "--dependencies", "--config", fromCwd]),

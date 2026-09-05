@@ -18,7 +18,7 @@ describe("S.Fetch", () => {
     const metadata = Target.metadata(target)
     expect(Target.isTarget(target)).toBe(true)
     expect(Fetch.isFetch(target)).toBe(true)
-    expect(Fetch.isFetch(Shell.Run({ command: "echo hi" }))).toBe(false)
+    expect(Fetch.isFetch(Shell.Run({ shell: "echo hi" }))).toBe(false)
     expect(metadata.target).toBe("Fetch")
     expect(metadata.kinds).toEqual(["build"])
     expect(metadata.outputs).toEqual({ cwd: ".", paths: ["schema.upstream.graphql"] })
@@ -36,7 +36,7 @@ describe("S.Fetch", () => {
   it("becomes a dependency edge when a consumer names it in data", () => {
     const schemaPinned = Fetch.Fetch(pinned)
     const consumer = Shell.Test({
-      command: "diff -q schema.graphql schema.upstream.graphql",
+      shell: "diff -q schema.graphql schema.upstream.graphql",
       data: [schemaPinned, Input.file("schema.graphql")]
     })
     const metadata = Target.metadata(consumer)
@@ -61,6 +61,6 @@ describe("S.Fetch", () => {
   })
 
   it("refuses to read attrs from a target of another rule", () => {
-    expect(() => Fetch.fetchAttrsOf(Shell.Run({ command: "echo hi" }))).toThrow(/expected a Fetch target/)
+    expect(() => Fetch.fetchAttrsOf(Shell.Run({ shell: "echo hi" }))).toThrow(/expected a Fetch target/)
   })
 })

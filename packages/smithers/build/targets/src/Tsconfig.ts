@@ -218,8 +218,8 @@ const resolveDeclarations = (
 ): (typeof Attrs)["~type.make.in"] => {
   if (typeof attrs !== "object" || attrs === null || !isPlainDeclaration(attrs)) return attrs
   const cwd = attrs.cwd ?? defaultCwd
-  const text = (entries: ReadonlyArray<Pattern>): ReadonlyArray<string> =>
-    entries.map((entry) => patternText(cwd, entry))
+  const text = (entries: ReadonlyArray<(typeof Pattern)["~type.make.in"]>): ReadonlyArray<string> =>
+    entries.map((entry) => patternText(cwd, Pattern.make(entry)))
   return {
     ...attrs,
     ...(attrs.include === undefined ? {} : { include: text(attrs.include) }),
@@ -244,8 +244,13 @@ const resolveDeclarations = (
  * @category targets
  * @since 0.1.0
  */
-export const Tsconfig = Target.rule(
-  definition,
-  (attrs: (typeof Attrs)["~type.make.in"] & Target.Presentation): ReturnType<typeof definition> =>
-    definition(resolveDeclarations(attrs))
+export const Tsconfig = Target.guard(
+  Target.rule(
+    definition,
+    (attrs: (typeof Attrs)["~type.make.in"] & Target.Presentation): ReturnType<typeof definition> =>
+      definition(resolveDeclarations(attrs))
+  ),
+  // The existing guard snapshots nested inputs before normalization reads
+  // their patterns. Normalization itself supplies no additional validation.
+  () => {}
 )

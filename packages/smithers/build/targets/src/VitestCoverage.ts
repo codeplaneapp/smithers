@@ -114,7 +114,7 @@ export const VitestCoverage = Target.make("VitestCoverage", {
         `--coverage.thresholds.statements=${attrs.thresholds.statements}`
       ])
     }).pipe(
-      Node.andThen((run) =>
+      Node.bindPlanned((run) =>
         ToolBuild.CaptureOutputs.call({ cwd: attrs.cwd, paths: [attrs.reportsDirectory] }).pipe(
           Node.map((captured) => ({
             run,

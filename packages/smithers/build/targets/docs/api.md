@@ -1,10 +1,18 @@
-# The module surface
+---
+title: "API reference"
+description: "The module surface of @smthrs/targets: how a target is constructed, what a declaration may say about inputs, outputs, and secrets, and which module owns which contract."
+---
 
-`@smthrs/targets` is the pure authoring surface a `PACKAGE.ts` or `PACKAGE.ts`
-file writes against. Nothing here reads the filesystem or starts a process: a
+This page is the tour of the module surface: what each layer is for, and which
+module owns which contract. For the export-by-export listing, with signatures
+and defaults read from source, see
+[the `@smthrs/targets` package reference](./reference/targets.md).
+
+`@smthrs/targets` is the authoring surface a `PACKAGE.ts` or `WORKSPACE.ts`
+file writes against. Nothing here reads the filesystem or starts a process. A
 target call validates its attrs, records its declared inputs and dependencies,
 and returns a Flow with planner metadata attached. Execution belongs to
-`@smthrs/build-cli`.
+[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli).
 
 ## Construction
 
@@ -72,30 +80,15 @@ unset is refused later, at the transport boundary.
 `Compose` holds the rules that are about other rules: `Generate` (check by
 default, `--write` applies, and check mode restores the declared write set
 including file type and permissions), `Suite`, `Alias`, `Materialize`, and
-`Files.Test`. `StandardPackage` and `PackageDefaults` assemble the conventional
-per-package target set, and `Smithers` is the single namespace a PACKAGE.ts file
-imports.
+`Files.Test`. `PackageDefaults` applies a function you provide to matching
+package directories. Keep shared package conventions in your repository.
 
-`BunSuite` is the Bun half of that set: it re-runs one package's vitest suite
-under Bun, with the interpreter named on the target rather than a second package
-manager restated, and with coverage off because `@vitest/coverage-v8` needs V8's
-inspector and Bun runs JavaScriptCore. A package declares it beside its
-`StandardPackage` call under the conventional key `bunTest`, so the whole
-runtime-compatibility matrix is the pattern `//packages/...:bunTest` and a
-package's Bun claim lives with the package instead of in a central list. Its
-JSDoc records which packages must not declare it and why.
+`BunSuite` runs a Vitest suite under Bun with coverage disabled. `FaultSuite`
+runs a separate fault-test suite. Both accept file and configuration overrides;
+your Vitest configuration controls test scheduling.
 
-`FaultSuite` is the fault-injection half. It runs one package's `test/faults`
-tree under a second vitest config, `vitest.faults.config.ts`, whose
-`fileParallelism` is `false`: a case `SIGKILL`s a pid, cuts a live socket, binds
-an ephemeral port, or reads the machine's process table, and none of those can
-be shared between two files on one machine. Coverage is off because the work
-happens in child processes this one never instruments, so the package's `test`
-target beside it stays the coverage gate. A package declares it beside its
-`StandardPackage` call under the conventional key `faults`, which makes
-`//packages/...:faults` the whole matrix; the target that pattern replaced was a
-single `//e2e:faults` in a workspace member that owned every case in the
-repository.
+Use `LlmLint` with explicit instructions, files, model, and failure threshold.
+Keep repository review rubrics and documentation paths in your own configuration.
 
 The emitted Vitest target carries `exclusive: true`, so wildcard `ci` and
 `test` selections omit it regardless of its exported key. Select the matrix
@@ -114,4 +107,20 @@ and anchors its globs and its diff to the `cwd` the declaring package passes,
 so a package opts into a review by declaring one target rather than by being
 named in a list somewhere else.
 
-See [`rules.md`](./rules.md) for the generated inventory of every rule.
+- [Catalog rules](./rules.md), the inventory of every rule with its verbs,
+  caching, and route.
+- [Filegroup](./reference/filegroup.md) and
+  [Agent.Diff](./reference/agent-diff.md), two rules documented in full.
+
+## Shell selector migration
+
+Shell text is declared with `Shell.Test({ shell: "node --version" })`. For direct
+argv execution, use `Shell.Test({ bin: Smithers.Runtime.bin, args: ["--version"] })`.
+The old `command` selector is removed. Select exactly one of `shell`, `bin`,
+`script`, or `bun`. Shell text and Bun templates reject `args` and `runtimeArgs`;
+`using` belongs only to Bun templates, and scripts reject `runtimeArgs`. These
+combinations are checked by the declaration schemas and constructor types.
+
+Targets are opaque declarations. Execute them through the package executor, or
+explicitly lower an action-backed declaration with `Target.plan(target)` inside
+a host-owned Flow. Package-only catalog rules lower to a typed refusal there.

@@ -23,9 +23,8 @@ when you trace a failure:
 Which route a given rule takes is a property of its declaration, not of its
 namespace: `Shell.Run` plans an exec and `Shell.Serve` does not, and both live
 in `Shell`. [`docs/rules.md`](./docs/rules.md) lists the route of every rule in
-the catalog and is generated from the `Target.make` declarations themselves, so
-read it there rather than from a list written by hand here, which is how this
-paragraph used to be wrong about ten rules at once.
+the catalog. Read it there rather than from a list written by hand here, which
+is how this paragraph used to be wrong about ten rules at once.
 
 A package-executor rule's Flow body is `Target.notImplemented`, so running one
 under a bare Flow runtime fails with `smithers-build/NotImplemented` rather than
@@ -60,11 +59,12 @@ export const Workspace = S.Workspace("example", {
 ```
 
 ```ts
+import { packageTargets } from "./package-targets.ts"
 import { Smithers } from "@smthrs/targets"
 
 // PACKAGE.ts: no manager, no runtime.
 export const Package = Smithers.Package({
-  targets: Smithers.StandardPackage({ cwd: "packages/example" })
+  targets: packageTargets({ cwd: "packages/example" })
 })
 ```
 
@@ -243,9 +243,32 @@ takes no `runtimeArgs`: those are flags for the JavaScript runtime a built
 binary is not, and a declaration that passes them is refused rather than run
 with a different argv.
 
+## Contributing to the documentation
+
+`docs/` is the source of the public site at https://targets.smithers.sh; the
+copy under `apps/docs/targets/src/content/docs/` is a synced cache, and CI
+fails on drift. Edit the colocated page, then run:
+
+```bash
+pnpm exec dprint fmt 'docs/**/*.md' 'README.md'
+pnpm --filter @smithers/docs-targets sync:docs
+pnpm --filter @smithers/docs-targets build
+```
+
+`apps/docs/shared/AUTHORING.md` is the page contract: frontmatter `title` and
+`description` on every page, no `#` heading in the body, no em or en dash
+outside code fences, and a language on every fence.
+
+`docs/rules.md` is hand maintained. No gate compares it to `src/`, so adding a
+rule, changing its `kinds`, or making it cacheable is also an edit to that
+table. `docs/reference/targets.md`, `docs/reference/filegroup.md`, and
+`docs/reference/agent-diff.md` are written by the `referenceDocs`,
+`referenceFilegroupDocs`, and `referenceAgentDiffDocs` targets in
+[`PACKAGE.ts`](./PACKAGE.ts); a hand edit to one of them survives only until
+that target runs again.
+
 See [`packages/smithers/build/API-REVIEW.md`](../API-REVIEW.md) for the review
-order and current API questions, and [`docs/`](./docs) for the package's own
-reference material.
+order and current API questions.
 
 Generated CI concurrency groups use the pull request number, or the commit SHA
 for other events. Superseded PR runs cancel by default; each pushed commit keeps

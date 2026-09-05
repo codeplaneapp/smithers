@@ -11,11 +11,7 @@ import { Vitest } from "./Vitest.ts"
 /**
  * Options accepted by {@link BunSuite}.
  *
- * `cwd` is required rather than defaulted: this macro exists to be declared
- * inside a package, and the workspace root is never the right directory for
- * it. A package spells its own directory here exactly the way its
- * neighbouring `StandardPackage` call does, for example
- * `cwd: "packages/smithers/flows/keys"`.
+ * `cwd` is the workspace-relative directory containing the package to test.
  *
  * @category models
  * @since 0.1.0
@@ -54,28 +50,14 @@ export interface Options {
  * config cannot attach there. The Node `test` target beside it stays the
  * coverage gate.
  *
- * Packages that must NOT declare this, and why:
- *
- * - `database`, `engine-store`, `flows`, `journal`, `kernel`, `plan`,
- *   `run-store`, `step-cache`, `sync`, `time-travel`, and `examples`: Bun's
- *   `node:sqlite` binds the host SQLite, built with
- *   `SQLITE_OMIT_LOAD_EXTENSION`, which the sqlite layer requires. This
- *   exclusion is a contract, not a limitation: rc.0 does not run the durable
- *   engine under Bun, and `NodeDatabase.layer` refuses to open a database
- *   when `process.versions.bun` is set (`unsupported_runtime`, exclusion
- *   X-18). A Bun target for any of those suites would assert the refusal,
- *   not durable execution.
- * - `jj`: `NodeJjClassification` expects spawn failures to classify as
- *   `unknown`; Bun's `child_process` error shape classifies as
- *   `not_installed`.
- * - `platform-node`: the Node host contract suite asserts Node-host behavior
- *   and is not expected to pass on Bun.
+ * Check that the suite and its native dependencies support Bun before adding
+ * this target. Use the ordinary Node test target for Node-specific behavior.
  *
  * @example
  * ```ts
  * import { Smithers } from "@smthrs/targets"
  *
- * const bunTest = Smithers.BunSuite({ cwd: "packages/smithers/flows/keys" })
+ * const bunTest = Smithers.BunSuite({ cwd: "packages/core" })
  * ```
  *
  * @category macros

@@ -24,7 +24,7 @@ describe("Memory.Retain", () => {
   })
 
   it("refuses to read retain attrs from another target kind", () => {
-    const operation = () => MemoryTarget.retainAttrsOf(Shell.Test({ command: "true" }))
+    const operation = () => MemoryTarget.retainAttrsOf(Shell.Test({ shell: "true" }))
 
     expect(operation).toThrow(TypeError)
     expect(operation).toThrow("expected a Memory.Retain target, received Shell.Test")

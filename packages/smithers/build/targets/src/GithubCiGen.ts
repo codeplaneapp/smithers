@@ -299,7 +299,7 @@ export const Attrs = Schema.Struct({
   ),
   /**
    * The package manager every job installs the workspace with and runs the
-   * smithers-build binary through, so a workspace that switches managers gets
+   * smthrs binary through, so a workspace that switches managers gets
    * a regenerated workflow rather than a pipeline still calling pnpm.
    *
    * Omitted — which is what a PACKAGE.ts writes — the executor fills it in
@@ -382,18 +382,28 @@ export type Attrs = typeof Attrs.Type
  * @since 0.1.0
  */
 export const actions = {
-  checkout: "actions/checkout@v4",
-  setupNode: "actions/setup-node@v4",
-  setupBun: "oven-sh/setup-bun@v2",
-  setupPnpm: "pnpm/action-setup@v6",
-  installTool: "taiki-e/install-action@v2",
-  setupGo: "actions/setup-go@v5",
-  foundryToolchain: "foundry-rs/foundry-toolchain@v1",
-  rustCache: "Swatinem/rust-cache@v2",
-  uploadArtifact: "actions/upload-artifact@v4",
-  nixInstallerDeterminate: "DeterminateSystems/nix-installer-action@v16",
-  nixInstallerCachix: "cachix/install-nix-action@v31"
+  checkout: "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", // v4
+  setupNode: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", // v4
+  setupBun: "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6", // v2.2.0
+  setupPnpm: "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86", // v6
+  installTool: "taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b", // v2
+  setupGo: "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff", // v5
+  foundryToolchain: "foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09", // v1
+  rustCache: "Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6", // v2
+  uploadArtifact: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", // v4
+  nixInstallerDeterminate: "DeterminateSystems/nix-installer-action@e50d5f73bfe71c2dd0aa4218de8f4afa59f8f81d", // v16
+  nixInstallerCachix: "cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24" // v31
 } as const
+
+/**
+ * Immutable image manifests for the actionlint releases accepted above.
+ *
+ * @category constants
+ * @since 0.1.0
+ */
+export const actionlintImages: Readonly<Record<CiToolchain.ActionlintRelease, string>> = {
+  "1.7.11": "docker://rhysd/actionlint@sha256:6f03470d0152251d7f07f7c4dc019dbe7024c72cd952f839544c7798843efa8f"
+}
 
 /**
  * Control characters a rendered value may not carry. Tab and newline are
@@ -662,7 +672,7 @@ const installArgv = (attrs: Attrs): ReadonlyArray<string> =>
 export const stepCommand = (attrs: Attrs, step: TargetStep, nix?: CiToolchain.NixSetup | undefined): string =>
   [
     ...developPrefix(nix),
-    ...PackageManager.exec(attrs.packageManager, ["smithers-build", Verb.command(step.verb)]),
+    ...PackageManager.exec(attrs.packageManager, ["smthrs", Verb.command(step.verb)]),
     shellArgument(step.pattern),
     ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)])
   ].join(" ")
@@ -786,14 +796,14 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
   if (needs.workflowLint !== undefined) {
     steps.push({
       name: "Validate GitHub Actions workflows",
-      uses: `docker://rhysd/actionlint:${needs.workflowLint.release}`,
+      uses: actionlintImages[needs.workflowLint.release],
       with: { args: needs.workflowLint.workflows.join(" ") }
     })
   }
   // Language toolchains go BEFORE the package manager and its install.
   // `actions/setup-go` prepends its own bin directories to PATH, which
   // displaced the pnpm shim corepack had put there: the job's own
-  // `pnpm exec smithers-build` still resolved, but every nested target the
+  // `pnpm exec smthrs` still resolved, but every nested target the
   // build tool spawned died with `spawn pnpm ENOENT` in under a second. That
   // took 51 targets down at once and read like 51 defects. Installing them
   // first leaves the package manager's setup last, so its PATH entry wins.
@@ -1389,7 +1399,7 @@ export const render = (attrs: Attrs): string => {
  * what it requires and which targets it runs; {@link toolchainSteps} turns the
  * requirements into checkout, setup, and install steps, and
  * {@link stepCommand} turns each target step into one
- * `<manager> exec smithers-build <verb> '<pattern>'` invocation. There is no attribute
+ * `<manager> exec smthrs <verb> '<pattern>'` invocation. There is no attribute
  * anywhere in {@link Attrs} that accepts a command, an action reference, or a
  * shell script, so a gate that is not a target cannot be added to the pipeline
  * without first becoming one.
@@ -1401,7 +1411,7 @@ export const render = (attrs: Attrs): string => {
  * Generated command example:
  *
  * ```yaml
- * - run: pnpm exec smithers-build ci '//packages/...' --jobs 2
+ * - run: pnpm exec smthrs ci '//packages/...' --jobs 2
  * ```
  *
  * @category targets

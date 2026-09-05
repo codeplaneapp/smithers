@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import * as Input from "../src/Input.ts"
-import { StandardPackage } from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
 import { Attrs, outputPaths, TsBuild } from "../src/TsBuild.ts"
 import { packageManager } from "./toolchain.ts"
@@ -53,29 +52,5 @@ describe("TsBuild program tool", () => {
   it("rejects a bare string where the program declaration belongs", () => {
     expect(() => TsBuild({ ...base, tool: { name: "program", entry: "scripts/build.mjs" }, format: "dual" } as never))
       .toThrow()
-  })
-})
-
-describe("StandardPackage lib", () => {
-  it("builds the dual distribution the published manifests describe", () => {
-    const targets = StandardPackage({ packageManager, cwd: "packages/example" })
-    const metadata = Target.metadata(targets.lib)
-    expect(metadata.attrs).toMatchObject({
-      format: "dual",
-      outDir: "dist",
-      tool: { name: "program", entry: { _tag: "File", path: "scripts/build.mjs" } }
-    })
-    expect(metadata.outputs).toEqual({ cwd: "packages/example", paths: ["dist/esm", "dist/cjs"] })
-  })
-
-  it("takes another build program without replacing the macro", () => {
-    const targets = StandardPackage({
-      packageManager,
-      cwd: "packages/example",
-      buildProgram: Input.file("scripts/dist.mjs")
-    })
-    expect(Target.metadata(targets.lib).attrs).toMatchObject({
-      tool: { name: "program", entry: { _tag: "File", path: "scripts/dist.mjs" } }
-    })
   })
 })

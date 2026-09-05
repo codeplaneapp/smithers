@@ -38,6 +38,8 @@ import * as NodeUtil from "node:util/types"
 import * as Secret from "./Secret.ts"
 import { placeholderPattern, placeholderPrefix } from "./Secret.ts"
 
+const toHex = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+
 /**
  * Raised when a declared secret has no value on this host.
  *
@@ -262,7 +264,7 @@ export const makeVault = (options: { readonly read?: Read | undefined } = {}): V
     ])
     const existing = byBinding.get(key)
     if (existing !== undefined) return existing
-    const placeholder = `${placeholderPrefix}${randomBytes(32).toString("hex")}`
+    const placeholder = `${placeholderPrefix}${toHex(randomBytes(32))}`
     byBinding.set(key, placeholder)
     byPlaceholder.set(placeholder, snapshot)
     return placeholder
@@ -706,7 +708,7 @@ export const startProxy = (vault: Vault): Promise<Proxy> =>
           const key = JSON.stringify([snapshot.env, snapshot.fallback ?? null])
           const existing = destinationByDeclaration.get(key)
           if (existing !== undefined) return existing
-          const route = randomBytes(32).toString("hex")
+          const route = toHex(randomBytes(32))
           const url = `http://127.0.0.1:${address.port}${secretUrlPath}${route}`
           destinations.set(route, { secret: snapshot, url })
           destinationByDeclaration.set(key, url)

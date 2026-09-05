@@ -30,7 +30,7 @@ import * as Target from "./Target.ts"
  * Payload for one scaffold run.
  *
  * The package NAME is not here: it is a per-invocation argument, not a
- * declaration, so it arrives through the layer from `smithers-build run --name`. Attrs
+ * declaration, so it arrives through the layer from `smthrs generate package <name>`. Attrs
  * that changed per invocation would re-key the target on every run and record a
  * cache entry per name.
  *
@@ -157,7 +157,7 @@ const sourceIdentifier = (name: string): string => {
  *
  * A model could write a better README and a better first test, and the
  * `packageJsonRefresh` target is where a model is allowed to. Scaffolding
- * itself stays static: `smithers-build run //:newPackage` must work on a machine with
+ * itself stays static: `smthrs generate package <name>` must work on a machine with
  * no model CLI, offline, and produce the same tree every time.
  *
  * @category rendering
@@ -205,7 +205,7 @@ export const boilerplate = (
     ],
     [
       "README.md",
-      `# ${name}\n\nCreated by \`smithers-build run //:newPackage --name ${name}\`.\n\nThis package has no legacy declaration: the workspace default target synthesizes its\ntargets from this directory.\n`
+      `# ${name}\n\nCreated by \`smthrs generate package ${name}\`.\n\nThis package has no legacy declaration: the workspace default target synthesizes its\ntargets from this directory.\n`
     ]
   ]
 }
@@ -218,7 +218,7 @@ export const boilerplate = (
  */
 export interface ScaffoldOptions {
   readonly workspaceRoot: string
-  /** The name supplied by `smithers-build run --name`, absent when the flag was not given. */
+  /** The name supplied by `smthrs generate package <name>`, absent when no name was given. */
   readonly packageName?: string | undefined
   /** Fault-injection seams used by publication tests. */
   readonly io?: ScaffoldIo | undefined
@@ -319,7 +319,7 @@ export const scaffold = (
       const directory = Input.resolvePath("", payload.directory)
       const packageName = options.packageName
       if (packageName === undefined || packageName === "") {
-        throw new Error("no package name was supplied; run `smithers-build run //:newPackage --name <package-name>`")
+        throw new Error("no package name was supplied; run `smthrs generate package <package-name>`")
       }
       const name = assertPackageName(packageName)
       const created = directory === "." ? directoryName(name) : `${directory}/${directoryName(name)}`
@@ -435,7 +435,7 @@ export type Attrs = typeof Attrs.Type
  * argument rather than an attr, so one declaration serves every new package:
  *
  * ```sh
- * smithers-build run //:newPackage --name @smthrs/widget
+ * smthrs generate package @smthrs/widget
  * ```
  *
  * A scoped name maps to an unscoped directory, so `@smthrs/widget` creates

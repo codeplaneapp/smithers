@@ -1,12 +1,9 @@
 /**
  * Package documentation parity checks.
  *
- * The parity gate owns the half of colocated documentation ESLint cannot see.
- * `eslint.jsdoc.js` already reads every exported declaration and requires a
- * description, `@since`, and `@category` on it, so this target never re-checks
- * JSDoc. It checks that the package has a README at all, that the README says
- * something, and it declares the README as a build input so editing prose
- * re-keys the package's targets.
+ * Checks that a README exists, has a title, and meets the configured minimum
+ * prose length. The README is a declared input. This target does not check
+ * JSDoc or compare documentation with source code.
  *
  * @since 0.1.0
  */
@@ -309,10 +306,7 @@ export type Attrs = typeof Attrs.Type
  * //...` remains the focused way to run just this gate. Key material contains
  * the README digest, dependency keys, and the prose floor, so prose drift is
  * a cache miss like any other input change.
- * JSDoc parity is not checked here: the root `eslint.jsdoc.js` config already
- * requires a description, `@since`, and `@category` on every exported
- * declaration, and `StandardPackage` runs it under `lint`. Executing the plan
- * requires {@link CheckDocsLive}.
+ * Executing the plan requires {@link CheckDocsLive}.
  *
  * @category targets
  * @since 0.1.0

@@ -69,7 +69,7 @@ export interface RemoteCache {
   /**
    * A public read token committed to the repository, or undefined.
    *
-   * The one credential that may appear in legacy declaration as a literal. jjhub mints
+   * The one credential that may appear in legacy declaration as a literal. Smithers Cloud mints
    * it per repository (`smithers cache token create`); it can only read that
    * repository's cache, is refused with 403 on every publication before the
    * body is read, and never authenticates anywhere else, so committing it is
@@ -103,7 +103,7 @@ export const normalizePublicReadToken = (value: string): string => {
   const trimmed = value.trim()
   if (!publicReadTokenShape.test(trimmed)) {
     throw new Error(
-      "remote cache publicReadToken must be a jjhub public read token (smithers_cachero_ followed by 40 hex characters); " +
+      "remote cache publicReadToken must be a Smithers Cloud public read token (smithers_cachero_ followed by 40 hex characters); " +
         "any other credential belongs in the environment, never in legacy declaration"
     )
   }
@@ -111,12 +111,12 @@ export const normalizePublicReadToken = (value: string): string => {
 }
 
 /**
- * The jjhub API base a {@link jjhub} declaration derives its endpoint from.
+ * The Smithers Cloud API base a {@link smithersCloud} declaration derives its endpoint from.
  *
  * @category constants
  * @since 0.1.0
  */
-export const defaultJjhubApiBase = "https://api.jjhub.tech"
+export const defaultSmithersCloudApiBase = "https://api.jjhub.tech"
 
 /**
  * Options accepted by {@link make}.
@@ -145,19 +145,19 @@ export interface Options {
 }
 
 /**
- * Options accepted by {@link jjhub}.
+ * Options accepted by {@link smithersCloud}.
  *
  * @category models
  * @since 0.1.0
  */
-export interface JjhubOptions {
+export interface SmithersCloudOptions {
   /** The repository as `owner/name`. */
   readonly repo: string
   /** The committed public read token, when the repository is private or publishes. */
   readonly publicReadToken?: string | undefined
   /** The write credential; defaults to `Secret("SMITHERS_CACHE_TOKEN")`. */
   readonly write?: Secret.Secret | undefined
-  /** The jjhub API base; defaults to {@link defaultJjhubApiBase}. */
+  /** The Smithers Cloud API base; defaults to {@link defaultSmithersCloudApiBase}. */
   readonly apiBase?: string | undefined
 }
 
@@ -284,7 +284,7 @@ export const make = (options: Options): RemoteCache => {
 const repositoryShape = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 /**
- * Creates the declaration for a repository's jjhub-hosted cache.
+ * Creates the declaration for a repository's Smithers Cloud-hosted cache.
  *
  * The endpoint is derived from the API base and the repository, so the only
  * thing a workspace commits is the repository name and, optionally, its
@@ -293,20 +293,20 @@ const repositoryShape = /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*
  * @category constructors
  * @since 0.1.0
  */
-export const jjhub = (options: JjhubOptions): RemoteCache => {
+export const smithersCloud = (options: SmithersCloudOptions): RemoteCache => {
   if (typeof options !== "object" || options === null) {
-    throw new TypeError("RemoteCache.jjhub options must be an object")
+    throw new TypeError("RemoteCache.smithersCloud options must be an object")
   }
   for (const name of Object.getOwnPropertyNames(options)) {
     if (name !== "repo" && name !== "publicReadToken" && name !== "write" && name !== "apiBase") {
-      throw new TypeError(`RemoteCache.jjhub received unknown option ${JSON.stringify(name)}`)
+      throw new TypeError(`RemoteCache.smithersCloud received unknown option ${JSON.stringify(name)}`)
     }
   }
   if (typeof options.repo !== "string" || !repositoryShape.test(options.repo.trim())) {
-    throw new Error("RemoteCache.jjhub repo must be owner/name")
+    throw new Error("RemoteCache.smithersCloud repo must be owner/name")
   }
   const [owner, name] = options.repo.trim().split("/") as [string, string]
-  const base = normalizeEndpoint(options.apiBase ?? defaultJjhubApiBase)
+  const base = normalizeEndpoint(options.apiBase ?? defaultSmithersCloudApiBase)
   return make({
     endpoint: `${base}/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/build-cache`,
     ...(options.publicReadToken === undefined ? {} : { publicReadToken: options.publicReadToken }),

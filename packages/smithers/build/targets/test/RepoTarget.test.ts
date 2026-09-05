@@ -43,7 +43,7 @@ describe("LocalRepository", () => {
 
 describe("Repo.Target", () => {
   it("records child identity, args, inputs, gates, and sandbox policy", () => {
-    const gate = S.Shell.Test({ command: "true" })
+    const gate = S.Shell.Test({ shell: "true" })
     const input = S.file("child/README.md")
     const target = S.Repo.Target("child", "//pkg:test", {
       args: ["--flag"],
@@ -76,6 +76,6 @@ describe("Repo.Target", () => {
   })
 
   it("refuses attrsOf on an ordinary target", () => {
-    expect(() => RepoTarget.attrsOf(S.Shell.Test({ command: "true" }))).toThrow(/not a Repo.Target/)
+    expect(() => RepoTarget.attrsOf(S.Shell.Test({ shell: "true" }))).toThrow(/not a Repo.Target/)
   })
 })

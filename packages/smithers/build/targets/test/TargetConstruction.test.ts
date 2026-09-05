@@ -283,6 +283,6 @@ describe("a declaration's presentation", () => {
   it("passes through a guarded rule's own validation", () => {
     // Shell.Test requires one executable; the presentation keys must not count as one.
     expect(() => Smithers.Shell.Test({ summary: "no executable" } as never)).toThrow()
-    expect(Target.metadata(Smithers.Shell.Test({ command: "true", summary: "One line." })).summary).toBe("One line.")
+    expect(Target.metadata(Smithers.Shell.Test({ shell: "true", summary: "One line." })).summary).toBe("One line.")
   })
 })

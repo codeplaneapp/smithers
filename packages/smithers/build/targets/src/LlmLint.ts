@@ -362,10 +362,10 @@ const appendBytes = (capture: ByteCapture, chunk: Uint8Array): boolean => {
     let capacity = Math.max(1, capture.buffer.byteLength)
     while (capacity < length) capacity = Math.min(capture.limit, capacity * 2)
     const grown = Buffer.allocUnsafe(capacity)
-    capture.buffer.copy(grown, 0, 0, capture.length)
+    grown.set(capture.buffer.subarray(0, capture.length))
     capture.buffer = grown
   }
-  Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).copy(capture.buffer, capture.length)
+  capture.buffer.set(chunk, capture.length)
   capture.length = length
   return true
 }
@@ -403,10 +403,10 @@ const appendTail = (capture: TailCapture, chunk: Uint8Array): void => {
 const decodeTail = (capture: TailCapture): string => {
   const bytes = Buffer.allocUnsafe(capture.length)
   if (capture.length < capture.buffer.byteLength) {
-    capture.buffer.copy(bytes, 0, 0, capture.length)
+    bytes.set(capture.buffer.subarray(0, capture.length))
   } else {
-    capture.buffer.copy(bytes, 0, capture.offset)
-    capture.buffer.copy(bytes, capture.buffer.byteLength - capture.offset, 0, capture.offset)
+    bytes.set(capture.buffer.subarray(capture.offset), 0)
+    bytes.set(capture.buffer.subarray(0, capture.offset), capture.buffer.byteLength - capture.offset)
   }
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes)

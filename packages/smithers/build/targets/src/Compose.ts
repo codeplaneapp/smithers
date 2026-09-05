@@ -253,6 +253,11 @@ const excerpt = (line: string | undefined): string =>
       line.length > maximumDriftExcerptCodeUnits ? `${line.slice(0, maximumDriftExcerptCodeUnits)}...` : line
     )
 
+const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
+
+const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
+
 /**
  * Renders the first line at which a regenerated output differs.
  *
@@ -269,11 +274,11 @@ const driftMessage = (path: string, previous: OutputState, current: OutputState)
   if (previous.bytes === undefined || current.bytes === undefined) {
     return `${path} changed and the change is not readable as text`
   }
-  if (previous.bytes.equals(current.bytes)) {
+  if (equalBytes(previous.bytes, current.bytes)) {
     return `${path} kept its contents and the generator changed its permissions`
   }
-  const checkedIn = previous.bytes.toString("utf8").split("\n")
-  const regenerated = current.bytes.toString("utf8").split("\n")
+  const checkedIn = decodeUtf8(previous.bytes).split("\n")
+  const regenerated = decodeUtf8(current.bytes).split("\n")
   const differing = checkedIn.findIndex((line, position) => line !== regenerated[position])
   const line = differing === -1 ? Math.min(checkedIn.length, regenerated.length) : differing
   return `${path} drifted from its generated form: ` +
@@ -465,7 +470,7 @@ const snapshotOutputs = async (
 const unchanged = (previous: OutputState, current: OutputState): boolean => {
   if (previous.kind !== current.kind || previous.mode !== current.mode) return false
   if (previous.bytes === undefined) return current.bytes === undefined
-  return current.bytes !== undefined && previous.bytes.equals(current.bytes)
+  return current.bytes !== undefined && equalBytes(previous.bytes, current.bytes)
 }
 
 /**
@@ -479,7 +484,7 @@ const unchanged = (previous: OutputState, current: OutputState): boolean => {
 const sameContents = (previous: OutputState, current: OutputState): boolean => {
   if (previous.kind !== current.kind) return false
   if (previous.bytes === undefined) return current.bytes === undefined
-  return current.bytes !== undefined && previous.bytes.equals(current.bytes)
+  return current.bytes !== undefined && equalBytes(previous.bytes, current.bytes)
 }
 
 const needsReplacement = (previous: OutputState, current: OutputState): boolean =>
@@ -543,7 +548,7 @@ const restoreOutput = async (
     return
   }
   if (previous.kind === "symlink") {
-    await Fs.symlink(previous.bytes?.toString("utf8") ?? "", absolute)
+    await Fs.symlink(previous.bytes === undefined ? "" : decodeUtf8(previous.bytes), absolute)
     return
   }
   const handle = await Fs.open(
@@ -716,7 +721,7 @@ const generatePayload = (attrs: typeof GenerateAttrs.Type): Exec.CallPayload | u
   }
   if (attrs.command !== undefined) {
     return Shell.execPayload({
-      command: attrs.command,
+      shell: attrs.command,
       env: attrs.env,
       secrets: attrs.secrets
     })

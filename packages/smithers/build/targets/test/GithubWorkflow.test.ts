@@ -663,7 +663,7 @@ describe("parseWorkflow", () => {
     expect(invokedFiles).toEqual([])
     // The run lines the pipeline DOES carry, so the two empty sets above are
     // read against a workflow that was parsed, not an empty string.
-    expect(commands).toContain("pnpm exec smithers-build test '//packages/...'")
+    expect(commands).toContain("pnpm exec smthrs test '//packages/...'")
     const missing: Array<string> = []
     for (const file of [...new Set(invokedFiles)]) {
       const absolute = NodePath.resolve(realWorkflowPath, "../../..", file)

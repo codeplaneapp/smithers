@@ -82,6 +82,19 @@ describe("Tsconfig include and exclude take declared file inputs", () => {
     expect(attrs.exclude).toEqual(["dist/x.ts"])
   })
 
+  it("applies constructor tag defaults before resolving file and glob patterns", () => {
+    const metadata = Target.metadata(Tsconfig.Tsconfig({
+      cwd: "packages/foo",
+      include: [{ pattern: "//packages/bar/src/**/*", exclude: [] }, { path: "//globals.d.ts" }],
+      exclude: [{ path: "//packages/foo/dist/x.ts" }]
+    }))
+    expect(metadata.attrs).toMatchObject({
+      include: ["../bar/src/**/*", "../../globals.d.ts"],
+      exclude: ["dist/x.ts"]
+    })
+    expect(metadata.inputs).toEqual([])
+  })
+
   it("still declares the base configuration it extends as an input", () => {
     const base = Input.file("//tsconfig.base.json")
     const metadata = Target.metadata(Tsconfig.Tsconfig({ extends: base, include: [Input.glob("src/**/*")] }))

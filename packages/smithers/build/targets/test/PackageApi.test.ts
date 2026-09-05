@@ -226,34 +226,34 @@ describe("input forms", () => {
 
 describe("unknown attr keys are rejected, never stripped", () => {
   it("rejects a top-level typo such as gate for gates or approvals for approval", () => {
-    expect(() => Shell.Run({ command: "echo hi", gate: [lint] } as never)).toThrow(/excess property[\s\S]*gate/)
-    expect(() => Shell.Run({ command: "echo hi", approvals: "required" } as never)).toThrow(
+    expect(() => Shell.Run({ shell: "echo hi", gate: [lint] } as never)).toThrow(/excess property[\s\S]*gate/)
+    expect(() => Shell.Run({ shell: "echo hi", approvals: "required" } as never)).toThrow(
       /excess property[\s\S]*approvals/
     )
   })
 
   it("rejects an unknown key inside a nested attr struct", () => {
-    expect(() => Shell.Serve({ command: "yarn start", readiness: { port: 4000, extra: true } } as never)).toThrow(
+    expect(() => Shell.Serve({ shell: "yarn start", readiness: { port: 4000, extra: true } } as never)).toThrow(
       /excess property/
     )
   })
 
   it("admits the three sandbox network values and rejects a misspelled one", () => {
-    expect(Target.isTarget(Shell.Test({ command: "go test ./...", sandbox: { network: "loopback" } }))).toBe(true)
-    expect(Target.isTarget(Shell.Test({ command: "go test ./...", sandbox: { network: true } }))).toBe(true)
-    expect(Target.isTarget(Shell.Test({ command: "go test ./...", sandbox: { network: false } }))).toBe(true)
-    expect(() => Shell.Test({ command: "go test ./...", sandbox: { network: "lopback" } } as never)).toThrow()
+    expect(Target.isTarget(Shell.Test({ shell: "go test ./...", sandbox: { network: "loopback" } }))).toBe(true)
+    expect(Target.isTarget(Shell.Test({ shell: "go test ./...", sandbox: { network: true } }))).toBe(true)
+    expect(Target.isTarget(Shell.Test({ shell: "go test ./...", sandbox: { network: false } }))).toBe(true)
+    expect(() => Shell.Test({ shell: "go test ./...", sandbox: { network: "lopback" } } as never)).toThrow()
   })
 
   it("admits Shell service edges, shards, scripts, and bounded duration syntax", () => {
-    const service = Shell.Serve({ command: "node server.js" })
-    expect(Target.isTarget(Shell.Serve({ command: "node proxy.js", services: [service] }))).toBe(true)
+    const service = Shell.Serve({ shell: "node server.js" })
+    expect(Target.isTarget(Shell.Serve({ shell: "node proxy.js", services: [service] }))).toBe(true)
     expect(
       Target.isTarget(Shell.Test({ script: Input.file("//test.sh"), services: [service], shards: 3, timeout: "6h" }))
     )
       .toBe(true)
-    expect(() => Shell.Test({ command: "true", shards: 0 })).toThrow()
-    expect(() => Shell.Test({ command: "true", timeout: "tomorrow" })).toThrow()
+    expect(() => Shell.Test({ shell: "true", shards: 0 })).toThrow()
+    expect(() => Shell.Test({ shell: "true", timeout: "tomorrow" })).toThrow()
   })
 
   it("rejects unknown Bundler.Rspack method options that named-key rebuilding would drop", () => {
@@ -261,7 +261,7 @@ describe("unknown attr keys are rejected, never stripped", () => {
     expect(() => bundler.resolve({ entries: ["src/client.tsx"], universe: [], entry: "typo" } as never)).toThrow(
       /unknown option "entry"/
     )
-    expect(() => Shell.Build({ command: "echo build", outDirs: ["dist"], outDir: "dist" } as never)).toThrow(
+    expect(() => Shell.Build({ shell: "echo build", outDirs: ["dist"], outDir: "dist" } as never)).toThrow(
       /excess property[\s\S]*outDir/
     )
   })
@@ -269,7 +269,7 @@ describe("unknown attr keys are rejected, never stripped", () => {
 
 describe("construct-only implementations", () => {
   it("marks every flavor with the NotImplemented stub body, never fake success", () => {
-    const target = Shell.Run({ command: "echo hi" })
+    const target = Shell.Run({ shell: "echo hi" })
     const test = Test({
       expect: Files.difference(lint, lint),
       toBe: "empty"

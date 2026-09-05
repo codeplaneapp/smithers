@@ -12,7 +12,6 @@ import * as Input from "../src/Input.ts"
 import * as NodeBinary from "../src/NodeBinary.ts"
 import * as NodeTest from "../src/NodeTest.ts"
 import * as Runtime from "../src/Runtime.ts"
-import * as StandardPackage from "../src/StandardPackage.ts"
 import * as Target from "../src/Target.ts"
 import { packageManager, runtime } from "./toolchain.ts"
 
@@ -162,32 +161,5 @@ describe("NodeBinary", () => {
     })
     expect(Target.metadata(target).dependencies).toEqual([])
     expect(Target.metadata(target).dependencySelectors).toEqual([selector])
-  })
-})
-
-describe("StandardPackage circular guard", () => {
-  /**
-   * `pnpm run circular` fanned out to a per-package script the target graph did
-   * not know about, so `smithers-build ci` was not gate-equivalent to the pnpm scripts
-   * it was meant to replace. The macro emits it now.
-   */
-  it("emits the conventional per-package circular-dependency guard", () => {
-    const targets = StandardPackage.StandardPackage({ packageManager, cwd: "packages/smithers/flows/plan" })
-    const attrs = attrsOf<NodeTest.Attrs>(targets.circular)
-    expect(NodeTest.runArgv(attrs)).toEqual(["node", "scripts/circular.mjs"])
-    expect(attrs.cwd).toBe("packages/smithers/flows/plan")
-    // The interpreter is the one the declared manager runs under, not a
-    // hardcoded `node`.
-    expect(attrs.runtime).toEqual(packageManager.runtime)
-  })
-
-  it("takes another guard when a package keeps one elsewhere", () => {
-    const targets = StandardPackage.StandardPackage({
-      packageManager,
-      cwd: "packages/smithers/flows/plan",
-      circularScript: Input.file("tools/cycles.mjs")
-    })
-    expect(NodeTest.runArgv(attrsOf<NodeTest.Attrs>(targets.circular)))
-      .toEqual(["node", "tools/cycles.mjs"])
   })
 })

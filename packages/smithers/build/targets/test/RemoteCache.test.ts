@@ -167,7 +167,7 @@ describe("S.Cache with a remote declaration", () => {
   })
 })
 
-describe("RemoteCache public read tokens and jjhub", () => {
+describe("RemoteCache public read tokens and Smithers Cloud", () => {
   const token = "smithers_cachero_" + "0123456789abcdef".repeat(2) + "01234567"
 
   it("accepts a committed public read token and defaults the write secret", () => {
@@ -192,7 +192,7 @@ describe("RemoteCache public read tokens and jjhub", () => {
       ]
     ) {
       expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: bad })).toThrow(
-        /publicReadToken must be a jjhub public read token/
+        /publicReadToken must be a Smithers Cloud public read token/
       )
     }
     expect(() => RemoteCache.make({ endpoint: "https://cache.example.test", publicReadToken: 42 as never })).toThrow(
@@ -209,19 +209,20 @@ describe("RemoteCache public read tokens and jjhub", () => {
     ).toThrow(/replaces token and read/)
   })
 
-  it("derives the jjhub endpoint from the repository", () => {
-    const declaration = RemoteCache.jjhub({ repo: "acme/app", publicReadToken: token })
+  it("derives the Smithers Cloud endpoint from the repository", () => {
+    const declaration = RemoteCache.smithersCloud({ repo: "acme/app", publicReadToken: token })
     expect(declaration.endpoint).toBe("https://api.jjhub.tech/api/repos/acme/app/build-cache")
     expect(declaration.publicReadToken).toBe(token)
-    expect(RemoteCache.jjhub({ repo: "acme/app", apiBase: "https://jjhub.example.test/" }).endpoint).toBe(
-      "https://jjhub.example.test/api/repos/acme/app/build-cache"
-    )
-    expect(RemoteCache.jjhub({ repo: "acme/app", write: Secret("CI_WRITE") }).write).toEqual({
+    expect(RemoteCache.smithersCloud({ repo: "acme/app", apiBase: "https://smithers-cloud.example.test/" }).endpoint)
+      .toBe(
+        "https://smithers-cloud.example.test/api/repos/acme/app/build-cache"
+      )
+    expect(RemoteCache.smithersCloud({ repo: "acme/app", write: Secret("CI_WRITE") }).write).toEqual({
       _tag: "Secret",
       env: "CI_WRITE"
     })
-    expect(() => RemoteCache.jjhub({ repo: "not-a-repo" })).toThrow(/owner\/name/)
-    expect(() => RemoteCache.jjhub({ repo: "acme/app", extra: 1 } as never)).toThrow(/unknown option/)
+    expect(() => RemoteCache.smithersCloud({ repo: "not-a-repo" })).toThrow(/owner\/name/)
+    expect(() => RemoteCache.smithersCloud({ repo: "acme/app", extra: 1 } as never)).toThrow(/unknown option/)
   })
 
   it("rejects a forged declaration carrying a bad literal", () => {

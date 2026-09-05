@@ -4,8 +4,8 @@ import * as S from "../src/Smithers.ts"
 import * as Target from "../src/Target.ts"
 
 const file = S.file("//package.json")
-const build = S.Shell.Build({ command: "true", outDirs: ["dist"] })
-const check = S.Shell.Test({ command: "true" })
+const build = S.Shell.Build({ shell: "true", outDirs: ["dist"] })
+const check = S.Shell.Test({ shell: "true" })
 
 const cases: ReadonlyArray<readonly [string, (extra?: Record<string, unknown>) => Target.AnyTarget, string]> = [
   ["Npm.Pack", (extra = {}) => S.Npm.Pack({ manifest: file, ...extra } as never), "Npm.Pack"],

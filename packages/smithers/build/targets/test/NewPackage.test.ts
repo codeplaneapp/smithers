@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Fs from "node:fs/promises"
+import { createRequire } from "node:module"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -54,6 +55,8 @@ describe("scaffold", () => {
       "packages/widget/README.md"
     ])
     expect(await Fs.readdir(NodePath.join(root, "packages/widget"))).not.toContain("legacy declaration")
+    expect(await Fs.readFile(NodePath.join(root, "packages/widget/README.md"), "utf8"))
+      .toContain("Created by `smthrs generate package @smthrs/widget`")
   })
 
   it("writes a manifest carrying the template fields", async () => {
@@ -83,6 +86,20 @@ describe("scaffold", () => {
     expect(tsconfig.extends).toBe("../../tsconfig.json")
   })
 
+  it("exports its initial public module without exposing future helper files", async () => {
+    await run("@smthrs/widget")
+    const directory = NodePath.join(root, "packages/widget")
+    await Fs.writeFile(NodePath.join(directory, "src/Hidden.ts"), "export const secret = 1\n")
+    const require = createRequire(NodePath.join(directory, "package.json"))
+    expect(require.resolve("@smthrs/widget")).toBe(NodePath.join(directory, "src/index.ts"))
+    expect(require.resolve("@smthrs/widget/package.json")).toBe(NodePath.join(directory, "package.json"))
+    expect(() => require.resolve("@smthrs/widget/Hidden")).toThrowError(
+      expect.objectContaining({ code: "ERR_PACKAGE_PATH_NOT_EXPORTED" })
+    )
+    const manifest = JSON.parse(await Fs.readFile(NodePath.join(directory, "package.json"), "utf8"))
+    expect(manifest.exports).toEqual({ ".": "./src/index.ts", "./package.json": "./package.json" })
+  })
+
   it("always generates a valid non-reserved JavaScript binding", () => {
     expect(boilerplate("123", payload)[2]?.[1]).toContain("export const package123")
     expect(boilerplate("default", payload)[2]?.[1]).toContain("export const packageDefault")
@@ -90,9 +107,9 @@ describe("scaffold", () => {
     expect(boilerplate("---", payload)[2]?.[1]).toContain("export const packageName")
   })
 
-  it("names the flag when no package name was supplied", async () => {
-    expect((await failure()).message).toContain("--name <package-name>")
-    expect((await failure("")).message).toContain("--name <package-name>")
+  it("names the public command when no package name was supplied", async () => {
+    expect((await failure()).message).toContain("smthrs generate package <package-name>")
+    expect((await failure("")).message).toContain("smthrs generate package <package-name>")
   })
 
   it("refuses an invalid npm name and an existing directory", async () => {

@@ -120,7 +120,17 @@ export const make = (options: Options): PackageDefaults => {
  *
  * export const packageDefaults = Smithers.PackageDefaults({
  *   directories: "packages/*",
- *   macro: Smithers.StandardPackage
+ *   macro: (attrs: { cwd: string }) => ({
+ *     test: Smithers.Vitest({
+ *       tests: [Smithers.glob("test/*.test.ts")],
+ *       sources: [Smithers.glob("src/**")],
+ *       deps: [],
+ *       config: null,
+ *       environment: "node",
+ *       passWithNoTests: false,
+ *       cwd: attrs.cwd
+ *     })
+ *   })
  * })
  * ```
  *

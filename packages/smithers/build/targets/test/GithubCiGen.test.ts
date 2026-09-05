@@ -12,6 +12,8 @@ import * as NodePath from "node:path"
 import { describe, expect, it } from "vitest"
 import * as CiToolchain from "../src/CiToolchain.ts"
 import {
+  actionlintImages,
+  actions,
   artifactSteps,
   Attrs,
   Gate,
@@ -118,57 +120,57 @@ jobs:
     name: workspace graph
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: ${actions.checkout}
       - name: Validate GitHub Actions workflows
-        uses: docker://rhysd/actionlint:1.7.11
+        uses: ${actionlintImages["1.7.11"]}
         with:
           args: ".github/workflows/ci.yml"
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: ${actions.setupPnpm}
+      - uses: ${actions.setupNode}
         with:
           node-version: 22.19.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install jj
-        uses: taiki-e/install-action@v2
+        uses: ${actions.installTool}
         with:
           tool: jj-cli@0.39.0
       - name: Initialize colocated jj repository
         run: jj git init --colocate
       - name: Workspace targets
-        run: pnpm exec smithers-build ci '//packages/...' --jobs 2
+        run: pnpm exec smthrs ci '//packages/...' --jobs 2
       - name: Script gates
-        run: pnpm exec smithers-build test '//scripts/...'
+        run: pnpm exec smthrs test '//scripts/...'
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: ${actions.checkout}
+      - uses: ${actions.setupPnpm}
+      - uses: ${actions.setupNode}
         with:
           node-version: 22.19.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Browser bundle guard
-        run: pnpm exec smithers-build test '//scripts:browserContract'
+        run: pnpm exec smthrs test '//scripts:browserContract'
   rust:
     runs-on: ubuntu-latest
     continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: ${actions.checkout}
         with:
           submodules: recursive
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: ${actions.setupPnpm}
+      - uses: ${actions.setupNode}
         with:
           node-version: 22.19.0
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Install pinned Rust toolchain
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: ${actions.rustCache}
       - name: Cargo gates
-        run: pnpm exec smithers-build lint '//crates/flows-jj'
+        run: pnpm exec smthrs lint '//crates/flows-jj'
 `
 
 const attrsOf = (input: unknown): never => GithubCiGen(input as typeof goldenAttrs)[Target.TargetTypeId].attrs as never
@@ -287,7 +289,7 @@ describe("render", () => {
     for (const job of parseWorkflow(golden).jobs) {
       const commands = job.steps.map((step) => step.run ?? step.uses ?? "")
       expect(commands.findIndex((command) => command.startsWith("pnpm install --frozen-lockfile")))
-        .toBeLessThan(commands.findIndex((command) => command.startsWith("pnpm exec smithers-build")))
+        .toBeLessThan(commands.findIndex((command) => command.startsWith("pnpm exec smthrs")))
     }
   })
 
@@ -302,7 +304,7 @@ describe("render", () => {
       packageManager: { name: "bun", version: ">=1.4.0", executable: "bun", runtime: bunRuntime }
     }))
     expect(rendered).toContain("      - run: bun install --frozen-lockfile --ignore-scripts\n")
-    expect(rendered).toContain("        run: bun x smithers-build test '//scripts/...'\n")
+    expect(rendered).toContain("        run: bun x smthrs test '//scripts/...'\n")
     // Bun installs itself; a second manager-setup action would install the same
     // program twice.
     expect(rendered).not.toContain("pnpm/action-setup")
@@ -326,14 +328,14 @@ describe("render", () => {
   })
 
   it("counts the aggregate verb as every verb it plans", () => {
-    // `smithers-build ci` over //packages/... satisfies a docs gate on the same pattern,
+    // `smthrs ci` over //packages/... satisfies a docs gate on the same pattern,
     // because the aggregate command plans the docs verb too.
     expect(
       render(attrsOf({
         ...goldenAttrs,
         gates: [{ name: "documentation parity", verb: Verb.Docs, pattern: "//packages/...", job: "test" }]
       }))
-    ).toContain("pnpm exec smithers-build ci '//packages/...'")
+    ).toContain("pnpm exec smthrs ci '//packages/...'")
     // A wider pattern is a different claim and does not satisfy a narrower gate.
     expect(() =>
       render(attrsOf({
@@ -397,7 +399,7 @@ describe("render", () => {
     }) as typeof goldenAttrs
     const steps = toolchainSteps(attrs, attrs.jobs[0]!)
     expect(steps.some((step) => step.run?.startsWith("pnpm install") === true)).toBe(false)
-    expect(steps.some((step) => step.uses === "Swatinem/rust-cache@v2")).toBe(false)
+    expect(steps.some((step) => step.uses === actions.rustCache)).toBe(false)
     expect(steps.some((step) => step.run === "jj git init --colocate")).toBe(false)
   })
 
@@ -653,9 +655,9 @@ describe("render", () => {
           steps: [{ verb: Verb.Test, pattern }]
         }]
       }))
-      expect(rendered).toContain(`      - run: pnpm exec smithers-build test '${pattern}'\n`)
+      expect(rendered).toContain(`      - run: pnpm exec smthrs test '${pattern}'\n`)
       expect(parseWorkflow(rendered).jobs[0]!.steps.map((step) => step.run))
-        .toContain(`pnpm exec smithers-build test '${pattern}'`)
+        .toContain(`pnpm exec smthrs test '${pattern}'`)
     }
   })
 
@@ -720,7 +722,7 @@ describe("render", () => {
           steps: [{ verb, pattern: "//..." }]
         }]
       }))
-      for (const [, emittedVerb] of rendered.matchAll(/pnpm exec smithers-build ([\w-]+) /g)) emitted.add(emittedVerb!)
+      for (const [, emittedVerb] of rendered.matchAll(/pnpm exec smthrs ([\w-]+) /g)) emitted.add(emittedVerb!)
     }
     expect([...emitted].filter((verb) => !commands.has(verb))).toEqual([])
   })
@@ -744,9 +746,9 @@ describe("render", () => {
       }]
     }))
     expect(withDepth).toContain(
-      "      - uses: actions/checkout@v4\n        with:\n          fetch-depth: \"0\"\n"
+      `      - uses: ${actions.checkout}\n        with:\n          fetch-depth: "0"\n`
     )
-    expect(withDepth).toContain("        run: pnpm exec smithers-build review '//...'\n")
+    expect(withDepth).toContain("        run: pnpm exec smthrs review '//...'\n")
 
     const both = render(attrsOf({
       ...goldenAttrs,
@@ -759,7 +761,7 @@ describe("render", () => {
       }]
     }))
     expect(both).toContain(
-      "      - uses: actions/checkout@v4\n        with:\n          submodules: recursive\n          fetch-depth: \"50\"\n"
+      `      - uses: ${actions.checkout}\n        with:\n          submodules: recursive\n          fetch-depth: "50"\n`
     )
 
     const bare = render(attrsOf({
@@ -773,7 +775,7 @@ describe("render", () => {
       }]
     }))
     expect(bare).not.toContain("fetch-depth")
-    expect(bare).toContain("      - uses: actions/checkout@v4\n      - uses: pnpm/action-setup@v6\n")
+    expect(bare).toContain(`      - uses: ${actions.checkout}\n      - uses: ${actions.setupPnpm}\n`)
   })
 
   it("does not let a ci step satisfy a review gate", () => {
@@ -1105,7 +1107,7 @@ describe("a platform matrix", () => {
 `
     )
     // Every row runs the same steps, rendered once.
-    expect(rendered.split("smithers-build test '//packages/...'").length - 1).toBe(1)
+    expect(rendered.split("smthrs test '//packages/...'").length - 1).toBe(1)
     // The rule the whole module rests on survives the new key.
     expect(rendered).not.toContain("if:")
   })
@@ -1184,7 +1186,7 @@ describe("a platform matrix", () => {
    *
    * `actions/setup-go` prepends its own bin directories to PATH. Emitted after
    * `pnpm/action-setup`, it displaced the pnpm shim corepack had put there, and
-   * the job's own `pnpm exec smithers-build` still resolved while every nested
+   * the job's own `pnpm exec smthrs` still resolved while every nested
    * target the build tool spawned died with `spawn pnpm ENOENT` in under a
    * second. Fifty-one targets failed at once, across every package, and read
    * like fifty-one defects rather than one ordering mistake.
