@@ -85,8 +85,9 @@ caller paging a large directory could see one entry twice and another never.
 details. A truncated capture is a fragment of what the process printed, and
 [`@smthrs/harness`](https://harness.smithers.sh/reference/api/) reads these flags to refuse a later write of
 those exact bytes: writing a captured tail over a file replaces the file with
-the end of a log. Renaming one of these fields, or omitting it when the capture
-is cut, disarms that guard silently.
+the end of a log. Read the flag before writing captured output anywhere, and set
+it in your own handler whenever you cut a capture: a consumer that cannot tell a
+fragment from the whole writes the fragment.
 
 `stdoutDroppedBytes`, `stderrDroppedBytes`, and `tailDroppedBytes` count what
 the process actually produced beyond the capture. Capture is bounded where the

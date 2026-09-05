@@ -103,7 +103,7 @@ uses five:
 | `net:post:*`   | `http-post`, `websearch`                                              |
 
 `explore` declares the union of the capabilities of the four flows it composes
-from, sorted and deduplicated, so a seat offered `explore` is offered exactly
+from, sorted and deduplicated, so a model offered `explore` is offered exactly
 the authority its readers need.
 
 ## Hermetic mode is a pre-check, not a sandbox

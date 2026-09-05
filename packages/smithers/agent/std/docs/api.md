@@ -220,7 +220,7 @@ makes that command hang. A container name that is empty or starts with `-` is
 
 ## TestRunner
 
-How this repository runs its tests, declared once by the host.
+How the project under test runs its suite, declared once by the host.
 
 | Export        | Type                                    | Meaning                                                                     |
 | ------------- | --------------------------------------- | --------------------------------------------------------------------------- |
@@ -307,11 +307,10 @@ mapping.
 
 The root entry point is Node-only: it re-exports `NodeLanguageServer`, which
 imports `node:url`. The four browser-safe subpaths are `@smthrs/std/Grep`,
-`@smthrs/std/Glob`, `@smthrs/std/Search`, and `@smthrs/std/PortableSearch`, and
-they are the entries the repository's browser contract checks.
+`@smthrs/std/Glob`, `@smthrs/std/Search`, and `@smthrs/std/PortableSearch`.
+Nothing any of the four imports reaches a Node built-in.
 
-Two pieces of prose that used to live on this page now have their own pages,
-because they are the model behind the API rather than part of it:
+The model behind this surface has its own pages:
 
 - [Limits are disclosed, never silent](./concepts/limits-and-disclosure.md) for
   every cap and how it is reported.

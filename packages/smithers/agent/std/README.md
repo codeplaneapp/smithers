@@ -1,7 +1,7 @@
 # @smthrs/std
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://std.smithers.sh
@@ -9,8 +9,10 @@ all Smithers packages share one Effect runtime.
 The standard flows tool library for filesystem, search, HTTP, shell, and language-server work. Each callable tool is an ordinary `@smthrs/core` flow declaration with explicit capabilities and effects, plus an injectable handler where execution is host-owned.
 
 ```sh
-npm install @smthrs/std
+npm install @smthrs/std@next
 ```
+
+The package publishes release candidates to the `next` dist-tag.
 
 ## Public API
 
@@ -44,7 +46,7 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `ShellCommand`       | `name`, `description`, `DEFAULT_TIMEOUT_MS`, `MAX_CAPTURE_BYTES`, `DEFAULT_MAX_OUTPUT_TOKENS`, `TIMEOUT_EXIT_CODE`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`           | Declares and runs a Codex-shaped shell command.                                |
 | `StdError`           | `Code`, `StdError`                                                                                                                                                                                      | Defines typed standard-tool failures.                                          |
 | `TestRun`            | `name`, `description`, `scratchDirectory`, `DEFAULT_TIMEOUT_MS`, `MAX_CAPTURE_BYTES`, `Input`, `Outcome`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`                              | Runs the declared test suite and reads its report.                             |
-| `TestRunner`         | `captureBase`, `Runner`, `TestRunner`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                         | Declares how this repository runs its tests.                                   |
+| `TestRunner`         | `captureBase`, `Runner`, `TestRunner`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                         | Declares how the project under test runs its suite.                            |
 | `UpdatePlan`         | `name`, `description`, `StepStatus`, `Plan`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`                                                                                  | Acknowledges a Codex plan update.                                              |
 | `WebFetch`           | `name`, `description`, `Input`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `run`                                                                                                        | Declares and runs normalized web-page fetches.                                 |
 | `WebSearch`          | `name`, `description`, `Input`, `Result`, `Output`, `effects`, `effectsFor`, `capabilities`, `flow`, `WebSearch`, `make`, `makeNoop`, `layerNoop`, `run`                                                | Declares web search and its injectable provider service.                       |
@@ -62,7 +64,7 @@ const program = Read.run({ path: "/workspace/notes.md" }).pipe(
 
 `Manifest.flows` is the declaration registry, `Manifest.handlers` contains directly executable handlers, `Manifest.effectsFor` narrows a declaration for one decoded input, and `Manifest.readOnly` is the canonical read-only projection. `@smthrs/std/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
 
-The root entry point is Node-only: `NodeLanguageServer` pulls in `node:url`. The four subpaths `@smthrs/std/Grep`, `@smthrs/std/Glob`, `@smthrs/std/Search` and `@smthrs/std/PortableSearch` are browser-safe and are the entries the repository's browser contract checks.
+The root entry point is Node-only: `NodeLanguageServer` pulls in `node:url`. The four subpaths `@smthrs/std/Grep`, `@smthrs/std/Glob`, `@smthrs/std/Search` and `@smthrs/std/PortableSearch` are browser-safe, because nothing any of them imports reaches a Node built-in.
 
 ## Child process environment
 
@@ -98,7 +100,7 @@ Every limit is a display budget disclosed to the caller, never a silent cut. A c
 | `MAX_QUEUED_FRAMES`               | 256         | frames buffered for one language server's stdin              |
 | `MAX_PENDING_REQUESTS`            | 512         | concurrent in-flight JSON-RPC requests to one server         |
 
-Shell capture is bounded where it is read rather than after: a command that prints gigabytes costs the bound, not the whole of what it printed, and the `<stream>DroppedBytes` fields count what the process actually produced. Every caller-supplied command — `bash`, `test`, `shell_command` — passes a bound. The internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do not, because a listing read for its content is useless with its head missing. Those fields and the `<stream>Truncated` flags beside them are a wire convention `@smthrs/harness/TruncatedOutput` reads to refuse a later write of those exact bytes; renaming one disarms that guard silently.
+Shell capture is bounded where it is read rather than after: a command that prints gigabytes costs the bound, not the whole of what it printed, and the `<stream>DroppedBytes` fields count what the process actually produced. Every caller-supplied command (`bash`, `test`, `shell_command`) passes a bound. The internal `git` plumbing calls behind `Checkpoints` and `TestRun`'s baseline do not, because a listing read for its content is useless with its head missing. Those fields and the `<stream>Truncated` flags beside them are a wire convention: [`@smthrs/harness`](https://harness.smithers.sh) reads them to refuse a later write of those exact bytes, so check the flag before writing captured output anywhere.
 
 ## Failures
 

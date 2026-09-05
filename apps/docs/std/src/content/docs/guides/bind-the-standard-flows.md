@@ -1,6 +1,6 @@
 ---
 title: "Bind the standard flows into a host"
-description: "Compose the platform and service layers the handlers require, offer the declarations to a model, and use the read-only projection for a restricted seat."
+description: "Compose the platform and service layers the handlers require, offer the declarations to a model, and use the read-only projection for a restricted tool surface."
 sidebar:
   order: 1
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/std/docs/guides/bind-the-standard-flows.md"
@@ -30,7 +30,7 @@ const host = Layer.mergeAll(
   NativeSearch.layer.pipe(Layer.provide(platform)),
   // bash and test, when a call names a container.
   Container.layerCommand({ program: "docker" }),
-  // test: how this repository runs its suite.
+  // test: how the project under test runs its suite.
   TestRunner.layer({ command: "pnpm vitest run", cwd: "/workspace" })
 )
 ```
@@ -79,8 +79,8 @@ import * as Manifest from "@smthrs/std/Manifest"
 const offered = Manifest.names.map((name) => Manifest.flows[name])
 ```
 
-For a seat that must not change anything, use the read-only projection instead
-of filtering by hand:
+For a tool surface that must not change anything, use the read-only projection
+instead of filtering by hand:
 
 ```ts
 const readOnly = Manifest.readOnly.map((name) => Manifest.flows[name])

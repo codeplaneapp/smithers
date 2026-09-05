@@ -73,17 +73,17 @@ Manifest.names // the 17 names, in registry order
 Manifest.flows // name -> declaration, all 17
 Manifest.handlers // name -> handler, the 16 that have one
 Manifest.effectsFor // name -> narrowing function, all 17
-Manifest.readOnly // the 8 names a read-only seat may see
+Manifest.readOnly // the 8 names a read-only tool surface may see
 ```
 
 Every registry is frozen. `Manifest.handlers` omits `explore` because a dynamic
-flow has no handler; `Manifest.effectsFor` includes it, because a seat can still
-be offered the declaration and its envelope still narrows.
+flow has no handler; `Manifest.effectsFor` includes it, because a model can
+still be offered the declaration and its envelope still narrows.
 
 `Manifest.readOnly` is `read`, `ls`, `glob`, `grep`, `fetch`, `explore`,
 `webfetch`, and `lsp`. `websearch` is deliberately absent: its provider contract
 requires `net:post` authority, which is mutating under the kernel capability
-taxonomy, so it cannot ride in a read-only seat.
+taxonomy, so it cannot ride in a read-only tool surface.
 
 ## The services a host binds
 
@@ -95,7 +95,7 @@ answer is a host decision rather than a platform one:
 | ---------------- | ----------------------- | -------------------------------------------------- |
 | `Search`         | `grep`, `glob`          | Whether searching runs in process or through `rg`. |
 | `Container`      | `bash`, `test`          | How a command reaches a named container.           |
-| `TestRunner`     | `test`                  | How this repository runs its tests.                |
+| `TestRunner`     | `test`                  | How the project under test runs its suite.         |
 | `Checkpoints`    | agent-side tree pinning | Where a pinned tree is recorded and checked out.   |
 | `WebSearch`      | `websearch`             | Which search provider answers.                     |
 | `LanguageServer` | `lsp`                   | Which language server answers.                     |

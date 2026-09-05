@@ -1,117 +1,120 @@
 ---
 title: "@smthrs/std"
-description: "The standard tool library for a Smithers agent: 17 callable flows for files, search, shell, tests, HTTP, and language servers, each a portable declaration with a host-supplied handler."
+description: "The standard tool library for coding agents: read, edit, grep, bash, test, and twelve more, each a portable declaration paired with a handler your host runs."
 ---
 
-`@smthrs/std` is the tool library a coding agent runs on. It declares the
-capabilities an agent reaches for every frame: read a file, edit it, list a
-directory, search a tree, run a shell command, run the repository's test suite,
-fetch a URL, query a language server. There are 17 of them, and every one is an
-ordinary [`@smthrs/core`](/api/core) flow.
+`@smthrs/std` is the tool library a coding agent works with: seventeen tools,
+among them `read`, `write`, `edit`, `grep`, `glob`, `bash`, `test`, and `lsp`.
+Every tool ships as two halves. The **declaration**, called a **flow** here and
+exported as `flow` from every module, is plain data, carrying a name, the one
+line a model sees, input and output schemas, the capabilities the tool needs,
+and the effects it would have. It reaches no filesystem, no process, and no
+network, so it is safe to hand to a model or keep in a registry. The **handler**
+is an ordinary [Effect](https://effect.website) whose requirements name the host
+services it needs, so you decide what `read` reads from and where `bash` runs.
 
-A flow here is two halves that ship apart. The **declaration** carries `name`,
-`description`, `Input`, `Output`, `capabilities`, and `effects`: it is pure
-data, safe to hand to a model, and safe to plan against before anything runs.
-The **handler** is the executable half, and it asks the host for the services it
-needs. A host binds the handlers it can serve and offers the declarations it
-wants a model to see, so a browser host and a Node host offer the same `read`
-and implement it differently.
+Reach for this package directly when you are building your own host, your own
+tool registry, or a tool surface for a model you drive yourself. If you want the
+agent loop that already offers all seventeen, use
+[`@smthrs/agent`](/api/agent), the parent package, instead.
 
-That split is what the rest of the library is built around. Limits are display
-budgets that every capped result discloses. Failures are one closed list of
-codes, and an ordinary outcome such as a non-zero exit code stays a value.
-Effect envelopes narrow per call, so a scheduler serializes two writes to one
-path instead of every write in the workspace.
+## Why reach for this
 
-## Who uses this package
+Any host can write `read` and `grep` in an afternoon. The cost arrives later, in
+the details that decide whether a model gets its next step right:
 
-Hosts bind these flows into an agent. [`@smthrs/agent`](/api/agent) does exactly
-that in `StandardFlows`, which is what the Smithers CLI runs. Flow authors reach
-for the declarations directly, naming `Read.flow` and `Edit.flow` in a larger
-flow so the composed step inherits their capabilities and effect envelope. Peers
-implementing their own search back end use `Search`, `SearchContract`, and
-`SearchConformance`.
+- **Limits are disclosed, never silent.** Every capped result says it was
+  capped, in `truncated` and `notice`. A model shown 200 lines of a 1,000-line
+  file is told so, instead of concluding the file ends there.
+- **`read` returns raw file text.** Line numbers come back as the sibling fields
+  `startLine`, `endLine`, and `totalLines`, never as a gutter inside the text,
+  so any line of a read is an anchor that `edit` accepts as it stands.
+- **A `grep` hit carries the definition it sits in.** When a file's shape says
+  plainly which definition a match falls inside, the hit carries that
+  definition's `kind`, `name`, `startLine`, and `endLine`, so the follow-up read
+  is a fact rather than a guess.
+- **Search has one meaning and two implementations.** `PortableSearch` walks the
+  filesystem in process and needs no external binary; `NativeSearch` drives the
+  `rg` executable. A differential kit holds both to the same answers.
+- **Every tool states its authority before it runs**, as `action:resource`
+  capability strings and an effect envelope, so a permission layer or a
+  scheduler can decide about a call before making it.
 
 ## Install
 
 ```bash
-pnpm add @smthrs/std
+pnpm add @smthrs/std@next @effect/platform-node effect
 ```
 
-For runtime requirements, import forms, and the browser-safe subset, see
+The package publishes release candidates to the `next` dist-tag. The handlers
+ask the host for services such as `FileSystem`, `Path`, and
+`ChildProcessSpawner`. `@effect/platform-node` supplies them on Node.js 22.19.0
+or later. For the browser-safe subset and the service each handler requires, see
 [Installation](./installation.md).
 
-## The smallest call
-
-A handler is an ordinary Effect. Give it the services it asks for and run it:
+## Read a file, bounded and disclosed
 
 ```ts
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import { NodeServices } from "@effect/platform-node"
 import * as Read from "@smthrs/std/Read"
 import * as Effect from "effect/Effect"
 
-const page = Read.run({ path: "/workspace/notes.md" })
+const page = await Effect.runPromise(
+  Effect.provide(Read.run({ path: "./README.md", limit: 20 }), NodeServices.layer)
+)
 
-Effect.runPromise(Effect.provide(page, NodeFileSystem.layer)).then((result) => {
-  console.log(result.startLine, result.endLine, result.totalLines)
-  console.log(result.content)
-})
+console.log(page.content) // raw file text, no line-number prefixes
+console.log(`lines ${page.startLine} to ${page.endLine} of ${page.totalLines}`)
+if (page.truncated) console.log(page.notice)
 ```
 
-`result.content` is raw file text. The line numbers are sibling fields, never a
-gutter inside the text, so any line of `content` is an edit anchor exactly as it
-stands.
+When the file holds more than 20 lines, `page.truncated` is `true` and
+`page.notice` names both counts, in the form
+`Showing 20 of 213 lines; output was truncated.` Nothing was cut quietly, and
+every line of `page.content` can be pasted back into `edit` as an anchor.
 
-## The 17 flows
+## What the library covers
 
-| Name            | What it does                                                     | The service it needs                |
-| --------------- | ---------------------------------------------------------------- | ----------------------------------- |
-| `read`          | Reads one page of a text file by 1-based offset and limit.       | `FileSystem`                        |
-| `write`         | Replaces a file, creating parent directories.                    | `FileSystem`, `Path`                |
-| `edit`          | Replaces exact text, or an earlier hit's line range.             | `FileSystem`                        |
-| `ls`            | Lists a directory, directories first, deterministically ordered. | `FileSystem`, `Path`                |
-| `glob`          | Finds files by a ripgrep `-g` pattern.                           | `Search`                            |
-| `grep`          | Searches file contents and returns match-centric hits.           | `Search`                            |
-| `bash`          | Runs a shell command line, or a script delivered as data.        | `ChildProcessSpawner`, `Path`       |
-| `test`          | Runs the declared suite and reports `{passed, failed}`.          | `ChildProcessSpawner`, `TestRunner` |
-| `shell_command` | Runs a Codex-shaped shell command.                               | `ChildProcessSpawner`               |
-| `apply_patch`   | Applies a Codex V4A patch.                                       | `FileSystem`, `Path`                |
-| `update_plan`   | Acknowledges a Codex plan update.                                | none                                |
-| `fetch`         | Gets a URL and returns status and text body.                     | `HttpClient`                        |
-| `http-post`     | Posts a text body to a URL.                                      | `HttpClient`                        |
-| `explore`       | Investigates the workspace read-only over the four readers.      | no handler                          |
-| `webfetch`      | Fetches a page and renders it as text, Markdown, or HTML.        | `HttpClient`                        |
-| `websearch`     | Searches the web through a configured provider.                  | `WebSearch`                         |
-| `lsp`           | Runs one language-server query.                                  | `LanguageServer`                    |
+| Area              | Flows                                         |
+| ----------------- | --------------------------------------------- |
+| Files             | `read`, `write`, `edit`, `apply_patch`, `ls`  |
+| Search            | `grep`, `glob`, `explore`                     |
+| Processes         | `bash`, `shell_command`, `test`               |
+| Network           | `fetch`, `http-post`, `webfetch`, `websearch` |
+| Code intelligence | `lsp`                                         |
+| Planning          | `update_plan`                                 |
 
-`explore` is a declaration only. It is a dynamic flow composed from `read`,
-`ls`, `glob`, and `grep`, so a seat can be offered it, and `Manifest.handlers`
-has no entry for it.
+Sixteen of the seventeen carry a handler. `explore` is a dynamic flow composed
+from the others, so it declares an interface without implementing one.
+`Manifest` is the whole set keyed by name, and `Manifest.readOnly` is the
+projection of it that changes nothing, for offering to a model you want to read
+and not write. Every field of every flow is in the
+[Flow reference](./reference/flows.md).
 
-## The registries
+## How this fits with the Smithers agent
 
-`Manifest` is how a host reaches all 17 at once without naming them:
+`@smthrs/std` is the tool half of a coding agent, and it knows nothing about
+models, prompts, or loops: it declares tools and it runs them. The loop lives in
+[`@smthrs/agent`](/api/agent), the parent package. Its `StandardFlows` module
+pairs each declaration here with its handler here, so the JavaScript a model
+emits on each turn reaches a file through `ctx.call("read", input)` rather than
+through a bespoke tool surface.
 
-```ts
-import * as Manifest from "@smthrs/std/Manifest"
-
-Manifest.flows // every declaration, by name
-Manifest.handlers // the 16 executable handlers, by name
-Manifest.effectsFor // the per-invocation envelope narrowing, by name
-Manifest.names // the 17 names, in registry order
-Manifest.readOnly // the 8 names a read-only seat may see
-```
+See [Give a run capabilities](/pkg/agent/guides/capabilities) for how a run
+binds these flows and gates the calls a cell makes into them. Both packages sit
+under the `smithers` command line tool,
+[`@smthrs/cli`](/api/cli), which composes the agent, the durable engine, and a
+control plane into something you run in a terminal.
 
 ## Where to go next
 
-- [Installation](./installation.md) for requirements, import forms, and the
-  browser-safe subpaths.
-- [Quickstart](./quickstart.md) to search a real tree and read the definition a
-  hit sits in.
-- [Flows and handlers](./concepts/flows-and-handlers.md) for the model behind
-  the two halves.
-- [Bind the standard flows into a host](./guides/bind-the-standard-flows.md) for
-  the composition every other guide assumes.
-- [Flow reference](./reference/flows.md) for every flow's input and output
-  fields.
-- [API reference](./api.md) for every module and every public export.
+- [Quickstart](./quickstart.md) searches a real directory and reads the
+  definition a hit sits in, with no external binary and no API key.
+- [Flows and handlers](./concepts/flows-and-handlers.md) explains the two halves
+  and the registries that reach both.
+- [Bind the standard flows into a host](./guides/bind-the-standard-flows.md)
+  composes the layers and offers all seventeen tools at once.
+- [Flow reference](./reference/flows.md) lists every input field, output field,
+  and failure code.
+- [Troubleshooting](./troubleshooting.md) maps each failure code to what to
+  change.

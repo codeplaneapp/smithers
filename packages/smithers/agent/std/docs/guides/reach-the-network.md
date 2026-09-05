@@ -127,4 +127,4 @@ A host with no provider binds `WebSearch.layerNoop`, and the call fails with
 
 `websearch` is not in `Manifest.readOnly`, because its provider contract
 requires `net:post` authority, which is mutating under the kernel capability
-taxonomy. A read-only seat gets `fetch` and `webfetch` instead.
+taxonomy. A read-only tool surface gets `fetch` and `webfetch` instead.

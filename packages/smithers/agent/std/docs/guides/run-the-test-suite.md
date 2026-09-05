@@ -1,6 +1,6 @@
 ---
 title: "Run the test suite and attribute a failure"
-description: "Declare how this repository runs its tests, select what to run, and use against:'base' to separate the failures your edit introduced from the ones that were already there."
+description: "Declare how the project under test runs its suite, select what to run, and use against:'base' to separate the failures your edit introduced from the ones that were already there."
 sidebar:
   order: 5
 ---
@@ -105,7 +105,7 @@ The worktree is a detached checkout at `<root>/.flows-test-base`, which is
 `TestRun.scratchDirectory`. Inside the repository is the only place that works:
 a runner reaching the repository through a container mount sees a scratch
 checkout anywhere else on the host as a path that does not exist. It is removed
-when the call ends, however it ends, and the repository format keys the
+when the call ends, however it ends, and the repository format keys that the
 relative checkout introduced are restored.
 
 `against: "base"` needs a repository directory. A runner declaring neither `root`

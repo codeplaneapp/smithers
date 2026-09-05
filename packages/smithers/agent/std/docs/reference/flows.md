@@ -370,7 +370,7 @@ A declaration with no handler: a dynamic flow composed from `read`, `ls`,
 | `findings` | string | Evidence-backed findings with `file:line` citations. |
 
 `Explore.make({ model })` builds the declaration pinned to a model;
-`Explore.flow` is the same declaration with model selection left to the seat.
+`Explore.flow` is the same declaration with model selection left to the host.
 `Explore.capabilities` is the sorted union of the capabilities of the four flows
 it composes.
 
@@ -465,7 +465,8 @@ all values.
 | `response_too_large`       | The response exceeded the byte cap before decoding.           |
 
 The list is closed and stable, and it is the vocabulary a host binding its own
-handler or its own `Search` peer answers in. Two codes are part of it that no
-handler in this package currently produces: `not_a_file` and `not_modified`.
+handler or its own `Search` peer answers in, `not_a_file` and `not_modified`
+included: both are available to a handler that needs them, and the handlers
+shipped here have no occasion to raise either.
 
 For what to do about each one, see [Troubleshooting](../troubleshooting.md).

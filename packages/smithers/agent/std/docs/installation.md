@@ -8,17 +8,17 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/std
+pnpm add @smthrs/std@next
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Its runtime dependencies install with
-it: [`effect`](https://effect.website), plus
-[`@smthrs/core`](/api/core) for the flow declaration type,
-[`@smthrs/kernel`](/api/kernel) for the permission-aware host services,
-[`@smthrs/capability`](/api/capability) for the capability vocabulary, and
-[`@smthrs/control`](/api/control) for the credential seam `ExaWebSearch` reads
-its API key through.
+The package publishes release candidates to the `next` dist-tag. It requires
+Node.js 22.19.0 or later and ships as both ESM and CommonJS with TypeScript
+declarations. Its runtime dependencies install with it:
+[`effect`](https://effect.website), plus [`@smthrs/core`](/api/core) for the
+flow declaration type, [`@smthrs/kernel`](/api/kernel) for the permission-aware
+host services, [`@smthrs/capability`](/api/capability) for the capability
+vocabulary, and [`@smthrs/control`](/api/control) for the credential seam
+`ExaWebSearch` reads its API key through.
 
 ## Import forms
 
@@ -46,8 +46,8 @@ The root entry point is Node-only. It re-exports `NodeLanguageServer`, which
 imports `node:url`, so importing `@smthrs/std` in a browser bundle pulls a Node
 built-in in with it.
 
-Four subpaths are browser-safe, and they are the entries the repository's own
-browser contract checks on every build:
+Four subpaths are browser-safe, because nothing they import reaches a Node
+built-in:
 
 - `@smthrs/std/Grep`
 - `@smthrs/std/Glob`

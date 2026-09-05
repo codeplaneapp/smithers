@@ -1,7 +1,7 @@
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as HostServices from "@smthrs/kernel/HostServices"
 import type * as Path from "@smthrs/kernel/Path"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import { Effect, type PlatformError } from "effect"
 import type * as FileSystem from "effect/FileSystem"

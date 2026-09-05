@@ -212,8 +212,8 @@ printed, not the whole of it.
 
 **What to change.** Check `stdoutTruncated`, `stderrTruncated`, or
 `tailTruncated` before writing captured output anywhere.
-[`@smthrs/harness`](https://harness.smithers.sh/reference/api/) reads exactly these flags to refuse such a
-write, which is why they must not be renamed or dropped.
+[`@smthrs/harness`](https://harness.smithers.sh/reference/api/) reads the same flags and refuses the write for
+you when it is the host running these tools.
 
 ## A browser bundle pulls in node:url
 
