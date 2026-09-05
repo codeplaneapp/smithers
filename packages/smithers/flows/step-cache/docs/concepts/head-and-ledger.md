@@ -31,8 +31,7 @@ history.
 That is why `get(keyDigest, { recordedBy })` reads the ledger first and falls
 back to the head only when the ledger holds no row for that provenance. The
 fallback exists for entries recorded under some other provenance: a fork
-sharing its parent's keys, a shared-tier write-back, a row an earlier build
-wrote before the ledger existed.
+sharing its parent's keys, or a shared-tier write-back.
 
 ## The two stages of a recording
 

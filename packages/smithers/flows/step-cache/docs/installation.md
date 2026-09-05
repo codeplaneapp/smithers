@@ -1,21 +1,46 @@
 ---
 title: "Installation"
-description: "Install @smthrs/step-cache, its runtime requirements, its import forms, and the database driver and HTTP client a runnable composition adds."
+description: "How to get @smthrs/step-cache, what it requires at runtime, the import forms it publishes, and the database driver and HTTP client a runnable composition adds."
 sidebar:
   order: 1
 ---
 
-## Install the package
+## Get the package
+
+`@smthrs/step-cache` is not on npm at 1.0.0-rc.0. It ships as a member of the
+[smithers repository](https://github.com/smithersai/smithers) workspace, so
+using it today means working from a checkout:
 
 ```bash
-pnpm add @smthrs/step-cache
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Two runtime dependencies install with
-it: [`@smthrs/canonical`](/api/canonical) for RFC 8785 JSON, and
-[`@smthrs/database`](/api/database) for the driver-neutral write boundary, plus
-`effect` itself.
+Code that consumes it lives in that workspace too, either an existing package
+or one you add under `packages/`, and depends on it with a workspace
+specifier:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/step-cache": "workspace:*"
+  }
+}
+```
+
+## Requirements
+
+- Node.js 22.19.0 or later.
+- [`effect`](https://effect.website) 4.0.0-rc.112, which supplies the `Effect`,
+  `Schema`, `Layer`, `Metric`, and SQL client types this package's signatures
+  use.
+- [`@smthrs/canonical`](/api/canonical) for RFC 8785 JSON and
+  [`@smthrs/database`](/api/database) for the driver-neutral write boundary.
+  Both resolve with the package. Declare `@smthrs/database` yourself only when
+  you import a driver from it, as a durable composition does below.
+
+The build ships both ESM and CommonJS with TypeScript declarations.
 
 ## Import forms
 
@@ -54,11 +79,18 @@ platform:
 
 `CacheStore.layer` requires two services from
 [`@smthrs/database`](/api/database): Effect's `SqlClient` and the
-`DurableWriter` write boundary. On Node:
+`DurableWriter` write boundary. Building them means importing that package
+directly, so declare it too:
 
-```bash
-pnpm add @smthrs/database
+```json
+{
+  "dependencies": {
+    "@smthrs/database": "workspace:*"
+  }
+}
 ```
+
+On Node:
 
 ```ts
 import * as DurableWriter from "@smthrs/database/DurableWriter"

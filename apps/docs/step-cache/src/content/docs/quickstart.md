@@ -15,11 +15,8 @@ under a fence.
 ## Prerequisites
 
 - Node.js 22.19.0 or later.
-- A package with the dependency installed:
-
-```bash
-pnpm add @smthrs/step-cache
-```
+- A package that depends on `@smthrs/step-cache`, as
+  [Installation](/installation/) sets up.
 
 ## Record a result
 

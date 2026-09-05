@@ -38,10 +38,9 @@ collide across runs routinely, so `eventSeq` alone names many events.
 ## When the fallback is right, and when it is not
 
 The head fallback exists for entries recorded under some other provenance: a
-fork sharing its parent's keys, a write-back from a shared tier, a row an
-earlier build wrote before the ledger existed. In those cases the ledger holds
-nothing for the caller's event and the head is the only durable answer there
-is.
+fork sharing its parent's keys, or a write-back from a shared tier. In those
+cases the ledger holds nothing for the caller's event and the head is the only
+durable answer there is.
 
 The fallback does not fire when the ledger holds the row and something else
 refuses it. A lookup that names a provenance the ledger holds and an

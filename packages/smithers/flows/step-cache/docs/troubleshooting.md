@@ -153,8 +153,7 @@ or `result_json <complaint>` using the admission vocabulary above. `meta_json`
 appears in the same messages.
 
 **What happened.** A row in the database did not decode back into a
-`CacheEntry`. Something other than this store wrote it, an earlier build wrote
-it under different rules, or the file is damaged.
+`CacheEntry`. Something other than this store wrote it, or the file is damaged.
 
 **What to change.** Evict the digest, which removes the head row and lets the
 next execution record a fresh one. A whole file that fails this way is faster

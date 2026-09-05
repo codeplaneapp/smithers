@@ -186,8 +186,8 @@ The run id carried by a provenance record: non-empty, NUL-free, well-formed
 text of at most `maximumRecordedRunIdLength` UTF-16 code units. Other control
 characters are admitted deliberately. The id is opaque here, it reaches SQL as
 a bound parameter and the wire as a percent-encoded query value, and every
-stored ledger row is read back through this schema, so narrowing it would make
-a row an earlier build persisted undecodable.
+stored ledger row is read back through this schema, so a narrower grammar
+would make rows already on disk undecodable.
 
 ### CacheStoreError
 

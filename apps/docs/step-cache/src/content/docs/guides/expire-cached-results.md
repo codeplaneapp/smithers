@@ -65,7 +65,7 @@ request.
 ## Keep a declared TTL out of the store
 
 A caller-facing `CachePolicy` annotation, `{ ttlMs?, scope? }`, is declared by
-[`@smthrs/flow`](https://flow.smithers.sh/reference/api/) and [`@smthrs/patterns`](https://patterns.smithers.sh/reference/api/), and read at
+[`@smthrs/flow`](https://flow.smithers.sh/reference/api/) and [`@smthrs/patterns`](https://smithers-patterns.smithers.sh/reference/api/), and read at
 dispatch by [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), which owns what it
 means and journals the decision it takes. Those packages are the contract for
 it.
@@ -75,6 +75,12 @@ re-derives its answer from a fresh clock reading on every lookup, which is
 exactly why the dispatch path does not use it for a declared `ttlMs`. A replay
 must reach the verdict the first execution reached, so that decision is
 journaled rather than recomputed here.
+
+The engine refuses removing `ttlMs` once that run has recorded an age verdict
+for the cache address, including when the head has since disappeared. It can
+reuse a copied fork verdict only after validating its producer, payload, TTL,
+and retained lineage history. These are engine decisions; the generic store's
+`maxAgeMs` and retention APIs remain independent read and collection policies.
 
 ## Where to go next
 

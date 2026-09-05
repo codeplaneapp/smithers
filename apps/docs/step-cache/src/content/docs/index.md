@@ -1,100 +1,136 @@
 ---
 title: "@smthrs/step-cache"
-description: "The Smithers step result cache: durable content-addressed storage for sealed step results, an append-only provenance ledger a replay reads through, and an optional shared HTTP tier."
+description: "Content-addressed storage for finished step results: record a result under a digest of its inputs, reuse it on the next run, and keep an immutable record of which run produced it."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/step-cache/docs/README.md"
 ---
 
-`@smthrs/step-cache` answers one question: may this sealed result be reused?
+`@smthrs/step-cache` records the result of a finished step under a digest of
+its inputs, so the next run that computes the same digest reads the result
+instead of doing the work again. It is an [Effect](https://effect.website)
+service with three implementations: a durable SQL store, an HTTP client for a
+cache other machines share, and a two-tier composition of the two.
 
-A durable run seals a step, digests everything the step depends on, and records
-the result under that digest. The next execution that derives the same digest
-reads the recorded result instead of doing the work again. This package is the
-store behind that read, and behind the write that fills it.
+## The problem it solves
 
-It is deliberately a _cache_. Entries may be evicted, a stale entry is a miss
-rather than a corruption, and one admission gate serves normal execution,
-replay, and speculation validation alike. What is not a cache is the provenance
-ledger beside it: every recording also lands an immutable row keyed by the exact
-journal event that made it, and no verb in this package deletes one. Evicting
-the reusable copy protects future executions from a poisoned result; it never
-rewrites what a past run recorded.
+A long job that crashes, retries, or reruns on a fresh checkout starts over.
+The steps that already produced an answer should not be paid for twice: a
+compile that took 90 seconds, a model call that cost money, a test suite that
+already passed on exactly these inputs.
 
-## Who uses this package
+Memoizing that is a dictionary lookup until two requirements collide. Reuse has
+to be revocable, because a result can turn out to be poison and no later run
+should reuse it. Replay has to be stable, because a run that finished last
+Tuesday must keep reporting what it actually recorded, whatever has been
+evicted since.
 
-Engine authors compose it: [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) reads it
-when a sealed action dispatches and writes it when one settles. A host that
-wants two machines to share step results composes the HTTP tier under it.
-Nothing above the engine calls this store directly, so a workflow author meets
-it as the reason a step did not run twice.
+This package answers both by writing two rows for every recording, in one
+transaction:
 
-## Install
+- The **head** is the mutable row an ordinary lookup serves. Evict it, sweep it
+  when it ages out, or overwrite what it points at. It is a cache, and it is
+  allowed to disappear.
+- The **ledger** row is keyed by the run and journal event that recorded the
+  result, and no verb in this package deletes one. A replay reading through
+  that fence sees the bytes its own event recorded, even after the head has
+  moved on.
 
-```bash
-pnpm add @smthrs/step-cache
-```
+Recording is first-writer-wins: `put` answers `Inserted`, `ExistingSame`, or
+`Conflict`, and never silently replaces a result two callers disagree about.
+Every argument crosses a strict admission boundary first, because a hit is
+handed back to a caller as real executable state.
 
-For the driver and write boundary a real composition adds, see
-[Installation](/installation/).
+## Get the package
 
-## The smallest real use
+`@smthrs/step-cache` is not on npm at 1.0.0-rc.0. It ships as a member of the
+[smithers repository](https://github.com/smithersai/smithers) workspace, so
+using it today means working from a checkout.
+[Installation](/installation/) has the clone, the workspace specifier, and
+the runtime requirements.
+
+## Reuse a result instead of recomputing it
+
+This program runs the expensive work once, records it, and reads it back on the
+second call. `TestCacheStore` is the production SQL store over an in-memory
+database, so the example runs with no file and no setup:
 
 ```ts
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as TestCacheStore from "@smthrs/step-cache/test/TestCacheStore"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 
-const program = Effect.gen(function*() {
-  const cache = yield* CacheStore.CacheStore
-  yield* cache.put({
-    keyDigest: "b1946ac92492d2347c6235b4d2611184",
-    result: { artifact: "dist/server.js" },
-    meta: { durationMs: 1_820 },
-    createdAtMs: Date.now(),
-    recordedRunId: "run-1",
-    recordedEventSeq: 7
+const compileOnce = (digest: string) =>
+  Effect.gen(function*() {
+    const cache = yield* CacheStore.CacheStore
+
+    const hit = yield* cache.get(digest)
+    if (Option.isSome(hit)) {
+      return { from: "cache", result: hit.value.result }
+    }
+
+    const result = { artifact: "dist/server.js", bytes: 41_022 }
+    yield* cache.put({
+      keyDigest: digest,
+      result,
+      meta: { durationMs: 1_820 },
+      createdAtMs: Date.now(),
+      recordedRunId: "run-a",
+      recordedEventSeq: 7
+    })
+    return { from: "work", result }
   })
-  return yield* cache.get("b1946ac92492d2347c6235b4d2611184")
+
+const main = Effect.gen(function*() {
+  const first = yield* compileOnce("compile-server-v1")
+  const second = yield* compileOnce("compile-server-v1")
+  console.log(first.from, JSON.stringify(first.result))
+  console.log(second.from, JSON.stringify(second.result))
 })
 
-Effect.runPromise(Effect.provide(program, TestCacheStore.layer).pipe(Effect.orDie))
+Effect.runPromise(Effect.provide(main, TestCacheStore.layer).pipe(Effect.orDie))
 ```
 
-`put` answers `Inserted`, `ExistingSame`, or `Conflict`, and `get` answers an
-`Option`. For the whole cycle, including the provenance fence and eviction, see
-the [Quickstart](/quickstart/).
+```text
+work {"artifact":"dist/server.js","bytes":41022}
+cache {"artifact":"dist/server.js","bytes":41022}
+```
 
-## The package at a glance
+Swap `TestCacheStore.layer` for `CacheStore.layer` over a real database and the
+same program keeps its results across restarts. [Compose a durable step cache](/guides/compose-a-store/) wires that composition.
 
-The root entry point exports these namespaces, and each is also importable from
-`@smthrs/step-cache/<Module>`:
+The digest is the caller's to compute. This store receives one and never
+inspects what it names, which is what lets any producer of stable content keys
+use it.
 
-| Namespace            | What it is                                                                                                                   |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `CacheStore`         | The service contract and its SQL implementation, plus the schemas, limits, validators, and error vocabulary of the boundary. |
-| `CacheStoreMetrics`  | The hit, miss, and recording-outcome counters the SQL store updates.                                                         |
-| `CombinedCacheStore` | Local-first read-through, local write-back, and inline or deferred publication to a shared tier.                             |
-| `RemoteCacheStore`   | The shared tier as an HTTP client: a bounded action cache under `/ac/{keyDigest}`.                                           |
-| `Migrations`         | The namespaced migration set for the two tables, and the layer that installs them.                                           |
+## How this fits the Smithers engine
 
-The Node-only test layer is at `@smthrs/step-cache/test/TestCacheStore`. Every
-export, with signatures, is on the [API reference](/reference/api/).
+This package is one seam of the Smithers durable flow engine, and most people
+reach it through the engine rather than directly.
+[`@smthrs/flows`](https://flows.smithers.sh/reference/api/) is the single dependency that carries that whole
+engine: it re-exports this package as its `StepCache` namespace, and its
+`NodeRuntime` composes `CacheStore.layer` into a durable host, so a flow author
+gets step reuse without ever naming this package. Above that sits the
+[`smithers` command line](https://cli.smithers.sh/reference/api/), which runs and resumes those flows from a
+terminal.
 
-## Where to go next
+Depend on `@smthrs/step-cache` on its own when you want the store without the
+engine: memoizing your own pipeline, standing up a shared cache for a fleet, or
+composing a host by hand.
 
-- [Installation](/installation/): requirements, import forms, and the
-  packages a runnable composition adds.
-- [Quickstart](/quickstart/): record a result, read it back through its
-  provenance, expire it, and evict it.
-- Concepts: [the head and the ledger](/concepts/head-and-ledger/),
-  [what the cache admits](/concepts/admission/), and
-  [local and shared tiers](/concepts/tiers/).
-- Guides: [compose a durable step cache](/guides/compose-a-store/),
-  [read the result one event recorded](/guides/read-a-recorded-result/),
-  [expire cached results](/guides/expire-cached-results/),
-  [evict a poisoned entry](/guides/evict-a-poisoned-entry/),
-  [share results across machines](/guides/share-results-across-machines/),
-  [implement a shared cache server](/guides/implement-a-shared-tier/),
-  [observe cache outcomes](/guides/observe-cache-outcomes/), and
-  [test against the step cache](/guides/test-with-the-cache/).
-- [Troubleshooting](/troubleshooting/): every failure this package reports,
-  what causes it, and what to change.
+## Next steps
+
+- [Installation](/installation/): import forms, runtime requirements, and
+  what a runnable composition adds.
+- [Quickstart](/quickstart/): one whole cache cycle, including the age bound
+  and a fenced eviction.
+- [The head and the ledger](/concepts/head-and-ledger/): why one `put`
+  writes two rows.
+- [What the cache admits](/concepts/admission/): the key grammar and the
+  bounded JSON budget every argument crosses.
+- [Local and shared tiers](/concepts/tiers/): read-through, write-back, and
+  what a shared tier changes.
+- [Share results across machines](/guides/share-results-across-machines/):
+  the same contract over HTTP.
+- [API reference](/reference/api/): every public export.
+- [Troubleshooting](/troubleshooting/): what each `CacheStoreError.code`
+  means and what to do about it.

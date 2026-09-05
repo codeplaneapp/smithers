@@ -1,7 +1,7 @@
 /**
  * Deterministic bundle of the production step cache service.
  *
- * See the {@link https://smithers.sh/concepts/step-keys | step-key contract}.
+ * See the {@link https://smithers.sh/docs/concepts/content-addressing | step-key contract}.
  *
  * @since 0.1.0
  */
