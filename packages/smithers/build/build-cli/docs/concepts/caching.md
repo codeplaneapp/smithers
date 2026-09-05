@@ -67,7 +67,7 @@ followed to their targets. Executables inside the workspace use relative
 paths so a checkout can move without changing its keys.
 
 This covers `Host.bin`, `NodeModule.Bin` entry points, runtime and package
-manager executables (including npx), Bun, resolved Nix/Mise tools, Go and
+manager executables and their launchers, Bun, resolved Nix/Mise tools, Go and
 Cargo executables, Cargo plugins, and the shell and leading literal program
 of a `Shell.Build` command. Shebang
 scripts also include their interpreter's path and bytes, including the PATH
