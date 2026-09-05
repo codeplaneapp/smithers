@@ -1,107 +1,119 @@
 ---
 title: "@smthrs/ui"
-description: "The shared component library for Smithers UIs: shadcn anatomy on Radix behavior, styled entirely through theme tokens, with every heavy renderer behind its own package subpath."
+description: "React components for coding-agent interfaces: run cards, status pills, streamed agent output, diffs, and prompt composers, styled through theme tokens with no stylesheet to configure."
 ---
 
-`@smthrs/ui` is the component library every Smithers browser UI renders. It is
-shadcn/ui anatomy (compound slots, `data-slot` attributes, CVA variant APIs,
-`asChild`) over Radix behavior, styled exclusively through the
-[`@smthrs/ui-styleguide`](/api/ui-styleguide) theme tokens.
+`@smthrs/ui` is a React component library for interfaces that watch and steer
+coding agents. It covers the surfaces such a product keeps needing: run cards
+and status pills, streamed agent output with its tool calls and reasoning
+summary, diffs and syntax-highlighted code, prompt composers with attachments,
+approval and checkpoint cards, and the theme tokens that hold them together.
 
-Two decisions shape everything else about it:
+Build those surfaces yourself and you decide, over and over, what color a
+`failed` run is, how a half-streamed tool call reads, how a dropped file that is
+too large gets refused, and how all of it behaves in dark mode. This package
+makes those decisions once. You pass a status string and get a correctly tinted
+pill; you pass a provider payload and get a rendered response; you set
+`data-theme` on `<html>` and the whole tree recolors with no code of your own.
 
-- **Styles travel as a JavaScript string.** There is no `.css` file to import.
-  You render `<SmithersUiStyles />` once, and every component also injects the
-  sheet itself in a browser as a fallback. The bundler this package targets
-  drops CSS artifacts, so a string is the only delivery that survives.
-- **Heavy renderers live behind their own subpaths.** Charts, terminals, syntax
-  highlighting, and the markdown editor ship from `@smthrs/ui/adapters/*` and
-  are never re-exported from the base barrel. A consumer who wants a `Button`
-  does not pay for Shiki.
+The components follow shadcn/ui anatomy on Radix behavior. If you have used
+shadcn, the shapes are the ones you already know: compound parts, `data-slot`
+attributes, CVA variant recipes, and `asChild`.
 
-Because every color is a token expression rather than a literal, a component is
-correct in light and dark with no dark-mode code, honors
-`prefers-reduced-motion`, and follows whichever of the eight palettes the
-document selects.
+## Availability
 
-## Who uses this package
+`@smthrs/ui` is not published to a registry. Its source lives in the
+[smithersai/smithers](https://github.com/smithersai/smithers) repository under
+`packages/smithers/ui`, and the applications there consume it through the pnpm
+workspace.
+Every page on this site describes that source, so the component contracts, the
+failure codes, and the styling model are readable whether or not you can install
+the package. [Installation](./installation.md) covers what a consumer needs and
+what each entry point exports.
 
-`apps/ui` and `apps/review` consume it through the workspace, and the
-`create-app` templates render it in generated applications. It is
-`private: true` at `1.0.0-rc.0` and published to no registry.
+## Two decisions shape everything else
 
-## Install
+**Styles ship as TypeScript, not as a CSS file.** There is no stylesheet to
+import and no build step to configure. Render one element and the whole library
+is styled, in whichever mode the document asks for. See
+[how styling ships](./concepts/styling.md).
 
-```json
-{ "dependencies": { "@smthrs/ui": "workspace:*" } }
-```
-
-React 19 is a peer dependency. See [Installation](./installation.md) for the
-entry points and the peer requirements.
+**Heavy renderers live behind subpaths.** Importing `@smthrs/ui` gets you the
+component library, about 500 KB bundled. Shiki, recharts, xterm.js, and Milkdown
+are reachable only through `@smthrs/ui/adapters/*`, so you pay for one after you
+ask for it. See [the adapters boundary](./concepts/adapters.md) for the measured
+costs.
 
 ## The shortest real example
 
-```tsx
-import { Button, Card, CardHeader, CardTitle, SmithersUiStyles, StatusPill } from "@smthrs/ui"
+A list of workflow runs, each with a status pill and a live timestamp:
 
-export function App() {
+```tsx
+import { Card, CardContent, CardHeader, CardTitle, RelativeTime, SmithersUiStyles, StatusPill } from "@smthrs/ui"
+
+type Run = {
+  readonly id: string
+  readonly name: string
+  readonly status: string
+  readonly startedAt: number
+}
+
+export function RunList({ runs }: { readonly runs: readonly Run[] }) {
   return (
     <>
       <SmithersUiStyles withTheme />
-      <Card>
-        <CardHeader>
-          <CardTitle>Runs</CardTitle>
-          <StatusPill status="running" />
-        </CardHeader>
-        <Button onClick={() => launch()}>Launch</Button>
-      </Card>
+      {runs.map((run) => (
+        <Card key={run.id}>
+          <CardHeader>
+            <CardTitle>{run.name}</CardTitle>
+            <StatusPill status={run.status} />
+          </CardHeader>
+          <CardContent>
+            Started <RelativeTime ts={run.startedAt} />
+          </CardContent>
+        </Card>
+      ))}
     </>
   )
 }
 ```
 
-No color is named, no stylesheet is imported, and no dark-mode branch exists.
-For the same surface built up end to end, see the
-[Quickstart](./quickstart.md).
+You wrote no color and imported no stylesheet. `StatusPill` derived its label
+and its tint from the status string through the shared status vocabulary, so
+`failed` looks the same here as it does on every other Smithers surface, and
+`SmithersUiStyles` carried the sheet and the theme tokens into the document.
 
-## The package at a glance
+## Where this package sits
 
-| Family                     | What it covers                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Base primitives            | `Button`, `Badge`, `Card`, `Input`, `Label`, `Alert`, `Table`, `Tabs`, `Dialog`, `Tooltip`, `Select`, `Progress`, `Separator`, `Skeleton`, `Spinner` |
-| House compositions         | `StatusPill`, `EmptyState`, `SectionHeader`, `RowButton`, `KpiStat`, `StageStrip`, `CollapsiblePanel`, `FileTree`, `Markdown`, `DiffHunks` |
-| Conversation               | `Message`, `MessageBranch`, `Bubble`, `MessageScroller`, `ChatMessage`, `ChatTranscript`, `ChatComposer`, `CompactGroup`, `ConversationCheckpoint`, `Marker`, `Shimmer` |
-| Prompt and attachments     | The `PromptInput` family with `usePromptInputAttachments`, and the `Attachment` compound                           |
-| Reasoning and tools        | `Reasoning`, `ChainOfThought`, `ToolCall`, `CodeBlock`, `AgentOutput`, `MessageResponse`, `parseAgentOutput`, `formatPartialJson` |
-| Plans, tasks, and queues   | `Plan`, `TaskItem`, `AgentTask`, `Queue`, `ActivityTimeline`                                                        |
-| Approvals and checkpoints  | `Confirmation`, `ApprovalCard`, `Checkpoint`                                                                        |
-| Sources and citations      | `Sources`, `InlineCitation`, `Suggestion`, `OpenInChat`                                                             |
-| Agents and context         | `AgentDefinition`, `AgentCard`, `ModelSelector`, `ModelBadge`, `ProviderBadge`, `ContextUsage`                       |
-| Coding artifacts           | `Artifact`, `Snippet`, `PackageInfo`, `SchemaDisplay`, `StackTrace`, `TestResults`, `Commit`, `ChangeSummary`, `EnvironmentVariables`, `SecretField` |
-| Sandbox previews           | `Sandbox`, `WebPreview`, `JSXPreview`                                                                               |
-| Workflow canvas            | `WorkflowCanvas` with its node, edge, controls, panel, toolbar, and minimap anatomy                                 |
-| Vault                      | `BacklinksPanel`, `OutlineView`, the `wikilinks` and `graphModel` helpers, and the autosave machine                 |
-| Time and calendar          | `RelativeTime`, `useRelativeTime`, `formatRelativeTime`, and `Calendar` with month, week, and agenda views          |
-| Adapters                   | `PierreDiffView`, `CodeFileView`, `Terminal`, `MarkdownEditor`, `ChartContainer`, `KnowledgeGraph`, each behind its own subpath |
+Smithers is a control plane for long-running coding agents, and its entry point
+is the `smthrs` command line in [`@smthrs/cli`](/api/cli). That package plans,
+approves, runs, and inspects flows, and it is where the vocabulary this library
+renders comes from: a run, its status, an approval waiting on a person. Read
+[`@smthrs/cli`](/api/cli) to learn what those things are, then come back here
+for the components that put them on a screen.
 
-Every export of every family, with signatures, is on the
-[API reference](./api.md).
+`@smthrs/ui` sits one level below the CLI, alongside the other pieces the
+Smithers applications are assembled from. It consumes
+[`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide), which owns the theme token block
+and the eight palettes, rather than restating them.
 
 ## Where to go next
 
-- [Installation](./installation.md): the entry points, the peer requirements,
-  and the one style element every host renders.
-- [Quickstart](./quickstart.md): build a run panel end to end.
+- [Installation](./installation.md): what a consumer needs, the entry-point
+  table, and the one style element every host renders.
+- [Quickstart](./quickstart.md): build a run panel end to end, then prove the
+  theme switch with one attribute change.
 - Concepts: [how styling ships](./concepts/styling.md),
   [theme tokens](./concepts/theming.md),
   [component anatomy](./concepts/component-anatomy.md), and
   [the adapters boundary](./concepts/adapters.md).
 - Guides: [style a host application](./guides/style-a-host-application.md),
-  [use a heavy renderer](./guides/use-a-heavy-renderer.md),
   [render a run status](./guides/render-run-status.md),
-  [collect a prompt with attachments](./guides/collect-a-prompt.md),
-  [render agent output](./guides/render-agent-output.md), and
+  [render agent output](./guides/render-agent-output.md),
+  [collect a prompt](./guides/collect-a-prompt.md),
+  [use a heavy renderer](./guides/use-a-heavy-renderer.md), and
   [test a component](./guides/test-a-component.md).
-- Reference: [API](./api.md) and
-  [failure codes and limits](./reference/contracts.md).
-- [Troubleshooting](./troubleshooting.md): symptoms, causes, and fixes.
+- [API reference](./api.md): every export of the base barrel and the ten
+  subpaths, with signatures.
+- [Failure codes and limits](./reference/contracts.md) and
+  [troubleshooting](./troubleshooting.md).

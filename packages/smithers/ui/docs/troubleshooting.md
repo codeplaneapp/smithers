@@ -17,8 +17,8 @@ injection fallback never ran; or the host imported a `.css` file expecting one
 to exist.
 
 **Fix.** Render `<SmithersUiStyles />` once at the root. There is no CSS file to
-import: the sheet is a JavaScript string, because the bundler this package
-targets drops CSS artifacts. See
+import: the sheet is a JavaScript string, because the bundler the Smithers
+applications are built with drops CSS artifacts. See
 [How styling ships](./concepts/styling.md).
 
 ## Colors are wrong, or every surface is the default violet
@@ -35,8 +35,8 @@ expression resolves to its light fallback in both modes.
 <SmithersUiStyles withTheme />
 ```
 
-Leave `withTheme` off only where the host page already inlines the theme, as a
-gateway workflow page does.
+Leave `withTheme` off only where the host page already inlines the theme, as the
+Smithers gateway does.
 
 ## Two copies of the stylesheet in `<head>`
 
@@ -60,14 +60,10 @@ grammars and themes and bundle at roughly 10 MB against the base barrel's 500
 KB.
 
 **Fix.** Import an adapter only from the module that renders it, and load that
-module lazily. Check what crossed the line by bundling the barrel yourself:
-
-```bash
-pnpm --filter @smthrs/ui test
-```
-
-`tests/barrel-weight.test.ts` fails when a heavy dependency reaches
-`src/index.ts`. See [The adapters boundary](./concepts/adapters.md).
+module lazily. Find the offending import in your bundler's production output:
+the adapter's dependency belongs to a lazily loaded chunk, not to the entry
+chunk. Importing `@smthrs/ui` itself never pulls one in. See
+[The adapters boundary](./concepts/adapters.md).
 
 ## An import from `@smthrs/ui` does not resolve
 
@@ -85,8 +81,7 @@ pnpm --filter @smthrs/ui test
 
 **Cause.** The unscoped `smthrs` package publishes only a deprecation notice.
 
-**Fix.** Import the scoped `@smthrs/ui` specifier. A test in this package fails
-on any file that names the unscoped form, including documentation.
+**Fix.** Import the scoped `@smthrs/ui` specifier.
 
 ## A Radix dialog, tooltip, or select renders nothing in tests
 
@@ -121,11 +116,10 @@ runs. The same applies to `data-theme` and `data-palette` attributes on
 **Fix.** Remove `style[data-smithers-ui]` and reset the root attributes in
 `afterEach`.
 
-A second cause is specific to bundling inside a test. Bun's bundler shares its
+A second cause applies if you bundle inside a test. Bun's bundler shares its
 file cache with the test runner's module registry, so an in-process `Bun.build`
 running after another suite imported the same modules reads crossed content and
-drops modules it cannot parse. Bundle in a fresh subprocess instead, which is
-what `tests/barrel-weight.test.ts` does.
+drops modules it cannot parse. Bundle in a fresh subprocess instead.
 
 ## A copy button never enters its copied state
 

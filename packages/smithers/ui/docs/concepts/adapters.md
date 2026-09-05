@@ -1,6 +1,6 @@
 ---
 title: "The adapters boundary"
-description: "Why heavy third-party renderers ship behind @smthrs/ui/adapters/* subpaths, what each one costs a consumer's bundle, and the ratchet that keeps them out of the base barrel."
+description: "Why heavy third-party renderers ship behind @smthrs/ui/adapters/* subpaths, what each one costs your bundle, and the test that keeps them out of the base barrel."
 sidebar:
   order: 4
 ---
@@ -54,32 +54,18 @@ through `KnowledgeGraph`. That is why `src/index.ts` names the `vault` and
 `calendar` exports one by one instead of re-exporting a subdirectory barrel: a
 future heavy addition to a lane barrel cannot ride in silently.
 
-## The ratchet
+## The guarantee behind the boundary
 
-`tests/barrel-weight.test.ts` measures the thing the rule is about, which is
-what a bundler emits for a consumer, not what a source file appears to import.
-It bundles `src/index.ts` in a fresh Bun subprocess and asserts that
-`node_modules/recharts`, `node_modules/@xterm`, `node_modules/@milkdown`,
-`node_modules/@pierre/diffs`, and `node_modules/d3-force` are all absent from
-the output.
+The boundary is not a convention a reader has to trust. The package's own test
+suite bundles `src/index.ts` in a fresh Bun subprocess and fails when
+`recharts`, `@xterm`, `@milkdown`, `@pierre/diffs`, or `d3-force` appears in the
+output, so a stray `export` line in a future release cannot quietly put Shiki in
+your bundle.
 
-Two controls guard the guard, because a negative assertion passes against an
-empty bundle:
-
-- The bundle must exceed 200 KB and must contain `node_modules/react`, so a
-  build that stopped emitting `node_modules/` paths cannot report "no heavy
-  renderer here" about a bundle full of them.
-- `src/adapters/code-view/index.ts` must contain both pierre and Shiki, and
-  `src/adapters/knowledge-graph.ts` must contain `d3-force` as bundled code
-  rather than as an externalized `import("d3-force")` call. A dependency that is
-  no longer reachable from anywhere in the package would make the negative
-  assertion vacuous.
-
-The subprocess is not incidental. Bun's bundler shares its file cache with the
-test runner's module registry, so an in-process `Bun.build` running after
-another suite has imported the same modules reads crossed content and silently
-drops modules it cannot parse. That produced a green control measuring a bundle
-that never contained `d3-force`: passing alone, failing under the full suite.
+The same suite bundles each adapter and asserts that its dependency is present,
+because a negative assertion passes against an empty bundle. What you can rely
+on is the pair: the base barrel is measured to be free of these dependencies,
+and the measurement is proven to be capable of seeing them.
 
 ## Getting the light surface instead
 

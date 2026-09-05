@@ -57,9 +57,9 @@ import { SmithersUiStyles } from "@smthrs/ui"
 ## Recipe: re-declare per axis
 
 A host that never stamps `data-palette`, or pins exactly one, can name the
-shapes it actually uses. This is what the `create-app` Aomi template does to
-bridge a generated brand onto the house names, abbreviated here to six of its
-33 declarations:
+shapes it actually uses. This is what the application template in
+[`@smthrs/create-app`](/api/create-app) does to bridge a generated brand onto
+the house names, abbreviated here to six of its 33 declarations:
 
 ```ts
 export const houseBridgeCss = `:root, :root[data-theme='light'], :root[data-theme='dark'] {

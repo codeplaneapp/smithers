@@ -7,7 +7,6 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "ignoreDeprecations": "6.0",
     "strict": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,

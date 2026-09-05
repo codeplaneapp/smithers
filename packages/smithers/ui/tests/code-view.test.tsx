@@ -7,16 +7,18 @@
 // model straight out of pierre's shadow root: per line, the inline colour and
 // the text of every span. That sequence is what a viewer sees; the snapshot
 // pins it per language, and the structural checks say what the snapshot means.
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { act, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { getSharedHighlighter } from "@pierre/diffs";
-import { CodeFileView, currentCodeViewPool, languageForFile, type CodeTokenPosition } from "../src/adapters/code-view";
+import { CodeFileView, currentCodeViewPool, disposeCodeViewPool, languageForFile, type CodeTokenPosition } from "../src/adapters/code-view";
 import { SMITHERS_UI_STYLE_ATTR } from "../src/index";
 import { themeRegistry } from "../src/styles";
 import { smithersUiCss } from "../src/uiCss";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+afterAll(() => disposeCodeViewPool());
 
 /*
  * One fixture per language the plan names. Each is a real, small file shape

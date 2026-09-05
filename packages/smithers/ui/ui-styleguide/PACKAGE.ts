@@ -4,7 +4,7 @@
  * `@smthrs/ui` and `apps/review` import this package. See
  * `packages/smithers/ui/PACKAGE.ts` for why this package declares its own targets: the
  * root `packageDefaults` would otherwise
- * synthesize a `StandardPackage` library build and vitest suite for it, and
+ * synthesize a `BuildAndCheckTypeScriptPackage` library build and vitest suite for it, and
  * this package ships as source with a Bun suite instead.
  *
  * It does own a `tsconfig.json` and a `Typecheck` target, so `pnpm run check`
@@ -81,7 +81,7 @@ const unitTests = Smithers.NodeTest({
 
 /**
  * The package's documentation as a file group (`docs/**`, the README, and
- * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * package.json), matching the filegroup BuildAndCheckTypeScriptPackage emits. The docs-site
  * content sync in `apps/docs/ui-styleguide/PACKAGE.ts` depends on it by
  * label, the one way an input reaches across a package boundary.
  */

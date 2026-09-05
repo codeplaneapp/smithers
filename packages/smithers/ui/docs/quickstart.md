@@ -16,8 +16,8 @@ every Smithers UI shares.
 
 ## Prerequisites
 
-- An app in this workspace with `@smthrs/ui`, `react`, and `react-dom`
-  installed. See [Installation](./installation.md).
+- A React 19 application that resolves `@smthrs/ui`, `react`, and `react-dom`.
+  See [Installation](./installation.md).
 - A bundler that compiles TSX.
 
 ## Model the data
@@ -28,15 +28,15 @@ string, because that is what a control plane reports:
 ```tsx
 type Run = {
   readonly id: string
-  readonly root: string
+  readonly name: string
   readonly status: string
   readonly startedAt: number
 }
 
 const runs: readonly Run[] = [
-  { id: "r-1", root: "//packages/smithers/ui:unitTests", status: "running", startedAt: Date.now() - 42_000 },
-  { id: "r-2", root: "//packages/smithers/ui:check", status: "failed", startedAt: Date.now() - 900_000 },
-  { id: "r-3", root: "//apps/ui:build", status: "completed", startedAt: Date.now() - 3_600_000 }
+  { id: "r-1", name: "fix-login-redirect", status: "running", startedAt: Date.now() - 42_000 },
+  { id: "r-2", name: "upgrade-deps", status: "failed", startedAt: Date.now() - 900_000 },
+  { id: "r-3", name: "release-notes", status: "completed", startedAt: Date.now() - 3_600_000 }
 ]
 ```
 
@@ -54,7 +54,7 @@ function RunCard({ run, onRetry }: { readonly run: Run; readonly onRetry: (id: s
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{run.root}</CardTitle>
+        <CardTitle>{run.name}</CardTitle>
         <StatusPill status={run.status} />
       </CardHeader>
       <CardContent>

@@ -9,8 +9,8 @@ This package ships no `.css` file. The entire component stylesheet is one
 JavaScript string, `smithersUiCss`, and it reaches the document through a
 `<style>` element the library renders or injects.
 
-That is not a preference. The bundler this package is built for keeps only the
-JavaScript output of `Bun.build` and drops CSS artifacts, so an
+That is not a preference. The bundler the Smithers applications are built with
+keeps only the JavaScript output of `Bun.build` and drops CSS artifacts, so an
 `import "./button.css"` would compile without error and produce an unstyled
 application. A string cannot be dropped.
 
@@ -105,13 +105,12 @@ The bridge therefore lives entirely inside `var()` expressions, in
 
 ## The invariants a test holds
 
-`tests/css-contract.test.ts` reads the shipped string and enforces what the
-prose above claims. The rules that constrain a contributor, and that explain
-what you can rely on as a consumer:
+A test in the package reads the shipped string and enforces what this page
+claims, so these are guarantees rather than intentions:
 
 - No raw hex or `rgb()` color outside `var()` fallback position. A literal color
-  pins a value to one theme, which is the exact bug class that put opaque white
-  panels into a dark UI.
+  pins a value to one theme, which is the bug class that puts opaque white
+  panels into a dark interface.
 - Every fallback is byte-equal to the styleguide's light value, so a component
   rendered with no styleguide present looks identical to the same component in
   light mode with it.
@@ -120,6 +119,8 @@ what you can rely on as a consumer:
 - Geometry stays on the documented scales: font sizes from the `--fs` steps,
   radii from `--r-1`, `--r-2`, and `--r-bubble`, padding and gap on a 2px grid,
   and font weights of 400, 500, and 650, with 700 reserved for a KPI numeral.
+  A component you compose from these tokens sits on the same grid as the rest
+  of the library.
 - One document-wide reduced-motion policy is composed after every component
   block, so `prefers-reduced-motion: reduce` neutralizes animation and
   transition durations across the sheet.
@@ -152,5 +153,5 @@ also runs during server rendering.
 - [Theme tokens](./theming.md): what the `var()` expressions resolve to.
 - [Style a host application](../guides/style-a-host-application.md): the
   task-shaped version of this page.
-- [`@smthrs/ui-styleguide`](/api/ui-styleguide): the package that owns the theme
+- [`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide): the package that owns the theme
   token block and the palettes.

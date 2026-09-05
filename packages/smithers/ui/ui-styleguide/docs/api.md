@@ -9,8 +9,8 @@ The package ships as source. The export map has one entry, `.`, pointing at
 `src/index.ts`; there is no build step, no runtime dependency, and no subpath
 export. Everything below is imported from `@smthrs/ui-styleguide`.
 
-`tests/docs.test.ts` reads this page against the barrel and fails when an export
-is missing from it, so the list cannot fall behind `src/index.ts`.
+The package's test suite reads this page against the barrel and fails when an
+export is missing from it, so nothing below can fall behind the code.
 
 ## Stylesheets
 
@@ -151,8 +151,8 @@ clears AA. See [Audit a color pair](./guides/audit-a-color-pair.md).
 | `SOFT_TINT_AMOUNT`    | `0.1`  | The ceiling for a semantic fill that carries text in its own semantic color. |
 | `STRONG_TINT_AMOUNT`  | `0.16` | For a fill that carries no text in the tinted color.                        |
 
-`tests/themeRegistry.test.ts` reads both constants, so the recipes and their
-proof cannot drift apart.
+The contrast audit reads both constants rather than restating the numbers, so a
+recipe and the measurement that justifies it cannot drift apart.
 
 ## Types
 

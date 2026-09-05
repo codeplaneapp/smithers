@@ -35,7 +35,7 @@ That is 7.7 KB instead of 24.9 KB. Three properties hold whatever you pass:
 ## Keep the primitive rules
 
 `workflowUiThemeCss` is `themeCss()` followed by a newline and the primitive
-element and component rules. `tests/index.test.ts` asserts that prefix
+element and component rules. The package's test suite asserts that prefix
 relationship, so you can swap the prefix:
 
 ```ts

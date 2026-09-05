@@ -96,3 +96,29 @@ pnpm --filter @smthrs/ui run check    # tsc -p tsconfig.json --noEmit
 Both are declared in `PACKAGE.ts` as `//packages/smithers/ui:unitTests` and
 `//packages/smithers/ui:check`. This package does not run vitest, coverage thresholds,
 eslint or dprint; `PACKAGE.ts` records the package-specific tooling boundary.
+
+Every export condition points at a `.ts` or `.tsx` source, so `tsc --noEmit` is
+the only thing between a type error and a consumer's build.
+
+Four suites hold the invariants the docs promise:
+
+- `tests/barrel-weight.test.ts` bundles `src/index.ts` in a fresh Bun
+  subprocess and fails when `recharts`, `@xterm`, `@milkdown`, `@pierre/diffs`,
+  or `d3-force` reaches the output. It also asserts a minimum bundle size, the
+  presence of `node_modules/react`, and a control entry point that must contain
+  each dependency, because a negative assertion passes against an empty bundle.
+  The subprocess is load-bearing: Bun's bundler shares its file cache with the
+  test runner's module registry, so an in-process `Bun.build` after another
+  suite imported the same modules reads crossed content.
+- `tests/css-contract.test.ts` reads the shipped string and enforces the
+  namespace, the absence of a `:root` block, the token-only color rule, the
+  byte-equal light fallbacks, and the geometry scales.
+- `tests/provenance.test.ts` holds the shadcn catalog: every lane file on disk
+  must be listed, and every export a lane declares must resolve in the module
+  it names.
+- `tests/docs-links.test.ts` resolves every relative link in the package's
+  Markdown and fails on any file that names the unscoped specifier.
+
+`bunfig.toml` preloads `tests/happy-dom-preload.ts`. Radix resolves its
+SSR-safe `useLayoutEffect` shim at module load, so happy-dom has to be
+registered before any test file imports `radix-ui`.

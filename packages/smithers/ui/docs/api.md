@@ -55,7 +55,7 @@ type SmithersUiStylesProps = { withTheme?: boolean; extra?: string }
 | `SmithersUiStyles`         | Renders the composed sheet in a `<style>` element. Render exactly once per document. Safe under `renderToStaticMarkup`.           |
 | `composeSmithersUiStyles`  | The string behind that element. `withTheme` prepends the styleguide token block; `extra` is appended last, so its rules win.      |
 | `smithersUiCss`            | The component sheet alone, with no theme block and no extras.                                                                     |
-| `standaloneThemeCss`       | Re-exported from [`@smthrs/ui-styleguide`](/api/ui-styleguide).                                                                   |
+| `standaloneThemeCss`       | Re-exported from [`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide).                                                                   |
 | `SMITHERS_UI_STYLE_ATTR`   | The marker attribute on rendered and injected style elements. The self-injection fallback stands down when it finds one.          |
 | `prefersReducedMotion`     | The current motion preference. Answers `false` with no `window`.                                                                  |
 | `observeReducedMotion`     | Subscribes to preference changes. Returns an unsubscribe function; a no-op with no `window`.                                      |
@@ -90,7 +90,7 @@ type SmithersUiTokens = typeof tokens
 | `resolvePalette`     | Reads `data-palette` on `<html>`, accepting only registered keys and falling back to `DEFAULT_THEME_KEY`.                                |
 | `subscribePalette`   | Fires on a `data-palette` mutation. Returns an unsubscribe function.                                                                     |
 | `useResolvedPalette` | The hook form of `resolvePalette`, re-rendering on change.                                                                               |
-| `themeRegistry`      | The eight palettes, re-exported from [`@smthrs/ui-styleguide`](/api/ui-styleguide).                                                      |
+| `themeRegistry`      | The eight palettes, re-exported from [`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide).                                                      |
 
 Both `resolveTheme` and `resolvePalette` take optional injectable roots, which
 is how the package tests them without a document.

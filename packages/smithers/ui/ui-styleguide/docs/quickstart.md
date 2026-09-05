@@ -10,12 +10,13 @@ with a palette picker and a light/dark override that both work. It uses no
 bundler and no framework. By the end you will have seen both selection axes
 change a live document.
 
-The pattern is the one `apps/review` ships: its landing page and its
-walkthrough reports are built exactly this way.
+It is the pattern to reach for whenever the deliverable is one HTML file that
+has to theme itself with no assets to serve: a report, a share link, a static
+landing page.
 
 ## Prerequisites
 
-- A workspace package that depends on `@smthrs/ui-styleguide`. See
+- A project that can import `@smthrs/ui-styleguide`. See
   [Installation](./installation.md).
 - Node.js 22.19.0 or later, for `--experimental-strip-types`.
 

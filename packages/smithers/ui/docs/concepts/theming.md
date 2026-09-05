@@ -26,8 +26,9 @@ theming mechanism.
 
 **With the styleguide theme present.** The custom properties are defined, the
 expressions resolve through them, and every component follows the active theme.
-A gateway host page inlines the theme into every workflow page; a standalone
-host gets the same block from `<SmithersUiStyles withTheme />`.
+A host page that already inlines the theme block, as the Smithers
+[gateway](/api/gateway) does, needs nothing further; every other host gets the
+same block from `<SmithersUiStyles withTheme />`.
 
 **Without it.** Every custom property is undefined and the fallback applies. The
 fallbacks are byte-equal to the styleguide's light values, enforced by a test,
@@ -80,7 +81,7 @@ Object.keys(themeRegistry).length // 8
 `useResolvedPalette` is the React hook form, and it re-renders when the
 attribute changes. `themeRegistry`, `DEFAULT_THEME_KEY`, and
 `standaloneThemeCss` are re-exported from
-[`@smthrs/ui-styleguide`](/api/ui-styleguide), which owns the palettes
+[`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide), which owns the palettes
 themselves; importing them from here saves a consumer a second dependency, not a
 second definition.
 
@@ -140,5 +141,5 @@ the label rules.
 ## Related
 
 - [How styling ships](./styling.md): the sheet these tokens are used in.
-- [`@smthrs/ui-styleguide`](/api/ui-styleguide): the palettes, the token block,
+- [`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide): the palettes, the token block,
   and the terminal and syntax palettes the adapters read.

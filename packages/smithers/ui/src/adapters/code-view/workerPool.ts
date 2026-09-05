@@ -43,7 +43,17 @@ const OFF: CodeViewPool = { state: "off", manager: undefined };
 let pool: CodeViewPool = OFF;
 let started = false;
 let themeKey = "";
+let generation = 0;
+let deadline: ReturnType<typeof setTimeout> | undefined;
+let probeTimer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
+
+const clearProbes = (): void => {
+  clearTimeout(deadline);
+  clearTimeout(probeTimer);
+  deadline = undefined;
+  probeTimer = undefined;
+};
 
 const publish = (next: CodeViewPool): void => {
   pool = next;
@@ -76,6 +86,7 @@ const spawnWorker = (): Worker => {
 
 const fail = (reason: string): void => {
   if (pool.state === "failed") return;
+  clearProbes();
   console.warn(`code view: highlighting stays on the main thread — ${reason}`);
   try {
     terminateWorkerPoolSingleton();
@@ -88,8 +99,9 @@ const fail = (reason: string): void => {
 /** Start the pool once per page; the first caller's theme is the pool's. Publishes nothing: the caller is mid-render. */
 const start = (theme: CodeViewTheme): void => {
   if (started) return;
-  started = true;
   if (typeof Worker !== "function" || typeof document === "undefined") return;
+  started = true;
+  const currentGeneration = generation;
   let manager: WorkerPoolManager;
   try {
     manager = getOrCreateWorkerPoolSingleton({
@@ -97,7 +109,9 @@ const start = (theme: CodeViewTheme): void => {
         poolSize: 1,
         workerFactory: () => {
           const worker = spawnWorker();
-          worker.addEventListener("error", (event) => fail(`its worker failed (${(event as ErrorEvent).message || "error"})`));
+          worker.addEventListener("error", (event) => {
+            if (generation === currentGeneration) fail(`its worker failed (${(event as ErrorEvent).message || "error"})`);
+          });
           return worker;
         },
       },
@@ -109,23 +123,25 @@ const start = (theme: CodeViewTheme): void => {
   }
   themeKey = keyOf(theme);
   pool = { state: "starting", manager };
-  const deadline = setTimeout(() => {
+  deadline = setTimeout(() => {
     if (pool.manager === manager && pool.state === "starting") fail(`its worker did not initialize within ${CODE_VIEW_POOL_DEADLINE_MS / 1000} s`);
   }, CODE_VIEW_POOL_DEADLINE_MS);
   (deadline as { unref?: () => void }).unref?.();
   const probe = (): void => {
     if (pool.manager !== manager) return;
     if (manager.isInitialized()) {
-      clearTimeout(deadline);
+      clearProbes();
       publish({ state: "ready", manager });
     } else if (!manager.isWorkingPool()) {
-      clearTimeout(deadline);
+      clearProbes();
       fail("its worker failed to initialize");
     } else {
-      setTimeout(probe, 50);
+      probeTimer = setTimeout(probe, 50);
+      (probeTimer as { unref?: () => void }).unref?.();
     }
   };
-  setTimeout(probe, 0);
+  probeTimer = setTimeout(probe, 0);
+  (probeTimer as { unref?: () => void }).unref?.();
 };
 
 /**
@@ -137,15 +153,32 @@ const start = (theme: CodeViewTheme): void => {
 export const codeViewWorkerPool = (theme: CodeViewTheme): CodeViewPool => {
   start(theme);
   if (pool.manager !== undefined && keyOf(theme) !== themeKey) {
+    const manager = pool.manager;
     themeKey = keyOf(theme);
-    void pool.manager.setRenderOptions({ theme, useTokenTransformer: true }).catch((error: unknown) => {
-      fail(`it could not take the theme (${error instanceof Error ? error.message : String(error)})`);
+    void manager.setRenderOptions({ theme, useTokenTransformer: true }).catch((error: unknown) => {
+      if (pool.manager === manager) fail(`it could not take the theme (${error instanceof Error ? error.message : String(error)})`);
     });
   }
   return pool;
 };
 
 export const currentCodeViewPool = (): CodeViewPool => pool;
+
+/**
+ * Release the page's highlighter after unmounting its code views, while its
+ * DOM still exists. Embedded hosts and tests may close a page without ending
+ * the JS process. The next page can create a fresh pool; old worker errors,
+ * probes and theme requests cannot change that successor's state.
+ */
+export const disposeCodeViewPool = (): void => {
+  generation += 1;
+  clearProbes();
+  const hadManager = pool.manager !== undefined;
+  pool = OFF;
+  started = false;
+  themeKey = "";
+  if (hadManager) terminateWorkerPoolSingleton();
+};
 
 export const subscribeCodeViewPool = (listener: () => void): (() => void) => {
   listeners.add(listener);

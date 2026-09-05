@@ -25,13 +25,12 @@ sheet and the standalone sheet; embed it separately only alongside a bare
 
 The workflow sheets quote their attribute selectors with `'`, and
 `standaloneThemeCss()` quotes with `"`. That is the only difference between
-their token blocks: `tests/standaloneThemeCss.test.ts` asserts the two declare
-identical tokens in both modes.
+their token blocks: the package's test suite asserts the two declare identical
+tokens in both modes.
 
 ## Server-rendered HTML
 
-Interpolate the string into a `<style>` element. This is what `apps/review`
-does for its landing page:
+Interpolate the string into a `<style>` element:
 
 ```ts
 import { standaloneThemeCss } from "@smthrs/ui-styleguide"
@@ -67,7 +66,7 @@ second copy silently wins every tie with the first.
 
 ## In React
 
-Do not inject the sheet yourself. [`@smthrs/ui`](/api/ui) owns this:
+Do not inject the sheet yourself. [`@smthrs/ui`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui) owns this:
 
 ```tsx
 import { SmithersUiStyles } from "@smthrs/ui"
@@ -84,8 +83,8 @@ export function App() {
 
 `withTheme` prepends `workflowUiThemeCss` to the component sheet, and `extra` is
 appended after both, which is the position a token override needs. Render it
-once, near the root. Hosts whose page already inlines the theme, such as the
-gateway's `/workflows/<key>` pages, leave `withTheme` off.
+once, near the root. A host whose page already inlines the theme leaves
+`withTheme` off.
 
 ## Stamp the selection
 

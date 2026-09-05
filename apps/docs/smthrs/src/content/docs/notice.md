@@ -14,9 +14,7 @@ and @smthrs/cli (the `smthrs` command), then run `smthrs migrate` in a 0.x proje
 Migration guide: https://smithers.sh/migration/1.0
 ```
 
-The four lines are the package's product, so they are frozen. `test/golden.ts`
-holds the original, and `test/notice.test.ts` compares the thrown error, the
-README npm publishes, and this page against it character for character.
+Those four lines are the whole package.
 
 ## What each line means
 
@@ -42,8 +40,8 @@ The module declares no exports at all. Evaluation always throws, so a declared
 export would be a name the published types offer and the runtime can never hand
 back. That drift, a program that type-checks and then fails at run time, is
 what the 0.x umbrella was guarded against, and it would be a strange thing for
-its removal notice to reintroduce. `test/publication.test.ts` asserts the
-published `index.d.ts` declares no importable surface.
+its removal notice to reintroduce. The published `index.d.ts` declares no
+importable surface, so a 0.x import fails to type-check as well as to run.
 
 Throwing also puts the message where the failure is. A 0.x import that resolved
 to an empty module would fail later, somewhere else, as an undefined value with
@@ -51,17 +49,17 @@ no explanation attached.
 
 ## How the package is published
 
-Six manifest decisions carry the notice to a reader rather than to a log
-nobody sees. Each is pinned by a test in `test/publication.test.ts`.
+Six manifest decisions carry the notice to a person rather than to a log
+nobody sees.
 
-| Decision                          | Why it is that way                                                                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `sideEffects: true`               | A bundler told this module is side-effect free may drop the import, and dropping the import drops the notice.                         |
-| `exports` is `.` and nothing else | Every 0.x subpath fails to resolve instead of resolving to something new. See [Troubleshooting](/troubleshooting/).                |
-| No `bin`                          | The `smthrs` and `smithers` executables come from `@smthrs/cli`. A binary here would shadow them on every machine that installs both. |
-| No dependencies                   | Installing the notice installs nothing else.                                                                                          |
-| Both entry points throw           | `dist/esm/index.js` throws on `import`, and `dist/cjs/index.js` throws on `require`.                                                  |
-| `engines.node` is `>=22.19.0`     | The repository floor. Lowering it to reach an unmigrated project on older Node would contradict the published support matrix.         |
+| Decision                          | Why it is that way                                                                                                                                           |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `sideEffects: true`               | A bundler told this module is side-effect free may drop the import, and dropping the import drops the notice.                                                |
+| `exports` is `.` and nothing else | Every 0.x subpath fails to resolve instead of resolving to something new. See [Troubleshooting](/troubleshooting/).                                       |
+| No `bin`                          | The `smthrs` and `smithers` executables come from `@smthrs/cli`. A binary here would shadow them on every machine that installs both.                        |
+| No dependencies                   | Installing the notice installs nothing else.                                                                                                                 |
+| Both entry points throw           | `dist/esm/index.js` throws on `import`, and `dist/cjs/index.js` throws on `require`.                                                                         |
+| `engines.node` is `>=22.19.0`     | Matches the [Node version Smithers 1.0 requires](https://smithers.sh/docs/migration/compatibility/). Lowering it would let the notice install where the packages it names cannot run. |
 
 A dynamic `import()` rejects with the error rather than throwing at the call
 site, because the throw happens while the module evaluates. A `require` of the

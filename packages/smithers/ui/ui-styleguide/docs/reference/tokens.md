@@ -61,7 +61,7 @@ The three shadows are recipes over `--shadow-rgb`, for example
 deepen every shadow by changing one channel triple.
 
 `--bg`, `--surface`, `--surface-2`, and `--surface-3` are an elevation ramp,
-and `tests/themeRegistry.test.ts` pins its direction per mode. Dark mode rises
+and the package's test suite pins its direction per mode. Dark mode rises
 monotonically from `--bg` to `--surface-3`. Light mode does not: `--surface-2`
 sits below `--surface`, because it is an inset rather than a lift.
 
@@ -150,8 +150,8 @@ Twenty-six properties, identical in every palette and mode.
 `--r-bubble` is the soft radius for chat bubbles and the floating glass
 composer. `--r-full` is the pill radius.
 
-Three policies ride on this scale, and `@smthrs/ui`'s css-contract tests enforce
-them:
+Three policies ride on this scale, and the css-contract tests in
+[`@smthrs/ui`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui) enforce them:
 
 - The `--sp` scale, in 4px steps, paces layout-level spacing. Component-internal
   padding and gap sit on a 2px fine grid, so even pixel values only: no 5px, 7px,
@@ -159,7 +159,7 @@ them:
 - Font weight 650 is the only emphasis weight, for titles and labels. 700 is
   reserved for KPI numerals. Body text is 400.
 - Every `border-radius` in the standalone sheet resolves through this scale or
-  `999px`. `tests/standaloneThemeCss.test.ts` asserts it.
+  `999px`, and the suite asserts it.
 
 ## Fonts
 
@@ -175,7 +175,7 @@ Sans carries the UI. Mono is reserved for code, ids, and tabular data; body copy
 is never set in mono.
 
 The font block is emitted exactly once on purpose, and never in a palette rule.
-`tests/index.test.ts` counts the occurrences. See
+The suite counts the occurrences. See
 [Theming](../theming.md) for why.
 
 ## Related

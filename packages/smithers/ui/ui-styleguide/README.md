@@ -65,3 +65,50 @@ so there is no separate coverage command.
 
 `tests/docs.test.ts` reads `docs/api.md` against the barrel and fails when an
 export goes undocumented, so a new export is a documentation change too.
+
+## Test failures
+
+These four are the suite's own contracts, and each one has a specific fix.
+
+### `the generated theme registry` fails after you edit a theme
+
+`src/themes/*.ts` other than `fucory.ts` are byte-for-byte generator output.
+`tests/generatedThemes.test.ts` runs the generator in `--check` mode and
+compares. Change `scripts/generate-theme-registry.ts` and regenerate:
+
+```sh
+node --experimental-strip-types packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts
+```
+
+Editing a generated theme file directly is not a change, it is a pending
+revert.
+
+### A `meets AA` test fails after you add a rule
+
+Your rule paints a pair that misses 4.5:1 in at least one of the 16 variants.
+The test name is `palette/mode/label`, so it says which. Change the rule, not
+the table. Adding the pair to `KNOWN_CONTRAST_GAPS` in `tests/paintedPairs.ts`
+is only correct when the cause is an upstream token value you cannot reach, and
+the suite asserts that a recorded gap still fails at its recorded ratio, so an
+exemption cannot outlive the defect.
+
+Any new rule that puts a foreground on a background adds its pair to
+`PAINTED_PAIRS`. A background expression that appears in a rule but not in that
+table is an unaudited surface, and removing a rule to make a listed pair
+disappear hides a token failure rather than fixing it.
+
+### `documents every runtime export` fails
+
+You added an export to `src/index.ts` and not to `docs/api.md`.
+`tests/docs.test.ts` requires each name to appear backticked on that page,
+either closed (`` `themeCss` ``) or opening a signature (`` `themeCss(` ``). A
+bare mention in prose does not count.
+
+### `ERR_MODULE_NOT_FOUND` for a relative specifier
+
+The package ships as source and is loaded under Node ESM by `apps/review`,
+where an extensionless relative specifier does not resolve. Every relative
+import inside `src/` carries its `.ts` extension for that reason, and the theme
+generator emits it too. If you dropped one, `tests/nodeEsmResolution.test.ts`
+catches it; the suite spawns a real Node process, because the Bun that runs the
+tests resolves extensionless specifiers happily.

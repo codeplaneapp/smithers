@@ -75,9 +75,8 @@ weight 650 with 0.05em tracking.
 - `.badge` is uppercase at weight 650 in the UI font, and takes a status
   modifier.
 
-The status vocabulary is shared with `@smthrs/ui`, and
-`packages/smithers/ui/tests/status-vocabulary-parity.test.ts` keeps the two
-aligned:
+The status vocabulary is shared with [`@smthrs/ui`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui), and a parity test
+there keeps the two aligned:
 
 | Modifier                                                   | Color       |
 | ---------------------------------------------------------- | ----------- |

@@ -18,6 +18,7 @@ export {
 export {
   CODE_VIEW_POOL_DEADLINE_MS,
   currentCodeViewPool,
+  disposeCodeViewPool,
   subscribeCodeViewPool,
   type CodeViewPool,
   type CodeViewPoolState,

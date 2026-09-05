@@ -15,7 +15,7 @@ every component color resolves through, plus the base element rules.
 
 | Host                                                  | Element                     |
 | ----------------------------------------------------- | --------------------------- |
-| A gateway workflow page, which inlines the theme itself | `<SmithersUiStyles />`      |
+| A page that already inlines the theme, as the Smithers gateway does | `<SmithersUiStyles />` |
 | A standalone app, report, or plain HTML shell         | `<SmithersUiStyles withTheme />` |
 
 Passing `withTheme` where the theme is already inlined emits the token block
@@ -148,5 +148,5 @@ Both are safe with no `window` present.
 
 - [How styling ships](../concepts/styling.md): why the sheet is a string.
 - [Theme tokens](../concepts/theming.md): the token names to override.
-- [`@smthrs/ui-styleguide`](/api/ui-styleguide): the package that defines the
+- [`@smthrs/ui-styleguide`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui/ui-styleguide): the package that defines the
   theme block.

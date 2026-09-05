@@ -5,7 +5,7 @@
  * directly and uses Bun for its tests.
  *
  * Its presence here is what this file is for. The root `packageDefaults`
- * synthesizes `StandardPackage` — a dual `dist/esm` and `dist/cjs` library
+ * synthesizes `BuildAndCheckTypeScriptPackage` — a dual `dist/esm` and `dist/cjs` library
  * build, a vitest
  * suite at 100% coverage, eslint, and dprint — for every `packages/*`
  * directory that ships no `PACKAGE.ts` of its own. This package satisfies none of
@@ -72,7 +72,7 @@ const unitTests = Smithers.NodeTest({
 
 /**
  * The package's documentation as a file group (`docs/**`, the README, and
- * package.json), matching the filegroup StandardPackage emits. The docs-site
+ * package.json), matching the filegroup BuildAndCheckTypeScriptPackage emits. The docs-site
  * content sync in `apps/docs/ui/PACKAGE.ts` depends on it by label, the one
  * way an input reaches across a package boundary.
  */

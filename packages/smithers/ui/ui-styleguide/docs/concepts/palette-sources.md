@@ -48,26 +48,24 @@ runtime.
 The script writes the checked-in shape directly, with unquoted identifier keys,
 trailing commas, and two-space indent, so a regeneration that changes nothing is
 a byte-for-byte no-op. Its `--check` mode writes nothing and exits 1 naming
-every file whose bytes differ from what it would write now, and
-`tests/generatedThemes.test.ts` runs exactly that under Node.
+every file whose bytes differ from what it would write now, and the package's
+test suite runs exactly that on every change.
 
 Two kinds of drift are caught, and a reader of the theme files alone can see
 neither:
 
 1. **A hand edit to a generated file.** It survives until the next regeneration
    silently reverts it. The `.ts` extension on the emitted import specifier is
-   exactly that case: `apps/review` resolves this package under Node ESM, where
-   an extensionless relative specifier does not resolve, and a fix applied to
-   the files instead of to the generator lasts until someone re-runs it.
+   exactly that case: a Node ESM host loading this package from source does not
+   resolve an extensionless relative specifier, and a fix applied to the theme
+   files instead of to the generator lasts only until the next run.
 2. **Upstream movement.** The Shiki themes change and the checked-in registry
    stops matching what the generator would write from them.
 
-So: to change a generated palette, change the generator and regenerate. Editing
-`src/themes/one.ts` is not a change, it is a pending revert.
-
-```bash
-node --experimental-strip-types packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts
-```
+The consequence for anyone reading a theme file: its values are output, not a
+decision. Changing a generated palette means changing the generator and
+regenerating, so an edit to `src/themes/one.ts` is not a change, it is a pending
+revert.
 
 ## Fucory is hand written
 
@@ -76,13 +74,15 @@ regeneration. It is the palette accessibility fixes land in directly, which is
 why it has none of the recorded gaps below: both `textPlaceholder` values were
 raised, its dark `brand` was nudged from `#8b78e6` to `#8e7ce8` to clear
 `--surface-3`, and its light code block is light like every other palette's so
-`.livelog-event` and `.livelog-node` are legible on it.
-`tests/themeRegistry.test.ts` pins both of its serialized token strings.
+`.livelog-event` and `.livelog-node` are legible on it. The test suite pins both
+of its serialized token strings.
 
 ## The recorded upstream gaps
 
-Four lists in `tests/paintedPairs.ts` enumerate what still fails. Every entry
-traces to the generator, and every one of them is a generated palette.
+Four lists in
+[the audited pair table](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/tests/paintedPairs.ts)
+enumerate what still fails. Every entry traces to the generator, and every one of
+them is a generated palette.
 
 - **`KNOWN_CONTRAST_GAPS`** is 52 entries, all Solarized. The generator takes
   `editor.foreground` raw for `--text` and for the terminal `foreground`,
@@ -102,11 +102,10 @@ traces to the generator, and every one of them is a generated palette.
 A fifth cause has no list of its own: the generator's `contrast()` runs on
 rounded channels, so its ratchet stops one step early.
 
-None of these can be fixed in this package. The token values live in generator
-output, and the generator's `--check` mode will revert any edit to them. Closing
-a gap means changing the generator and regenerating, at which point the
-corresponding entry has to come out of the list, because the suite asserts that
-nothing inside a list may pass.
+None of these can be fixed by overriding a token in your own sheet, because the
+values live in generator output that the `--check` mode restores. Closing a gap
+means changing the generator, at which point the corresponding entry has to come
+out of the list, because the suite asserts that nothing inside a list may pass.
 
 ## Related
 

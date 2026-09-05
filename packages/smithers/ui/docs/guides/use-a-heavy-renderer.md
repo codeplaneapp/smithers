@@ -15,9 +15,9 @@ plain diff, or fenced code needs no adapter at all.
 
 An adapter import is a chunk boundary. Put the adapter in a module of its own,
 import that module lazily from the surface that needs it, and the dependency
-stays out of your application's first paint. `apps/ui` does exactly this: one
-module imports `@smthrs/ui/adapters/pierre-diff-view`, and the card that renders
-a change loads it with `React.lazy`.
+stays out of your application's first paint. One module imports
+`@smthrs/ui/adapters/pierre-diff-view`, and the card that renders a change
+reaches it through `React.lazy`.
 
 ```tsx
 import { lazy, Suspense } from "react"
@@ -196,19 +196,17 @@ const model = computeGraphModel(notes, links)
 const nodeCount: number = model.nodes.length
 ```
 
-## Confirm you did not widen the base barrel
+## Confirm what landed in your bundle
 
-If you are adding a renderer to this package rather than consuming one, the
-ratchet is `tests/barrel-weight.test.ts`:
+An adapter belongs to whichever chunk imports it, so the check is your bundler's
+production output rather than anything in this package. Build for production and
+find the chunk that holds the adapter's dependency. It should be a lazily loaded
+chunk. If it is the entry chunk, a module on your initial route imports the
+adapter eagerly: follow the import back and move it behind the lazy boundary.
 
-```bash
-pnpm --filter @smthrs/ui test
-```
-
-It bundles `src/index.ts` in a fresh Bun process and fails when any heavy
-dependency reaches the output. Add the new subpath to the `exports` map, keep
-the module out of `src/index.ts`, and extend the test's `HEAVY_MODULES` list
-with the new dependency's `node_modules/` path.
+Importing `@smthrs/ui` itself never pulls a heavy dependency in, which
+[The adapters boundary](../concepts/adapters.md) explains and the package's test
+suite enforces.
 
 ## Related
 

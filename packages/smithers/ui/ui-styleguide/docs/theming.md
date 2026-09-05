@@ -10,7 +10,7 @@ override the result without breaking it.
 ## Two orthogonal axes
 
 **Palette** is `data-palette="<key>"` on `<html>`, one of the eight registered
-keys. `apps/ui` stamps the user's choice there. [`@smthrs/ui`](/api/ui) reads it
+keys. A host stamps the user's choice there. [`@smthrs/ui`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui) reads it
 back through `resolvePalette`, which accepts only registered keys and falls back
 to the default. An unrecognized value is not an error; it simply does not match
 any override rule, so the default palette's tokens stand.
@@ -40,8 +40,8 @@ this order:
 That is 3 rules plus 3 per additional palette: 24 for the full registry. The
 two entry points differ in one detail only, the attribute-selector quoting:
 `themeCss()` and `workflowUiThemeCss` use `'`, and `standaloneThemeCss()` uses
-`"`. `tests/standaloneThemeCss.test.ts` asserts the token declarations
-themselves are identical.
+`"`. The package's test suite asserts the token declarations themselves are
+identical.
 
 ## Source order is the cascade
 
@@ -52,8 +52,7 @@ one wins.
 That is why every palette override must come after the default palette's dark
 rules. Put them first and the default's dark tokens would override a selected
 palette's light tokens, and a Gruvbox document on a dark operating system would
-paint half Night Owl. `tests/index.test.ts` pins the order; do not reorder the
-emitter.
+paint half Night Owl. The package's test suite pins that order.
 
 A palette override in dark mode is one step higher again:
 `:root[data-palette='gruvbox'][data-theme='dark']` is **(0,3,0)**, and so is the
@@ -70,8 +69,8 @@ specificity arithmetic read from the other side.
 When the font block rode along with every light variant, all eight `:root`
 rules declared `--font-sans` at (0,2,0). A consumer declaring its own font on a
 bare `:root`, which is (0,1,0), lost the moment any palette was selected.
-`packages/smithers/create-app/template/aomi/src/shell/theme.ts` is exactly that
-consumer. Emitting the fonts once, in the one rule whose specificity a consumer
+The application template in [`@smthrs/create-app`](/api/create-app) is exactly
+that consumer: it declares its own font stack on a bare `:root`. Emitting the fonts once, in the one rule whose specificity a consumer
 can actually beat, is what makes a font override possible at all.
 
 ## The alias layer

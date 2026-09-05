@@ -33,7 +33,9 @@ construction: `--surface-glass`, `--surface-glass-strong`, `--border`,
 `TerminalPalette.selectionBackground`.
 
 Composite it over whatever is behind it yourself, then pass the composite.
-`rgbaOver` in `tests/paintedPairs.ts` is the reference implementation.
+`rgbaOver` in
+[the audited pair table](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/tests/paintedPairs.ts)
+is the reference implementation.
 
 ### `TypeError: contrastRatio needs an opaque foreground`
 
@@ -121,8 +123,8 @@ Use `:root:root:root { ... }`, placed after the sheet. See
 Same arithmetic, from the other side. If you are writing `:root { --font-sans:
 ... }` and it is being beaten, check whether something upstream is declaring the
 font block in a palette rule. The house sheet declares it exactly once, in the
-base `:root` rule, precisely so a bare `:root` override can win;
-`tests/index.test.ts` counts the occurrences to keep it that way.
+base `:root` rule, precisely so a bare `:root` override can win, and the
+package's test suite counts the occurrences to keep it that way.
 
 ### Nothing themes at all
 
@@ -160,45 +162,6 @@ onto one color, so the text ramp is flat.
 
 The values live in generator output and cannot be fixed here. See
 [Where the palettes come from](./concepts/palette-sources.md).
-
-## Test failures
-
-### `the generated theme registry` fails after you edit a theme
-
-`src/themes/*.ts` other than `fucory.ts` are byte-for-byte generator output.
-`tests/generatedThemes.test.ts` runs the generator in `--check` mode and
-compares. Change
-[`scripts/generate-theme-registry.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts)
-and regenerate:
-
-```bash
-node --experimental-strip-types packages/smithers/ui/ui-styleguide/scripts/generate-theme-registry.ts
-```
-
-### A `meets AA` test fails after you add a rule
-
-Your rule paints a pair that misses 4.5:1 in at least one of the 16 variants.
-The test name is `palette/mode/label`, so it says which. Change the rule, not
-the table. Adding the pair to `KNOWN_CONTRAST_GAPS` is only correct when the
-cause is an upstream token value you cannot reach, and the suite asserts that a
-recorded gap still fails at its recorded ratio, so an exemption cannot outlive
-the defect.
-
-### `documents every runtime export` fails
-
-You added an export to `src/index.ts` and not to `docs/api.md`.
-`tests/docs.test.ts` requires each name to appear backticked on that page,
-either closed (`` `themeCss` ``) or opening a signature (`` `themeCss(` ``). A
-bare mention in prose does not count.
-
-### `ERR_MODULE_NOT_FOUND` for a relative specifier
-
-The package ships as source and is loaded under Node ESM by `apps/review`, where
-an extensionless relative specifier does not resolve. Every relative import
-inside `src/` carries its `.ts` extension for that reason, and the theme
-generator emits it too. If you dropped one, `tests/nodeEsmResolution.test.ts`
-catches it; the suite spawns a real Node process, because the Bun that runs the
-tests resolves extensionless specifiers happily.
 
 ## Related
 

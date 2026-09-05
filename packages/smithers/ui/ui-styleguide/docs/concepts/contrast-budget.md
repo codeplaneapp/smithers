@@ -14,8 +14,8 @@ conspicuously absent from the sheet.
 ## The claim is a table, not a spot check
 
 [`tests/paintedPairs.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/ui/ui-styleguide/tests/paintedPairs.ts) enumerates every
-(foreground, background) pair the shipped stylesheets actually paint, and
-`tests/themeRegistry.test.ts` registers one test per pair per variant. The pairs
+(foreground, background) pair the shipped stylesheets actually paint, and the
+package's test suite registers one assertion per pair per variant. The pairs
 cover:
 
 - The four-step text ramp (`--text`, `--text-muted`, `--text-faint`,
@@ -67,7 +67,7 @@ fill, because there is nowhere deeper to go. And each of those state rules
 restates its own `background`, because the generic `.button:hover` and
 `.button:active` rules match them too at higher specificity; without the
 restatement the resolved fill is brand text on a neutral surface nobody
-measured. `tests/cascade.test.ts` resolves the sheet and pins what each state
+measured. The suite resolves the sheet rule by rule and pins what each state
 actually paints.
 
 ## The topbar is measured twice
@@ -85,7 +85,7 @@ with it. `blur(18px)` is inert over a uniform background; `saturate(180%)` is
 not.
 
 Change the `saturate()` amount in the rule and you audit a background the
-browser no longer paints, so `tests/index.test.ts` pins the two together.
+browser no longer paints, so the suite pins the two together.
 
 ## What the budget forbids
 
@@ -99,7 +99,7 @@ markdown editor does. The user agent's own selection colors are contrast
 guaranteed, so the sheet leaves them alone.
 
 **No inline `color-mix` on a semantic fill.** Every tinted fill routes through a
-named recipe. `tests/index.test.ts` scans the component rules and fails on any
+named recipe. The suite scans the component rules and fails on any
 `background: color-mix(... var(--brand) ...)` written by hand, because a hand
 written percentage bypasses the audited list.
 
@@ -119,11 +119,11 @@ The suite asserts both directions: nothing outside the lists may fail, and
 nothing inside them may pass. Fixing the upstream cause therefore forces the
 entry out of the list rather than leaving a stale exemption behind.
 
-## Adding a rule
+## The same discipline in your own rules
 
-Any new rule that puts a foreground on a background adds its pair to the table.
-A background expression that appears in a rule but not in `PAINTED_PAIRS` is an
-unaudited surface, and removing a rule to make a listed pair disappear hides a
-token failure rather than fixing it.
+The budget only covers what this package ships. Any rule you write that puts a
+foreground on a background is a new pair, and it is unaudited until you measure
+it in all 16 variants. Deleting a rule to make a failing pair disappear hides
+the token failure rather than fixing it.
 
 For the mechanics, see [Audit a color pair](../guides/audit-a-color-pair.md).

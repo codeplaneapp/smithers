@@ -1,31 +1,32 @@
 ---
 title: "Installation"
-description: "Add @smthrs/ui to a workspace app: the peer requirements, the entry points you may import, and the one style element every host renders."
+description: "What @smthrs/ui needs from a host application, the entry points you may import, and the one style element every host renders."
 sidebar:
   order: 1
 ---
 
-`@smthrs/ui` is `private: true` and workspace-only at `1.0.0-rc.0`. It is
-published to no registry, so `npm install` cannot reach it. Consume it through
-the pnpm workspace, the way `apps/ui` and `apps/review` do.
+`@smthrs/ui` is not published to a registry, so `npm install @smthrs/ui`
+resolves nothing. It is consumed from source, through the pnpm workspace of the
+[smithersai/smithers](https://github.com/smithersai/smithers) repository that
+also holds the applications built on it. This page
+describes what the package expects from a host either way, so the requirements
+and the entry points are readable before you commit to it.
 
 ## Requirements
 
-| Requirement                | Value                                                              |
-| -------------------------- | ------------------------------------------------------------------ |
-| React                      | `^19.0.0`, as a peer dependency, together with `react-dom ^19.0.0` |
-| A bundler that reads TypeScript | The package ships `src/` directly, with no `dist/`             |
-| A CSS-capable host         | None. The stylesheet travels as a JavaScript string                |
+| Requirement                     | Value                                                              |
+| ------------------------------- | ------------------------------------------------------------------ |
+| React                           | `^19.0.0`, as a peer dependency, together with `react-dom ^19.0.0` |
+| A bundler that reads TypeScript | The package ships `src/` directly, with no `dist/`                 |
+| A CSS-capable host              | None. The stylesheet travels as a JavaScript string                |
 
 The package sets `"files": ["src/"]`, and every condition in its `exports` map
 points at a `.ts` or `.tsx` source. Your bundler compiles those sources as part
-of your app, so it must handle TSX and the `react-jsx` runtime. That is also why
-the package's `tsc --noEmit` gate matters to you: it is the only thing between a
-type error in a component and your build.
+of your application, so it must handle TSX and the `react-jsx` runtime.
 
 ## Add the dependency
 
-Declare the workspace protocol in your app's `package.json`:
+Declare the workspace protocol in the host application's `package.json`:
 
 ```json
 {
@@ -44,8 +45,8 @@ pnpm install
 ```
 
 Import the package by its scoped name. The unscoped `smthrs` package publishes
-only a deprecation notice whose module throws on import, so the scoped specifier
-is the only one that resolves to components.
+only a deprecation notice whose module throws on import, so the scoped
+specifier is the only one that resolves to components.
 
 ## Entry points
 
@@ -54,24 +55,24 @@ narrower slice of the same light surface or an adapter that carries a heavy
 third-party renderer. Importing an adapter is a deliberate act, because the
 adapter's dependency lands in your bundle.
 
-| Specifier                             | What it exports                                                       | Heavy dependency  |
-| ------------------------------------- | --------------------------------------------------------------------- | ----------------- |
-| `@smthrs/ui`                          | Every component, hook, token, and pure helper in the base library     | None              |
-| `@smthrs/ui/status`                   | The status vocabulary alone                                            | None              |
-| `@smthrs/ui/time`                     | `RelativeTime`, `useRelativeTime`, `formatRelativeTime`                | None              |
-| `@smthrs/ui/calendar`                 | `Calendar`, its types, its CSS, and the date helpers                   | None              |
-| `@smthrs/ui/vault`                    | Wikilinks, the graph model, the outline and backlinks panels, autosave | None              |
-| `@smthrs/ui/adapters/chart`           | `ChartContainer` and the categorical series palette                    | `recharts`        |
-| `@smthrs/ui/adapters/terminal`        | `Terminal`, an xterm.js render surface                                 | `@xterm/*`        |
-| `@smthrs/ui/adapters/code-view`       | `CodeFileView`, one syntax-highlighted file                            | `@pierre/diffs`   |
-| `@smthrs/ui/adapters/pierre-diff-view` | `PierreDiffView`, a syntax-highlighted patch                          | `@pierre/diffs`   |
-| `@smthrs/ui/adapters/markdown-editor` | `MarkdownEditor`, the Milkdown Crepe surface                           | `@milkdown/*`     |
-| `@smthrs/ui/adapters/knowledge-graph` | `KnowledgeGraph`, the force-directed vault graph                       | `d3-force`        |
+| Specifier                              | What it exports                                                        | Heavy dependency |
+| -------------------------------------- | ---------------------------------------------------------------------- | ---------------- |
+| `@smthrs/ui`                           | Every component, hook, token, and pure helper in the base library      | None             |
+| `@smthrs/ui/status`                    | The status vocabulary alone                                            | None             |
+| `@smthrs/ui/time`                      | `RelativeTime`, `useRelativeTime`, `formatRelativeTime`                | None             |
+| `@smthrs/ui/calendar`                  | `Calendar`, its types, its CSS, and the date helpers                   | None             |
+| `@smthrs/ui/vault`                     | Wikilinks, the graph model, the outline and backlinks panels, autosave | None             |
+| `@smthrs/ui/adapters/chart`            | `ChartContainer` and the categorical series palette                    | `recharts`       |
+| `@smthrs/ui/adapters/terminal`         | `Terminal`, an xterm.js render surface                                 | `@xterm/*`       |
+| `@smthrs/ui/adapters/code-view`        | `CodeFileView`, one syntax-highlighted file                            | `@pierre/diffs`  |
+| `@smthrs/ui/adapters/pierre-diff-view` | `PierreDiffView`, a syntax-highlighted patch                           | `@pierre/diffs`  |
+| `@smthrs/ui/adapters/markdown-editor`  | `MarkdownEditor`, the Milkdown Crepe surface                           | `@milkdown/*`    |
+| `@smthrs/ui/adapters/knowledge-graph`  | `KnowledgeGraph`, the force-directed vault graph                       | `d3-force`       |
 
 The four subpaths without a heavy dependency exist for import ergonomics, not
 for weight: everything they export is also on the root barrel. The six adapter
 subpaths are the opposite, and reaching one is the only way to load its
-dependency. For what each adapter costs and how the boundary is enforced, read
+dependency. For what each adapter costs and how the boundary holds, read
 [The adapters boundary](./concepts/adapters.md).
 
 ## Render the stylesheet once
@@ -129,3 +130,5 @@ console.log(html.includes("sui-button")) // true
 - [The adapters boundary](./concepts/adapters.md): what each heavy subpath
   costs before you import it.
 - [API reference](./api.md): every public export.
+- [`@smthrs/cli`](/api/cli): the `smthrs` command line these surfaces report
+  on, and the package the rest of Smithers sits under.

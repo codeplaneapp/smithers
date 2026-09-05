@@ -97,16 +97,13 @@ by accident. Pass `type="submit"` when you mean it.
 
 ## Provenance
 
-Each ported family records where it came from. Per-lane manifests live under
-`provenance/`, aggregated into `shadcn-provenance.json`, naming the upstream
+Each ported family records where it came from. Per-family manifests under
+`provenance/`, aggregated into `shadcn-provenance.json`, name the upstream
 collection, the registry item, the exports kept, and the deliberate divergences.
-
-`tests/provenance.test.ts` holds two lines over that record: the catalog must
-list every lane file on disk, and every export a lane declares must resolve in
-the module it names. The check is "declared names resolve" rather than "declared
-equals runtime", because the manifests deliberately list type-only exports,
-which are erased before an import sees them, and deliberately omit internal
-helpers a module also exports.
+Read them when you want to know which upstream component a family started as,
+and what changed on the way in. A test keeps the record honest: every family
+file on disk must appear in the catalog, and every export a manifest declares
+must resolve in the module it names.
 
 ## Related
 

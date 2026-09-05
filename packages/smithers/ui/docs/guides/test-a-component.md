@@ -1,27 +1,18 @@
 ---
 title: "Test a component"
-description: "Run the package suite, register happy-dom before Radix loads, choose between static markup and a real root, and keep injected stylesheets from leaking between tests."
+description: "Test a surface built on @smthrs/ui: register happy-dom before Radix loads, choose between static markup and a real root, drive the theme, and keep injected stylesheets from leaking between tests."
 ---
 
-The suite runs on Bun against a happy-dom registrator. This guide covers the two
-rendering shapes, the one preload that has to exist, and the cleanup that keeps
-tests independent.
+Testing a surface built on this library is ordinary React testing with three
+wrinkles: Radix has to see a DOM at module load, the components inject a
+stylesheet into the shared document, and computed colors need the theme block.
+This guide covers all three. The examples run on Bun's test runner against
+happy-dom, which is what the package itself uses, and the shapes transfer to
+Vitest and jsdom unchanged.
 
-## Run the gates
-
-```bash
-pnpm --filter @smthrs/ui test    # bun test tests
-pnpm --filter @smthrs/ui run check    # tsc -p tsconfig.json --noEmit
-```
-
-Both are declared in `PACKAGE.ts` as `//packages/smithers/ui:unitTests` and
-`//packages/smithers/ui:check`. This package runs neither vitest nor eslint nor
-dprint, and `PACKAGE.ts` records why: it ships its sources directly, types
-against `@types/bun`, and satisfies none of the standard library-build synthesis.
-
-The typecheck is not optional in the way it is for a package that ships a build.
-Every export condition points at a `.ts` or `.tsx` source, so `tsc --noEmit` is
-the only thing between a type error and a consumer's build.
+Also run a typecheck over your tests. The package ships TypeScript sources
+rather than a build, so `tsc --noEmit` is what catches a prop that no longer
+exists.
 
 ## Register happy-dom in a preload, not a test file
 
@@ -32,16 +23,30 @@ register happy-dom a line later. ESM imports hoist above any in-file
 registration call, so the registration must happen before any test file imports
 `radix-ui`.
 
-That is what `bunfig.toml` is for:
+Point `bunfig.toml` at a preload file:
 
 ```toml
 [test]
 preload = ["./tests/happy-dom-preload.ts"]
 ```
 
-The preload registers the global DOM and disables happy-dom's iframe page
-loading, because iframe-rendering tests would otherwise perform real network
-fetches that hang in a networkless sandbox.
+The preload registers the global DOM before anything imports Radix:
+
+```ts
+import { GlobalRegistrator } from "@happy-dom/global-registrator"
+
+GlobalRegistrator.register()
+
+// Mutate the live settings object rather than passing `settings` to register(),
+// which replaces happy-dom's defaults wholesale. Without this, a test that
+// renders an iframe at a real URL performs a genuine network fetch and hangs
+// where there is no network.
+const happy = globalThis as { happyDOM?: { settings: Record<string, unknown> } }
+if (happy.happyDOM) happy.happyDOM.settings.disableIframePageLoading = true
+```
+
+Under Vitest, the equivalent is an `environment` of `happy-dom` or `jsdom` in
+the config, which the runner applies before it loads a test file.
 
 ## Assert on markup when the question is markup
 
@@ -145,24 +150,23 @@ document.documentElement.setAttribute("data-theme", "dark")
 
 Remove the element and the attribute afterwards, for the same reason as above.
 
-## Guard a guard
+## Assert on absence with a control
 
-Two suites in this package are worth copying as a pattern rather than as code.
+When a test asserts that something is *not* there, add a second assertion that
+proves the test could have seen it. The bundle test in this package is the
+example: it asserts that no heavy dependency reaches the base barrel, and,
+because a negative assertion passes against an empty bundle, it also asserts a
+minimum bundle size and bundles a control entry point that must contain the
+dependency.
 
-`tests/barrel-weight.test.ts` asserts that heavy dependencies are absent from
-the bundled base barrel. A negative assertion passes against an empty bundle, so
-it also asserts a minimum size and the presence of `node_modules/react`, and
-bundles a control entry point that must contain the dependency. Write both
-halves whenever you assert that something is missing.
-
-`tests/docs-links.test.ts` scans every Markdown file in the package and fails on
-a relative link whose target does not exist. It then pins the scanner itself
-against the link forms it must catch and the ones it must ignore, because a
-scanner that silently matches nothing is the failure being guarded against.
+The same applies to a link checker, a lint rule, or any scan you write over your
+own tree: pin the scanner against an input it must catch as well as one it must
+ignore, because a scanner that silently matches nothing looks exactly like a
+clean tree.
 
 ## Related
 
-- [The adapters boundary](../concepts/adapters.md): what the bundle ratchet
-  measures and why it runs in a subprocess.
+- [The adapters boundary](../concepts/adapters.md): what the bundle test
+  measures, and why importing an adapter is a deliberate act.
 - [How styling ships](../concepts/styling.md): why the sheet reaches the
   document twice.

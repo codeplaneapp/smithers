@@ -1,0 +1,138 @@
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  codeViewWorkerPool,
+  currentCodeViewPool,
+  disposeCodeViewPool,
+  subscribeCodeViewPool,
+} from "../src/adapters/code-view/workerPool";
+
+// Exercise the real Pierre manager, with only the browser Worker boundary
+// held open. No module mock can leak into the real highlighting tests.
+class HeldWorker extends EventTarget {
+  static instances: HeldWorker[] = [];
+  terminated = false;
+  requests: unknown[] = [];
+  constructor() {
+    super();
+    HeldWorker.instances.push(this);
+  }
+  postMessage(request: unknown): void {
+    this.requests.push(request);
+  }
+  terminate(): void {
+    this.terminated = true;
+  }
+}
+
+const originalWorker = globalThis.Worker;
+const waitFor = async (condition: () => boolean): Promise<void> => {
+  const deadline = Date.now() + 2_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Worker boundary did not settle");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+};
+const holdWorkers = (): void => {
+  disposeCodeViewPool();
+  HeldWorker.instances.length = 0;
+  globalThis.Worker = HeldWorker as unknown as typeof Worker;
+};
+
+afterEach(() => {
+  disposeCodeViewPool();
+  globalThis.Worker = originalWorker;
+});
+
+describe("code view page lifetime", () => {
+  test("a no-worker render does not prevent a later browser from starting", () => {
+    holdWorkers();
+    globalThis.Worker = undefined as unknown as typeof Worker;
+    expect(codeViewWorkerPool("github-dark").state).toBe("off");
+    globalThis.Worker = HeldWorker as unknown as typeof Worker;
+    expect(codeViewWorkerPool("github-dark").state).toBe("starting");
+  });
+
+  test("views share one pool until the page closes; even pending initialization is terminated", async () => {
+    holdWorkers();
+    const first = codeViewWorkerPool("github-dark");
+    expect(codeViewWorkerPool("github-dark").manager).toBe(first.manager);
+    await waitFor(() => HeldWorker.instances.length === 1);
+    const worker = HeldWorker.instances[0]!;
+    expect(worker.requests.length).toBeGreaterThan(0);
+    expect(worker.terminated).toBe(false);
+    disposeCodeViewPool();
+    expect(worker.terminated).toBe(true);
+    expect(currentCodeViewPool()).toEqual({ state: "off", manager: undefined });
+    expect(first.manager!.getStats().totalWorkers).toBe(0);
+    expect(() => disposeCodeViewPool()).not.toThrow();
+    const second = codeViewWorkerPool("github-dark");
+    expect(second.manager).not.toBe(first.manager);
+    await waitFor(() => HeldWorker.instances.length === 2);
+    expect(HeldWorker.instances[1]!.terminated).toBe(false);
+  });
+
+  test("a retired worker's late error cannot fail its successor", async () => {
+    holdWorkers();
+    codeViewWorkerPool("github-dark");
+    await waitFor(() => HeldWorker.instances.length === 1);
+    const old = HeldWorker.instances[0]!;
+    disposeCodeViewPool();
+    const next = codeViewWorkerPool("github-dark");
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      old.dispatchEvent(new Event("error"));
+      expect(currentCodeViewPool()).toBe(next);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  test("a retired theme request's rejection cannot fail its successor", async () => {
+    holdWorkers();
+    const first = codeViewWorkerPool("github-dark");
+    let rejectTheme!: (error: Error) => void;
+    const pending = new Promise<void>((_resolve, reject) => { rejectTheme = reject; });
+    const theme = spyOn(first.manager!, "setRenderOptions").mockImplementation(() => pending);
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      codeViewWorkerPool("github-light");
+      disposeCodeViewPool();
+      const next = codeViewWorkerPool("github-dark");
+      rejectTheme(new Error("old theme request failed"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(currentCodeViewPool()).toBe(next);
+      expect(warning).not.toHaveBeenCalled();
+    } finally {
+      theme.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  test("a current worker failure publishes fallback once, terminates it, and can restart on a new page", async () => {
+    holdWorkers();
+    codeViewWorkerPool("github-dark");
+    await waitFor(() => HeldWorker.instances.length === 1);
+    const states: string[] = [];
+    const unsubscribe = subscribeCodeViewPool(() => states.push(currentCodeViewPool().state));
+    const warning = spyOn(console, "warn").mockImplementation(() => {});
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      HeldWorker.instances[0]!.dispatchEvent(new Event("error"));
+      HeldWorker.instances[0]!.dispatchEvent(new Event("error"));
+      expect(states).toEqual(["failed"]);
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(HeldWorker.instances[0]!.terminated).toBe(true);
+      expect(codeViewWorkerPool("github-dark").state).toBe("failed");
+      disposeCodeViewPool();
+      expect(codeViewWorkerPool("github-dark").state).toBe("starting");
+    } finally {
+      unsubscribe();
+      warning.mockRestore();
+      error.mockRestore();
+    }
+  });
+});
