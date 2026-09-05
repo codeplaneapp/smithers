@@ -36,11 +36,11 @@ Use `map` for computation only. A `map` that chooses what happens next is a
 `branch` written wrongly, and the plan loses the topology a reviewer needs to
 see.
 
-## Sequence with andThen
+## Sequence nodes and bind planned references
 
-`Node.andThen` puts one node after another. Supply a node directly when the
-first result is not needed, or a builder when it is. A builder is evaluated once
-at build time against a `Planned` placeholder:
+`Node.andThen(first, next)` sequences two nodes when the first result is not needed.
+Use `Node.bindPlanned(first, build)` when the next node consumes a reference to
+that result. The builder runs once at plan time against a `Planned` placeholder:
 
 ```ts
 import { Action } from "@smthrs/flow"
@@ -58,7 +58,7 @@ const Publish = Action.make("docs/Publish", {
   success: Schema.String
 })
 
-const article = Node.andThen(
+const article = Node.bindPlanned(
   Draft.call({ topic: "durable plans" }),
   (text: Planned.Planned<string>) => Publish.call({ text, urgent: false })
 )
@@ -66,7 +66,13 @@ const article = Node.andThen(
 
 `text` is a placeholder, not a string. Pass it into a payload field, read a
 field off it, hand it to a branch: all of that records a reference. Computing on
-it throws `planned_value_computed` with the node and path named. [The authoring AST](../concepts/authoring-ast.md) covers the rule and why it fails twice.
+it can throw `planned_value_computed` with the node and path named. JavaScript
+truthiness and strict equality cannot be trapped: they inspect the reference,
+not its future result. Use `Node.branch` for decisions and `Node.map` for real-value
+computation. Enable the type-aware ESLint rule
+`@typescript-eslint/strict-boolean-expressions: "error"` to reject planned values
+in conditions. Explicit `Boolean(reference)` and reference equality still require
+review. [The authoring AST](../concepts/authoring-ast.md) explains the reference contract.
 
 ## Decide with branch
 
@@ -74,7 +80,7 @@ Both arms are built once, symbolically, so the plan carries the exit condition
 and both continuations before anything runs:
 
 ```ts
-const decided = Node.andThen(
+const decided = Node.bindPlanned(
   Draft.call({ topic: "durable plans" }),
   (text: Planned.Planned<string>) =>
     Node.branch(Node.succeed({ urgent: true }), {
@@ -156,7 +162,7 @@ const Article = Flow.make("docs/Article", {
   success: Schema.String,
   error: Schema.String,
   body: ({ topic }: { readonly topic: string }) =>
-    Node.andThen(Draft.call({ topic }), (text: Planned.Planned<string>) => Publish.call({ text, urgent: false }))
+    Node.bindPlanned(Draft.call({ topic }), (text: Planned.Planned<string>) => Publish.call({ text, urgent: false }))
 })
 
 const drafts: ReadonlyArray<Plan.NodeDraft> = Graph.drafts(Graph.build(Article, { topic: "plans" }))

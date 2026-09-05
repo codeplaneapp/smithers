@@ -43,7 +43,7 @@ covers why the ordering matters.
 
 ## Record generation 0
 
-`record` is first-writer-wins, in the shape `CacheStore.put` established:
+`record` is first-writer-wins:
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

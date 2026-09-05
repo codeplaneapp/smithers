@@ -52,15 +52,15 @@ const compiled = Plan.compile({
 
 ## What a draft carries
 
-| Field              | Required | What it decides                                                                   |
-| ------------------ | -------- | --------------------------------------------------------------------------------- |
-| `id`               | yes      | The durable lookup address. Never hashed.                                         |
-| `material`         | yes      | Everything the key is derived from.                                               |
-| `effects`          | yes      | Declared reads, writes, optional removals, and the boundary mode.                 |
-| `kind`             | no       | `step`, `agent`, or `merge`. Defaults to `step`.                                  |
-| `priority`         | no       | Scheduling tie-break. Defaults to 0.                                              |
-| `conflictStrategy` | no       | This node's preferred plan-time verdict for an overlap. Defaults to `serialize`.  |
-| `runtimeStrategy`  | no       | This node's preferred response when an overlap bites. Defaults to `delay-rebase`. |
+| Field              | Required | What it decides                                                                                                            |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | yes      | The durable lookup address. Not part of the declaration fingerprint; non-cacheable execution uses it as a run-local scope. |
+| `material`         | yes      | Everything the key is derived from.                                                                                        |
+| `effects`          | yes      | Declared reads, writes, optional removals, and the boundary mode.                                                          |
+| `kind`             | no       | `step`, `agent`, or `merge`. Defaults to `step`.                                                                           |
+| `priority`         | no       | Scheduling tie-break. Defaults to 0.                                                                                       |
+| `conflictStrategy` | no       | This node's preferred plan-time verdict for an overlap. Defaults to `serialize`.                                           |
+| `runtimeStrategy`  | no       | This node's preferred response when an overlap bites. Defaults to `delay-rebase`.                                          |
 
 ## What compile does, in order
 
@@ -72,8 +72,10 @@ const compiled = Plan.compile({
    computed key of the node it names.
 4. Annotates overlapping write sets and adds the ordering edges the verdicts
    imply.
-5. Adds reader-after-writer edges, so a node that reads a produced path follows
-   its producer.
+5. Adds reader-after-writer edges where explicit `Ref`/`Pending` paths have not
+   already selected read-before-write sequencing. A read before a writer
+   consumes an earlier version, not that later writer's output. Contradictory
+   inferred orderings still fail with `cycle`.
 6. Derives the plan digest over the whole result.
 
 The nodes come back in topological order, deep-frozen, at generation 0, with
@@ -114,10 +116,11 @@ covers, so a `Date` or `URL` in a body is stored as the value it serializes to.
 | `invalid_node`       | An empty id or flow, a priority that is not a safe integer, a value outside a literal set, or material this release cannot decode. |
 | `graph_too_large`    | The plan would hold more than `Plan.maximumPlanNodes` nodes.                                                                       |
 
-`compile` can also fail with `StepKey.KeyMaterialError`, when a dependency
-digest is missing or the material is not `sealed`, and with a `Schema.SchemaError`
-from decoding. [Troubleshooting](../troubleshooting.md) states the fix for each
-one.
+All three effect tiers compile. `StepKey.planIdentity` produces approval-bound
+declaration fingerprints; compilation does not grant cache eligibility.
+`compile` can also fail with `StepKey.KeyMaterialError` when a dependency
+digest is missing, and with a `Schema.SchemaError` from decoding.
+[Troubleshooting](../troubleshooting.md) states the fix for each one.
 
 ## Size
 

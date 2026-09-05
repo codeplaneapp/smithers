@@ -68,7 +68,7 @@ describe("Node", () => {
 
   it("defers a continuation builder and reveals nothing until the graph is built", () => {
     let built = 0
-    const node = Node.succeed(2).pipe(Node.andThen((value: Planned.Planned<number>) => {
+    const node = Node.succeed(2).pipe(Node.bindPlanned((value: Planned.Planned<number>) => {
       built++
       return Node.succeed(value)
     }))
@@ -94,7 +94,8 @@ describe("Node", () => {
     expect(() => Node.andThen(Node.succeed(1), 2 as unknown as Node.Any)).toThrow(expect.objectContaining({
       code: "invalid_continuation",
       node: "andThen/next",
-      message: "Node.andThen expected its direct continuation to be a Node"
+      message:
+        "Node.andThen expects a Node; use Node.bindPlanned for a symbolic builder or Node.map for value computation"
     }))
   })
 
@@ -382,7 +383,7 @@ describe("Node", () => {
     const continueWithZero = (_value: Planned.Planned<number>): Node.Node<number> => Node.succeed(0)
     const continuationDigest = (
       f: (value: Planned.Planned<number>) => Node.Any
-    ): string => tagged(Node.andThen(Node.succeed(1), f).ast, "AndThen").continuation.digest
+    ): string => tagged(Node.bindPlanned(Node.succeed(1), f).ast, "AndThen").continuation.digest
     expect(continuationDigest(continueWithValue)).toBe(continuationDigest(continueWithValue))
     expect(continuationDigest(continueWithValue)).not.toBe(continuationDigest(alsoContinueWithValue))
     expect(continuationDigest(continueWithValue)).not.toBe(continuationDigest(continueWithZero))
@@ -529,7 +530,7 @@ describe("internal/node call factories", () => {
     expect(Node.declaration(tagged(action.ast, "ActionCall"))).toBe(declaration)
     expect(Node.declaration(tagged(flow.ast, "FlowCall"))).toBe(declaration)
 
-    const built = Node.andThen(Node.succeed(1), (value: Planned.Planned<number>) => Node.succeed(value))
+    const built = Node.bindPlanned(Node.succeed(1), (value: Planned.Planned<number>) => Node.succeed(value))
     const continued = Node.continuation(tagged(built.ast, "AndThen"))?.(Planned.make<number>("upstream"))
     expect(Node.isNode(continued)).toBe(true)
     const supplied = Node.andThen(Node.succeed(1), Node.succeed(2))
@@ -682,7 +683,7 @@ describe("internal/node call factories", () => {
     const mapped = Node.priority(Node.map(Node.succeed(1), (value: number) => value + 1), 3)
     expect(Node.mapper(mapped.ast)?.(1)).toBe(2)
 
-    const sequenced = Node.priority(Node.andThen(Node.succeed(1), () => Node.succeed(2)), 3)
+    const sequenced = Node.priority(Node.bindPlanned(Node.succeed(1), () => Node.succeed(2)), 3)
     const builder = Node.continuation(tagged(sequenced.ast, "AndThen"))
     expect(Node.isNode(builder?.(Planned.make("upstream")))).toBe(true)
 
@@ -871,7 +872,7 @@ describe("Node.isNode", () => {
     const built = Node.all({
       chain: Node.succeed(0).pipe(
         Node.map((value) => value + 1),
-        Node.andThen(() => Node.succeed("built")),
+        Node.bindPlanned(() => Node.succeed("built")),
         Node.andThen(Node.succeed("direct")),
         Node.branch({ if: (value) => value === "direct", then: () => Node.succeed(1), else: () => Node.succeed(2) }),
         Node.catch({ error: Schema.String, onFailure: () => Node.succeed(3) }),
@@ -937,7 +938,8 @@ describe("Node.isNode", () => {
       expect(refusal(() => Node.andThen(Node.succeed(0), forged)), label).toMatchObject({
         code: "invalid_continuation",
         node: "andThen/next",
-        message: "Node.andThen expected its direct continuation to be a Node"
+        message:
+          "Node.andThen expects a Node; use Node.bindPlanned for a symbolic builder or Node.map for value computation"
       })
       for (const side of ["then", "else"] as const) {
         expect(

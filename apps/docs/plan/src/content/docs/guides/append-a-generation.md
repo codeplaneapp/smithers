@@ -61,8 +61,9 @@ has grown three times since.
 ## Which nodes the append adds
 
 `Plan.generationNodes(plan)` returns the nodes at the plan's current generation.
-That is what `PlanStore.append` inserts and what a `subgraph-appended` journal
-record names.
+That is what `PlanStore.append` inserts, and what a scheduler such as
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/)'s reports in the
+`subgraph-appended` record it writes to the run journal.
 
 ## Frozen nodes are annotated one-sidedly
 

@@ -16,13 +16,14 @@
  *
  * @since 0.1.0
  */
-import { StoredKey } from "@smthrs/keys"
+import { DerivedKey, StoredKey } from "@smthrs/keys"
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Inspectable from "effect/Inspectable"
 import * as Schema from "effect/Schema"
 import * as FileSet from "./FileSet.ts"
 import { GraphBuildError } from "./GraphBuildError.ts"
+import * as EffectCandidates from "./internal/EffectCandidates.ts"
 import { value as jsonMirror } from "./internal/node.ts"
 import * as KeyMaterial from "./KeyMaterial.ts"
 import * as StepKey from "./StepKey.ts"
@@ -224,6 +225,7 @@ export class PlanError extends Schema.TaggedError<PlanError>()("@smthrs/plan/Pla
     "overlap_forbidden",
     "invalid_effects",
     "invalid_node",
+    "invalid_plan",
     "graph_too_large"
   ]),
   message: Schema.String
@@ -385,8 +387,8 @@ const topological = (drafts: ReadonlyArray<NodeDraft>, known: ReadonlySet<string
  * node writes is ordered behind its producer. That pair is not a conflict,
  * because nothing needs annotating and no strategy applies. It is a missing
  * edge, so only `dependsOn` grows. When the graph already orders the producer
- * behind its reader, the missing edge would close a cycle and the pass fails
- * with `cycle` rather than leaving the reader ahead of the bytes it reads.
+ * behind its reader by explicit material dependencies, the reader consumes
+ * the earlier version. An opposing inferred ordering still fails with `cycle`.
  *
  * Nodes are visited in plan order, so a `serialize` edge always points from
  * the earlier declaration to the later one and can never close a cycle. Nodes
@@ -406,13 +408,21 @@ const annotate = (
       produced: producedPaths(node.effects),
       reads: FileSet.expandReads(node.effects.reads)
     }]))
+    const candidates = EffectCandidates.make(nodes.map((node) => expanded.get(node.id)!.produced))
     const conflicts = new Map<string, Array<ConflictAnnotation>>()
     const ordering = new Map<string, Array<string>>()
     const edges = new Map(nodes.map((node) => [node.id, new Set(node.dependsOn)]))
+    // Keep declaration sequencing separate from inferred ordering, including
+    // for frozen generations whose `dependsOn` already contains inferred edges.
+    const declaredEdges = new Map(nodes.map((node) => [node.id, KeyMaterial.dependencies(node.material)]))
     // The dependency chain from `from` to `to`, or `undefined` when no path
     // exists. The chain is what a cycle refusal shows the author, so the walk
     // records how it arrived rather than only whether it did.
-    const route = (from: string, to: string): ReadonlyArray<string> | undefined => {
+    const route = (
+      from: string,
+      to: string,
+      graph: ReadonlyMap<string, Iterable<string>> = edges
+    ): ReadonlyArray<string> | undefined => {
       const arrivedFrom = new Map<string, string>()
       const seen = new Set<string>([from])
       const stack = [from]
@@ -426,7 +436,7 @@ const annotate = (
           return chain
         }
         // Every edge is validated against this plan before conflict analysis.
-        for (const next of edges.get(current)!) {
+        for (const next of graph.get(current)!) {
           if (seen.has(next)) continue
           seen.add(next)
           arrivedFrom.set(next, current)
@@ -441,10 +451,10 @@ const annotate = (
       if (frozen.has(later.id)) continue
       const laterProduced = expanded.get(later.id)!.produced
       if (laterProduced.length === 0) continue
-      for (let before = 0; before < index; before++) {
+      for (const before of candidates(laterProduced)) {
+        if (before >= index) break
         const earlier = nodes[before]!
         const earlierProduced = expanded.get(earlier.id)!.produced
-        if (earlierProduced.length === 0) continue
         const paths = overlap(earlierProduced, laterProduced)
         if (paths.length === 0) continue
         if (reaches(later.id, earlier.id)) continue
@@ -475,8 +485,9 @@ const annotate = (
     // round. The reader then measures pre-producer bytes and — because the
     // dispatch key honestly folds the digest it measured — caches that wrong
     // execution as a legitimate one. `PlanScheduler.measure` already assumes
-    // "their producer has settled"; this pass is what makes the assumption
-    // true.
+    // "their preceding producer has settled"; this pass is what makes that
+    // assumption true. Explicit read-before-write sequencing instead consumes
+    // an earlier version: a source input, or another preceding writer's output.
     //
     // Ordering only, exactly like a `serialize` edge: it enters `dependsOn`
     // and never key material, because the reader computes the same result
@@ -488,23 +499,20 @@ const annotate = (
       if (frozen.has(reader.id)) continue
       const reads = expanded.get(reader.id)!.reads
       if (reads.length === 0) continue
-      for (const writer of nodes) {
+      for (const writerIndex of candidates(reads)) {
+        const writer = nodes[writerIndex]!
         if (writer.id === reader.id) continue
         const produced = expanded.get(writer.id)!.produced
-        if (produced.length === 0) continue
         const paths = readOverlap(reads, produced)
         if (paths.length === 0) continue
         // Already ordered, by a material edge, a serialize edge, or a path
         // through either.
         if (reaches(reader.id, writer.id)) continue
-        // The graph already orders the writer AFTER the reader, through a
-        // declared dependency or a serialize edge, and the reader still has
-        // to follow its producer. No edge set satisfies both: adding the
-        // reader-first edge closes a cycle, and leaving it out lets the reader
-        // measure pre-producer bytes and cache that execution as legitimate.
-        // Reachability decides it rather than plan order, because plan order
-        // only justifies edges that point backwards and writer-first points
-        // either way.
+        // Explicit sequencing selects the version being read. Do not reverse
+        // it just because a later node writes the same path. Only declared
+        // Ref/Pending paths establish this intent; a serialize edge or an
+        // earlier inferred producer edge cannot silently select old bytes.
+        if (route(writer.id, reader.id, declaredEdges) !== undefined) continue
         const contradiction = route(writer.id, reader.id)
         if (contradiction !== undefined) {
           return yield* Effect.fail(
@@ -830,7 +838,7 @@ const keyNodes = (
     for (const draft of sorted.drafts) {
       const invalid = validateEffects(draft.id, draft.effects)
       if (invalid !== undefined) return yield* Effect.fail(invalid)
-      const key = yield* StepKey.fromKeyMaterial(draft.material, digests)
+      const key = yield* StepKey.planIdentity(draft.material, digests)
       Object.defineProperty(digests, draft.id, {
         configurable: true,
         enumerable: true,
@@ -908,11 +916,12 @@ export const append = (
   plan: Plan,
   drafts: ReadonlyArray<NodeDraft>
 ): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> => {
-  const capturedPlan = frozenPlans.has(plan) ? plan : snapshot(plan)
+  const candidate = frozenPlans.has(plan) ? plan : snapshot(plan)
   const capturedDrafts = snapshot(drafts)
   return Effect.gen(function*() {
-    const invalidIdentity = validateIdentity(capturedPlan.planId, capturedPlan.flow)
+    const invalidIdentity = validateIdentity(candidate.planId, candidate.flow)
     if (invalidIdentity !== undefined) return yield* Effect.fail(invalidIdentity)
+    const capturedPlan = yield* verify(candidate)
     const nextSize = capturedPlan.nodes.length + capturedDrafts.length
     if (nextSize > maximumPlanNodes) return yield* Effect.fail(graphSizeError(nextSize))
     const validated = yield* validateDrafts(capturedDrafts)
@@ -934,6 +943,99 @@ export const append = (
     return freezePlan({ ...capturedPlan, generation, digest, nodes })
   })
 }
+
+/**
+ * Verifies an imported plan against the same key and topology rules as the
+ * compiler. Valid compiler-owned immutable values need no second compilation.
+ *
+ * Generation boundaries are replayed when reconstructing conflict annotations:
+ * an append may annotate new nodes, but cannot rewrite an earlier generation.
+ * Keys and approval digests retain their existing format. The returned snapshot
+ * is immutable; later caller mutation cannot change the verified value.
+ *
+ * @since 1.0.0
+ * @category validation
+ */
+export const verify = (
+  input: unknown
+): Effect.Effect<Plan, PlanError | StepKey.KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    if (typeof input === "object" && input !== null && frozenPlans.has(input as Plan)) return input as Plan
+    // Check the array ceiling before schema decoding copies its members.
+    if (typeof input === "object" && input !== null && "nodes" in input && Array.isArray(input.nodes)) {
+      if (input.nodes.length > maximumPlanNodes) return yield* Effect.fail(graphSizeError(input.nodes.length))
+    }
+    const decoded = yield* Schema.decodeUnknownEffect(Plan)(input)
+    const invalid = (message: string) => new PlanError({ code: "invalid_plan", message })
+    if (
+      !Number.isSafeInteger(decoded.generation) || decoded.generation < 0 || decoded.generation > decoded.nodes.length
+    ) {
+      return yield* Effect.fail(
+        invalid("Plan generation must be a non-negative safe integer with a nonempty appended generation")
+      )
+    }
+    const generations = new Map<string, number>()
+    let previous = 0
+    for (const node of decoded.nodes) {
+      if (!Number.isSafeInteger(node.generation) || node.generation < previous || node.generation > previous + 1) {
+        return yield* Effect.fail(invalid(`Node ${node.id} has an invalid or out-of-order generation`))
+      }
+      generations.set(node.id, node.generation)
+      previous = node.generation
+    }
+    if (previous !== decoded.generation) {
+      return yield* Effect.fail(invalid("Plan generation does not match its newest nodes"))
+    }
+    for (const node of decoded.nodes) {
+      for (const dependency of KeyMaterial.dependencies(node.material)) {
+        const generation = generations.get(dependency)
+        if (generation !== undefined && generation > node.generation) {
+          return yield* Effect.fail(invalid(`Node ${node.id} refers to a future generation`))
+        }
+      }
+    }
+    const drafts = yield* validateDrafts(decoded.nodes.map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      material: node.material,
+      effects: node.effects,
+      conflictStrategy: node.strategy,
+      runtimeStrategy: node.runtime,
+      priority: node.priority
+    })))
+    const keyed = (yield* keyNodes(drafts, [], 0)).map((node) =>
+      freezeNode({ ...node, generation: generations.get(node.id)! })
+    )
+    let nodes: ReadonlyArray<PlanNode> = keyed
+    // Without producers there are no inferred ordering/conflict edges. Avoid
+    // rebuilding every prefix of a long, effect-free elaboration history.
+    if (keyed.some((node) => producedPaths(node.effects).length > 0)) {
+      const groups = new Map<number, Array<PlanNode>>()
+      for (const node of keyed) {
+        const group = groups.get(node.generation) ?? []
+        group.push(node)
+        groups.set(node.generation, group)
+      }
+      nodes = []
+      for (let generation = 0; generation <= decoded.generation; generation++) {
+        nodes = yield* annotate([...nodes, ...(groups.get(generation) ?? [])], new Set(nodes.map((node) => node.id)))
+      }
+    }
+    const baseDigest = yield* digestOf(decoded.planId, decoded.flow, nodes.filter((node) => node.generation === 0))
+    const digest = decoded.generation === 0 ? baseDigest : yield* digestOf(decoded.planId, decoded.flow, nodes)
+    if (decoded.baseDigest !== baseDigest || decoded.digest !== digest) {
+      return yield* Effect.fail(invalid("Plan approval digest does not match its compiled content"))
+    }
+    // Compare the complete node contract, including material and generation,
+    // rather than trusting the claimed keys or the approval projection alone.
+    const hash = Schema.decodeUnknownEffect(DerivedKey)
+    if ((yield* hash(decoded.nodes)) !== (yield* hash(nodes))) {
+      return yield* Effect.fail(
+        invalid("Plan nodes do not match their compiled keys, effects, ordering, or generations")
+      )
+    }
+    return freezePlan({ ...decoded, nodes })
+  })
 
 /**
  * The nodes added by the newest generation: what {@link module:PlanStore}

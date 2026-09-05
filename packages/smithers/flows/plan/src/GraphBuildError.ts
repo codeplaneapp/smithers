@@ -36,7 +36,9 @@ import * as Schema from "effect/Schema"
  * `invalid_priority` is a scheduling priority that is not a safe integer,
  * which no ordering could compare; `invalid_payload` is a payload member that
  * cannot be captured as inert JSON without executing author code or losing
- * identity. The two
+ * identity; `unstable_callback` is a function with process-local identity in a
+ * graph that requires stable callbacks. Declare its complete inert captures
+ * with `Node.capture`, including semantic implementation versions. The two
  * depth refusals exist because graph building walks with an explicit stack
  * and refuses at a bound, rather than recursing until the native stack
  * overflows without a typed error.
@@ -56,7 +58,8 @@ export const GraphBuildErrorCode = Schema.Literals([
   "graph_too_deep",
   "duplicate_node",
   "invalid_priority",
-  "invalid_payload"
+  "invalid_payload",
+  "unstable_callback"
 ])
 
 /**

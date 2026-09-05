@@ -305,13 +305,11 @@ describe("PlanStore", () => {
       const failure = yield* withStore((store) =>
         Effect.gen(function*() {
           yield* store.record(plan, 1)
-          // `Plan.append` refuses this in memory; the primary key refuses it in
-          // the database, so a caller that bypasses the compiler cannot rewrite
-          // history either.
+          // Persistence verifies imported plans before any SQL mutation.
           return yield* Effect.flip(store.append(forged))
         })
       )
-      expect(failure).toMatchObject({ code: "constraint" })
+      expect(failure).toMatchObject({ code: "invalid_plan" })
     }))
 
   it.effect("raises when a recorded node row is rewritten or deleted", () =>

@@ -135,13 +135,42 @@ const dependencies: (material: KeyMaterial) => ReadonlyArray<string>
 
 The graph-local dependencies a material names, in declaration order and without duplicates. `Literal` inputs contribute nothing. `Plan.compile` uses the result as the node's edge set.
 
+## Scheduling
+
+`Scheduling.make(concurrency?)` creates a pure admission policy. Import it from
+`@smthrs/plan/Scheduling` or the package's `Scheduling` namespace. The optional
+`steps` and `agents` limits must be positive safe integers; omission is
+unbounded within the safe-integer range. Construction snapshots the limits.
+
+`policy.admit(ready, active)` takes candidates `{ node, order, waited }` and
+the current permit usage `{ steps, agents }`. Each node supplies its unique
+`id`, `kind` (`step`, `agent`, or `merge`), and safe-integer `priority`.
+`order` is its unique non-negative position in the compiled plan, not arrival
+order. `waited` is its non-negative count of capacity-constrained admission
+passes. An agent consumes both a step permit and an agent permit.
+
+The result contains immutable `admitted` and `deferred` candidate arrays plus
+the number of newly admitted `agents`. Only deferred candidates receive an
+incremented age; input candidates and node values are not mutated. Age
+saturates at `Number.MAX_SAFE_INTEGER`. Exact priority-plus-age comparison
+prevents floating-point rounding from changing the ordering. Equal scores
+preserve plan order; a blocked agent does not prevent a regular node from using
+available step capacity. Invalid counts, duplicate IDs/positions, or invalid
+priorities are refused synchronously with `RangeError`.
+
+This policy is used by `@smthrs/engine-store`'s durable plan scheduler. It does
+not determine readiness, evaluate branches, launch nodes, or cancel effects.
+The caller must supply only ready candidates and apply the returned ages before
+its next admission pass. Public interpreter/compiled scheduling parity is not
+provided by this policy alone.
+
 ## StepKey
 
 [src/StepKey.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/StepKey.ts)
 
-The compiler from material to a [`@smthrs/keys`](/api/keys) `Key`. `fromKeyMaterial` substitutes each `Ref` and `Pending` for the already-computed key of the referenced node, then builds a content key through `content`. `ordinal` mints the deliberately run-local key of compensable, irreversible, or unsealed work, whose `tier` is one of those three words.
+The compiler from material to a [`@smthrs/keys`](/api/keys) `Key`. `planIdentity` substitutes each `Ref` and `Pending` for the already-computed key of the referenced node. Sealed material retains the `fromKeyMaterial` content-key format; other tiers use a separate declaration namespace. `ordinal` mints the deliberately run-local key of compensable, irreversible, or unsealed work, whose `tier` is one of those three words.
 
-Structural node ids are lookup addresses only and never enter the hashed value. Rename a node and nothing re-keys; change what a node consumes and everything downstream of it does. Only `sealed` material may become a content key, so `fromKeyMaterial` fails `non_content_material` for the other two tiers. A dependency digest is resolved as an own property, so a `Ref` naming `toString` or `constructor` is a `missing_dependency` refusal rather than a colliding key.
+Structural node ids do not enter declaration fingerprints. Non-cacheable execution keys also need a run-local structural scope to distinguish repeated identical effects. Only `sealed` material may become a content key, so `fromKeyMaterial` fails `non_content_material` for the other two tiers. A dependency digest is resolved as an own property, so a `Ref` naming `toString` or `constructor` is a `missing_dependency` refusal rather than a colliding key.
 
 The brand behind `digestInput` is private, so a plain object that merely has a `digest` field hashes as a literal. That closes a collision where shape sniffing hashed a genuine upstream-result reference and an ordinary content hash identically.
 
@@ -210,7 +239,32 @@ type EnvironmentIdentity =
   }
 ```
 
-The engine-resolved execution environment a content key is computed under. The union enforces the `runScope` rule for typed callers, and both `content` and `dispatchIdentity` enforce it again at run time.
+The engine-resolved execution environment a content key is computed under.
+`EnvironmentIdentity` is also a runtime schema; its TypeScript type is derived
+from that schema. `content`, `dispatchIdentity`, and `environmentIdentity`
+validate the entire shape, reject unknown fields, and return typed
+`invalid_environment` errors for invalid identities rather than defects.
+
+### StepKey.environmentIdentity
+
+```ts
+const environmentIdentity: (
+  environment?: EnvironmentIdentity
+) => Effect.Effect<StoredKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+A fingerprint for binding a durable execution to its runtime environment,
+not an action dispatch key. It has a separate `execution-environment/v1`
+namespace and uses the same normalization as content/dispatch keys: layer
+order and duplicates are significant; layer strings and capability patterns
+normalize to NFC; capability-pattern sets sort and deduplicate. Capability
+group names retain their exact spelling. An omitted environment, declared-empty
+environment, and undeclared run-scoped environment remain distinct.
+
+`PlanScheduler` snapshots the identity at construction and stores this
+fingerprint with `PlanInputStore` before dispatch. Changed identities cannot
+resume the same run. This does not change existing valid action-key material
+or detect implementation changes missing from the declared identity.
 
 ### StepKey.DigestInput
 
@@ -288,6 +342,20 @@ const ordinal: (
 
 Produces a run-local key for compensable, irreversible, or unsealed work. These keys intentionally cannot be reused across runs.
 
+### StepKey.planIdentity
+
+```ts
+const planIdentity: (
+  material: KeyMaterial.KeyMaterial,
+  dependencyDigests: Readonly<Record<string, string>>
+) => Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
+```
+
+The declaration fingerprint used by `Plan.compile`, `append`, and `verify`.
+Accepts every effect tier. Non-sealed fingerprints use a distinct, tier-bearing
+namespace and are not cross-run cache keys. Dependency references must resolve
+to own string-valued properties, as with `fromKeyMaterial`.
+
 ### StepKey.fromKeyMaterial
 
 ```ts
@@ -297,7 +365,7 @@ const fromKeyMaterial: (
 ) => Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto>
 ```
 
-The plan key: resolves graph-local references against `dependencyDigests`, which must hold an own string-valued property for every node the material names, then builds a content key. Fails `non_content_material` unless `material.kind` is `sealed`.
+The sealed plan key: resolves graph-local references against `dependencyDigests`, which must hold an own string-valued property for every node the material names, then builds a content key. Fails `non_content_material` unless `material.kind` is `sealed`. Use `planIdentity` for a tier-independent compiler.
 
 ### StepKey.dispatchIdentity
 
@@ -344,7 +412,7 @@ Stable failures while resolving graph-local dependency references.
 
 `compile` puts drafts in topological order, substitutes dependency digests, annotates write-set overlaps, and derives the plan digest. `append` adds a pre-keyed subgraph at the next generation, and `generationNodes` reads back the nodes the newest generation added.
 
-`PlanNode.kind` is `step`, `agent`, or `merge`. `dependsOn` is the edge set: material references, any ordering edge a `serialize` verdict added, and the reader-after-writer edges that put a node behind whoever produces the paths it reads. Ordering edges are deliberately not key material, so a node serialized behind another keeps its cache hit. A reader-after-writer edge that would close a cycle, because a declared dependency or a `serialize` edge already orders the producer behind its reader, is refused as `cycle` rather than dropped; the message names the reader, the producer, the overlapping paths, and the dependency chain. `NodeEffects` carries `reads`, `writes`, an optional `removes`, and a `boundaryMode` of `hard` or `expected`; a removal mutates the world exactly as a write does, so both plan passes treat the two as one set.
+`PlanNode.kind` is `step`, `agent`, or `merge`. `dependsOn` is the edge set: material references, ordering edges from `serialize`, and inferred reader-after-writer edges. Explicit `Ref`/`Pending` dependency paths select the version being read: a read before a writer consumes the initial source or an earlier producer's output, not that later writer's output. Otherwise, the compiler orders a reader after overlapping writers. A contradictory inferred ordering still fails with `cycle`; the diagnostic names both nodes, overlapping paths, and the dependency chain. Ordering edges are deliberately not key material: file content enters dispatch identity through boundary digests. `NodeEffects` carries `reads`, `writes`, optional `removes`, and `boundaryMode` (`hard` or `expected`). Removals participate in ordering just like writes.
 
 Planning performs no I/O. Declared effects carry read and write _paths_, never digests, because measuring a path is run-time work. A node's key is a function of what it consumes, so an edited declaration re-keys that node and its dependent cone and nothing else. That is the entire invalidation mechanism: there is no reverse-dependency index and no invalidating node visitor, because content addressing subsumes both.
 
@@ -472,13 +540,25 @@ const append: (
 
 Appends an elaborated subgraph at the next generation. Nodes already in the plan keep their id, key, edges, and generation byte for byte, and the new nodes arrive pre-keyed against them. `baseDigest` does not move; `digest` does. An append with no drafts fails as `invalid_node`.
 
+### Plan.verify
+
+```ts
+const verify: (input: unknown) => Effect.Effect<
+  Plan,
+  PlanError | StepKey.KeyMaterialError | Schema.SchemaError,
+  Crypto.Crypto
+>
+```
+
+Reconstructs an imported plan using compiler key, dependency, conflict and generation rules. It verifies both the approval digests and the complete node contract, then returns an immutable snapshot. Compiler-owned immutable plans take a trusted fast path. `Plan.append` verifies imported prefixes through this same boundary. Existing key and digest formats remain unchanged; corrupted records are refused rather than silently rewritten.
+
 ### Plan.generationNodes
 
 ```ts
 const generationNodes: (plan: Plan) => ReadonlyArray<PlanNode>
 ```
 
-The nodes added by the newest generation: what `PlanStore.append` inserts and what the `subgraph-appended` journal record names.
+The nodes added by the newest generation: what `PlanStore.append` inserts, and what a scheduler such as [`@smthrs/engine-store`](/api/engine-store)'s reports in the `subgraph-appended` record it writes to the run journal.
 
 ### Plan.maximumPlanNodes
 
@@ -633,14 +713,38 @@ Transforms an eventual success value with a deferred pure function. The function
 
 ```ts
 const andThen: {
-  <A, B, E2, R2>(f: (a: Planned.Planned<A>) => Node<B, E2, R2>): <E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
   <B, E2, R2>(next: Node<B, E2, R2>): <A, E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
-  <A, E, R, B, E2, R2>(self: Node<A, E, R>, f: (a: Planned.Planned<A>) => Node<B, E2, R2>): Node<B, E | E2, R | R2>
   <A, E, R, B, E2, R2>(self: Node<A, E, R>, next: Node<B, E2, R2>): Node<B, E | E2, R | R2>
 }
 ```
 
-Sequences a builder, or a node, after this one. Supply a node directly when the first result is not needed. A builder is evaluated once, against a placeholder, when the graph is built. A direct continuation that is neither throws `invalid_continuation`.
+Starts the entire next subtree only after the first node succeeds, without consuming its result. Failure or interruption prevents nested actions, combinations, and inline flows from starting. Independent children inside the next subtree can still run concurrently once the boundary opens. Passing a callback is a type error and throws `invalid_continuation` in JavaScript.
+
+### Node.bindPlanned
+
+```ts
+const bindPlanned: {
+  <A, B, E2, R2>(
+    build: (reference: Planned.Planned<A>) => Node<B, E2, R2>
+  ): <E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
+  <A, E, R, B, E2, R2>(
+    self: Node<A, E, R>,
+    build: (reference: Planned.Planned<A>) => Node<B, E2, R2>
+  ): Node<B, E | E2, R | R2>
+}
+```
+
+Builds a dependency at plan time using a reference to the future result. Pass it into payloads; use `Node.map` for value computation and `Node.branch` for decisions. The callback receives a symbolic reference. Enable type-aware ESLint's `@typescript-eslint/strict-boolean-expressions` to reject planned conditions; explicit Boolean coercion and reference equality still require review.
+
+Migration: replace callback-form `Node.andThen` with `Node.bindPlanned`. Direct node sequencing remains `Node.andThen`. This source API change preserves existing AST and key formats.
+
+`bindPlanned` builds dependencies, not a whole-subtree success barrier. Members
+that do not consume the reference can start while its producer runs. Use
+explicit `andThen` when no work in the next subtree may start before success.
+The corrected graph normalization now carries that explicit barrier to every
+descendant, including inline-flow bodies. This changes compiled keys/digests
+for previously under-ordered nested sequences; re-plan affected work rather
+than substituting the new graph into an already approved execution.
 
 ### Node.BranchOptions
 
@@ -1025,7 +1129,7 @@ Compares a plan against the last plan for the same flow. Pure, total, and free o
 
 [src/PlanStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/PlanStore.ts)
 
-`record` is first-writer-wins in the shape `CacheStore.put` established: an identical re-record is not an error, and a different plan under the same id is a `Conflict` carrying the stored digest rather than a silent overwrite. It accepts generation 0 only, whose `baseDigest` equals its `digest` and every one of whose nodes is at generation 0. `get` returns the whole plan with nodes in recorded order.
+`record` is first-writer-wins: an identical re-record is not an error, and a different plan under the same id is a `Conflict` carrying the stored digest rather than a silent overwrite. It accepts generation 0 only, whose `baseDigest` equals its `digest` and every one of whose nodes is at generation 0. `get` returns the verified immutable plan with nodes in recorded order. Admission and reads recompute keys, approval digests, topology, effect ordering and generation relationships. A forged incoming plan fails with `invalid_plan` before writes; corrupt stored content fails with `decode_failed`, including on duplicate admission. Envelope and nodes are read in one SQL statement to avoid mixed generations during concurrent appends.
 
 `append` advances the plan row with a compare-and-swap on the previous generation, the flow, and the approved base digest, and refuses an append that adds no nodes. The refusal matters because of the append-only triggers: without it the node rows would land while the plan-row update matched nothing or skipped a generation, leaving rows whose dependencies are missing and that nothing is allowed to delete. The whole append is one transaction, so the refusal takes the rows back with it. Ordinals are derived from the rows already stored, not from the caller's array.
 
@@ -1044,7 +1148,7 @@ interface Service {
 }
 ```
 
-`createdAtMs` is the caller's clock, because this package performs no I/O of its own.
+`createdAtMs` comes from the caller's clock. Constructing the store requires `Crypto.Crypto` alongside SQL and the durable writer; individual operations use that captured implementation.
 
 ### PlanStore.RecordResult
 
@@ -1068,7 +1172,7 @@ The service tag.
 ### PlanStore.make
 
 ```ts
-const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlClient>
+const make: Effect.Effect<Service, never, DurableWriter | SqlClient.SqlClient | Crypto.Crypto>
 ```
 
 Builds the SQL-backed store.
@@ -1076,7 +1180,7 @@ Builds the SQL-backed store.
 ### PlanStore.layer
 
 ```ts
-const layer: Layer.Layer<PlanStore, never, DurableWriter | SqlClient.SqlClient>
+const layer: Layer.Layer<PlanStore, never, DurableWriter | SqlClient.SqlClient | Crypto.Crypto>
 ```
 
 Provides `make`.
@@ -1105,9 +1209,14 @@ class PlanStoreError extends Schema.TaggedError<PlanStoreError>()("@smthrs/plan/
 
 [src/Migrations.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/src/Migrations.ts)
 
-The namespaced set owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges` in id block `4000`. Block `4000` is the next free block after the journal (`0`), the run store (`1000`), the step cache (`2000`), and the engine store (`3000`). [`@smthrs/engine-store`](/api/engine-store)'s `Migrations.sets` composes this set last, because `Migrator` decides what to run from a single high-water mark and a set whose ids sit below an already-applied one would be assumed done.
+The namespaced set owns `flows_plans`, `flows_plan_nodes`, and `flows_plan_edges`
+in id block `4000`, after journal (`0`), run store (`1000`), step cache (`2000`),
+and engine store (`3000`). [`@smthrs/engine-store`](/api/engine-store)'s
+`Migrations.sets` composes all five. The database loader handles forward
+additions to already installed lower blocks before the ordinary migration pass;
+earlier holes and entirely new lower blocks are refused rather than skipped.
 
-The ordered steps live under `src/internal/migrations`, which the export map blocks, so `set` is the only way to reach them; a step imported on its own would run outside the namespaced ordering `Migrator` relies on.
+The ordered steps live under `src/internal/migrations`, which the export map blocks, so `set` is the only way to reach them; a step imported on its own would run outside the namespaced ordering that migrator relies on.
 
 ### Migrations.set
 

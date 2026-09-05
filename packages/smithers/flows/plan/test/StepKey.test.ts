@@ -32,6 +32,84 @@ const expectKeyMaterialError = (
 }
 
 describe("StepKey", () => {
+  it.effect("binds normalized environment fingerprints without changing existing content identity", () =>
+    Effect.gen(function*() {
+      const environment: StepKey.EnvironmentIdentity = {
+        declared: true,
+        layers: ["cafe\u0301", "second"],
+        capabilities: { fs: ["b", "a", "a"], net: ["host"] }
+      }
+      const equivalent: StepKey.EnvironmentIdentity = {
+        declared: true,
+        layers: ["caf\u00e9", "second"],
+        capabilities: { net: ["host"], fs: ["a", "b"] }
+      }
+      const fingerprint = yield* withCrypto(StepKey.environmentIdentity(environment))
+      expect(fingerprint).toBe(yield* withCrypto(StepKey.environmentIdentity(equivalent)))
+      const base = { body: 1, inputs: {}, layers: [], capabilities: {} }
+      expect(yield* withCrypto(StepKey.content({ ...base, environment })))
+        .toBe(yield* withCrypto(StepKey.content({ ...base, environment: equivalent })))
+      expect(fingerprint).not.toBe(yield* withCrypto(StepKey.content({ ...base, environment })))
+      const variants: Array<StepKey.EnvironmentIdentity | undefined> = [
+        undefined,
+        { declared: true, layers: [], capabilities: {} },
+        { ...environment, layers: ["second", "caf\u00e9"] },
+        { ...environment, layers: ["caf\u00e9", "second", "second"] },
+        { ...environment, capabilities: { fs: ["a", "b", "c"], net: ["host"] } },
+        { ...environment, declared: false, runScope: "run-a" },
+        { ...environment, declared: false, runScope: "run-b" }
+      ]
+      const keys = yield* withCrypto(Effect.forEach(variants, (value) => StepKey.environmentIdentity(value)))
+      expect(new Set([fingerprint, ...keys]).size).toBe(variants.length + 1)
+      const decoded = Schema.decodeUnknownSync(StepKey.EnvironmentIdentity)(environment)
+      expect(decoded).toEqual(environment)
+      expect(decoded).not.toBe(environment)
+      expect(decoded.layers).not.toBe(environment.layers)
+      expect(decoded.capabilities.fs).not.toBe(environment.capabilities.fs)
+    }))
+
+  it.effect("rejects malformed environments through every identity constructor without defects", () =>
+    Effect.gen(function*() {
+      const base = { declared: true, layers: [], capabilities: {} }
+      const values: Array<unknown> = [
+        null,
+        1,
+        "env",
+        [],
+        {},
+        { ...base, layers: "layer" },
+        { ...base, layers: [1] },
+        { ...base, capabilities: null },
+        { ...base, capabilities: { fs: "path" } },
+        { ...base, capabilities: { fs: [false] } },
+        { ...base, extra: "not-keyed" },
+        {
+          ...base,
+          get layers() {
+            throw new Error("private getter detail")
+          }
+        }
+      ]
+      for (const value of values) {
+        const environment = value as StepKey.EnvironmentIdentity
+        const effects = [
+          StepKey.environmentIdentity(environment),
+          StepKey.content({ body: 1, inputs: {}, layers: [], capabilities: {}, environment }),
+          StepKey.dispatchIdentity({
+            material: material(),
+            results: {},
+            environment,
+            hermetic: { readSet: [], writeSet: [], boundaryMode: "hard" }
+          })
+        ]
+        for (const effect of effects) {
+          const error = yield* withCryptoFailure(effect)
+          expect(error).toMatchObject({ code: "invalid_environment" })
+          expect(JSON.stringify(error)).not.toContain("private getter detail")
+        }
+      }
+    }))
+
   it.effect("produces a key1_ digest and is stable under set reordering", () =>
     Effect.gen(function*() {
       const left = yield* withCrypto(

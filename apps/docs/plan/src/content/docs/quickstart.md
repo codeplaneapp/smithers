@@ -88,9 +88,10 @@ const store = Layer.provideMerge(
 )
 ```
 
-Use `:memory:` while you are learning. A real host points `filename` at the
-project database, where the plan tables sit beside the journal and the step
-cache under their own migration id block.
+Use `:memory:` while you are learning. A real host points `filename` at a file
+on disk. The three plan tables carry their own migration id block, so one
+database file can hold them alongside the tables other Smithers packages
+create without the two migration sets colliding.
 
 ## Compile, record, append, read back
 

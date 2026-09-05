@@ -6,21 +6,26 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/plan/docs/concepts/step-keys.md"
 ---
 
-A step key is the name a piece of work caches under. `StepKey` is the compiler
-that produces one, and `KeyMaterial` is what a planner declares to get one.
+A step key identifies a declaration or a durable execution. It is not, by
+itself, permission to reuse a result across runs. `StepKey` produces these
+identities from the declared `KeyMaterial`.
 
-Two derivations live here and they answer different questions:
+The derivations answer different questions:
 
-- `StepKey.fromKeyMaterial` produces the **plan key**: the key a node is
+- `StepKey.planIdentity` produces the **plan key** for every effect tier: the key a node is
   _identified_ by, computed at plan time from the resolved keys of its
   dependencies.
-- `StepKey.dispatchIdentity` produces the **dispatch key**: the key a run is
+- `StepKey.dispatchIdentity` produces a sealed **dispatch key**: the key a run is
   _cached_ under, computed at execution time from the settled content its
   dependencies produced.
 
-Both go through `StepKey.content`, so there is one key format, one hashing
-chokepoint, and one namespace field distinguishing content keys from run-local
-ones.
+- `StepKey.ordinal` produces a run-local execution key for non-cacheable work.
+  The plan scheduler scopes it by run, plan, structural node, and declaration
+  fingerprint, so repeated identical effects do not collapse into one action.
+
+Sealed plan keys still use `StepKey.fromKeyMaterial` and retain the existing
+content-key format. Other tiers use a distinct `plan-declaration` namespace
+that binds approvals without claiming cacheability.
 
 ## Key material
 
@@ -78,12 +83,14 @@ world outside the workspace must not be served from a cache.
 
 ## What a plan key folds in
 
-`fromKeyMaterial` substitutes each `Ref` and `Pending` for the already computed
-key of the referenced node, then builds a content key through `content`.
+`planIdentity` substitutes each `Ref` and `Pending` for the already computed
+key of the referenced node. For sealed material it delegates to
+`fromKeyMaterial`; other tiers produce a tier-bearing declaration fingerprint.
 
-Structural node ids are lookup addresses only and never enter the hashed value.
-Rename a node and nothing re-keys. Change what a node consumes and everything
-downstream of it does.
+Structural node ids do not enter the plan key. Renaming a node preserves its
+declaration fingerprint. A non-cacheable execution key does include its
+structural address: renaming an effect must not accidentally replay a different
+invocation. Changing what a node consumes changes downstream plan keys.
 
 A dependency digest is resolved as an own data property. A `Ref` naming
 `toString` or `constructor` is a `missing_dependency` refusal rather than a

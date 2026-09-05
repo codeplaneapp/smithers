@@ -7,8 +7,8 @@
  * into a branch, into a map — and field access is allowed, because it records a
  * reference path. It may never be **computed on**.
  *
- * Misuse fails twice. {@link Planned} is branded, so arithmetic and template
- * interpolation are compile errors; and {@link make} returns a STRICT proxy
+ * {@link Planned} is branded, so arithmetic is a compile error.
+ * {@link make} returns a strict proxy
  * whose `Symbol.toPrimitive`, `valueOf`, `toString`, `toJSON`, and call traps
  * throw {@link module:GraphBuildError.GraphBuildError} rather than let a plan be
  * built around `NaN` or `"[object Object]"`. The lenient proxy this adapts
@@ -20,6 +20,9 @@
  * (`value === other`), so those operations cannot be refused at run time.
  * They reveal only proxy truthiness or identity and never the planned result;
  * authors must use {@link module:Node.branch} for decisions on real values.
+ * Type-aware ESLint `@typescript-eslint/strict-boolean-expressions` rejects
+ * planned conditions, but does not reject explicit Boolean coercion or all
+ * reference comparisons. Those still require review.
  *
  * @since 0.1.0
  */
@@ -75,7 +78,7 @@ export interface Identity<out T> extends Reference {
 /**
  * A step result that has not been produced yet.
  *
- * The brand makes computation a compile error. The mapped half keeps field
+ * The brand rejects arithmetic and ordinary value arguments. The mapped half keeps field
  * access typed — `result.files` is a `Planned` of the field, which is what
  * makes "pass it on, never compute on it" expressible rather than merely
  * documented.

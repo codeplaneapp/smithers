@@ -143,19 +143,28 @@ export const isDigestInput = (value: unknown): value is DigestInput =>
  * @category models
  * @slop
  */
-export type EnvironmentIdentity =
-  | {
-    readonly declared: true
-    readonly layers: ReadonlyArray<string>
-    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
-    readonly runScope?: undefined
-  }
-  | {
-    readonly declared: false
-    readonly layers: ReadonlyArray<string>
-    readonly capabilities: Readonly<Record<string, ReadonlyArray<string>>>
-    readonly runScope: string
-  }
+export type EnvironmentIdentity = typeof EnvironmentIdentity.Type
+
+/**
+ * Validated, copyable runtime environment identity. Layer order matters;
+ * capability patterns are set-like. Unknown fields are not identity material.
+ * @since 1.0.0
+ * @category schemas
+ */
+export const EnvironmentIdentity = Schema.Union([
+  Schema.Struct({
+    declared: Schema.Literal(true),
+    layers: Schema.Array(Schema.String),
+    capabilities: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+    runScope: Schema.optionalKey(Schema.Undefined)
+  }),
+  Schema.Struct({
+    declared: Schema.Literal(false),
+    layers: Schema.Array(Schema.String),
+    capabilities: Schema.Record(Schema.String, Schema.Array(Schema.String)),
+    runScope: Schema.NonEmptyString
+  })
+])
 
 /**
  * Caller-owned memoization context for projected dependency-value digests.
@@ -288,6 +297,21 @@ const validateEnvironment = (environment: EnvironmentIdentity): KeyMaterialError
   })
 }
 
+const decodeEnvironment = (environment: EnvironmentIdentity) =>
+  Effect.try({
+    try: () => {
+      const invalid = validateEnvironment(environment)
+      if (invalid !== undefined) throw invalid
+      return Schema.decodeUnknownSync(EnvironmentIdentity)(environment, { onExcessProperty: "error" })
+    },
+    catch: (cause) =>
+      cause instanceof KeyMaterialError ? cause : new KeyMaterialError({
+        code: "invalid_environment",
+        message:
+          "Environment identity must contain only its declared fields, string layers, and string capability patterns"
+      })
+  })
+
 const sortStrings = (values: ReadonlyArray<string>): Array<string> =>
   [...new Set(values.map((value) => value.normalize("NFC")))].sort()
 
@@ -367,6 +391,24 @@ const normalizeHermetic = (hermetic: NonNullable<ContentIdentity["hermetic"]>) =
 const decodeKey = Schema.decodeUnknownEffect(DerivedKey)
 
 /**
+ * Fingerprint for binding one execution to its runtime environment, not an
+ * action dispatch key. Uses the same normalization as content/dispatch keys.
+ * An omitted environment is distinct from declared-empty and run-scoped ones.
+ * @since 1.0.0
+ * @category constructors
+ */
+export const environmentIdentity = (
+  environment?: EnvironmentIdentity
+): Effect.Effect<StoredKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  Effect.gen(function*() {
+    const captured = environment === undefined ? undefined : yield* decodeEnvironment(environment)
+    return yield* decodeKey({
+      kind: "execution-environment/v1",
+      environment: captured === undefined ? null : normalizeEnvironment(captured)
+    })
+  })
+
+/**
  * Produces a cross-run reusable key for a sealed or hermetic step. Set-like
  * declarations are normalized before serialization; write declarations remain
  * part of the identity even when the step writes nothing.
@@ -379,17 +421,14 @@ export const content = (
   identity: ContentIdentity
 ): Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
   Effect.gen(function*() {
-    if (identity.environment !== undefined) {
-      const invalid = validateEnvironment(identity.environment)
-      if (invalid !== undefined) return yield* invalid
-    }
+    const environment = identity.environment === undefined ? undefined : yield* decodeEnvironment(identity.environment)
     return yield* decodeKey({
       kind: "content",
       body: identity.body,
       inputs: normalizeInputs(identity.inputs),
       layers: sortStrings(identity.layers),
       capabilities: normalizeCapabilities(identity.capabilities),
-      ...(identity.environment === undefined ? {} : { environment: normalizeEnvironment(identity.environment) }),
+      ...(environment === undefined ? {} : { environment: normalizeEnvironment(environment) }),
       ...(identity.hermetic === undefined ? {} : { hermetic: normalizeHermetic(identity.hermetic) })
     })
   })
@@ -408,7 +447,7 @@ export const ordinal = (
 
 /**
  * Resolves graph-local references to dependency digests and constructs a
- * content key.
+ * sealed content key. Use {@link planIdentity} to compile any effect tier.
  *
  * This is the handoff the Flow Builder Brief describes: the planner hands over
  * a topologically ordered sequence of `{ nodeId, material }`, and for each one
@@ -433,6 +472,41 @@ export const fromKeyMaterial = (
       })
     )
   }
+  return materialIdentity(material, dependencyDigests).pipe(Effect.flatMap(content))
+}
+
+/**
+ * Identifies a declaration in a plan, independently of whether its execution
+ * can be cached. Sealed material retains its existing content-key format;
+ * compensable and irreversible material use a distinct, tier-bearing plan
+ * namespace. These fingerprints bind approvals, not cross-run result reuse.
+ * Dispatch non-cacheable work under a run-local {@link ordinal} instead.
+ *
+ * @since 1.0.0
+ * @category constructors
+ */
+export const planIdentity = (
+  material: KeyMaterial.KeyMaterial,
+  dependencyDigests: Readonly<Record<string, string>>
+): Effect.Effect<StepKey, KeyMaterialError | Schema.SchemaError, Crypto.Crypto> =>
+  material.kind === "sealed" ?
+    fromKeyMaterial(material, dependencyDigests) :
+    materialIdentity(material, dependencyDigests).pipe(Effect.flatMap((identity) =>
+      decodeKey({
+        kind: "plan-declaration",
+        tier: material.kind,
+        body: identity.body,
+        inputs: normalizeInputs(identity.inputs),
+        layers: sortStrings(identity.layers),
+        capabilities: normalizeCapabilities(identity.capabilities)
+      })
+    ))
+
+/** Resolves plan references once for both content and non-cacheable declarations. */
+const materialIdentity = (
+  material: KeyMaterial.KeyMaterial,
+  dependencyDigests: Readonly<Record<string, string>>
+): Effect.Effect<ContentIdentity, KeyMaterialError> => {
   const inputs: Record<string, unknown> = {}
   for (let index = 0; index < material.inputs.length; index++) {
     const input = material.inputs[index]!
@@ -474,7 +548,7 @@ export const fromKeyMaterial = (
       ? digestInput(digest, { reference: "ref-projected", path: input.path })
       : digestInput(digest, { reference: "ref" })
   }
-  return content({
+  return Effect.succeed({
     body: materialBody(material),
     inputs,
     layers: material.layers,
@@ -483,8 +557,8 @@ export const fromKeyMaterial = (
 }
 
 /**
- * The node's own declaration, hashed. Shared by {@link fromKeyMaterial} and
- * {@link dispatchIdentity} so the two derivations can never drift about what
+ * The node's own declaration, hashed. Shared by {@link planIdentity},
+ * {@link fromKeyMaterial}, and {@link dispatchIdentity} so derivations cannot drift about what
  * "the node itself" means.
  *
  * @private
@@ -581,10 +655,7 @@ export const dispatchIdentity = (options: {
         message: `Cannot create a dispatch key for ${material.kind} material`
       })
     }
-    if (options.environment !== undefined) {
-      const invalid = validateEnvironment(options.environment)
-      if (invalid !== undefined) return yield* invalid
-    }
+    const environment = options.environment === undefined ? undefined : yield* decodeEnvironment(options.environment)
     const inputs: Record<string, unknown> = {}
     for (let index = 0; index < material.inputs.length; index++) {
       const input = material.inputs[index]!
@@ -622,7 +693,7 @@ export const dispatchIdentity = (options: {
       inputs,
       layers: material.layers,
       capabilities: { declared: material.capabilities },
-      environment: options.environment,
+      environment,
       hermetic: options.hermetic
     })
   })

@@ -78,6 +78,12 @@ export * as Planned from "./Planned.ts"
 export * as StepKey from "./StepKey.ts"
 
 /**
+ * @since 1.0.0
+ * @category constructors
+ */
+export * as Scheduling from "./Scheduling.ts"
+
+/**
  * @since 0.1.0
  * @category migrations
  * @slop

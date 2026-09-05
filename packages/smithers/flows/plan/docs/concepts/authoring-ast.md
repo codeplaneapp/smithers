@@ -62,7 +62,7 @@ const Publish = Action.make("docs/Publish", {
   success: Schema.String
 })
 
-const article = Node.andThen(
+const article = Node.bindPlanned(
   Draft.call({ topic: "durable plans" }),
   (text: Planned.Planned<string>) =>
     Node.branch(Node.succeed({ urgent: true }), {

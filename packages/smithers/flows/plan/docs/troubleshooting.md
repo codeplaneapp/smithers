@@ -111,7 +111,7 @@ Failed, not thrown: `compile` and `append` return an Effect.
 Plan cycle through node run-tests
 ```
 
-or a reader-after-writer edge would close one:
+or a reader-after-writer edge contradicts an inferred ordering:
 
 ```text
 Plan cycle: node lint reads dist/bundle.js, which node bundle produces, so lint must
@@ -119,12 +119,13 @@ follow bundle, but bundle already depends on lint through bundle -> report -> li
 ```
 
 **What to change.** For the first, break the dependency loop in the declarations.
-For the second, the message names the whole contradiction: a node reads a path
-another node produces, so it must follow that producer, but the producer already
-depends on it. Either the reader should not read that path, or the producer
-should not depend on the reader. Splitting the producer into the part the reader
-needs and the part that needs the reader resolves it without dropping either
-declaration.
+For the second, inspect the inferred producer and `serialize` edges. If the
+reader needs the new output, put the producer first or separate unrelated
+overlapping writes. If it intentionally reads the earlier version, express that
+sequence with a `Ref` or `Pending` dependency path from the writer to the reader.
+Explicit read-before-write sequencing is valid; declaration order alone is not
+an explicit version choice. Two unordered nodes that each need the other's new
+output still form a cycle and must be split into stages.
 
 ### unknown_dependency
 
@@ -205,8 +206,9 @@ is compared. A plan that large is also a plan no operator can review.
 asked for a key on material whose `kind` is `compensable` or `irreversible`.
 
 **What to change.** Only `sealed` work gets a cross-run content key. Use
-`StepKey.ordinal` for the other tiers: it mints a run-local key, which is the
-correct answer for work that changed the world outside the workspace.
+`StepKey.planIdentity` when compiling any tier's declaration, and
+`StepKey.ordinal` when dispatching the other tiers: it mints a run-local key.
+Do not change an action to `sealed` merely to make it plannable.
 
 ### missing_dependency
 

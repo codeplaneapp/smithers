@@ -26,6 +26,21 @@ const probe = (args: ReadonlyArray<string>): Record<string, string> =>
   >
 
 describe("package exports", () => {
+  it("exposes the scheduling policy through its explicit subpath under ESM and CommonJS", () => {
+    const evaluate = `const policy = scheduling.make({ steps: 1 });
+      const result = policy.admit([
+        { node: { id: "low", kind: "step", priority: 0 }, order: 0, waited: 0 },
+        { node: { id: "high", kind: "step", priority: 1 }, order: 1, waited: 0 }
+      ], { steps: 0, agents: 0 });
+      console.log(JSON.stringify({ admitted: result.admitted[0].node.id }));`
+    expect(
+      probe(["--input-type=module", "--eval", `import * as scheduling from "@smthrs/plan/Scheduling"; ${evaluate}`])
+    )
+      .toEqual({ admitted: "high" })
+    expect(probe(["--eval", `const scheduling = require("@smthrs/plan/Scheduling"); ${evaluate}`]))
+      .toEqual({ admitted: "high" })
+  })
+
   it("ships the migration steps beneath internal, where the export map blocks them", () => {
     expect(existsSync(join(packageRoot, "src", "migrations"))).toBe(false)
     for (const step of steps) {
@@ -71,15 +86,12 @@ describe("package exports", () => {
         `
       ])
 
-      const expected = (notFound: string, migrations: string): Record<string, string> => ({
-        ...Object.fromEntries(steps.flatMap((step) => [
-          [`@smthrs/plan/internal/migrations/${step}`, "ERR_PACKAGE_PATH_NOT_EXPORTED"],
-          [`@smthrs/plan/migrations/${step}`, notFound]
-        ])),
+      const expected = (migrations: string): Record<string, string> => ({
+        ...Object.fromEntries(rawSpecifiers.map((specifier) => [specifier, "ERR_PACKAGE_PATH_NOT_EXPORTED"])),
         "@smthrs/plan/Migrations": migrations
       })
-      expect(esm).toEqual(expected("ERR_MODULE_NOT_FOUND", steps.join(",")))
-      expect(cjs).toEqual(expected("MODULE_NOT_FOUND", join(packageRoot, "src", "Migrations.ts")))
+      expect(esm).toEqual(expected(steps.join(",")))
+      expect(cjs).toEqual(expected(join(packageRoot, "src", "Migrations.ts")))
     },
     // Two cold Node processes, one of which loads Effect. A few seconds on an
     // idle machine and far more under the parallel-workspace load the package

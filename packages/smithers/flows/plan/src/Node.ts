@@ -299,47 +299,72 @@ export const map: {
 )
 
 /**
- * Sequences a builder, or a node, after this one.
+ * Starts the entire next subtree only after this node succeeds, without
+ * consuming its result. Failure or interruption prevents that subtree from
+ * starting, including actions nested inside combinations or inline flows.
  *
- * A node may be supplied directly when the first result is not needed. A
- * builder is evaluated once, against a placeholder, when the graph is built —
- * so the downstream topology and the references it consumes are known before
- * execution.
+ * Use {@link bindPlanned} to build a dependency from a symbolic result, or
+ * {@link map} to compute on the eventual value.
  *
  * @since 0.1.0
  * @category sequencing
  * @slop
  */
 export const andThen: {
-  <A, B, E2, R2>(
-    f: (a: Planned.Planned<A>) => Node<B, E2, R2>
-  ): <E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
   <B, E2, R2>(next: Node<B, E2, R2>): <A, E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
-  <A, E, R, B, E2, R2>(
-    self: Node<A, E, R>,
-    f: (a: Planned.Planned<A>) => Node<B, E2, R2>
-  ): Node<B, E | E2, R | R2>
   <A, E, R, B, E2, R2>(self: Node<A, E, R>, next: Node<B, E2, R2>): Node<B, E | E2, R | R2>
 } = dual(
   2,
   <A, E, R, B, E2, R2>(
     self: Node<A, E, R>,
-    next: Node<B, E2, R2> | ((a: Planned.Planned<A>) => Node<B, E2, R2>)
+    next: Node<B, E2, R2>
   ): Node<B, E | E2, R | R2> => {
-    if (typeof next !== "function" && !isNode(next)) {
+    if (!isNode(next)) {
       throw new GraphBuildError({
         code: "invalid_continuation",
         node: "andThen/next",
         path: [],
-        message: "Node.andThen expected its direct continuation to be a Node"
+        message:
+          "Node.andThen expects a Node; use Node.bindPlanned for a symbolic builder or Node.map for value computation"
       })
     }
-    return internal.makeNode<B, E | E2, R | R2>(
-      typeof next === "function"
-        ? internal.andThen(self.ast, (value) => next(value as Planned.Planned<A>), next)
-        : internal.andThenNode(self.ast, next.ast)
-    )
+    return internal.makeNode<B, E | E2, R | R2>(internal.andThenNode(self.ast, next.ast))
   }
+)
+
+/**
+ * Builds a dependency using a symbolic reference to this node's future result.
+ *
+ * The builder runs during planning. Its argument is a {@link module:Planned.Planned}
+ * reference, not the value the node will eventually produce. Pass references
+ * into action payloads; use {@link branch} for decisions and {@link map} for
+ * computation on real results. JavaScript truthiness and reference equality
+ * cannot inspect a planned result. Enable type-aware ESLint's
+ * `@typescript-eslint/strict-boolean-expressions` to reject planned conditions.
+ * Independent descendants of the built subtree can start while this producer
+ * is running; consumers of its reference wait for its value. Use
+ * {@link andThen} when the whole next subtree must wait for success.
+ *
+ * @since 1.0.0
+ * @category sequencing
+ */
+export const bindPlanned: {
+  <A, B, E2, R2>(
+    build: (reference: Planned.Planned<A>) => Node<B, E2, R2>
+  ): <E, R>(self: Node<A, E, R>) => Node<B, E | E2, R | R2>
+  <A, E, R, B, E2, R2>(
+    self: Node<A, E, R>,
+    build: (reference: Planned.Planned<A>) => Node<B, E2, R2>
+  ): Node<B, E | E2, R | R2>
+} = dual(
+  2,
+  <A, E, R, B, E2, R2>(
+    self: Node<A, E, R>,
+    build: (reference: Planned.Planned<A>) => Node<B, E2, R2>
+  ): Node<B, E | E2, R | R2> =>
+    internal.makeNode<B, E | E2, R | R2>(
+      internal.andThen(self.ast, (value) => build(value as Planned.Planned<A>), build)
+    )
 )
 
 /**
@@ -645,12 +670,30 @@ export const catchFilter = (ast: Ast): Schema.Top | undefined => ast._tag === "C
 export const functionIdentity = (operation: unknown): FunctionIdentity => internal.functionIdentity(operation)
 
 /**
- * Declares the inert values a plan-time function closes over.
+ * Declares every semantic value a callback closes over, making its existing
+ * source-and-captures identity reproducible across processes.
  *
  * The capture record is canonicalized into function identity and deeply frozen
  * immediately. Unsupported values, accessors, exotic prototypes, symbols,
  * cycles, and member nesting beyond 256 levels are refused instead of
  * producing an identity that cannot describe the function's behavior.
+ * Validate application input with its schema before capturing it. This is an
+ * author declaration: JavaScript cannot verify closure completeness. Include
+ * the version of imported helpers or other implementation behavior that is not
+ * present in the callback source. Empty captures are appropriate only when no
+ * semantic state exists outside that source. Capturing a snapshot while the
+ * callback reads a different mutable object does not make the callback stable.
+ *
+ * For example, close over the exact frozen record being declared:
+ *
+ * ```ts
+ * const config = { increment: 2, implementationVersion: "counter/v1" }
+ * const increment = Node.capture(config, (value: number) => value + config.increment)
+ * ```
+ *
+ * The existing `sha256-source-captures/v4` format is unchanged. Changing source,
+ * captures, or an explicitly captured version changes identity; it requires a
+ * newly planned run rather than silently re-keying an existing execution.
  *
  * @since 0.1.0
  * @category constructors

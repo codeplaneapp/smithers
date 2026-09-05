@@ -634,36 +634,32 @@ describe("Plan.compile reader-after-writer edges", () => {
       expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual(["middle"])
     }))
 
-  it.effect("refuses a writer that depends on the reader of its own output", () =>
+  it.effect("preserves an explicit read-before-write dependency", () =>
     Effect.gen(function*() {
-      // The declared edge orders the writer AFTER the reader, and the reader
-      // has to follow its producer. Dropping either edge would let the reader
-      // measure pre-writer bytes and cache that execution as legitimate, so
-      // the contradiction is refused rather than resolved silently.
-      const error = yield* withCryptoFailure(compile([
+      const plan = yield* withCrypto(compile([
         draft("reader", { reads: ["out"] }),
         draft("writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "reader", path: [] }] })
       ]))
-      expect(error).toBeInstanceOf(Plan.PlanError)
-      expect(error).toMatchObject({
-        code: "cycle",
-        message: "Plan cycle: node reader reads out, which node writer produces, so reader must follow writer, " +
-          "but writer already depends on reader through writer -> reader"
-      })
+      expect(plan.nodes.map((node) => [node.id, node.dependsOn])).toEqual([
+        ["reader", []],
+        ["writer", ["reader"]]
+      ])
+      yield* withCrypto(Plan.verify(plan))
     }))
 
-  it.effect("refuses the contradiction through a transitive dependency path", () =>
+  it.effect("preserves a transitive Pending read-before-write sequence", () =>
     Effect.gen(function*() {
-      const error = yield* withCryptoFailure(compile([
+      const plan = yield* withCrypto(compile([
         draft("reader", { reads: ["out"] }),
-        draft("middle", { inputs: [{ _tag: "Ref", from: "reader", path: [] }] }),
-        draft("writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "middle", path: [] }] })
+        draft("middle", { inputs: [{ _tag: "Pending", from: "reader" }] }),
+        draft("writer", { writes: ["out"], inputs: [{ _tag: "Pending", from: "middle" }] })
       ]))
-      expect(error).toMatchObject({
-        code: "cycle",
-        message: "Plan cycle: node reader reads out, which node writer produces, so reader must follow writer, " +
-          "but writer already depends on reader through writer -> middle -> reader"
-      })
+      expect(plan.nodes.map((node) => [node.id, node.dependsOn])).toEqual([
+        ["reader", []],
+        ["middle", ["reader"]],
+        ["writer", ["middle"]]
+      ])
+      expect(acyclic(plan)).toBe(true)
     }))
 
   it.effect("refuses two nodes that each read what the other writes", () =>
@@ -681,10 +677,10 @@ describe("Plan.compile reader-after-writer edges", () => {
       })
     }))
 
-  it.effect("names every overlapping read, including a glob, in the refusal", () =>
+  it.effect("preserves explicit ordering for overlapping exact and glob reads", () =>
     Effect.gen(function*() {
       const reader = draft("reader")
-      const error = yield* withCryptoFailure(compile([
+      const plan = yield* withCrypto(compile([
         {
           ...reader,
           effects: { ...reader.effects, reads: ["out/a.txt", { _tag: "Glob", include: ["out/**"] }] }
@@ -694,11 +690,23 @@ describe("Plan.compile reader-after-writer edges", () => {
           inputs: [{ _tag: "Ref", from: "reader", path: [] }]
         })
       ]))
-      expect(error).toMatchObject({
-        code: "cycle",
-        message: "Plan cycle: node reader reads out/a.txt, out/**, which node writer produces, " +
-          "so reader must follow writer, but writer already depends on reader through writer -> reader"
-      })
+      expect(plan.nodes.find((node) => node.id === "reader")!.dependsOn).toEqual([])
+      expect(plan.nodes.find((node) => node.id === "writer")!.dependsOn).toEqual(["reader"])
+    }))
+
+  it.effect("reads the intervening version in an explicitly ordered write-read-write chain", () =>
+    Effect.gen(function*() {
+      const plan = yield* withCrypto(compile([
+        draft("last", { writes: ["out"], inputs: [{ _tag: "Pending", from: "reader" }] }),
+        draft("reader", { reads: ["out"], inputs: [{ _tag: "Pending", from: "first" }] }),
+        draft("first", { writes: ["out"] })
+      ]))
+      expect(plan.nodes.map((node) => [node.id, node.dependsOn])).toEqual([
+        ["first", []],
+        ["reader", ["first"]],
+        ["last", ["reader"]]
+      ])
+      yield* withCrypto(Plan.verify(plan))
     }))
 
   it.effect("refuses a serialize edge that points against a read, and accepts the other declaration order", () =>
@@ -793,14 +801,29 @@ describe("Plan.append", () => {
   it.effect("accepts a new writer that depends on a frozen reader of its output", () =>
     Effect.gen(function*() {
       // The recorded reader already ran and its key covers the bytes it
-      // measured, so a producer elaborated after it is growth, not the
-      // contradiction `compile` refuses within one generation.
+      // measured. A producer elaborated after it preserves that explicit
+      // sequence, just as compilation within one generation does.
       const base = yield* withCrypto(compile([draft("recorded-reader", { reads: ["out"] })]))
       const grown = yield* withCrypto(Plan.append(base, [
         draft("late-writer", { writes: ["out"], inputs: [{ _tag: "Ref", from: "recorded-reader", path: [] }] })
       ]))
       expect(grown.nodes[0]).toEqual(base.nodes[0])
       expect(grown.nodes[1]!.dependsOn).toEqual(["recorded-reader"])
+    }))
+
+  it.effect("preserves explicit version ordering inside an appended generation and verifies its history", () =>
+    Effect.gen(function*() {
+      const base = yield* withCrypto(compile([draft("initial", { writes: ["out"] })]))
+      const grown = yield* withCrypto(Plan.append(base, [
+        draft("reader", { reads: ["out"], inputs: [{ _tag: "Pending", from: "initial" }] }),
+        draft("writer", { writes: ["out"], inputs: [{ _tag: "Pending", from: "reader" }] })
+      ]))
+      expect(grown.nodes[0]).toBe(base.nodes[0])
+      expect(grown.nodes.slice(1).map((node) => [node.id, node.dependsOn])).toEqual([
+        ["reader", ["initial"]],
+        ["writer", ["reader"]]
+      ])
+      expect(yield* withCrypto(Plan.verify(JSON.parse(JSON.stringify(grown))))).toEqual(grown)
     }))
 
   it.effect("grows the plan without rewriting a single recorded node", () =>

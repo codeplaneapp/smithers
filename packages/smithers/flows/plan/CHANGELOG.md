@@ -1,5 +1,31 @@
 # @smthrs/plan
 
+## [Unreleased]
+
+### Added
+
+- `Scheduling.make` exposes the pure ready-work priority, aging and capacity
+  policy used by the durable plan scheduler. Its exact integer comparison does
+  not round away priority differences after aging. Conditional readiness and
+  effect execution remain the coordinator's responsibilities.
+
+### Fixed
+
+- `StepKey.EnvironmentIdentity` now also supplies the runtime schema. Identity
+  constructors reject malformed/unknown environment fields with typed errors.
+  `StepKey.environmentIdentity` fingerprints a runtime environment for durable
+  recovery binding, using content-key normalization in a separate namespace.
+  Existing valid content and dispatch keys are unchanged.
+
+- Explicit `Ref`/`Pending` read-before-write sequences compile and verify,
+  including transitive paths and appended generations. Conflicting inferred
+  producer/serialize orders still fail with `cycle`.
+
+- `Plan.compile`, `append`, and `verify` accept compensable and irreversible
+  declarations. New `StepKey.planIdentity` separates their approval fingerprints
+  from cache eligibility. Existing sealed keys are unchanged;
+  `fromKeyMaterial` and `dispatchIdentity` remain sealed-only.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Added
