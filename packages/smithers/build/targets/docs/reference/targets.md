@@ -157,9 +157,9 @@ output has been produced.
 Declare tool dependencies for commands computed dynamically or launched later
 in shell text. Executable installations must stay stable while a run is in
 progress; the executor rejects observed changes between planning, cache
-lookup, and result storage. See the build CLI's
-[executable identity contract](/docs/build-cli/concepts/caching/#executable-identity)
-for the Go, Rust, Node module, and within-run guarantees.
+lookup, and result storage. The build CLI cache keys on executable
+content, with Go, Rust, Node module, and within-run guarantees described
+in its caching concept doc.
 
 ### `Smithers.Docker`
 
