@@ -1,7 +1,7 @@
 # @smthrs/core
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://core.smithers.sh
@@ -12,7 +12,7 @@ Pure plan-time data model for flows. It defines inert Flow and Node declarations
 npm install @smthrs/core
 ```
 
-The full documentation is at [core.smithers.sh](https://core.smithers.sh): a [quickstart](https://core.smithers.sh/quickstart/) that plans a graph end to end, concept pages on [plan time](https://core.smithers.sh/concepts/plan-time/), [identity](https://core.smithers.sh/concepts/identity/), [effect envelopes](https://core.smithers.sh/concepts/effects/), and [build limits](https://core.smithers.sh/concepts/limits/), task guides, [troubleshooting](https://core.smithers.sh/troubleshooting/), and the complete [API reference](https://core.smithers.sh/reference/api/).
+The full API reference lives at [core.smithers.sh/reference/api](https://core.smithers.sh/reference/api/).
 
 ## Public API
 

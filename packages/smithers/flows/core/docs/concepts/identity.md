@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-`Graph.keyMaterial` is the projection [`@smthrs/keys`](/api/keys) compiles into
+`Graph.keyMaterial` is the projection [`@smthrs/plan`](/api/plan) compiles into
 step keys. Two declarations that produce equal key material are the same step,
 so a resumed run replays one instead of repeating it, and two runs share the
 cached result. What enters that projection is this package's most consequential

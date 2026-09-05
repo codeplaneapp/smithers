@@ -778,7 +778,7 @@ const keyMaterial: (graph: Graph) => Result.Result<ReadonlyArray<KeyMaterial.Ent
 
 Returns node-associated, digest-free key material in topological dependency
 order, or fails with the first fatal diagnostic the graph carries, unchanged.
-The graph-local node id is outside the material `@smthrs/keys` hashes.
+The graph-local node id is outside the material `@smthrs/plan` hashes.
 
 ### Graph limits
 
@@ -973,7 +973,7 @@ interface LaneOptions {
 
 ## KeyMaterial
 
-The digest-free input to [`@smthrs/keys`](https://keys.smithers.sh/reference/api/). Types only; this module
+The digest-free input to [`@smthrs/plan`](https://plan.smithers.sh/reference/api/). Types only; this module
 exports no runtime values.
 
 ### KeyMaterial.KeyMaterial

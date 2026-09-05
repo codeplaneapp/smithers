@@ -67,7 +67,7 @@ of the contract:
 material. It does not execute anything. A host that runs what the plan
 describes adds the packages above it:
 
-- [`@smthrs/keys`](/api/keys) compiles key material into step keys, performing
+- [`@smthrs/plan`](/api/plan) compiles key material into step keys, performing
   the dependency-digest substitution this package deliberately leaves undone.
 - [`@smthrs/registry`](/api/registry) resolves the flow names a declaration
   carries, and owns the markdown and Agent Skills rules that need the file

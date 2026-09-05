@@ -6,7 +6,7 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/core/docs/concepts/identity.md"
 ---
 
-`Graph.keyMaterial` is the projection [`@smthrs/keys`](https://keys.smithers.sh/reference/api/) compiles into
+`Graph.keyMaterial` is the projection [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) compiles into
 step keys. Two declarations that produce equal key material are the same step,
 so a resumed run replays one instead of repeating it, and two runs share the
 cached result. What enters that projection is this package's most consequential

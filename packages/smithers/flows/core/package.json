@@ -35,9 +35,19 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Annotations": "./src/Annotations.ts",
+    "./Digest": "./src/Digest.ts",
+    "./Effects": "./src/Effects.ts",
+    "./Flow": "./src/Flow.ts",
+    "./Graph": "./src/Graph.ts",
+    "./KeyMaterial": "./src/KeyMaterial.ts",
+    "./Markdown": "./src/Markdown.ts",
+    "./Node": "./src/Node.ts",
+    "./Placement": "./src/Placement.ts",
+    "./TestRuntime": "./src/TestRuntime.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +71,63 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Annotations": {
+        "types": "./dist/esm/Annotations.d.ts",
+        "import": "./dist/esm/Annotations.js",
+        "require": "./dist/cjs/Annotations.js"
+      },
+      "./Digest": {
+        "types": "./dist/esm/Digest.d.ts",
+        "import": "./dist/esm/Digest.js",
+        "require": "./dist/cjs/Digest.js"
+      },
+      "./Effects": {
+        "types": "./dist/esm/Effects.d.ts",
+        "import": "./dist/esm/Effects.js",
+        "require": "./dist/cjs/Effects.js"
+      },
+      "./Flow": {
+        "types": "./dist/esm/Flow.d.ts",
+        "import": "./dist/esm/Flow.js",
+        "require": "./dist/cjs/Flow.js"
+      },
+      "./Graph": {
+        "types": "./dist/esm/Graph.d.ts",
+        "import": "./dist/esm/Graph.js",
+        "require": "./dist/cjs/Graph.js"
+      },
+      "./KeyMaterial": {
+        "types": "./dist/esm/KeyMaterial.d.ts",
+        "import": "./dist/esm/KeyMaterial.js",
+        "require": "./dist/cjs/KeyMaterial.js"
+      },
+      "./Markdown": {
+        "types": "./dist/esm/Markdown.d.ts",
+        "import": "./dist/esm/Markdown.js",
+        "require": "./dist/cjs/Markdown.js"
+      },
+      "./Node": {
+        "types": "./dist/esm/Node.d.ts",
+        "import": "./dist/esm/Node.js",
+        "require": "./dist/cjs/Node.js"
+      },
+      "./Placement": {
+        "types": "./dist/esm/Placement.d.ts",
+        "import": "./dist/esm/Placement.js",
+        "require": "./dist/cjs/Placement.js"
+      },
+      "./TestRuntime": {
+        "types": "./dist/esm/TestRuntime.d.ts",
+        "import": "./dist/esm/TestRuntime.js",
+        "require": "./dist/cjs/TestRuntime.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -84,27 +144,27 @@
     "@smthrs/crypto": "1.0.0-rc.0",
     "yaml": "2.9.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

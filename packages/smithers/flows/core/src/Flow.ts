@@ -424,7 +424,7 @@ export const make = <
       prompt: config.prompt
     }
   }
-  return makeFlow({
+  return makeFlow<Input, Output, E>({
     name: config.name,
     description: config.description,
     input,
