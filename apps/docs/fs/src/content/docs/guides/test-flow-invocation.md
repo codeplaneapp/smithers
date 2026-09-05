@@ -7,9 +7,8 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/age
 ---
 
 Both projections dispatch through the `FlowInvoker` seam, so tests replace it
-and never run a real flow. This guide covers the three patterns the package's
-own suite uses: recording invocations, failing closed, and asserting on
-sanitized errors.
+and never run a real flow. This guide covers three patterns: recording
+invocations, failing closed, and asserting on sanitized errors.
 
 ## Record invocations with a stub
 
@@ -79,9 +78,8 @@ Two properties are worth asserting in your own surfaces:
    ```
 
 2. **Errors never echo caller data.** `FsError` values retain no raw
-   arguments, input values, output values, or implementation causes. The
-   package's suite asserts the serialized error does not contain the
-   offending value:
+   arguments, input values, output values, or implementation causes. Assert
+   that the serialized error does not contain the offending value:
 
    ```ts
    import { Cause, Option } from "effect"

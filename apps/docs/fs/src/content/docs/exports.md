@@ -4,8 +4,8 @@ description: "The public surface of @smthrs/fs as one index: 8 namespaces and 44
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/fs/docs/exports.md"
 ---
 
-8 namespaces and 44 documented members. An export without an `@category` tag
-in the source JSDoc is not part of the public contract. For signatures,
+The surface of `@smthrs/fs` is 8 namespaces and 44 documented members. Anything
+the package exports that this index does not name is internal. For signatures,
 behavior, and errors, see the [API reference](/reference/api/).
 
 ## `Command`

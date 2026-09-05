@@ -105,7 +105,7 @@ shell syntax is never evaluated, so quote the way the
 ### `unsupported_body`
 
 A non-module route was sent to `Route.load`. Markdown and skill routes are
-registry inputs, not executable commands in this adapter. Filter with
+registry inputs rather than executable commands. Filter with
 `Route.isCommandRoute` before loading, or take routes from a command surface,
 which applies the filter for you.
 

@@ -11,11 +11,20 @@ shell or an HTTP client.
 
 ## Prerequisites
 
-- A checkout of the Smithers workspace. `@smthrs/fs` is private and never
-  publishes, so there is nothing to install from a registry.
-- Node.js 22.19.0 or later.
-- The runtime dependencies: `@smthrs/fs`, `@smthrs/core`, `effect`, and
-  `@effect/platform-node`.
+- Node.js 22.19.0 or later, and pnpm.
+- `@smthrs/fs`, `@smthrs/core`, `effect`, and `@effect/platform-node` resolvable
+  from your program.
+
+`@smthrs/fs` is not published to npm, so you install it from a checkout:
+
+```bash
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
+```
+
+Write this walkthrough's program inside that checkout, in a package that depends
+on `@smthrs/fs`, so the imports below resolve.
 
 ## Create a flow
 

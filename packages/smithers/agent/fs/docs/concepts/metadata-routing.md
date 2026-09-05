@@ -63,8 +63,8 @@ Every discovered entry becomes a route, but not every route is executable:
 `Route.isCommandRoute` is the single guard both execution surfaces apply:
 kind `module` with `modelInvocable` true. `Command.make` and
 `Incur.createCli` filter to those routes; `Route.load` refuses every other
-body kind with `unsupported_body`, because Markdown and skill execution is
-not implemented in this adapter. Markdown and skill routes still appear in
+body kind with `unsupported_body`, because `@smthrs/fs` executes module bodies
+only. Markdown and skill routes still appear in
 scan results, so tooling can inspect the whole tree even though it cannot
 run every member of it.
 

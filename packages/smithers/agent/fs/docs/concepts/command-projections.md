@@ -21,7 +21,7 @@ projections hand it a materialized invocation: the resolved route name, the
 loaded flow, and the schema-decoded input, frozen. The invoker's answer is
 then encoded through the flow's output schema before it crosses back.
 
-This keeps the adapter's responsibilities narrow: resolve, load, decode,
+This keeps the package's responsibilities narrow: resolve, load, decode,
 invoke, encode. Everything about how a run actually happens stays behind the
 seam, which is also what makes the surfaces testable without a runtime. For
 the testing patterns, see [Test flow invocation](../guides/test-flow-invocation.md).

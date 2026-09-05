@@ -1,49 +1,87 @@
 ---
 title: "@smthrs/fs"
-description: "Private metadata routing and schema-checked command projections for Smithers flows."
+description: "Turn a directory of Smithers flows into named, schema-checked commands for agents, shells, HTTP clients, and MCP tools."
 ---
 
-`@smthrs/fs` connects registry discovery to the surfaces that run Smithers
-flows. It scans a flows tree without importing any flow module, freezes the
-discovered metadata into path-named routes, and projects the executable
-subset onto agent, CLI, HTTP, and MCP surfaces where the flow's own Effect
-schema checks every input and output.
+A flow is one unit of Smithers work: an input schema, an output schema, and a
+body, declared with `Flow.make` from [@smthrs/core](/pkg/core). `@smthrs/fs`
+turns a directory of those flows into a set of named commands.
 
-This package is private at 1.0.0-rc.0 and has no supported external consumer.
-Do not install it from a registry. It remains in the workspace as an internal
-adapter while the registry and command surfaces settle.
+It reads the tree without importing a single flow module, records what it finds
+as immutable routes named after their directory paths, and projects the runnable
+ones onto four surfaces: a command surface an agent drives, a CLI, HTTP, and
+MCP. Each flow's own Effect schema decodes every input and encodes every output.
 
-## What it does
+## What it solves
+
+Offering a directory of flows to a model, a shell, or an HTTP client usually
+forces a bad trade. Import every flow to learn its name and its schema, and
+listing the commands runs arbitrary user code and pays for every dependency in
+the tree. Skip the import, and you advertise hand-written descriptions that
+drift away from what each flow actually accepts.
+
+This package refuses the trade. Discovery reads metadata only, so a flow whose
+module throws at import time still appears in the listing. Dispatch imports one
+module, the one being called, and decodes the arguments through that flow's real
+Effect schema. `--help`, `--schema`, the OpenAPI document, and the MCP tool list
+publish that same schema, so the advertised input is the accepted input.
 
 Two halves share one immutable route model:
 
 - **Metadata routing.** `FileRouter.scan` reads [registry](/api/registry)
-  metadata without importing flow modules and returns module, Markdown, and
-  skill routes for inspection. `Route` validates and freezes that metadata,
-  `CommandTree` indexes routes for lookup, and `Directive` compiles placement
-  literals into [core](/api/core) placement values.
+  metadata and returns module, Markdown, and skill routes for inspection.
+  `Route` validates and freezes that metadata, `CommandTree` indexes routes for
+  lookup, and `Directive` compiles placement literals into [core](/api/core)
+  placement values.
 - **Command projections.** `Command.make` exposes the model-invocable module
   routes to an agent as list, parse, execute, and typed call operations.
   `Incur.createCli` serves the same routes as a CLI and as HTTP, OpenAPI, and
-  MCP surfaces. Neither projection executes a flow: both dispatch through the
+  MCP surfaces, built on the [`incur`](https://github.com/wevm/incur) CLI
+  library. Neither projection runs a flow: both dispatch through the
   injected `FlowInvoker` seam, and every failure arrives as a sanitized
   `FsError`.
 
-A selected module loads only when invoked. Its real Effect input schema
-decodes the request, and its output schema encodes the result.
+## How it relates to @smthrs/agent
 
-## Install
+`@smthrs/fs` is one package in the Smithers agent group, next to
+[@smthrs/agent](/api/agent), and the two own opposite ends of the same
+contract. The agent owns the loop: it runs the model's program in a sandbox
+whose only authority is calling a flow by name. This package owns the other end
+of that name, answering which flows exist on disk, what each one accepts, and
+how a command string becomes one schema-checked invocation. Neither package
+executes a flow itself. Execution lands behind the `FlowInvoker` seam, which a
+harness fills.
 
-The package never publishes, so there is nothing to install from npm. Inside
-the Smithers workspace, add it as a dependency:
+Both packages sit under the `smthrs` command line, the program most people
+actually run. To plan, approve, run, and inspect flows from a shell, start at
+[@smthrs/cli](/api/cli).
 
-```bash
-pnpm add @smthrs/fs
-```
+## Availability
+
+`@smthrs/fs` is not published to npm. You install it from a checkout of the
+[Smithers repository](https://github.com/smithersai/smithers), and it carries no
+support promise while the registry and the command surfaces settle. See
+[Quickstart](./quickstart.md) for the checkout steps. Read these pages for the
+routing contract and the schema behavior; to run flows from a shell today, use
+[@smthrs/cli](/api/cli).
 
 ## The smallest working example
 
-Scan a flows directory, build the agent command surface, and execute one
+Start with one flow at `flows/review/flow.ts`, whose directory path gives the
+command its name:
+
+```ts
+import { Flow } from "@smthrs/core"
+import { Schema } from "effect"
+
+export default Flow.make({
+  description: "Review a pull request.",
+  input: Schema.Struct({ number: Schema.Number }),
+  output: Schema.Struct({ accepted: Schema.Boolean, number: Schema.Number })
+})
+```
+
+Then scan that directory, build the agent command surface, and execute one
 command through a stub invoker:
 
 ```ts
@@ -72,8 +110,8 @@ Effect.runPromise(program).then(console.log)
 ```
 
 `FileRouter.scan` requires the platform `FileSystem` and `Path` services, and
-`execute` requires a `FlowInvoker`. For the guided version of this program,
-see [Quickstart](./quickstart.md).
+`execute` requires a `FlowInvoker`. For the guided version of this program, see
+[Quickstart](./quickstart.md).
 
 ## Where to go next
 

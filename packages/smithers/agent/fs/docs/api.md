@@ -17,9 +17,9 @@ is reachable through its named subpath, for example `@smthrs/fs/Command`.
 | `Incur`       | Lazy schema-aware CLI and HTTP projection.                                   |
 | `Route`       | Immutable route metadata, generated manifest types, and lazy module loading. |
 
-The source exports map resolves the root and every named module subpath to
-`src/*.ts`. `./internal/*` and nested `*/index` subpaths are null: they do
-not resolve.
+The root and the eight named module subpaths are the whole import surface.
+`./internal/*` and nested `*/index` subpaths are declared null in the package's
+`exports` map, so they do not resolve.
 
 `FileRouter` is discovery. It retains module, Markdown, and skill metadata.
 `Command` and `Incur` are execution surfaces and therefore filter to module
@@ -205,9 +205,9 @@ Configuration for one bounded file-router scan.
 ### `Warning`
 
 A non-fatal diagnostic emitted by registry discovery, aliasing
-`Descriptor.DiscoveryWarning` from [@smthrs/registry](/api/registry). The
-adapter copies each warning's `code`, `path`, `name`, and `message` and drops
-the registry's optional `cause`.
+`Descriptor.DiscoveryWarning` from [@smthrs/registry](/api/registry).
+`@smthrs/fs` copies each warning's `code`, `path`, `name`, and `message` and
+drops the registry's optional `cause`.
 
 ### `ScanResult`
 
@@ -227,8 +227,8 @@ both arrays are frozen.
 
 Scans a flows root without importing or evaluating any flow module. The
 registry owns entry precedence, metadata parsing, directive detection, and
-bounded reads; this adapter projects descriptors into absolute, immutable
-path-derived routes.
+bounded reads; `@smthrs/fs` projects those descriptors into absolute,
+immutable path-derived routes.
 
 The configuration is inspected synchronously, before the first await:
 accessors and exotic containers fail with `invalid_root` without being read,
@@ -529,9 +529,8 @@ True only for routes the agent and Incur command surfaces may execute: kind
 ```
 
 Materializes the flow behind a route. The route is snapshotted first. Only
-module routes can be materialized here; Markdown and skill bodies are
-registry inputs, not executable commands in this private adapter, and fail
-with `unsupported_body`. The module is imported through an escaped absolute
+module routes can be materialized here; Markdown and skill bodies are registry
+inputs rather than executable commands, and fail with `unsupported_body`. The module is imported through an escaped absolute
 file URL, so spaces, Unicode, percent signs, hashes, and query characters in
 the path name the intended file. An import failure, or a module whose default
 export is not a flow, fails with `load_failed`.
