@@ -9,7 +9,7 @@
  * whether a write is retained at all.
  *
  * The annotation takes no part in flow identity, so a policy never changes the
- * graph a flow plans. See `docs/pages/api/memory.md`.
+ * graph a flow plans. See https://memory.smithers.sh/reference/api/.
  *
  * @since 0.1.0
  */

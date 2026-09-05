@@ -11,6 +11,7 @@ describe("public consumer surface", () => {
       write: (effect) => effect
     }
     const store = RecallSemantic.makeSqlVectorStore(database)
-    expect(store).toMatchObject({ upsert: expect.any(Function), list: expect.any(Function) })
+    expect(store).toMatchObject({ upsert: expect.any(Function), scan: expect.any(Function) })
+    expect(Object.keys(store).sort()).toEqual(["scan", "upsert"])
   })
 })

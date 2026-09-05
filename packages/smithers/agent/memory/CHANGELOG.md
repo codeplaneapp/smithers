@@ -21,9 +21,10 @@
 - Added `Bank.parse`, the validating bank-name reader, and the public
   `Database` port `makeSqlVectorStore` accepts, so no public signature names a
   blocked `internal/*` type.
-- Added package-owned documentation: `docs/` plus `docs/Manifest.ts` generate
-  `docs/pages/api/memory.md` and the README export table, drift-checked by
-  `//packages/memory:docsPages`.
+- Added the package's documentation site, https://memory.smithers.sh: an
+  installation page, a quickstart, concept pages for durability, recall, and
+  policies, task guides, a full API reference, an import-surface page, and a
+  troubleshooting page keyed by failure code.
 
 ### Changed
 

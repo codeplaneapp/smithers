@@ -10,11 +10,8 @@ This quickstart writes one fact, recalls it, and then moves the store from an in
 ## Before you begin
 
 - Node.js 22.19.0 or later.
-- The package, from [Installation](./installation.md):
-
-```bash
-pnpm add @smthrs/memory
-```
+- `@smthrs/memory`, resolving in your project. [Installation](./installation.md)
+  covers where to get it today and what step 2 below adds.
 
 ## 1. Write and recall over an in-memory database
 
@@ -64,7 +61,11 @@ The bank name `global-notes` resolves to the namespace `{ kind: "global", id: "n
 
 ## 2. Make the fact survive a restart
 
-The in-memory layer forgets everything when the process exits. Swap it for a SQLite file by replacing the layer, and nothing else:
+The in-memory layer forgets everything when the process exits. Swap it for a SQLite file by replacing the layer, and nothing else. This step imports two packages by name, so declare them in your own dependencies first:
+
+```bash
+pnpm add @smthrs/database @effect/platform-node
+```
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

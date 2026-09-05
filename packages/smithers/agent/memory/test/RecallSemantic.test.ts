@@ -1,5 +1,5 @@
 import { DurableWriter } from "@smthrs/database/DurableWriter"
-import { Cause, Effect } from "effect"
+import { Cause, Effect, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { describe, expect, it } from "vitest"
@@ -40,9 +40,15 @@ const projection = (overrides: Partial<Semantic.Vector>): Semantic.Vector => ({
 })
 
 const vectorStoreOf = (vectors: ReadonlyArray<Semantic.Vector>): Semantic.VectorStore => ({
-  list: (_banks, _model) => Effect.succeed(vectors),
+  scan: () =>
+    Stream.fromIterable(
+      Array.from({ length: Math.ceil(vectors.length / 64) }, (_, index) => vectors.slice(index * 64, index * 64 + 64))
+    ),
   upsert: () => Effect.void
 })
+
+const collectVectors = (store: Semantic.VectorStore, banks: ReadonlyArray<string>, model: string) =>
+  Stream.runCollect(store.scan(banks, model)).pipe(Effect.map((pages) => pages.flat()))
 
 const queryVector = Embedding.make(() => Effect.succeed([[1, 0]]))
 
@@ -100,7 +106,7 @@ describe("RecallSemantic", () => {
       Effect.gen(function*() {
         yield* TestClock.setTime(1_000)
         return yield* Semantic.recall({ banks: ["bank"], query: "q", budget: "low" }, {
-          vectorStore: { list: (_banks, _model) => Effect.succeed(vectors), upsert: () => Effect.void },
+          vectorStore: vectorStoreOf(vectors),
           model: "test",
           halfLifeMs: 1000
         })
@@ -126,11 +132,11 @@ describe("RecallSemantic", () => {
     const rows = await Effect.runPromise(
       Semantic.recall({ banks: ["bank", "flow-bank", "bank"], query: "q" }, {
         vectorStore: {
-          list: (banks) =>
-            Effect.sync(() => {
+          scan: (banks) =>
+            Stream.fromEffect(Effect.sync(() => {
               listedBanks.push(banks)
               return [projection({ bank: "bank", key: "one", recordId: "one", contentDigest: digest("one") })]
-            }),
+            })),
           upsert: () => Effect.void
         },
         halfLifeMs: 1_000
@@ -150,7 +156,7 @@ describe("RecallSemantic", () => {
     const embedding = Embedding.make(() => Effect.succeed([[1]]))
     const projector = Semantic.makeProjector({
       vectorStore: {
-        list: (_banks, _model) => Effect.succeed([]),
+        scan: () => Stream.empty,
         upsert: () => Effect.fail(new (class extends Error {})()) as never
       }
     })
@@ -169,7 +175,7 @@ describe("RecallSemantic", () => {
     const embedding = Embedding.make(() => Effect.succeed([[1]]))
     const projector = Semantic.makeProjector({
       vectorStore: {
-        list: (_banks, _model) => Effect.succeed([]),
+        scan: () => Stream.empty,
         upsert: () =>
           Effect.sync(() => {
             writes += 1
@@ -196,7 +202,7 @@ describe("RecallSemantic", () => {
     const embedding = Embedding.make(() => Effect.interrupt)
     const projector = Semantic.makeProjector({
       vectorStore: {
-        list: (_banks, _model) => Effect.succeed([]),
+        scan: () => Stream.empty,
         upsert: () => Effect.void
       }
     })
@@ -331,7 +337,7 @@ describe("RecallSemantic", () => {
     let rejectProjection = false
     let upsertAttempts = 0
     const vectorStore: Semantic.VectorStore = {
-      list: (_banks, _model) => Effect.succeed(stored === undefined ? [] : [stored]),
+      scan: () => Stream.suspend(() => Stream.succeed(stored === undefined ? [] : [stored])),
       upsert: (vector) => {
         upsertAttempts += 1
         return rejectProjection
@@ -466,7 +472,7 @@ describe("RecallSemantic", () => {
           vector: [1],
           updatedAtMs: 8
         })
-        const before = yield* vectors.list(["flow-one", "agent-fleet", "user-empty"], "test")
+        const before = yield* collectVectors(vectors, ["flow-one", "agent-fleet", "user-empty"], "test")
         yield* vectors.upsert({
           bank: "flow-one",
           key: "runbook",
@@ -478,7 +484,7 @@ describe("RecallSemantic", () => {
           recordKind: "fact",
           recordId: "runbook"
         })
-        const after = yield* vectors.list(["flow-one"], "test")
+        const after = yield* collectVectors(vectors, ["flow-one"], "test")
         return { before, after }
       }).pipe(Effect.provide(TestMemory.layerWithDatabase))
     )
@@ -487,10 +493,10 @@ describe("RecallSemantic", () => {
       ["flow-one", "runbook", "fact", 2],
       ["agent-fleet", "note", "note", 1]
     ])
-    expect(result.before[0]?.vector).toEqual([0.5, -0.25])
+    expect(Array.from(result.before[0]!.vector)).toEqual([0.5, -0.25])
     expect(result.after).toHaveLength(1)
     expect(result.after[0]).toMatchObject({ contentDigest: "c", updatedAtMs: 9 })
-    expect(result.after[0]?.vector).toEqual([1, 0])
+    expect(Array.from(result.after[0]!.vector)).toEqual([1, 0])
   })
 
   it.each(
@@ -576,7 +582,7 @@ describe("RecallSemantic", () => {
             vector: [1],
             updatedAtMs: 0
           })),
-          yield* Effect.flip(vectors.list(["flow-one"], "test"))
+          yield* Effect.flip(collectVectors(vectors, ["flow-one"], "test"))
         ]
       }).pipe(Effect.provide(TestMemory.layerWithDatabase))
     )
@@ -597,7 +603,7 @@ describe("RecallSemantic", () => {
           record_kind, record_id, namespace_kind, namespace_id,
           embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
         ) VALUES ('note', 'bad', 'flow', 'one', 'test', 'digest', 2, ${new Uint8Array(4)}, 0)`
-        return yield* Effect.flip(vectors.list(["flow-one"], "test"))
+        return yield* Effect.flip(collectVectors(vectors, ["flow-one"], "test"))
       }).pipe(Effect.provide(TestMemory.layerWithDatabase))
     )
     expect(failure).toMatchObject({ code: "store", message: expect.stringContaining("invalid dimensions") })
@@ -745,7 +751,7 @@ describe("RecallSemantic", () => {
     const projector = Semantic.makeProjector({
       model: "test-model",
       vectorStore: {
-        list: (_banks, _model) => Effect.succeed([]),
+        scan: () => Stream.empty,
         upsert: (vector) =>
           Effect.sync(() => {
             upserted.push(vector)
@@ -791,7 +797,7 @@ describe("RecallSemantic", () => {
     const projector = Semantic.makeProjector({
       model: "test",
       vectorStore: {
-        list: (_banks, _model) => Effect.succeed([]),
+        scan: () => Stream.empty,
         upsert: (vector) =>
           Effect.sync(() => {
             upserted.push(vector)

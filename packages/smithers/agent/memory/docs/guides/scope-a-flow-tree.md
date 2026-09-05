@@ -27,7 +27,7 @@ The policy is decoded and deeply frozen at this call, so an invalid policy (an e
 
 ## Bind the policy-carrying declaration
 
-A host binds the declaration a cell was given. For delegated work that is the copy `withMemory` produced, not the bare export, so build the handler from that same copy with `Flows.handlersFor`:
+Bind the same declaration the caller will run. For delegated work that is the copy `withMemory` produced, not the bare export, so build the handler from that same copy with `Flows.handlersFor`:
 
 ```ts
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
@@ -57,19 +57,26 @@ Outside a host, `Flows.runRecallFor` and `Flows.runRememberFor` apply a flow's p
 
 ```ts
 import * as Flows from "@smthrs/memory/Flows"
+import { Effect } from "effect"
 
-// banks and maxTokens come from the policy because the caller named none
-const rows = yield* Flows.runRecallFor(scoped, { banks: [], query: "changelog" })
+const scopedCalls = Effect.gen(function*() {
+  // banks and maxTokens come from the policy because the caller named none
+  const rows = yield* Flows.runRecallFor(scoped, { banks: [], query: "changelog" })
 
-// bank resolves to the policy namespace because the caller left it empty
-const written = yield* Flows.runRememberFor(scopedRemember, { bank: "", key: "release", text: "cut 0.1.0" })
+  // bank resolves to the policy namespace because the caller left it empty
+  const written = yield* Flows.runRememberFor(scopedRemember, { bank: "", key: "release", text: "cut 0.1.0" })
+
+  return { rows, written }
+})
 ```
 
 Two policy values are refusals, not defaults: `recall: "none"` answers no rows and never reaches the recall service, and `retain: "never"` answers `{ key }` while nothing reaches the store.
 
 ## Cover generated work with MemoryTrellis
 
-`MemoryTrellis.make` is the delegation case. `Trellis.make` from [`@smthrs/patterns`](/api/patterns) declares the topology a model-authored plan fits inside and fills its leaf slots at run time, so a leaf cannot be handed a namespace at declaration time. `MemoryTrellis.make` applies one policy to the author, to the leaf, and to the memory flows those declare, then annotates the trellis itself:
+`MemoryTrellis.make` is the delegation case. `Trellis.make` from [`@smthrs/patterns`](/api/smithers-patterns) declares the topology a model-authored plan fits inside and fills its leaf slots at run time, so a leaf cannot be handed a namespace at declaration time. `MemoryTrellis.make` applies one policy to the author, to the leaf, and to the memory flows those declare, then annotates the trellis itself.
+
+It takes everything `Trellis.make` takes, plus `memory`. The `envelope` bounds the plan the author is allowed to produce: `fuel` is the total number of leaf calls, `depth` the nesting the plan may reach, and `fanout` the members any one group may hold.
 
 ```ts
 import * as MemoryTrellis from "@smthrs/memory/MemoryTrellis"
@@ -87,7 +94,7 @@ const trellis = MemoryTrellis.make({
 })
 ```
 
-The graph is the plain trellis graph, node for node. When you drive the plan yourself with `Trellis.run` rather than calling the declared flow, take the scoped author and leaf from `MemoryTrellis.parts`; calling the originals instead loses the policy. For the trellis itself, see the [`@smthrs/patterns` delegation guide](/pkg/patterns/delegation).
+The graph is the plain trellis graph, node for node. When you drive the plan yourself with `Trellis.run` rather than calling the declared flow, take the scoped author and leaf from `MemoryTrellis.parts`; calling the originals instead loses the policy. For the trellis itself, see the [`@smthrs/patterns` delegation guide](/pkg/smithers-patterns/delegation).
 
 ## Next steps
 

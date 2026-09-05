@@ -10,7 +10,7 @@
  *
  * An annotation takes no part in flow identity, so the graph a memory trellis
  * plans is the graph the plain trellis plans, node for node. See
- * `docs/pages/api/memory.md`.
+ * https://memory.smithers.sh/reference/api/.
  *
  * @since 0.1.0
  */

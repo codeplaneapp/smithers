@@ -9,7 +9,7 @@ Recall answers one question: given named banks and a query, which memory rows sh
 
 ## The seam
 
-Recall is two things at once: an Effect service (`Recall.Recall`) with one method, and a flow-valued injection slot (`Recall.slot`) a host binds with `Pattern.bind` from [`@smthrs/patterns`](/api/patterns). The `recall` flow declaration and `Flows.runRecall` both delegate to whichever service the context provides, so swapping the binding swaps the behavior of every caller without touching them.
+Recall is two things at once: an Effect service (`Recall.Recall`) with one method, and a flow-valued injection slot (`Recall.slot`) a host binds with `Pattern.bind` from [`@smthrs/patterns`](/api/smithers-patterns). The `recall` flow declaration and `Flows.runRecall` both delegate to whichever service the context provides, so swapping the binding swaps the behavior of every caller without touching them.
 
 Three bindings ship in the box:
 
@@ -22,6 +22,14 @@ Three bindings ship in the box:
 `RecallKeyword` normalizes both query and row text to NFKC before matching. SQLite full text search does not, so the two bindings can disagree on compatibility-equivalent characters. `RecallFts` quotes each query term independently, so user input can never become an FTS5 operator, and it propagates the store's `fts_not_enabled` error when the namespace kind has not opted in.
 
 `RecallSemantic` answers only rows that hold a current vector under the requested model: foreign-model vectors are skipped, a stale projection whose content digest no longer matches the row is skipped, and a stored vector under the requested model with the wrong dimension fails with `vector_model_mismatch`. The authoritative store writes no vectors itself; projection is opt-in through `RecallSemantic.decorateStore`, which adds an after-commit projection to fact and note writes that retries once and logs failures without changing the write result.
+
+Semantic recall searches the entire selected bank's eligible projection, regardless of record age. `budget` limits retained results (3, 8, or 20), not the candidate domain. Recency changes the score; it does not exclude an older match through a recent-row window.
+
+The SQLite adapter scans at most 64 vectors per page, keeps their components in `Float32Array`, and resolves that page's exact `(kind, id)` identities through `MemoryStore.searchRows`. Scoring retains only the best result budget. Exact search remains linear in eligible vector count times dimensions; working memory holds one vector/authoritative-row page plus the retained results. Individual authoritative text sizes still follow the store's value contract.
+
+The scan captures a per-bank projection row count and rowid ceiling when that bank opens, and advances an exclusive `(record_kind, record_id)` cursor. It examines at most that opening count, so even deletion/reinsertion churn cannot extend it indefinitely. Later rowids are excluded, but SQLite may reuse deleted rowids: concurrent replacements can enter the scan and consume its remaining candidate budget, displacing opening rows. Stable banks are searched exactly; concurrent authority is rechecked page by page rather than held in a transaction-wide historical snapshot.
+
+Custom `VectorStore` adapters must now implement a finite `scan(banks, model)` stream of pages, each containing at most 64 vectors and each projection identity at most once. `VectorStore` exposes only `upsert` and `scan`; the former materializing `list` method is removed. A caller that explicitly needs all rows can collect and flatten the scan stream. This is a source-level adapter contract change with no persisted vector format change.
 
 Every binding applies the same filters before ranking: rows pass status, supersession, and tag-group filters from the store's authoritative read, and banks are de-duplicated on the resolved namespace.
 
@@ -37,4 +45,4 @@ A `limit` on `listFacts`, `listNotes`, `listMessages`, `searchRows`, or `searchF
 
 ## Score ties
 
-Every binding breaks score ties the same way: newest update first, then ascending key. The order is deterministic, so a replayed recall over unchanged memory returns the same rows in the same order.
+Bindings break score ties by newest update first, then ascending key. Semantic recall also orders equal keys by bank, independent of the request's bank order. The order is deterministic, so a replayed recall over unchanged memory returns the same rows in the same order.

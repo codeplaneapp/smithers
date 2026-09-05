@@ -5,13 +5,16 @@ sidebar:
   order: 1
 ---
 
-All storage goes through the `MemoryStore` service. Every example assumes the store from the context:
+All storage goes through the `MemoryStore` service. Every example on this page is an Effect that takes the store from the context:
 
 ```ts
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import { Effect } from "effect"
 
-const store = yield* MemoryStore.MemoryStore
+const program = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  // the calls below go here
+})
 ```
 
 Provide it with `MemoryStore.layer` over a SQL client in production, or `@smthrs/memory/test/TestMemory` in tests, as shown in the [Quickstart](../quickstart.md).
@@ -21,13 +24,16 @@ Provide it with `MemoryStore.layer` over a SQL client in production, or `@smthrs
 Call `putFact` with a namespace, a key, a JSON-serializable value, and the provenance you want recorded. Writes are last-write-wins upserts.
 
 ```ts
-yield * store.putFact({
-  namespace: { kind: "flow", id: "release-notes" },
-  key: "release",
-  value: { content: "cut 0.1.0" },
-  tags: ["scope:project"],
-  ttlMs: 86_400_000,
-  provenance: { runId: "run-1" }
+const write = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  yield* store.putFact({
+    namespace: { kind: "flow", id: "release-notes" },
+    key: "release",
+    value: { content: "cut 0.1.0" },
+    tags: ["scope:project"],
+    ttlMs: 86_400_000,
+    provenance: { runId: "run-1" }
+  })
 })
 ```
 
@@ -39,8 +45,12 @@ yield * store.putFact({
 Read facts back with `getFact` for an exact key, or `listFacts` with an optional key `prefix` and `limit`:
 
 ```ts
-const fact = yield * store.getFact({ namespace: { kind: "flow", id: "release-notes" }, key: "release" })
-const sessionFacts = yield * store.listFacts({ namespace: "flow-release-notes", prefix: "session:", limit: 50 })
+const read = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  const fact = yield* store.getFact({ namespace: { kind: "flow", id: "release-notes" }, key: "release" })
+  const sessionFacts = yield* store.listFacts({ namespace: "flow-release-notes", prefix: "session:", limit: 50 })
+  return { fact, sessionFacts }
+})
 ```
 
 `getFact` answers `undefined` for a missing or expired fact. `deleteFact` removes a fact together with its full text and vector projections and answers whether a row existed.
@@ -51,14 +61,17 @@ When the writer is a model, use the `remember` flow's runtime handler instead of
 
 ```ts
 import * as Flows from "@smthrs/memory/Flows"
+import { Effect } from "effect"
 
-const output = yield* Flows.handlers.remember({
-  bank: "global-history",
-  key: "release",
-  text: "cut 0.1.0",
-  tags: ["scope:project"]
+const remembered = Effect.gen(function*() {
+  return yield* Flows.handlers.remember({
+    bank: "global-history",
+    key: "release",
+    text: "cut 0.1.0",
+    tags: ["scope:project"]
+  })
 })
-// output: { key: "release" }
+// { key: "release" }
 ```
 
 `Flows.runRememberWith(provenance)` builds the same handler with run coordinates bound in, so every fact it writes records them. See [Scope a flow tree to a namespace](./scope-a-flow-tree.md) for binding handlers under a policy.
@@ -68,13 +81,16 @@ const output = yield* Flows.handlers.remember({
 Notes are append-only knowledge records. Call `putNote` with a globally unique id, text, tags, and provenance:
 
 ```ts
-const note = yield * store.putNote({
-  namespace: { kind: "agent", id: "reviewer" },
-  id: "finding-41",
-  text: "The changelog job skips pre-release tags.",
-  tags: ["source:eval"],
-  provenance: {},
-  supersedes: ["finding-40"]
+const noted = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  return yield* store.putNote({
+    namespace: { kind: "agent", id: "reviewer" },
+    id: "finding-41",
+    text: "The changelog job skips pre-release tags.",
+    tags: ["source:eval"],
+    provenance: {},
+    supersedes: ["finding-40"]
+  })
 })
 ```
 
@@ -85,19 +101,26 @@ const note = yield * store.putNote({
 Read notes with `listNotes`. An absent `status` filter selects `accepted`; pass `"any"` for everything, or an array of statuses. A note with an accepted superseder is hidden unless you pass `includeSuperseded: true`:
 
 ```ts
-const accepted = yield * store.listNotes({ namespace: "agent-reviewer", prefix: "finding-" })
-const everything = yield * store.listNotes({
-  namespace: "agent-reviewer",
-  status: "any",
-  includeSuperseded: true,
-  tagGroup: { tags: ["source:eval"], match: "any" }
+const findings = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  const accepted = yield* store.listNotes({ namespace: "agent-reviewer", prefix: "finding-" })
+  const everything = yield* store.listNotes({
+    namespace: "agent-reviewer",
+    status: "any",
+    includeSuperseded: true,
+    tagGroup: { tags: ["source:eval"], match: "any" }
+  })
+  return { accepted, everything }
 })
 ```
 
 Add a supersession edge after the fact with `supersede`:
 
 ```ts
-yield * store.supersede({ supersederId: "finding-41", targetId: "finding-40" })
+const corrected = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  yield* store.supersede({ supersederId: "finding-41", targetId: "finding-40" })
+})
 ```
 
 Both notes must exist and share a namespace, and a note cannot supersede itself; violations fail with `supersede_conflict`.
@@ -107,14 +130,16 @@ Both notes must exist and share a namespace, and a note cannot supersede itself;
 Create a thread explicitly when it belongs in a specific namespace, then append messages:
 
 ```ts
-yield * store.createThread({ id: "conversation-7", namespace: "agent-reviewer", title: "PR 41 review" })
-
-yield * store.appendMessage({
-  threadId: "conversation-7",
-  id: "msg-1",
-  role: "user",
-  text: "Review the changelog job.",
-  at: Date.now()
+const conversation = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  yield* store.createThread({ id: "conversation-7", namespace: "agent-reviewer", title: "PR 41 review" })
+  yield* store.appendMessage({
+    threadId: "conversation-7",
+    id: "msg-1",
+    role: "user",
+    text: "Review the changelog job.",
+    at: Date.now()
+  })
 })
 ```
 
@@ -125,11 +150,18 @@ yield * store.appendMessage({
 Read a thread with `listMessages`, paginating with the exclusive `cursor` when you need more than one page:
 
 ```ts
-const page = yield * store.listMessages({ threadId: "conversation-7", limit: 100 })
-const last = page.at(-1)
-const nextPage = last === undefined
-  ? []
-  : yield * store.listMessages({ threadId: "conversation-7", limit: 100, cursor: { at: last.at, id: last.id } })
+const history = Effect.gen(function*() {
+  const store = yield* MemoryStore.MemoryStore
+  const page = yield* store.listMessages({ threadId: "conversation-7", limit: 100 })
+  const last = page.at(-1)
+  if (last === undefined) return page
+  const nextPage = yield* store.listMessages({
+    threadId: "conversation-7",
+    limit: 100,
+    cursor: { at: last.at, id: last.id }
+  })
+  return [...page, ...nextPage]
+})
 ```
 
 `deleteThread` removes the thread and all its messages.

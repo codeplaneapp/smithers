@@ -13,9 +13,13 @@ sidebar:
 
 ```ts
 import * as Maintenance from "@smthrs/memory/Maintenance"
+import { Effect } from "effect"
 
-const result = yield* Maintenance.ttlGc
-// result: { deletedFacts: 2 }
+const collected = Effect.gen(function*() {
+  const result = yield* Maintenance.ttlGc
+  // result: { deletedFacts: 2 }
+  return result
+})
 ```
 
 Facts expire relative to their last update, and expired facts are already invisible to reads; this pass reclaims their storage and keeps recall projections honest.
@@ -25,8 +29,11 @@ Facts expire relative to their last update, and expired facts are already invisi
 `Maintenance.limitHistory` deletes the oldest messages in every thread until each thread fits an approximate token budget:
 
 ```ts
-const limited = yield * Maintenance.limitHistory({ maxTokens: 4096 })
-// limited: { deletedMessages: 37 }
+const trimmed = Effect.gen(function*() {
+  const limited = yield* Maintenance.limitHistory({ maxTokens: 4096 })
+  // limited: { deletedMessages: 37 }
+  return limited
+})
 ```
 
 The approximation is character-based: a thread's budget is `maxTokens * charsPerToken` characters, with `charsPerToken` defaulting to 4. A non-finite or negative `maxTokens`, or a non-positive `charsPerToken`, fails with `invalid_argument` and a path to the field. Threads are processed one at a time, and messages page through the store rather than loading a whole thread at once.
@@ -36,16 +43,19 @@ The approximation is character-based: a thread's budget is `maxTokens * charsPer
 `Maintenance.compact` summarizes the old messages of each thread and atomically replaces them with one summary message. You supply the summarizer, so the pass works with a model flow, a test fake, or any route you own:
 
 ```ts
-import { Effect } from "effect"
 import * as Maintenance from "@smthrs/memory/Maintenance"
+import { Effect } from "effect"
 
-const compacted = yield* Maintenance.compact({
-  summarizer: {
-    summarize: ({ rendered }) => Effect.succeed(`Earlier: ${rendered.length} characters of discussion.`)
-  },
-  keepRecent: 2
+const summarized = Effect.gen(function*() {
+  const compacted = yield* Maintenance.compact({
+    summarizer: {
+      summarize: ({ rendered }) => Effect.succeed(`Earlier: ${rendered.length} characters of discussion.`)
+    },
+    keepRecent: 2
+  })
+  // compacted: { compactedThreads: 3, deletedMessages: 41 }
+  return compacted
 })
-// compacted: { compactedThreads: 3, deletedMessages: 41 }
 ```
 
 - `threadId` restricts the pass to one thread; omit it to compact every thread.

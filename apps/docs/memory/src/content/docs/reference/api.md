@@ -4,13 +4,13 @@ description: "Every public export of @smthrs/memory: the two flows, the memory p
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/memory/docs/api.md"
 ---
 
-This page covers the parts a flow author touches: the two callable flows, the memory policy that decides which namespace a flow tree reads and writes, and the store behaviors that are easy to get wrong. The [module reference](#module-reference) at the end lists every export; the sections before it explain the behaviors tests enforce.
+This page covers the parts a flow author touches: the two callable flows, the memory policy that decides which namespace a flow tree reads and writes, and the store behaviors that are easy to get wrong. The [module reference](#module-reference) at the end lists every export; the sections before it explain how those exports behave.
 
 ## The two flows
 
 `Flows.remember` writes one record into a bank. `Flows.recall` reads advisory rows out of named banks. Both are declarations: building a graph performs no memory I/O. `Flows.handlersFor(flow)` supplies the runtime bindings for one declaration, and `Flows.handlers` is that pair for the bare declarations the module exports. `Flows.runRemember` and `Flows.runRecall` are the same implementations callable directly, without a policy.
 
-`Flows.rememberEffects` is `irreversible` because it writes. `Flows.recallEffects` is `sealed`: recall declares no writes, so it nests inside a sealed or compensable envelope without widening its tier.
+Each flow also carries an effect declaration, the claim a planner reads before it runs anything: the paths the flow touches, a `mode` (`expected` means these are the paths worth declaring, `hermetic` means these are all of them), an `onConflict` policy saying what to do about another writer of the same path, and a `tier` saying how reversible the effect is. Tiers order from `irreversible` through `compensable` to `sealed`, and a nested declaration may narrow along that order but never widen it. `Flows.rememberEffects` is `irreversible` because it writes; `Flows.recallEffects` is `sealed` because recall declares no writes, so recall nests inside any enclosing declaration without widening it. [Effect envelopes](https://core.smithers.sh/concepts/effects/) in `@smthrs/core` covers the full grammar.
 
 A bank name is the public spelling of a namespace. `Bank.parse` is the validating reader: it answers an `Effect` and rejects an empty or malformed bank with `invalid_namespace`. `Recall.namespaceForBank` is the unvalidated inverse kept for callers that already hold a well-formed bank, and `Recall.bankForNamespace` maps a namespace back. An unprefixed bank is flow-local; a prefix such as `flow-` or `global-` names an explicit lifetime. Because `bank` and `flow-bank` resolve to the same namespace, recall de-duplicates on the resolved namespace rather than on the bank string.
 
@@ -47,6 +47,7 @@ Two policy values are refusals rather than defaults, and they win over what the 
 
 ```ts
 import { Flows, WithMemory } from "@smthrs/memory"
+import { Effect } from "effect"
 
 const scoped = WithMemory.withMemory(Flows.recall, {
   namespace: { kind: "flow", id: "release-notes" },
@@ -55,12 +56,14 @@ const scoped = WithMemory.withMemory(Flows.recall, {
   retain: "on-complete"
 })
 
-const rows = yield* Flows.runRecallFor(scoped, { banks: [], query: "changelog" })
+const recalled = Effect.gen(function*() {
+  return yield* Flows.runRecallFor(scoped, { banks: [], query: "changelog" })
+})
 ```
 
 ### Binding a policy-carrying declaration
 
-A host binds the declaration a cell was given. For delegated work that is the copy `withMemory` produced, not the bare export, so bind it through `handlersFor`:
+Bind the same declaration the caller will run. For delegated work that is the copy `withMemory` produced, not the bare export, so bind it through `handlersFor`:
 
 ```ts
 import { FlowBinding } from "@smthrs/harness"
@@ -77,7 +80,9 @@ Binding `Flows.recall` with `Flows.runRecall` reaches the store with no namespac
 
 ## MemoryTrellis
 
-`MemoryTrellis.make` is the delegation case. `Trellis.make` declares the topology a model-authored plan fits inside, and fills its leaf slots at run time, so a leaf cannot be handed a namespace at declaration time. `MemoryTrellis.make` applies one policy to the author, to the leaf, and to the memory flows those declare, then annotates the trellis itself:
+`MemoryTrellis.make` is the delegation case. `Trellis.make` declares the topology a model-authored plan fits inside, and fills its leaf slots at run time, so a leaf cannot be handed a namespace at declaration time. `MemoryTrellis.make` applies one policy to the author, to the leaf, and to the memory flows those declare, then annotates the trellis itself.
+
+It takes everything `Trellis.make` takes, plus `memory`. The `envelope` is the bound the authored plan is admitted under: `fuel` is the total number of leaf calls the plan may make, `depth` the nesting it may reach, and `fanout` the members any one group may hold.
 
 ```ts
 import { MemoryTrellis } from "@smthrs/memory"
@@ -97,11 +102,11 @@ const trellis = MemoryTrellis.make({
 
 The graph is the plain trellis graph, node for node. `MemoryTrellis.parts` returns the scoped author and leaf on their own, for a caller that drives the plan with `Trellis.run` rather than calling the declared flow: calling the originals instead loses the policy.
 
-See the [`@smthrs/patterns` reference](https://patterns.smithers.sh/reference/api/) and its [delegation guide](https://patterns.smithers.sh/delegation/) for the trellis itself.
+See the [`@smthrs/patterns` reference](https://smithers-patterns.smithers.sh/reference/api/) and its [delegation guide](https://smithers-patterns.smithers.sh/delegation/) for the trellis itself.
 
 ## Store behaviors worth knowing
 
-These are the answers that surprise callers most often. Each one is enforced by a test in the package.
+These are the answers that surprise callers most often.
 
 - `listNotes` defaults `status` to `"accepted"`. Pending and rejected notes are hidden unless you ask for them by name or pass `"any"`.
 - A message id is unique within its thread, not globally. The same id in two threads is two messages. A same-thread retry whose `role`, `text`, or `at` differs fails with `idempotency_conflict` and a path to the first field that differs.
@@ -110,7 +115,7 @@ These are the answers that surprise callers most often. Each one is enforced by 
 - `capRecallResults` drops rows with empty text before it fills the budget.
 - Fact values are stored as JSON, so the value `getFact` returns is the value `JSON.stringify` produced: `NaN` and `Infinity` become `null`, `undefined`, function, and symbol members disappear, and sparse arrays collapse. The value is serialized once at API entry, and the stored JSON, the search text, the retained tags, and any vector projection all come from that one snapshot.
 - `RecallKeyword` normalizes both query and row text to NFKC before matching. SQLite full text search does not, so the two bindings can disagree on compatibility-equivalent characters.
-- The authoritative store writes no embedding vectors. Semantic projection is opt-in through `RecallSemantic.decorateStore`, and `RecallSemantic.recall` only lists vectors written under the model it was asked for.
+- The authoritative store writes no embedding vectors. Semantic projection is opt-in through `RecallSemantic.decorateStore`, and `RecallSemantic.recall` scans all eligible vectors in the selected banks under the requested model, retaining only its result budget.
 - TTL garbage collection is complete: `Maintenance.ttlGc` removes the expired fact, its full text projection, and its vector rows in one transaction.
 
 ### Published ceilings
@@ -129,6 +134,8 @@ These are the answers that surprise callers most often. Each one is enforced by 
 Each tag group is bounded on its own, and the group list is bounded too: every group is evaluated against every candidate row by every binding, so an unbounded list would multiply the per-group budget without limit.
 
 ### What a read limit counts
+
+`searchRows.records` optionally restricts the read to at most 64 exact `{ kind, id }` identities, while preserving namespace, TTL, status, supersession, and tag filtering.
 
 `limit` on `listFacts`, `listNotes`, `listMessages`, `searchRows` and `searchFts` bounds the rows the caller receives, after every status, supersession and tag-group filter on the same input. It is not a bound on the rows the query examines, and a bounded read never under-fills while matching rows remain.
 
@@ -189,6 +196,8 @@ Every module is importable from the root as a namespace and from its own subpath
 | `layerInProcess`    | `Layer<Embedding>`                                          | Provides in-process embeddings with no provider dependency.                                                                                                         |
 
 ### `@smthrs/memory/Flows`
+
+The `mode`, `onConflict`, and `tier` values in the two effect declarations below are the vocabulary defined under [The two flows](#the-two-flows).
 
 | Export                | Signature                                                                                    | Behavior                                                                                                                                                            |
 | --------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -382,22 +391,22 @@ The service tag is `MemoryStore`, `Context.Service` tag `flows/memory/MemoryStor
 
 ### `@smthrs/memory/RecallSemantic`
 
-| Export               | Signature                                                                         | Behavior                                                                                                                                 |
-| -------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `Vector`             | interface                                                                         | A durable projection row: `{ bank, key, model, contentDigest, dimensions, vector, updatedAtMs, recordKind?, recordId? }`.                |
-| `VectorStore`        | interface                                                                         | The injectable vector-table adapter: `upsert(vector)` and `list(banks, model)`.                                                          |
-| `Options`            | interface                                                                         | `{ vectorStore, model?, halfLifeMs? }`.                                                                                                  |
-| `budgetLimits`       | `{ low: 3, mid: 8, high: 20 }`                                                    | Deterministic result counts for the three budgets.                                                                                       |
-| `defaultModel`       | `Embedding.inProcessModel`                                                        | The model semantic recall uses when a declaration names none.                                                                            |
-| `makeSqlVectorStore` | `(database: DatabaseService) => VectorStore`                                      | The SQLite adapter for the migration-owned `memory_vectors` table.                                                                       |
-| `recall`             | `(input, options) => Effect<Output, MemoryError, MemoryStore \| Embedding>`       | Cosine similarity decayed by row age. Skips foreign-model and stale rows; a same-model dimension mismatch fails `vector_model_mismatch`. |
-| `ProjectionInput`    | interface                                                                         | One authoritative row submitted for projection after commit.                                                                             |
-| `Projector`          | interface                                                                         | `{ project(row), activeKeys() }`: the per-key serialized projection coordinator. There is no callable projector alias.                   |
-| `makeProjector`      | `(options: Options) => Projector`                                                 | Constructs the coordinator. Projection retries once and logs failures without changing the write result.                                 |
-| `decorateStore`      | `(store: Service, projector: Projector, embedding: Embedding.Service) => Service` | Adds after-commit projection to `putFact` and `putNote`, keeping the ordinary write signatures.                                          |
-| `layer`              | `(options: Options) => Layer<Recall, never, MemoryStore \| Embedding>`            | Provides semantic recall from the store, the embedding service, and the vector table.                                                    |
-| `cosineSimilarity`   | `(left, right) => number`                                                         | Cosine similarity between two embedding vectors.                                                                                         |
-| `recencyDecay`       | `(updatedAtMs, nowMs, halfLifeMs) => number`                                      | The exponential recency weight, with a default half-life of seven days inside `recall`.                                                  |
+| Export               | Signature                                                                         | Behavior                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Vector`             | interface                                                                         | A durable projection row: `{ bank, key, model, contentDigest, dimensions, vector, updatedAtMs, recordKind?, recordId? }`; components may be a readonly array or `Float32Array`. |
+| `VectorStore`        | interface                                                                         | The injectable vector-table adapter: `upsert(vector)` and finite `scan(banks, model)` pages of at most 64 vectors.                                                              |
+| `Options`            | interface                                                                         | `{ vectorStore, model?, halfLifeMs? }`.                                                                                                                                         |
+| `budgetLimits`       | `{ low: 3, mid: 8, high: 20 }`                                                    | Deterministic result counts for the three budgets.                                                                                                                              |
+| `defaultModel`       | `Embedding.inProcessModel`                                                        | The model semantic recall uses when a declaration names none.                                                                                                                   |
+| `makeSqlVectorStore` | `(database: DatabaseService) => VectorStore`                                      | The SQLite adapter for the migration-owned `memory_vectors` table.                                                                                                              |
+| `recall`             | `(input, options) => Effect<Output, MemoryError, MemoryStore \| Embedding>`       | Cosine similarity decayed by row age. Skips foreign-model and stale rows; a same-model dimension mismatch fails `vector_model_mismatch`.                                        |
+| `ProjectionInput`    | interface                                                                         | One authoritative row submitted for projection after commit.                                                                                                                    |
+| `Projector`          | interface                                                                         | `{ project(row), activeKeys() }`: the per-key serialized projection coordinator. There is no callable projector alias.                                                          |
+| `makeProjector`      | `(options: Options) => Projector`                                                 | Constructs the coordinator. Projection retries once and logs failures without changing the write result.                                                                        |
+| `decorateStore`      | `(store: Service, projector: Projector, embedding: Embedding.Service) => Service` | Adds after-commit projection to `putFact` and `putNote`, keeping the ordinary write signatures.                                                                                 |
+| `layer`              | `(options: Options) => Layer<Recall, never, MemoryStore \| Embedding>`            | Provides semantic recall from the store, the embedding service, and the vector table.                                                                                           |
+| `cosineSimilarity`   | `(left, right) => number`                                                         | Cosine similarity between two embedding vectors.                                                                                                                                |
+| `recencyDecay`       | `(updatedAtMs, nowMs, halfLifeMs) => number`                                      | The exponential recency weight, with a default half-life of seven days inside `recall`.                                                                                         |
 
 ### `@smthrs/memory/Source`
 

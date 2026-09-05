@@ -1,70 +1,121 @@
 # @smthrs/memory
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://memory.smithers.sh
 
-Effect services for durable cross-run facts, history, notes, recall, and maintenance. It sits above the database and model ports and exposes both storage primitives and callable remember/recall flows.
+Durable memory for an AI agent: facts, notes, and message threads kept in
+SQLite, ranked for recall, and reachable by a model through two operations it
+calls by name, `remember` and `recall`.
 
-```sh
-npm install @smthrs/memory
+A model's context window disappears when the process exits. Everything the next
+run should still know has to live outside the model, and this package is that
+store. It ships as Effect services, so you choose the storage and the recall
+algorithm your host can support and every caller keeps working.
+
+## Install
+
+The `1.0.0-rc.0` release documented here is not on npm yet. The `0.x` versions
+published under this name are the previous generation of the package and have a
+different API. Until the release candidate publishes, use `@smthrs/memory` from
+a checkout of the [smithers repository](https://github.com/smithersai/smithers),
+where it resolves as a workspace dependency:
+
+```bash
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
 ```
+
+It needs Node.js 22.19.0 or later and `effect` 4.0.0-rc.112 as a peer. The full
+requirements, and the two packages a file-backed store adds, are on the
+[installation page](https://memory.smithers.sh/installation/).
+
+## Write a fact and recall it
+
+```ts
+import * as Flows from "@smthrs/memory/Flows"
+import * as RecallKeyword from "@smthrs/memory/RecallKeyword"
+import * as TestMemory from "@smthrs/memory/test/TestMemory"
+import { Effect, Layer } from "effect"
+
+const memory = Layer.provideMerge(RecallKeyword.layer, TestMemory.layer)
+
+const program = Effect.gen(function*() {
+  yield* Flows.handlers.remember({ bank: "global-notes", key: "release", text: "cut 0.1.0" })
+  return yield* Flows.handlers.recall({ banks: ["global-notes"], query: "release" })
+})
+
+const rows = await Effect.runPromise(program.pipe(Effect.provide(memory)))
+// [{ bank: "global-notes", key: "release", text: "cut 0.1.0", score: 1, updatedAtMs: ... }]
+```
+
+`global-notes` is a bank, the public string spelling of a namespace.
+`TestMemory.layer` forgets everything when the process exits; swapping it for
+`MemoryStore.layer` over a SQLite file is a one-layer change, and the
+[quickstart](https://memory.smithers.sh/quickstart/) walks that whole path.
+
+## What the package gives you
+
+- One namespace per lifetime. `flow`, `agent`, `user`, and `global` memory stay
+  apart, so a note written for one agent never surfaces in another's recall.
+- Recall as a replaceable service rather than one fixed algorithm. Keyword
+  matching needs nothing beyond the store; SQLite full text search and
+  in-process semantic search over embeddings are also included, and swapping
+  between them changes no caller. Semantic recall searches all eligible records
+  in the selected banks using bounded pages and retains only its result budget.
+- A byte budget on every recall answer, because recalled rows are about to
+  become part of a prompt.
+- Idempotent writes. Re-appending an identical message is a no-op; re-appending
+  the same id with different content fails with `idempotency_conflict` instead
+  of duplicating history.
+- Append-only notes that correct themselves by supersession, so an obsolete
+  note drops out of recall without a destructive edit.
+- One memory policy a whole flow tree inherits, including the work a delegated
+  plan generates that nobody named.
 
 ## Public API
 
-<!-- generated:memory-surface start -->
+The root entry point exports these namespaces, and each is also importable from
+`@smthrs/memory/<Module>`. Every export, with its signature and its guarantees,
+is on the [API reference](https://memory.smithers.sh/reference/api/).
 
-The root entry point exports every public module as a namespace; each is also importable from its listed subpath. `@smthrs/memory/test/TestMemory` is published separately as the in-memory test layer, and `internal/*` and nested `*/index` subpaths are blocked.
+| Namespace          | What it is                                                                        |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `Flows`            | The callable `remember` and `recall` declarations, and their runtime bindings.    |
+| `WithMemory`       | One memory policy applied to a whole flow tree.                                   |
+| `MemoryTrellis`    | A trellis whose model-authored work inherits one memory policy.                   |
+| `MemoryStore`      | The authoritative SQL store: facts, notes, threads, messages, and search rows.    |
+| `Namespace`        | Structured memory namespaces and tag-group matching.                              |
+| `Bank`             | The validating reader for the public string spelling of a namespace.              |
+| `Recall`           | The replaceable recall seam: the service, the slot, and the byte budget.          |
+| `RecallKeyword`    | Keyword recall, needing nothing beyond the store.                                 |
+| `RecallFts`        | SQLite FTS5 recall.                                                               |
+| `RecallSemantic`   | In-process semantic recall and opt-in vector projection.                          |
+| `Embedding`        | The provider-neutral embedding port semantic recall reads.                        |
+| `Source`           | The frozen, byte-capped memory snapshot an agent's opening context reads.         |
+| `SnapshotRecorder` | The optional port that keeps that snapshot stable across a resumed process.       |
+| `Maintenance`      | TTL collection, history limiting, and compaction, as finite Effects you schedule. |
+| `Database`         | The public database port SQL-backed memory adapters accept.                       |
+| `MemoryError`      | The one failure type, carrying a stable code and an optional field path.          |
 
-| Module             | Import specifier                  | Summary                                                                                            | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Bank`             | `@smthrs/memory/Bank`             | Validating public bank-name constructors.                                                          | `parse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Database`         | `@smthrs/memory/Database`         | Public database port used by SQL-backed memory adapters.                                           | `DatabaseService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `Embedding`        | `@smthrs/memory/Embedding`        | Provider-neutral embeddings used by semantic memory recall.                                        | `EmbedResponse`, `EmbedManyResponse`, `EmbedMany`, `Service`, `Embedding`, `make`, `layer`, `makeNoop`, `layerNoop`, `layerFake`, `inProcessModel`, `inProcessVector`, `makeInProcess`, `layerInProcess`                                                                                                                                                                                                                                                                                                                                                            |
-| `Flows`            | `@smthrs/memory/Flows`            | Memory flow declarations and runtime bindings.                                                     | `rememberName`, `recallName`, `rememberDescription`, `recallDescription`, `RememberInput`, `RememberOutput`, `RecallInput`, `RecallOutput`, `rememberEffects`, `recallEffects`, `remember`, `recall`, `recallSlot`, `bindRecall`, `runRememberWith`, `runRemember`, `runRecall`, `runRecallFor`, `runRememberFor`, `Handlers`, `handlersFor`, `handlers`, `RememberInputType`, `RecallInputType`, `RecallOutputType`                                                                                                                                                |
-| `Maintenance`      | `@smthrs/memory/Maintenance`      | Finite memory maintenance Effects intended for explicit schedules.                                 | `TtlGcResult`, `ttlGc`, `TokenLimiterOptions`, `TokenLimiterResult`, `limitHistory`, `SummarizerInput`, `Summarizer`, `CompactionOptions`, `CompactionResult`, `compact`                                                                                                                                                                                                                                                                                                                                                                                            |
-| `MemoryError`      | `@smthrs/memory/MemoryError`      | Stable memory failures.                                                                            | `MemoryErrorCode`, `MemoryError`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `MemoryStore`      | `@smthrs/memory/MemoryStore`      | Authoritative SQL memory contract store.                                                           | `Provenance`, `Fact`, `PutFactInput`, `GetFactInput`, `ListFactsInput`, `Thread`, `CreateThreadInput`, `ListThreadsInput`, `GetThreadInput`, `DeleteThreadInput`, `Message`, `AppendMessageInput`, `ListMessagesInput`, `MessageCursor`, `GetNoteInput`, `NoteStatus`, `Note`, `PutNoteInput`, `SetNoteStatusInput`, `SupersedeInput`, `NamespaceInput`, `StatusFilter`, `ListNotesInput`, `SearchRow`, `SearchRowsInput`, `EnableFtsInput`, `SearchFtsInput`, `FtsRow`, `CompactMessagesInput`, `Service`, `MemoryStore`, `make`, `makeNoop`, `layerNoop`, `layer` |
-| `MemoryTrellis`    | `@smthrs/memory/MemoryTrellis`    | A Trellis whose generated work inherits one memory policy.                                         | `MakeOptions`, `Parts`, `parts`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `Namespace`        | `@smthrs/memory/Namespace`        | Structured memory namespaces and tag-group matching.                                               | `Kind`, `Namespace`, `MAX_TAGS`, `MAX_TAG_GROUP_DEPTH`, `MAX_TAG_GROUP_NODES`, `TagPrefix`, `Tag`, `Tags`, `MatchMode`, `TagGroup`, `matches`                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Recall`           | `@smthrs/memory/Recall`           | The replaceable memory-recall seam.                                                                | `MAX_RECALL_BANKS`, `MAX_RECALL_BANK_NAME_LENGTH`, `MAX_RECALL_QUERY_BYTES`, `MAX_RECALL_TOKENS`, `MAX_RECALL_TAG_GROUPS`, `TagGroup`, `Input`, `Result`, `Output`, `slot`, `Service`, `Recall`, `capRecallResults`, `make`, `layer`, `makeNoop`, `layerNoop`, `NamespaceValue`, `bankForNamespace`, `namespaceForBank`                                                                                                                                                                                                                                             |
-| `RecallFts`        | `@smthrs/memory/RecallFts`        | SQLite FTS5 recall binding.                                                                        | `literalFtsQuery`, `recall`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `RecallKeyword`    | `@smthrs/memory/RecallKeyword`    | Keyword recall with no host dependencies.                                                          | `Row`, `recall`, `layer`, `normalizeQueryTerms`, `scoreRow`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `RecallSemantic`   | `@smthrs/memory/RecallSemantic`   | In-process semantic recall and best-effort vector projection.                                      | `Vector`, `VectorStore`, `Options`, `budgetLimits`, `defaultModel`, `makeSqlVectorStore`, `recall`, `ProjectionInput`, `Projector`, `makeProjector`, `decorateStore`, `layer`, `cosineSimilarity`, `recencyDecay`                                                                                                                                                                                                                                                                                                                                                   |
-| `Source`           | `@smthrs/memory/Source`           | Advisory memory context source for an agent's opening context.                                     | `Input`, `Source`, `DeclaredText`, `make`, `source`, `declaredText`, `byteLength`, `truncate`                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `SnapshotRecorder` | `@smthrs/memory/SnapshotRecorder` | Optional host boundary for freezing an opening memory snapshot beyond the process that fetched it. | `Identity`, `Service`, `SnapshotRecorder`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `WithMemory`       | `@smthrs/memory/WithMemory`       | One memory policy applied to a whole flow tree.                                                    | `Policy`, `MemoryPolicy`, `references`, `children`, `policyOf`, `withMemory`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+`@smthrs/memory/test/TestMemory` is the in-memory test layer: the same
+authoritative store over a fresh in-memory database. `internal/*`,
+`migrations/*`, and nested `*/index` subpaths resolve to nothing on purpose.
 
-<!-- generated:memory-surface end -->
+## Documentation
 
-## Safety limits
+- [Overview](https://memory.smithers.sh)
+- [Quickstart](https://memory.smithers.sh/quickstart/)
+- [What memory persists](https://memory.smithers.sh/concepts/durability/)
+- [How recall works](https://memory.smithers.sh/concepts/recall/)
+- [Memory policies](https://memory.smithers.sh/concepts/policies/)
+- [Give an agent opening memory](https://memory.smithers.sh/guides/agent-opening-context/)
+- [Troubleshooting](https://memory.smithers.sh/troubleshooting/), which lists
+  every failure code, what causes it, and what to change.
 
-Tag groups accept at most `Namespace.MAX_TAG_GROUP_DEPTH` (8) root-inclusive levels and `Namespace.MAX_TAG_GROUP_NODES` (64) total expression nodes. Records and tag-group leaves accept at most `Namespace.MAX_TAGS` (16) unique vocabulary tags.
+## License
 
-Model-facing recall accepts at most `Recall.MAX_RECALL_BANKS` (16) banks and `Recall.MAX_RECALL_TAG_GROUPS` (16) tag groups. Each bank name is capped by `Recall.MAX_RECALL_BANK_NAME_LENGTH` (128) code units, the query by `Recall.MAX_RECALL_QUERY_BYTES` (16,384) UTF-8 bytes, and `maxTokens` by `Recall.MAX_RECALL_TOKENS` (65,536) conservative bytes.
-
-A read `limit` bounds the rows the caller receives after every status, supersession and tag-group filter, not the rows the query examines, so a bounded read never under-fills while matching rows remain. Tag-filtered reads walk the namespace in bounded pages, keeping working-set memory proportional to one page.
-
-`RecallSemantic.makeSqlVectorStore` accepts the public `Database.DatabaseService` port. Semantic projectors expose `{ project, activeKeys }`; there is no callable projector alias.
-
-```ts
-import { MemoryStore } from "@smthrs/memory"
-import { Effect } from "effect"
-
-const program = Effect.gen(function*() {
-  const store = yield* MemoryStore.MemoryStore
-  return yield* store.listFacts({ namespace: { kind: "global", id: "default" } })
-}).pipe(Effect.provide(MemoryStore.layerNoop()))
-```
-
-## Memory policies
-
-`WithMemory.withMemory(flow, policy)` returns a copy of `flow` carrying one policy of namespace, `recall: "auto" | "none"`, `maxTokens`, and `retain: "on-complete" | "never"`, and gives the same policy to every flow that flow declares. The copy keeps the declaration's input and output schemas, so a host can bind it through `FlowBinding.make`; a flow held as `Flow.Any` stays `Flow.Any`. The annotation takes no part in flow identity, so a policy never changes the graph a flow plans.
-
-`Flows.runRecallFor` and `Flows.runRememberFor` read the policy back. It supplies defaults and never overrides: a caller that names its own banks or its own budget keeps them. `recall: "none"` and `retain: "never"` are refusals, not defaults, so no request reaches the service at all.
-
-`MemoryTrellis.make` is the delegation case: a model-authored plan generates work nobody named, so the leaf that runs each generated goal carries the policy instead of receiving it as an argument. See the [memory reference](https://memory.smithers.sh/reference/api/).
-
-Use `MemoryStore.layer` with the database service for persistence. `@smthrs/memory/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
+MIT. See [LICENSE](./LICENSE).

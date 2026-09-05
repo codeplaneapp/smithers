@@ -11,14 +11,18 @@ Every binding answers the same input:
 
 ```ts
 import * as Flows from "@smthrs/memory/Flows"
+import { Effect } from "effect"
 
-const rows = yield* Flows.handlers.recall({
-  banks: ["global-notes", "flow-release-notes"],
-  query: "changelog",
-  maxTokens: 2048,
-  tagGroups: [{ tags: ["scope:project"], match: "any" }]
+const recalled = Effect.gen(function*() {
+  const rows = yield* Flows.handlers.recall({
+    banks: ["global-notes", "flow-release-notes"],
+    query: "changelog",
+    maxTokens: 2048,
+    tagGroups: [{ tags: ["scope:project"], match: "any" }]
+  })
+  // rows: [{ bank, key, text, score, updatedAtMs? }, ...]
+  return rows
 })
-// rows: [{ bank, key, text, score, updatedAtMs? }, ...]
 ```
 
 `banks` accepts at most 16 names, de-duplicated on the resolved namespace. `maxTokens` is a UTF-8 byte ceiling over the serialized result array, at most 65,536; rows with empty text drop out before the budget fills. `tagGroups` accepts at most 16 groups, and every group must match a row's tags for the row to rank.
@@ -100,13 +104,13 @@ const program = Effect.gen(function*() {
 
 Three details shape the answers:
 
-- Recall only lists vectors written under the model it was asked for. `options.model` defaults to the in-process model, and a stored vector under that model with the wrong dimension fails with `vector_model_mismatch`.
+- Recall scans all eligible vectors in the selected banks under the model it was asked for, in bounded pages; `budget` limits results rather than restricting the search to recent records. `options.model` defaults to the in-process model, and a stored vector under that model with the wrong dimension fails with `vector_model_mismatch`.
 - `input.budget` selects the result count deterministically: `"low"` answers 3 rows, `"mid"` answers 8, `"high"` answers 20. The byte cap still applies after the count.
 - `options.halfLifeMs` controls the recency decay and defaults to seven days.
 
 ## Bind the slot in a flow graph
 
-When a host composes flows rather than calling handlers directly, bind the flow-valued slot instead of providing the service. `Flows.recallSlot` is the shared slot, and `Flows.bindRecall(supplied)` resolves it to a flow you supply. See the [`@smthrs/patterns` API](/api/patterns) for `Pattern.bind`.
+When a host composes flows rather than calling handlers directly, bind the flow-valued slot instead of providing the service. `Flows.recallSlot` is the shared slot, and `Flows.bindRecall(supplied)` resolves it to a flow you supply. See the [`@smthrs/patterns` API](/api/smithers-patterns) for `Pattern.bind`.
 
 ## Next steps
 

@@ -14,17 +14,21 @@ Call `Source.declaredText` with a source and an input. The answer is the exact `
 
 ```ts
 import * as Source from "@smthrs/memory/Source"
+import { Effect } from "effect"
 
-const memory = yield* Source.declaredText(Source.source, {
-  lineageId: "run-42",
-  iteration: 0,
-  banks: ["flow-release-notes"],
-  query: "changelog",
-  primerBanks: ["global-primers"],
-  maxTokens: 2048,
-  maxBytes: 8192
+const opening = Effect.gen(function*() {
+  const memory = yield* Source.declaredText(Source.source, {
+    lineageId: "run-42",
+    iteration: 0,
+    banks: ["flow-release-notes"],
+    query: "changelog",
+    primerBanks: ["global-primers"],
+    maxTokens: 2048,
+    maxBytes: 8192
+  })
+  // memory: { text: "<flows_memory_context>\n...\n</flows_memory_context>", digest: "..." }
+  return memory
 })
-// memory: { text: "<flows_memory_context>\n...\n</flows_memory_context>", digest: "..." }
 ```
 
 The input extends the recall input, so `banks`, `query`, `tagGroups`, `maxTokens`, and `budget` all behave as they do for the `recall` flow. Two fields are new:
@@ -52,7 +56,7 @@ The snapshot degrades rather than fail: a fetch that exceeds two seconds or fail
 
 ## Record the snapshot across processes
 
-Memory text goes into an agent's opening context, so a resumed run whose snapshot came back different has a different frame-zero prefix. That re-keys every sealed model step under it and re-executes model calls the run already paid for. `SnapshotRecorder` is the optional port that closes that replay gap:
+Memory text goes into an agent's opening context, so it is part of the very first message of the conversation. A resumed run replays a model call it already made only when the input reaching that call is identical, and the opening context is part of that input. So a resumed run that fetches memory again and gets different text repeats, and pays for, every model call underneath it. `SnapshotRecorder` is the optional port that closes that gap:
 
 ```ts
 import * as SnapshotRecorder from "@smthrs/memory/SnapshotRecorder"

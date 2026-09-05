@@ -93,7 +93,7 @@ export const retainedTags = (value: unknown): ReadonlyArray<string> => {
  * @category encoding
  * @since 0.1.0
  */
-export const vectorBytes = (vector: ReadonlyArray<number>): Uint8Array => {
+export const vectorBytes = (vector: ArrayLike<number>): Uint8Array => {
   const bytes = new Uint8Array(vector.length * 4)
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   for (let index = 0; index < vector.length; index++) {

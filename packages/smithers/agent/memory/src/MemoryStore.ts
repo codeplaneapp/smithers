@@ -372,6 +372,8 @@ export interface SearchRow {
  * @slop
  */
 export interface SearchRowsInput extends ListNotesInput {
+  /** Exact projection identities to resolve, at most 64 per authoritative read. */
+  readonly records?: ReadonlyArray<{ readonly kind: "fact" | "note"; readonly id: string }> | undefined
   /**
    * At most this many merged fact and note rows that pass EVERY filter on this
    * input. Both sides are read newest-first and bounded independently, so the
@@ -1358,11 +1360,25 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         const limit = yield* validateLimit(input.limit, "searchRows")
         if (limit === 0) return []
         const { bank, namespace } = yield* resolveNamespace(input.namespace)
+        if (input.records !== undefined) {
+          if (input.records.length > 64) {
+            return yield* Effect.fail(error("invalid_argument", "searchRows accepts at most 64 record identities"))
+          }
+          for (const record of input.records) {
+            if (record.kind !== "fact" && record.kind !== "note") {
+              return yield* Effect.fail(error("invalid_argument", "searchRows record kind must be fact or note"))
+            }
+            yield* validateNonEmpty(record.id, "record id", ["records", "id"])
+          }
+        }
         const tagFiltered = input.tagGroup !== undefined || input.tagGroups !== undefined
         const matchesTags = tagMatcher(input)
         const toFactRow = (fact: Fact): SearchRow => factSearchRow(bank, fact)
         const factQuery = {
           namespace,
+          ...(input.records === undefined ? {} : {
+            keys: input.records.filter((record) => record.kind === "fact").map((record) => record.id)
+          }),
           ...(input.prefix === undefined ? {} : { prefix: input.prefix })
         }
         const readFactRows = Effect.gen(function*() {
@@ -1394,7 +1410,14 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
         })
         const [factRows, notes] = yield* Effect.all([
           readFactRows,
-          readNotes({ ...input, namespace, ...(limit === undefined ? {} : { limit }) }, true)
+          readNotes({
+            ...input,
+            namespace,
+            ...(input.records === undefined ? {} : {
+              ids: input.records.filter((record) => record.kind === "note").map((record) => record.id)
+            }),
+            ...(limit === undefined ? {} : { limit })
+          }, true)
         ])
         const rows = [...factRows, ...notes.map((note) => noteSearchRow(bank, note))]
           .sort((left, right) => right.updatedAtMs - left.updatedAtMs || compareText(left.key, right.key))

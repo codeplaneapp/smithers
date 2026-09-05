@@ -12,7 +12,9 @@
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Semaphore from "effect/Semaphore"
+import * as Stream from "effect/Stream"
 import type { DatabaseService } from "./Database.ts"
 import * as Embedding from "./Embedding.ts"
 import { resolveBanks, resolveNamespace } from "./internal/Bank.ts"
@@ -35,7 +37,7 @@ export interface Vector {
   readonly model: string
   readonly contentDigest: string
   readonly dimensions: number
-  readonly vector: ReadonlyArray<number>
+  readonly vector: ReadonlyArray<number> | Float32Array
   readonly updatedAtMs: number
   readonly recordKind?: "fact" | "note" | undefined
   readonly recordId?: string | undefined
@@ -49,11 +51,16 @@ export interface Vector {
  * @slop
  */
 export interface VectorStore {
-  readonly upsert: (vector: Vector) => Effect.Effect<void, MemoryError.MemoryError>
-  readonly list: (
+  /**
+   * Finite scan of selected banks/model, in pages of at most 64 vectors.
+   * Emit each projection identity at most once. The SQL adapter bounds each
+   * bank by its opening count and observes concurrent changes per page.
+   */
+  readonly scan: (
     banks: ReadonlyArray<string>,
     model: string
-  ) => Effect.Effect<ReadonlyArray<Vector>, MemoryError.MemoryError>
+  ) => Stream.Stream<ReadonlyArray<Vector>, MemoryError.MemoryError>
+  readonly upsert: (vector: Vector) => Effect.Effect<void, MemoryError.MemoryError>
 }
 
 /**
@@ -105,11 +112,12 @@ export const defaultModel = Embedding.inProcessModel
 const defaultHalfLifeMs = 7 * 24 * 60 * 60 * 1000
 
 const maximumDimensions = 65_536
+const vectorPageSize = 64
 
 const readVector = (
   bytes: Uint8Array,
   dimensions: number
-): Effect.Effect<ReadonlyArray<number>, MemoryError.MemoryError> =>
+): Effect.Effect<Float32Array, MemoryError.MemoryError> =>
   !Number.isSafeInteger(dimensions) || dimensions < 1 || dimensions > maximumDimensions ||
     bytes.byteLength !== dimensions * 4
     ? Effect.fail(
@@ -121,7 +129,7 @@ const readVector = (
     : Effect.try({
       try: () => {
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-        const vector = new Array<number>(dimensions)
+        const vector = new Float32Array(dimensions)
         for (let index = 0; index < dimensions; index++) vector[index] = view.getFloat32(index * 4, true)
         return vector
       },
@@ -167,14 +175,74 @@ const validateVector = (vector: Vector): MemoryError.MemoryError | undefined => 
  * @since 0.1.0
  * @slop
  */
-export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
-  upsert: (vector) =>
-    Effect.gen(function*() {
-      const failure = validateVector(vector)
-      if (failure !== undefined) return yield* Effect.fail(failure)
-      const { namespace } = yield* resolveNamespace(vector.bank)
-      yield* database.write(
-        database.sql`
+export const makeSqlVectorStore = (database: DatabaseService): VectorStore => {
+  const scan: VectorStore["scan"] = (banks, model) =>
+    Stream.fromEffect(resolveBanks(banks)).pipe(
+      Stream.flatMap(Stream.fromIterable),
+      Stream.flatMap(({ bank, namespace }) =>
+        Stream.fromEffect(database.sql<{ readonly upper: number; readonly count: number }>`
+          SELECT COALESCE(MAX(rowid), 0) AS upper, COUNT(*) AS count FROM memory_vectors
+          WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
+            AND embedding_model = ${model}`.pipe(Effect.mapError(sqlError))).pipe(
+          Stream.flatMap((bounds) =>
+            Stream.paginate(
+              {
+                after: undefined as { readonly kind: string; readonly id: string } | undefined,
+                remaining: bounds[0]!.count
+              },
+              ({ after, remaining }) =>
+                Effect.gen(function*() {
+                  const continuation = after === undefined ? database.sql.literal("1 = 1") : database.sql`
+          (record_kind, record_id) > (${after.kind}, ${after.id})`
+                  const rows = yield* database.sql<SqlVectorRow>`
+          SELECT record_kind, record_id, namespace_kind, namespace_id,
+            embedding_model, content_digest, dimensions,
+            CASE WHEN length(vector_bytes) <= ${maximumDimensions * 4}
+              THEN vector_bytes ELSE x'' END AS vector_bytes, updated_at_ms
+          FROM memory_vectors
+          WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
+            AND embedding_model = ${model} AND rowid <= ${bounds[0]!.upper} AND ${continuation}
+          ORDER BY record_kind, record_id
+          LIMIT ${Math.min(vectorPageSize, remaining)}`.pipe(Effect.mapError(sqlError))
+                  const vectors = yield* Effect.forEach(rows, (row) =>
+                    readVector(row.vector_bytes, row.dimensions).pipe(
+                      Effect.map((vector): Vector => ({
+                        bank,
+                        key: row.record_id,
+                        model: row.embedding_model,
+                        contentDigest: row.content_digest,
+                        dimensions: row.dimensions,
+                        vector,
+                        updatedAtMs: row.updated_at_ms,
+                        recordKind: row.record_kind,
+                        recordId: row.record_id
+                      }))
+                    ))
+                  const last = rows.at(-1)
+                  return [
+                    vectors.length === 0 ? [] : [vectors],
+                    rows.length === vectorPageSize && rows.length < remaining && last !== undefined
+                      ? Option.some({
+                        after: { kind: last.record_kind, id: last.record_id },
+                        remaining: remaining - rows.length
+                      })
+                      : Option.none()
+                  ] as const
+                })
+            )
+          )
+        )
+      )
+    )
+  return {
+    scan,
+    upsert: (vector) =>
+      Effect.gen(function*() {
+        const failure = validateVector(vector)
+        if (failure !== undefined) return yield* Effect.fail(failure)
+        const { namespace } = yield* resolveNamespace(vector.bank)
+        yield* database.write(
+          database.sql`
       INSERT INTO memory_vectors (
         record_kind, record_id, namespace_kind, namespace_id,
         embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
@@ -197,43 +265,10 @@ export const makeSqlVectorStore = (database: DatabaseService): VectorStore => ({
         vector_bytes = excluded.vector_bytes,
         updated_at_ms = excluded.updated_at_ms
     `
-      ).pipe(Effect.mapError(sqlError), Effect.asVoid)
-    }),
-  list: (banks, model) =>
-    resolveBanks(banks).pipe(
-      Effect.flatMap((resolved) =>
-        Effect.all(
-          resolved.map(({ bank, namespace }) => {
-            return database.sql<SqlVectorRow>`
-          SELECT record_kind, record_id, namespace_kind, namespace_id,
-            embedding_model, content_digest, dimensions, vector_bytes, updated_at_ms
-          FROM memory_vectors
-          WHERE namespace_kind = ${namespace.kind} AND namespace_id = ${namespace.id}
-            AND embedding_model = ${model}
-        `.pipe(Effect.map((rows) => ({ bank, rows })))
-          }),
-          { concurrency: 4 }
-        )
-      ),
-      Effect.flatMap((groups) =>
-        Effect.forEach(groups.flatMap(({ bank, rows }) => rows.map((row) => ({ bank, row }))), ({ bank, row }) =>
-          readVector(row.vector_bytes, row.dimensions).pipe(Effect.map((vector) => ({
-            bank,
-            key: row.record_id,
-            model: row.embedding_model,
-            contentDigest: row.content_digest,
-            dimensions: row.dimensions,
-            vector,
-            updatedAtMs: row.updated_at_ms,
-            recordKind: row.record_kind,
-            recordId: row.record_id
-          }))))
-      ),
-      Effect.mapError((cause) =>
-        cause instanceof MemoryError.MemoryError ? cause : sqlError()
-      )
-    )
-})
+        ).pipe(Effect.mapError(sqlError), Effect.asVoid)
+      })
+  }
+}
 
 const mismatch = (message: string): MemoryError.MemoryError =>
   new MemoryError.MemoryError({ code: "embedding_unavailable", message })
@@ -241,7 +276,7 @@ const mismatch = (message: string): MemoryError.MemoryError =>
 const vectorMismatch = (message: string): MemoryError.MemoryError =>
   new MemoryError.MemoryError({ code: "vector_model_mismatch", message })
 
-const cosine = (left: ReadonlyArray<number>, right: ReadonlyArray<number>): number => {
+const cosine = (left: ArrayLike<number>, right: ArrayLike<number>): number => {
   if (left.length !== right.length || left.length === 0) return 0
   let dot = 0
   let leftMagnitude = 0
@@ -279,68 +314,63 @@ export const recall = (
     const model = options.model ?? defaultModel
     const limit = budgetLimits[input.budget ?? "mid"]
     const query = yield* embedding.embed(input.query)
-    const vectors = yield* options.vectorStore.list(banks.map(({ bank }) => bank), model)
-    if (
-      vectors.some((vector) =>
-        vector.model === model &&
-        (vector.dimensions !== query.vector.length || vector.vector.length !== query.vector.length)
-      )
-    ) {
-      return yield* Effect.fail(vectorMismatch("embedding dimensions do not match the query vector"))
-    }
-    const rows = yield* Effect.all(
-      banks.map(({ namespace }) =>
-        store.searchRows({
-          namespace,
-          status: "accepted",
-          limit: Math.min(512, limit * 5)
-        })
-      ),
-      { concurrency: 4 }
-    )
-    const byIdentity = new Map(
-      rows.flatMap((bankRows, index) =>
-        bankRows.map((row) =>
-          [
-            `${banks[index]?.bank ?? ""}\u0000${row.kind}\u0000${row.id}`,
-            { ...row, bank: banks[index]?.bank ?? "" }
-          ] as const
-        )
-      )
-    )
     const now = yield* Clock.currentTimeMillis
     const halfLife = options.halfLifeMs ?? defaultHalfLifeMs
     if (!Number.isFinite(now) || !Number.isFinite(halfLife) || halfLife <= 0) {
       return yield* Effect.fail(mismatch("semantic recency configuration must be finite with a positive half-life"))
     }
     const ranked: Array<Recall.Result> = []
-    for (const vector of vectors) {
-      if (vector.model !== model) continue
-      const row = byIdentity.get(
-        `${vector.bank}\u0000${vector.recordKind ?? "note"}\u0000${vector.recordId ?? vector.key}`
-      )
-      if (row === undefined) continue
-      if (vector.contentDigest !== digest(searchableText(row.text))) continue
-      if (row.status !== undefined && row.status !== "accepted") continue
-      if (input.tagGroups !== undefined && !input.tagGroups.every((group) => Namespace.matches(group, row.tags))) {
-        continue
-      }
-      const score = cosine(query.vector, vector.vector) * recency(vector.updatedAtMs, now, halfLife)
-      if (score > 0) {
-        ranked.push({
-          bank: vector.bank,
-          key: row.key,
-          text: row.text,
-          score,
-          updatedAtMs: row.updatedAtMs
-        })
-      }
-    }
-    ranked.sort((left, right) =>
+    const compareResults = (left: Recall.Result, right: Recall.Result): number =>
       right.score - left.score || (right.updatedAtMs ?? 0) - (left.updatedAtMs ?? 0) ||
-      compareText(left.key, right.key)
+      compareText(left.key, right.key) || compareText(left.bank, right.bank)
+    yield* Stream.runForEach(
+      options.vectorStore.scan(banks.map(({ bank }) => bank), model),
+      (page) =>
+        Effect.gen(function*() {
+          if (page.length > vectorPageSize) {
+            return yield* Effect.fail(invalidArgument("vector scan page exceeds 64 rows", ["vectorStore", "scan"]))
+          }
+          for (const { bank, namespace } of banks) {
+            const vectors = page.filter((vector) => vector.bank === bank && vector.model === model)
+            if (vectors.length === 0) continue
+            if (
+              vectors.some((vector) =>
+                vector.dimensions !== query.vector.length || vector.vector.length !== query.vector.length
+              )
+            ) {
+              return yield* Effect.fail(vectorMismatch("embedding dimensions do not match the query vector"))
+            }
+            const rows = yield* store.searchRows({
+              namespace,
+              status: "accepted",
+              records: vectors.map((vector) => ({
+                kind: vector.recordKind ?? "note",
+                id: vector.recordId ?? vector.key
+              }))
+            })
+            const byIdentity = new Map(
+              rows.filter((row) => row.namespace.kind === namespace.kind && row.namespace.id === namespace.id).map((
+                row
+              ) => [`${row.kind}\u0000${row.id}`, row] as const)
+            )
+            for (const vector of vectors) {
+              const row = byIdentity.get(`${vector.recordKind ?? "note"}\u0000${vector.recordId ?? vector.key}`)
+              if (row === undefined || vector.contentDigest !== digest(searchableText(row.text))) continue
+              if (row.status !== undefined && row.status !== "accepted") continue
+              if (
+                input.tagGroups !== undefined && !input.tagGroups.every((group) => Namespace.matches(group, row.tags))
+              ) continue
+              const score = cosine(query.vector, vector.vector) * recency(vector.updatedAtMs, now, halfLife)
+              if (score > 0) {
+                ranked.push({ bank, key: row.key, text: row.text, score, updatedAtMs: row.updatedAtMs })
+                ranked.sort(compareResults)
+                if (ranked.length > limit) ranked.pop()
+              }
+            }
+          }
+        })
     )
-    return Recall.capRecallResults(ranked.slice(0, limit), input.maxTokens ?? 2048)
+    return Recall.capRecallResults(ranked, input.maxTokens ?? 2048)
   })
 
 /**
