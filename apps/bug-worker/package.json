@@ -11,14 +11,14 @@
     "destroy": "alchemy destroy"
   },
   "dependencies": {
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   },
   "devDependencies": {
-    "@smthrs/control": "1.0.0-rc.0",
-    "@types/node": "26.1.0",
-    "alchemy": "^0.93.12",
-    "bun-types": "^1.3.14",
-    "effect": "4.0.0-rc.108",
-    "typescript": "~6.0.3"
+    "@smthrs/control": "workspace:*",
+    "@types/node": "26.4.1",
+    "alchemy": "2.0.0-beta.76",
+    "bun-types": "^1.4.0",
+    "effect": "4.0.0-rc.112",
+    "typescript": "~5.9.3"
   }
 }

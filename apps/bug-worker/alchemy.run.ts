@@ -32,9 +32,12 @@ export const worker = await Worker("smithers-bug-worker", {
   entrypoint: "src/worker.ts",
   compatibilityDate: "2025-05-01",
   url: true,
+  crons: ["*/10 * * * *"],
   adopt: true,
   bindings: {
     BUGS: bugs,
+    ...(process.env.RESEND_API_KEY ? { RESEND_API_KEY: alchemy.secret(process.env.RESEND_API_KEY) } : {}),
+    ...(process.env.NOTIFICATION_FROM ? { NOTIFICATION_FROM: process.env.NOTIFICATION_FROM } : {}),
     BUG_ADMIN_TOKEN: alchemy.secret(adminToken),
     PUBLIC_BASE_URL: process.env.BUG_PUBLIC_BASE_URL?.trim() || "https://bug.smithers.sh",
   },

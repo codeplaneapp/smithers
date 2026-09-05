@@ -47,6 +47,9 @@ const check = Smithers.Typecheck({
  * @since 1.0.0
  * @category test
  */
+// Coverage policy: assertion-only for the Bun Worker suite until a whole-source
+// denominator is measured. See scripts/repo-contract/README.md; the real handler
+// assertions remain required and no percentage guarantee is claimed.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["tests"]),

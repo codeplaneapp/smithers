@@ -192,6 +192,51 @@ describe("bug worker", () => {
     expect(res.status).toBe(404);
   });
 
+  test("admin tokens of different lengths still compare correctly (no length shortcut)", async () => {
+    const worker = createBugWorker();
+    const env = makeEnv();
+    const posted = await worker.fetch(postBug({ summary: "length check" }), env);
+    const { id } = (await posted.json()) as { id: string };
+    for (const guess of [ADMIN.slice(0, -1), `${ADMIN}x`, ""]) {
+      const res = await worker.fetch(
+        new Request(`https://bug.smithers.sh/api/bugs/${id}`, { headers: { "x-bug-admin": guess } }),
+        env,
+      );
+      expect(res.status).toBe(401);
+    }
+    const ok = await worker.fetch(
+      new Request(`https://bug.smithers.sh/api/bugs/${id}`, { headers: { "x-bug-admin": ADMIN } }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+  });
+
+  test("a KV outage answers a clean 503 JSON error, never a thrown 1101 page", async () => {
+    const worker = createBugWorker();
+    const broken = {
+      async get(): Promise<string | null> {
+        throw new Error("KV namespace unavailable");
+      },
+      async put(): Promise<void> {
+        throw new Error("KV namespace unavailable");
+      },
+    };
+    const env: BugWorkerEnv = { ...makeEnv(), BUGS: broken };
+
+    const posted = await worker.fetch(postBug({ summary: "posted during a KV outage" }), env);
+    expect(posted.status).toBe(503);
+    expect(posted.headers.get("content-type")).toContain("application/json");
+    expect(await posted.json()).toEqual({ error: "storage unavailable" });
+
+    const read = await worker.fetch(
+      new Request("https://bug.smithers.sh/api/bugs/abc123", { headers: { "x-bug-admin": ADMIN } }),
+      env,
+    );
+    expect(read.status).toBe(503);
+    expect(read.headers.get("content-type")).toContain("application/json");
+    expect(await read.json()).toEqual({ error: "storage unavailable" });
+  });
+
   test("unmatched route falls through to 404", async () => {
     const worker = createBugWorker();
     const res = await worker.fetch(new Request("https://bug.smithers.sh/nope", { method: "DELETE" }), makeEnv());

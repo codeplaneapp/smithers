@@ -23,6 +23,12 @@ export function memoryKv(now: () => number = () => Date.now()): BugKv & {
       const expiresAt = options?.expirationTtl ? now() + options.expirationTtl * 1000 : null;
       store.set(key, { value, expiresAt });
     },
+    async list(options) {
+      const keys = [...store.keys()].filter((key) => key.startsWith(options.prefix)).sort();
+      const offset = Number(options.cursor || 0);
+      const end = offset + (options.limit || 1000);
+      return { keys: keys.slice(offset, end).map((name) => ({ name })), list_complete: end >= keys.length, cursor: String(end) };
+    },
     dump(): Map<string, string> {
       return new Map([...store.entries()].map(([k, v]) => [k, v.value]));
     },

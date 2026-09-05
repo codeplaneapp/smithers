@@ -1,6 +1,7 @@
 import type { BugWorkerEnv } from "./env.ts";
 import { bugReportSchema } from "./bugReportSchema.ts";
 import { newBugId } from "./newBugId.ts";
+import { handleRepoRequests, retryRepoNotifications } from "./repoRequests.ts";
 
 export type { BugWorkerEnv, BugKv } from "./env.ts";
 
@@ -9,6 +10,7 @@ const RATE_LIMIT_PER_HOUR = 20;
 
 export interface BugWorkerDeps {
   now: () => number;
+  fetch: typeof fetch;
 }
 
 /** Permissive on purpose: the CLI is the main client, but anyone may POST. */
@@ -26,13 +28,21 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-function timingSafeStringEqual(a: string, b: string): boolean {
+/**
+ * Compare without leaking length: both sides are hashed to a fixed-size
+ * digest first, so the loop below always runs 32 iterations and a timing
+ * side channel cannot reveal how long the admin token is.
+ */
+export async function timingSafeStringEqual(a: string, b: string): Promise<boolean> {
   const enc = new TextEncoder();
-  const ab = enc.encode(a);
-  const bb = enc.encode(b);
+  const [ah, bh] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(a)),
+    crypto.subtle.digest("SHA-256", enc.encode(b)),
+  ]);
+  const ab = new Uint8Array(ah);
+  const bb = new Uint8Array(bh);
   let diff = ab.length ^ bb.length;
-  const len = Math.max(ab.length, bb.length);
-  for (let i = 0; i < len; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  for (let i = 0; i < ab.length; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
   return diff === 0;
 }
 
@@ -43,7 +53,7 @@ function timingSafeStringEqual(a: string, b: string): boolean {
  * floods, not a hard security boundary. For a strict limit, back the counter
  * with a Durable Object or a Cloudflare Rate Limiting binding.
  */
-async function checkRateLimit(env: BugWorkerEnv, ip: string, now: number): Promise<boolean> {
+export async function checkRateLimit(env: BugWorkerEnv, ip: string, now: number): Promise<boolean> {
   const hourBucket = Math.floor(now / 3_600_000);
   const key = `ratelimit:${ip}:${hourBucket}`;
   const count = Number((await env.BUGS.get(key)) ?? "0");
@@ -58,7 +68,7 @@ async function checkRateLimit(env: BugWorkerEnv, ip: string, now: number): Promi
  * lies about) content-length cannot stream the whole platform body cap into
  * memory before the size check fires. Returns `null` when the cap is exceeded.
  */
-async function readBodyBounded(request: Request, maxBytes: number): Promise<string | null> {
+export async function readBodyBounded(request: Request, maxBytes: number): Promise<string | null> {
   const body = request.body;
   if (!body) return "";
   const reader = body.getReader();
@@ -95,7 +105,15 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
   }
 
   const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for") ?? "unknown";
-  if (!(await checkRateLimit(env, ip, now))) {
+  // A KV exception escaping the fetch handler becomes workerd's 1101 HTML
+  // page; answer a clean JSON error instead.
+  let allowed: boolean;
+  try {
+    allowed = await checkRateLimit(env, ip, now);
+  } catch {
+    return json(503, { error: "storage unavailable" });
+  }
+  if (!allowed) {
     return json(429, { error: `rate limit exceeded (${RATE_LIMIT_PER_HOUR} reports per hour per IP)` });
   }
 
@@ -117,7 +135,11 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
 
   const id = newBugId(now);
   const record = { id, receivedAt: new Date(now).toISOString(), report: result.data };
-  await env.BUGS.put(`bug:${id}`, JSON.stringify(record));
+  try {
+    await env.BUGS.put(`bug:${id}`, JSON.stringify(record));
+  } catch {
+    return json(503, { error: "storage unavailable" });
+  }
 
   const base = (env.PUBLIC_BASE_URL ?? "https://bug.smithers.sh").replace(/\/$/, "");
   return json(201, { id, url: `${base}/api/bugs/${id}` });
@@ -125,10 +147,15 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
 
 async function handleGetBug(request: Request, env: BugWorkerEnv, id: string): Promise<Response> {
   const provided = request.headers.get("x-bug-admin") ?? "";
-  if (!env.BUG_ADMIN_TOKEN || !timingSafeStringEqual(provided, env.BUG_ADMIN_TOKEN)) {
+  if (!env.BUG_ADMIN_TOKEN || !(await timingSafeStringEqual(provided, env.BUG_ADMIN_TOKEN))) {
     return json(401, { error: "x-bug-admin header required" });
   }
-  const stored = await env.BUGS.get(`bug:${id}`);
+  let stored: string | null;
+  try {
+    stored = await env.BUGS.get(`bug:${id}`);
+  } catch {
+    return json(503, { error: "storage unavailable" });
+  }
   if (stored === null) return json(404, { error: "not found" });
   return new Response(stored, {
     headers: { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS },
@@ -140,8 +167,11 @@ async function handleGetBug(request: Request, env: BugWorkerEnv, id: string): Pr
  * clock. The default export uses the real clock.
  */
 export function createBugWorker(overrides?: Partial<BugWorkerDeps>) {
-  const deps: BugWorkerDeps = { now: () => Date.now(), ...overrides };
+  const deps: BugWorkerDeps = { now: () => Date.now(), fetch: globalThis.fetch, ...overrides };
   return {
+    async scheduled(_event: unknown, env: BugWorkerEnv): Promise<void> {
+      await retryRepoNotifications(env, deps);
+    },
     async fetch(request: Request, env: BugWorkerEnv): Promise<Response> {
       const url = new URL(request.url);
 
@@ -150,6 +180,9 @@ export function createBugWorker(overrides?: Partial<BugWorkerDeps>) {
       }
       if (request.method === "GET" && url.pathname === "/healthz") {
         return json(200, { ok: true });
+      }
+      if (url.pathname === "/api/repo-requests" || url.pathname.startsWith("/api/repo-requests/")) {
+        return handleRepoRequests(request, env, deps);
       }
       if (request.method === "POST" && url.pathname === "/api/bugs") {
         return handlePostBug(request, env, deps.now());

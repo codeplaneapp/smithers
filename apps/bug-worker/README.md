@@ -3,6 +3,12 @@
 Cloudflare Worker behind `https://bug.smithers.sh` that receives bug reports
 from `smithers bug` (and anyone else) and stores them in KV.
 
+## Community repositories
+
+The home page also uses this Worker for public repository requests, smithering
+status, and completion emails. See [REPO-REQUESTS.md](./REPO-REQUESTS.md) for
+the app handoff, API, notification configuration, and deployment requirements.
+
 ## The payload
 
 Two shapes reach this endpoint and both are stored. The worker is deployed once

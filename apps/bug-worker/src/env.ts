@@ -5,6 +5,9 @@
 export interface BugKv {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  list?(options: { prefix: string; limit?: number; cursor?: string }): Promise<{
+    keys: { name: string }[]; list_complete: boolean; cursor?: string;
+  }>;
 }
 
 /**
@@ -17,4 +20,7 @@ export interface BugWorkerEnv {
   BUG_ADMIN_TOKEN: string;
   /** Public origin used for the returned bug URL, e.g. https://bug.smithers.sh */
   PUBLIC_BASE_URL?: string;
+  /** Transactional completion emails. Missing configuration keeps them pending. */
+  RESEND_API_KEY?: string;
+  NOTIFICATION_FROM?: string;
 }
