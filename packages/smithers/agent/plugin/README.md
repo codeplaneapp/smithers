@@ -1,7 +1,7 @@
 # `@smthrs/plugin`
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://plugin.smithers.sh
@@ -11,7 +11,7 @@ hooks that are ordinary Effects, ordering that follows Vite's rules exactly, and
 a resolution boundary that copies every value a caller hands it.
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.108
+pnpm add @smthrs/plugin effect@4.0.0-rc.112
 ```
 
 ```ts
@@ -49,8 +49,11 @@ declare module "@smthrs/plugin" {
 }
 ```
 
-The shipped example is the Smithers agent cell host in `@smthrs/agent`, which
-adds three waterfalls to the kernel's two hooks.
+The shipped host is the Smithers agent loop in
+[`@smthrs/agent`](https://agent.smithers.sh), which adds three waterfalls to the
+kernel's two hooks and dispatches them around each frame of an agent cell. Both
+packages sit under the `smthrs` command line,
+[`@smthrs/cli`](https://cli.smithers.sh).
 
 ## What it does not do
 

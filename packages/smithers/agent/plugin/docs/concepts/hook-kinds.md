@@ -64,9 +64,10 @@ const replaced = kernel.plugins.waterfall("tools", initial, (_previous, next) =>
 `Config.merge` deep-merges each returned patch into the accumulated
 configuration, which is what makes the `config` hook a patch protocol. A host
 that wants replacement passes `(_previous, next) => next`, which is what the
-agent cell host does for its registry, flow, and model-request waterfalls. A
-handler that returns `undefined` (an `Effect.void` handler) leaves the value
-untouched: the merge is not called at all.
+Smithers agent host in [`@smthrs/agent`](/api/agent) does for its registry,
+flow, and model-request waterfalls. A handler that returns `undefined` (an
+`Effect.void` handler) leaves the value untouched: the merge is not called at
+all.
 
 ## The kind lives in the type and in the catalog
 

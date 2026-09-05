@@ -6,11 +6,15 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/plugin/docs/guides/cache-identity.md"
 ---
 
-A sealed step in the durable engine is content-addressed: the same call replays
-one recorded result instead of paying the provider again. That is only safe when
-the key covers the composition the result was computed under. Swap a model
-plugin and keep the key, and the run is served a stale answer computed by a
-different composition.
+Skip this guide unless your host runs on the Smithers durable engine, which is
+what reads the identity described here. Everything else in this package works
+without it.
+
+A sealed step in the [durable engine](https://engine.smithers.sh/reference/api/) is content-addressed: the
+same call replays one recorded result instead of paying the provider again.
+That is only safe when the key covers the composition the result was computed
+under. Swap a model plugin and keep the key, and the run is served a stale
+answer computed by a different composition.
 
 The kernel is where a host says what its composition is. Declaring
 `cacheEnvironment` folds every selected plugin's identity into the environment

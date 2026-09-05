@@ -19,7 +19,7 @@ Everything here runs in one file with no services to provide and no I/O.
 - A TypeScript project with the package installed:
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.108
+pnpm add @smthrs/plugin effect@4.0.0-rc.112
 ```
 
 ## Declare the host's hook catalog
@@ -110,9 +110,10 @@ console.log(kernel.config)
 // { host: { name: "quickstart" }, editor: { readOnly: false } }
 ```
 
-Pass `target: "harness"` when your host is not the engine. The kernel defaults
-to `"engine"`, and the target is what a plugin's `apply: "engine" | "harness"`
-selector is compared against.
+`target` names which kind of host you are, and it is what a plugin's
+`apply: "engine" | "harness"` selector is compared against. It defaults to
+`"engine"`, meaning the Smithers durable engine, so pass `"harness"` for any
+other host, including this one.
 
 ## Dispatch the hook
 

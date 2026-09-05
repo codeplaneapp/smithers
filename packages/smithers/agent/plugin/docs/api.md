@@ -432,7 +432,8 @@ What to change for each code is in [Troubleshooting](./troubleshooting.md).
 
 ## Related packages
 
-The production hook catalog is the Smithers agent cell host in
+The shipped hook catalog is the Smithers agent loop in
 [`@smthrs/agent`](/api/agent), which augments `FlowsHooks` with three
 waterfalls. `Action.CacheEnvironment` comes from
-[`@smthrs/flow`](/api/flow).
+[`@smthrs/flow`](/api/flow), the one other runtime dependency this package
+has.

@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/age
 ## Install the package
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.108
+pnpm add @smthrs/plugin effect@4.0.0-rc.112
 ```
 
 Install `effect` explicitly at that version. The kernel depends on it, but your
