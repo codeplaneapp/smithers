@@ -18,10 +18,11 @@
       "default": "./alchemy-site.mjs"
     }
   },
-  "dependencies": {
-    "alchemy": "^0.93.12"
-  },
   "devDependencies": {
-    "@astrojs/starlight": "^0.36.0"
+    "@astrojs/starlight": "^0.42.0",
+    "alchemy": "2.0.0-beta.76"
+  },
+  "peerDependencies": {
+    "alchemy": "2.0.0-beta.76"
   }
 }

@@ -38,13 +38,6 @@ const entries = [
   ["scorers", "@smthrs/scorers", "packages/smithers/agent/scorers"],
   ["std", "@smthrs/std", "packages/smithers/agent/std"],
   ["triggers", "@smthrs/triggers", "packages/smithers/agent/triggers"],
-  // @smthrs/build's docs slug is "smithers-build", not "build":
-  // build.smithers.sh belongs to the build remote-cache worker in prod
-  // (packages/smithers/build/infra/deployment.ts), so the docs site must not
-  // claim that hostname on deploy.
-  ["smithers-build", "@smthrs/build", "packages/smithers/build"],
-  ["build-cli", "@smthrs/build-cli", "packages/smithers/build/build-cli"],
-  ["targets", "@smthrs/targets", "packages/smithers/build/targets"],
   ["control", "@smthrs/control", "packages/smithers/control"],
   ["create-app", "@smthrs/create-app", "packages/smithers/create-app"],
   ["cli", "@smthrs/cli", "packages/smithers"],
@@ -63,7 +56,7 @@ const entries = [
   ["kernel", "@smthrs/kernel", "packages/smithers/flows/kernel"],
   ["keys", "@smthrs/keys", "packages/smithers/flows/keys"],
   ["observability", "@smthrs/observability", "packages/smithers/flows/observability"],
-  ["patterns", "@smthrs/patterns", "packages/smithers/flows/patterns"],
+  ["smithers-patterns", "@smthrs/patterns", "packages/smithers/flows/patterns"],
   ["plan", "@smthrs/plan", "packages/smithers/flows/plan"],
   ["platform-browser", "@smthrs/platform-browser", "packages/smithers/flows/platform-browser"],
   ["platform-bun", "@smthrs/platform-bun", "packages/smithers/flows/platform-bun"],
@@ -71,7 +64,7 @@ const entries = [
   ["run-store", "@smthrs/run-store", "packages/smithers/flows/run-store"],
   ["sandbox", "@smthrs/sandbox", "packages/smithers/flows/sandbox"],
   ["step-cache", "@smthrs/step-cache", "packages/smithers/flows/step-cache"],
-  ["sync", "@smthrs/sync", "packages/smithers/flows/sync"],
+  ["smithers-sync", "@smthrs/sync", "packages/smithers/flows/sync"],
   ["time-travel", "@smthrs/time-travel", "packages/smithers/flows/time-travel"],
   ["gateway", "@smthrs/gateway", "packages/smithers/gateway"],
   ["mcp", "@smthrs/mcp", "packages/smithers/mcp"],
@@ -79,8 +72,6 @@ const entries = [
   ["notifications", "@smthrs/notifications", "packages/smithers/notifications"],
   ["errors", "@smthrs/errors", "packages/errors"],
   ["testing", "@smthrs/testing", "packages/testing"],
-  ["ui", "@smthrs/ui", "packages/smithers/ui"],
-  ["ui-styleguide", "@smthrs/ui-styleguide", "packages/smithers/ui/ui-styleguide"],
   ["smthrs", "smthrs", "packages/smthrs-deprecation"]
 ]
 

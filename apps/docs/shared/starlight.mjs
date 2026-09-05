@@ -6,7 +6,7 @@
  * apps/docs/<slug>/astro.config.mjs calls defineDocsSite with the site's row
  * from manifest.mjs; everything shared — the smithers.sh branding, the
  * Google Fonts head tags, the expressive-code font, the social links, and the
- * sidebar — lives here so 53 sites stay identical by construction.
+ * sidebar — lives here so package sites stay identical by construction.
  *
  * The factory takes the starlight integration as a parameter rather than
  * importing it: @astrojs/starlight's entry is a raw .ts file, and astro's
@@ -86,7 +86,7 @@ export function sidebarFor(contentRoot) {
     .sort()
     .map((dir) => [dir, titleCase(dir)])
   for (const [dir, label] of [...standard, ...others]) {
-    if (dirHasPages(contentRoot, dir)) sidebar.push({ label, autogenerate: { directory: dir } })
+    if (dirHasPages(contentRoot, dir)) sidebar.push({ label, items: [{ autogenerate: { directory: dir } }] })
   }
   return sidebar
 }
@@ -110,6 +110,7 @@ export function defineDocsSite({ starlight, slug, title, description, sourceDir,
     integrations: [
       starlight({
         title,
+        routeMiddleware: "../shared/release-notice.mjs",
         description,
         logo: { src: "./src/docs-assets/logo.png", alt: "Smithers" },
         favicon: "/favicon.png",

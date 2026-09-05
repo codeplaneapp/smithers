@@ -43,14 +43,14 @@ const packageJson = (site) =>
         destroy: "alchemy destroy"
       },
       devDependencies: {
-        "@astrojs/check": "^0.9.4",
+        "@astrojs/check": "^0.9.10",
         "@smithers/docs-shared": "workspace:*",
-        alchemy: "^0.93.12",
-        typescript: "~6.0.3"
+        alchemy: "2.0.0-beta.76",
+        typescript: "~5.9.3"
       },
       dependencies: {
-        "@astrojs/starlight": "^0.36.0",
-        astro: "^5.13.2"
+        "@astrojs/starlight": "^0.42.0",
+        astro: "^7.3.1"
       }
     },
     null,

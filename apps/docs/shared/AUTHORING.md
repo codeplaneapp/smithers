@@ -124,6 +124,15 @@ sidebar:
 ---
 ```
 
+## Release status
+
+`shared/release-notice.mjs` adds the current prerelease notice to every rendered
+package page and the main docs. Remove it from both Starlight configurations
+when 1.0 is published, and update the source-checkout notice in the main
+installation guide and `generate-project-copy.mjs` at the same time. Package
+installation pages that describe unpublished packages must also be refreshed
+against the release manifest and registry.
+
 ## Verify your work
 
 From the repo root, with your slug:
