@@ -1,3 +1,5 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
+import { ReviewTagsMigrationsAndKeys } from "@smthrs/repo-targets"
 /**
  * Standard package targets.
  *
@@ -5,7 +7,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
   cwd: "packages/smithers/flows/database",
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
@@ -18,7 +20,7 @@ const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.Stan
  * @since 0.1.0
  * @category lint
  */
-const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smithers/flows/database" })
+const reviewTagsMigrationsAndKeys = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/database" })
 
 /**
  * The package's fault-injection cases.
@@ -33,5 +35,5 @@ const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smit
 const faults = Smithers.FaultSuite({ cwd: "packages/smithers/flows/database" })
 
 export const Package = Smithers.Package({
-  targets: { check, circular, docs, docsFiles, durableIdentityGuard, faults, fmt, lib, lint, test }
+  targets: { check, circular, docs, docsFiles, reviewTagsMigrationsAndKeys, faults, fmt, lib, lint, test }
 })

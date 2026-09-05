@@ -50,8 +50,8 @@ These are the blocks the shipped packages reserve:
 | [`@smthrs/time-travel`](https://time-travel.smithers.sh/reference/api/)   | `time-travel`  | `idBlock * 5` | `5001`             |
 | [`@smthrs/control`](https://control.smithers.sh/reference/api/)           | `control`      | `idBlock * 6` | `6001`             |
 
-Offsets must be unique among the sets composed into one database, not across
-the repository. [`@smthrs/integrations`](https://integrations.smithers.sh/reference/api/) also reserves
+Offsets must be unique among the sets composed into one database, not
+globally. [`@smthrs/integrations`](https://integrations.smithers.sh/reference/api/) also reserves
 `idBlock * 6` because it migrates a different database and is never composed
 with `control`.
 

@@ -11,9 +11,10 @@
  *
  * @since 0.1.0
  */
-import { Cause, Context, Effect, Layer, Option, Schema } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Option, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlError from "effect/unstable/sql/SqlError"
+import * as CommitScope from "./internal/CommitScope.ts"
 import * as WriteRetry from "./internal/WriteRetry.ts"
 
 /**
@@ -92,6 +93,23 @@ export interface Service {
  * @since 0.1.0
  */
 export class DurableWriter extends Context.Service<DurableWriter, Service>()("@smthrs/database/DurableWriter") {}
+
+/**
+ * Schedules a non-failing process-local update after the outermost managed
+ * write commits. Failed savepoints and retried attempts discard their updates.
+ *
+ * Returns false without running the update outside a managed write, including
+ * raw SQL transactions/savepoints whose commit this writer does not own.
+ * Callers may skip optional cache publication in that case; they must never
+ * interpret false as permission to publish uncommitted state. Keep updates
+ * short: publication is uninterruptible and is not retried with the SQL body.
+ * Pass the store's SQL client when an update belongs to a particular database;
+ * a nested transaction on another client must not own its publication.
+ *
+ * @category transactions
+ * @since 1.0.0
+ */
+export const afterCommit = CommitScope.afterCommit
 
 /**
  * Converts an Effect SQL error into the package's stable error vocabulary.
@@ -184,23 +202,48 @@ export const make = (sql: SqlClient.SqlClient, options?: WriteRetryOptions | und
     write: Effect.fn("DurableWriter.write")(<A, E, R>(
       effect: Effect.Effect<A, E, R>
     ): Effect.Effect<A, E | DatabaseError, R> =>
-      Effect.flatMap(
-        Effect.serviceOption(sql.transactionService),
-        (enclosing) =>
-          Effect.annotateCurrentSpan({ nested: Option.isSome(enclosing) }).pipe(
-            Effect.andThen(
-              (Option.isSome(enclosing)
-                // Inside the client's transaction this write is a savepoint, and a
-                // transient conflict dooms the enclosing transaction's snapshot:
-                // replaying the savepoint alone can never resolve it, so the retry
-                // belongs to the outermost write only.
-                ? sql.withTransaction(effect)
-                : WriteRetry.withWriteRetry(sql.withTransaction(effect), options)).pipe(
-                  Effect.catchCause((cause) => Effect.failCause(normalizeSqlErrors(cause)))
-                )
+      Effect.gen(function*() {
+        const enclosing = yield* Effect.serviceOption(sql.transactionService)
+        const parent = yield* CommitScope.Current
+        const nested = Option.isSome(enclosing)
+        const managed = !nested || CommitScope.matches(parent, sql.transactionService, enclosing.value)
+        yield* Effect.annotateCurrentSpan({ nested })
+        // Allocate inside the retry boundary. Each savepoint also owns a fresh
+        // list so a failure caught by its parent cannot publish rolled-back data.
+        const attempt = Effect.suspend(() => {
+          const effects: Array<Effect.Effect<void>> = []
+          let scope: CommitScope.CommitScope | undefined
+          return sql.withTransaction(
+            Effect.flatMap(Effect.serviceOption(sql.transactionService), (transaction) => {
+              scope = managed && Option.isSome(transaction)
+                ? { key: sql.transactionService, transaction: transaction.value, effects, open: true }
+                : undefined
+              return Effect.provideService(effect, CommitScope.Current, scope)
+            })
+          ).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              if (scope !== undefined) scope.open = false
+            })),
+            Effect.map((value) => ({ value, effects }))
+          )
+        })
+        return yield* Effect.uninterruptibleMask((restore) =>
+          restore(nested ? attempt : WriteRetry.withWriteRetry(attempt, options)).pipe(
+            Effect.catchCause((cause) => Effect.failCause(normalizeSqlErrors(cause))),
+            Effect.flatMap(({ value, effects }) =>
+              (nested
+                ? Effect.sync(() => {
+                  if (managed) parent!.effects.push(...effects)
+                })
+                // A defective update must not suppress the other committed
+                // publications. Retain every failure, but never retry SQL.
+                : Effect.forEach(effects, (update) => Effect.exit(update)).pipe(
+                  Effect.flatMap((exits) => Exit.asVoidAll(exits))
+                )).pipe(Effect.as(value))
             )
           )
-      )
+        )
+      })
     )
   })
 

@@ -37,12 +37,20 @@ compare-and-swap into a reported no-op.
 
 ## Pass the conformance suite
 
-`packages/smithers/flows/database/test/contract/DatabaseWriteContract.ts`
-exports `describeContract(harness)`. A new backend layer is not done until it
-is added there.
+Those guarantees are executable. The suite that checks them is
+[`test/contract/DatabaseWriteContract.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/test/contract/DatabaseWriteContract.ts)
+in this package's source repository, which exports `describeContract(harness)`
+and runs under Vitest. A new backend layer is not done until it passes.
 
-Supply a harness that builds two client and writer pairs over one freshly
-created store:
+The suite ships with the repository rather than with the npm package, and it
+imports this package's internal retry classifier, which the export map blocks.
+So run it where it lives: clone
+[smithersai/smithers](https://github.com/smithersai/smithers), add a harness
+file for your backend beside the two that are already there, and run the
+package's tests. A driver you maintain outside the repository can still read
+the suite as the specification and reproduce its assertions in your own tests.
+
+A harness builds two client and writer pairs over one freshly created store:
 
 ```ts
 import { describeContract, type Harness } from "./contract/DatabaseWriteContract.ts"
@@ -72,15 +80,19 @@ another connection starts afterwards, that a failed write transaction rolls
 back whole with no partial effect for a peer to read, and that an affected-row
 count is readable for a delete that matches and one that does not.
 
-## The two harnesses already in the tree
+## Two worked harnesses
 
-`test/DatabaseWriteContract.test.ts` runs the suite against the shared
-in-memory `TestDatabase` connection, where `realDriver` and `crossConnection`
-are both false and serialization comes from the client's in-process transaction
-mutex, a weaker mechanism that must still satisfy the same contract.
-`test/DatabaseWriteContractIntegration.test.ts` runs it against two
-`NodeDatabase` connections over one file, where serialization can only come
-from SQLite's cross-connection lock. Read both before writing a third.
+Two harnesses are already written, and between them they show both settings of
+each flag. Read both before you write a third.
+
+[`test/DatabaseWriteContract.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/test/DatabaseWriteContract.test.ts)
+runs the suite against the shared in-memory `TestDatabase` connection, where
+`realDriver` and `crossConnection` are both false and serialization comes from
+the client's in-process transaction mutex, a weaker mechanism that must still
+satisfy the same contract.
+[`test/DatabaseWriteContractIntegration.test.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/test/DatabaseWriteContractIntegration.test.ts)
+runs it against two `NodeDatabase` connections over one file, where
+serialization can only come from SQLite's cross-connection lock.
 
 ## What a backend does not have to supply
 

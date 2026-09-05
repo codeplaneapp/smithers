@@ -10,8 +10,8 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 transaction-scoped retries. It is one combinator, not a decorated client:
 queries still use Effect's plain `SqlClient`. The combinator exists because
 several storage packages share transaction policy that has to live at exactly
-one boundary, and each of the three properties below is depended on for
-correctness somewhere in the repository.
+one boundary, and a store above it depends on each of the three properties
+below for correctness.
 
 ## Serialization is contract, not incidental
 
@@ -31,8 +31,8 @@ PostgreSQL implementation must run write transactions at `SERIALIZABLE` and
 retry `40001`. Plain `READ COMMITTED` does not satisfy it, and adopting it
 would silently reintroduce the cycle race.
 
-The contract is executable. `test/contract/DatabaseWriteContract.ts` exports
-`describeContract(harness)`, and it is run against two `NodeDatabase`
+The contract is executable. The package ships a conformance suite that a new
+client layer has to pass, and runs it both against two `NodeDatabase`
 connections over one file and against the shared in-memory `TestDatabase`
 connection. See [Add a backend driver](/guides/add-a-backend/).
 
@@ -49,13 +49,37 @@ wrapped a savepoint failure in its own domain error still keeps the outermost
 transaction replaying, as long as that domain error preserves `cause`. This is
 what makes a state projection and its journal entry retryable as one unit.
 
+## Process-local state follows the outer commit
+
+Do not update a cache or notify subscribers from a transaction body. Even
+after an inner `write` succeeds, its enclosing transaction can still roll back.
+Use `DurableWriter.afterCommit(update)` inside the managed write to register a
+short, non-failing process-local update. It runs once, after the outermost
+commit, outside the SQL retry loop. Failed attempts discard their updates;
+a caught savepoint failure discards only that savepoint's updates.
+
+Store implementations should pass their captured SQL client as the second
+argument: `DurableWriter.afterCommit(update, sql)`. This prevents an unrelated
+database's nested transaction from publishing an update before its own
+database commits.
+
+The helper returns `false` without running the update if no managed write owns
+the current transaction. This includes a raw `sql.withTransaction` or raw
+savepoint. Skip optional cache publication in that case and read authoritative
+state from SQL; `false` is **not** permission to publish immediately. Use the
+shared writer for transactions that need commit notifications.
+
+Publication is uninterruptible, so updates must be short and non-blocking.
+This hook is not a durable outbox: a crash after SQL commits can lose local
+publication. External deliveries need their own durable records and retries.
+
 ## Retry classification is domain policy
 
 Classification is dialect blind by construction. `DurableWriter.make` accepts
 any `SqlClient`, so keying only off SQLite codes made the retry silently inert
 for other drivers, and a serialization failure, which is the normal outcome of
 two drivers fencing one run, surfaced as a hard write error. Both vocabularies
-are recognized, and a code from the wrong dialect simply never matches.
+are recognized, and a code from the wrong dialect never matches.
 
 | Category     | Recognized as                                                                                                                                                                                                                 | Replayed |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
@@ -71,9 +95,9 @@ Three properties of the classifier are load bearing:
 
 - **One function decides both answers.** The code `fromSqlError` reports and
   the decision to replay come from the same call, so the category a caller is
-  told is always the category the retry budget was spent on. They used to
-  disagree: an `SQLITE_IOERR` whose own cause carried `SQLITE_BUSY` was
-  reported as `io` and retried anyway.
+  told is always the category the retry budget was spent on. Split across two
+  functions the two answers drift: an `SQLITE_IOERR` whose own cause carries
+  `SQLITE_BUSY` gets reported as `io` and retried anyway.
 - **I/O outranks a busy cause beneath it.** The write did reach the disk, so an
   I/O failure is never replayed even when a lock error hides in its cause
   chain.

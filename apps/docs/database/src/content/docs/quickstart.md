@@ -14,11 +14,9 @@ recording what was applied, and a program that is safe to run again.
 ## Prerequisites
 
 - Node.js 22.19.0 or later.
-- A package with the dependencies installed:
-
-```bash
-pnpm add @smthrs/database effect
-```
+- A package with `@smthrs/database`, `effect`, and `@effect/sql-sqlite-node`
+  resolved. See [Installation](/installation/), which also covers where the
+  package comes from while it is unpublished.
 
 ## Declare the migration
 

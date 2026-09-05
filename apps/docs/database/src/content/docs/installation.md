@@ -6,19 +6,29 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/database/docs/installation.md"
 ---
 
-## Install
+## Availability
+
+`@smthrs/database` is not published to npm yet. Its source is on
+[GitHub](https://github.com/smithersai/smithers), and the storage packages
+listed below are the worked examples of everything on this page.
+
+When it is published, the install is:
 
 ```bash
-pnpm add @smthrs/database effect
+pnpm add @smthrs/database@1.0.0-rc.0 effect@4.0.0-rc.112
 ```
 
-`effect` is a direct dependency of this package and must resolve to the same
-version your application uses. Mixing two copies of `effect` splits the
-`SqlClient` service identity, and a writer built against one copy cannot see a
-client provided from the other.
+`effect` is a required exact peer. The SQLite adapter is an optional exact
+peer, needed by `node/NodeDatabase` and `test/TestDatabase`, including the
+verification example below. Install it when selecting either subpath:
 
-The Node driver pulls in `@effect/sql-sqlite-node`, which ships with the
-package. You do not install it separately.
+```bash
+pnpm add @effect/sql-sqlite-node@4.0.0-rc.112
+```
+
+The driver-neutral root needs no SQLite adapter. Mixing two copies
+of `effect` splits the `SqlClient` service identity, and a writer built against
+one copy cannot see a client provided from the other.
 
 ## Requirements
 
@@ -38,7 +48,7 @@ platform packages out of its root.
 // Driver neutral. Safe in a browser bundle.
 import { DatabaseMetrics, DurableWriter, Migrations, UnsupportedBackend } from "@smthrs/database"
 
-// Or one namespace at a time, which is what the repository does.
+// Or one namespace at a time, which keeps the import graph narrow.
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as Migrations from "@smthrs/database/Migrations"
 
@@ -53,16 +63,15 @@ consumer needs is reachable from the paths above.
 ## What a real composition adds
 
 This package provides a client and a write policy. It does not provide tables.
-An application that stores run state composes the storage packages that own
-them, and each one contributes its migration set:
+An application that stores run state also depends on the storage packages that
+own them, and each one contributes its migration set:
+[`@smthrs/journal`](https://journal.smithers.sh/reference/api/), [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/),
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/), and
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/).
 
-```bash
-pnpm add @smthrs/journal @smthrs/run-store @smthrs/step-cache @smthrs/engine-store
-```
-
-[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/) exports `Migrations.sets`, the
-complete list a durable engine needs, so most applications compose that rather
-than assembling the sets by hand. For the wiring, see
+`@smthrs/engine-store` exports `Migrations.sets`, the complete list a durable
+engine needs, so most applications compose that rather than assembling the sets
+by hand. For the wiring, see
 [Compose a database layer](/guides/compose-a-database/).
 
 ## Verify the install

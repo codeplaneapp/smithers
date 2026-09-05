@@ -35,9 +35,15 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./DatabaseMetrics": "./src/DatabaseMetrics.ts",
+    "./DurableWriter": "./src/DurableWriter.ts",
+    "./Migrations": "./src/Migrations.ts",
+    "./UnsupportedBackend": "./src/UnsupportedBackend.ts",
+    "./index": "./src/index.ts",
+    "./node/NodeDatabase": "./src/node/NodeDatabase.ts",
+    "./test/TestDatabase": "./src/test/TestDatabase.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +67,43 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./DatabaseMetrics": {
+        "types": "./dist/esm/DatabaseMetrics.d.ts",
+        "import": "./dist/esm/DatabaseMetrics.js",
+        "require": "./dist/cjs/DatabaseMetrics.js"
+      },
+      "./DurableWriter": {
+        "types": "./dist/esm/DurableWriter.d.ts",
+        "import": "./dist/esm/DurableWriter.js",
+        "require": "./dist/cjs/DurableWriter.js"
+      },
+      "./Migrations": {
+        "types": "./dist/esm/Migrations.d.ts",
+        "import": "./dist/esm/Migrations.js",
+        "require": "./dist/cjs/Migrations.js"
+      },
+      "./UnsupportedBackend": {
+        "types": "./dist/esm/UnsupportedBackend.d.ts",
+        "import": "./dist/esm/UnsupportedBackend.js",
+        "require": "./dist/cjs/UnsupportedBackend.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./node/NodeDatabase": {
+        "types": "./dist/esm/node/NodeDatabase.d.ts",
+        "import": "./dist/esm/node/NodeDatabase.js",
+        "require": "./dist/cjs/node/NodeDatabase.js"
+      },
+      "./test/TestDatabase": {
+        "types": "./dist/esm/test/TestDatabase.d.ts",
+        "import": "./dist/esm/test/TestDatabase.js",
+        "require": "./dist/cjs/test/TestDatabase.js"
+      }
     }
   },
   "scripts": {
@@ -79,29 +115,33 @@
     "test": "vitest",
     "coverage": "vitest --coverage"
   },
-  "dependencies": {
-    "@effect/sql-sqlite-node": "4.0.0-rc.108"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  },
+  "peerDependenciesMeta": {
+    "@effect/sql-sqlite-node": {
+      "optional": true
+    }
   }
 }

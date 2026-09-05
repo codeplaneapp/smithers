@@ -49,8 +49,8 @@ These are the blocks the shipped packages reserve:
 | [`@smthrs/time-travel`](/api/time-travel)   | `time-travel`  | `idBlock * 5` | `5001`             |
 | [`@smthrs/control`](/api/control)           | `control`      | `idBlock * 6` | `6001`             |
 
-Offsets must be unique among the sets composed into one database, not across
-the repository. [`@smthrs/integrations`](/api/integrations) also reserves
+Offsets must be unique among the sets composed into one database, not
+globally. [`@smthrs/integrations`](/api/integrations) also reserves
 `idBlock * 6` because it migrates a different database and is never composed
 with `control`.
 

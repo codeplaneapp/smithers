@@ -57,6 +57,22 @@ Two guarantees are contract rather than implementation detail:
 
 See [the write boundary](./concepts/write-boundary.md).
 
+### afterCommit
+
+```ts
+const afterCommit: (update: Effect.Effect<void>) => Effect.Effect<boolean>
+```
+
+Registers a short, non-failing process-local update inside a managed `write`.
+The outermost successful commit runs it once, outside SQL retries. Failed
+attempts and rolled-back savepoints discard their registrations. The update
+runs uninterruptibly; it must not block or perform external deliveries.
+
+Returns `false` without running the update when the current transaction is not
+owned by the writer, including raw SQL transactions/savepoints. Skip optional
+cache publication in that case; never publish uncommitted data as a fallback.
+See [commit ownership](./concepts/write-boundary.md#process-local-state-follows-the-outer-commit).
+
 ### make
 
 ```ts
@@ -250,13 +266,19 @@ rather than returning a list the migrator would quietly mishandle:
 | Malformed key                        | `Malformed migration key "<key>" in namespace <namespace>`                                                     |
 | Local id at or above `idBlock`       | `Local migration id <id> ... is outside the block range 0..999 and would claim a neighbouring package's block` |
 | Two keys realizing one id            | `Migration id <id> is claimed twice: <owner> and <claimant>`                                                   |
-| An id the high-water mark would skip | `Migration <id>_<name> would be skipped: the database has already applied migration id <highWater> ...`        |
+| A historical hole or new lower block | `Migration <id>_<name> would be skipped: the database has already applied migration id <highWater> ...`        |
+| A recorded id/name mismatch          | `Migration <id> was recorded as <name>, but this package declares <otherName>`                                 |
 | An unreadable ledger id              | `flows_migrations contains an invalid migration_id: <value>`                                                   |
 
 On a fresh database the loader applies global id zero itself, inside the
 migrator's transaction, because the migrator's high-water mark starts at zero
 and would silently skip it. A caller wiring the loader into its own `Migrator`
-therefore gets id zero applied but not reported in the migrator's completed
+therefore gets id zero applied. The loader also applies forward additions to
+an installed package block below the global high-water mark. Each such block
+must include a declaration matching an already recorded id and name. Earlier
+holes, changed recorded names, and newly introduced lower blocks are refused.
+All applications share the migrator transaction. The upstream migrator's
+completed list omits loader-applied entries; use `run` to receive the complete
 list.
 
 ### run
@@ -270,7 +292,7 @@ const run: (sets: ReadonlyArray<MigrationSet>) => Effect.Effect<
 ```
 
 Runs every migration in the given sets that has not been applied yet, and
-answers the `[id, name]` pairs it applied on this pass, including id zero. A
+answers the `[id, name]` pairs it applied on this pass, including id zero and installed lower-block appends. A
 pass with nothing to do answers an empty array.
 
 The whole migrator pass, the `BEGIN IMMEDIATE`, the loader, and the pending

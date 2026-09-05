@@ -12,9 +12,9 @@ its teeth.
 ## 1. Write the migration
 
 Put each migration in its own file under your package, and export it by name.
-The repository keeps them under `src/internal/migrations/` or
-`src/migrations/`, one file per migration, named for the key that references
-it:
+Keep them under `src/internal/migrations/`, one file per migration, named for
+the key that references it. That is the layout the Smithers storage packages
+use:
 
 ```ts
 import * as Effect from "effect/Effect"
@@ -69,39 +69,37 @@ Zero padding is cosmetic: the loader parses the digits. Two keys that parse to
 the same number are rejected, so `0002_a` beside `02_b` fails with
 `Migration id 3002 is claimed twice`.
 
-## 3. Check the id against the database, not just the set
+## 3. Append within the package's existing block
 
-This is the rule that bites.
+A migration's global id is `idOffset + localId`. For an installed package,
+choose a local id greater than every id already applied in that package's
+block. Keep its earlier migration identities in the set. The loader checks
+recorded names against declared names before it applies anything.
 
-`Migrator` decides what to run from a single high-water mark: it runs ids
-strictly above the highest id the database has already applied. Your new
-migration's global id is `idOffset + localId`. If a database has already
-applied a higher id from some other package's block, your migration would be
-assumed done and never run, so the loader refuses the pass instead:
+The underlying Effect migrator uses one global high-water mark. Smithers
+handles forward additions in lower installed blocks inside that same database
+transaction, records their ids, and reports them alongside the ordinary
+forward pass. A journal migration at id 3 can therefore follow an already
+installed plan migration at id 4003 without renumbering either package.
 
-```text
-Migration 1002_lineage would be skipped: the database has already applied
-migration id 4003, and the migrator only runs ids above the highest applied
-one. Compose every package's migration set from the first migration onwards,
-and give a new migration an id above 4003.
-```
+Earlier holes remain errors: inserting id 2 after this package has applied id
+3 is refused. Introducing a completely new lower block after higher packages
+have run is also refused. A new package still reserves a higher unused block.
+This prevents an omitted dependency from being silently treated as installed.
+A different namespace cannot take over an installed block by changing its
+recorded names or supplying only a new id.
 
-Two consequences follow, and neither is optional:
-
-- **A fresh database is always fine.** Every set is composed from its first
-  migration, the whole ladder runs in id order in one pass, and no id is ever
-  below the mark.
-- **An existing database accepts a new migration only when its global id sorts
-  above every id already applied to it.** A package whose block sits below
-  another package's applied block cannot extend that block in place. It needs a
-  new namespaced set whose offset is a multiple of `idBlock` above every block
-  already applied, declared and composed like any other set.
-
-Check what a target database has applied before you choose:
+Inspect the package's applied range before choosing an id:
 
 ```sql
-SELECT MAX(migration_id) FROM flows_migrations;
+SELECT migration_id, name FROM flows_migrations
+WHERE migration_id >= 1000 AND migration_id < 2000
+ORDER BY migration_id;
 ```
+
+All appended migrations and their ledger rows commit together. A failed
+append rolls back the whole migration pass; retrying executes the missing
+work and never reports a rolled-back migration as completed.
 
 ## 4. Prove it
 
@@ -132,9 +130,8 @@ describe("migrations", () => {
 ```
 
 Assert the block too, so a mis-declared offset fails a test rather than a
-deployment. The repository pins this pattern: the offset is a multiple of
-`idBlock`, it is not one a sibling package claims, and every local id is below
-`idBlock`.
+deployment: the offset is a multiple of `idBlock`, no set composed beside it
+claims the same offset, and every local id is below `idBlock`.
 
 ## What a failed migration leaves behind
 

@@ -304,6 +304,63 @@ describe("composed migrations", () => {
       expect(message).toContain("already applied migration id 1001")
     }))
 
+  it.effect("applies package-local forward migrations below another package's global cursor", () =>
+    Effect.gen(function*() {
+      const next = {
+        ...alpha,
+        migrations: {
+          ...alpha.migrations,
+          "0002_second": createTable("alpha_second"),
+          "0003_third": createTable("alpha_third")
+        }
+      }
+      const result = yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* Migrations.run([alpha, beta])
+        const applied = yield* Migrations.run([next, beta])
+        const repeated = yield* Migrations.run([next, beta])
+        const rows = yield* sql<
+          { migration_id: number; name: string }
+        >`SELECT migration_id, name FROM flows_migrations ORDER BY migration_id`
+        return { applied, repeated, rows }
+      }).pipe(Effect.provide(TestDatabase.layer))
+      expect(result.applied).toEqual([[2, "alpha_second"], [3, "alpha_third"]])
+      expect(result.repeated).toEqual([])
+      expect(result.rows.map((row) => row.migration_id)).toEqual([1, 2, 3, 1001])
+    }))
+
+  it.effect("rejects inserting a migration before its package's own applied cursor", () =>
+    Effect.gen(function*() {
+      const original = { ...alpha, migrations: { "0003_third": createTable("alpha_third") } }
+      const next = { ...alpha, migrations: { ...alpha.migrations, ...original.migrations } }
+      const message = yield* failureMessage(
+        Effect.flatMap(Migrations.run([original, beta]), () => Migrations.run([next, beta]))
+      )
+      expect(message).toContain("Migration 1_alpha_initial would be skipped")
+    }))
+
+  it.effect("rolls back all lower-block appends when a later append fails", () =>
+    Effect.gen(function*() {
+      yield* Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* Migrations.run([alpha, beta])
+        const next = {
+          ...alpha,
+          migrations: {
+            ...alpha.migrations,
+            "0002_second": createTable("alpha_second"),
+            "0003_failure": Effect.fail("migration failure")
+          }
+        }
+        const exit = yield* Effect.exit(Migrations.run([next, beta]))
+        expect(exit._tag).toBe("Failure")
+        expect(yield* sql`SELECT name FROM sqlite_master WHERE name = 'alpha_second'`).toEqual([])
+        expect(yield* sql`SELECT migration_id FROM flows_migrations WHERE migration_id IN (2, 3)`).toEqual([])
+        const corrected = { ...next, migrations: { ...next.migrations, "0003_failure": createTable("alpha_third") } }
+        expect(yield* Migrations.run([corrected, beta])).toEqual([[2, "alpha_second"], [3, "alpha_failure"]])
+      }).pipe(Effect.provide(TestDatabase.layer))
+    }))
+
   it.effect("accepts a set every id of which is already applied", () =>
     Effect.gen(function*() {
       const exit = yield* provided(Effect.flatMap(

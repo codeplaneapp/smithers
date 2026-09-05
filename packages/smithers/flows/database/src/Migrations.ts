@@ -16,12 +16,14 @@
  * realize the same id — `0001_first` beside `01_second` — so a mis-declared
  * package fails the migration rather than skipping a table.
  *
- * Blocks reintroduce a second way to skip one, which the loader also rejects:
+ * Blocks reintroduce a second way to skip one, which the loader handles:
  * `Migrator` decides what to run from a single high-water mark, so a set whose
  * id lands at or below the highest id the database already applied would be
- * assumed done and never run. See `rejectSkipped`. The one such skip that is
- * legitimate work — global id zero on a fresh database, which sits at the
- * mark's starting value — the loader applies itself. See `applyZero`.
+ * assumed done and never run. Appends to an already installed package block
+ * run transactionally in the loader before the ordinary forward pass. Missing
+ * earlier migrations and newly introduced lower blocks remain refusals; a
+ * package cannot insert a migration before its own applied high-water mark.
+ * Global id zero on a fresh database is also applied by the loader.
  *
  * {@link run} wraps the whole migrator pass in the same transient-lock retry
  * the durable writer uses, so concurrent processes migrating one database
@@ -100,6 +102,13 @@ export const idBlock = 1000
  */
 const migrationOrder = (left: Migrator.ResolvedMigration, right: Migrator.ResolvedMigration) => left[0] - right[0]
 
+/** The loader we construct always loads an Effect with only SQL requirements. @private */
+type PendingMigration = readonly [
+  id: number,
+  name: string,
+  load: Effect.Effect<Effect.Effect<void, unknown, SqlClient.SqlClient>>
+]
+
 /** @private */
 const fail = (message: string) => new Migrator.MigrationError({ kind: "BadState", message })
 
@@ -128,12 +137,15 @@ const appliedIds = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   const rows = yield* sql<{
     readonly migration_id: unknown
-  }>`SELECT migration_id FROM ${sql(table)}`.withoutTransform.pipe(
+    readonly name: string
+  }>`SELECT migration_id, name FROM ${sql(table)}`.withoutTransform.pipe(
     Effect.mapError((cause) =>
       new Migrator.MigrationError({ kind: "BadState", cause, message: `Could not read ${table}` })
     )
   )
-  return new Set(yield* Effect.forEach(rows, (row) => migrationId(row.migration_id)))
+  return new Map(
+    yield* Effect.forEach(rows, (row) => Effect.map(migrationId(row.migration_id), (id) => [id, row.name] as const))
+  )
 })
 
 /**
@@ -177,10 +189,10 @@ const applyZero = (zero: ZeroMigration) =>
  * high-water mark: anything with an id at or below the highest applied id is
  * assumed done. Namespaced id blocks make that assumption false — a database
  * migrated with only the `2000` block would treat the `0` and `1000` blocks as
- * already applied and never create their tables, and a package that adds a
- * second migration inside a block below the mark would never run it. Neither
- * case can be repaired by running the migration again, so the composition
- * fails here instead of returning a set the migrator would quietly drop.
+ * already applied and never create their tables. Valid forward additions to
+ * an installed block have already run in `finish`; anything still missing
+ * here is an earlier hole or an entirely new lower block. The composition
+ * fails instead of returning a migration the global cursor would drop.
  *
  * @private
  */
@@ -193,8 +205,8 @@ const rejectSkipped = (
     if (id <= highWater && !applied.has(id)) {
       return Effect.fail(fail(
         `Migration ${id}_${name} would be skipped: the database has already applied migration id ${highWater}, ` +
-          `and the migrator only runs ids above the highest applied one. Compose every package's migration set ` +
-          `from the first migration onwards, and give a new migration an id above ${highWater}.`
+          `and this is not a forward append in a declared, installed package block. Compose each installed ` +
+          `package's recorded migrations when appending to its block; introduce new packages above ${highWater}.`
       ))
     }
   }
@@ -202,25 +214,60 @@ const rejectSkipped = (
 }
 
 /**
- * Applies the id-zero migration when the database is fresh, then rejects any
- * remaining skip. Id zero exists only on a fresh database — on any other
- * database it is either already applied or a skip {@link rejectSkipped}
- * rejects — so applying it here, inside the migrator's transaction, closes
- * the one case the migrator's high-water mark cannot express.
+ * Applies id zero on a fresh database and forward additions inside installed
+ * blocks that the global cursor would skip. Every application and its ledger
+ * row share the migrator transaction. Earlier holes and new lower blocks are
+ * still refused rather than guessed safe.
  *
  * @private
  */
 const finish = (
-  resolved: ReadonlyArray<Migrator.ResolvedMigration>,
+  resolved: ReadonlyArray<PendingMigration>,
   zero: ZeroMigration | undefined,
-  onZeroApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
+  onLoaderApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
 ) =>
   Effect.gen(function*() {
-    const applied = yield* appliedIds
+    const recorded = yield* appliedIds
+    const applied = new Set(recorded.keys())
+    for (const [id, name] of resolved) {
+      if (recorded.has(id) && recorded.get(id) !== name) {
+        return yield* Effect.fail(
+          fail(`Migration ${id} was recorded as ${recorded.get(id)}, but this package declares ${name}`)
+        )
+      }
+    }
     if (applied.size === 0 && zero !== undefined) {
       yield* applyZero(zero)
-      yield* onZeroApplied([0, zero.name])
+      yield* onLoaderApplied([0, zero.name])
       applied.add(0)
+    }
+    const highWater = Math.max(0, ...applied)
+    const knownBlocks = new Set(resolved.filter(([id]) => applied.has(id)).map(([id]) => Math.floor(id / idBlock)))
+    const installed = new Map<number, number>()
+    for (const id of applied) {
+      const block = Math.floor(id / idBlock)
+      installed.set(block, Math.max(installed.get(block) ?? -1, id))
+    }
+    // An existing package may append within its reserved block after another
+    // package has advanced the database's global cursor. Run only such forward
+    // additions here; retain rejectSkipped for holes and new lower blocks.
+    for (const [id, name, load] of resolved) {
+      const block = Math.floor(id / idBlock)
+      const previous = installed.get(block)
+      if (
+        id > highWater || applied.has(id) || previous === undefined || id <= previous || !knownBlocks.has(block)
+      ) continue
+      const sql = yield* SqlClient.SqlClient
+      const migration = yield* load
+      yield* Effect.gen(function*() {
+        yield* migration
+        yield* sql`INSERT INTO ${sql(table)} ${sql.insert([{ migration_id: id, name }])}`.withoutTransform
+      }).pipe(Effect.catch((cause) =>
+        Effect.die(new Migrator.MigrationError({ cause, kind: "Failed", message: `Migration "${id}_${name}" failed` }))
+      ))
+      applied.add(id)
+      installed.set(block, id)
+      yield* onLoaderApplied([id, name])
     }
     return yield* rejectSkipped(resolved, applied)
   })
@@ -228,13 +275,13 @@ const finish = (
 /** @private */
 const loaderFromPlan = (
   sets: ReadonlyArray<PlannedMigrationSet>,
-  onZeroApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
+  onLoaderApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
 ): Migrator.Loader<SqlClient.SqlClient> =>
   Effect.suspend(() => {
     const namespaces = new Set<string>()
     const offsets = new Set<number>()
     const ids = new Map<number, string>()
-    const resolved: Array<Migrator.ResolvedMigration> = []
+    const resolved: Array<PendingMigration> = []
     let zero: ZeroMigration | undefined
 
     for (const set of sets) {
@@ -308,14 +355,14 @@ const loaderFromPlan = (
       }
     }
 
-    return finish(resolved.sort(migrationOrder), zero, onZeroApplied)
+    return finish(resolved.sort(migrationOrder), zero, onLoaderApplied)
   })
 
 /** @private */
 const loaderWith = (
   sets: ReadonlyArray<MigrationSet>,
-  onZeroApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
-): Migrator.Loader<SqlClient.SqlClient> => loaderFromPlan(snapshotMigrationSets(sets), onZeroApplied)
+  onLoaderApplied: (entry: readonly [id: number, name: string]) => Effect.Effect<void>
+): Migrator.Loader<SqlClient.SqlClient> => loaderFromPlan(snapshotMigrationSets(sets), onLoaderApplied)
 
 /**
  * Builds a `Migrator` loader from namespaced package migration sets, resolved
@@ -325,8 +372,10 @@ const loaderWith = (
  * On a fresh database the loader applies a global id-zero migration itself,
  * inside the migrator's transaction, because the migrator's high-water mark
  * starts at zero and would silently skip it. A caller wiring the loader into
- * its own `Migrator` therefore gets id zero applied, but not reported in the
- * migrator's completed list; {@link run} reports it.
+ * its own `Migrator` therefore gets id zero applied. Forward additions to
+ * installed lower blocks also run in this transaction. The upstream migrator's
+ * completed list omits these loader-applied migrations; {@link run} reports
+ * every migration applied in the successful transaction.
  * The set list and each migration record are snapshotted when this function is
  * called, so later caller mutation cannot change a loader already returned.
  *
@@ -358,19 +407,19 @@ export const run = (
 > => {
   const plan = snapshotMigrationSets(sets)
   return Effect.gen(function*() {
-    const zeroApplied = yield* Ref.make<ReadonlyArray<readonly [id: number, name: string]>>([])
+    const loaderApplied = yield* Ref.make<ReadonlyArray<readonly [id: number, name: string]>>([])
     const completed = yield* WriteRetry.withWriteRetry(
       Migrator.make({})({
         // Reset before each attempt: a retry that finds a peer already applied
-        // id zero must not keep reporting the rolled-back application.
-        loader: Ref.set(zeroApplied, []).pipe(
-          Effect.andThen(loaderFromPlan(plan, (entry) => Ref.set(zeroApplied, [entry])))
+        // a lower-block append must not report rolled-back applications.
+        loader: Ref.set(loaderApplied, []).pipe(
+          Effect.andThen(loaderFromPlan(plan, (entry) => Ref.update(loaderApplied, (entries) => [...entries, entry])))
         ),
         table
       })
     )
-    const zero = yield* Ref.get(zeroApplied)
-    return [...zero, ...completed]
+    const appliedByLoader = yield* Ref.get(loaderApplied)
+    return [...appliedByLoader, ...completed]
   })
 }
 
