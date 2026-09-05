@@ -37,10 +37,10 @@
       # channel's latest.
       pnpmPinned = pkgs: pkgs.stdenvNoCC.mkDerivation rec {
         pname = "pnpm";
-        version = "11.21.0";
+        version = "11.25.0";
         src = pkgs.fetchurl {
           url = "https://registry.npmjs.org/pnpm/-/pnpm-${version}.tgz";
-          hash = "sha256-hyN9N+rbedxiagV26zpS0j1wQiwyOuXgD8BckfQyN4A=";
+          hash = "sha256-M90HSPJ+eRbE8ci2lDRhmD40U7BrvaYxKmKAEwtIgeU=";
         };
         dontBuild = true;
         installPhase = ''
