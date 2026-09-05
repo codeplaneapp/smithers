@@ -43,7 +43,7 @@ what replaces it.
 
 ### Packages
 
-- 40 packages publish at `1.0.0-rc.0` under the `next` dist-tag, in the
+- 49 packages publish at `1.0.0-rc.0` under the `next` dist-tag, in the
   dependency order `node scripts/pack-release.mjs --names` prints.
   `@smthrs/flows` is the curated aggregate and `@smthrs/cli` owns the
   `smithers` binary.
@@ -63,7 +63,7 @@ what replaces it.
   `@smthrs/sandbox`, and `@smthrs/observability` keep their names and are new
   implementations. Treat them as new packages.
 - Every published package pins `effect` and the `@effect/*` packages to
-  exactly `4.0.0-rc.108`.
+  exactly `4.0.0-rc.112`.
 
 ### CLI
 
@@ -146,7 +146,7 @@ The paragraphs below describe the candidate's enforced limits.
 
 > **Credential redaction in logs.** Credentials are redacted on the way into the journal and on the way out to a log stream, under one rule set applied in one place. The rules are `@smthrs/journal` `Redaction`: structurally by field name (`isSensitiveKey`, matching any name ending in `authorization`, `cookie`, `apikey`, `token`, `password`, or `secret` once case and separators are folded), and textually by the ten `defaultRules`, applied to a field's NAME as well as its value, since a credential reaches an operator as a log annotation key and an OTLP span attribute name just as readily as it reaches one as a value. A name carrying a credential becomes the placeholder outright rather than being rewritten in place, because a partial rewrite changes what the name reads as and redaction would stop being a fixed point; two such names collapse into one and the later member wins (`url-credentials`, a password in a URL's userinfo; `bearer-token`, an `Authorization` bearer value; `api-key`, provider keys shaped `sk-`/`pk-`; `github-token` and `github-fine-grained-token`; `aws-access-key`; `slack-token`; `google-api-key`; `assignment`, a `key=value` pair whose key ends in `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, or `CREDENTIAL`; and `embedded-json-credential`, those same key shapes inside already-encoded JSON). The rules run in that order and the first one to claim a span keeps it, so a value written as `Bearer sk-…` reads back as `Bearer [REDACTED_TOKEN]` under the wider rule rather than under the provider-key marker. The journal applies them before any row is committed, and `e2e/faults/case22-secret-never-in-journal.test.ts` proves that half by reading the SQLite file rather than an API that could redact on the way out. `@smthrs/journal` `RedactedLogger` applies the same rules to log output: `RedactedLogger.layer()` replaces the installed logger set with redacting wrappers of the same loggers, so an operator keeps the format they had, and it is installed twice, by `packages/cli/src/bin.ts` over every CLI command and by `packages/flows/src/NodeRuntime.ts` beneath the durable engine, which covers the pretty logger, `Logger.LogToStderr` under `--json`, an action's own `Effect.logInfo`, the harness and agent session, and the `.flows/logs/<runId>.log` stream of a detached `smthrs up -d`. The wrapper redacts the log event itself, meaning the message, the cause, and the log annotations, as well as the fiber's console, so a logger that reads the event rather than rendering it through the console is covered on the same rules: `Logger.tracerLogger` is in Effect's default logger set, publishes the message as a span event name and `Cause.pretty` of the cause as the span's `effect.cause` attribute, and never reads the console, so an OTLP collector receives the redacted text. Wrapping is idempotent, so a detached `smthrs run` that is both at once pays the rules once. Each rule is a character-class scan with no nested quantifier and no alternation inside a repetition, and `url-credentials` caps its scheme at 30 characters so no start position rescans the tail, so none of them backtracks catastrophically, and the walk visits each value once. Cost tracks the number of values in a line rather than its rendered length, so a large container costs what its entries cost, and a proxy is a container that reports whatever it chooses: one that answers `getPrototypeOf` with something other than its target's prototype is walked as the object it claims to be and costs what it reports. Redaction is an observability concern, so it is deliberately not applied to executable durable state (`flows_runs.state_json`, attempt checkpoints, outcomes, cache results), because a placeholder there resumes the flow with the wrong data; a value that must never reach durable state is a `Redacted` field in the caller's own schema. Redacting a log line costs fidelity in how a value is rendered, and the trade is deliberate, because a log line must never be the thing that ends the run it describes. An `Error` is rebuilt as a plain `Error` and its class is not preserved. The copy carries the name, the message, the stack, and the error's own named members, each read once and put through the rules, and a member whose NAME matches becomes the placeholder the way an object key does. Nothing else crosses. An earlier revision built the copy on the original's prototype so a tagged error stayed an instance of its own class, and a prototype is an unbounded leak surface that an own-key walk never looks at: an inherited `name`, `cause`, `toJSON`, `Symbol.toStringTag`, or `nodejs.util.inspect.custom` each carried a credential to an OTLP span attribute or to the operator's terminal in clear, one per review round. A symbol-keyed member does not cross either, because a symbol's description is text no walk can rewrite in place, and neither do the members a renderer calls rather than prints, `constructor`, `toString`, `valueOf`, and `toJSON`, because a redacted string under a name the language calls throws from inside the renderer. So a renderer that special-cases `instanceof MyError` sees a plain `Error`, and a host error whose accessors are backed by internal slots a copy does not have, such as the `DOMException` an `AbortSignal` carries as its reason, has no copy left to impersonate it. A `Date`, a `Map`, a `Set`, a `URL`, a class instance or a host object is rebuilt from its plain data by the same rules the journal applies, and reaches the operator in that plain form rather than as itself. A function, a class object and a symbol carry text no property walk can rewrite in place, a body, a name, a description, so they render as the constant markers `[Function]` and `[Symbol]` rather than being printed. A binary view is named by its type and byte length under the `[Binary]` key, and that name goes through the rules too, because a class name is caller data. Rebuilding a view from its entries wrote one key per byte, and handing it back untouched put a credential a caller had set on it into a journal row in clear, so the bytes are named and the members are walked. That walk is bounded twice, because neither bound holds on its own. The size is read from the value's own internal slot, through the `byteLength` accessor that `%TypedArray%.prototype`, `DataView.prototype`, and `ArrayBuffer.prototype` define, rather than from a `byteLength` property, which a caller can shadow: a pooled chunk reporting the bytes it has used rather than the bytes it holds is an ordinary pattern, and a 4 MB chunk reporting 12 walked one property per byte anyway. A value that answers no such accessor, which includes a proxy over a view, is named and never enumerated at all. Above 65,536 bytes only the bytes are named, because enumerating a view's own properties materialises one pair per byte, so the walk would cost the buffer's size even though the rendering does not. Below it the members are counted as they are walked and the walk stops after 65,536 of them, because the size bounds a view's bytes and not the properties a caller hangs on it. A proxy reaches this branch by its prototype chain rather than by `ArrayBuffer.isView`, which reads an internal slot a proxy does not have: a proxied 2 MB view fell through to the object branch and was rebuilt one key per byte, 2,000 ms and 22.9 million characters for one logged value. Traversal accepts at most `Redaction.maxDepth`, 256, container edges from a redaction root. The journal REFUSES a payload past that bound, because a durable row quietly truncated to a marker is worse than a refused write. A logger asks for the other policy through `Redaction.Options.onTooDeep` set to `"name"`, which renders the deeper value as `[Deep]`: a throw inside the walk is caught one frame up and replaces every argument on the line with `[Unrenderable]`, so one deep member would cost the operator the whole line. An `Error`'s own members stop at 200 levels under the same marker. A caller's own string `[Deep]` is indistinguishable from that marker. A value that defeats the rules entirely, such as a revoked proxy or a throwing getter, renders as `[Unrenderable]`, and so does every argument of a line whose renderer refuses it. None of these is a redaction gap: each is a redacted form, never the value itself, and no fallback prints text the rules have not seen. An earlier revision kept each value's own class by rebuilding it on its own prototype; three rounds of review found three ways that could kill the run being logged, because a host class keeps state a property walk cannot see, and one fallback printed a value's own rendering in clear. A narrower revision kept the class of an `Error` alone, and four more rounds found four things its prototype handed to a renderer that no own-key walk ever saw. Fidelity here is cosmetic and was not worth either. Two limits remain. The rules recognise credential shapes, not arbitrary strings: a secret that matches no rule and sits under no credential-named field is not detected. And a child process that writes to its own stderr without going through the logger, such as a spawned agent binary, is that process's own output and is not rewritten.
 
-> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
+> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.112`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
 
 > **Source migration.** See the compatibility promise below.
 
@@ -155,10 +155,62 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1440 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1505 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **review:** integrate repository review workflows ([0b6a9d2db1](https://github.com/smithersai/smithers/commit/0b6a9d2db1333daa6c0c65c1cd1e807ec20164cd))
+- **bug-worker:** integrate redacted report handling ([3128c9327b](https://github.com/smithersai/smithers/commit/3128c9327ba581485bd67f97658615a3670744f0))
+- **ui:** integrate the planning workbench and embedded tool interactions ([8112c22c5a](https://github.com/smithersai/smithers/commit/8112c22c5a5bb359b27d734c88e5174344e63e8f))
+- **server:** integrate hosted project APIs and retire the gateway proxy ([09ee7e019a](https://github.com/smithersai/smithers/commit/09ee7e019aea5d951a36a2dc84830e277f3f375f))
+- **testing:** integrate supported-host contract harnesses ([18fd44d7bb](https://github.com/smithersai/smithers/commit/18fd44d7bb88c85054c5976ecbdbb9dfe2ee8d06))
+- **cli:** unify target and durable commands while preserving usage and approval boundaries ([ca5144c931](https://github.com/smithersai/smithers/commit/ca5144c931503a86069e4adacdf5675bf75617d4))
+- **ui-kit:** integrate embedded tool results and flow presentation ([c93e2d8807](https://github.com/smithersai/smithers/commit/c93e2d8807c64f7f8fea2b54b7597b76689fe4e0))
+- **create-app:** scaffold the revised workspace and flow model ([8c8c8a431d](https://github.com/smithersai/smithers/commit/8c8c8a431d3de84a756d906ddf697c0cd06e73b7))
+- **migrate:** integrate migration inventory, plans, and repair flows ([4f5f49661f](https://github.com/smithersai/smithers/commit/4f5f49661f9ca50840cf1d687be280b47169bda6))
+- **notifications:** integrate notification delivery contracts ([fa52c58f2a](https://github.com/smithersai/smithers/commit/fa52c58f2a9fd0ff0db9c506f9b789e2d33617fd))
+- **mcp:** combine bounded diagnostics with explicit transport contracts ([e22baaf240](https://github.com/smithersai/smithers/commit/e22baaf240be9b111ebd10240ac675dca0a4c074))
+- **gateway:** integrate observed run state and optional host adapters ([0712488168](https://github.com/smithersai/smithers/commit/0712488168d0072cd0218c6b2be7740669108287))
+- **control:** integrate durable signals, run lifecycle, and host approval authority ([f2c58d8979](https://github.com/smithersai/smithers/commit/f2c58d8979af2d8675a19d4c89aafef9f0914e03))
+- **agent:** integrate session forks and lineage cancellation ([8dd10e3f15](https://github.com/smithersai/smithers/commit/8dd10e3f1568d0343fcba64cf9c878534ad596cb))
+- **evals:** integrate evaluation targets and fixtures ([70e21396d5](https://github.com/smithersai/smithers/commit/70e21396d53875283644db1a6d42479ca44f4367))
+- **std:** update standard agent actions ([c96d7b24a1](https://github.com/smithersai/smithers/commit/c96d7b24a12c42337e89c7c3ddaf287983b36a8f))
+- **triggers:** integrate durable trigger scheduling ([2c601f3bb9](https://github.com/smithersai/smithers/commit/2c601f3bb9f5529c436c47ad5bfd17e5f03a2d8c))
+- **scorers:** add score gates and evaluation contracts ([d53b488935](https://github.com/smithersai/smithers/commit/d53b488935ffaa04977117b82b32b082e1a6f137))
+- **plugin:** integrate agent plugin contracts ([7de7876967](https://github.com/smithersai/smithers/commit/7de7876967461321ddafbf0a593441dcc5a6f4c2))
+- **registry:** update agent discovery and flow declarations ([e7e3cd8e87](https://github.com/smithersai/smithers/commit/e7e3cd8e87781acd7982ea73aaa821de8ffa04c9))
+- **integrations:** integrate provider contracts and declared listeners ([a2a04c5890](https://github.com/smithersai/smithers/commit/a2a04c5890a27d5065bd7e30346c5fdefc58b509))
+- **chain:** integrate durable chain composition ([51e9ab8867](https://github.com/smithersai/smithers/commit/51e9ab886755d5074f158086452e89f5b7189fd3))
+- **memory:** integrate durable memory recall and history ([ef9ad30fd4](https://github.com/smithersai/smithers/commit/ef9ad30fd449f9bc5008fb3c917b2cb2617e06c3))
+- **model:** update model adapters and runtime contracts ([4a88949be3](https://github.com/smithersai/smithers/commit/4a88949be3e83341e4366a0a61dceecacd56f601))
+- **harness:** integrate host-owned agent execution ([0c03abdf4b](https://github.com/smithersai/smithers/commit/0c03abdf4bb36606b5a51e88c16e789d313bbf0e))
+- **fs:** retain guarded agent filesystem operations ([d2724e0aa3](https://github.com/smithersai/smithers/commit/d2724e0aa30051440edae1ac93487c6988897621))
+- **build-cli:** integrate unified target operations and executable cache identity ([ac56afa1e3](https://github.com/smithersai/smithers/commit/ac56afa1e3d6274b7c0469ea339b0602bc749da7))
+- **targets:** integrate declarative rules and safe execution contracts ([f860e80c0c](https://github.com/smithersai/smithers/commit/f860e80c0c3ee8cf3855554f7e12e982803e4163))
+- **patterns:** update composable flow patterns ([7bd6bf4b0a](https://github.com/smithersai/smithers/commit/7bd6bf4b0ac0595954f2f75cc6b3e0b09cf337b1))
+- **observability:** align durable runtime diagnostics ([d4596e3719](https://github.com/smithersai/smithers/commit/d4596e37190e6c5b2dec01b64a24c0f3ab115c16))
+- **jj:** preserve snapshot and repository ownership guarantees ([47cbe06505](https://github.com/smithersai/smithers/commit/47cbe065058f8076813989caaeda02365cee530a))
+- **time-travel:** integrate restore, rewind, and fork execution ([293ee97cfe](https://github.com/smithersai/smithers/commit/293ee97cfe56aaf317dddea158907e177378fe96))
+- **sync:** combine generation checks with admitted and applied progress ([7f8009ec48](https://github.com/smithersai/smithers/commit/7f8009ec48819fdc3699db9f1cb898554dbc5744))
+- **step-cache:** retain best-effort cache failure semantics ([8f09fa2bda](https://github.com/smithersai/smithers/commit/8f09fa2bdacbb6e8d9903d7d7b3c4b6445f74b15))
+- **engine-store:** integrate plan input, merge, and observation stores ([b226b1fb9b](https://github.com/smithersai/smithers/commit/b226b1fb9b429fb253b3a7f2e3c8797505747352))
+- **engine:** integrate executable plans and durable flow lifecycle ([660a47b9af](https://github.com/smithersai/smithers/commit/660a47b9afcdac2a3040db6a1362361168c774d2))
+- **run-store:** integrate durable run observations and migrations ([5ac20f0713](https://github.com/smithersai/smithers/commit/5ac20f071340b1772f2feb122a1f45484cd44d89))
+- **flow:** integrate explicit starts and fresh execution identities ([c21be4d01a](https://github.com/smithersai/smithers/commit/c21be4d01ac75d563b4cb1fb9e876a18065d3e5a))
+- **plan:** integrate scheduling analysis and immutable plan contracts ([c2ad04ae9d](https://github.com/smithersai/smithers/commit/c2ad04ae9db9c48a914b3a7d460a84a1943fe12d))
+- **journal:** integrate versioned engine events and generations ([03fd7bdc36](https://github.com/smithersai/smithers/commit/03fd7bdc363ea416b95ebfeb3129cc2157db19df))
+- **database:** align SQLite persistence and peer contracts ([160c2e4d3d](https://github.com/smithersai/smithers/commit/160c2e4d3da0fa8407fc02d228e3a4c716ce4476))
+- **platform-bun:** retain Bun host capability boundaries ([196dfd5a29](https://github.com/smithersai/smithers/commit/196dfd5a296236f564535925cf68953aeb3fb385))
+- **platform-node:** retain durable Node host and process guarantees ([5604ee8e32](https://github.com/smithersai/smithers/commit/5604ee8e325d91eb32f6cae9b1428c8b315aae9e))
+- **platform-browser:** retain browser isolation and memory-only hosting ([a519ea7eae](https://github.com/smithersai/smithers/commit/a519ea7eaea5d43a11a0055646607ace715e139d))
+- **kernel:** preserve cancellation and child environment boundaries ([e789aef089](https://github.com/smithersai/smithers/commit/e789aef0890832981b38e0a9a03440d2c5f464a2))
+- **sandbox:** integrate guarded host execution ([e8e8900c27](https://github.com/smithersai/smithers/commit/e8e8900c27ecb5061012d2d767e109ddeda92f27))
+- **capability:** integrate explicit host capability contracts ([5e84114e6b](https://github.com/smithersai/smithers/commit/5e84114e6bb7e76f47cbd66d828a67af6da12915))
+- **core:** align durable runtime primitives ([ebb74a65d1](https://github.com/smithersai/smithers/commit/ebb74a65d12c641a0af4f991cfcd90fec136646b))
+- **artifacts:** integrate content-addressed artifact storage ([ab92291686](https://github.com/smithersai/smithers/commit/ab92291686f444e3506cc3226ca9acf8373ec473))
+- **keys:** preserve stable keys and derivation rules ([e0c50e0f74](https://github.com/smithersai/smithers/commit/e0c50e0f746de7549255705e44584bcc3da6da05))
+- **crypto:** update cryptographic runtime contracts ([2b5f2e947a](https://github.com/smithersai/smithers/commit/2b5f2e947ac3a3be9eb7457aba4f7e7a9bc2109d))
+- **canonical:** retain safe records and canonical identity contracts ([eaa4773a94](https://github.com/smithersai/smithers/commit/eaa4773a941476339ea5fb6479a3e95e36feffde))
 - **targets:** land the unknown-property guidance its test already asks for ([ff58cf0054](https://github.com/smithersai/smithers/commit/ff58cf0054e3fc97574bac1b9e649328e08fcd1c))
 - **ci:** gate the 53 package documentation sites ([f0114f19c4](https://github.com/smithersai/smithers/commit/f0114f19c41da2862910a61708490b2cee8d33d9))
 - **cli:** smthrs suggest ([e1bdbb9ca8](https://github.com/smithersai/smithers/commit/e1bdbb9ca83b1e84123eb8acdf3105fb7c9477cd))
@@ -942,6 +994,11 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ♻️ Refactors
 
+- **repo-targets:** consolidate package gates and review declarations ([095bde5138](https://github.com/smithersai/smithers/commit/095bde513893ef305046866cee075f41288216ed))
+- **errors:** standardize public error contracts ([aa48b1de60](https://github.com/smithersai/smithers/commit/aa48b1de60bbd171451a76fd827ef5799cf43e66))
+- **rpc:** integrate shared contracts and preserve product verification ([fb42ae2709](https://github.com/smithersai/smithers/commit/fb42ae27090bfa8435849b5897a93024c66824a3))
+- **build:** consolidate build declarations and documentation ([f91792022c](https://github.com/smithersai/smithers/commit/f91792022c27fb0bc07b161080081ec6d2cc5d05))
+- **flows:** compose the revised durable runtime packages ([10b788b930](https://github.com/smithersai/smithers/commit/10b788b930a408af336c1f4dd6b2d2da4c9bc7be))
 - **engine-store:** simplify parent conflict value ([c07ef8dd3c](https://github.com/smithersai/smithers/commit/c07ef8dd3cd566457ff46e91bf012ef09a8958a0))
 - **packages:** nest every package under packages/smithers and wire the root to the nested layout ([4e87ac1588](https://github.com/smithersai/smithers/commit/4e87ac15887e0b31e9e570dfd553fbd9281d644e))
 - **flows,evals,examples:** follow the nested package layout ([c01954f7b2](https://github.com/smithersai/smithers/commit/c01954f7b241abb61248ee3f33567bae5dff0bd3))
@@ -985,6 +1042,10 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **repo:** integrate contributor guidance and review evidence ([f49a676289](https://github.com/smithersai/smithers/commit/f49a67628962ae18784cd04e732ed313537592b8))
+- **site:** integrate the unified CLI guides and generated references ([a13c5b35e6](https://github.com/smithersai/smithers/commit/a13c5b35e6ac9f5f6e1453e282a60dc36f330877))
+- **sites:** synchronize package documentation and site inventories ([e92796253a](https://github.com/smithersai/smithers/commit/e92796253a44f3c98777ff8b1d5baee53d913491))
+- **examples:** update executable flows and preserve live-smoke diagnostics ([f4281e79fc](https://github.com/smithersai/smithers/commit/f4281e79fc5ec8caa0130f0c54bd6c5bad1c2e9b))
 - sync the targets mirror and llms bundle after the caching-link reword ([dd194b5442](https://github.com/smithersai/smithers/commit/dd194b5442ff9a8baabcfb0499d84e2d7e71ea07))
 - **targets:** drop the unresolved caching link from the executable-identity note ([242a9e6f69](https://github.com/smithersai/smithers/commit/242a9e6f69b992fe715ddf289ba624e51c20749b))
 - **site:** regenerate the ingested reference pages for the fault-tier and cache docs ([1395aba0f1](https://github.com/smithersai/smithers/commit/1395aba0f1d7c7decc4f83ff74647b9d5c32fd36))
@@ -1222,6 +1283,10 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🧹 Chores
 
+- **deps:** align workspace toolchains and regenerate both lockfiles ([3466f91d5a](https://github.com/smithersai/smithers/commit/3466f91d5a4942cff6098ff4ac0d423a811bbc38))
+- **release:** integrate immutable artifacts and preserve registry retry policy ([44bafddb20](https://github.com/smithersai/smithers/commit/44bafddb20c84e8d13594215305b8f4e8d5f1857))
+- **jj-wasm:** align native build and release metadata ([c265271955](https://github.com/smithersai/smithers/commit/c265271955ba4aa71f16f36b2c0e814b0fdb90d8))
+- **deprecation:** retain the legacy package migration notice ([f5b63f6b43](https://github.com/smithersai/smithers/commit/f5b63f6b435c9a49a795190e0fb1d295eba41ca6))
 - **sync:** record the time-travel dev dependency in bun.lock ([f4ac6cedf3](https://github.com/smithersai/smithers/commit/f4ac6cedf3fdbdf4c8a778b10d7775d9c1e765b7))
 - **jj:** rebuild flows_jj.wasm on the canonical host ([8d5cf3e1ac](https://github.com/smithersai/smithers/commit/8d5cf3e1ac13ca3fd85631b8d9b6ca6b7a8cca25))
 - **ci:** move every Bun pin to 1.4.1 so the graph loads ([ec540eee08](https://github.com/smithersai/smithers/commit/ec540eee0855ceab96445170a687d20dcf2b3379))
