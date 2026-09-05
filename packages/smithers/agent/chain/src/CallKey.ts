@@ -4,7 +4,7 @@
  * Re-running a link with the same script digest prefix-matches its settled
  * calls by ordinal; editing one character of a script re-keys exactly the
  * calls inside it and nothing else. Governing contract:
- * `packages/smithers/agent/chain/docs/contract.md`.
+ * https://chain.smithers.sh/contract/.
  *
  * @since 0.1.0
  */

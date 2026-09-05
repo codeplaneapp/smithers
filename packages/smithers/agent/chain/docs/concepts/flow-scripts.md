@@ -67,5 +67,5 @@ and the limits, see [The chain contract](../contract.md).
 `ScriptRunner.layerInProcess` is the other binding and provides NO
 isolation: the script body runs as an async `Function` in global scope and
 reaches `globalThis`, `process`, and dynamic `import()`. It exists for
-trusted fixtures and for the test suite. `QuickJsRunner.layer()` is the only
+trusted fixtures and for this package's own tests. `QuickJsRunner.layer()` is the only
 sandbox for model-authored scripts.

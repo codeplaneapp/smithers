@@ -8,7 +8,7 @@
  * catalog entries, journaled like any call — and the only bridge out is
  * `ctx.call`. The same single-file variant runs unmodified on Node and in
  * a browser. Adapted from the cell loop's QuickJS binding
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

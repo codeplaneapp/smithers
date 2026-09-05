@@ -2,48 +2,76 @@
 
 **Documentation:** https://chain.smithers.sh
 
-The Agent Chain spine: an append-only journal of typed events, keyed
-replayable calls, and the trampoline that runs model-authored flow scripts.
+A crash-safe agent loop for TypeScript. A model writes a small JavaScript
+program, the program's only way to reach the outside world is
+`ctx.call(name, payload)`, and every call is recorded in an append-only
+journal before the loop moves on. Run the same program again over the same
+journal and it picks up where it stopped without repeating a single side
+effect.
 
-The journal is the only state. Every other structure — the call cache used
-for replay, transcripts, UIs — is a pure fold over it. A model authors a
-script; the script's only exits are `ctx.call(name, payload)` and the
-outcome it returns; every call settles as a journaled event keyed by its
-link, script digest, ordinal, and the callee's declaration digest. Resuming
-replays that settled prefix with zero effects and then runs live.
+The journal is the only state. Every other structure, including the call
+cache used for replay, transcripts, and UIs, is a pure fold over it. Each
+call settles as a journaled event keyed by its link, the digest of the script
+that issued it, its ordinal, and the callee's declaration digest, so a
+resumed run serves a recorded result only when all four still match and fails
+loudly with `replay_divergence` instead of serving a stale one.
 
-The package is private at 1.0.0-rc.0. It is consumed by `apps/ui`, not
-published.
+## Install
 
-## Composing a run
+`@smthrs/chain` is not on the npm registry. It is developed in the
+[Smithers repository](https://github.com/smithersai/smithers) and is used
+today from a checkout of it. It needs Node.js 22.19.0 or later and
+[Effect](https://effect.website).
 
-```ts
-import { Catalog, Chain, Journal, ModelAuthor, QuickJsRunner } from "@smthrs/chain"
+## Run a chain
+
+This runs a whole chain to a terminal outcome with no model account: a mock
+author supplies the script, an in-memory journal records the events, and the
+production QuickJS runner executes it.
+
+````ts
+import { Author, Catalog, Chain, Journal, QuickJsRunner } from "@smthrs/chain"
 import { Effect, Layer } from "effect"
+
+const grep: Catalog.Entry = {
+  name: "grep",
+  description: "Search the workspace for a pattern",
+  handler: () => Effect.succeed({ files: ["a.ts", "b.ts"] })
+}
+
+const script = [
+  "```flow",
+  `const hits = await ctx.call("grep", { pattern: "TODO" })`,
+  "return done({ matched: hits.files.length })",
+  "```"
+].join("\n")
 
 const layers = Layer.mergeAll(
   Journal.layerMemory(),
-  ModelAuthor.layer(authorConfig).pipe(Layer.provide(modelLayer)),
+  Author.layerMock([script]),
   QuickJsRunner.layer(),
-  Catalog.layer(Catalog.withSystem(hostEntries))
+  Catalog.layer(Catalog.withSystem([grep]))
 )
 
-const terminal = await Effect.runPromise(
-  Chain.run({ goal: "fix the failing test" }).pipe(Effect.provide(layers))
+const outcome = await Effect.runPromise(
+  Chain.run({ goal: "count the TODOs" }).pipe(Effect.provide(layers))
 )
-```
+// { _tag: "Done", value: { matched: 2 } }
+````
 
-`Chain.run` needs `Journal`, `Catalog`, `Author`, and `ScriptRunner`, and
-picks up the optional `Authorize` and `Steering` seams when they are
-mounted. A catalog layer that itself needs those services — `SubChains` is
-the one here — must be built over the SAME instances the chain runs on.
+Swap `Author.layerMock` for `ModelAuthor.layer(config)` over a real model and
+the same four layers drive a real agent. `Chain.run` requires `Journal`,
+`Catalog`, `Author`, and `ScriptRunner`, and picks up the optional
+`Authorize` and `Steering` seams when they are mounted. A catalog layer that
+itself needs those services, such as `SubChains`, must be built over the SAME
+instances the chain runs on.
 
 ## Two runners, one sandbox
 
-`QuickJsRunner.layer()` is the production sealed interpreter: a fresh
-QuickJS realm per link with memory, stack, and step limits and no host
-globals. `ScriptRunner.layerInProcess` provides NO isolation — the
-`Function` constructor builds its body in global scope, so a script reaches
+`QuickJsRunner.layer()` is the production sealed interpreter: a fresh QuickJS
+realm per link with memory, stack, and step limits and no host globals.
+`ScriptRunner.layerInProcess` provides NO isolation. The `Function`
+constructor builds its body in global scope, so a script reaches
 `globalThis`, `process`, and dynamic `import()`. Use it for trusted fixtures
 only.
 
@@ -53,31 +81,29 @@ A run fails with `ChainError` (`replay_divergence`, `invalid_journal`),
 `JournalError` (`journal_conflict`, `journal_unavailable`), `AuthorError`
 (`exhausted`, `author_unavailable`), `AuthorizeError`
 (`authorize_unavailable`, and `denied` for the model seat), or
-`SteeringError` (`steering_unavailable`). Everything else — a failing
-script, a failing handler, a value that will not serialize, a denied or
-unknown catalog call — becomes a journaled observation the next author
-routes around.
+`SteeringError` (`steering_unavailable`). Everything else, including a
+failing script, a failing handler, a value that will not serialize, and a
+denied or unknown catalog call, becomes a journaled observation the next
+author routes around.
 
 ## Limits a caller inherits
 
 32 links per chain, 64 calls per link, 4 levels of sub-chain nesting, a
-64 MiB QuickJS heap with a 256 KiB stack and a 10000-poll step budget, and
-a JSON boundary bounded at depth 128 and an 8 MiB size budget.
-
-## Where the documentation lives
-
-Every published sentence about this package has one source inside it: JSDoc
-in `src/`, and two prose files this README defers to rather than restating.
-
-- [`docs/api.md`](./docs/api.md) — the nineteen namespaces and how they
-  compose.
-- [`docs/contract.md`](./docs/contract.md) — the governing design: the
-  slice, the four gates, the failure taxonomy, concurrency, the resource
-  limits, the JSON boundary's copy semantics, determinism, and isolation.
-- [`docs/exports.md`](./docs/exports.md) — every documented member, its
-  kind, its category, and the first sentence of its JSDoc. Generated by
-  `node scripts/docs.mjs`; edit the JSDoc, never that file.
-- [`docs/README.md`](./docs/README.md) — the ownership rule and the drift
-  gate that enforces it.
+64 MiB QuickJS heap with a 256 KiB stack and a 10000-poll step budget, and a
+JSON boundary bounded at depth 128 and an 8 MiB size budget.
 
 `./internal/*` is null-mapped in the export map and carries no promise.
+
+## Documentation
+
+The full documentation is at https://chain.smithers.sh:
+
+- [Quickstart](https://chain.smithers.sh/quickstart/): a two-link run, the
+  journal it writes, and the replay that repeats nothing.
+- [API reference](https://chain.smithers.sh/reference/api/): every export of
+  the nineteen namespaces.
+- [The chain contract](https://chain.smithers.sh/contract/): the gates, the
+  failure taxonomy, the concurrency rule, the resource limits, and the JSON
+  boundary.
+- [Troubleshooting](https://chain.smithers.sh/troubleshooting/): every typed
+  failure a run can carry, what causes it, and what to do.

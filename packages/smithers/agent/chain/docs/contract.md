@@ -3,9 +3,10 @@ title: "The chain contract"
 description: "The governing design of @smthrs/chain: the slice, the four gates, the failure taxonomy, concurrency, resource limits, the JSON boundary, determinism, and isolation."
 ---
 
-The governing design for `@smthrs/chain`. Source modules cite this file; it
-replaced a `docs/specs/Concepts/` directory that never came across with the
-package.
+The governing design of `@smthrs/chain`, in one page: what a chain is made
+of, what each gate rejects, which failures reach your error channel, and
+every default you inherit. Read it when you need the rule rather than the
+recipe.
 
 ## The slice
 
@@ -202,4 +203,4 @@ There are two runners and only one of them is a sandbox.
 - `ScriptRunner.layerInProcess` provides NO isolation. The `Function`
   constructor builds its body in global scope, so a script reaches
   `globalThis`, `process`, and dynamic `import()`. It exists for trusted
-  fixtures and for the suite.
+  fixtures and for this package's own tests.

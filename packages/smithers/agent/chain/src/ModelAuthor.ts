@@ -5,9 +5,8 @@
  * tests supply a replay model — and maps an author input onto the sealed
  * request shape the cell loop proved out: prefix as the stable system
  * part, context lines as one user message, no tools, `toolChoice: "none"`
- * (`packages/smithers/agent/chain/docs/contract.md`). Reference prior art: the cell
- * loop's sealed author step (`packages/smithers/agent/harness/src/CellTurn.ts`, mined
- * not imported).
+ * (https://chain.smithers.sh/contract/). Reference prior art: the sealed
+ * author step of the earlier cell loop, mined not imported.
  *
  * @since 0.1.0
  */

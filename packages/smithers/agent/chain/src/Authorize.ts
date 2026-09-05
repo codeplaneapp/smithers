@@ -7,7 +7,7 @@
  * refusal forever. A policy denial becomes a journaled observation the
  * model routes around; a required approval parks the run without ending
  * the link, so resuming re-executes the call under the new grant
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

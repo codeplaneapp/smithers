@@ -6,7 +6,7 @@
  * declared names. Payloads and results are held to those schemas, with
  * the actual parse failure quoted in every refusal; store failures carry
  * the memory package's stable error code as the call's `cause`
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * Composition note: hosts that also mount the memory flows through the
  * registry must bind them there OR here, not both — a catalog holding two

@@ -3,7 +3,7 @@
  *
  * Every effect goes through this one door: a call names a visible entry,
  * pinned by its declaration digest, and settles as a journaled event
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */
@@ -155,7 +155,7 @@ export const make = (entries: ReadonlyArray<Entry>): Service => {
 /**
  * The system entries every sealed realm relies on: time and randomness as
  * ordinary journaled calls, so replay is deterministic with no special
- * identity (`packages/smithers/agent/chain/docs/contract.md`).
+ * identity (https://chain.smithers.sh/contract/).
  *
  * @category constructors
  * @since 0.1.0

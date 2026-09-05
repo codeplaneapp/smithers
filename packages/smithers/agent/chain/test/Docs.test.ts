@@ -109,11 +109,12 @@ describe("package documentation", () => {
     expect(unnamed).toEqual([])
   })
 
-  it("keeps the README pointing at the package-owned prose", () => {
-    expect(readme).toContain("./docs/api.md")
-    expect(readme).toContain("./docs/contract.md")
-    expect(readme).toContain("./docs/exports.md")
-    expect(readme).toContain("./docs/README.md")
+  // The npm README is a reader's front page, not a maintainer's map, so it
+  // links the published site rather than the source files under `docs/`.
+  it("keeps the README pointing at the published documentation", () => {
+    expect(readme).toContain("https://chain.smithers.sh")
+    expect(readme).toContain("https://chain.smithers.sh/reference/api/")
+    expect(readme).toContain("https://chain.smithers.sh/contract/")
   })
 
   it("leaves no source file citing a document this repository does not carry", () => {

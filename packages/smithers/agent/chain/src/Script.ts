@@ -3,7 +3,7 @@
  * digest.
  *
  * The digest is the replay identity of every call the script makes
- * (`packages/smithers/agent/chain/docs/contract.md`). Extraction implements gate 1
+ * (https://chain.smithers.sh/contract/). Extraction implements gate 1
  * (shape): the author's output must contain exactly one fenced flow block.
  *
  * @since 0.1.0

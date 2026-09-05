@@ -3,21 +3,21 @@ title: "API reference"
 description: "Every public export of @smthrs/chain: the nineteen namespaces, their members, signatures, behavior, and errors."
 ---
 
-`src/index.ts` re-exports one namespace per module. The wildcard `./*`
-export over `src/` is the same surface reached by subpath, so
-`@smthrs/chain/Catalog` and `Catalog` from the barrel are the same module.
-`./internal/*` is null-mapped and carries no promise.
+`@smthrs/chain` exports one namespace per module. The barrel and the matching
+subpath reach the same module, so `@smthrs/chain/Catalog` and `Catalog` from
+the barrel are the same namespace. `./internal/*` is null-mapped and carries
+no promise.
 
 ## The spine
 
-| Namespace     | What it is                                                                                                                              |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `Chain`       | The trampoline. `Chain.run(options)` drives a chain to a terminal outcome and resumes from whatever the journal already holds.          |
-| `Journal`     | The append-only journal port: `append(event, expectedPosition)` and `read`. `layerMemory` is the in-process stand-in the suite runs on. |
-| `Event`       | The event vocabulary and the pure folds over it. Every projection a host shows is a fold, never a second store.                         |
-| `CallKey`     | The replay key: link, script digest, ordinal, and the entry's declaration digest.                                                       |
-| `Outcome`     | What a link returns: `done`, `to`, `park`, and the terminal subset a run resolves to.                                                   |
-| `Observation` | The typed rejection a gate journals so the next author can route around it.                                                             |
+| Namespace     | What it is                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `Chain`       | The trampoline. `Chain.run(options)` drives a chain to a terminal outcome and resumes from whatever the journal already holds.     |
+| `Journal`     | The append-only journal port: `append(event, expectedPosition)` and `read`. `layerMemory` is the in-process stand-in tests run on. |
+| `Event`       | The event vocabulary and the pure folds over it. Every projection a host shows is a fold, never a second store.                    |
+| `CallKey`     | The replay key: link, script digest, ordinal, and the entry's declaration digest.                                                  |
+| `Outcome`     | What a link returns: `done`, `to`, `park`, and the terminal subset a run resolves to.                                              |
+| `Observation` | The typed rejection a gate journals so the next author can route around it.                                                        |
 
 ## Authoring and scripts
 
@@ -409,9 +409,9 @@ The model-backed author seat over `Model.Model` from
 ### Constructors and layers
 
 - `requestFor(config): (input: Author.Input) => ModelRequest.ModelRequest`:
-  the pure mapping from an author input to the wire-neutral request. The
-  same function derives test fixtures, so a mapping drift breaks the replay
-  match loudly instead of silently changing the step key. Degenerate inputs
+  the pure mapping from an author input to the wire-neutral request. It is
+  the mapping `make` itself calls, so you can build a request from an input
+  and inspect exactly what the model will see. Degenerate inputs
   collapse to wire-valid shapes: an empty prefix emits no system part at
   all, and an empty context becomes one placeholder line, because providers
   reject empty system blocks and empty user content outright. The request
@@ -880,5 +880,4 @@ Only the root chain drains, and only at the `link/ordinal` boundary of a
 live author call. Non-empty drains journal a `SteeringDrained` event;
 drained lines reach every subsequent author attempt of the link as
 `[steering] <line>` context. For the design behind every entry on this page,
-see [The chain contract](./contract.md). For the generated member index,
-see [Exported members](./exports.md).
+see [The chain contract](./contract.md).

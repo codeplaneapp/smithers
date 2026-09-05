@@ -6,7 +6,7 @@
  * filesystem read, browser-safe, and a sync test fails the gate when the
  * sources and the generated module drift. Assembly is byte-stable — same
  * inputs, identical string — so the provider prompt-prefix cache hits
- * across turns. Design authority: `packages/smithers/agent/chain/docs/contract.md`.
+ * across turns. Design authority: https://chain.smithers.sh/contract/.
  *
  * The catalog block renders what the chain actually dispatches: names
  * dedupe last-wins exactly like `Catalog.make`'s lookup, an entry named

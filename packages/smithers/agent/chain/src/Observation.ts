@@ -3,7 +3,7 @@
  *
  * A failed gate is never a harness crash: it is recorded in the journal and
  * projected into the next authored link's context so the model corrects it
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

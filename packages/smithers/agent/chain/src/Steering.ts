@@ -6,7 +6,7 @@
  * in as the production binding when the engine mounts; the in-memory
  * layer is the stand-in. Chains that provide no steering service run
  * unchanged and journal identically — the chain looks the service up
- * optionally (`packages/smithers/agent/chain/docs/contract.md`).
+ * optionally (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

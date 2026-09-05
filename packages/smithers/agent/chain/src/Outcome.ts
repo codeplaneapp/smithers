@@ -4,7 +4,7 @@
  * `done` completes the chain, `to` hands off to a successor script, and
  * `park` suspends the lineage with a typed waiting reason. There is no
  * agent-loop object: continuation is whatever the script returns
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

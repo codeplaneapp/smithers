@@ -1,77 +1,119 @@
 ---
 title: "@smthrs/chain"
-description: "The Agent Chain spine: an append-only journal, keyed replayable calls, and the trampoline that runs model-authored flow scripts."
+description: "A crash-safe agent loop for TypeScript: an append-only journal, keyed replayable calls, and a sealed sandbox that runs model-authored scripts."
 ---
 
-`@smthrs/chain` is the Agent Chain spine: an append-only journal of typed
-events, keyed replayable calls, and the trampoline that runs model-authored
-flow scripts.
+`@smthrs/chain` runs a model-driven agent loop that survives a crash. The
+model writes a small JavaScript program, the program's only way to reach the
+outside world is `ctx.call(name, payload)`, and every call is recorded in an
+append-only journal before the loop moves on. Run the same program again over
+the same journal and it picks up where it stopped, without repeating a single
+side effect.
 
-A model authors a script. The script's only exits are `ctx.call(name, payload)`
-and the outcome it returns. Every call settles as a journaled event keyed by
-its link, script digest, ordinal, and the callee's declaration digest.
-Resuming replays that settled prefix with zero effects and then runs live.
+## Why you would reach for it
 
-The journal is the only state. Every other structure a host shows (the call
-cache used for replay, transcripts, timelines, a UI) is a pure fold over the
-event array, never a second store.
+An agent that calls tools, edits files, and spends money on model tokens is a
+long-running program that can die in the middle. Restarting from scratch
+re-sends the emails and re-applies the patches; restarting from a hand-rolled
+cache serves stale results after you rename a tool. Four properties of this
+package address that:
 
-## Who uses it
+- **Resume with zero repeated effects.** Every settled call carries a key
+  built from the link, the digest of the script that issued it, its ordinal,
+  and the digest of the called entry's declaration. A resumed run serves a
+  recorded result only when all four still match, and fails loudly with
+  `replay_divergence` instead of serving a stale one.
+- **One door for every effect.** A script has no import, no fetch, and no
+  filesystem. It calls catalog entries you wrote, so the list of things an
+  agent can do is a list you can read.
+- **A sealed sandbox.** The production runner executes each authored script
+  in a fresh QuickJS realm with memory, stack, and step limits, and without
+  `Date` or `Math.random`, so time and randomness are journaled calls and
+  replay stays deterministic.
+- **A policy seam per call.** Mount `Authorize` and every call is decided
+  against the capabilities its entry declares. A call that needs approval
+  parks the run in place and re-asks after you grant it.
 
-You use this package when you host a durable, model-driven agent loop and
-want crash-safe resume, per-call authorization, and a sealed script sandbox
-without building them yourself. At 1.0.0-rc.0 the package is private: it is
-consumed by `apps/ui` inside the smithers repository and is not published to
-npm.
+You own the model seat, the entries, and the storage. This package owns the
+loop, the journal keys, and the sandbox.
 
 ## Install
 
-```bash
-pnpm add @smthrs/chain
-```
+`@smthrs/chain` is not on the npm registry; it is used today from a checkout
+of the [Smithers repository](https://github.com/smithersai/smithers). It
+targets Node.js 22.19.0 or later and depends on
+[Effect](https://effect.website). For requirements, import paths, and the
+services a run needs, see [Installation](./installation.md).
 
-While the package is private, a consumer inside the smithers monorepo declares
-it as a workspace dependency (`"@smthrs/chain": "workspace:*"`), the way
-`apps/ui` does. For the full setup, see [Installation](./installation.md).
+## Run a chain
 
-## A working chain
+This example runs a whole chain to a terminal outcome with no model account:
+a mock author supplies the script, an in-memory journal records the events,
+and the production QuickJS runner executes it.
 
-`Chain.run` needs four services (`Journal`, `Catalog`, `Author`, and
-`ScriptRunner`) and picks up the optional `Authorize` and `Steering` seams
-when they are mounted.
-
-```ts
-import { Catalog, Chain, Journal, ModelAuthor, QuickJsRunner } from "@smthrs/chain"
+````ts
+import { Author, Catalog, Chain, Journal, QuickJsRunner } from "@smthrs/chain"
 import { Effect, Layer } from "effect"
 
-// `ModelAuthor.layer` needs `Model.Model`, and `Layer.mergeAll` does not
-// satisfy one sibling from another: the model layer goes UNDER the author
-// layer, not beside it.
-const author = ModelAuthor.layer({ modelId: "anthropic:claude-fable-5" }).pipe(Layer.provide(modelLayer))
+const grep: Catalog.Entry = {
+  name: "grep",
+  description: "Search the workspace for a pattern",
+  handler: () => Effect.succeed({ files: ["a.ts", "b.ts"] })
+}
+
+const script = [
+  "```flow",
+  `const hits = await ctx.call("grep", { pattern: "TODO" })`,
+  "return done({ matched: hits.files.length })",
+  "```"
+].join("\n")
 
 const layers = Layer.mergeAll(
   Journal.layerMemory(),
-  author,
+  Author.layerMock([script]),
   QuickJsRunner.layer(),
-  Catalog.layer(Catalog.withSystem(hostEntries))
+  Catalog.layer(Catalog.withSystem([grep]))
 )
 
-const terminal = await Effect.runPromise(
-  Chain.run({ goal: "fix the failing test" }).pipe(Effect.provide(layers))
+const outcome = await Effect.runPromise(
+  Chain.run({ goal: "count the TODOs" }).pipe(Effect.provide(layers))
 )
-```
+// { _tag: "Done", value: { matched: 2 } }
+````
 
-For a complete first run you can execute without a model account, see the
-[Quickstart](./quickstart.md).
+Swap `Author.layerMock` for `ModelAuthor.layer(config)` over a real model and
+the same four layers drive a real agent. The
+[Quickstart](./quickstart.md) extends this run to two links, reads the
+journal it wrote, and replays it.
+
+## How this fits the rest of Smithers
+
+`@smthrs/chain` is the standalone spine. It needs four services and nothing
+else: no durable engine, no flow runtime, no control plane. Reach for it when
+you are building your own host and want the journal, the replay keys, and the
+sandbox without the rest.
+
+[`@smthrs/agent`](/api/agent) is the parent package and the fuller answer.
+It composes the production Smithers agent loop on the durable engine, and it
+ships the two adapters that run it: `AgentSession` for control-plane runs an
+operator can watch, steer, and approve, and `AgentAction` for a typed
+model-backed step inside a larger flow. If you want an agent that plugs into
+runs, approvals, and workflows rather than a loop you assemble yourself,
+start there.
+
+Both sit under [`@smthrs/cli`](/api/cli), the `smithers` command that runs
+and inspects agents from a terminal.
 
 ## Where to go next
 
-- [Installation](./installation.md): requirements and dependencies.
-- [Quickstart](./quickstart.md): run a chain to `done` with a scripted author.
+- [Installation](./installation.md): requirements, import paths, and the
+  layers `Chain.run` needs.
+- [Quickstart](./quickstart.md): a two-link run, the journal it writes, and
+  the replay that repeats nothing.
 - Concepts: [The journal](./concepts/journal.md),
   [Keyed replay](./concepts/keyed-replay.md),
   [The trampoline](./concepts/trampoline.md), and
-  [Flow scripts](./concepts/flow-scripts.md) explain the mental models.
+  [Flow scripts](./concepts/flow-scripts.md).
 - Guides: [Write catalog entries](./guides/catalog-entries.md),
   [Authorize calls](./guides/authorization.md),
   [Resume and replay](./guides/resume-and-replay.md),
@@ -80,36 +122,15 @@ For a complete first run you can execute without a model account, see the
   [Project the registry and bind memory](./guides/registry-and-memory.md), and
   [Test a chain](./guides/testing.md).
 - [API reference](./api.md): every export of the nineteen namespaces.
-- [The chain contract](./contract.md): the governing design, failure
-  taxonomy, concurrency rule, resource limits, JSON boundary, determinism,
-  and isolation.
-- [Troubleshooting](./troubleshooting.md): the typed failures a run can
-  carry, what causes them, and what to do.
-- [Exported members](./exports.md): the generated index of every documented
-  member.
+- [The chain contract](./contract.md): the gates, the failure taxonomy, the
+  concurrency rule, the resource limits, and the JSON boundary.
+- [Troubleshooting](./troubleshooting.md): every typed failure a run can
+  carry, what causes it, and what to do.
 
-## Limits a caller inherits
+## Limits you inherit
 
-32 links per chain, 64 calls per link, 4 levels of sub-chain nesting, a
-64 MiB QuickJS heap with a 256 KiB stack and a 10000-poll step budget, and a
-JSON boundary bounded at depth 128 and an 8 MiB size budget. The table of
-every default and the constant that carries it lives in
+Defaults a caller gets without asking: 32 links per chain, 64 calls per link,
+4 levels of sub-chain nesting, a 64 MiB QuickJS heap with a 256 KiB stack and
+a 10000-poll step budget, and a JSON boundary bounded at depth 128 and an
+8 MiB size budget. Every default and the constant that carries it is in
 [The chain contract](./contract.md).
-
-## Two runners, one sandbox
-
-`QuickJsRunner.layer()` is the production sealed interpreter: a fresh QuickJS
-realm per link with memory, stack, and step limits and no host globals.
-`ScriptRunner.layerInProcess` provides NO isolation: the `Function`
-constructor builds its body in global scope, so a script reaches `globalThis`,
-`process`, and dynamic `import()`. Use it for trusted fixtures only.
-
-## Documentation owned by this package
-
-Every published sentence about this package has one source inside it: the
-JSDoc in `src/`, the prose in `docs/`, and the `description` field of
-`package.json`. `exports.md` is generated from the JSDoc: edit the JSDoc,
-never that file. `test/Docs.test.ts` is the drift gate: it fails when a
-namespace exported from `src/index.ts` is missing from `api.md`, when
-`contract.md` states a default the source no longer carries, or when the
-package README stops pointing at these files.

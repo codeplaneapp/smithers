@@ -5,7 +5,7 @@
  * an outcome, or — when it has no script (bootstrap) or its script was
  * rejected by a gate — the harness authors a successor from the goal plus
  * the journaled observations. Continuation is whatever the link returns
- * (`packages/smithers/agent/chain/docs/contract.md`).
+ * (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

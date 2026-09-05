@@ -11,13 +11,12 @@ scripted author stands in for the model, an in-memory journal holds the
 events, and the production QuickJS runner executes the scripts. By the end
 you have a terminal outcome and the journal that produced it.
 
-## 1. Install the package
+## 1. Get the package
 
-```bash
-pnpm add @smthrs/chain
-```
-
-For workspace setups and requirements, see [Installation](/installation/).
+A chain runs on Node.js 22.19.0 or later and pulls in
+[Effect](https://effect.website), which every sample below imports.
+[Installation](/installation/) covers where to get the package, the import
+paths it exposes, and the services a run needs.
 
 ## 2. Write the author scripts
 
@@ -157,6 +156,6 @@ guard them, see [Resume and replay](/guides/resume-and-replay/).
   trampoline, and flow scripts, one mental model per page.
 - [Authorize calls](/guides/authorization/): put a policy seam in front
   of gate 4.
-- [Test a chain](/guides/testing/): the mock and noop layers the suite
-  itself uses.
+- [Test a chain](/guides/testing/): the mock and noop layers this
+  package tests itself with.
 - [API reference](/reference/api/): every export of the nineteen namespaces.

@@ -4,7 +4,7 @@
  * The seat is mocked at this boundary, not at the provider wire: the model
  * layer sits beneath a production implementation and no chain code changes
  * when it arrives. The author call carries no tools; the root stays
- * clean (`packages/smithers/agent/chain/docs/contract.md`).
+ * clean (https://chain.smithers.sh/contract/).
  *
  * @since 0.1.0
  */

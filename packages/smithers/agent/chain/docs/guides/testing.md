@@ -1,13 +1,13 @@
 ---
 title: "Test a chain"
-description: "The mock, noop, and in-memory layers the chain's own suite runs on, and the runner conformance they pin."
+description: "The mock, noop, and in-memory layers this package tests itself with, and the runner conformance they pin."
 sidebar:
   order: 7
 ---
 
-Every service the chain needs has a test double in the package itself. The
-suite runs on these layers; they are the advertised way to test your own
-chains and entries.
+Every service a chain needs ships with a test double in this package. Its
+own tests run on these layers, and they are the supported way to test your
+own chains and entries.
 
 ## Script the author seat
 
@@ -46,7 +46,7 @@ replay a finished chain or resume a crashed one mid-test.
 fast and synchronous-looking. `QuickJsRunner.layer()` is the production
 sealed realm; use it when the test must match production behavior exactly.
 
-The suite runs a conformance set over BOTH bindings, so they agree on the
+This package runs a conformance set over BOTH bindings, so they agree on the
 behavior a host depends on: calls settle one at a time in issue order, race
 losers settle durably, `to` re-derives the successor digest (a forged digest
 is discarded), `park` defaults its message, thrown scripts fail `runtime`,
@@ -84,9 +84,9 @@ call misses gate 3.
 
 ## Assert on the journal, not the API
 
-The in-memory journal is a deletable stand-in for the engine journal, and the
-suite's end-to-end tests assert journal CONTENTS rather than this API, so the
-suite survives an engine swap. Do the same: run the chain, read the events,
+The in-memory journal is a stand-in for whatever durable journal you mount,
+so this package's own end-to-end tests assert journal CONTENTS rather than
+this API and survive a swap of the storage underneath. Do the same: run the chain, read the events,
 and assert on outcomes, `CallSettled` keys, and `GateRejected` observations.
 A counting entry (a handler that increments a counter) is the zero-effects
 probe for replay tests.

@@ -4,7 +4,7 @@
  * A script's only INTENDED exits are `ctx.call` and the outcome it returns.
  * Calls are settled one at a time by an Effect handler (the same pump shape
  * the QuickJS sandbox uses), so a hardened interpreter is a layer swap with
- * no chain change (`packages/smithers/agent/chain/docs/contract.md`). Enforcing that the
+ * no chain change (https://chain.smithers.sh/contract/). Enforcing that the
  * intended exits are the ONLY exits is the sandbox's job, not this port's:
  * {@link layerInProcess} runs the script in the host realm.
  *
