@@ -13,8 +13,6 @@
 import { Smithers } from "@smthrs/targets"
 import { Package as examplesPackage } from "../../examples/PACKAGE.ts"
 import { Package as errorsPackage } from "../../packages/errors/PACKAGE.ts"
-import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
-import { Package as agentPackage } from "../../packages/smithers/agent/PACKAGE.ts"
 import { Package as chainPackage } from "../../packages/smithers/agent/chain/PACKAGE.ts"
 import { Package as evalsPackage } from "../../packages/smithers/agent/evals/PACKAGE.ts"
 import { Package as fsPackage } from "../../packages/smithers/agent/fs/PACKAGE.ts"
@@ -22,6 +20,7 @@ import { Package as harnessPackage } from "../../packages/smithers/agent/harness
 import { Package as integrationsPackage } from "../../packages/smithers/agent/integrations/PACKAGE.ts"
 import { Package as memoryPackage } from "../../packages/smithers/agent/memory/PACKAGE.ts"
 import { Package as modelPackage } from "../../packages/smithers/agent/model/PACKAGE.ts"
+import { Package as agentPackage } from "../../packages/smithers/agent/PACKAGE.ts"
 import { Package as pluginPackage } from "../../packages/smithers/agent/plugin/PACKAGE.ts"
 import { Package as registryPackage } from "../../packages/smithers/agent/registry/PACKAGE.ts"
 import { Package as scorersPackage } from "../../packages/smithers/agent/scorers/PACKAGE.ts"
@@ -30,7 +29,6 @@ import { Package as triggersPackage } from "../../packages/smithers/agent/trigge
 import { Package as targetsPackage } from "../../packages/smithers/build/targets/PACKAGE.ts"
 import { Package as controlPackage } from "../../packages/smithers/control/PACKAGE.ts"
 import { Package as createAppPackage } from "../../packages/smithers/create-app/PACKAGE.ts"
-import { Package as flowsPackage } from "../../packages/smithers/flows/PACKAGE.ts"
 import { Package as artifactsPackage } from "../../packages/smithers/flows/artifacts/PACKAGE.ts"
 import { Package as canonicalPackage } from "../../packages/smithers/flows/canonical/PACKAGE.ts"
 import { Package as capabilityPackage } from "../../packages/smithers/flows/capability/PACKAGE.ts"
@@ -45,6 +43,7 @@ import { Package as journalPackage } from "../../packages/smithers/flows/journal
 import { Package as kernelPackage } from "../../packages/smithers/flows/kernel/PACKAGE.ts"
 import { Package as keysPackage } from "../../packages/smithers/flows/keys/PACKAGE.ts"
 import { Package as observabilityPackage } from "../../packages/smithers/flows/observability/PACKAGE.ts"
+import { Package as flowsPackage } from "../../packages/smithers/flows/PACKAGE.ts"
 import { Package as patternsPackage } from "../../packages/smithers/flows/patterns/PACKAGE.ts"
 import { Package as planPackage } from "../../packages/smithers/flows/plan/PACKAGE.ts"
 import { Package as platformBrowserPackage } from "../../packages/smithers/flows/platform-browser/PACKAGE.ts"
@@ -59,9 +58,22 @@ import { Package as gatewayPackage } from "../../packages/smithers/gateway/PACKA
 import { Package as mcpPackage } from "../../packages/smithers/mcp/PACKAGE.ts"
 import { Package as migratePackage } from "../../packages/smithers/migrate/PACKAGE.ts"
 import { Package as notificationsPackage } from "../../packages/smithers/notifications/PACKAGE.ts"
+import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
 import { Package as testingPackage } from "../../packages/testing/PACKAGE.ts"
 
 const cwd = "apps/site"
+
+const supportDocs = Smithers.Generate({
+  summary: "Project the RC support reference and entry pages from colocated docs.",
+  script: Smithers.file("scripts/sync-support-docs.mjs"),
+  data: [Smithers.glob("docs/**/*")],
+  changes: [
+    "src/content/docs/docs/reference/support-matrix.mdx",
+    "src/content/docs/docs/reference/api/index.mdx",
+    "src/content/docs/docs/installation.mdx",
+    "src/content/docs/changelogs/1.0.0-rc.0.mdx"
+  ]
+})
 
 /** The pages, docs content, components, layouts, styles, scripts, and the Astro config. */
 const sources = [
@@ -119,7 +131,8 @@ const referenceIngest = Smithers.Generate({
 // pages, so `smithers-build lint //apps/site:cliData` fails the moment a
 // removed verb, a help string, or the policy wording moves without the docs.
 const cliData = Smithers.Generate({
-  summary: "Regenerate CLI help captures, version pins, and the removed-command anchor contract; check drift under lint.",
+  summary:
+    "Regenerate CLI help captures, version pins, and the removed-command anchor contract; check drift under lint.",
   script: Smithers.file("scripts/gen-cli-data.mjs"),
   // `cliPackage.docsSources` is the CLI's src tree, README, docs, and
   // package.json by label. A `//packages/smithers/src/**` glob declared here
@@ -265,6 +278,22 @@ const tutorialCodeBlocks = Object.fromEntries(
   ])
 )
 
+/**
+ * Build and documentation targets for the public site.
+ *
+ * @since 1.0.0
+ * @category packages
+ */
 export const Package = Smithers.Package({
-  targets: { check, build, referenceIngest, cliData, apiDocs, docsLint, examplesPages, ...tutorialCodeBlocks }
+  targets: {
+    check,
+    build,
+    supportDocs,
+    referenceIngest,
+    cliData,
+    apiDocs,
+    docsLint,
+    examplesPages,
+    ...tutorialCodeBlocks
+  }
 })

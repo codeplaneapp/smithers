@@ -66,6 +66,7 @@
 
 - [Library API](https://smithers.sh/docs/reference/api/): One page per @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source.
 - [Targets](https://smithers.sh/docs/reference/targets/): One page per @smthrs/targets rule: attributes, verbs, cache behavior, and channels from Target.make.
+- [RC support matrix](https://smithers.sh/docs/reference/support-matrix/): Runtime, platform, storage, hosting, and evidence limits for Smithers 1.0.0-rc.0.
 - [@smthrs/flow](https://smithers.sh/docs/reference/api/flow/): What @smthrs/flow exports: the flow, action, runtime-port, and durable-primitive namespaces, with types and defaults from source.
 - [@smthrs/engine](https://smithers.sh/docs/reference/api/engine/): What @smthrs/engine exports: FlowEngine, FlowProxy, and FlowProxyServer, with types and defaults from source.
 - [@smthrs/targets](https://smithers.sh/docs/reference/api/targets/): What @smthrs/targets exports: the Smithers namespace of workspace declarations, catalog rules, macros, actions, and errors, with types from source.

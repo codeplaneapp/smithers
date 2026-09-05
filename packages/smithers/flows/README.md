@@ -55,14 +55,13 @@ is chosen by the program that runs, not by the library it depends on.
 
 `@smthrs/flows` bundles for a browser, and `pnpm run browser` gates it along
 with every package root it re-exports.
-[Browser support](https://smithers.sh/architecture/browser-support) lists the
-gated entry points; that page tracks the gate's own contract, so it is the one
-place the list is written down.
+[RC support matrix](https://smithers.sh/docs/reference/support-matrix/)
+links the browser bundle contract and lists runtime evidence limits.
 
 Bundling is not durable execution. The rc.0 durable engine is supported only on
-Node.js >= 22.19.0 with local SQLite; browser and edge runtimes may author and
-inspect declarations but are not supported durable hosts, even with another
-SQL client.
+Node.js >= 22.19.0 with local SQLite. Browser support is bundle-only, with no
+durable flows even when another SQL client is supplied. Deno and edge runtimes
+are not supported.
 
 Platform implementations are never re-exported through the namespaces here
 either. Import `@smthrs/platform-node`, `@smthrs/platform-bun`,

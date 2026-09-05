@@ -9,6 +9,9 @@ import starlight from "@astrojs/starlight"
  * Starlight content is authored under src/content/docs/docs/ so every route
  * carries the /docs prefix and the root stays a plain Astro page. Add a page
  * there and list it in the sidebar below.
+ *
+ * @since 1.0.0
+ * @category configuration
  */
 export default defineConfig({
   site: "https://smithers.sh",
@@ -67,6 +70,7 @@ export default defineConfig({
           label: "Reference",
           collapsed: true,
           items: [
+            { slug: "docs/reference/support-matrix" },
             { slug: "docs/reference/cli", label: "CLI overview" },
             { label: "CLI verbs", autogenerate: { directory: "docs/reference/cli" }, collapsed: true },
             { slug: "docs/reference/flow-mdx" },
