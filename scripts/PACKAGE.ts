@@ -156,7 +156,7 @@ const toolchainPins = Smithers.NodeTest({
 })
 
 /**
- * The browser contract, executed.
+ * The web bundle compatibility contract, compiled without a browser process.
  *
  * Browser support is a hard requirement met through layers: the contract entry
  * points must bundle for the browser, and the documented Node-only ones must
@@ -166,8 +166,8 @@ const toolchainPins = Smithers.NodeTest({
  * @since 0.1.0
  * @category test
  */
-const browserContract = Smithers.NodeTest({
-  summary: "The browser bundle builds and exposes the contract surface.",
+const webBundleContract = Smithers.NodeTest({
+  summary: "Compile the web bundle and validate its exported surface; no browser process is started.",
   featured: true,
   runner: Smithers.entrypoint(Smithers.file("//scripts/browser-check.mjs")),
   // The entry points this bundles live in other packages, and a declared glob
@@ -407,15 +407,49 @@ const thirdPartyNoticesUnit = Smithers.NodeTest({
   deps: []
 })
 
-/**
- * Repository script gates.
- *
- * @since 1.0.0
- * @category configuration
- */
+/** Verifies immutable-artifact publication and partial-retry refusal using a fake registry. */
+const releaseIntegrity = Smithers.NodeTest({
+  runner: Smithers.testRunner([
+    Smithers.file("//scripts/publish-release.test.mjs"),
+    Smithers.file("//scripts/restore-release.test.mjs")
+  ]),
+  srcs: sources,
+  deps: []
+})
+
+/** Required fast behavioral mutation tier, including both exact-byte guards. */
+const mutationGate = Smithers.NodeTest({
+  runner: Smithers.entrypoint(Smithers.file("//scripts/check-mutations.mjs")),
+  srcs: [...sources, Smithers.glob("//packages/smithers/gateway/src/**/*.ts"), Smithers.glob("//packages/smithers/gateway/test/**/*.ts")],
+  deps: []
+})
+
+/** Deterministic scheduler and journal cost regressions, after output validation. */
+const benchmarkGate = Smithers.NodeTest({
+  runner: Smithers.entrypoint(Smithers.file("//scripts/bench/gate.mjs")),
+  srcs: [...sources, Smithers.file("//scripts/bench/baseline.json")],
+  deps: []
+})
+
+/** Real-runner sentinels and fail-closed campaign-verifier regressions. */
+const tierContracts = Smithers.NodeTest({
+  runner: Smithers.testRunner([
+    Smithers.file("//scripts/runner-contract.test.mjs"),
+    Smithers.file("//scripts/check-mutations.test.mjs"),
+    Smithers.file("//scripts/check-soak-campaign.test.mjs"),
+    Smithers.file("//scripts/benchmark-gate.test.mjs")
+  ]),
+  srcs: sources,
+  deps: []
+})
+
 export const Package = Smithers.Package({
   targets: {
-    browserContract,
+    mutationGate,
+    benchmarkGate,
+    tierContracts,
+    releaseIntegrity,
+    webBundleContract,
     changelog,
     dependencyBoundaries,
     effectVersion,

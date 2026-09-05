@@ -1,15 +1,20 @@
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
+import { assertExportTargets, assertPackedExportTargets } from "./packed-export-targets.mjs"
+import { assertEffectPins, effectDeclarations, effectLockVersions, installedEffectResolutions } from "./check-single-effect-version.mjs"
 import {
   defaultBindings,
   dependencyOrder,
   esmOnlyModules,
   packResultFilename,
   publicationManifest,
+  stagePackage,
   publishedPackages,
   readWorkspaceManifests,
   releaseGroups,
@@ -52,13 +57,16 @@ const jobSteps = (source, job) => {
 
 /** Every build-graph invocation these steps make, in order. */
 const graphCommands = (steps) =>
-  steps.flatMap((step) => [...step.matchAll(/pnpm exec smithers-build [^\n]+/g)].map((match) => match[0]))
+  steps.flatMap((step) => [...step.matchAll(/pnpm exec (?:smithers-build|smthrs) [^\n]+/g)].map((match) => match[0]))
 
 /** The recursive per-package script runners the target graph replaced. */
 const scriptRunners = (source) => [...source.matchAll(/\bpnpm (?:run [a-z][a-z:-]*|test)\b/g)].map((match) => match[0])
 
 /** The `with:` entries of one step, which a copy may extend but not contradict. */
 const withEntries = (step) => step.split("\n").filter((line) => line.startsWith("          "))
+
+/** Whether a step invokes an action, independent of its immutable ref. */
+const invokes = (step, action) => step.startsWith(`      - uses: ${action}@`)
 
 test("publicationManifest replaces source exports without mutating the input", () => {
   const manifest = {
@@ -144,24 +152,31 @@ test("workspaces covers every non-private engine and agent package under package
     .filter(([, manifest]) => !manifest.private && releaseGroups.has(manifest.smthrs?.group))
     .map(([name]) => name)
 
-  assert.deepEqual([...releaseGroups].sort(), ["agent", "engine"])
+  assert.deepEqual([...releaseGroups].sort(), ["agent", "engine", "tooling"])
   assert.deepEqual([...workspaces].sort(), published.sort())
-  // Every tooling package is private. The build graph, its CLI, the typed
-  // PACKAGE.ts rules, and the hosted cache deployment are workspace machinery,
-  // not a supported install.
+  // The build runtime is public because the CLI requires it. Infrastructure
+  // deployment and repository-local policy remain private and cannot enter
+  // the tarball set by accident.
   const tooling = manifests.filter(([, manifest]) => manifest.smthrs?.group === "tooling")
   assert.ok(tooling.length > 0)
-  assert.deepEqual(tooling.filter(([, manifest]) => manifest.private !== true).map(([name]) => name), [])
+  assert.deepEqual(
+    tooling.filter(([, manifest]) => manifest.private !== true).map(([, manifest]) => manifest.name).sort(),
+    ["@smthrs/build", "@smthrs/build-cli", "@smthrs/create-app", "@smthrs/targets"]
+  )
+  assert.deepEqual(
+    tooling.filter(([, manifest]) => manifest.private === true).map(([, manifest]) => manifest.name).sort(),
+    ["@smthrs/build-infra", "@smthrs/repo-targets", "@smthrs/rpc"]
+  )
 })
 
-test("the packed set is exactly the 40 names the RC contract publishes", () => {
+test("the packed set is exactly the 49 names the RC contract publishes", () => {
   // `publishedPackages` is the release decision; group membership is
   // only how it is enforced. Restating the roster here means a package that
   // joins or leaves the release has to change both files in one diff.
   const manifests = readWorkspaceManifests()
   const packed = workspaces.map((directory) => manifests.get(directory).name)
 
-  assert.equal(publishedPackages.length, 40)
+  assert.equal(publishedPackages.length, 49)
   assert.deepEqual([...packed].sort(), [...publishedPackages].sort())
   assert.ok(publishedPackages.includes("smthrs"), "the unscoped deprecation notice publishes with the RC")
 })
@@ -205,7 +220,7 @@ test("pack-release order is a topological order of the workspace dependency grap
     }
   }
 
-  assert.deepEqual(unordered.sort(), [])
+  assert.deepEqual(unordered, [])
 })
 
 test("release.yml publishes exactly the packed workspaces, in the packed order", () => {
@@ -270,24 +285,29 @@ test("every toolchain step in ci.yml's required test job also runs in release.ym
   // out the full history the changelog gate reads, and it points npm at the
   // registry it publishes to. Their `with:` entries are checked below instead,
   // so a version bump inside one still has to reach this file.
-  const extended = ["      - uses: actions/checkout@v4", "      - uses: actions/setup-node@v4"]
-  const toolchain = ciSteps.filter((step) => !step.includes("smithers-build"))
+  const extended = ["actions/checkout", "actions/setup-node"]
+  const toolchain = ciSteps.filter((step) => !/(?:smithers-build|smthrs)/.test(step))
   const missing = toolchain
-    .filter((step) => !extended.some((first) => step.startsWith(first)))
+    .filter((step) => !extended.some((action) => invokes(step, action)))
     .filter((step) => !declared.has(step))
 
   assert.ok(toolchain.length > 5, `${toolchain.length} steps is too few to be the CI toolchain`)
   assert.deepEqual(missing, [], "these ci.yml toolchain steps are missing from release.yml")
 
-  for (const first of extended) {
-    const source = toolchain.find((step) => step.startsWith(first))
-    const copy = releaseSteps.find((step) => step.startsWith(first))
-    assert.ok(source !== undefined, `ci.yml has no ${first.trim()} step`)
-    assert.ok(copy !== undefined, `release.yml has no ${first.trim()} step`)
+  for (const action of extended) {
+    const source = toolchain.find((step) => invokes(step, action))
+    const copy = releaseSteps.find((step) => invokes(step, action))
+    assert.ok(source !== undefined, `ci.yml has no ${action} step`)
+    assert.ok(copy !== undefined, `release.yml has no ${action} step`)
+    assert.equal(
+      source.split("\n")[0],
+      copy.split("\n")[0],
+      `release.yml's ${action} step uses a different action pin`
+    )
     assert.deepEqual(
       withEntries(source).filter((entry) => !withEntries(copy).includes(entry)),
       [],
-      `release.yml's ${first.trim()} step drops a pin ci.yml declares`
+      `release.yml's ${action} step drops a toolchain setting ci.yml declares`
     )
   }
 })
@@ -307,9 +327,9 @@ test("dependencyOrder is a topological order with an alphabetical tiebreak", () 
   )
 })
 
-test("dependencyOrder enters a cycle at its alphabetically first member", () => {
-  assert.deepEqual(
-    dependencyOrder(
+test("dependencyOrder rejects cycles", () => {
+  assert.throws(
+    () => dependencyOrder(
       new Map([
         ["b", new Set(["c"])],
         ["c", new Set(["b"])],
@@ -317,7 +337,7 @@ test("dependencyOrder enters a cycle at its alphabetically first member", () => 
         ["d", new Set()]
       ])
     ),
-    ["d", "b", "c", "a"]
+    /cyclic workspace dependencies/
   )
 })
 
@@ -378,65 +398,115 @@ test("@smthrs/memory packs the SQL reference copies its shipped source cites", (
   )
 })
 
-test("the install docs pin the drifted @effect/platform-node-shared to the packed effect version", () => {
-  // @effect/platform-node@4.0.0-rc.108 asks for @effect/platform-node-shared
-  // ^4.0.0-rc.108, which selected 4.0.0-rc.112 before the exact peer set
-  // constrained it. Older installs can retain that incompatible Effect tree.
-  // The documented remedy for those installs is an
-  // overrides pin, and it has to name the version the packed manifests pin.
+test("every published library exposes the one Effect runtime as a peer", () => {
   const manifests = readWorkspaceManifests()
-  const pins = new Set(
-    workspaces
-      .map((directory) => manifests.get(directory))
-      .map((manifest) => manifest.dependencies?.effect ?? manifest.peerDependencies?.effect)
-      .filter((range) => typeof range === "string")
-  )
+  const published = workspaces.map((directory) => manifests.get(directory))
+  const pins = new Set(published.flatMap((manifest) =>
+    [manifest.dependencies?.effect, manifest.peerDependencies?.effect].filter((range) => typeof range === "string")
+  ))
+  assert.deepEqual([...pins], ["4.0.0-rc.112"], "one effect pin across the published set")
+  const misplaced = published
+    .filter((manifest) => manifest.bin === undefined && manifest.dependencies?.effect !== undefined)
+    .map((manifest) => manifest.name)
+  assert.deepEqual(misplaced, [], "library packages must not install a private Effect runtime")
+})
 
-  assert.deepEqual([...pins], ["4.0.0-rc.108"], "one effect pin across the published set")
-  const pin = [...pins][0]
-  for (const relative of ["README.md"]) {
-    const source = readFileSync(join(repoRoot, relative), "utf8")
-    assert.match(
-      source,
-      new RegExp(`"@effect/platform-node-shared":\\s*"${pin.replace(/\./g, "\\.")}"`),
-      `${relative} must document the overrides pin`
-    )
-    assert.match(source, /overrides/, `${relative} must name the overrides field`)
+test("published adapters remain optional while executable SQLite and Bun host prerequisites are required", () => {
+  const byName = new Map([...readWorkspaceManifests().values()].map((manifest) => [manifest.name, publicationManifest(manifest)]))
+  const optional = {
+    "@smthrs/database": { "@effect/sql-sqlite-node": "4.0.0-rc.112" },
+    "@smthrs/gateway": { "@effect/platform-node": "4.0.0-rc.112" },
+    "@smthrs/flows": { "@smthrs/platform-node": "1.0.0-rc.0" },
+    "@smthrs/create-app": { "@smthrs/testing": "1.0.0-rc.0" },
+    "@smthrs/observability": {
+      "@opentelemetry/exporter-logs-otlp-http": "0.222.0", "@opentelemetry/exporter-metrics-otlp-http": "0.222.0",
+      "@opentelemetry/exporter-trace-otlp-http": "0.222.0", "@opentelemetry/sdk-trace-base": "2.11.0",
+      "@opentelemetry/sdk-trace-node": "2.11.0", "@opentelemetry/sdk-trace-web": "2.11.0"
+    }
+  }
+  for (const [name, peers] of Object.entries(optional)) {
+    const manifest = byName.get(name)
+    for (const [peer, version] of Object.entries(peers)) {
+      assert.equal(manifest.dependencies?.[peer], undefined, name + " must not force " + peer)
+      assert.equal(manifest.peerDependencies[peer], version)
+      assert.deepEqual(manifest.peerDependenciesMeta[peer], { optional: true })
+      assert.equal(manifest.devDependencies[peer], version)
+    }
+  }
+  for (const [name, peer, version] of [
+    ["@smthrs/cli", "@effect/sql-sqlite-node", "4.0.0-rc.112"],
+    ["@smthrs/platform-bun", "@smthrs/platform-node", "1.0.0-rc.0"],
+    ["@smthrs/platform-bun", "@effect/platform-node", "4.0.0-rc.112"]
+  ]) {
+    assert.equal(byName.get(name).peerDependencies[peer], version)
+    assert.notEqual(byName.get(name).peerDependenciesMeta?.[peer]?.optional, true)
+  }
+  assert.equal(byName.get("@smthrs/observability").dependencies["@opentelemetry/sdk-logs"], "0.222.0")
+  assert.equal(byName.get("@smthrs/observability").dependencies["@opentelemetry/sdk-metrics"], "2.11.0")
+  assert.equal(byName.get("@smthrs/agent").dependencies["@smthrs/platform-browser"], undefined)
+})
+
+test("runtime evaluation owns scorers while testing delegates to the same pure grading package", () => {
+  const manifests = readWorkspaceManifests()
+  const evals = manifests.get("packages/smithers/agent/evals")
+  const testing = manifests.get("packages/testing")
+  assert.equal(evals.dependencies["@smthrs/testing"], undefined)
+  assert.equal(evals.devDependencies["@smthrs/testing"], "1.0.0-rc.0")
+  assert.equal(evals.dependencies["@smthrs/scorers"], "1.0.0-rc.0")
+  assert.equal(testing.dependencies["@smthrs/scorers"], "1.0.0-rc.0")
+})
+
+test("the Effect checker refuses ranges and mismatched RCs in every dependency field", () => {
+  for (const section of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+    for (const name of ["effect", "@effect/platform-node", "@effect/sql-sqlite-node", "@effect/new-adapter"]) {
+      for (const version of ["4.0.0-rc.111", "^4.0.0-rc.112", "~4.0.0-rc.112", "4.0.0-rc.113"]) {
+        const records = effectDeclarations({ [section]: { [name]: version } }, "fixture")
+        assert.equal(records.length, 1)
+        assert.throws(() => assertEffectPins(records), /Expected exact Effect-family RC/)
+      }
+      assert.doesNotThrow(() => assertEffectPins(effectDeclarations({ [section]: { [name]: "4.0.0-rc.112" } }, "fixture")))
+    }
   }
 })
 
-test("the overrides recipe names the npm ls form that fails and the reinstall it needs", () => {
-  // Two measured facts about npm 11.16.0 that the recipe has to carry, or a
-  // reader follows it and sees nothing change.
-  //
-  // Bare `npm ls` prints direct dependencies only. The drifted copy nests
-  // below that depth, so the bare form exits 0 with the drift in place; the
-  // forms that walk the tree, `npm ls --all` and `npm ls <name>`, are the ones
-  // that exit 1. An unqualified "npm ls exits 1" sends a reader to the one
-  // command that reports the problem as absent.
-  //
-  // And npm does not reconcile an installed tree when `overrides` is edited
-  // afterward. With `node_modules` and `package-lock.json` on disk, the
-  // install answers `up to date` and leaves the drifted copy nested, so the
-  // pin only takes effect on a clean install.
-  for (const relative of ["README.md"]) {
-    const source = readFileSync(join(repoRoot, relative), "utf8")
-    assert.match(
-      source,
-      /npm ls --all/,
-      `${relative} must attach the exit-1 claim to a form that walks the tree`
-    )
-    assert.match(
-      source,
-      /package-lock\.json/,
-      `${relative} must tell an already-installed project to drop its lockfile and reinstall`
-    )
-    assert.match(
-      source,
-      /node_modules/,
-      `${relative} must tell an already-installed project to drop node_modules and reinstall`
-    )
-  }
+test("the Effect checker reads scoped and duplicate lock entries independently of declarations", () => {
+  const pnpm = "packages:\n  effect@4.0.0-rc.112:\n  '@effect/platform-node@4.0.0-rc.111':\n" +
+    "snapshots:\n  '@effect/platform-node@4.0.0-rc.111(effect@4.0.0-rc.112)':\n"
+  assert.deepEqual(effectLockVersions(pnpm, "pnpm").map(({ name, version }) => [name, version]), [
+    ["effect", "4.0.0-rc.112"], ["@effect/platform-node", "4.0.0-rc.111"], ["@effect/platform-node", "4.0.0-rc.111"]
+  ])
+  const bun = '"effect": ["effect@4.0.0-rc.112", ""], "@effect/platform-bun": ["@effect/platform-bun@4.0.0-rc.113", ""]'
+  assert.deepEqual(effectLockVersions(bun, "bun").map(({ name, version }) => [name, version]), [
+    ["effect", "4.0.0-rc.112"], ["@effect/platform-bun", "4.0.0-rc.113"]
+  ])
+  assert.throws(() => assertEffectPins(effectLockVersions(pnpm, "pnpm")), /platform-node@4.0.0-rc.111/)
+  assert.throws(() => assertEffectPins(effectLockVersions(bun, "bun")), /platform-bun@4.0.0-rc.113/)
+})
+
+test("installed package checks reject missing, malformed and same-version private Effect copies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "smithers-k-effect-resolution-"))
+  try {
+    await writeFile(join(root, "package.json"), "{}")
+    const directory = "library"
+    const library = { name: "@smthrs/fixture", peerDependencies: { effect: "4.0.0-rc.112" } }
+    await mkdir(join(root, directory), { recursive: true })
+    await writeFile(join(root, directory, "package.json"), JSON.stringify(library))
+    const manifests = new Map([[directory, library]])
+    assert.throws(() => installedEffectResolutions(root, manifests), /Cannot find module/)
+    await mkdir(join(root, "node_modules/effect"), { recursive: true })
+    await writeFile(join(root, "node_modules/effect/package.json"), JSON.stringify({ name: "effect", version: "4.0.0-rc.112" }))
+    assert.equal(installedEffectResolutions(root, manifests).length, 1)
+    // Each installation has its own importer. Node caches prior resolutions,
+    // so changing a previously resolved directory would test that cache.
+    await mkdir(join(root, "duplicate/node_modules/effect"), { recursive: true })
+    await writeFile(join(root, "duplicate/package.json"), JSON.stringify(library))
+    await writeFile(join(root, "duplicate/node_modules/effect/package.json"), JSON.stringify({ name: "effect", version: "4.0.0-rc.112" }))
+    assert.throws(() => installedEffectResolutions(root, new Map([["duplicate", library]])), /different physical Effect instance/)
+    await mkdir(join(root, "malformed/node_modules/effect"), { recursive: true })
+    await writeFile(join(root, "malformed/package.json"), JSON.stringify(library))
+    await writeFile(join(root, "malformed/node_modules/effect/package.json"), "{ invalid")
+    assert.throws(() => installedEffectResolutions(root, new Map([["malformed", library]])))
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test("every published package packs the markdown inside the source tree it ships", () => {
@@ -460,41 +530,17 @@ test("every published package packs the markdown inside the source tree it ships
   assert.deepEqual(unpacked, [], "these markdown files sit in a packed source tree and no files glob packs them")
 })
 
-test("the install line pins @effect/platform-node-shared beside @effect/platform-node", () => {
-  // Measured against the live registry on the 40 packed tarballs: a consumer
-  // that names @effect/platform-node-shared in its own dependencies resolves
-  // one copy at the pinned version under npm 11.16.0, Bun 1.4.0, and pnpm
-  // 11.21.0. The five published manifests that already pin it exactly cannot
-  // do this for the consumer, because a dependency's manifest does not rewrite
-  // the range a sibling declares; only an edge the consumer owns does.
-  //
-  // The install line is the edge the consumer owns, so the pin belongs there.
-  // Without it npm nests @effect/platform-node-shared@4.0.0-rc.112 under
-  // @effect/platform-node and `npm ls --all` exits 1.
-  const manifests = readWorkspaceManifests()
-  const pins = new Set(
-    workspaces
-      .map((directory) => manifests.get(directory))
-      .map((manifest) => manifest.dependencies?.effect ?? manifest.peerDependencies?.effect)
-      .filter((range) => typeof range === "string")
-  )
-  const pin = [...pins][0]
-
+test("the CLI install line needs no dependency workaround", () => {
   for (const relative of ["README.md"]) {
     const source = readFileSync(join(repoRoot, relative), "utf8")
     const installLines = source
       .split("\n")
       .filter((line) => /^(pnpm add|npm install|npm i|bun add|yarn add) /.test(line))
-      .filter((line) => /@effect\/platform-node@/.test(line))
-    assert.ok(installLines.length > 0, `${relative} must show an install command naming @effect/platform-node`)
-    const unpinned = installLines.filter(
-      (line) => !line.includes(`@effect/platform-node-shared@${pin}`)
-    )
-    assert.deepEqual(
-      unpinned,
-      [],
-      `${relative} install lines must name @effect/platform-node-shared@${pin} beside @effect/platform-node`
-    )
+      .filter((line) => /@smthrs\/cli@/.test(line))
+    assert.ok(installLines.length > 0, `${relative} must show an install command naming @smthrs/cli`)
+    assert.ok(installLines.every((line) => !line.includes("@effect/platform-node")))
+    assert.ok(installLines.every((line) => !line.includes("@effect/platform-node-shared")))
+    assert.doesNotMatch(source, /\boverrides\b/, `${relative} must not require dependency overrides`)
   }
 })
 
@@ -603,4 +649,102 @@ test("no published source module default-imports a sibling or exports a default"
       "to `__toESM(require(...), 1).default`, which in Node mode is the whole exports object instead of the " +
       "exported value, so the published CommonJS entry throws at module init; use a named export and a named import"
   )
+})
+
+
+test("the real staging and tarball retain authored template config and exclude runtime debris", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "smithers-pack-template-"))
+  try {
+    const source = join(directory, "source")
+    const staged = join(directory, "staged")
+    const config = join(source, "template/default/.smithers")
+    await mkdir(config, { recursive: true })
+    const templateRoot = join(repoRoot, "packages/smithers/create-app/template/default")
+    await cp(templateRoot, join(source, "template/default"), { recursive: true })
+    await mkdir(join(source, ".smithers"), { recursive: true })
+    await writeFile(join(source, ".smithers", "state.db"), "runtime state")
+    await writeFile(join(config, "credentials.json"), "fixture credential")
+    await writeFile(join(config, "cache.db"), "runtime state")
+    const manifest = { name: "smithers-pack-template-fixture", version: "1.0.0", files: ["template/default/**"], publishConfig: { exports: { "./package.json": "./package.json" } } }
+    await writeFile(join(source, "package.json"), JSON.stringify(manifest))
+    await stagePackage(source, staged, manifest)
+    const packed = JSON.parse(execFileSync("pnpm", ["pack", "--json", "--config.ignore-scripts=true", "--pack-destination", directory], { cwd: staged, encoding: "utf8" }))
+    const file = packed[0]?.filename ?? packed.filename
+    assert.deepEqual(assertPackedExportTargets(resolve(directory, file)), { name: manifest.name, literalTargets: 1 })
+    const entries = execFileSync("tar", ["-tzf", resolve(directory, file)], { encoding: "utf8" }).split("\n")
+    for (const name of ["WORKSPACE.ts", "agents.ts", "sandbox.ts"]) {
+      const entry = `package/template/default/.smithers/${name}`
+      assert.ok(entries.includes(entry), `${entry} absent from the actual tarball`)
+      assert.equal(execFileSync("tar", ["-xOf", resolve(directory, file), entry], { encoding: "utf8" }), readFileSync(join(templateRoot, ".smithers", name), "utf8"))
+    }
+    assert.ok(!entries.some((entry) => /(?:state\.db|cache\.db|credentials\.json)$/.test(entry)))
+    // The import closure beside .smithers is retained too.
+    assert.ok(entries.includes("package/template/default/PACKAGE.ts"))
+    assert.ok(entries.includes("package/template/default/TOOLS.ts"))
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("packed exports traverse nested conditions and arrays while preserving null and ESM-only entries", () => {
+  const manifest = { name: "fixture", exports: {
+    ".": { types: "./index.d.ts", node: { import: "./index.js", require: "./index.cjs" }, default: [null, "./fallback.js"] },
+    "./Vitest": { import: "./Vitest.js" },
+    "./internal/*": null,
+    "./space": "./directory with spaces/entry.js"
+  } }
+  const files = new Set(["index.d.ts", "index.js", "index.cjs", "fallback.js", "Vitest.js", "directory with spaces/entry.js"].map((path) => `package/${path}`))
+  assert.equal(assertExportTargets(manifest, files), 6)
+  for (const missing of files) {
+    assert.throws(() => assertExportTargets(manifest, new Set([...files].filter((file) => file !== missing)), "fixture.tgz"), (error) => {
+      assert.match(error.message, /fixture exports/)
+      assert.ok(error.message.includes(missing.replace(/^package\//, "./")))
+      assert.match(error.message, /missing or is not a regular file.*fixture\.tgz/)
+      return true
+    })
+  }
+})
+
+test("packed export targets refuse unsafe paths and malformed leaves", () => {
+  for (const target of ["../outside.js", "./../outside.js", "/absolute.js", "./node_modules/other.js", "./nested/../outside.js", "./nested\\outside.js", "./*.js", "./encoded%2fpath.js", "./query.js?x", "./hash.js#x", "./line\nbreak.js", "./", 42, undefined]) {
+    assert.throws(() => assertExportTargets({ name: "unsafe", exports: { "./deep": { node: { import: target } } } }, new Set()), /unsafe exports\["\.\/deep"\]\["node"\]\["import"\] target/)
+  }
+})
+
+test("actual pnpm tarballs reject a declared deep export omitted by files despite built files and valid root exports", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "smithers-packed-export-targets-"))
+  try {
+    const source = join(directory, "source")
+    const staged = join(directory, "staged")
+    await mkdir(join(source, "dist/esm/deep"), { recursive: true })
+    for (const file of ["index.js", "index.d.ts", "deep/Forgotten.js"]) await writeFile(join(source, "dist/esm", file), "export {}\n")
+    const manifest = { name: "smithers-missing-deep-export", version: "1.0.0", files: ["dist/esm/index.js", "dist/esm/index.d.ts"], publishConfig: { exports: {
+      ".": { types: "./dist/esm/index.d.ts", import: "./dist/esm/index.js" },
+      "./deep/Forgotten": { node: { import: "./dist/esm/deep/Forgotten.js" } }
+    } } }
+    await writeFile(join(source, "package.json"), JSON.stringify(manifest))
+    await stagePackage(source, staged, manifest)
+    assert.equal(existsSync(join(staged, "dist/esm/deep/Forgotten.js")), true)
+    const packed = JSON.parse(execFileSync("pnpm", ["pack", "--json", "--config.ignore-scripts=true", "--pack-destination", directory], { cwd: staged, encoding: "utf8" }))
+    const file = packed[0]?.filename ?? packed.filename
+    assert.throws(() => assertPackedExportTargets(resolve(directory, file)), /smithers-missing-deep-export exports\["\.\/deep\/Forgotten"\]\["node"\]\["import"\] target "\.\/dist\/esm\/deep\/Forgotten\.js" is missing/)
+  } finally { await rm(directory, { recursive: true, force: true }) }
+})
+
+test("a directory or symbolic link in a real tarball cannot satisfy an exported file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "smithers-export-file-type-"))
+  try {
+    const packageRoot = join(directory, "package")
+    await mkdir(join(packageRoot, "directory.js"), { recursive: true })
+    await writeFile(join(packageRoot, "real.js"), "export {}\n")
+    await writeFile(join(packageRoot, "file with spaces.js"), "export {}\n")
+    await symlink("real.js", join(packageRoot, "link.js"))
+    const tarball = join(directory, "fixture.tgz")
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "space-entry", exports: { ".": "./file with spaces.js" } }))
+    execFileSync("tar", ["-czf", tarball, "-C", directory, "package"])
+    assert.deepEqual(assertPackedExportTargets(tarball), { name: "space-entry", literalTargets: 1 })
+    for (const target of ["./directory.js", "./link.js"]) {
+      await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "wrong-entry-kind", exports: { ".": target } }))
+      execFileSync("tar", ["-czf", tarball, "-C", directory, "package"])
+      assert.throws(() => assertPackedExportTargets(tarball), /wrong-entry-kind exports\["\."\] target.*is missing or is not a regular file/)
+    }
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })

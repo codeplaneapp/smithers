@@ -9,7 +9,7 @@ const example = {
   version: "0.1.0",
   dependencies: {
     "@smthrs/kernel": "0.1.0",
-    effect: "4.0.0-rc.108"
+    effect: "4.0.0-rc.112"
   },
   devDependencies: {
     "@smthrs/kernel": "workspace:*",
@@ -23,11 +23,10 @@ test("retarget moves the version and the exact workspace ranges together", () =>
     version: "0.1.0-next.0",
     dependencies: {
       "@smthrs/kernel": "0.1.0-next.0",
-      effect: "4.0.0-rc.108"
+      effect: "4.0.0-rc.112"
     },
     devDependencies: {
-      // A protocol range carries no version, so it cannot drift.
-      "@smthrs/kernel": "workspace:*",
+      "@smthrs/kernel": "0.1.0-next.0",
       vitest: "4.1.9"
     }
   })
@@ -45,6 +44,7 @@ test("retarget preserves private versions while updating exact workspace ranges"
   const retargeted = retarget(privateManifest, "0.1.0-next.0", workspaceNames)
   assert.equal(retargeted.version, "0.0.0")
   assert.equal(retargeted.dependencies["@smthrs/kernel"], "0.1.0-next.0")
+  assert.equal(retargeted.devDependencies["@smthrs/kernel"], "workspace:*")
 })
 
 test("mismatches names the version and every stale internal range", () => {
@@ -58,7 +58,8 @@ test("mismatches names the version and every stale internal range", () => {
 
   assert.deepEqual(mismatches(entries, "0.1.0-next.0"), [
     "packages/smithers/flows: version is 0.1.0, expected 0.1.0-next.0",
-    "packages/smithers/flows: dependencies.@smthrs/kernel is 0.1.0, expected 0.1.0-next.0"
+    "packages/smithers/flows: dependencies.@smthrs/kernel is 0.1.0, expected 0.1.0-next.0",
+    "packages/smithers/flows: devDependencies.@smthrs/kernel is workspace:*, expected 0.1.0-next.0"
   ])
   assert.deepEqual(mismatches(entries.slice(1), "0.1.0-next.0"), [])
 })

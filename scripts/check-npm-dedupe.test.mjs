@@ -1,14 +1,12 @@
-// The two claims check-npm-dedupe.mjs makes about an npm consumer of the
-// release set, pinned as assertions instead of as console output.
+// The dependency policy of combined and individual release consumers.
 //
 // The script reports both findings through one exit code, so a regression in
 // either reads as an opaque non-zero exit. These cells name the claim that
 // broke and the package that broke it.
 //
-// Both run over the fixture the script itself builds: the real release
-// manifests, packed into real tarballs, resolved by npm's own arborist. There
-// is no synthetic tree here, because the duplication this guards exists only in
-// npm's resolution and never in pnpm's.
+// Real release manifests are packed unchanged. The combined fixture inspects
+// npm's lockfile, while individual npm and pnpm consumers inspect physical
+// files and each installed package's native Effect resolution.
 //
 // The fixture install reads registry metadata, so this suite needs the network.
 //
@@ -16,7 +14,31 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 
-import { SINGLETONS, copiesOf, resolveConsumerTree } from "./check-npm-dedupe.mjs";
+import { SINGLETONS, copiesOf, optionalPeersOf, resolveConsumerTree, resolveConsumerProfiles } from "./check-npm-dedupe.mjs";
+
+it("distinguishes optional library peers from a selected executable's requirements", () => {
+  const library = { peerDependencies: { runtime: "1", renderer: "1" },
+    peerDependenciesMeta: { runtime: { optional: true }, renderer: { optional: true } } };
+  assert.deepEqual(optionalPeersOf([library]), ["renderer", "runtime"]);
+  assert.deepEqual(optionalPeersOf([library, { dependencies: { runtime: "1" } }]), ["renderer"]);
+  assert.deepEqual(optionalPeersOf([library, { peerDependencies: { runtime: "1" } }]), ["renderer"]);
+  assert.deepEqual(optionalPeersOf([library, { name: "runtime" }]), ["renderer"]);
+});
+
+it("isolates each default library and the CLI on npm and pnpm, and refuses an incompatible Effect RC", { timeout: 10 * 60_000 }, async () => {
+  const results = await resolveConsumerProfiles();
+  for (const manager of ["npm", "pnpm"]) {
+    const profiles = results.filter((result) => result.manager === manager);
+    assert.deepEqual(profiles.map((result) => result.profile), [
+      "database-default", "gateway-default", "observability-default", "flows-default", "create-app-default", "cli-default"
+    ]);
+    for (const profile of profiles) {
+      assert.equal(profile.effectCopies.length, 1);
+      assert.ok(profile.resolutions.length > 0);
+    }
+    assert.equal(results.filter((result) => result.incompatible?.manager === manager).length, 1);
+  }
+});
 
 describe("check-npm-dedupe", () => {
   let tree;
@@ -29,12 +51,12 @@ describe("check-npm-dedupe", () => {
     for (const name of SINGLETONS) {
       const copies = copiesOf(tree.lockPackages, name);
       const versions = [...new Set(copies.map((key) => tree.lockPackages[key]?.version))];
-      assert.ok(copies.length <= 1, `${name} resolves to ${copies.length} copies:\n  - ${copies.join("\n  - ")}`);
-      assert.ok(versions.length <= 1, `${name} resolves to ${versions.length} versions: ${versions.join(", ")}`);
+      assert.equal(copies.length, 1, `${name} resolves to ${copies.length} copies:\n  - ${copies.join("\n  - ")}`);
+      assert.equal(versions.length, 1, `${name} resolves to ${versions.length} versions: ${versions.join(", ")}`);
     }
   });
 
-  it("keeps every optional peer out of the default install", () => {
+  it("keeps peers optional across the selected release set out of the default install", () => {
     const present = tree.optionalPeers
       .map((name) => [name, copiesOf(tree.lockPackages, name)])
       .filter(([, copies]) => copies.length > 0);

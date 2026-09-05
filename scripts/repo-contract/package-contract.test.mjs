@@ -20,6 +20,13 @@ const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
 
 /** The one version every package on the release line carries. */
 const releaseVersion = "1.0.0-rc.0"
+const effectVersion = "4.0.0-rc.112"
+
+/** Executables own their runtime; libraries make the host supply the singleton. */
+const effectRuntimeOwners = new Set(["@smthrs/build-cli", "@smthrs/cli", "@smthrs/migrate"])
+
+/** Public packages whose implementation and API do not touch Effect. */
+const effectIndependent = new Set(["@smthrs/errors"])
 
 /**
  * Publishable packages that are deliberately NOT on the release line, and why.
@@ -185,41 +192,75 @@ describe("the workspace package contract", () => {
     }
   })
 
-  it("keeps every published Effect runtime dependency as an exact peer and workspace dev dependency", () => {
-    const substrate = ["effect", "@effect/platform-node", "@effect/platform-node-shared"]
+  it("uses no package-manager dependency overrides", () => {
+    const rootManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+    for (const [where, manifest] of [["package.json", rootManifest], ...manifests.map((entry) => [entry.path, entry.manifest])]) {
+      assert.equal(manifest.overrides, undefined, `${where} must not use npm overrides`)
+      assert.equal(manifest.pnpm?.overrides, undefined, `${where} must not use pnpm overrides`)
+    }
+    assert.doesNotMatch(
+      readFileSync(join(root, "pnpm-workspace.yaml"), "utf8"),
+      /^overrides\s*:/m,
+      "pnpm-workspace.yaml must not use dependency overrides"
+    )
+  })
+
+  it("keeps Effect as an exact peer of every library", () => {
     for (const entry of publishable) {
-      for (const name of substrate) {
-        const declared = ["dependencies", "peerDependencies"]
-          .some((field) => entry.manifest[field]?.[name] !== undefined)
-        if (!declared) continue
-        const where = `packages/${entry.directory}`
-        assert.equal(
-          entry.manifest.peerDependencies?.[name],
-          "4.0.0-rc.108",
-          `${where} must constrain ${name} as an exact peer`
-        )
-        assert.equal(
-          entry.manifest.dependencies?.[name],
-          undefined,
-          `${where} must not install a private ${name} copy`
-        )
-        assert.equal(
-          entry.manifest.devDependencies?.[name],
-          "4.0.0-rc.108",
-          `${where} must install ${name} for its own checks`
-        )
+      const { manifest } = entry
+      if (manifestNotExposed.has(manifest.name)) continue
+      if (effectIndependent.has(manifest.name)) {
+        assert.equal(manifest.dependencies?.effect, undefined, `${manifest.name} must not install unused Effect`)
+        assert.equal(manifest.peerDependencies?.effect, undefined, `${manifest.name} must not impose an unused peer`)
+        continue
       }
+      if (effectRuntimeOwners.has(manifest.name)) {
+        assert.equal(
+          manifest.dependencies?.effect,
+          effectVersion,
+          `${manifest.name} is an executable and must install its Effect runtime`
+        )
+        assert.equal(manifest.peerDependencies?.effect, undefined, `${manifest.name} must not also peer Effect`)
+        continue
+      }
+      assert.equal(
+        manifest.peerDependencies?.effect,
+        effectVersion,
+        `${manifest.name} must share the exact Effect runtime supplied by its host`
+      )
+      assert.equal(
+        manifest.dependencies?.effect,
+        undefined,
+        `${manifest.name} is a library and must not install a private Effect runtime`
+      )
+      assert.equal(
+        manifest.devDependencies?.effect,
+        effectVersion,
+        `${manifest.name} must install the peer only for its own development checks`
+      )
     }
   })
 
-  it("pins the gateway's complete Node Effect peer set", () => {
-    const gateway = publishable.find((entry) => entry.manifest.name === "@smthrs/gateway")
-    assert.ok(gateway, "@smthrs/gateway must be publishable")
+  it("keeps the Node Effect runtime as one exact peer set", () => {
+    const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-node")
+    assert.ok(platform, "@smthrs/platform-node must be publishable")
 
     for (const name of ["effect", "@effect/platform-node", "@effect/platform-node-shared"]) {
-      assert.equal(gateway.manifest.peerDependencies?.[name], "4.0.0-rc.108", `${name} peer`)
-      assert.equal(gateway.manifest.devDependencies?.[name], "4.0.0-rc.108", `${name} dev dependency`)
-      assert.equal(gateway.manifest.dependencies?.[name], undefined, `${name} hard dependency`)
+      assert.equal(
+        platform.manifest.peerDependencies?.[name],
+        effectVersion,
+        `@smthrs/platform-node must constrain ${name} as an exact peer`
+      )
+      assert.equal(
+        platform.manifest.dependencies?.[name],
+        undefined,
+        `@smthrs/platform-node must not install a private ${name} copy`
+      )
+      assert.equal(
+        platform.manifest.devDependencies?.[name],
+        effectVersion,
+        `@smthrs/platform-node must install ${name} for its own checks`
+      )
     }
   })
 
@@ -237,7 +278,7 @@ describe("the workspace package contract", () => {
     const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-bun")
     assert.ok(platform, "@smthrs/platform-bun must be publishable")
 
-    assert.equal(platform.manifest.peerDependencies?.["@effect/platform-bun"], "4.0.0-rc.108")
+    assert.equal(platform.manifest.peerDependencies?.["@effect/platform-bun"], "4.0.0-rc.112")
     assert.notEqual(platform.manifest.peerDependenciesMeta?.["@effect/platform-bun"]?.optional, true)
   })
 })

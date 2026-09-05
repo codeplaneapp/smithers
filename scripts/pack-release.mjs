@@ -7,13 +7,16 @@
  * source-first manifest shape, so release packing happens from a temporary
  * copy whose exports are rewritten to the already-built ESM/CJS artifacts.
  */
-import { spawn } from "node:child_process"
+import { createHash } from "node:crypto"
+import { integrity } from "./publish-release.mjs"
+import { execFileSync, spawn } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { libraryPackages, packageKey } from "./workspace-packages.mjs"
+import { assertPackedExportTargets } from "./packed-export-targets.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
@@ -24,10 +27,10 @@ const packageGroups = new Set(["engine", "agent", "tooling"])
  *
  * 0.x shipped the engine group alone and left the agent layer for a second
  * train. Smithers 1.0 gives every public first-party package one synchronized
- * version, so both groups release together. `tooling` stays out: the build
- * graph, its CLI, and the hosted cache are private.
+ * version, so all public groups release together. Private deployment tooling
+ * remains excluded by the manifest's `private` flag.
  */
-export const releaseGroups = new Set(["engine", "agent"])
+export const releaseGroups = new Set(["engine", "agent", "tooling"])
 
 /**
  * The package names published at 1.0.0-rc.0.
@@ -40,19 +43,25 @@ export const releaseGroups = new Set(["engine", "agent"])
 export const publishedPackages = [
   "@smthrs/agent",
   "@smthrs/artifacts",
+  "@smthrs/build",
+  "@smthrs/build-cli",
   "@smthrs/canonical",
   "@smthrs/capability",
   "@smthrs/cli",
   "@smthrs/control",
   "@smthrs/core",
+  "@smthrs/create-app",
   "@smthrs/crypto",
   "@smthrs/database",
   "@smthrs/engine",
   "@smthrs/engine-store",
+  "@smthrs/errors",
+  "@smthrs/evals",
   "@smthrs/flow",
   "@smthrs/flows",
   "@smthrs/gateway",
   "@smthrs/harness",
+  "@smthrs/integrations",
   "@smthrs/jj",
   "@smthrs/journal",
   "@smthrs/kernel",
@@ -72,11 +81,14 @@ export const publishedPackages = [
   "@smthrs/registry",
   "@smthrs/run-store",
   "@smthrs/sandbox",
+  "@smthrs/scorers",
   "@smthrs/std",
   "@smthrs/step-cache",
   "@smthrs/sync",
+  "@smthrs/targets",
   "@smthrs/testing",
   "@smthrs/time-travel",
+  "@smthrs/triggers",
   "smthrs"
 ]
 
@@ -148,33 +160,18 @@ export const workspaceDependencies = (manifests) => {
   ]))
 }
 
-const dependsOnItself = (node, dependencies, remaining) => {
-  const pending = [...dependencies.get(node)].filter((edge) => remaining.has(edge))
-  const seen = new Set()
-  while (pending.length > 0) {
-    const current = pending.pop()
-    if (current === node) return true
-    if (seen.has(current)) continue
-    seen.add(current)
-    for (const edge of dependencies.get(current)) {
-      if (remaining.has(edge)) pending.push(edge)
-    }
-  }
-  return false
-}
-
 /**
  * Orders workspaces so a package follows every workspace dependency it declares.
  *
  * The tiebreak among unblocked workspaces is the directory's last segment
  * rather than the whole path. Release order is a property of the packages, not
  * of where their directories sit, so nesting a granular package inside the
- * product package it belongs to publishes the same forty names in the same
+ * product package it belongs to publishes the same names in the same
  * order it published them from a top-level directory.
  *
- * The order emits an unblocked workspace whenever one exists, and otherwise
- * enters a remaining cycle at its alphabetically first member. The release
- * contract test requires the actual publication graph to remain acyclic.
+ * A cycle is a release error: publication cannot satisfy both edges without a
+ * package already existing in the registry, which makes a clean RC bootstrap
+ * impossible.
  *
  * @since 1.0.0
  * @category utilities
@@ -191,15 +188,11 @@ export const dependencyOrder = (dependencies) => {
     const unblocked = [...remaining].find((candidate) =>
       [...dependencies.get(candidate)].every((edge) => !remaining.has(edge))
     )
-    // Every remaining workspace is blocked, so the remaining subgraph has an
-    // out-edge everywhere and therefore contains a cycle to enter.
-    const next = unblocked ??
-      [...remaining].find((candidate) => dependsOnItself(candidate, dependencies, remaining))
-    if (next === undefined) {
-      throw new Error(`no orderable workspace among ${[...remaining].join(", ")}`)
+    if (unblocked === undefined) {
+      throw new Error(`cyclic workspace dependencies among ${[...remaining].join(", ")}`)
     }
-    ordered.push(next)
-    remaining.delete(next)
+    ordered.push(unblocked)
+    remaining.delete(unblocked)
   }
   return ordered
 }
@@ -250,8 +243,7 @@ const sourceFiles = async (directory) => {
     const path = join(directory, entry.name)
     return entry.isDirectory()
       ? sourceFiles(path)
-      : entry.name.endsWith(".ts")
-      ? [path]
+      : entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts") || entry.name.endsWith(".js") ? [path]
       : []
   }))
   return nested.flat()
@@ -455,15 +447,27 @@ const assertBuilt = async (packageRoot, manifest) => {
   }
 }
 
-const copyFilter = (packageRoot) => (source) => {
+/** Package-declared template trees are authored input, even when configuration is hidden. */
+export const copyFilter = (packageRoot, manifest) => (source) => {
   const path = relative(packageRoot, source)
   if (path === "") return true
   const segments = path.split(sep)
-  return !segments.some((segment) =>
-    segment === "node_modules" ||
-    segment === "coverage" ||
-    segment === ".smithers"
-  ) && !basename(path).endsWith(".tsbuildinfo")
+  if (segments.some((segment) => segment === "node_modules" || segment === "coverage" || segment === ".flows") || basename(path).endsWith(".tsbuildinfo")) return false
+  const configAt = segments.indexOf(".smithers")
+  if (configAt === -1) return true
+  const prefix = segments.slice(0, configAt).join("/")
+  const authoredTemplate = (manifest.files ?? []).some((entry) => entry === `${prefix}/**` && prefix.startsWith("template/"))
+  if (!authoredTemplate) return false
+  // These are the template's authored configuration files. Runtime caches,
+  // databases and credentials under a same-named directory are never shipped.
+  const tail = segments.slice(configAt + 1)
+  return tail.length === 0 || (tail.length === 1 && ["WORKSPACE.ts", "agents.ts", "sandbox.ts"].includes(tail[0]))
+}
+
+/** Stages the exact publication tree; exported for tarball-level regression fixtures. */
+export const stagePackage = async (packageRoot, stagedPackage, manifest) => {
+  await cp(packageRoot, stagedPackage, { recursive: true, filter: copyFilter(packageRoot, manifest) })
+  await writeFile(join(stagedPackage, "package.json"), `${JSON.stringify(publicationManifest(manifest), null, 2)}\n`)
 }
 
 const run = (command, args, options = {}) =>
@@ -497,14 +501,7 @@ const packWorkspace = async (directory, outputDirectory, stagingRoot) => {
   // The staging directory is flat: a tarball is named from the manifest, so a
   // nested package stages beside its siblings under its own basename.
   const stagedPackage = join(stagingRoot, packageKey({ dir: directory }))
-  await cp(packageRoot, stagedPackage, {
-    recursive: true,
-    filter: copyFilter(packageRoot)
-  })
-  await writeFile(
-    join(stagedPackage, "package.json"),
-    `${JSON.stringify(publicationManifest(manifest), null, 2)}\n`
-  )
+  await stagePackage(packageRoot, stagedPackage, manifest)
 
   const output = await run(
     "pnpm",
@@ -519,11 +516,11 @@ const packWorkspace = async (directory, outputDirectory, stagingRoot) => {
     ]
   )
   const result = JSON.parse(output)
-  return {
-    name: manifest.name,
-    version: manifest.version,
-    filename: packResultFilename(result, manifest.name)
-  }
+  const filename = packResultFilename(Array.isArray(result) ? result[0] : result, manifest.name)
+  assertPackedExportTargets(join(outputDirectory, filename))
+  return { name: manifest.name, version: manifest.version, filename,
+    integrity: integrity(await readFile(join(outputDirectory, filename))) }
+
 }
 
 export const main = async (args) => {
@@ -558,7 +555,7 @@ export const main = async (args) => {
   // checks before it trusts the set. CI packs into a fresh runner.temp, so the
   // stale files only ever appeared in a local `dist/release-packs`.
   for (const entry of await readdir(outputDirectory)) {
-    if (entry.endsWith(".tgz") || entry === "manifest.json") {
+    if (entry.endsWith(".tgz") || ["manifest.json", "release-manifest.json", "smoke-evidence.json", "publish-receipt.json", "restore-evidence.json"].includes(entry)) {
       await rm(join(outputDirectory, entry), { force: true })
     }
   }
@@ -572,6 +569,14 @@ export const main = async (args) => {
       join(outputDirectory, "manifest.json"),
       `${JSON.stringify(packed, null, 2)}\n`
     )
+    const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim()
+    const changed = execFileSync("git", ["status", "--porcelain", "--untracked-files=normal"], { cwd: repoRoot, encoding: "utf8" }).trim()
+    await writeFile(join(outputDirectory, "release-manifest.json"), JSON.stringify({
+      schemaVersion: 1,
+      source: { sha: sourceSha, tag: process.env.RELEASE_TAG ?? null, dirty: changed.length > 0 },
+      toolchain: { node: process.version, lockfileSha256: createHash("sha256").update(await readFile(join(repoRoot, "pnpm-lock.yaml"))).digest("hex") },
+      packages: packed
+    }, null, 2) + "\n")
   } finally {
     await rm(stagingRoot, { recursive: true, force: true })
   }

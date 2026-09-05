@@ -13,6 +13,9 @@
  * the consumer is told to bring: `@smthrs/platform-bun` resolves
  * `@effect/platform-bun` at import time, and without it the ESM entry throws
  * ERR_MODULE_NOT_FOUND in the consumer's project.
+ * Separate npm and pnpm consumers then certify default libraries, selected
+ * Node/browser/Bun adapters, create-app/testing, and migration install shapes
+ * against the same tarballs before a successful smoke receipt is written.
  *
  * usage: node scripts/smoke-release.mjs <pack-directory>
  */
@@ -21,6 +24,12 @@ import { build as bundle } from "esbuild"
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { peerRangesOf } from "./release-peer-ranges.mjs"
+import { captureProcess as runQuietly } from "./release-process.mjs"
+import { releaseRegistry } from "./release-registry.mjs"
+import { recordSmokeSuccess, verifyLocalCandidate } from "./publish-release.mjs"
+import { assertNodeSupport } from "./release-node-support.mjs"
+import { adapterProfiles, migrationProfiles, minimalProfiles, runConsumerMatrix, templateProfile } from "./fixtures/dependency-consumers.mjs"
 
 const repoRoot = resolve(import.meta.dirname, "..")
 
@@ -46,54 +55,16 @@ const run = (command, args, cwd) =>
     })
   })
 
-const runQuietly = (command, args, cwd) =>
-  new Promise((resolveRun) => {
-    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
-    let output = ""
-    for (const stream of [child.stdout, child.stderr]) {
-      stream.setEncoding("utf8")
-      stream.on("data", (chunk) => {
-        output += chunk
-      })
-    }
-    child.once("error", (error) => resolveRun({ ok: false, output: error.message }))
-    child.once("exit", (code) => resolveRun({ ok: code === 0, output }))
-  })
-
-/**
- * Compares dotted numeric versions. Prerelease suffixes are ignored; the
- * engines floors in this repository are plain releases.
- */
-const isAtLeast = (version, floor) => {
-  const parse = (value) => value.replaceAll(/^\D+/g, "").split(".").map((part) => Number.parseInt(part, 10) || 0)
-  const [actual, required] = [parse(version), parse(floor)]
-  for (let index = 0; index < 3; index += 1) {
-    if ((actual[index] ?? 0) !== (required[index] ?? 0)) return (actual[index] ?? 0) > (required[index] ?? 0)
-  }
-  return true
-}
-
-/**
- * The optional peers a consumer must install for the packed set to import.
- * Derived from the installed manifests so a new peer cannot slip past this gate.
- */
-const optionalPeers = (manifests) => {
-  const peers = new Map()
-  for (const manifest of manifests) {
-    for (const [name, range] of Object.entries(manifest.peerDependencies ?? {})) {
-      if (name.startsWith("@smthrs/")) continue
-      peers.set(name, range)
-    }
-  }
-  return peers
-}
-
 const packDirectory = process.argv[2]
 if (packDirectory === undefined) {
   throw new Error("usage: node scripts/smoke-release.mjs <pack-directory>")
 }
 
 const absolutePackDirectory = resolve(packDirectory)
+// A failed rerun must not leave the prior successful receipt available to publish.
+await rm(join(absolutePackDirectory, "smoke-evidence.json"), { force: true })
+const candidate = JSON.parse(await readFile(join(absolutePackDirectory, "release-manifest.json"), "utf8"))
+await verifyLocalCandidate(absolutePackDirectory, candidate)
 const packManifest = JSON.parse(
   await readFile(join(absolutePackDirectory, "manifest.json"), "utf8")
 )
@@ -107,35 +78,37 @@ if (tarballs.length !== expected.size || tarballs.some((filename) => !expected.h
 }
 
 const smokeRoot = await mkdtemp(join(tmpdir(), "smthrs-release-smoke-"))
+let registry
 try {
+  registry = await releaseRegistry(absolutePackDirectory, packManifest)
+  await writeFile(join(smokeRoot, ".npmrc"), `@smthrs:registry=${registry.url}\n`)
+  const releaseDependencies = Object.fromEntries(
+    packManifest.map((entry) => [entry.name, entry.name.startsWith("@smthrs/")
+      ? entry.version : `file:${join(absolutePackDirectory, entry.filename)}`])
+  )
   await writeFile(
     join(smokeRoot, "package.json"),
-    '{\n  "private": true,\n  "type": "module"\n}\n'
+    `${JSON.stringify({
+      private: true,
+      type: "module",
+      dependencies: {
+        ...releaseDependencies,
+        typescript: "7.0.2",
+        vitest: "4.1.9"
+      }
+    }, null, 2)}\n`
   )
-  // The packages are not published yet, and pnpm resolves each transitive
-  // exact-version edge independently even when every tarball is also passed
-  // to `pnpm add`. Override those internal edges to the tarballs under test so
-  // the smoke project cannot fall back to an older registry copy.
-  await writeFile(
-    join(smokeRoot, "pnpm-workspace.yaml"),
-    [
-      "overrides:",
-      ...packManifest.map((entry) =>
-        `  ${JSON.stringify(entry.name)}: ${JSON.stringify(`file:${join(absolutePackDirectory, entry.filename)}`)}`
-      ),
-      ""
-    ].join("\n")
-  )
+  // Resolve both direct and transitive first-party edges through a disposable
+  // registry. Root file: dependencies do not satisfy transitive registry edges
+  // in pnpm. This uses unchanged published manifests, without overrides,
+  // workspace linking, or requiring an unreleased package to exist on npm.
   await run(
     "pnpm",
     [
       "--dir",
       smokeRoot,
-      "add",
+      "install",
       "--ignore-scripts",
-      ...tarballs.map((filename) => join(absolutePackDirectory, filename)),
-      "typescript@6.0.3",
-      "vitest@4.1.9"
     ],
     repoRoot
   )
@@ -146,19 +119,15 @@ try {
     )
   )
   for (const manifest of installed) {
-    const floor = manifest.engines?.node
-    if (floor !== undefined && !isAtLeast(process.versions.node, floor)) {
-      throw new Error(
-        `${manifest.name} requires node ${floor}; this smoke runs on ${process.versions.node}`
-      )
-    }
+    assertNodeSupport(manifest, process.versions.node)
   }
-  const peers = [...optionalPeers(installed)]
+  const peers = [...peerRangesOf(installed)]
     .filter(([name]) => installed.every((manifest) => manifest.name !== name))
-    .map(([name, range]) => `${name}@${range.replace(/^[\^~]/, "")}`)
+    .map(([name, range]) => `${name}@${range}`)
   if (peers.length > 0) {
     await run("pnpm", ["--dir", smokeRoot, "add", "--ignore-scripts", ...peers], repoRoot)
   }
+  await run("pnpm", ["--dir", smokeRoot, "peers", "check"], repoRoot)
 
   // Every packed package, through its published entry, in a project that has
   // no access to the workspace.
@@ -202,6 +171,46 @@ try {
   if (failures.length > 0) {
     throw new Error(`release tarballs failed to load:\n${failures.join("\n\n")}`)
   }
+
+  // The same recorded transport and stubborn stdio server used by the source
+  // fault tests, relocated beside the installed fixture so imports resolve
+  // exclusively from this external consumer's dependencies.
+  for (const [source, target] of [
+    ["recorded-provider.mjs", "release-recorded-provider.mjs"],
+    ["contained-mcp.mjs", "release-contained-mcp.mjs"]
+  ]) {
+    await writeFile(join(smokeRoot, target), await readFile(
+      join(repoRoot, "packages/smithers/test/faults/fixtures", source)
+    ))
+  }
+  for (const fixture of ["release-public-api.mjs", "release-history-workspace.mjs", "release-cli-containment.mjs"]) {
+    await writeFile(
+      join(smokeRoot, fixture),
+      await readFile(join(repoRoot, "scripts/fixtures", fixture))
+    )
+    for (const mode of ["esm", "cjs"]) {
+      await run(process.execPath, [fixture, mode], smokeRoot)
+    }
+  }
+
+  for (const [binary, name] of [["smthrs", "@smthrs/cli"], ["smithers-build", "@smthrs/build-cli"]]) {
+    const version = packManifest.find((entry) => entry.name === name).version
+    const result = await runQuietly(join(smokeRoot, "node_modules/.bin", binary), ["--version"], smokeRoot)
+    if (!result.ok || !result.output.includes(version)) throw new Error(`${binary} --version failed: ${result.output}`)
+  }
+  const cli = join(smokeRoot, "node_modules/.bin/smthrs")
+  for (const args of [["init", "release-smoke", "--json"], ["targets", "--json"], ["flow", "list", "--json"]]) {
+    const result = await runQuietly(cli, args, smokeRoot)
+    if (!result.ok) throw new Error(`Installed CLI ${args.join(" ")} failed: ${result.output}`)
+  }
+  console.log("CLI smoke ok: packaged binaries, workspace initialization, target loading, and flow discovery")
+
+  // Import-only checks cannot catch a guest runner path erased by a CJS build.
+  // Execute a real sandboxed flow through both published module conditions.
+  for (const filename of ["release-sandbox-entry.mjs", "release-sandbox-smoke.mjs"]) {
+    await writeFile(join(smokeRoot, filename), await readFile(join(repoRoot, "scripts/fixtures", filename)))
+  }
+  await run(process.execPath, ["release-sandbox-smoke.mjs"], smokeRoot)
 
   // Bundle a bare side-effect import from the installed tarball. The package
   // manifest, not this repository's source graph, decides whether esbuild may
@@ -273,10 +282,18 @@ try {
     ],
     smokeRoot
   )
+  // All-peers imports alone can conceal an unrelated adapter forced into a
+  // library's default install. Certify independent profiles on both managers
+  // against these same candidate bytes before issuing the success receipt.
+  await runConsumerMatrix(absolutePackDirectory, packManifest, {
+    profiles: [...minimalProfiles, ...adapterProfiles, ...migrationProfiles, templateProfile(absolutePackDirectory, packManifest)], runtime: true
+  })
+  await recordSmokeSuccess(absolutePackDirectory, candidate)
   console.log(
     `\nrelease smoke holds: ${packManifest.length} tarballs install, import, and typecheck` +
       ` on node ${process.versions.node}.`
   )
 } finally {
+  await registry?.close()
   await rm(smokeRoot, { recursive: true, force: true })
 }

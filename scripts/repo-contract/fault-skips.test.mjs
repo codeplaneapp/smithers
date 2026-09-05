@@ -7,9 +7,9 @@
  * fixtures; the script is gone, so what survives is the audit itself, run
  * against the real matrix.
  *
- * The matrix is not a directory any more. Every case lives in the package whose
- * behaviour it asserts, under `packages/<package>/test/faults/`, and every one
- * of those packages declares a `faults` target, so `//packages/...:faults` is
+ * Process-level scenarios live under the CLI's `test/faults/` tree; component
+ * fault cases live with their owning package. Every package carrying cases
+ * declares a `faults` target, so `//packages/...:faults` is
  * the whole matrix. That move deleted the manifest the old audit read
  * (`e2e/fault-matrix.json`) along with the runner that read it, so the two jobs
  * the manifest actually did — a case may not exist undeclared, and a case may
@@ -64,7 +64,42 @@ const packagesRoot = join(root, "packages")
  */
 const requiredGates = new Map([
   [
-    "packages/smithers/flows/journal/test/faults/case22-secret-never-in-journal.test.ts",
+    "packages/smithers/test/faults/case31-cli-process-containment.test.ts",
+    {
+      title: [
+        "reaps a crashed CLI's shell child without touching a live CLI's child",
+        "contains configured MCP children during shutdown and after a CLI crash"
+      ],
+      why: "The CLI must actually install durable containment under shell and MCP children, "
+        + "escalate a shutdown that ignores TERM, and refuse to reap children with a live owner. "
+        + "A host-library test alone does not prove this CLI composition."
+    }
+  ],
+  [
+    "packages/smithers/test/faults/case03-cli-durable-recovery.test.ts",
+    {
+      title: [
+        "recovers a real agent approval after the detached CLI process exits",
+        "resumes a real agent timer after its deadline passes without a CLI process",
+        "reads a pinned working tree through a real agent cell after CLI restart",
+        "blocks unrecorded provider requests in the child-process fixture"
+      ],
+      why: "Real-binary recovery must exercise agent-created waits, a process boundary, and recorded-only "
+        + "provider transport. The checkpoint case must read both the saved and changed live tree "
+        + "through a resumed agent cell. Directly inserting approval or timer rows does not prove CLI recovery."
+    }
+  ],
+  [
+    "packages/smithers/test/faults/engine/case05-concurrent-timer-hosts.test.ts",
+    {
+      title: "arms two live hosts before one durable deadline and executes its continuation once",
+      why: "The two-host timer race must keep both real hosts alive before the persisted deadline, "
+        + "verify their re-arm records, and count the post-timer action independently of the journal. "
+        + "A single-host restart or a count of deduplicated journal entries does not replace that proof."
+    }
+  ],
+  [
+    "packages/smithers/test/faults/engine/case22-secret-never-in-journal.test.ts",
     {
       title: "redacts the credential out of the operator's terminal",
       why: "case 22 must cover the logs as well as the journal. It was red at rc.0 "
@@ -105,7 +140,7 @@ const faultGaps = join(root, "scripts", "repo-contract", "fault-gaps.md")
  */
 const allowedSkips = new Map([
   [
-    "packages/smithers/flows/time-travel/test/faults/case12-rewind-reverts-vcs.test.ts",
+    "packages/smithers/test/faults/time-travel/case12-rewind-reverts-vcs.test.ts",
     "Needs the jj binary to rewind a real workspace. Skips locally without it and throws on CI."
   ],
   [
@@ -134,10 +169,6 @@ const packageDirectories = (parent = "") =>
         : []
     })
 
-const faultPackages = packageDirectories()
-  .filter((name) => existsSync(join(packagesRoot, name, "test", "faults")))
-  .sort()
-
 /** Every TypeScript file under a package's `test/faults` tree. */
 const walk = (directory) =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -146,6 +177,13 @@ const walk = (directory) =>
     return entry.isFile() && path.endsWith(".ts") ? [path] : []
   })
 
+const faultPackages = packageDirectories()
+  .filter((name) => {
+    const directory = join(packagesRoot, name, "test", "faults")
+    return existsSync(directory) && walk(directory).some((path) => path.endsWith(".test.ts"))
+  })
+  .sort()
+
 const sources = faultPackages
   .flatMap((name) => walk(join(packagesRoot, name, "test", "faults")))
   .map((path) => ({ relative: relative(root, path), text: readFileSync(path, "utf8") }))
@@ -153,7 +191,7 @@ const sources = faultPackages
 
 describe("the fault-suite skip audit", () => {
   it("has sources to audit", () => {
-    assert.ok(faultPackages.length > 5, `expected several packages to carry fault cases, found ${faultPackages.length}`)
+    assert.ok(faultPackages.includes("smithers"), "the CLI must carry the process-level fault scenarios")
     assert.ok(sources.length > 15, `expected the matrix to be populated, found ${sources.length} files`)
   })
 
@@ -201,10 +239,12 @@ describe("the fault-suite skip audit", () => {
     for (const [relative_, gate] of requiredGates) {
       const text = byRelative.get(relative_)
       assert.ok(text !== undefined, `${relative_} is a required gate and is not in the matrix any more. ${gate.why}`)
-      assert.ok(
-        text.includes(gate.title),
-        `${relative_} no longer contains the required test "${gate.title}". ${gate.why}`
-      )
+      for (const title of Array.isArray(gate.title) ? gate.title : [gate.title]) {
+        assert.ok(
+          text.includes(title),
+          `${relative_} no longer contains the required test "${title}". ${gate.why}`
+        )
+      }
     }
   })
 
@@ -325,7 +365,7 @@ describe("the fault matrix is wired to a gate", () => {
     const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8")
     assert.match(
       ci,
-      /^\s*run: pnpm exec smithers-build test '\/\/packages\/\.\.\.:faults' --jobs 1$/m,
+      /^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1$/m,
       "the generated workflow does not run the fault matrix serially over every package that declares one"
     )
   })

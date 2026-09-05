@@ -35,6 +35,23 @@ const packageContract = Smithers.NodeTest({
 })
 
 /**
+ * Explicit entrypoints preserve reviewed imports and block future source files.
+ * @since 1.0.0
+ * @category test
+ */
+const publicExportMaps = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/public-export-maps.test.mjs")]),
+  srcs: [
+    sources,
+    Smithers.file("//scripts/public-export-map.mjs"),
+    Smithers.file("//scripts/fixtures/public-export-surface.json"),
+    Smithers.file("//scripts/workspace-packages.mjs"),
+    Smithers.file("//pnpm-workspace.yaml")
+  ],
+  deps: []
+})
+
+/**
  * The barrels re-export what they claim, checked by importing them.
  *
  * A typecheck reads the same source the declarations are generated from, so it
@@ -57,7 +74,17 @@ const barrels = Smithers.NodeTest({
  */
 const testScriptWiring = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/test-script-wiring.test.mjs")]),
-  srcs: [sources],
+  srcs: [
+    sources,
+    Smithers.file("//scripts/check-signal-campaign.mjs"),
+    Smithers.file("//scripts/release-rehearsal.mjs"),
+    Smithers.file("//.github/workflows/ci.yml"),
+    Smithers.file("//.github/workflows/reliability.yml"),
+    Smithers.file("//apps/ui/PACKAGE.ts"),
+    Smithers.file("//apps/ui/scripts/run-pr-e2e.mjs"),
+    Smithers.file("//package.json"),
+    Smithers.file("//pnpm-workspace.yaml")
+  ],
   deps: []
 })
 
@@ -96,9 +123,17 @@ const machinePaths = Smithers.NodeTest({
  * Every smithers.sh URL shipped by a package reaches the built documentation,
  * directly or through one production redirect whose destination is real.
  *
- * The emitted HTML under `apps/site/dist` is the route oracle. Depending on
- * its producer makes this gate work on a clean checkout, including when the
- * release workflow selects it through `//scripts/...` before the site step.
+ * The route oracle is the emitted HTML under `apps/site/dist`, so the site's
+ * build is a dependency rather than a step someone ran first. The edge orders
+ * the build ahead of the gate, keys the gate on the build's own key so a
+ * content change re-runs it, and puts the build's declared outputs in the
+ * gate's sandbox read set. It is a selector rather than an import because
+ * importing `apps/site/PACKAGE.ts` would pull every documented package's
+ * declaration into this file to reach one target.
+ *
+ * `dist` is deliberately not declared as an input: declared inputs expand at
+ * plan time, and on a clean checkout the directory the build has not produced
+ * yet expands to nothing, which is both a vacuous edge and no read at all.
  *
  * @since 1.0.0
  * @category test
@@ -121,7 +156,13 @@ const cliVerbs = Smithers.NodeTest({
   srcs: [sources],
   deps: []
 })
+/** Actual planner selection, runtime policy, sentinels and cache behavior. */
+const ciInventory = Smithers.NodeTest({
+  runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/ci-inventory.test.mjs")]),
+  srcs: [sources, Smithers.file("//scripts/ci-inventory.mjs")],
+  deps: []
+})
 
 export const Package = Smithers.Package({
-  targets: { barrels, cliVerbs, faultSkips, machinePaths, packageContract, smithersLinks, testScriptWiring }
+  targets: { barrels, cliVerbs, faultSkips, machinePaths, packageContract, smithersLinks, testScriptWiring, ciInventory, publicExportMaps }
 })

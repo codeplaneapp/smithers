@@ -1,5 +1,75 @@
 # Repo-contract gates
 
+## Resolved CI and runtime policy
+
+`node scripts/ci-inventory.mjs <output.json>` plans the actual commands in the
+generated CI workflow, with no target execution. The required
+`ci-inventory.test.mjs` gate checks those roots against the package/app/script/
+eval/fault requirements and retains a machine-readable row for each selected
+target and platform: runner argv, input declarations, config, CI job/step,
+trigger, installed runtime versions, required/advisory status and cache policy.
+The `ci //packages/...` and `test //packages/...` selections must agree on every
+package test root. A `unitTests` target cannot sit in an E2E step. `browserE2e`
+must invoke the real Playwright entrypoint; every `faults` root must invoke its
+actual serial Vitest fault config. The former `browserContract` is now named
+`webBundleContract`, with a compilation-only displayed job name. The historical
+job id `browser` is pinned by the release roster test; it does not claim E2E
+execution. Every selected browser/E2E/faults suite name must map to its real
+Playwright or serial fault runner.
+
+Linux on Node 22.19.0 is the required release-candidate package platform.
+macOS and Windows package rows are advisory, so the generated root README
+explicitly makes no support guarantee for them. The required web UI scope is
+offline Chromium. Packaged Electrobun and live hosted/provider journeys remain
+separate acceptance tiers. Node 24.18.0 is the additional local gateway baseline,
+not a claim that every package was re-certified here on every newer Node.
+
+### Bun coverage exceptions
+
+The owning app `PACKAGE.ts` files declare `Coverage policy: assertion-only`.
+Their Bun suites remain required. None claims a numeric source coverage floor:
+Bun's loaded-module measurements do not by themselves establish a complete
+production denominator across Worker, CLI, React and static assets.
+
+| Owner | Required behavior | Missing coverage evidence |
+| --- | --- | --- |
+| `apps/server` | Worker unit and canary-wiring assertions | Whole Worker/script source denominator and failure-branch measurement. |
+| `apps/ui` | Typecheck, Bun units, offline Playwright | TSX/host/React denominator; packaged native host and live provider acceptance. |
+| `apps/review` | Node/Bun typechecks and unit contracts | Mixed CLI/Worker denominator; credentialed review case is optional and cannot close offline coverage. |
+| `apps/bug-worker` | Real fetch handler against in-memory KV | Complete Worker branch measurement, including transport failures. |
+| `apps/status-site` | Worker and published-surface/static-page contracts | Worker denominator and browser rendering coverage. |
+
+These are explicit transitional exceptions owned by the corresponding app, not
+zero-percent thresholds or completed coverage work. A future numeric gate must
+first measure all production sources, add missing behavior tests and establish
+a baseline. Existing package floors and ignore rationales remain in
+`coverage-conformance.md` and the flows coverage-isolation suite. The lower
+build-cli, std, migrate and CLI branch floors remain behavioral test debt owned
+by those packages; this lane changes none of their thresholds or exclusions.
+
+### Failure propagation and cache identity
+
+`runner-contract.test.mjs` creates disposable workspaces and uses the real CLI:
+the Bun server assertion, a browser DOM assertion through the actual PR
+Playwright wrapper, and a Vitest coverage threshold all fail the target.
+The coverage sentinel first passes its assertion, so an assertion failure
+cannot accidentally stand in for a coverage failure.
+
+The current general NodeTest and Vitest runners are uncacheable. The inventory
+ratchets that policy until their ambient helpers, fixtures, configs, dependency
+implementations, actual runtime and seeds have a complete identity. A separate
+cacheable Shell.Test fixture proves a genuine warmed result-cache hit, then
+independent helper, fixture, config and declared seed changes must each fail
+instead of returning the previous pass. Scheduled campaigns run directly and
+never consult build-result caches. This establishes the current safe policy;
+it does not claim complete cacheability for all workspace rules.
+
+Workflow drift uses `pnpm exec smthrs lint '//:ci'`. Regeneration uses
+`node scripts/generate-ci.mjs`, which calls `GithubCiGen.render` in its declared
+`write` mode and the generated-file writer. This legacy rule keeps its explicit
+`mode: "check"` even when the CLI receives `target --write`; that command was
+verified to check drift without applying it. The YAML is never edited by hand.
+
 The claims this repository makes about itself, checked. Each file here is a
 `node:test` suite that reads the real tree rather than a fixture, because the
 defects they exist for are the ones a fixture cannot have: a package that is
@@ -30,6 +100,7 @@ pnpm exec smithers-build test '//scripts/repo-contract/...'
 | --- | --- |
 | `package-contract.test.mjs` | One version across the release line, a declared publishable surface, the `next` dist-tag, the scripts every gate invokes, and no published dependency on a private package. |
 | `barrels.test.mjs` | `@smthrs/flows` re-exports exactly the namespaces it lists, declares every package it re-exports, and every published root export points at a file that exists. |
+| `public-export-maps.test.mjs` | Explicit development/publication allowlists retain reviewed entrypoints, deny internal migrations and future files, and resolve equivalently through Node's ESM and CommonJS resolvers. |
 | `test-script-wiring.test.mjs` | Every workspace member with tests has a `test` script, and the pnpm workspace and the root manifest name the same members. |
 | `fault-skips.test.mjs` | No focused, parked, or inverted test in any package's `test/faults` tree, every conditional skip declared with its reason, every required gate still in the matrix — including the ones that are red — and every package carrying fault cases wired to a `faults` target, a serial fault config, and the CI step that runs them. |
 | `machine-paths.test.mjs` | No tracked file under `evals/`, `scripts/`, or a package's `test/faults` tree names one machine's home directory. Recorded material — wave reports, archives, the authoring corpus — is exempt, because rewriting it would falsify a record. |

@@ -1,0 +1,2537 @@
+{
+  "version": 1,
+  "added": [
+    {
+      "name": "@smthrs/engine-store",
+      "subpath": "./ExecutionSnapshot",
+      "development": "./src/ExecutionSnapshot.ts",
+      "published": {
+        "types": "./dist/esm/ExecutionSnapshot.d.ts",
+        "import": "./dist/esm/ExecutionSnapshot.js",
+        "require": "./dist/cjs/ExecutionSnapshot.js"
+      },
+      "reason": "Deliberate public revisioned execution observation port, documented in engine-store's observe-executions guide and API reference; reviewed in execution-snapshots.md. Internal SQL readers remain private."
+    },
+    {
+      "name": "@smthrs/engine-store",
+      "subpath": "./RunChangeFeed",
+      "development": "./src/RunChangeFeed.ts",
+      "published": {
+        "types": "./dist/esm/RunChangeFeed.d.ts",
+        "import": "./dist/esm/RunChangeFeed.js",
+        "require": "./dist/cjs/RunChangeFeed.js"
+      },
+      "reason": "Deliberate public bounded revision catch-up port with durable deletion tombstones, documented in engine-store's observe-executions guide and API reference; reviewed in execution-snapshots.md."
+    },
+    {
+      "name": "@smthrs/journal",
+      "subpath": "./EngineEvent",
+      "development": "./src/EngineEvent.ts",
+      "published": {
+        "types": "./dist/esm/EngineEvent.d.ts",
+        "import": "./dist/esm/EngineEvent.js",
+        "require": "./dist/cjs/EngineEvent.js"
+      },
+      "reason": "Shared versioned engine event schemas and explicit consumer admission, documented in journal's state-event-authority guide; reviewed in state-event-contracts.md. Additive contracts do not cut over existing writers or expose engine projection internals."
+    },
+    {
+      "name": "@smthrs/control",
+      "subpath": "./ApprovalAuthority",
+      "development": "./src/ApprovalAuthority.ts",
+      "published": {
+        "types": "./dist/esm/ApprovalAuthority.d.ts",
+        "import": "./dist/esm/ApprovalAuthority.js",
+        "require": "./dist/cjs/ApprovalAuthority.js"
+      },
+      "reason": "Host-owned approval authority, distinct from authenticated principal attribution and workflow capability grants; enforced before mutation/replay and at decision commit."
+    },
+    {
+      "name": "@smthrs/engine-store",
+      "subpath": "./PlanMergeStore",
+      "development": "./src/PlanMergeStore.ts",
+      "published": {
+        "types": "./dist/esm/PlanMergeStore.d.ts",
+        "import": "./dist/esm/PlanMergeStore.js",
+        "require": "./dist/cjs/PlanMergeStore.js"
+      },
+      "reason": "Authoritative owner-fenced merge intent/completion state. Required on the scheduler's database so a stopped attempt and its atomic plan/input extension survive recovery independently of redacted journal projections."
+    },
+    {
+      "name": "@smthrs/engine-store",
+      "subpath": "./PlanInputStore",
+      "development": "./src/PlanInputStore.ts",
+      "published": {
+        "types": "./dist/esm/PlanInputStore.d.ts",
+        "import": "./dist/esm/PlanInputStore.js",
+        "require": "./dist/cjs/PlanInputStore.js"
+      },
+      "reason": "Authoritative owner-fenced input observations for durable plan execution; explicitly composed on the run database, separate from approval plans, redacted journal projections and evictable caches."
+    },
+    {
+      "name": "@smthrs/plan",
+      "subpath": "./Scheduling",
+      "development": "./src/Scheduling.ts",
+      "published": {
+        "types": "./dist/esm/Scheduling.d.ts",
+        "import": "./dist/esm/Scheduling.js",
+        "require": "./dist/cjs/Scheduling.js"
+      },
+      "reason": "Shared ready-work priority, aging and capacity policy; deliberately public for execution adapters. Does not execute effects or determine conditional readiness."
+    },
+    {
+      "name": "@smthrs/scorers",
+      "subpath": "./ScoreGate",
+      "development": "./src/ScoreGate.ts",
+      "published": {
+        "types": "./dist/esm/ScoreGate.d.ts",
+        "import": "./dist/esm/ScoreGate.js",
+        "require": "./dist/cjs/ScoreGate.js"
+      },
+      "reason": "Pure runtime grading contract extracted from testing so published evaluations do not execute a test package; testing delegates with unchanged verdicts and error identity."
+    },
+    {
+      "name": "@smthrs/canonical",
+      "subpath": "./Record",
+      "development": "./src/Record.ts",
+      "published": {
+        "types": "./dist/esm/Record.d.ts",
+        "import": "./dist/esm/Record.js",
+        "require": "./dist/cjs/Record.js"
+      },
+      "reason": "Retains main's safe own-property record operations."
+    },
+    {
+      "name": "@smthrs/journal",
+      "subpath": "./JournalGeneration",
+      "development": "./src/JournalGeneration.ts",
+      "published": {
+        "types": "./dist/esm/JournalGeneration.d.ts",
+        "import": "./dist/esm/JournalGeneration.js",
+        "require": "./dist/cjs/JournalGeneration.js"
+      },
+      "reason": "Retains main's generation-aware journal cursor contract."
+    },
+    {
+      "name": "@smthrs/kernel",
+      "subpath": "./ChildProcessEnvironment",
+      "development": "./src/ChildProcessEnvironment.ts",
+      "published": {
+        "types": "./dist/esm/ChildProcessEnvironment.d.ts",
+        "import": "./dist/esm/ChildProcessEnvironment.js",
+        "require": "./dist/cjs/ChildProcessEnvironment.js"
+      },
+      "reason": "Retains main's declared child-process environment policy."
+    }
+  ],
+  "removed": [
+    {
+      "name": "@smthrs/integrations",
+      "subpath": "./core/migrations/0001_integration_cursors",
+      "reason": "Schema-install implementation moved under the already blocked internal directory; Core.Migrations remains public."
+    },
+    {
+      "name": "@smthrs/build-cli",
+      "subpath": "./effect-resolution.d",
+      "reason": "Declaration-only source file; no corresponding emitted runtime module. Preserve the explicit ./effect-resolution JavaScript hook and its declaration."
+    }
+  ],
+  "packages": [
+    {
+      "name": "@smthrs/errors",
+      "directory": "packages/errors",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./ErrorCode",
+        "./SmithersError",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/cli",
+      "directory": "packages/smithers",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Agents",
+        "./Application",
+        "./Audience",
+        "./Bug",
+        "./ClaudeMirror",
+        "./Cli",
+        "./CliError",
+        "./CodexAuth",
+        "./Command",
+        "./Detached",
+        "./Doctor",
+        "./Environment",
+        "./ExecutorOwnership",
+        "./Forensics",
+        "./Gc",
+        "./Init",
+        "./Legacy",
+        "./McpServer",
+        "./NodeControl",
+        "./NodeOutput",
+        "./Output",
+        "./Project",
+        "./Providers",
+        "./Serve",
+        "./Suggest",
+        "./Ui",
+        "./Unsupported",
+        "./Update",
+        "./Verb",
+        "./Version",
+        "./bin",
+        "./cli/Arguments",
+        "./cli/Compatibility",
+        "./cli/ControlBridge",
+        "./cli/ControlCommands",
+        "./cli/Entry",
+        "./cli/Generate",
+        "./cli/HistoryCommands",
+        "./cli/LegacyBin",
+        "./cli/Presentation",
+        "./cli/RunProgress",
+        "./evaluation/Cli",
+        "./evaluation/Evaluation",
+        "./history/History",
+        "./history/Legacy",
+        "./history/Workspace",
+        "./index",
+        "./operator/Credentials",
+        "./operator/Integrations",
+        "./operator/Memory",
+        "./operator/Store",
+        "./operator/TriggerPlans",
+        "./operator/Triggers",
+        "./package.json",
+        "./suggest/Brief",
+        "./suggest/Checklist",
+        "./suggest/SuggestFlow"
+      ]
+    },
+    {
+      "name": "@smthrs/agent",
+      "directory": "packages/smithers/agent",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Agent",
+        "./AgentAction",
+        "./AgentSession",
+        "./Budget",
+        "./CellPlugin",
+        "./Checkpointed",
+        "./ChildFlows",
+        "./EngineChildren",
+        "./EventSink",
+        "./FlowEngineLike",
+        "./FlowStore",
+        "./InMemoryWorkspaceSandbox",
+        "./MemorySnapshotRecorder",
+        "./PromoteFlows",
+        "./QuotaPolicy",
+        "./Seat",
+        "./SeatResolver",
+        "./StandardFlows",
+        "./WorkspaceObservation",
+        "./WorkspaceSandbox",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/evals",
+      "directory": "packages/smithers/agent/evals",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Baseline",
+        "./CaseExecutor",
+        "./EvalError",
+        "./Gate",
+        "./Regression",
+        "./Report",
+        "./Runner",
+        "./Suite",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/harness",
+      "directory": "packages/smithers/agent/harness",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./AgentEvent",
+        "./CallLedger",
+        "./Cell",
+        "./CellCalls",
+        "./CellHistory",
+        "./CellTurn",
+        "./CellValidation",
+        "./Compaction",
+        "./ContextWindow",
+        "./EngineLike",
+        "./FlowBinding",
+        "./HarnessError",
+        "./NarrowedCheck",
+        "./Notifications",
+        "./Plan",
+        "./QuickJSSandbox",
+        "./Sandbox",
+        "./Steering",
+        "./StructuredOutput",
+        "./Sufficiency",
+        "./Tokens",
+        "./Transcript",
+        "./TruncatedOutput",
+        "./UnmovedTree",
+        "./UnresolvedFailure",
+        "./VacuousVerification",
+        "./VariablesPanel",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/integrations",
+      "directory": "packages/smithers/agent/integrations",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Environment",
+        "./core",
+        "./core/ActionFailure",
+        "./core/AuthorizationUrl",
+        "./core/Channel",
+        "./core/CursorStore",
+        "./core/ExternalEvent",
+        "./core/IntegrationError",
+        "./core/JsonPath",
+        "./core/Pkce",
+        "./core/SignalName",
+        "./core/Signature",
+        "./core/migrations/0001_integration_cursors",
+        "./github",
+        "./github/Actions",
+        "./github/Config",
+        "./github/GitHubClient",
+        "./github/ListenerRegistry",
+        "./github/Payload",
+        "./github/Repository",
+        "./github/Webhook",
+        "./index",
+        "./linear",
+        "./linear/Actions",
+        "./linear/Config",
+        "./linear/LinearClient",
+        "./linear/Payload",
+        "./linear/Webhook",
+        "./package.json",
+        "./telegram",
+        "./telegram/Actions",
+        "./telegram/Approval",
+        "./telegram/Chunk",
+        "./telegram/Config",
+        "./telegram/InitData",
+        "./telegram/Markdown",
+        "./telegram/Payload",
+        "./telegram/Source",
+        "./telegram/TelegramClient"
+      ]
+    },
+    {
+      "name": "@smthrs/memory",
+      "directory": "packages/smithers/agent/memory",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Bank",
+        "./Database",
+        "./Embedding",
+        "./Flows",
+        "./Maintenance",
+        "./MemoryError",
+        "./MemoryStore",
+        "./MemoryTrellis",
+        "./Namespace",
+        "./Recall",
+        "./RecallFts",
+        "./RecallKeyword",
+        "./RecallSemantic",
+        "./SnapshotRecorder",
+        "./Source",
+        "./WithMemory",
+        "./index",
+        "./package.json",
+        "./test/TestMemory"
+      ]
+    },
+    {
+      "name": "@smthrs/model",
+      "directory": "packages/smithers/agent/model",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./AnthropicMessages",
+        "./Auth",
+        "./CanonicalJson",
+        "./DeferredTools",
+        "./Endpoint",
+        "./Framing",
+        "./Model",
+        "./ModelError",
+        "./ModelEvent",
+        "./ModelRequest",
+        "./OpenAIChatCompletions",
+        "./OpenAIChatGPT",
+        "./OpenAIResponses",
+        "./Protocol",
+        "./RequestExecutor",
+        "./Route",
+        "./ToolStream",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/plugin",
+      "directory": "packages/smithers/agent/plugin",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Config",
+        "./Hooks",
+        "./Kernel",
+        "./Plugin",
+        "./PluginError",
+        "./Plugins",
+        "./Resolve",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/registry",
+      "directory": "packages/smithers/agent/registry",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Descriptor",
+        "./Disclosure",
+        "./Discovery",
+        "./Executable",
+        "./MarkdownFlow",
+        "./Pack",
+        "./Registry",
+        "./RegistryError",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/scorers",
+      "directory": "packages/smithers/agent/scorers",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Binding",
+        "./Runner",
+        "./RunnerLive",
+        "./Sampling",
+        "./ScoreStore",
+        "./Scorer",
+        "./ScorerError",
+        "./SqlScoreStore",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/std",
+      "directory": "packages/smithers/agent/std",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./ApplyPatch",
+        "./Bash",
+        "./Checkpoints",
+        "./Container",
+        "./Edit",
+        "./ExaWebSearch",
+        "./Explore",
+        "./Fetch",
+        "./Glob",
+        "./Grep",
+        "./HttpPost",
+        "./LanguageServer",
+        "./Ls",
+        "./Lsp",
+        "./Manifest",
+        "./NativeSearch",
+        "./NodeLanguageServer",
+        "./PortableSearch",
+        "./Probe",
+        "./Read",
+        "./Search",
+        "./SearchConformance",
+        "./SearchContract",
+        "./ShellCommand",
+        "./StdError",
+        "./TestRun",
+        "./TestRunner",
+        "./UpdatePlan",
+        "./WebFetch",
+        "./WebSearch",
+        "./Write",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/triggers",
+      "directory": "packages/smithers/agent/triggers",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./migrations/*": null,
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./migrations/*": null,
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./CatchUp",
+        "./Channel",
+        "./Cron",
+        "./Overlap",
+        "./Schedule",
+        "./Scheduler",
+        "./SqlTriggerStore",
+        "./Trigger",
+        "./TriggerError",
+        "./TriggerStore",
+        "./Webhook",
+        "./index",
+        "./package.json",
+        "./test/TestTriggers"
+      ]
+    },
+    {
+      "name": "@smthrs/build",
+      "directory": "packages/smithers/build",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./Install": "./src/Install.ts",
+        "./PackageManager": "./src/PackageManager.ts",
+        "./Runtime": "./src/Runtime.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./Install": {
+          "types": "./dist/esm/Install.d.ts",
+          "import": "./dist/esm/Install.js",
+          "require": "./dist/cjs/Install.js"
+        },
+        "./PackageManager": {
+          "types": "./dist/esm/PackageManager.d.ts",
+          "import": "./dist/esm/PackageManager.js",
+          "require": "./dist/cjs/PackageManager.js"
+        },
+        "./Runtime": {
+          "types": "./dist/esm/Runtime.d.ts",
+          "import": "./dist/esm/Runtime.js",
+          "require": "./dist/cjs/Runtime.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Install",
+        "./PackageManager",
+        "./Runtime",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/build-cli",
+      "directory": "packages/smithers/build/build-cli",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./effect-resolution": "./src/effect-resolution.js",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./effect-resolution": {
+          "types": "./dist/esm/effect-resolution.d.ts",
+          "import": "./dist/esm/effect-resolution.js",
+          "require": "./dist/cjs/effect-resolution.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./index": null
+      },
+      "subpaths": [
+        ".",
+        "./Affected",
+        "./AgentFake",
+        "./AgentSession",
+        "./Ansi",
+        "./AnvilExec",
+        "./Audience",
+        "./Cache",
+        "./CacheAdmin",
+        "./Cli",
+        "./CreateApp",
+        "./Diagnostic",
+        "./DockerExec",
+        "./Entry",
+        "./Environment",
+        "./Executor",
+        "./FetchExec",
+        "./FoundryExec",
+        "./GitCommit",
+        "./GitHooks",
+        "./GitSubmoduleExec",
+        "./GithubRender",
+        "./GoExec",
+        "./GraphOutput",
+        "./Label",
+        "./MarkdownCodeBlocks",
+        "./MemoryBackend",
+        "./NixExec",
+        "./OutputStream",
+        "./OverlayExec",
+        "./Owners",
+        "./PackageDiscovery",
+        "./PackageError",
+        "./PackageExec",
+        "./PackageIndex",
+        "./PackageLoader",
+        "./PackageTree",
+        "./Planner",
+        "./Query",
+        "./RepoResolution",
+        "./Reporter",
+        "./Resolver",
+        "./RspackRunner",
+        "./ServiceSupervisor",
+        "./StampExec",
+        "./TargetExecution",
+        "./Watch",
+        "./Workspace",
+        "./WorkspaceLoader",
+        "./WorkspaceToolchain",
+        "./effect-resolution",
+        "./effect-resolution.d",
+        "./engine",
+        "./main",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/control",
+      "directory": "packages/smithers/control",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Cancellation",
+        "./Channels",
+        "./Control",
+        "./ControlClient",
+        "./ControlError",
+        "./ControlExecutor",
+        "./ControlLive",
+        "./ControlRpcs",
+        "./ControlRuntime",
+        "./ControlSchema",
+        "./ControlServer",
+        "./Credential",
+        "./CredentialCipher",
+        "./CredentialStore",
+        "./Lineage",
+        "./Migrations",
+        "./Monitor",
+        "./SqlControlRuntime",
+        "./SqlCredentialStore",
+        "./Steering",
+        "./SystemFlows",
+        "./WebCryptoCipher",
+        "./WebhookChannel",
+        "./index",
+        "./package.json",
+        "./test/TestControl"
+      ]
+    },
+    {
+      "name": "@smthrs/create-app",
+      "directory": "packages/smithers/create-app",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./app": "./src/app.ts",
+        "./package": "./src/package.ts",
+        "./ui": "./src/ui.ts",
+        "./runtime": "./src/runtime.ts",
+        "./router": "./src/router.ts",
+        "./vite": "./src/vite.ts",
+        "./testing": {
+          "types": "./src/testing.ts",
+          "import": "./src/testing.ts"
+        },
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./app": {
+          "types": "./dist/esm/app.d.ts",
+          "import": "./dist/esm/app.js",
+          "require": "./dist/cjs/app.js"
+        },
+        "./package": {
+          "types": "./dist/esm/package.d.ts",
+          "import": "./dist/esm/package.js",
+          "require": "./dist/cjs/package.js"
+        },
+        "./ui": {
+          "types": "./dist/esm/ui.d.ts",
+          "import": "./dist/esm/ui.js",
+          "require": "./dist/cjs/ui.js"
+        },
+        "./runtime": {
+          "types": "./dist/esm/runtime.d.ts",
+          "import": "./dist/esm/runtime.js",
+          "require": "./dist/cjs/runtime.js"
+        },
+        "./router": {
+          "types": "./dist/esm/router.d.ts",
+          "import": "./dist/esm/router.js",
+          "require": "./dist/cjs/router.js"
+        },
+        "./vite": {
+          "types": "./dist/esm/vite.d.ts",
+          "import": "./dist/esm/vite.js",
+          "require": "./dist/cjs/vite.js"
+        },
+        "./testing": {
+          "types": "./dist/esm/testing.d.ts",
+          "import": "./dist/esm/testing.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./app",
+        "./index",
+        "./package",
+        "./package.json",
+        "./router",
+        "./routesBin",
+        "./runtime",
+        "./testing",
+        "./ui",
+        "./vite"
+      ]
+    },
+    {
+      "name": "@smthrs/flows",
+      "directory": "packages/smithers/flows",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./NodeRuntime",
+        "./SandboxedFlow",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/artifacts",
+      "directory": "packages/smithers/flows/artifacts",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./ArtifactBackupLease",
+        "./ArtifactStore",
+        "./ArtifactStoreMetrics",
+        "./ArtifactSweep",
+        "./CombinedArtifacts",
+        "./RemoteArtifacts",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/canonical",
+      "directory": "packages/smithers/flows/canonical",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Canonical",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/capability",
+      "directory": "packages/smithers/flows/capability",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Capability",
+        "./Permission",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/core",
+      "directory": "packages/smithers/flows/core",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Annotations",
+        "./Digest",
+        "./Effects",
+        "./Flow",
+        "./Graph",
+        "./KeyMaterial",
+        "./Markdown",
+        "./Node",
+        "./Placement",
+        "./TestRuntime",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/crypto",
+      "directory": "packages/smithers/flows/crypto",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Sha256",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/database",
+      "directory": "packages/smithers/flows/database",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./DatabaseMetrics",
+        "./DurableWriter",
+        "./Migrations",
+        "./UnsupportedBackend",
+        "./index",
+        "./node/NodeDatabase",
+        "./package.json",
+        "./test/TestDatabase"
+      ]
+    },
+    {
+      "name": "@smthrs/engine",
+      "directory": "packages/smithers/flows/engine",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./FlowEngine": "./src/FlowEngine/index.ts",
+        "./FlowEngine/*": null,
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./FlowEngine": {
+          "types": "./dist/esm/FlowEngine/index.d.ts",
+          "import": "./dist/esm/FlowEngine/index.js",
+          "require": "./dist/cjs/FlowEngine/index.js"
+        },
+        "./FlowEngine/*": null,
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./FlowEngine",
+        "./FlowProxy",
+        "./FlowProxyServer",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/engine-store",
+      "directory": "packages/smithers/flows/engine-store",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./ArtifactGc",
+        "./ArtifactSync",
+        "./CacheSync",
+        "./DisasterRecovery",
+        "./DurableEngineState",
+        "./EngineStore",
+        "./EngineStoreMetrics",
+        "./Errors",
+        "./Inconsistency",
+        "./Migrations",
+        "./OwnerIdentity",
+        "./PlanScheduler",
+        "./Reconciliation",
+        "./Retention",
+        "./RunCatalogRead",
+        "./RunState",
+        "./Selection",
+        "./SelectionStore",
+        "./StepBoundary",
+        "./StepSandbox",
+        "./WakeBus",
+        "./WorkspaceSandbox",
+        "./index",
+        "./package.json",
+        "./test/TestStores"
+      ]
+    },
+    {
+      "name": "@smthrs/flow",
+      "directory": "packages/smithers/flows/flow",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./Action": "./src/Action/index.ts",
+        "./Action/*": null,
+        "./CacheEnvironment": "./src/Action/CacheEnvironment.ts",
+        "./FileBoundary": "./src/Action/FileBoundary.ts",
+        "./FileInput": "./src/Action/FileInput.ts",
+        "./Flow": "./src/Flow/index.ts",
+        "./Flow/*": null,
+        "./FlowRuntime": "./src/FlowRuntime/index.ts",
+        "./FlowRuntime/*": null,
+        "./StepIdentity": "./src/Action/StepIdentity.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./Action": {
+          "types": "./dist/esm/Action/index.d.ts",
+          "import": "./dist/esm/Action/index.js",
+          "require": "./dist/cjs/Action/index.js"
+        },
+        "./Action/*": null,
+        "./CacheEnvironment": {
+          "types": "./dist/esm/Action/CacheEnvironment.d.ts",
+          "import": "./dist/esm/Action/CacheEnvironment.js",
+          "require": "./dist/cjs/Action/CacheEnvironment.js"
+        },
+        "./FileBoundary": {
+          "types": "./dist/esm/Action/FileBoundary.d.ts",
+          "import": "./dist/esm/Action/FileBoundary.js",
+          "require": "./dist/cjs/Action/FileBoundary.js"
+        },
+        "./FileInput": {
+          "types": "./dist/esm/Action/FileInput.d.ts",
+          "import": "./dist/esm/Action/FileInput.js",
+          "require": "./dist/cjs/Action/FileInput.js"
+        },
+        "./Flow": {
+          "types": "./dist/esm/Flow/index.d.ts",
+          "import": "./dist/esm/Flow/index.js",
+          "require": "./dist/cjs/Flow/index.js"
+        },
+        "./Flow/*": null,
+        "./FlowRuntime": {
+          "types": "./dist/esm/FlowRuntime/index.d.ts",
+          "import": "./dist/esm/FlowRuntime/index.js",
+          "require": "./dist/cjs/FlowRuntime/index.js"
+        },
+        "./FlowRuntime/*": null,
+        "./StepIdentity": {
+          "types": "./dist/esm/Action/StepIdentity.d.ts",
+          "import": "./dist/esm/Action/StepIdentity.js",
+          "require": "./dist/cjs/Action/StepIdentity.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Action",
+        "./CacheEnvironment",
+        "./DurableClock",
+        "./DurableDeferred",
+        "./DurableQueue",
+        "./FileBoundary",
+        "./FileInput",
+        "./Flow",
+        "./FlowRuntime",
+        "./Graph",
+        "./HumanTask",
+        "./Interpreter",
+        "./Poll",
+        "./RetryPolicy",
+        "./Sleep",
+        "./StepIdentity",
+        "./WaitFor",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/jj",
+      "directory": "packages/smithers/flows/jj",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./wasm/flows_jj.wasm": "./wasm/flows_jj.wasm",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./wasm/flows_jj.wasm": "./wasm/flows_jj.wasm",
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Jj",
+        "./browser/BrowserJj",
+        "./browser/WasiFs",
+        "./browser/WasiPreview1",
+        "./bun/BunJj",
+        "./index",
+        "./node/NodeJj",
+        "./node/resolveJjBinary",
+        "./package.json",
+        "./wasm/flows_jj.wasm"
+      ]
+    },
+    {
+      "name": "@smthrs/journal",
+      "directory": "packages/smithers/flows/journal",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Journal",
+        "./JournalEvent",
+        "./JournalMetrics",
+        "./Migrations",
+        "./OwnerId",
+        "./Projection",
+        "./RedactedLogger",
+        "./Redaction",
+        "./SqlJournal",
+        "./index",
+        "./package.json",
+        "./test/Notifying",
+        "./test/TestJournal"
+      ]
+    },
+    {
+      "name": "@smthrs/kernel",
+      "directory": "packages/smithers/flows/kernel",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./test/contract": "./src/test/HostContract.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./test/contract": {
+          "types": "./dist/esm/test/HostContract.d.ts",
+          "import": "./dist/esm/test/HostContract.js",
+          "require": "./dist/cjs/test/HostContract.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./CapabilitySet",
+        "./ChildProcessSpawner",
+        "./CommandLine",
+        "./ContainedSpawner",
+        "./FileSystem",
+        "./GrantEvent",
+        "./GrantStore",
+        "./HostError",
+        "./HostServices",
+        "./HttpClient",
+        "./Jj",
+        "./JournalGrantStore",
+        "./Path",
+        "./ProcessLedger",
+        "./Workspace",
+        "./index",
+        "./package.json",
+        "./test/HostContract",
+        "./test/TestGrantStore",
+        "./test/contract"
+      ]
+    },
+    {
+      "name": "@smthrs/keys",
+      "directory": "packages/smithers/flows/keys",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Key",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/observability",
+      "directory": "packages/smithers/flows/observability",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts"
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        }
+      },
+      "subpaths": [
+        ".",
+        "./BrowserOtel",
+        "./Endpoint",
+        "./JournalLogger",
+        "./Logger",
+        "./Metric",
+        "./NodeOtel",
+        "./Otel",
+        "./Otlp",
+        "./Resource",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/patterns",
+      "directory": "packages/smithers/flows/patterns",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Bounded",
+        "./CheckSuite",
+        "./Debate",
+        "./DelegationChain",
+        "./DriftDetector",
+        "./Escalation",
+        "./Intervene",
+        "./Kanban",
+        "./Loop",
+        "./MapReduce",
+        "./MergeQueue",
+        "./Optimizer",
+        "./Panel",
+        "./Pattern",
+        "./PatternError",
+        "./Quarantine",
+        "./Recursion",
+        "./ReviewLoop",
+        "./Runbook",
+        "./Saga",
+        "./ScanFixVerify",
+        "./Sidecar",
+        "./Supervisor",
+        "./Trellis",
+        "./TryCatchFinally",
+        "./WithApproval",
+        "./WithCache",
+        "./WithRetry",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/plan",
+      "directory": "packages/smithers/flows/plan",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./GraphBuildError": "./src/GraphBuildError.ts",
+        "./Node": "./src/Node.ts",
+        "./Planned": "./src/Planned.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./GraphBuildError": {
+          "types": "./dist/esm/GraphBuildError.d.ts",
+          "import": "./dist/esm/GraphBuildError.js",
+          "require": "./dist/cjs/GraphBuildError.js"
+        },
+        "./Node": {
+          "types": "./dist/esm/Node.d.ts",
+          "import": "./dist/esm/Node.js",
+          "require": "./dist/cjs/Node.js"
+        },
+        "./Planned": {
+          "types": "./dist/esm/Planned.d.ts",
+          "import": "./dist/esm/Planned.js",
+          "require": "./dist/cjs/Planned.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./FileSet",
+        "./GraphBuildError",
+        "./KeyMaterial",
+        "./Migrations",
+        "./Node",
+        "./Plan",
+        "./PlanDiff",
+        "./PlanStore",
+        "./Planned",
+        "./StepKey",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/platform-browser",
+      "directory": "packages/smithers/flows/platform-browser",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./BrowserChildProcessSpawner": "./src/BrowserChildProcessSpawner/index.ts",
+        "./BrowserChildProcessSpawner/*": null,
+        "./BrowserFileSystem": "./src/BrowserFileSystem/index.ts",
+        "./BrowserFileSystem/*": null,
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./BrowserChildProcessSpawner": {
+          "types": "./dist/esm/BrowserChildProcessSpawner/index.d.ts",
+          "import": "./dist/esm/BrowserChildProcessSpawner/index.js",
+          "require": "./dist/cjs/BrowserChildProcessSpawner/index.js"
+        },
+        "./BrowserChildProcessSpawner/*": null,
+        "./BrowserFileSystem": {
+          "types": "./dist/esm/BrowserFileSystem/index.d.ts",
+          "import": "./dist/esm/BrowserFileSystem/index.js",
+          "require": "./dist/cjs/BrowserFileSystem/index.js"
+        },
+        "./BrowserFileSystem/*": null,
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./BrowserChildProcessSpawner",
+        "./BrowserFileSystem",
+        "./BrowserHost",
+        "./BrowserServices",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/platform-bun",
+      "directory": "packages/smithers/flows/platform-bun",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./BunFileSystem",
+        "./BunHost",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/platform-node",
+      "directory": "packages/smithers/flows/platform-node",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./AtomicFileSystem",
+        "./HostLiveness",
+        "./NodeHost",
+        "./ProcessReaper",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/run-store",
+      "directory": "packages/smithers/flows/run-store",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./migrations/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./AttemptStore",
+        "./Heartbeat",
+        "./Migrations",
+        "./Ownership",
+        "./RunStore",
+        "./RunStoreMetrics",
+        "./index",
+        "./package.json",
+        "./test/TestRunStore"
+      ]
+    },
+    {
+      "name": "@smthrs/sandbox",
+      "directory": "packages/smithers/flows/sandbox",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./ContainerSandbox": "./src/ContainerSandbox/index.ts",
+        "./ContainerSandbox/*": null,
+        "./DirectorySandbox": "./src/DirectorySandbox/index.ts",
+        "./DirectorySandbox/*": null,
+        "./ProviderConformance": "./src/ProviderConformance/index.ts",
+        "./ProviderConformance/*": null,
+        "./RemoteChildProcessSpawner": "./src/RemoteChildProcessSpawner/index.ts",
+        "./RemoteChildProcessSpawner/*": null,
+        "./Sandbox": "./src/Sandbox/index.ts",
+        "./Sandbox/*": null,
+        "./SandboxConformance": "./src/SandboxConformance/index.ts",
+        "./SandboxConformance/*": null,
+        "./SandboxHealth": "./src/SandboxHealth/index.ts",
+        "./SandboxHealth/*": null,
+        "./SandboxSupervision": "./src/SandboxSupervision/index.ts",
+        "./SandboxSupervision/*": null,
+        "./AwsSandbox": "./src/AwsSandbox/index.ts",
+        "./AwsSandbox/*": null,
+        "./CloudflareSandbox": "./src/CloudflareSandbox/index.ts",
+        "./CloudflareSandbox/*": null,
+        "./DaytonaSandbox": "./src/DaytonaSandbox/index.ts",
+        "./DaytonaSandbox/*": null,
+        "./JustBashSandbox": "./src/JustBashSandbox/index.ts",
+        "./JustBashSandbox/*": null,
+        "./KubernetesSandbox": "./src/KubernetesSandbox/index.ts",
+        "./KubernetesSandbox/*": null,
+        "./MicrosandboxSandbox": "./src/MicrosandboxSandbox/index.ts",
+        "./MicrosandboxSandbox/*": null,
+        "./VercelSandbox": "./src/VercelSandbox/index.ts",
+        "./VercelSandbox/*": null,
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./ContainerSandbox": {
+          "types": "./dist/esm/ContainerSandbox/index.d.ts",
+          "import": "./dist/esm/ContainerSandbox/index.js",
+          "require": "./dist/cjs/ContainerSandbox/index.js"
+        },
+        "./ContainerSandbox/*": null,
+        "./DirectorySandbox": {
+          "types": "./dist/esm/DirectorySandbox/index.d.ts",
+          "import": "./dist/esm/DirectorySandbox/index.js",
+          "require": "./dist/cjs/DirectorySandbox/index.js"
+        },
+        "./DirectorySandbox/*": null,
+        "./ProviderConformance": {
+          "types": "./dist/esm/ProviderConformance/index.d.ts",
+          "import": "./dist/esm/ProviderConformance/index.js",
+          "require": "./dist/cjs/ProviderConformance/index.js"
+        },
+        "./ProviderConformance/*": null,
+        "./RemoteChildProcessSpawner": {
+          "types": "./dist/esm/RemoteChildProcessSpawner/index.d.ts",
+          "import": "./dist/esm/RemoteChildProcessSpawner/index.js",
+          "require": "./dist/cjs/RemoteChildProcessSpawner/index.js"
+        },
+        "./RemoteChildProcessSpawner/*": null,
+        "./Sandbox": {
+          "types": "./dist/esm/Sandbox/index.d.ts",
+          "import": "./dist/esm/Sandbox/index.js",
+          "require": "./dist/cjs/Sandbox/index.js"
+        },
+        "./Sandbox/*": null,
+        "./SandboxConformance": {
+          "types": "./dist/esm/SandboxConformance/index.d.ts",
+          "import": "./dist/esm/SandboxConformance/index.js",
+          "require": "./dist/cjs/SandboxConformance/index.js"
+        },
+        "./SandboxConformance/*": null,
+        "./SandboxHealth": {
+          "types": "./dist/esm/SandboxHealth/index.d.ts",
+          "import": "./dist/esm/SandboxHealth/index.js",
+          "require": "./dist/cjs/SandboxHealth/index.js"
+        },
+        "./SandboxHealth/*": null,
+        "./SandboxSupervision": {
+          "types": "./dist/esm/SandboxSupervision/index.d.ts",
+          "import": "./dist/esm/SandboxSupervision/index.js",
+          "require": "./dist/cjs/SandboxSupervision/index.js"
+        },
+        "./SandboxSupervision/*": null,
+        "./AwsSandbox": {
+          "types": "./dist/esm/AwsSandbox/index.d.ts",
+          "import": "./dist/esm/AwsSandbox/index.js",
+          "require": "./dist/cjs/AwsSandbox/index.js"
+        },
+        "./AwsSandbox/*": null,
+        "./CloudflareSandbox": {
+          "types": "./dist/esm/CloudflareSandbox/index.d.ts",
+          "import": "./dist/esm/CloudflareSandbox/index.js",
+          "require": "./dist/cjs/CloudflareSandbox/index.js"
+        },
+        "./CloudflareSandbox/*": null,
+        "./DaytonaSandbox": {
+          "types": "./dist/esm/DaytonaSandbox/index.d.ts",
+          "import": "./dist/esm/DaytonaSandbox/index.js",
+          "require": "./dist/cjs/DaytonaSandbox/index.js"
+        },
+        "./DaytonaSandbox/*": null,
+        "./JustBashSandbox": {
+          "types": "./dist/esm/JustBashSandbox/index.d.ts",
+          "import": "./dist/esm/JustBashSandbox/index.js",
+          "require": "./dist/cjs/JustBashSandbox/index.js"
+        },
+        "./JustBashSandbox/*": null,
+        "./KubernetesSandbox": {
+          "types": "./dist/esm/KubernetesSandbox/index.d.ts",
+          "import": "./dist/esm/KubernetesSandbox/index.js",
+          "require": "./dist/cjs/KubernetesSandbox/index.js"
+        },
+        "./KubernetesSandbox/*": null,
+        "./MicrosandboxSandbox": {
+          "types": "./dist/esm/MicrosandboxSandbox/index.d.ts",
+          "import": "./dist/esm/MicrosandboxSandbox/index.js",
+          "require": "./dist/cjs/MicrosandboxSandbox/index.js"
+        },
+        "./MicrosandboxSandbox/*": null,
+        "./VercelSandbox": {
+          "types": "./dist/esm/VercelSandbox/index.d.ts",
+          "import": "./dist/esm/VercelSandbox/index.js",
+          "require": "./dist/cjs/VercelSandbox/index.js"
+        },
+        "./VercelSandbox/*": null,
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./AwsSandbox",
+        "./CloudflareSandbox",
+        "./ContainerSandbox",
+        "./DaytonaSandbox",
+        "./DirectorySandbox",
+        "./JustBashSandbox",
+        "./KubernetesSandbox",
+        "./MicrosandboxSandbox",
+        "./ProviderConformance",
+        "./RemoteChildProcessSpawner",
+        "./Sandbox",
+        "./SandboxConformance",
+        "./SandboxHealth",
+        "./SandboxSupervision",
+        "./VercelSandbox",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/step-cache",
+      "directory": "packages/smithers/flows/step-cache",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./migrations/*": null,
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./migrations/*": null,
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./CacheStore",
+        "./CacheStoreMetrics",
+        "./CombinedCacheStore",
+        "./Migrations",
+        "./RemoteCacheStore",
+        "./index",
+        "./package.json",
+        "./test/TestCacheStore"
+      ]
+    },
+    {
+      "name": "@smthrs/sync",
+      "directory": "packages/smithers/flows/sync",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./BranchCommands",
+        "./BranchIds",
+        "./BranchPresence",
+        "./BranchProjection",
+        "./BranchProtocol",
+        "./BranchRpcs",
+        "./BranchServer",
+        "./BranchShare",
+        "./RunCatalog",
+        "./SyncAuth",
+        "./SyncClient",
+        "./SyncError",
+        "./SyncPrincipal",
+        "./SyncProtocol",
+        "./SyncRpcs",
+        "./SyncServer",
+        "./WorkspaceShare",
+        "./index",
+        "./package.json",
+        "./test/TestSocket",
+        "./test/TestSync"
+      ]
+    },
+    {
+      "name": "@smthrs/time-travel",
+      "directory": "packages/smithers/flows/time-travel",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./CompensationHandlers",
+        "./EffectBoundary",
+        "./Frame",
+        "./MemoryTimeTravelStore",
+        "./Migrations",
+        "./SqlTimeTravelStore",
+        "./TimeTravel",
+        "./TimeTravelError",
+        "./TimeTravelStore",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/gateway",
+      "directory": "packages/smithers/gateway",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Diagnosis",
+        "./GatewayError",
+        "./GatewayProjection",
+        "./GatewayRpcs",
+        "./GatewaySchema",
+        "./GatewayServer",
+        "./Projections",
+        "./SuperviseRuntime",
+        "./index",
+        "./node/NodeGateway",
+        "./package.json",
+        "./test/TestSuperviseRuntime"
+      ]
+    },
+    {
+      "name": "@smthrs/mcp",
+      "directory": "packages/smithers/mcp",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Diagnostics",
+        "./McpClient",
+        "./McpError",
+        "./McpFlows",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/migrate",
+      "directory": "packages/smithers/migrate",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./flow/internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./flow/internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Checks",
+        "./Constructs",
+        "./Detect",
+        "./Inventory",
+        "./Mapping",
+        "./MigrateError",
+        "./PromptHints",
+        "./Report",
+        "./RunState",
+        "./Scan",
+        "./Units",
+        "./ZodSchemaHints",
+        "./flow/Archive",
+        "./flow/Checkpoint",
+        "./flow/Cli",
+        "./flow/Command",
+        "./flow/Contract",
+        "./flow/Gate",
+        "./flow/Layers",
+        "./flow/Lock",
+        "./flow/MigrateFlow",
+        "./flow/Options",
+        "./flow/Repair",
+        "./flow/Transform",
+        "./flow/Verify",
+        "./flow/bin",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/notifications",
+      "directory": "packages/smithers/notifications",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./Alerts",
+        "./Notification",
+        "./NotificationEvent",
+        "./NotificationQueue",
+        "./NotificationState",
+        "./Projection",
+        "./SteerPayload",
+        "./index",
+        "./package.json"
+      ]
+    },
+    {
+      "name": "@smthrs/testing",
+      "directory": "packages/testing",
+      "development": {
+        "./package.json": "./package.json",
+        ".": "./src/index.ts",
+        "./Vitest": {
+          "types": "./src/Vitest.ts",
+          "import": "./src/Vitest.ts"
+        },
+        "./*": "./src/*.ts",
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "published": {
+        "./package.json": "./package.json",
+        ".": {
+          "types": "./dist/esm/index.d.ts",
+          "import": "./dist/esm/index.js",
+          "require": "./dist/cjs/index.js"
+        },
+        "./Vitest": {
+          "types": "./dist/esm/Vitest.d.ts",
+          "import": "./dist/esm/Vitest.js"
+        },
+        "./*": {
+          "types": "./dist/esm/*.d.ts",
+          "import": "./dist/esm/*.js",
+          "require": "./dist/cjs/*.js"
+        },
+        "./internal/*": null,
+        "./*/index": null
+      },
+      "subpaths": [
+        ".",
+        "./CachedModel",
+        "./Conformance",
+        "./Divergence",
+        "./EngineSubject",
+        "./Faults",
+        "./Fixture",
+        "./FixtureStore",
+        "./FlowEngineLike",
+        "./HostSuite",
+        "./JournalAssertions",
+        "./MemoryEngine",
+        "./ModelLike",
+        "./Plan",
+        "./PlanAssertions",
+        "./PlanLike",
+        "./RecordedModel",
+        "./RecordingModel",
+        "./RestartableEngine",
+        "./ScoreGate",
+        "./TestHost",
+        "./TestLayers",
+        "./TestingError",
+        "./Vitest",
+        "./index",
+        "./package.json",
+        "./pins/Identity",
+        "./pins/Interrupt",
+        "./pins/Race",
+        "./pins/Replay"
+      ]
+    }
+  ]
+}

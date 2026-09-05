@@ -70,7 +70,7 @@ const seed = () => {
   write(
     root,
     "packages/smithers/package.json",
-    json({ name: "@smthrs/cli", version: "0.1.0", dependencies: { "@smthrs/kernel": "0.1.0" } })
+    json({ name: "@smthrs/cli", version: "0.1.0", dependencies: { "@smthrs/kernel": "0.1.0", effect: "4.0.0-rc.112" } })
   )
   write(root, "packages/kernel/package.json", json({ name: "@smthrs/kernel", version: "0.1.0" }))
   write(root, "packages/private/package.json", json({ name: "@smthrs/tooling", private: true, version: "0.0.0" }))
@@ -159,6 +159,7 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
 
     assert.equal(manifest(root, "packages/smithers/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/smithers/package.json").dependencies["@smthrs/kernel"], "0.2.0")
+    assert.equal(manifest(root, "packages/smithers/package.json").dependencies.effect, "4.0.0-rc.112")
     assert.equal(manifest(root, "packages/kernel/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/private/package.json").version, "0.0.0", "a private manifest is not bumped")
     assert.match(readFileSync(join(root, versionedSources[0].path), "utf8"), /"0\.2\.0"/)

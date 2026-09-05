@@ -1,170 +1,87 @@
-/**
- * One `effect` version across the whole repository.
- *
- * Effect's schema internals are not interoperable between instances, so a tree
- * that resolves two copies of `effect` fails at runtime in ways a type check
- * never sees. This gate pins the supported range to the single version below
- * and proves the tree
- * agrees: every workspace manifest that declares `effect`, both lockfiles, and
- * whatever is actually installed must name it and nothing else.
- *
- * The gate reads `bun.lock` as well as `pnpm-lock.yaml` because Bun runs
- * `apps/*`, the `ci/legacy declaration` matrix, and `evals/agent`.
- *
- * Run it with `pnpm exec smithers-build test '//scripts:effectVersion'`, or directly
- * with `node scripts/check-single-effect-version.mjs`.
+/** Exact Effect-family declarations, locked versions, and live package resolution.
+ * Physical identity is a necessary check, not proof against arbitrary loader
+ * namespaces. The executable loading contract has separate instance tests.
  */
 import { createRequire } from "node:module"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { workspacePackages } from "./workspace-packages.mjs"
+import { readWorkspaceManifests } from "./pack-release.mjs"
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 
-/**
- * The one supported version.
- *
- * Changing it requires updating every manifest and both lockfiles in the same
- * commit.
- */
-export const EXPECTED_EFFECT_VERSION = "4.0.0-rc.108"
+// Update the family atomically with manifests and both package-manager locks.
+export const EXPECTED_EFFECT_VERSION = "4.0.0-rc.112"
+const family = new Set(["effect", "@effect/opentelemetry", "@effect/platform-bun",
+  "@effect/platform-node", "@effect/platform-node-shared", "@effect/sql-sqlite-node", "@effect/vitest"])
+const sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
+const isFamily = (name, version) => family.has(name) || name.startsWith("@effect/") && /-rc\./.test(String(version))
 
+export const effectDeclarations = (manifest, source) => sections.flatMap((section) =>
+  Object.entries(manifest[section] ?? {}).filter(([name, range]) => isFamily(name, range))
+    .map(([name, version]) => ({ name, version, source: `${source} (${section})` })))
 
-/** @type {Map<string, string[]>} */
-const versions = new Map()
-
-/**
- * @param {string | undefined} version
- * @param {string} source
- */
-const addVersion = (version, source) => {
-  if (typeof version !== "string") return
-  const normalized = version.trim()
-  if (normalized === "") return
-  const sources = versions.get(normalized) ?? []
-  sources.push(source)
-  versions.set(normalized, sources)
+/** Read resolved package entries, including quoted scoped pnpm keys. */
+export const effectLockVersions = (text, format) => {
+  const pattern = format === "pnpm"
+    ? /^ {2}['"]?(@effect\/[^@\s]+|effect)@([^:'"\s(]+)(?:\([^\n]*\))?['"]?:$/gm
+    : /"[^"\n]+"\s*:\s*\[\s*"(@effect\/[^@"\s]+|effect)@([^"\s]+)"/g
+  return [...text.matchAll(pattern)].filter((match) => isFamily(match[1], match[2]))
+    .map((match) => ({ name: match[1], version: match[2], source: format === "pnpm" ? "pnpm-lock.yaml" : "bun.lock" }))
 }
 
-/**
- * @param {string} manifestPath
- * @param {string} source
- */
-const readManifestRanges = (manifestPath, source) => {
-  if (!existsSync(manifestPath)) return
-  let manifest
-  try {
-    manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
-  } catch {
-    return
-  }
-  for (const section of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
-    const range = manifest?.[section]?.effect
-    // Only exact pins are comparable; a range is a separate contract question
-    // and `pnpm-lock.yaml` below reports what it actually resolved to.
-    if (typeof range === "string" && /^\d/.test(range)) addVersion(range, `${source} (${section})`)
-  }
+export const assertEffectPins = (records) => {
+  const wrong = records.filter(({ version }) => version !== EXPECTED_EFFECT_VERSION)
+  if (wrong.length > 0) throw new Error(`Expected exact Effect-family RC ${EXPECTED_EFFECT_VERSION}:\n` +
+    wrong.map(({ name, version, source }) => `  ${source}: ${name}@${version}`).join("\n"))
 }
 
-/**
- * Collects the exact `effect` pins every workspace manifest declares.
- *
- * The member list comes from `pnpm-workspace.yaml` through the shared reader
- * rather than from a list of directory roots walked one level deep: a package
- * nested inside the product package it belongs to still pins `effect`, and a
- * one-level walk would stop reading it the day it moved.
- */
-const collectManifestVersions = () => {
-  readManifestRanges(join(root, "package.json"), "package.json")
-  for (const member of workspacePackages(root)) {
-    readManifestRanges(member.manifestPath, `${member.dir}/package.json`)
-  }
-}
-
-/** Collects every `effect` version `pnpm-lock.yaml` resolved. */
-const collectPnpmLockVersions = () => {
-  const lockPath = join(root, "pnpm-lock.yaml")
-  if (!existsSync(lockPath)) return
-  const lock = readFileSync(lockPath, "utf8")
-  for (const match of lock.matchAll(/^ {2}effect@([^:\s(]+):$/gm)) addVersion(match[1], "pnpm-lock.yaml")
-}
-
-/** Collects every `effect` version `bun.lock` resolved. */
-const collectBunLockVersions = () => {
-  const lockPath = join(root, "bun.lock")
-  if (!existsSync(lockPath)) return
-  const lock = readFileSync(lockPath, "utf8")
-  for (const match of lock.matchAll(/"effect"\s*:\s*\[\s*"effect@([^"]+)"/g)) addVersion(match[1], "bun.lock")
-}
-
-/**
- * @param {string} packageJsonPath
- * @param {string} source
- */
-const readInstalledVersion = (packageJsonPath, source) => {
-  if (!existsSync(packageJsonPath)) return
-  try {
-    addVersion(JSON.parse(readFileSync(packageJsonPath, "utf8")).version, source)
-  } catch {
-    // An unreadable install is reported by the lockfile checks above.
-  }
-}
-
-/** Collects the `effect` copies an install actually linked. */
-const collectInstalledVersions = () => {
-  readInstalledVersion(join(root, "node_modules", "effect", "package.json"), "node_modules/effect")
-
-  const pnpmStore = join(root, "node_modules", ".pnpm")
-  if (existsSync(pnpmStore)) {
-    for (const entry of readdirSync(pnpmStore)) {
-      if (!entry.startsWith("effect@")) continue
-      readInstalledVersion(
-        join(pnpmStore, entry, "node_modules", "effect", "package.json"),
-        `node_modules/.pnpm/${entry}`
-      )
+/** Missing and malformed installs fail closed; same-version private Effect copies fail too. */
+export const installedEffectResolutions = (root, manifests) => {
+  const rootEffect = realpathSync(createRequire(join(root, "package.json")).resolve("effect/package.json"))
+  const records = []
+  for (const [directory, manifest] of manifests) {
+    const require = createRequire(join(root, directory, "package.json"))
+    const declarations = effectDeclarations(manifest, directory)
+    for (const name of new Set(declarations.map((entry) => entry.name))) {
+      const path = realpathSync(require.resolve(`${name}/package.json`))
+      const installed = JSON.parse(readFileSync(path, "utf8"))
+      if (installed.name !== name) throw new Error(`${directory}: ${name} resolves to ${installed.name} at ${path}`)
+      records.push({ name, version: installed.version, source: `${directory} resolves ${path}` })
+      if (name === "effect" && path !== rootEffect) {
+        throw new Error(`${directory}: a different physical Effect instance resolves at ${path}; root uses ${rootEffect}`)
+      }
+      if (name !== "effect") {
+        const adapterEffect = realpathSync(createRequire(path).resolve("effect/package.json"))
+        if (adapterEffect !== rootEffect) throw new Error(`${directory}: ${name} resolves a different physical Effect instance at ${adapterEffect}`)
+      }
     }
   }
+  return records
+}
 
-  // The CLI is the entry point a consumer runs, so resolve `effect` the way it
-  // does. The package root is the closest stable anchor.
-  try {
-    const cliRequire = createRequire(join(root, "packages", "smithers", "package.json"))
-    readInstalledVersion(cliRequire.resolve("effect/package.json"), "packages/smithers import resolution")
-  } catch {
-    // A missing install is reported by the lockfile checks above.
+export const checkEffectVersions = (root = repoRoot) => {
+  const manifestRecords = [
+    ...effectDeclarations(JSON.parse(readFileSync(join(root, "package.json"), "utf8")), "package.json"),
+    ...workspacePackages(root).flatMap((entry) => effectDeclarations(entry.manifest, `${entry.dir}/package.json`))
+  ]
+  const locked = [
+    ...effectLockVersions(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"), "pnpm"),
+    ...effectLockVersions(readFileSync(join(root, "bun.lock"), "utf8"), "bun")
+  ]
+  for (const format of ["pnpm-lock.yaml", "bun.lock"]) {
+    if (!locked.some((entry) => entry.source === format && entry.name === "effect")) throw new Error(`${format}: no resolved Effect package`)
   }
+  assertEffectPins([...manifestRecords, ...locked])
+  const published = readWorkspaceManifests(root)
+  const installed = installedEffectResolutions(root, published)
+  assertEffectPins(installed)
+  return { declarations: manifestRecords.length, locked: locked.length, resolutions: installed.length, packages: published.size }
 }
 
-collectManifestVersions()
-collectPnpmLockVersions()
-collectBunLockVersions()
-collectInstalledVersions()
-
-if (versions.size === 0) {
-  console.error("check-single-effect-version: found no resolved effect version in any manifest, lockfile, or install.")
-  process.exit(1)
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const result = checkEffectVersions()
+  console.log(`check-single-effect-version: exact RC ${EXPECTED_EFFECT_VERSION}; ${result.declarations} declarations, ` +
+    `${result.locked} locked entries, ${result.resolutions} installed resolutions across ${result.packages} published packages; one physical Effect`)
 }
-
-const sorted = [...versions.entries()].sort(([a], [b]) => a.localeCompare(b))
-
-if (versions.size > 1) {
-  console.error(`check-single-effect-version: expected exactly effect@${EXPECTED_EFFECT_VERSION}, found:`)
-  for (const [version, sources] of sorted) {
-    console.error(`  effect@${version}`)
-    for (const source of sources) console.error(`    - ${source}`)
-  }
-  process.exit(1)
-}
-
-const [[version, sources]] = sorted
-if (version !== EXPECTED_EFFECT_VERSION) {
-  console.error(
-    `check-single-effect-version: the tree resolves effect@${version}, ` +
-      `but this release pins effect@${EXPECTED_EFFECT_VERSION}.`
-  )
-  for (const source of sources) console.error(`    - ${source}`)
-  process.exit(1)
-}
-
-console.log(`check-single-effect-version: effect@${version} everywhere (${sources.length} sources)`)

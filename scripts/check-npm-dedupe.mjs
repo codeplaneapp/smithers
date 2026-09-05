@@ -15,6 +15,10 @@
 // to real versions), point a throwaway fixture at all of them with file: deps,
 // run `npm install --package-lock-only` so npm's own arborist builds the tree,
 // then assert on the resolved lockfile.
+// Individual library and CLI profiles additionally install the unchanged
+// manifests on npm and pnpm, inspect physical copies and native resolution,
+// and prove unrelated optional adapters stay absent. An adjacent incompatible
+// Effect RC must be refused by each manager's strict peer check.
 //
 // The install reads registry metadata, so this gate needs the network.
 //
@@ -30,6 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readWorkspaceManifests } from "./pack-release.mjs";
+import { minimalProfiles, adapterProfiles, runConsumerMatrix } from "./fixtures/dependency-consumers.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
@@ -50,23 +55,26 @@ const npmInstallArgs = [
 // not a size problem.
 export const SINGLETONS = ["effect"];
 
-/**
- * External optional peers must stay absent from the default install. Workspace
- * packages are explicitly requested by this fixture, so their presence does
- * not imply an optional peer pulled them in.
- *
- * @since 1.0.0
- * @category utilities
- */
+// A peer stays optional for this combined install only when no other selected
+// package requires it. In particular the CLI owns its Node runtime and TS
+// loader even though browser-facing libraries expose those as optional peers.
 export const optionalPeersOf = (manifests) => {
   const installed = new Set(manifests.map((manifest) => manifest.name));
   const names = new Set();
+  const required = new Set();
   for (const manifest of manifests) {
+    // An explicitly selected package is present even when a sibling only
+    // mentions it as an optional peer (for example the all-package smoke).
+    if (manifest.name !== undefined) required.add(manifest.name);
+    for (const name of Object.keys(manifest.dependencies ?? {})) required.add(name);
+    for (const name of Object.keys(manifest.peerDependencies ?? {})) {
+      if (manifest.peerDependenciesMeta?.[name]?.optional !== true) required.add(name);
+    }
     for (const [name, meta] of Object.entries(manifest.peerDependenciesMeta ?? {})) {
       if (meta?.optional === true && !installed.has(name)) names.add(name);
     }
   }
-  return [...names].sort();
+  return [...names].filter((name) => !required.has(name)).sort();
 };
 
 // The published set, read from the same manifest the release packs.
@@ -95,7 +103,7 @@ function rewriteWorkspaceProtocol(manifest, versionByName) {
 // Minimal POSIX ustar tarball holding a single package/package.json — enough
 // for npm arborist to resolve metadata; --package-lock-only never unpacks
 // sources.
-function manifestTarball(manifest) {
+export function manifestTarball(manifest) {
   const body = Buffer.from(JSON.stringify(manifest, null, 2) + "\n");
   const header = Buffer.alloc(512);
   header.write("package/package.json", 0, 100);
@@ -187,21 +195,36 @@ export function resolveConsumerTree({ keepTmp: keep = false } = {}) {
   }
 }
 
-function main() {
+/** Real physical installs of individual libraries, with no rewritten dependency edges. */
+export async function resolveConsumerProfiles() {
+  const directory = mkdtempSync(join(tmpdir(), "smithers-k-profile-manifests-"));
+  try {
+    const entries = workspacePackages().map(({ manifest }) => {
+      const filename = manifest.name.replace("/", "-") + ".tgz";
+      writeFileSync(join(directory, filename), manifestTarball(manifest));
+      return { name: manifest.name, version: manifest.version, filename };
+    });
+    return await runConsumerMatrix(directory, entries, {
+      profiles: [...minimalProfiles, adapterProfiles[0]]
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+async function main() {
   const { optionalPeers: OPTIONAL_ABSENT, lockPackages, tmp } = resolveConsumerTree({ keepTmp });
 
   const failures = [];
   for (const name of SINGLETONS) {
     const copies = copiesOf(lockPackages, name);
     const versions = new Set(copies.map((key) => lockPackages[key]?.version));
-    if (copies.length > 1 || versions.size > 1) {
+    if (copies.length !== 1 || versions.size !== 1) {
       failures.push(
         `${name} resolves to ${copies.length} copie(s) at ${[...versions].join(", ")}:\n  - ${copies.join("\n  - ")}`,
       );
-    } else if (copies.length === 1) {
-      console.log(`ok: ${name}@${[...versions][0]} (single copy)`);
     } else {
-      console.log(`ok: ${name} not in tree`);
+      console.log(`ok: ${name}@${[...versions][0]} (single copy)`);
     }
   }
   for (const name of OPTIONAL_ABSENT) {
@@ -225,6 +248,9 @@ function main() {
     console.error(`\nnpm dedupe check failed:\n${failures.map((f) => `- ${f}`).join("\n")}`);
     process.exitCode = 1;
   }
+  await resolveConsumerProfiles();
 }
 
-main();
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

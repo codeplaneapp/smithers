@@ -156,24 +156,51 @@ test("publication keeps provenance and uses the repository token for first publi
 test("publication tolerates tag checkouts and bounded registry throttling", () => {
   const command = step("Publish packages in dependency order").run
 
-  assert.match(command, /pnpm publish .* --no-git-checks/)
-  assert.match(command, /publish_retry_delays=\(10 30 60\)/)
-  assert.match(command, /E404|404/)
-  assert.match(command, /429/)
-  assert.match(command, /5\[0-9\]\[0-9\]/)
-  assert.match(command, /sleep 2/)
-  assert.doesNotMatch(command, /if pnpm view .*2>&1; then/)
+  assert.match(command, /node scripts\/publish-release\.mjs/)
+  const publisher = readFileSync(join(repoRoot, "scripts/publish-release.mjs"), "utf8")
+  assert.match(publisher, /--no-git-checks/)
+  assert.match(publisher, /retryDelays = \[10, 30, 60\]/)
+  assert.match(publisher, /options\.pause\?\.\(2\)/)
+
 })
 
-test("every gate runs on both paths; only publication is conditional", () => {
+test("current gates always run; only artifact preparation and publication select a path", () => {
   const conditional = release.jobs.publish.steps
     .filter((candidate) => candidate.if !== undefined)
     .map((candidate) => candidate.name)
 
   assert.deepEqual(conditional, [
+    "Build all workspaces from clean artifacts",
+    "Pack and smoke-test release artifacts",
+    "Restore and verify archived release candidate",
     "Publish packages in dependency order",
     "Report the skipped publication"
   ])
+})
+
+test("archived retries restore an explicit immutable artifact without rebuilding or replacing smoke evidence", () => {
+  for (const restore of [false, true]) {
+    for (const dryRun of [false, true]) {
+      const contexts = dispatchContexts("v1.0.0-rc.0", dryRun)
+      contexts.inputs.candidateRunId = restore ? "10" : ""
+      contexts.inputs.candidateArtifactId = restore ? "20" : ""
+      contexts.env = jobEnv(contexts)
+      assert.equal(condition(step("Build all workspaces from clean artifacts").if, contexts), !restore)
+      assert.equal(condition(step("Pack and smoke-test release artifacts").if, contexts), !restore)
+      assert.equal(condition(step("Restore and verify archived release candidate").if, contexts), restore)
+      assert.equal(condition(step("Publish packages in dependency order").if, contexts), !dryRun)
+    }
+  }
+  assert.equal(release.on.workflow_dispatch.inputs.candidateRunId.default, "")
+  assert.equal(release.on.workflow_dispatch.inputs.candidateArtifactId.default, "")
+  assert.equal(release.jobs.publish.permissions.actions, "read")
+  const restore = step("Restore and verify archived release candidate")
+  assert.equal(restore.run, 'node scripts/restore-release.mjs "$PACK_DIR"')
+  assert.equal(restore.env.GH_TOKEN, "${{ github.token }}")
+  const names = release.jobs.publish.steps.map((candidate) => candidate.name)
+  assert.ok(names.indexOf("Validate archived candidate selection") < names.indexOf("Workspace targets"))
+  assert.ok(names.indexOf("Restore and verify archived release candidate") < names.indexOf("Archive tested release artifacts"))
+  assert.ok(names.indexOf("Archive tested release artifacts") < names.indexOf("Publish packages in dependency order"))
 })
 
 test("the driver reads the toolchain steps copied out of ci.yml", () => {
@@ -205,7 +232,11 @@ test("the toolchain the gates need is installed before the first gate", () => {
   // the shim corepack put there, which killed every nested `pnpm` the build
   // tool spawned. The package manager's setup therefore has to come after it,
   // which is the order GithubCiGen renders and this file copies.
-  assert.ok(names.indexOf("Install Go") < names.indexOf("pnpm/action-setup@v6"))
+  const packageManager = names.findIndex(
+    (name) => typeof name === "string" && name.startsWith("pnpm/action-setup@")
+  )
+  assert.notEqual(packageManager, -1, "release.yml does not install pnpm")
+  assert.ok(names.indexOf("Install Go") < packageManager)
 })
 
 test("the rehearsal driver documents a local equivalent for every action the release uses", () => {
@@ -226,8 +257,8 @@ test("the dispatch inputs keep the rehearsal safe by default", () => {
 
 test("CI gates the server's checks and tests in the required test job", () => {
   const ci = parseWorkflow(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8"))
-  const server = ci.jobs.test.steps.find((entry) => entry.name === "Server")
-  assert.equal(server?.run, "pnpm exec smithers-build ci '//apps/server/...'")
+  const server = ci.jobs.test.steps.find((entry) => entry.name === "Server typecheck and tests")
+  assert.equal(server?.run, "pnpm exec smthrs ci '//apps/server/...'")
   assert.equal(server?.if, undefined)
 })
 
@@ -275,4 +306,18 @@ test("a colocated rehearsal skips initialization and continues to the next gate"
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
+})
+test("release checks out the requested candidate, serializes its tag, and archives before publication", () => {
+  const contexts = { github: { ref: "refs/heads/main", ref_name: "main" }, inputs: { releaseTag: "v1.0.0-rc.0" } }
+  const steps = release.jobs.publish.steps
+  const checkout = steps.find((item) => item.uses?.startsWith("actions/checkout@"))
+  assert.equal(interpolate(checkout.with.ref, contexts), "v1.0.0-rc.0")
+  assert.equal(interpolate(release.concurrency.group, contexts), "release-v1.0.0-rc.0")
+  const pushed = { github: { ref: "refs/tags/v1.0.0-rc.0", ref_name: "v1.0.0-rc.0" }, inputs: {} }
+  assert.equal(interpolate(release.concurrency.group, pushed), "release-v1.0.0-rc.0")
+  assert.equal(release.concurrency["cancel-in-progress"], false)
+  const archive = steps.findIndex((item) => item.uses?.startsWith("actions/upload-artifact@"))
+  const publish = steps.findIndex((item) => item.run?.includes("node scripts/publish-release.mjs"))
+  assert.ok(archive >= 0 && publish > archive)
+  assert.equal(steps[archive].with["if-no-files-found"], "error")
 })

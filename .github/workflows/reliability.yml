@@ -1,0 +1,188 @@
+name: Scheduled reliability
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Replay seed; empty chooses the current UTC day'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: reliability-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  benchmark-observations:
+    name: scheduler and journal counters, latency and retained resources
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Measure cold, warmup and repeated warm fixtures without result-cache reuse
+        env:
+          SMITHERS_BENCH_ARTIFACT_DIR: ${{ github.workspace }}/reliability-artifacts/bench
+        run: node --expose-gc scripts/bench/gate.mjs --measure
+      - name: Preserve benchmark observations and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: benchmark-observations-${{ github.run_id }}
+          path: reliability-artifacts/bench/**
+          if-no-files-found: error
+          retention-days: 30
+  sync-long-soak:
+    name: sync subscriber lifecycle (60 minute soak, Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.19.0', '24.18.0']
+    env:
+      SMITHERS_SOAK_MINUTES: '60'
+      SMITHERS_SOAK_SEED: '20260904'
+      SMITHERS_SOAK_NODE: ${{ matrix.node }}
+      SMITHERS_SOAK_ARTIFACT: ${{ github.workspace }}/reliability-artifacts/sync/sync-soak.json
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Record the deterministic soak workload
+        run: |
+          mkdir -p reliability-artifacts/sync
+          echo "sync soak: seed $SMITHERS_SOAK_SEED, $SMITHERS_SOAK_MINUTES minutes"
+      - name: Execute env-scaled sync soak directly
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm --filter @smthrs/sync exec vitest run test/ServerLongSoak.test.ts --coverage.enabled=false --maxWorkers=1 --reporter=default --reporter=json --outputFile="$GITHUB_WORKSPACE/reliability-artifacts/sync/vitest.json" 2>&1 | tee reliability-artifacts/sync/workload.log
+      - name: Require completed soak artifact
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p reliability-artifacts/sync
+          node scripts/check-soak-campaign.mjs "$SMITHERS_SOAK_ARTIFACT" 2>&1 | tee reliability-artifacts/sync/verifier.log
+      - name: Preserve soak checkpoints, cleanup and failure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sync-long-soak-${{ matrix.node }}-${{ github.run_id }}
+          path: reliability-artifacts/sync/**
+          if-no-files-found: error
+          retention-days: 30
+  signal-state-machine:
+    name: durable signal state machine (rotating seed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Select and record reproducible campaign
+        env:
+          REQUESTED_SEED: ${{ inputs.seed }}
+        run: |
+          node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs'
+          const seed = process.env.REQUESTED_SEED || String(Math.floor(Date.now() / 86400000))
+          if (!/^\d+$/.test(seed) || !Number.isInteger(Number(seed)) || Number(seed) > 4294967295) throw new Error('seed must be an unsigned 32-bit integer')
+          const configuration = `SMITHERS_FUZZ_SEED=${seed}\nSMITHERS_FUZZ_CASES=50\nSMITHERS_FUZZ_STEPS=500\n`
+          appendFileSync(process.env.GITHUB_ENV, configuration)
+          console.log(configuration)
+          JS
+      - name: Run generated durable histories
+        env:
+          SMITHERS_FUZZ_ARTIFACT_DIR: ${{ github.workspace }}/reliability-artifacts
+        run: pnpm --filter @smthrs/control exec vitest run test/SignalInboxModel.test.ts --coverage.enabled=false --reporter=default --reporter=json --outputFile=reliability-results.json
+      - name: Verify complete campaign evidence
+        run: node scripts/check-signal-campaign.mjs reliability-artifacts
+      - name: Prove signal transition mutation sensitivity
+        env:
+          SMITHERS_MUTATION_ARTIFACT_DIR: ${{ github.workspace }}/reliability-artifacts/signal-mutations
+        run: node packages/smithers/control/scripts/check-signal-mutations.mjs
+      - name: Preserve history and seed evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signal-state-machine-${{ github.run_id }}
+          path: |
+            packages/smithers/control/reliability-results.json
+            reliability-artifacts/**
+          if-no-files-found: error
+          retention-days: 30
+  jj-native-wasm-abi:
+    name: generated native and real WASM ABI corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.19.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - name: Execute and verify parser, native and WASM ABI tiers
+        env:
+          REQUESTED_SEED: ${{ inputs.seed }}
+          SMITHERS_ABI_CASES: '5000'
+          SMITHERS_ABI_STEPS: '32'
+          SMITHERS_ABI_ARTIFACT_DIR: ${{ github.workspace }}/reliability-artifacts/jj-abi
+        run: |
+          node --input-type=module <<'JS'
+          import { campaignConfiguration, runCampaign } from './scripts/run-jj-abi-campaign.mjs'
+          const seed = process.env.REQUESTED_SEED || String(Math.floor(Date.now() / 86400000))
+          await runCampaign(campaignConfiguration({ ...process.env, SMITHERS_ABI_SEED: seed }))
+          JS
+      - name: Install pinned nightly for parser AddressSanitizer
+        run: rustup toolchain install nightly-2025-08-08 --profile minimal --component rust-src
+      - name: Execute parser corpus under AddressSanitizer
+        shell: bash
+        timeout-minutes: 15
+        env:
+          CARGO_BUILD_JOBS: '1'
+          CARGO_TARGET_DIR: target/jj-parser-asan
+          RUSTFLAGS: -Zsanitizer=address
+          ASAN_OPTIONS: detect_leaks=1:detect_stack_use_after_return=1:halt_on_error=1
+          SMITHERS_ABI_CASES: '5000'
+          SMITHERS_ABI_ARTIFACT_DIR: ${{ github.workspace }}/reliability-artifacts/jj-abi/asan
+        run: |
+          mkdir -p "$SMITHERS_ABI_ARTIFACT_DIR"
+          SMITHERS_ABI_SEED="$(node -p "require('./reliability-artifacts/jj-abi/campaign.json').seed")"
+          export SMITHERS_ABI_SEED
+          cargo +nightly-2025-08-08 test -p flows-jj --locked \
+            -Zbuild-std --target x86_64-unknown-linux-gnu --test test_abi_parser \
+            -- --nocapture 2>&1 | tee "$SMITHERS_ABI_ARTIFACT_DIR/asan.log"
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs'
+          import { campaignConfiguration, verifyParser } from './scripts/run-jj-abi-campaign.mjs'
+          verifyParser(JSON.parse(readFileSync(`${process.env.SMITHERS_ABI_ARTIFACT_DIR}/parser.json`)), campaignConfiguration())
+          JS
+      - name: Preserve native and WASM corpus, results and allocation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: jj-native-wasm-abi-${{ github.run_id }}
+          path: reliability-artifacts/jj-abi/**
+          if-no-files-found: error
+          retention-days: 30

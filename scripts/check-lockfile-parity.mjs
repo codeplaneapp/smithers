@@ -41,9 +41,22 @@ const workspaces = readLock().workspaces ?? {}
 // package that moves — a granular package nesting inside the product package
 // it belongs to — is still compared. A glob written here would answer for one
 // directory depth and silently stop covering the moved package.
-const manifests = workspacePackages(root)
+const packageEntries = workspacePackages(root)
   .filter((entry) => entry.dir.startsWith("packages/") || entry.dir.startsWith("apps/"))
-  .map((entry) => `${entry.dir}/package.json`)
+const manifests = packageEntries.map((entry) => `${entry.dir}/package.json`)
+const workspaceVersions = new Map(
+  packageEntries.map((entry) => {
+    const pkg = JSON.parse(readFileSync(path.join(root, entry.dir, "package.json"), "utf8"))
+    return [pkg.name, pkg.version]
+  })
+)
+
+// Bun may canonicalize an exact dependency on a same-version workspace package
+// to `workspace:*` in its lockfile. That is equivalent only while the package
+// named by the dependency still has the exact version the manifest declares;
+// retaining this version check preserves the stale-internal-range protection.
+const rangesAgree = (name, declared, locked) =>
+  locked === declared || (locked === "workspace:*" && workspaceVersions.get(name) === declared)
 
 const problems = []
 for (const manifest of manifests) {
@@ -58,7 +71,7 @@ for (const manifest of manifests) {
     const declared = pkg[field] ?? {}
     const locked = entry[field] ?? {}
     for (const [name, range] of Object.entries(declared)) {
-      if (locked[name] !== range) {
+      if (!rangesAgree(name, range, locked[name])) {
         problems.push(`${directory}: ${field} ${name}@${range} is ${locked[name] ?? "absent"} in bun.lock`)
       }
     }

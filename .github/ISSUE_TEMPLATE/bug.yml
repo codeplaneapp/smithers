@@ -1,0 +1,52 @@
+name: Bug report
+description: Give Smithers enough evidence to reduce the bug to a minimal reproduction.
+title: "bug: "
+labels:
+  - "kind:bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Our triage flow will try to turn this into a minimal reproduction. Exact, copyable inputs make that much more likely.
+  - type: input
+    id: version
+    attributes:
+      label: Smithers version or commit
+      description: Run `smthrs --version`, or paste the commit SHA when using a checkout.
+      placeholder: 1.0.0 or abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: minimal-input
+    attributes:
+      label: Smallest flow or command that fails
+      description: Remove private data and unrelated steps. Do not include credentials.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior and full error
+      description: Include the complete error and exit status, with secrets removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, Node version, package manager, and relevant provider.
+      placeholder: macOS 15 arm64, Node 22.19.0, pnpm 10, OpenAI
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, or links that help, with secrets removed.

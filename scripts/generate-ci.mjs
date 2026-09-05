@@ -1,0 +1,18 @@
+/** Apply the owning PACKAGE.ts declaration through the actual workflow generator. */
+import { fileURLToPath } from "node:url"
+import { Effect } from "effect"
+import { openPackageIndex } from "../packages/smithers/build/build-cli/src/Cli.ts"
+import { render } from "../packages/smithers/build/targets/src/GithubCiGen.ts"
+import { resolveOutputPath, writeGeneratedFile } from "../packages/smithers/build/targets/src/GeneratedFile.ts"
+import * as Target from "../packages/smithers/build/targets/src/Target.ts"
+
+const root = fileURLToPath(new URL("../", import.meta.url))
+const index = await openPackageIndex({ workspace: root })
+const declaration = index.targets().find((row) => row.label === "//:ci")
+if (!declaration) throw new Error("Missing //:ci declaration")
+const metadata = Target.metadata(declaration.target)
+if (metadata.target !== "GithubCiGen") throw new Error("Review generation when the workflow rule changes")
+const attrs = { ...metadata.attrs, packageManager: index.workspace.packageManager, mode: "write" }
+const path = resolveOutputPath(attrs.output)
+await Effect.runPromise(writeGeneratedFile(root, { path, contents: render(attrs) }))
+console.log(`Generated ${path} from //:ci`)

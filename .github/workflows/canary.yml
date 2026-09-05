@@ -66,13 +66,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.19.0
           cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
@@ -113,7 +113,10 @@ jobs:
           echo "number=$number" >> "$GITHUB_OUTPUT"
       # The verdict is captured rather than raised, so the alert lands before
       # the job goes red. An exit code other than 0 or 1 means the alert
-      # machinery itself broke, which the last step reports separately.
+      # machinery itself broke, which the last step reports separately. The
+      # capture is `|| verdict=$?`, not a bare command under the default
+      # `bash -e`: a failing canary exits 1 here, and `-e` would abort the
+      # step before the verdict was written, skipping the alert entirely.
       - name: Decide the alert
         id: decide
         working-directory: apps/server
@@ -121,14 +124,16 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           OPEN_ISSUE: ${{ steps.existing.outputs.number }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
+          verdict=0
           bun scripts/canary/uptime-report.ts \
             --report "$RUNNER_TEMP/canary-uptime.json" \
             --run-url "$RUN_URL" \
             --open-issue "$OPEN_ISSUE" \
-            --body-out "$RUNNER_TEMP/canary-alert.md"
-          echo "verdict=$?" >> "$GITHUB_OUTPUT"
+            --body-out "$RUNNER_TEMP/canary-alert.md" || verdict=$?
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
       - name: Raise or clear the alert
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           ALERT_ACTION: ${{ steps.decide.outputs.action }}
@@ -157,7 +162,7 @@ jobs:
           esac
       - name: Upload the probe report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: canary-uptime-report
           path: ${{ runner.temp }}/canary-uptime.json

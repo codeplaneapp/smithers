@@ -25,7 +25,7 @@ execution suite exists, so neither establishes durable-engine support. The
 the status of each platform and storage combination.
 
 The substrate is a release candidate: every release-1 engine manifest pins
-`effect` to exactly `4.0.0-rc.108`. An upstream defect against that pin is not
+`effect` to exactly `4.0.0-rc.112`. An upstream defect against that pin is not
 fixed by a patch range, so the known ones and their mitigations are tracked in
 [substrate pin and known upstream issues](../pages/release/support-matrix.md#substrate-pin-and-known-upstream-issues).
 

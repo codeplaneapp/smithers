@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "maxIncrease": 0.05,
+  "cases": [
+    {
+      "id": "scheduler-chain-8",
+      "size": 8,
+      "outputDigest": "a34bc4e2433de629b2890564a6ed2e3c589f430bd8665e8c0395171ebf9f0f8e",
+      "counts": {
+        "queries": 380,
+        "prepares": 187,
+        "execs": 0,
+        "dispatches": 8
+      }
+    },
+    {
+      "id": "scheduler-chain-32",
+      "size": 32,
+      "outputDigest": "a9c18b5f8119854af73e9e08a747858b2b835cb9e7d1c1c8ccccb964fb4f32eb",
+      "counts": {
+        "queries": 1480,
+        "prepares": 667,
+        "execs": 0,
+        "dispatches": 32
+      }
+    },
+    {
+      "id": "scheduler-chain-64",
+      "size": 64,
+      "outputDigest": "95d6bdd37b77a166f1839a8e640125689eebeebeb7ea6f72ccd15e5b2ef6127f",
+      "counts": {
+        "queries": 3026,
+        "prepares": 1307,
+        "execs": 0,
+        "dispatches": 64
+      }
+    },
+    {
+      "id": "scheduler-wide-8",
+      "size": 8,
+      "outputDigest": "a34bc4e2433de629b2890564a6ed2e3c589f430bd8665e8c0395171ebf9f0f8e",
+      "counts": {
+        "queries": 380,
+        "prepares": 187,
+        "execs": 0,
+        "dispatches": 8
+      }
+    },
+    {
+      "id": "scheduler-wide-32",
+      "size": 32,
+      "outputDigest": "a9c18b5f8119854af73e9e08a747858b2b835cb9e7d1c1c8ccccb964fb4f32eb",
+      "counts": {
+        "queries": 1476,
+        "prepares": 667,
+        "execs": 0,
+        "dispatches": 32
+      }
+    },
+    {
+      "id": "scheduler-wide-64",
+      "size": 64,
+      "outputDigest": "95d6bdd37b77a166f1839a8e640125689eebeebeb7ea6f72ccd15e5b2ef6127f",
+      "counts": {
+        "queries": 3020,
+        "prepares": 1307,
+        "execs": 0,
+        "dispatches": 64
+      }
+    },
+    {
+      "id": "scheduler-conflict-8",
+      "size": 8,
+      "outputDigest": "a34bc4e2433de629b2890564a6ed2e3c589f430bd8665e8c0395171ebf9f0f8e",
+      "counts": {
+        "queries": 380,
+        "prepares": 187,
+        "execs": 0,
+        "dispatches": 8
+      }
+    },
+    {
+      "id": "scheduler-conflict-32",
+      "size": 32,
+      "outputDigest": "a9c18b5f8119854af73e9e08a747858b2b835cb9e7d1c1c8ccccb964fb4f32eb",
+      "counts": {
+        "queries": 1480,
+        "prepares": 667,
+        "execs": 0,
+        "dispatches": 32
+      }
+    },
+    {
+      "id": "scheduler-conflict-64",
+      "size": 64,
+      "outputDigest": "95d6bdd37b77a166f1839a8e640125689eebeebeb7ea6f72ccd15e5b2ef6127f",
+      "counts": {
+        "queries": 3026,
+        "prepares": 1307,
+        "execs": 0,
+        "dispatches": 64
+      }
+    },
+    {
+      "id": "journal-append-32",
+      "size": 32,
+      "outputDigest": "94147d49e0cda81054864a7c57e6d3e87fd415c437a2044d76abfc51a42dc8d1",
+      "counts": {
+        "queries": 192,
+        "prepares": 68,
+        "execs": 0
+      }
+    },
+    {
+      "id": "journal-replay-32",
+      "size": 32,
+      "outputDigest": "94147d49e0cda81054864a7c57e6d3e87fd415c437a2044d76abfc51a42dc8d1",
+      "counts": {
+        "queries": 2,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 1
+      }
+    },
+    {
+      "id": "journal-paging-32",
+      "size": 32,
+      "outputDigest": "94147d49e0cda81054864a7c57e6d3e87fd415c437a2044d76abfc51a42dc8d1",
+      "counts": {
+        "queries": 4,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 2
+      }
+    },
+    {
+      "id": "journal-append-256",
+      "size": 256,
+      "outputDigest": "836ab1680713a41000266d1946c7b7370461b6daa083ca5b68500a59bd8e7d43",
+      "counts": {
+        "queries": 1536,
+        "prepares": 516,
+        "execs": 0
+      }
+    },
+    {
+      "id": "journal-replay-256",
+      "size": 256,
+      "outputDigest": "836ab1680713a41000266d1946c7b7370461b6daa083ca5b68500a59bd8e7d43",
+      "counts": {
+        "queries": 2,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 1
+      }
+    },
+    {
+      "id": "journal-paging-256",
+      "size": 256,
+      "outputDigest": "836ab1680713a41000266d1946c7b7370461b6daa083ca5b68500a59bd8e7d43",
+      "counts": {
+        "queries": 18,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 9
+      }
+    },
+    {
+      "id": "journal-append-1024",
+      "size": 1024,
+      "outputDigest": "ae29cba15cbfce9827c3978967816c934b9661692901e44447a7256ef02e5755",
+      "counts": {
+        "queries": 6144,
+        "prepares": 2052,
+        "execs": 0
+      }
+    },
+    {
+      "id": "journal-replay-1024",
+      "size": 1024,
+      "outputDigest": "ae29cba15cbfce9827c3978967816c934b9661692901e44447a7256ef02e5755",
+      "counts": {
+        "queries": 2,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 1
+      }
+    },
+    {
+      "id": "journal-paging-1024",
+      "size": 1024,
+      "outputDigest": "ae29cba15cbfce9827c3978967816c934b9661692901e44447a7256ef02e5755",
+      "counts": {
+        "queries": 68,
+        "prepares": 2,
+        "execs": 0,
+        "pages": 34
+      }
+    }
+  ]
+}

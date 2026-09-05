@@ -66,8 +66,8 @@ export const NODE_ONLY = [
     reason: "the Bun bundle falls back to the @effect/platform-node adapters off Bun"
   },
   {
-    name: "@smthrs/kernel/test/TestHost",
-    entry: "packages/smithers/flows/kernel/src/test/TestHost.ts",
+    name: "@smthrs/testing/TestHost",
+    entry: "packages/testing/src/TestHost.ts",
     expect: "node:assert",
     reason: "effect/testing's TestClock pulls node:assert"
   },

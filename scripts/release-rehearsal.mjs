@@ -373,8 +373,9 @@ export const interpolate = (value, contexts) => {
  * not listed here stops the rehearsal instead of being silently ignored.
  */
 export const localEquivalents = {
+  "actions/upload-artifact": "the candidate tarballs and manifests remain in the declared local pack directory",
   "actions/checkout": "this checkout is the tree under test",
-  "docker://rhysd/actionlint:1.7.11": "the installed actionlint binary validates workflow syntax",
+  "docker://rhysd/actionlint": "the installed actionlint binary validates workflow syntax",
   "pnpm/action-setup": "pnpm on PATH",
   "actions/setup-node": "the Node and registry pin applied to PATH by --node",
   "oven-sh/setup-bun": "bun on PATH",

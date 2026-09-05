@@ -22,15 +22,15 @@ jobs:
       # `git rev-list --count <sha>..origin/main`, and a shallow clone has
       # neither origin/main nor the commits between. Without this the probe
       # reports that it could not measure, which is honest and useless.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.19.0
           cache: pnpm
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
@@ -74,7 +74,7 @@ jobs:
           cp -R apps/reports "$RUNNER_TEMP/e2e-artifacts/reports" 2>/dev/null || true
       - name: Upload e2e artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: apps-deploy-e2e-artifacts
           path: ${{ runner.temp }}/e2e-artifacts
@@ -241,7 +241,7 @@ jobs:
           fi
       - name: Upload the canary probe reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: canary-probe-reports
           path: |
@@ -250,7 +250,7 @@ jobs:
           if-no-files-found: ignore
       - name: Upload deploy receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: deploy-receipt
           path: apps/server/deploy-receipts/**/*.json

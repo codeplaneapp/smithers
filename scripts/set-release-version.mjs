@@ -96,17 +96,22 @@ export const readManifests = (root = repoRoot) =>
 /**
  * Retargets one manifest at `version`.
  *
- * Only ranges naming a workspace package are rewritten, and `workspace:` and
- * `catalog:` protocol ranges are left alone — they carry no version to drift.
+ * Published manifests always receive a concrete sibling version: package
+ * managers rewrite `workspace:` during packing, but the checked-in release
+ * contract must already describe what a registry consumer can resolve.
+ * Private manifests retain workspace/catalog protocols and only have concrete
+ * sibling versions retargeted.
  */
 export const retarget = (manifest, version, workspaceNames) => {
   const updated = manifest.private === true ? { ...manifest } : { ...manifest, version }
   for (const field of dependencyFields) {
     if (manifest[field] === undefined) continue
     updated[field] = Object.fromEntries(
-      Object.entries(manifest[field]).map(([name, range]) =>
-        workspaceNames.has(name) && !range.includes(":") ? [name, version] : [name, range]
-      )
+      Object.entries(manifest[field]).map(([name, range]) => {
+        if (!workspaceNames.has(name)) return [name, range]
+        if (manifest.private !== true || !range.includes(":")) return [name, version]
+        return [name, range]
+      })
     )
   }
   return updated
@@ -126,7 +131,8 @@ export const mismatches = (entries, version) => {
     }
     for (const field of dependencyFields) {
       for (const [name, range] of Object.entries(manifest[field] ?? {})) {
-        if (!workspaceNames.has(name) || range.includes(":") || range === version) continue
+        if (!workspaceNames.has(name) || range === version) continue
+        if (manifest.private === true && range.includes(":")) continue
         found.push(`${directory}: ${field}.${name} is ${range}, expected ${version}`)
       }
     }

@@ -10,11 +10,16 @@
  *
  * Run it with `node --test "scripts/repo-contract/*.test.mjs"`.
  */
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs"
+import { tmpdir } from "node:os"
 import assert from "node:assert/strict"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { describe, it } from "node:test"
+import { parseWorkflow } from "../release-rehearsal.mjs"
 import { fileURLToPath } from "node:url"
+import { verifySignalCampaign } from "../check-signal-campaign.mjs"
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..")
 
@@ -78,4 +83,86 @@ describe("test-script wiring", () => {
         + "a member in one and not the other is installed but never tested, or tested and never installed"
     )
   })
+})
+
+
+describe("required PR selection", () => {
+  const workflow = parseWorkflow(readFileSync(join(root, ".github/workflows/ci.yml"), "utf8"))
+  const runs = (job) => workflow.jobs[job].steps.flatMap((step) => step.run ? [step.run] : [])
+  it("selects UI typecheck, UI unit tests, and server CI in the required main job", () => {
+    const main = runs("test").join("\n")
+    assert.match(main, /(?:smthrs|smithers-build) build '\/\/apps\/ui:check'/)
+    assert.match(main, /(?:smthrs|smithers-build) test '\/\/apps\/ui:unitTests'/)
+    assert.match(main, /(?:smthrs|smithers-build) ci '\/\/apps\/server\/\.\.\.'/)
+    assert.notEqual(workflow.jobs.test["continue-on-error"], true)
+  })
+  it("the browser job selects the target that executes actual Playwright", () => {
+    assert.match(runs("apps-e2e").join("\n"), /(?:smthrs|smithers-build) test '\/\/apps\/ui:browserE2e'/)
+    assert.notEqual(workflow.jobs["apps-e2e"]["continue-on-error"], true)
+    const declaration = readFileSync(join(root, "apps/ui/PACKAGE.ts"), "utf8")
+    assert.match(declaration, /browserE2e = Smithers\.NodeTest/)
+    assert.match(declaration, /entrypoint\(Smithers\.file\("scripts\/run-pr-e2e\.mjs"\)/)
+    const executable = readFileSync(join(root, "apps/ui/scripts/run-pr-e2e.mjs"), "utf8")
+    assert.match(executable, /\["exec", "playwright", "test"\]/)
+    assert.match(executable, /SMITHERS_CHAT_STUB: "1"/)
+  })
+})
+
+
+it("the selected browser executable installs its matching browser then runs Playwright and propagates failure", () => {
+  const temporary = mkdtempSync(join(tmpdir(), "smithers-pr-browser-"))
+  try {
+    const fake = join(temporary, "pnpm")
+    const calls = join(temporary, "calls")
+    writeFileSync(fake, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$BROWSER_TEST_CALLS"\nif [ "$3" = "test" ]; then exit 23; fi\n')
+    chmodSync(fake, 0o755)
+    assert.throws(() => execFileSync(process.execPath, [join(root, "apps/ui/scripts/run-pr-e2e.mjs")], {
+      cwd: join(root, "apps/ui"), env: { ...process.env, PATH: `${temporary}:${process.env.PATH}`, BROWSER_TEST_CALLS: calls }, stdio: "pipe"
+    }), (error) => error.status === 23)
+    assert.deepEqual(readFileSync(calls, "utf8").trim().split("\n"), ["exec playwright install --with-deps chromium", "exec playwright test"])
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
+})
+
+
+it("scheduled durable histories retain reproducible seeds and operation artifacts", () => {
+  const workflow = parseWorkflow(readFileSync(join(root, ".github/workflows/reliability.yml"), "utf8"))
+  assert.ok(workflow.on.schedule[0].cron)
+  const job = workflow.jobs["signal-state-machine"]
+  const steps = job.steps
+  const campaign = steps.find((step) => step.name === "Run generated durable histories")
+  assert.match(campaign.run, /@smthrs\/control exec vitest run test\/SignalInboxModel\.test\.ts/)
+  assert.match(campaign.env.SMITHERS_FUZZ_ARTIFACT_DIR, /reliability-artifacts/)
+  const seed = steps.find((step) => step.name === "Select and record reproducible campaign").run
+  assert.match(seed, /SMITHERS_FUZZ_SEED=/)
+  assert.match(seed, /SMITHERS_FUZZ_CASES=50/)
+  assert.match(seed, /SMITHERS_FUZZ_STEPS=500/)
+  const artifact = steps.find((step) => step.name === "Preserve history and seed evidence")
+  assert.equal(artifact.if, "always()")
+  assert.match(artifact.with.path, /reliability-results\.json/)
+  assert.match(artifact.with.path, /reliability-artifacts/)
+  assert.equal(artifact.with["if-no-files-found"], "error")
+  assert.match(steps.find((step) => step.name === "Verify complete campaign evidence").run, /check-signal-campaign\.mjs reliability-artifacts/)
+  assert.match(steps.find((step) => step.name === "Prove signal transition mutation sensitivity").run, /check-signal-mutations\.mjs/)
+  assert.notEqual(job["continue-on-error"], true)
+})
+
+it("campaign evidence refuses a missing case, truncated history, wrong seed and failed result", async () => {
+  const temporary = mkdtempSync(join(tmpdir(), "smithers-campaign-evidence-"))
+  try {
+    const first = { status: "passed", seed: 7, steps: 2, history: [{ kind: "reopen" }, { kind: "admit" }], reopenCount: 1, finalState: [] }
+    const secondSeed = (7 + Math.imul(1, 0x9e3779b9)) >>> 0
+    const second = { ...first, seed: secondSeed }
+    const firstPath = join(temporary, "signal-inbox-7.json")
+    const secondPath = join(temporary, `signal-inbox-${secondSeed}.json`)
+    const configuration = { seed: 7, cases: 2, steps: 2 }
+    writeFileSync(firstPath, JSON.stringify(first))
+    await assert.rejects(verifySignalCampaign(temporary, configuration), /ENOENT/)
+    writeFileSync(secondPath, JSON.stringify(second))
+    assert.deepEqual(await verifySignalCampaign(temporary, configuration), configuration)
+    for (const change of [{ history: [] }, { seed: 8 }, { status: "failed" }, { steps: 1 }, { reopenCount: 0 }]) {
+      writeFileSync(firstPath, JSON.stringify({ ...first, ...change }))
+      await assert.rejects(verifySignalCampaign(temporary, configuration), /Incomplete signal campaign evidence/)
+    }
+    await assert.rejects(verifySignalCampaign(temporary, { ...configuration, seed: 4294967296 }), /Invalid signal campaign configuration/)
+  } finally { rmSync(temporary, { recursive: true, force: true }) }
 })
