@@ -6,20 +6,18 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/create-app/docs/api.md"
 ---
 
-`@smthrs/create-app` declares a Smithers app in one `PACKAGE.ts`. Everything
-else is named by where it sits: pages, panes, flows, and the three layer files
-a flow inherits.
+`@smthrs/create-app` declares a Smithers app in one `PACKAGE.ts` at the app
+root. Everything else is named by where it sits: pages, panes, flows, and the
+three layer files a flow inherits.
 
-The package is private and is not published to a registry. An app is scaffolded
-from a source checkout with `pnpm exec smithers-build create-app my-app`, a
-verb of the private `@smthrs/build-cli`, and the scaffold rewrites every
-`@smthrs/*` specifier in the copied template to a `link:` path into that
-checkout. See [Installation](/installation/).
+Install `@smthrs/build-cli@next` and `@smthrs/targets@next`, then scaffold with
+`pnpm exec smithers-build create-app my-app`. The copied manifest pins the same
+RC release line. See [Installation](/installation/).
 
 ## Runtime class of each subpath
 
 A scaffolded app splits this package across three hosts, so each subpath has a
-runtime class, and `test/bundle.test.ts` holds it to that class by bundling it.
+runtime class. Import the one whose class matches the file doing the importing.
 
 | Import                         | Runtime                |
 | ------------------------------ | ---------------------- |
@@ -51,7 +49,7 @@ const CreateApp: (options: CreateAppOptions) => AppTargets
 ```
 
 Declares an app. Returns the serializable manifest plus four
-[`@smthrs/targets`](https://targets.smithers.sh/reference/api/) rules.
+[`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets) rules.
 
 ```ts
 import { CreateApp } from "@smthrs/create-app"
@@ -467,8 +465,8 @@ module that exists only while Vite is running.
 
 ## @smthrs/create-app/routesBin
 
-The body of the `smithers-routes` executable, kept out of `bin/routes.mjs` so a
-coverage provider can instrument it and so the bin stays a shim.
+The body of the `smithers-routes` executable, exported so a test or another
+host can run it and read exactly what a user at a terminal would see.
 
 ```ts
 const runRoutesBin: (argv: ReadonlyArray<string>, options: RoutesBinOptions) => number

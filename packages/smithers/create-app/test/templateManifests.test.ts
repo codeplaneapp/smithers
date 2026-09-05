@@ -3,12 +3,8 @@
  * cut from.
  *
  * A template's `@smthrs/*` specifier is a literal version string, not a
- * `workspace:*` range, because a scaffolded app is not a workspace member. So
- * nothing but a test holds the two in step: both manifests pinned `0.1.0`
- * against a roster that had moved to `1.0.0-rc.0`, and every specifier in a
- * freshly scaffolded app was unresolvable. It installed anyway only because
- * `packages/smithers/build/build-cli`'s `linkWorkspace` rewrites those specifiers to `link:`
- * paths when it finds a source checkout.
+ * `workspace:*` range, because a scaffolded app is not a workspace member.
+ * Nothing but this test holds those literal versions in step with the release.
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Fixture } from "@smthrs/testing/Fixture"
@@ -51,8 +47,10 @@ const manifestsByName = (): ReadonlyMap<string, Manifest> => {
 interface Manifest {
   readonly version?: string
   readonly private?: boolean
+  readonly overrides?: Record<string, string>
   readonly dependencies?: Record<string, string>
   readonly devDependencies?: Record<string, string>
+  readonly pnpm?: { readonly overrides?: Record<string, string> }
 }
 
 const read = (path: string): Manifest => JSON.parse(readFileSync(path, "utf8")) as Manifest
@@ -69,27 +67,7 @@ const smthrsSpecifiers = (manifest: Manifest): ReadonlyArray<readonly [string, s
     .filter(([name]) => name.startsWith("@smthrs/"))
     .sort(([a], [b]) => a.localeCompare(b))
 
-/**
- * The private workspace packages a template is allowed to depend on.
- *
- * A private package never reaches a registry, so a scaffolded app can only
- * resolve these through the `link:` rewrite. Adding a fourth is a deliberate
- * decision about what a scaffold can be installed from, so it is spelled out
- * here rather than derived: a new private dependency fails this test until
- * someone writes it down.
- *
- * The list is three, not four. `@smthrs/ui-styleguide` was declared and never
- * imported — `@smthrs/ui` resolves the token names itself — so it was dropped
- * rather than recorded. `@smthrs/create-app` and `@smthrs/targets` are what a
- * scaffold is built from and cannot be dropped; `@smthrs/ui` is imported by
- * roughly twenty files of the aomi template and is the exposure that stays
- * until it publishes.
- */
-const allowedPrivateDependencies = [
-  "@smthrs/create-app",
-  "@smthrs/targets",
-  "@smthrs/ui"
-] as const
+const publishedTemplates = new Set(["default"])
 
 describe.each(templates)("template/%s", (template) => {
   const manifest = read(join(templateRoot, template, "package.json"))
@@ -97,6 +75,11 @@ describe.each(templates)("template/%s", (template) => {
 
   it("depends on at least one workspace package", () => {
     expect(specifiers.length).toBeGreaterThan(0)
+  })
+
+  it("requires no package-manager overrides", () => {
+    expect(manifest.overrides).toBeUndefined()
+    expect(manifest.pnpm?.overrides).toBeUndefined()
   })
 
   it.each(specifiers)("pins %s at the installable release line", (name, specifier) => {
@@ -112,30 +95,12 @@ describe.each(templates)("template/%s", (template) => {
     ).toBe(expected)
   })
 
-  /**
-   * A scaffolded app cannot install a private package from a registry, so each
-   * template's README tells its reader which of its dependencies are in that
-   * position. Both READMEs named the same four, because one was copied from the
-   * other: `template/default` depends on neither `@smthrs/ui` nor
-   * `@smthrs/ui-styleguide` and named both anyway, which is the one paragraph a
-   * reader consults when a `--no-link` install fails.
-   */
-  it("names in its README exactly the private packages it depends on", () => {
-    const readme = readFileSync(join(templateRoot, template, "README.md"), "utf8")
-    const isPrivate = (name: string): boolean => workspaceManifests.get(name)?.private === true
-    const declared = specifiers.map(([name]) => name).filter(isPrivate)
-    const named = allowedPrivateDependencies.filter((name) => readme.includes(`\`${name}\``))
-    expect([...named].sort()).toEqual([...declared].sort())
-  })
-
-  it("depends on no private package outside the recorded allowlist", () => {
+  it("has no private dependency when included in the npm package", () => {
     const privateNames = specifiers
       .map(([name]) => name)
-      .filter((name) =>
-        workspaceManifests.get(name)?.private
-          === true
-      )
-    expect(privateNames).toEqual(privateNames.filter((name) => allowedPrivateDependencies.includes(name as never)))
+      .filter((name) => workspaceManifests.get(name)?.private === true)
+    if (publishedTemplates.has(template)) expect(privateNames).toEqual([])
+    else expect(privateNames).toEqual(["@smthrs/ui"])
   })
 })
 

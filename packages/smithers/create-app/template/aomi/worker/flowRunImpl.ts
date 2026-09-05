@@ -26,6 +26,7 @@ import type { FlowRunRequest, TurnFrame } from "../src/api.ts"
 import { layerCrypto } from "./crypto.ts"
 import type { Env } from "./env.ts"
 import { seatsFor } from "./seats.ts"
+import { liveRuntimeUnsupported } from "./turnImpl.ts"
 
 /** How a run ended, which is what the session's row in the Recent column reports. */
 export type Phase = FlowRunCard["phase"]

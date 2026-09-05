@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "version": "0.0.0",
+  "packageManager": "pnpm@11.25.0",
   "description": "The Aomi Build page as a Smithers app: file-routed flows and panes, an in-Worker agent on Cloudflare, and a Tevm chain tool",
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "scripts": {
     "dev": "vite",
@@ -19,12 +20,12 @@
     "test:record": "SMTHRS_RECORD=1 vitest run"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/platform-node": "4.0.0-rc.112",
     "@smthrs/agent": "1.0.0-rc.0",
     "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/cli": "next",
     "@smthrs/core": "1.0.0-rc.0",
-    "@smthrs/create-app": "0.1.0",
+    "@smthrs/create-app": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/harness": "1.0.0-rc.0",
@@ -33,31 +34,26 @@
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
     "@smthrs/std": "1.0.0-rc.0",
-    "@smthrs/targets": "0.1.0",
+    "@smthrs/targets": "1.0.0-rc.0",
     "@smthrs/testing": "1.0.0-rc.0",
     "@smthrs/ui": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108",
+    "effect": "4.0.0-rc.112",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "tevm": "1.0.0-rc.153",
-    "viem": "^2.55.19"
+    "tevm": "1.0.0-next.149",
+    "viem": "^2.56.3"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.53.0",
-    "@cloudflare/workers-types": "^4.20260604.1",
+    "@cloudflare/vite-plugin": "^1.54.4",
+    "@cloudflare/workers-types": "^5.20260904.1",
     "@types/d3-force": "^3.0.10",
-    "@types/node": "^24.0.0",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "6.0.3",
-    "vite": "^8.2.1",
-    "vitest": "4.1.9",
-    "wrangler": "^4.124.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@tevm/actions": "1.0.0-rc.151"
-    }
+    "@types/node": "^26.4.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "5.0.0",
+    "wrangler": "^4.129.0"
   }
 }

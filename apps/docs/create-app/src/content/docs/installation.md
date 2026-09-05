@@ -1,6 +1,6 @@
 ---
 title: "Installation"
-description: "What @smthrs/create-app needs to run, how to scaffold an app from a source checkout, what the link: rewrite does to the scaffolded manifest, and the import forms each subpath serves."
+description: "What @smthrs/create-app needs, how to scaffold an installable RC app, and the import forms each subpath serves."
 sidebar:
   order: 1
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/create-app/docs/installation.md"
@@ -8,15 +8,17 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/cre
 
 ## Requirements
 
-- Node.js 22.19.0 or later.
+- Node.js 22.19+ (Node 22) or 24.11+.
 - pnpm, for the scaffold command and for the app's own scripts.
-- A source checkout of the Smithers repository. The package is private and is
-  not published to a registry, so there is nothing to `pnpm add`.
+
+```bash
+pnpm add -D @smthrs/build-cli@next @smthrs/targets@next
+```
 
 ## Scaffold an app
 
 `create-app` is a verb of `smithers-build`, the executable of
-[`@smthrs/build-cli`](https://build-cli.smithers.sh/). The templates ship inside this package,
+[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli). The templates ship inside this package,
 and the CLI resolves them through Node rather than by path:
 
 ```bash
@@ -27,46 +29,35 @@ The directory name becomes the app name, so it must match
 `^[a-z0-9][a-z0-9._-]*$`. The target directory must be absent or empty. Two
 options change what you get:
 
-| Option                    | Default                        | What it does                                                                                           |
-| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `--template <name>`, `-t` | `default`                      | Which template to copy. `default` and `aomi` are the two that ship.                                    |
-| `--link` / `--no-link`    | link when a checkout was found | Whether the scaffolded `@smthrs/*` dependencies point at the checkout or keep their declared versions. |
+| Option                    | Default   | What it does            |
+| ------------------------- | --------- | ----------------------- |
+| `--template <name>`, `-t` | `default` | Which template to copy. |
 
-The two templates are described in
-[Templates](/reference/templates/), and the command's full argument list is
-in the [command reference](/reference/cli/).
+[Templates](/reference/templates/) describes the public scaffold, and the
+command's full argument list is in the [command reference](/reference/cli/).
 
 ## What the scaffold rewrites
 
-Copying is the whole scaffold, plus two rewrites.
+Copying is the whole scaffold, plus one substitution.
 
 Every `.css`, `.html`, `.json`, `.jsonc`, `.md`, `.mjs`, `.ts`, and `.tsx` file
 has `__APP_NAME__` replaced by the directory's name. Every other file is copied
 byte for byte.
 
-Then, unless you passed `--no-link`, every `@smthrs/*` entry in the scaffolded
-`package.json` becomes a `link:` path into the checkout the templates came
-from:
+The template manifest already pins every `@smthrs/*` dependency to the same RC
+release line:
 
 ```json
 {
   "dependencies": {
-    "@smthrs/core": "link:/path/to/smithers/packages/smithers/flows/core",
-    "@smthrs/create-app": "link:/path/to/smithers/packages/smithers/create-app"
+    "@smthrs/core": "1.0.0-rc.0",
+    "@smthrs/create-app": "1.0.0-rc.0"
   }
 }
 ```
 
-Each package is found by the name its own manifest declares, not by its
-directory: `@smthrs/targets` lives at `packages/smithers/build/targets`, and
-`@smthrs/core` at `packages/smithers/flows/core`. A dependency the checkout
-does not carry keeps its declared version.
-
-The rewrite is what makes a scaffolded app installable today. Some of the
-packages a template depends on are private and reach no registry:
-`@smthrs/create-app` and `@smthrs/targets` for the `default` template, and
-`@smthrs/ui` as well for `aomi`. An app moved away from that checkout keeps the
-links, vendors what it uses, or waits for those packages to publish.
+There is no generated override, local path, or vendored package tree. A fresh
+app resolves through the registry exactly as an end user install does.
 
 ## Install the app
 
@@ -75,9 +66,13 @@ cd ledger
 pnpm install
 ```
 
-The install brings the app's own stack with it: React 19, Vite 8, Vitest 4,
+The install brings the app's own stack with it: React 19, Vite 8, Vitest 5,
 wrangler, and the Cloudflare Vite plugin. It also installs this package's
 executable, `smithers-routes`, which the app's `pnpm routes` script runs.
+
+The generated `flows/chat/flow.e2e.ts` uses the optional testing adapter.
+Before running that test, install the prerequisites in the optional-peer
+section below. That command also selects the compatible Vitest 4 runner.
 
 ## Import forms
 
@@ -106,8 +101,7 @@ import { cachedModelTest } from "@smthrs/create-app/testing"
 
 `./app`, `./ui`, and `./runtime` reach no `node:` builtin, which is what lets a
 Worker bundle and a browser bundle load them. `sideEffects: []` lets a bundler
-drop the Node half when only those three are imported. The package's own
-`test/bundle.test.ts` bundles each subpath to hold it to its class.
+drop the Node half when only those three are imported.
 
 Two subpath forms are refused by the export map: `@smthrs/create-app/internal/*`
 and `@smthrs/create-app/*/index`. `@smthrs/create-app/package.json` is
@@ -118,12 +112,24 @@ exported.
 Each peer is needed only by the subpath that uses it, so an app that skips a
 subpath skips its peer:
 
-| Peer     | Range     | Needed by                                                |
-| -------- | --------- | -------------------------------------------------------- |
-| `react`  | `^19.0.0` | `./ui`, and any page or layout                           |
-| `vite`   | `^8.0.0`  | `./vite`                                                 |
-| `vitest` | `^4.0.0`  | `./testing`                                              |
-| `tsx`    | `^4.20.0` | `loadManifest` in `./vite`, which evaluates `PACKAGE.ts` |
+| Peer                    | Range                | Needed by                                                |
+| ----------------------- | -------------------- | -------------------------------------------------------- |
+| `@effect/platform-node` | `4.0.0-rc.112`       | `./testing`                                              |
+| `@smthrs/testing`       | `1.0.0-rc.0`         | `./testing`                                              |
+| `react`                 | `^19.2.8`            | `./ui`, and any page or layout                           |
+| `vite`                  | `^8.2.2`             | `./vite`                                                 |
+| `vitest`                | `^4.1.9 \|\| ^5.0.0` | `./testing`                                              |
+| `tsx`                   | `^4.23.13`           | `loadManifest` in `./vite`, which evaluates `PACKAGE.ts` |
+
+The default library install has no test runner or testing facade. To use
+`@smthrs/create-app/testing`, install its prerequisites explicitly:
+
+```bash
+pnpm add -D @smthrs/testing@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 vitest@4.1.9
+```
+
+`@smthrs/testing` supplies its grading facade through `@smthrs/scorers`.
+Only its separate `Vitest` adapter also needs `@effect/vitest`.
 
 An app that passes its own manifest to the Vite plugin never needs `tsx`. See
 [Brand an app](/guides/brand-an-app/).

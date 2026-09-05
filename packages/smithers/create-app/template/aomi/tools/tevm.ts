@@ -12,7 +12,7 @@
  *
  * Two layers exist. {@link layerMock} answers with fixed data so the agent, the
  * panes, and the e2e fixtures run without a network. {@link layerTevm} is the
- * real one, built on `tevm@rc`'s `createMemoryClient` over a fork transport.
+ * real one, built on `tevm`'s `createMemoryClient` over a fork transport.
  */
 import * as Flow from "@smthrs/core/Flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
@@ -22,7 +22,7 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import type { Abi, AbiFunction, MemoryClient } from "tevm"
 import { createMemoryClient, decodeErrorResult, formatEther, http, parseAbi } from "tevm"
-import { createCommon, createMockKzg, mainnet } from "tevm/common"
+import { createCommon, mainnet } from "tevm/common"
 
 // ---------------------------------------------------------------------------
 // Shared field schemas
@@ -405,12 +405,11 @@ const asError = (what: string, failure: CallFailure): Error =>
  * The chain id is read from the endpoint so the fork agrees with it; without
  * that, `blockFromRpc` rejects every forked block with a chain-id mismatch. The
  * hardfork schedule is mainnet's, so a fork of an L2 executes under mainnet
- * rules. `createMockKzg` is installed because a blob transaction cannot be
- * rebuilt without one, though on the published build it does not reach the
- * transaction factory on its own; see {@link forkTransport}.
+ * rules. Blob transactions are removed before Tevm rebuilds a forked block;
+ * see {@link forkTransport}.
  */
 const commonFor = (chainId: number) =>
-  createCommon({ ...mainnet, id: chainId, customCrypto: { kzg: createMockKzg() }, loggingLevel: "warn" })
+  createCommon({ ...mainnet, id: chainId, loggingLevel: "warn" })
 
 /** A fork transport, plus the transaction count of each block it passed through. */
 interface Fork {
@@ -422,7 +421,7 @@ interface Fork {
  * The fork transport, with EIP-4844 blob transactions filtered out of every
  * block it returns.
  *
- * `@tevm/block@1.0.0-rc.151`, which `tevm@1.0.0-rc.153` depends on, rebuilds a
+ * The `@tevm/block` version that `tevm` depends on rebuilds a
  * forked block by handing each transaction to ethereumjs `createTx`. A type-3
  * transaction needs `common.customCrypto.kzg`, and the common the factory is
  * given does not carry the one passed to `createMemoryClient`, so any fork of a
@@ -554,7 +553,7 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
             abi,
             functionName: input.functionName,
             args,
-            blockTag: at,
+            ...(at === undefined ? {} : { blockTag: at }),
             throwOnFail: false
           })
           const failure = result.errors?.[0] as CallFailure | undefined
@@ -578,9 +577,9 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
           const result = await chain.tevmCall({
             to: input.to as `0x${string}`,
             data: input.data as `0x${string}`,
-            from: input.from as `0x${string}` | undefined,
-            value: input.value === undefined ? undefined : BigInt(input.value),
-            blockTag: at,
+            ...(input.from === undefined ? {} : { from: input.from as `0x${string}` }),
+            ...(input.value === undefined ? {} : { value: BigInt(input.value) }),
+            ...(at === undefined ? {} : { blockTag: at }),
             throwOnFail: false
           })
           const failure = result.errors?.[0] as CallFailure | undefined
@@ -601,9 +600,9 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
           const address = input.address as `0x${string}`
           await chain.tevmSetAccount({
             address,
-            balance: input.balance === undefined ? undefined : BigInt(input.balance),
-            nonce: input.nonce === undefined ? undefined : BigInt(input.nonce),
-            deployedBytecode: input.code as `0x${string}` | undefined,
+            ...(input.balance === undefined ? {} : { balance: BigInt(input.balance) }),
+            ...(input.nonce === undefined ? {} : { nonce: BigInt(input.nonce) }),
+            ...(input.code === undefined ? {} : { deployedBytecode: input.code as `0x${string}` }),
             throwOnFail: true
           })
           // tevmSetAccount answers with an empty object, so the values that
@@ -641,8 +640,8 @@ export const layerTevm = (options: TevmOptions): Layer.Layer<Tevm> =>
               const result = await chain.tevmCall({
                 to: call.to as `0x${string}`,
                 data: call.data as `0x${string}`,
-                from: call.from as `0x${string}` | undefined,
-                value: call.value === undefined ? undefined : BigInt(call.value),
+                ...(call.from === undefined ? {} : { from: call.from as `0x${string}` }),
+                ...(call.value === undefined ? {} : { value: BigInt(call.value) }),
                 addToMempool: true,
                 throwOnFail: false
               })

@@ -5,7 +5,7 @@
  * and e2e replay is recorded against, so the value of the mock is entirely in
  * whether the real client agrees with it. The parity suite runs with no network
  * and pins the shape each binding returns; the fork suite runs the same inputs
- * through `tevm@rc` against a real chain and checks it produces that same
+ * through `tevm` against a real chain and checks it produces that same
  * shape. A field the real client renders differently fails here rather than in
  * a pane six months from now.
  *
@@ -218,16 +218,18 @@ if (RPC_URL === undefined) {
 } else {
   describe("layerTevm against a mainnet fork", () => {
     let chain: Service
+    const forkBlock = process.env["TEVM_FORK_BLOCK"]
+    const forkOptions = { rpcUrl: RPC_URL, ...(forkBlock === undefined ? {} : { blockTag: forkBlock }) }
 
     beforeAll(async () => {
-      chain = await serviceOf(layerTevm({ rpcUrl: RPC_URL, blockTag: process.env["TEVM_FORK_BLOCK"] }))
+      chain = await serviceOf(layerTevm(forkOptions))
       // Open the fork once. Every later test reads the same in-memory chain,
       // so the suite costs one fork rather than one per test.
-      await Effect.runPromise(chain.fork({ rpcUrl: RPC_URL, blockTag: process.env["TEVM_FORK_BLOCK"] }))
+      await Effect.runPromise(chain.fork(forkOptions))
     }, 120_000)
 
     test("fork reports the chain it connected to", async () => {
-      const forked = await Effect.runPromise(chain.fork({ rpcUrl: RPC_URL, blockTag: process.env["TEVM_FORK_BLOCK"] }))
+      const forked = await Effect.runPromise(chain.fork(forkOptions))
       expect(() => Schema.decodeUnknownSync(ForkOutput)(forked)).not.toThrow()
       expect(forked.chainId).toBe(1)
       expect(forked.blockNumber).toMatch(/^\d+$/)

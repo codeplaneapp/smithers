@@ -12,30 +12,28 @@ creates one, and `smithers-routes` keeps its generated tables current.
 ## smithers-build create-app
 
 Copies a template into a new directory. The verb belongs to
-[`@smthrs/build-cli`](https://build-cli.smithers.sh/); the templates ship in this package and
+[`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli); the templates ship in this package and
 the CLI resolves them through Node rather than by path.
 
 ```bash
-pnpm exec smithers-build create-app <dir> [--template <name>] [--no-link]
+pnpm exec smithers-build create-app <dir> [--template <name>]
 ```
 
-| Argument or option               | Default                        | Meaning                                                                        |
-| -------------------------------- | ------------------------------ | ------------------------------------------------------------------------------ |
-| `<dir>`                          | required                       | Directory to create. Its name becomes the app name                             |
-| `--template <name>`, `-t <name>` | `default`                      | Which template to copy: `default` or `aomi`                                    |
-| `--link` / `--no-link`           | link when a checkout was found | Whether `@smthrs/*` dependencies point at the checkout the templates came from |
+| Argument or option               | Default   | Meaning                                            |
+| -------------------------------- | --------- | -------------------------------------------------- |
+| `<dir>`                          | required  | Directory to create. Its name becomes the app name |
+| `--template <name>`, `-t <name>` | `default` | Which template to copy                             |
 
 The command takes neither `--workspace` nor `--cache-dir`.
 
 It reports what it did as JSON: the resolved `directory`, the `name` it
-substituted, the `template`, the number of `files` copied, and the sorted list
-of dependency names it `linked`.
+substituted, the `template`, and the number of `files` copied.
 
 Three refusals, each exiting non-zero:
 
 | Message                                                                         | Cause                                                                     |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `unknown template "<name>"; available: aomi, default`                           | `--template` named something that is not a directory under `template/`    |
+| `unknown template "<name>"; available: default`                                 | `--template` named something that is not shipped in the installed package |
 | `"<name>" is not a usable app name; use lowercase letters, digits, ., _, and -` | The directory's base name does not match `^[a-z0-9][a-z0-9._-]*$`         |
 | `<dir> is not empty`                                                            | The target directory holds something. An existing empty directory is fine |
 
@@ -99,23 +97,15 @@ through Node's own type stripping.
 An installed copy with no `dist/esm/routesBin.js` says so and exits 1, rather
 than failing on a type-stripping error that names neither cause nor cure.
 
-A pnpm `link:` install resolves to its real path in the checkout, so a
-scaffolded app linked at a source checkout runs that checkout's source. That is
-why an edit to the router shows up in the linked app's next `pnpm routes` run
-without a rebuild.
-
-### Drift, three ways
+### Checking for drift in CI
 
 ```bash
-pnpm routes:check                 # smithers-routes --check
-smithers-build lint '//:routes'   # what the build graph runs
-smithers-build '//:routes'        # the write form; checks nothing
+pnpm routes:check
 ```
 
-`--check` is the standalone convenience. The build graph checks drift by
-running the generator in write mode and comparing the `routes` target's
-declared changes. See
-[The generated route tables](/concepts/generated-routes/).
+The template defines that script as `smithers-routes --check`. It writes
+nothing, names each stale file, and exits 1, so it runs beside the type check.
+See [The generated route tables](/concepts/generated-routes/).
 
 ### Running it from code
 

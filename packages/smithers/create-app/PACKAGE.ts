@@ -1,3 +1,4 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
 /**
  * Standard package targets, plus the templates' own suites.
  *
@@ -19,7 +20,7 @@ import { Smithers } from "@smthrs/targets"
 
 const cwd = "packages/smithers/create-app"
 
-const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
   cwd
 })

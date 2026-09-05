@@ -13,12 +13,9 @@ pnpm typecheck
 pnpm dev        # vite, with workerd in the loop
 ```
 
-`pnpm exec smithers-build create-app` rewrites every `@smthrs/*` dependency to
-a `link:` path into the checkout the app was scaffolded from, which is how
-those specifiers resolve. Three of them are private packages no registry
-serves: `@smthrs/create-app`, `@smthrs/targets`, and `@smthrs/ui`. Until those
-publish, an app moved off that checkout keeps the links or vendors what it
-uses.
+This UI reference remains repository-only for the 1.0 RC. It depends on the
+unreleased `@smthrs/ui` package and is deliberately excluded from the
+published `@smthrs/create-app` tarball.
 
 ## Layout
 

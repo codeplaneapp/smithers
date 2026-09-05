@@ -13,6 +13,9 @@ offline and grades the same model turn on every commit.
 
 ## Write the test
 
+The `@smthrs/create-app/testing` entry is ESM-only, like Vitest itself. Use
+`import`, not CommonJS `require`.
+
 A flow's test sits beside it, so the fixture URL is relative:
 
 ```ts
@@ -146,9 +149,8 @@ export default defineConfig({
 
 Nothing under test needs workerd, and the create-app plugin would regenerate
 the route tables on every run. Regeneration is `pnpm routes`. The `dedupe`
-entry matters when the app's `@smthrs/*` dependencies are `link:` paths: linked
-packages carry their own `node_modules`, and two copies of `effect` would split
-the service tags.
+entry ensures every bundled package shares one Effect runtime and one set of
+service tags.
 
 The timeout is sized for the slower of the two modes. A replay is fast; a
 recording makes real provider calls.

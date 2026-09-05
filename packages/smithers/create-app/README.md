@@ -2,27 +2,47 @@
 
 **Documentation:** https://create-app.smithers.sh
 
-Declare a Smithers app in one `PACKAGE.ts`. Everything else is named by where
-it sits: pages, panes, flows, and the three layer files a flow inherits.
+Build a web app around Smithers flows. You declare the app once, in a
+`PACKAGE.ts` at the app root, and every other name comes from where a file
+sits: a page, a pane the model can put on screen, a flow, and the three layer
+files that give a flow its model, its compute budget, and its tools. There is
+no route table, pane registry, or flow-to-model map to keep in step by hand.
 
-This package is private and is not published, so there is nothing to install
-from a registry. An app is scaffolded from a source checkout:
+## Install
+
+Install the release-candidate build CLI and authoring surface, then scaffold:
 
 ```sh
+pnpm add -D @smthrs/build-cli@next @smthrs/targets@next
 pnpm exec smithers-build create-app my-app
 ```
 
-`smithers-build` is the binary of `@smthrs/build-cli`, a second private
-package; `create-app` is one of its verbs. The scaffold rewrites every
-`@smthrs/*` specifier in the copied template to a `link:` path into the
-checkout it was cut from, which is how those specifiers resolve. `package.json`
-carries a full `publishConfig` with a dist-based export map: it is retained for
-a future publish decision and has no effect while the package is private.
+`smithers-build` is the executable of `@smthrs/build-cli`, and `create-app` is
+one of its verbs. The scaffold copies a template and substitutes the app name;
+its manifest already contains installable RC versions.
+
+## The shortest real example
+
+```sh
+pnpm exec smithers-build create-app ledger
+cd ledger
+pnpm install
+pnpm test
+```
+
+```text
+Test Files  1 passed (1)
+     Tests  1 passed (1)
+```
+
+That ran the template's `chat` flow through the production agent loop against a
+committed model transcript, so the run made no network call and needed no API
+key.
 
 ## The authoring surface
 
 ```ts
-// PACKAGE.ts
+// PACKAGE.ts, at the app root
 import { CreateApp } from "@smthrs/create-app"
 
 export const App = CreateApp({
@@ -33,9 +53,10 @@ export const App = CreateApp({
 ```
 
 `App` carries the manifest plus four targets: `routes` regenerates the route
-tables, `dev` serves, `build` bundles, and `deploy` ships. Put them in the
-package's target map and the `smithers-build` CLI addresses them as `//:dev`,
-`//:build`, and so on.
+tables, `dev` serves, `build` bundles, and `deploy` ships the app to a
+Cloudflare Worker.
+
+Every other name comes from a file's location:
 
 | File                   | Export    | Constructor       |
 | ---------------------- | --------- | ----------------- |
@@ -75,16 +96,14 @@ A flow never names a model. Its seat comes from the resolved `AGENT.ts`.
 `./app`, `./ui`, and `./runtime` are what a scaffolded app ships: `routes.gen.ts`
 pulls `./app` and `./runtime` into the Worker bundle, `routes.ui.gen.ts` pulls
 `./ui` into the browser bundle, and `sideEffects: []` lets a bundler drop the
-Node half. `test/bundle.test.ts` holds each of the nine to its row by bundling
-it, because this package is not in `scripts/browser-check.mjs`'s frozen
-inventory.
+Node half.
 
 ## Generated files
 
 `smithers-routes` writes two files at the app root and never anything else.
 
 - `routes.gen.ts`: every flow with its three resolved layers, plus the pane
-  names. No React import, so the Worker and a plain vitest run load it.
+  names. No React import, so the Worker and a plain Vitest run both load it.
 - `routes.ui.gen.ts`: the layout, the pages, and the pane components.
 
 ```sh
@@ -92,16 +111,19 @@ smithers-routes           # write; exit 2 on a flag given no value
 smithers-routes --check   # write nothing, exit 1 on drift
 ```
 
-`--check` is a standalone convenience, and both templates expose it as
-`pnpm routes:check`. The build graph checks drift a different way:
-`smithers-build lint '//:routes'` runs the generator in write mode and compares
-the declared `changes`. A bare `smithers-build '//:routes'` is the write form
-and checks nothing.
-
-The Vite plugin regenerates them on start and on every routed file change, so
+Both templates expose those as `pnpm routes` and `pnpm routes:check`. The Vite
+plugin regenerates the tables on start and on every routed file change, so
 `pnpm dev` never serves a stale table.
 
 ## Testing a flow
+
+`@smthrs/create-app/testing` selects optional peers. The default library
+install includes no test runner. Add the testing facade, Node adapter, and
+runner before importing this subpath:
+
+```sh
+pnpm add -D @smthrs/testing@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 vitest@4.1.9
+```
 
 ```ts
 cachedModelTest("chat answers a balance question", {
@@ -115,20 +137,16 @@ cachedModelTest("chat answers a balance question", {
 ```
 
 Replay is the default: no network, no key. `SMTHRS_RECORD=1` records against
-the live seat named by `options.live` and rewrites the fixture.
+the live model the option `live` builds, and rewrites the fixture.
 
 ## Templates
 
-Two templates ship in `template/`. `default` is the smallest app that routes,
-runs, tests, and deploys, and leaves the agent host to you. `aomi` is the
-reference layout: two flows on two seats, six panes, twelve pages, three tool
-sources, and a full Cloudflare Worker.
-
-```sh
-pnpm exec smithers-build create-app my-app --template aomi
-```
+The public package ships the `default` template: the smallest app that routes,
+runs, tests, and deploys while leaving the agent host to you. The repository's
+UI-only Aomi reference stays outside the package until the UI is released.
 
 ## Documentation
 
-The full documentation is at https://create-app.smithers.sh and its source is
-this package's `docs/` directory.
+The full documentation, including the file-routing rules, the layer resolution
+order, every public export, and the Cloudflare deploy guide, is at
+https://create-app.smithers.sh.

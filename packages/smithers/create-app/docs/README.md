@@ -1,123 +1,134 @@
 ---
 title: "@smthrs/create-app"
-description: "Declare a Smithers app in one PACKAGE.ts: a file router that names pages, panes, flows, and the three layer files a flow inherits, plus the Vite plugin, the Cloudflare targets, and the replay test harness that go with it."
+description: "Build a web app around Smithers flows: one PACKAGE.ts declaration, file-routed flows and pages, panes the model renders by name, offline flow tests, and Cloudflare deploy targets."
 ---
 
-`@smthrs/create-app` turns a directory into a Smithers app. One `PACKAGE.ts`
-declares the app. Everything else is named by where it sits: pages, panes,
-flows, and the three layer files a flow inherits.
+`@smthrs/create-app` turns a set of [Smithers flows](/api/flow) into a
+deployable web app. You declare the app once, in a `PACKAGE.ts` at the app
+root, and every other name comes from where a file sits: a page, a pane the
+model can put on screen, a flow, and the three layer files that give a flow its
+model, its compute budget, and its tools.
 
-An app built this way is a Vite project that builds into a Cloudflare Worker
-plus a static bundle. The package supplies five things:
+## The problem it removes
 
-- The **authoring constructors**: `CreateApp`, `defineAgent`, `defineSandbox`,
-  `defineTools`, `defineFlow`, and `definePane`.
-- The **file router**, which walks the app root and derives every route, every
-  pane name, and every flow's three layers from file location alone.
-- The **`smithers-routes` executable**, which writes the two generated route
-  tables and checks them for drift.
-- The **Vite plugin**, which regenerates those tables in dev and serves the
-  declared brand as CSS custom properties.
-- The **runtime and test harness**: `layerFor` composes the services one routed
-  flow runs under, and `cachedModelTest` replays a flow against a recorded
-  model fixture with no network and no API key.
+An agent app usually keeps a registry beside each of those: a route table, a
+pane registry, a tool list, and a map from flow id to model. Every registry is
+a second place a name has to be spelled, and each one goes stale on its own
+schedule.
 
-Two templates ship with the package, and
-[`smithers-build create-app`](./reference/cli.md) copies one of them into a new
-directory.
+This package has no registries. One walk of the app root derives every page
+route, pane name, and flow id from the filesystem, then writes two generated
+tables that the dev server, the Cloudflare Worker bundle, and the test suite
+all import. You never edit those tables. You regenerate them, and
+`smithers-routes --check` fails when they drift.
 
-## Who uses this package
+Three more things fall out of the same declaration:
 
-App authors, and the hosts that run their flows. If you are scaffolding a chat
-or pipeline app that reaches a model, deploys as one Cloudflare Worker, and
-keeps its flows in files, this package is the whole authoring surface. If you
-are writing a flow library rather than an app, [`@smthrs/flow`](/api/flow) and
-[`@smthrs/agent`](/api/agent) are the layers underneath.
+- A flow never names a model. Its seat comes from the nearest ancestor
+  `AGENT.ts`, so moving one directory's flows onto a stronger model is a
+  one-file change.
+- A flow's test replays a recorded model transcript through the production
+  agent loop, so the suite runs with no network call and no API key.
+- `CreateApp` returns dev, build, and deploy targets, so shipping the app to a
+  Cloudflare Worker is already wired.
 
-## Install
+## The shortest real example
 
-The package is private and is not published to a registry. Scaffold an app from
-a source checkout instead:
+Scaffold an app and run its flow test:
 
 ```bash
 pnpm exec smithers-build create-app ledger
+cd ledger
+pnpm install
+pnpm test
 ```
 
-For the requirements, the two templates, and what the scaffold rewrites, see
-[Installation](./installation.md).
+```text
+Test Files  1 passed (1)
+     Tests  1 passed (1)
+```
 
-## The smallest declaration
+That test ran the template's `chat` flow through the production agent loop
+against a committed transcript, offline.
 
-`PACKAGE.ts` is the only file that declares anything about the app as a whole:
+A second flow is a directory and a file. Nothing registers it:
 
 ```ts
-import { CreateApp } from "@smthrs/create-app"
+// flows/summarize/flow.ts
+import { defineFlow } from "@smthrs/create-app/app"
+import * as Schema from "effect/Schema"
 
-export const App = CreateApp({
-  name: "ledger",
-  brand: { name: "Ledger", tokens: { accent: "#5288c2" } },
-  deploy: { cloudflare: { workerName: "ledger", domain: "ledger.example.com" } }
+export const Flow = defineFlow({
+  description: "Summarize a ledger entry for an operator.",
+  payload: { entryId: Schema.String },
+  output: Schema.Struct({
+    summary: Schema.String,
+    risk: Schema.Literals(["none", "review", "block"])
+  }),
+  prompt: ({ entryId }) => `Summarize entry ${entryId}.`
 })
 ```
 
-`App.manifest` is what the browser shell reads. `App.routes`, `App.dev`,
-`App.build`, and `App.deploy` are ordinary [`@smthrs/targets`](/api/targets)
-rules, so putting them in the package's target map makes them addressable as
-`//:routes`, `//:dev`, `//:build`, and `//:deploy`.
+Run `pnpm routes`, and `summarize` is in the table on the seat its nearest
+`AGENT.ts` declares.
 
-Everything else is a file in a known place:
+## How this relates to the smithers CLI
 
-| File                   | Export    | Constructor       |
-| ---------------------- | --------- | ----------------- |
-| `AGENT.ts`             | `Agent`   | `defineAgent`     |
-| `SANDBOX.ts`           | `Sandbox` | `defineSandbox`   |
-| `TOOLS.ts`             | `Tools`   | `defineTools`     |
-| `flows/<id>/flow.ts`   | `Flow`    | `defineFlow`      |
-| `app/panes/<name>.tsx` | `Pane`    | `definePane`      |
-| `app/**/page.tsx`      | default   | a React component |
-| `app/layout.tsx`       | default   | a React component |
+[`@smthrs/cli`](/api/cli) ships `smithers`, the top-level command the rest of
+Smithers sits under. It plans, approves, runs, and inspects durable flows from
+a shell. `@smthrs/create-app` is the second surface for the same flows: a
+routed flow is an ordinary [`@smthrs/flow`](/api/flow) flow, and instead of a
+terminal it gets a browser page, panes the model renders by name, and a Worker
+that answers a turn.
 
-A flow never names a model. Its seat comes from the nearest ancestor
-`AGENT.ts`, which is why moving one file moves every flow below it to another
-seat. The full rule is in [Layer files](./concepts/layers.md).
+Use the CLI when a person or a CI job drives the run. Use this package when the
+flow needs a product around it.
 
-## The package at a glance
+The scaffold command belongs to neither executable. `create-app` is a verb of
+`smithers-build`, the build CLI in [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli); the
+templates ship inside this package, and that CLI resolves them through Node.
 
-Each subpath is a separate entry point, and each has a runtime class the
-package's own bundle test holds it to:
+## Install
 
-| Import                         | Runtime                | What it holds                                        |
-| ------------------------------ | ---------------------- | ---------------------------------------------------- |
-| `@smthrs/create-app`           | Node                   | `CreateApp` plus everything in `./app`, flat         |
-| `@smthrs/create-app/app`       | browser, workerd, Node | The layer, flow, and manifest constructors and types |
-| `@smthrs/create-app/ui`        | browser, workerd, Node | `definePane`, the card schemas, and `TurnFrame`      |
-| `@smthrs/create-app/runtime`   | browser, workerd, Node | `materializeFlow` and `layerFor`                     |
-| `@smthrs/create-app/package`   | Node                   | `CreateApp` over `@smthrs/targets`                   |
-| `@smthrs/create-app/router`    | Node                   | The file router and the two renderers                |
-| `@smthrs/create-app/vite`      | Node                   | The Vite plugin and the virtual modules              |
-| `@smthrs/create-app/testing`   | Node                   | `cachedModelTest` and the recording seam             |
-| `@smthrs/create-app/routesBin` | Node                   | The body of the `smithers-routes` executable         |
-
-Every export of every subpath, with signatures, is on the
-[API reference](./api.md).
+Install `@smthrs/build-cli@next` and `@smthrs/targets@next`, then run
+`pnpm exec smithers-build create-app my-app`. The copied manifest already pins
+the installable RC package set; no checkout, override, or local link is needed.
+[Installation](./installation.md) covers the requirements and import forms.
 
 ## Where to go next
 
-- [Installation](./installation.md): requirements, the scaffold, and what the
-  `link:` rewrite does.
-- [Quickstart](./quickstart.md): scaffold an app, route it, replay its test,
-  and add a pane of your own.
-- Concepts: [file routing](./concepts/routing.md),
-  [layer files](./concepts/layers.md), and
-  [the generated route tables](./concepts/generated-routes.md).
-- Guides: [add a flow](./guides/add-a-flow.md),
-  [add a pane](./guides/add-a-pane.md), [add a page](./guides/add-a-page.md),
-  [brand an app](./guides/brand-an-app.md),
-  [test a flow](./guides/test-a-flow.md),
-  [run a routed flow from your own host](./guides/host-a-turn.md), and
-  [deploy to Cloudflare](./guides/deploy-to-cloudflare.md).
-- Reference: [the two templates](./reference/templates.md),
-  [the command line](./reference/cli.md), and the
-  [API reference](./api.md).
-- [Troubleshooting](./troubleshooting.md): the refusals the router, the
-  runtime, and the test harness report, and what to change for each.
+Two pages get an app running:
+
+- [Installation](./installation.md): requirements, the scaffold command, and
+  what it rewrites.
+- [Quickstart](./quickstart.md): scaffold, route, test, and serve an app in
+  about five minutes.
+
+Three pages explain how an app is named and generated:
+
+- [File routing](./concepts/routing.md): what each file location means, the
+  name grammar, and the three ways the walk refuses a tree.
+- [Layer files](./concepts/layers.md): how `AGENT.ts`, `SANDBOX.ts`, and
+  `TOOLS.ts` resolve, and what each one declares.
+- [The generated route tables](./concepts/generated-routes.md): what
+  `routes.gen.ts` and `routes.ui.gen.ts` hold, and how drift is checked.
+
+Seven guides cover the work of building one:
+
+- [Add a flow](./guides/add-a-flow.md)
+- [Add a pane](./guides/add-a-pane.md)
+- [Add a page](./guides/add-a-page.md)
+- [Brand an app](./guides/brand-an-app.md)
+- [Test a flow](./guides/test-a-flow.md)
+- [Run a routed flow from your own host](./guides/host-a-turn.md)
+- [Deploy to Cloudflare](./guides/deploy-to-cloudflare.md)
+
+Four reference pages describe the surface:
+
+- [API reference](./api.md): every public export, subpath by subpath.
+- [Command reference](./reference/cli.md): the flags and exit codes of
+  `smithers-build create-app` and `smithers-routes`.
+- [Templates](./reference/templates.md): the public `default` scaffold and the
+  repository's UI-only reference app.
+- [Troubleshooting](./troubleshooting.md): every refusal this package reports,
+  grouped by the component that raises it.

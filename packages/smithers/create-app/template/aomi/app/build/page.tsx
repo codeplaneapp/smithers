@@ -268,7 +268,7 @@ function ActionPills() {
           <ActionPill
             key={pill.label}
             label={pill.label}
-            hint={"hint" in pill ? pill.hint : undefined}
+            {...("hint" in pill ? { hint: pill.hint } : {})}
             disabled={disabled}
             onClick={() => {
               if (template !== undefined) actions.setDraft(template.prompt)

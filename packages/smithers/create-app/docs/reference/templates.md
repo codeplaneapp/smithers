@@ -1,50 +1,49 @@
 ---
 title: "Templates"
-description: "The two templates smithers-build create-app copies: what each one routes, which packages it depends on, which scripts it defines, and which parts are wired."
+description: "The public default scaffold and the repository-only UI reference: what each routes, depends on, and wires."
 sidebar:
   order: 1
 ---
 
-Two templates ship inside this package. `smithers-build create-app` copies one
-of them into a new directory and substitutes the app name.
+The npm package ships the `default` template. The source repository also keeps
+the Aomi UI reference beside it for development, but excludes that tree from
+the tarball until `@smthrs/ui` is released.
 
 ```bash
 pnpm exec smithers-build create-app ledger                 # default
-pnpm exec smithers-build create-app ledger --template aomi # aomi
 ```
 
-|                          | `default`                               | `aomi`                        |
-| ------------------------ | --------------------------------------- | ----------------------------- |
-| Files copied             | 28                                      | 96                            |
-| Pages                    | 1                                       | 12                            |
-| Panes                    | 1                                       | 6                             |
-| Flows                    | 1                                       | 2                             |
-| Tool sources             | 1                                       | 3                             |
-| Agent host in the Worker | not shipped                             | shipped, mock turn by default |
-| Fixture recording        | not shipped                             | `pnpm test:record`            |
-| Private dependencies     | `@smthrs/create-app`, `@smthrs/targets` | those two plus `@smthrs/ui`   |
+|                          | `default`   | `aomi`                        |
+| ------------------------ | ----------- | ----------------------------- |
+| Files copied             | 28          | 96                            |
+| Pages                    | 1           | 12                            |
+| Panes                    | 1           | 6                             |
+| Flows                    | 1           | 2                             |
+| Tool sources             | 1           | 3                             |
+| Agent host in the Worker | not shipped | shipped, mock turn by default |
+| Fixture recording        | not shipped | `pnpm test:record`            |
+| Private dependencies     | none        | `@smthrs/ui`                  |
 
-Pick `default` to start an app. Pick `aomi` to read a worked example: it is the
-reference layout, and every rule the router enforces is exercised somewhere in
-it.
+Use `default` to start an app. Read `aomi` in the repository as a worked UI
+example; it is not a public scaffold in this release candidate.
 
 ## Shared shape
 
 Both templates are the same app skeleton:
 
-| Path                                 | What it is                                                                       |
-| ------------------------------------ | -------------------------------------------------------------------------------- |
-| `PACKAGE.ts`                         | `CreateApp()`: brand, navigation, and the dev, build, and deploy targets         |
-| `AGENT.ts`, `SANDBOX.ts`, `TOOLS.ts` | The root layer files every flow inherits                                         |
-| `flows/<id>/flow.ts`                 | One flow, named by its directory                                                 |
-| `app/**/page.tsx`                    | One page at `/<dir>`; `app/page.tsx` is `/`                                      |
-| `app/panes/<name>.tsx`               | One pane the agent renders by name                                               |
-| `app/layout.tsx`                     | The shell layout                                                                 |
-| `tools/*.ts`                         | Flow bindings a cell reaches as `ctx.call("<source>/<flow>")`                    |
-| `worker/`                            | The Cloudflare Worker: the API and the assets bucket                             |
-| `src/`                               | The browser entry point and styles                                               |
-| `routes.gen.ts`, `routes.ui.gen.ts`  | Generated. Run `pnpm routes` after adding a routed file                          |
-| `.smithers/`                         | The build-graph workspace: runtime, package manager, sandboxes, and build agents |
+| Path                                 | What it is                                                                 |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| `PACKAGE.ts`                         | `CreateApp()`: brand, navigation, and the dev, build, and deploy targets   |
+| `AGENT.ts`, `SANDBOX.ts`, `TOOLS.ts` | The root layer files every flow inherits                                   |
+| `flows/<id>/flow.ts`                 | One flow, named by its directory                                           |
+| `app/**/page.tsx`                    | One page at `/<dir>`; `app/page.tsx` is `/`                                |
+| `app/panes/<name>.tsx`               | One pane the agent renders by name                                         |
+| `app/layout.tsx`                     | The shell layout                                                           |
+| `tools/*.ts`                         | Flow bindings a cell reaches as `ctx.call("<source>/<flow>")`              |
+| `worker/`                            | The Cloudflare Worker: the API and the assets bucket                       |
+| `src/`                               | The browser entry point and styles                                         |
+| `routes.gen.ts`, `routes.ui.gen.ts`  | Generated. Run `pnpm routes` after adding a routed file                    |
+| `.smithers/`                         | Workspace configuration for the Smithers build CLI, not for the app itself |
 
 Both carry the same scripts, and `aomi` adds one:
 
@@ -60,9 +59,10 @@ Both carry the same scripts, and `aomi` adds one:
 | `test`                      | `vitest run`                 |
 | `test:record` (`aomi` only) | `SMTHRS_RECORD=1 vitest run` |
 
-The `.smithers/` directory is the build graph's own configuration, not the
-app's. Its `agents.ts` declares the coding agents `smithers-build` may run;
-the in-app agent seats live in `AGENT.ts` files.
+The `.smithers/` directory configures the `smithers-build` CLI: the Node
+version, the package manager, and the coding agents that CLI may run. None of
+the app's own `pnpm` scripts read it, and its `agents.ts` has nothing to do
+with the in-app agent seats, which live in `AGENT.ts` files.
 
 ## default
 
@@ -141,21 +141,3 @@ each:
 
 Set `APP_API_TOKEN` as a secret before the first public deploy. See
 [Deploy to Cloudflare](../guides/deploy-to-cloudflare.md).
-
-## Adding a template
-
-A template is a directory under `template/` in this package. The scaffold
-copies it whole, substitutes `__APP_NAME__` in every `.css`, `.html`, `.json`,
-`.jsonc`, `.md`, `.mjs`, `.ts`, and `.tsx` file, and rewrites the `@smthrs/*`
-dependencies. Four directory names are never copied, so a checkout that ran the
-template's own suite does not ship the result: `node_modules`, `dist`,
-`.wrangler`, and `.flows`. `.smithers` is copied, because templates ship one.
-
-Two rules are checked by the package's own suite:
-
-- Every `@smthrs/*` specifier must pin the version the workspace publishes,
-  because a scaffolded app is not a workspace member and nothing else holds the
-  two in step.
-- The template's README must name exactly the private packages it depends on,
-  because that paragraph is what a reader consults when a `--no-link` install
-  fails.

@@ -15,7 +15,7 @@ import { defineConfig } from "vitest/config"
  * the aliases below stand in for what a scaffolded app's install resolves:
  *
  * - `@smthrs/create-app/*` is this package, which a scaffold gets from the
- *   registry or from `linkWorkspace`'s `link:` rewrite.
+ *   registry.
  * - The five `@smthrs/*` packages the template imports that this package does
  *   not itself depend on resolve to their workspace sources. The rest already
  *   resolve through this package's own `node_modules`, and `dedupe` keeps one

@@ -26,6 +26,7 @@ const api = read("docs/api.md")
 const manifest = JSON.parse(read("package.json")) as {
   readonly exports: Record<string, unknown>
   readonly bin: Record<string, string>
+  readonly publishConfig: { readonly exports: Record<string, unknown> }
 }
 
 /** The rows of the "Runtime class of each subpath" table, as import specifiers. */
@@ -44,6 +45,14 @@ const exportedSubpaths = Object.entries(manifest.exports)
   .sort()
 
 describe("docs/api.md", () => {
+  it("declares the Vitest adapter as ESM-only in development and publication", () => {
+    expect(manifest.exports["./testing"]).toEqual({ types: "./src/testing.ts", import: "./src/testing.ts" })
+    expect(manifest.publishConfig.exports["./testing"]).toEqual({
+      types: "./dist/esm/testing.d.ts",
+      import: "./dist/esm/testing.js"
+    })
+  })
+
   it("documents the runtime class of every subpath the package declares", () => {
     expect(exportedSubpaths.filter((subpath) => !documentedSubpaths.includes(subpath))).toEqual([])
   })

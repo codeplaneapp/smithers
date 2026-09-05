@@ -24,7 +24,7 @@ export const Pane = definePane({
   render: (props, context) => (
     <div className="aomi-pane-grid" data-fullscreen={context.fullscreen ? "true" : undefined}>
       <div className="aomi-pane-row">
-        <AddressPill address={props.address} label={props.name} />
+        <AddressPill address={props.address} {...(props.name === undefined ? {} : { label: props.name })} />
         <Badge variant="secondary">{props.chain}</Badge>
       </div>
       <Table>

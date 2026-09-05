@@ -10,21 +10,15 @@ tables generated, its flow test passing with no network and no API key, and a
 pane of your own rendered from a file you added. It takes about five minutes.
 
 The app is the `default` template: one page, one pane, one flow, one tool, and
-a Cloudflare Worker whose agent endpoint is deliberately a stub. The `aomi`
-template is the wired version, and [Templates](./reference/templates.md)
-compares the two.
+a Cloudflare Worker whose agent endpoint is deliberately a stub.
 
 ## Prerequisites
 
-- Node.js 22.19.0 or later, and pnpm.
-- A source checkout of the Smithers repository, with its own dependencies
-  installed. The scaffold points the new app at that checkout, because several
-  of the packages it needs are private. See
-  [Installation](./installation.md).
+- Node.js 22.19+ (Node 22) or 24.11+, and pnpm.
+- `@smthrs/build-cli@next` and `@smthrs/targets@next` installed in the project
+  from which you run the scaffold. See [Installation](./installation.md).
 
 ## Scaffold the app
-
-From the checkout:
 
 ```bash
 pnpm exec smithers-build create-app ledger
@@ -32,16 +26,14 @@ pnpm exec smithers-build create-app ledger
 
 The directory name becomes the app name, so `ledger` is substituted everywhere
 the template wrote `__APP_NAME__`: the manifest, the Worker name, the brand,
-and the agent's teaching. The command reports what it copied and which
-dependencies it pointed at the checkout:
+and the agent's teaching. The command reports what it copied:
 
 ```text
 {
   "directory": "/work/ledger",
   "name": "ledger",
   "template": "default",
-  "files": 28,
-  "linked": ["@smthrs/core", "@smthrs/create-app", "@smthrs/harness", "@smthrs/targets"]
+  "files": 28
 }
 ```
 
@@ -193,7 +185,7 @@ same process. Three things are worth trying:
 flow, the pane, the tool, the test, and the deploy target, and leaves the agent
 host to you. Building it is
 [Run a routed flow from your own host](./guides/host-a-turn.md), and the `aomi`
-template is the worked example.
+repository reference is the worked example.
 
 ## What just happened
 

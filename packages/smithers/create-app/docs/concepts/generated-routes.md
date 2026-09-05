@@ -86,24 +86,22 @@ can close the literal and inject a statement into the generated module.
 ## Checking for drift
 
 Both generated files are derived data. Edit what they are derived from, then
-regenerate. Three commands check that you did:
+regenerate. One command checks that you did:
 
 ```bash
-pnpm routes:check                      # smithers-routes --check: exit 1 on drift
-smithers-build lint '//:routes'        # what the build graph runs
-smithers-build '//:routes'             # the write form; checks nothing
+pnpm routes:check
 ```
 
-`--check` writes nothing and names each stale file:
+Both templates define that script as `smithers-routes --check`. It writes
+nothing, names each stale file, and exits 1:
 
 ```text
 routes.gen.ts is out of date; run `pnpm routes`
 ```
 
-The build graph checks drift a different way: `lint` runs the generator in
-write mode and compares the declared `changes` of the `routes` target. The two
-paths agree because they call the same function, `writeRoutes`, with and
-without `check`.
+Writing and checking are the same function, `writeRoutes`, called with and
+without `check`, so the two can never disagree about what the tables should
+hold.
 
 ## Regeneration in dev
 

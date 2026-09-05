@@ -22,15 +22,15 @@ export const Package = S.Package({
 | `build`  | `//:build`  | `vite build`, producing the Worker bundle and the static assets |
 | `deploy` | `//:deploy` | `wrangler deploy`, gated on `build`                             |
 
-Each is an ordinary [`@smthrs/targets`](https://targets.smithers.sh/reference/api/) rule, so an app runs on
+Each is an ordinary [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets) rule, so an app runs on
 the build CLI without a target kind of its own.
 
 ## What the targets declare
 
 `routes` keys on everything the router reads: pages, panes, flows, layer files,
 and `PACKAGE.ts`. Adding one of those invalidates the generated tables, and
-nothing else does. Its declared changes are the two generated files, which is
-how `smithers-build lint '//:routes'` checks drift.
+nothing else does. It writes exactly two files, `routes.gen.ts` and
+`routes.ui.gen.ts`.
 
 `dev` waits for port 5173 and stops with `SIGTERM` and a five second grace
 period. It runs with the network on.
@@ -99,7 +99,7 @@ running instance is in `none` or `token` mode, so an operator can tell from
 outside without a credential.
 
 Local development reads the same values from `.dev.vars`, which is gitignored.
-Both templates ship an example file.
+The `aomi` template ships a `.dev.vars.example` to copy.
 
 ## Build and deploy
 

@@ -201,11 +201,10 @@ does not now usually means the schema moved.
 
 ## The scaffold
 
-### unknown template "nope"; available: aomi, default
+### unknown template "nope"; available: default
 
-**What to change.** Pass `--template default` or `--template aomi`. The
-available list is read from the `template/` directory of the resolved
-`@smthrs/create-app`, so it is always what is actually installed.
+**What to change.** Pass `--template default`. The available list is read from
+the resolved `@smthrs/create-app`, so it reflects the installed package.
 
 ### "Ledger App" is not a usable app name
 
@@ -263,11 +262,11 @@ the build. See [Deploy to Cloudflare](/guides/deploy-to-cloudflare/).
 
 ### Effect service tags do not match across packages
 
-**What happened.** Two copies of `effect` reached one bundle. Linked
-`@smthrs/*` packages carry their own `node_modules`, so a config that does not
+**What happened.** Two copies of `effect` reached one bundle. A package graph
+can contain more than one physical installation, so a config that does not
 deduplicate can load the module twice, and a `Context` tag from one copy does
 not satisfy a requirement declared with the other.
 
 **What to change.** Both templates set `resolve.dedupe` in `vite.config.ts` and
 `vitest.config.ts`. Keep `effect` there, and `react` and `react-dom` in the
-Vite config, so hooks and tags stay identical across linked packages.
+Vite config, so hooks and tags stay identical across packages.

@@ -11,7 +11,7 @@ export default defineConfig({
   plugins: [createApp(), react(), cloudflare({ configPath: "./worker/wrangler.jsonc" })],
   resolve: {
     // One instance of each per bundle keeps Context tags and React hooks
-    // identical across linked packages.
+    // identical across the package graph.
     dedupe: ["effect", "react", "react-dom"]
   }
 })

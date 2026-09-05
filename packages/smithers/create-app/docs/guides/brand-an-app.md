@@ -47,7 +47,7 @@ default, so declaring six tokens changes six things.
 
 Every token is optional, and every one that is declared is emitted as
 `--house-<kebab-case-name>`. Most also alias the styleguide property that
-[`@smthrs/ui`](/api/ui) components actually resolve their colors through:
+[`@smthrs/ui`](https://github.com/smithersai/smithers/tree/main/packages/smithers/ui) components actually resolve their colors through:
 
 | Token              | Styleguide properties it also sets   |
 | ------------------ | ------------------------------------ |

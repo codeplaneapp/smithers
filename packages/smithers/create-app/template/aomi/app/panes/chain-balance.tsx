@@ -32,7 +32,7 @@ export const Pane = definePane({
   render: (props, context) => (
     <div className="aomi-pane-grid" data-fullscreen={context.fullscreen ? "true" : undefined}>
       <div className="aomi-pane-row">
-        <AddressPill address={props.address} label={props.label} />
+        <AddressPill address={props.address} {...(props.label === undefined ? {} : { label: props.label })} />
         <KpiStat label="Chain" value={props.chain} />
         <KpiStat
           label={props.native.symbol}
