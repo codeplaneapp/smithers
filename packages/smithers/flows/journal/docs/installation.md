@@ -8,12 +8,24 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/journal
+pnpm add @smthrs/journal@next @smthrs/database@next effect@4.0.0-rc.112
 ```
+
+Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the
+release candidate publishes under the `next` tag, which is what the command
+above installs.
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
 CommonJS with TypeScript declarations. Its only runtime dependencies are
 [`effect`](https://effect.website) and [`@smthrs/database`](/api/database).
+Composing a journal layer imports from both of them by name, so install them as
+direct dependencies rather than relying on them being hoisted.
+
+`effect` is a peer dependency pinned at `4.0.0-rc.112`. Install exactly that
+version: two copies of `effect` in one program are two sets of service tags, so
+a journal layer built against one copy cannot be provided to a program holding
+the other, and the mismatch shows up as a missing service rather than as a
+version error.
 
 ## Add a database
 
@@ -34,7 +46,7 @@ const database = Layer.provideMerge(
 ```
 
 SQLite is the supported backend at `1.0.0-rc.0`. PostgreSQL and PGlite are
-not; see [databases](/migration/1.0#databases).
+not; see [storage compatibility](/docs/migration/compatibility#storage).
 
 ## Install the migrations
 
@@ -105,8 +117,9 @@ import * as SqlJournal from "@smthrs/journal/SqlJournal"
 ```
 
 The root is written against the driver-neutral `@smthrs/database` contract and
-bundles for the browser. The two test doubles bind a Node SQLite database, so
-they are not in the root and are imported by subpath:
+bundles for the browser. Neither test double is exported from the root, so both
+are imported by subpath. `TestJournal` binds a Node SQLite database and runs on
+Node only; `Notifying` wraps a service and is platform independent:
 
 ```ts
 import * as Notifying from "@smthrs/journal/test/Notifying"

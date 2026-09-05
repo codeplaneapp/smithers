@@ -1,10 +1,9 @@
 /**
  * Logical journal contract with durable lifecycle and lossy telemetry channels.
  *
- * Governing design: `docs/pages/concepts/journal.md`.
- *
- * The ownership fence and the lossless `emitDurable` / lossy `emitLossy` split
- * are recorded in `docs/pages/concepts/concurrency.md`.
+ * The ownership fence and the lossless `emitDurable` / lossy `emitLossy`
+ * split are described at https://journal.smithers.sh/concepts/owner-fence/
+ * and https://journal.smithers.sh/concepts/two-channels/.
  *
  * @since 0.1.0
  */
@@ -20,6 +19,16 @@ import { Entry, RunId, Seq, SourceSeq } from "./JournalEvent.ts"
 import type { Input } from "./JournalEvent.ts"
 import type { OwnerId } from "./OwnerId.ts"
 import type { Projection } from "./Projection.ts"
+
+/**
+ * Defers a fold/cache update until the outermost durable write commits.
+ * Returns false without running it when no managed commit is available.
+ * Failed savepoints and retried transaction attempts never publish the update.
+ *
+ * @category transactions
+ * @since 1.0.0
+ */
+export { afterCommit } from "@smthrs/database/DurableWriter"
 
 /**
  * Stable error codes returned by journal operations.
@@ -408,8 +417,7 @@ export type Compacted = typeof Compacted.Type
  *
  * `emitDurable` allocates `seq` inside the writer's SQL transaction, so the
  * returned sequence is already committed and independent writers never fork
- * the per-run clock
- * (`docs/pages/concepts/journal.md`, "The durable path").
+ * the per-run clock.
  *
  * Caveat on scope: the stores above this log (`RunStore`, `AttemptStore`,
  * `CacheStore`, and engine-store's `DurableEngineState`) hold the executable
@@ -497,6 +505,16 @@ export interface Service {
    * one and defers its publication to the outermost commit.
    */
   readonly transact: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | JournalError, R>
+  /**
+   * Publishes a short, non-failing process-local update after the current
+   * transaction commits, or immediately when no transaction is open.
+   *
+   * Returns false without publishing inside a raw SQL transaction whose
+   * commit this journal cannot observe. A true result can mean deferred, not
+   * already run. Failed savepoints and retries discard their registrations.
+   * Test doubles that implement transactions must preserve this contract.
+   */
+  readonly whenCommitted: (update: Effect.Effect<void>) => Effect.Effect<boolean>
   /**
    * Replays the run's durable history from `afterSequence`, then follows it.
    *
@@ -621,6 +639,7 @@ export const makeNoop = (overrides: Partial<Service> = {}): Service => {
      * window to close. A test double that models rollback overrides it.
      */
     transact: <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | JournalError, R> => effect,
+    whenCommitted: (update) => Effect.as(update, true),
     stream: (options) =>
       Stream.unwrap(
         Effect.fn("Journal.stream")((_options: StreamOptions) => Effect.succeed(Stream.fail(unavailable("stream"))))(

@@ -17,10 +17,9 @@
  *
  * @since 0.1.0
  */
-import { DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
+import { afterCommit, DatabaseError, DurableWriter } from "@smthrs/database/DurableWriter"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
-import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -319,23 +318,6 @@ const error = (code: JournalError["code"], message: string, cause?: unknown): Jo
     message,
     ...(cause === undefined ? {} : { cause })
   })
-
-/**
- * Post-commit settlements accumulated while a `transact` transaction is open.
- *
- * `emitDurable` publishes an entry and records it in the in-process
- * source-event index only once the entry is really committed. Inside a
- * transaction the innermost `writer.write` merely releases a savepoint, so
- * those two effects are parked here as thunks and replayed by the outermost
- * `transact` after COMMIT. The parked value is a closure, so several journal
- * instances sharing one transaction each settle their own PubSub and index.
- *
- * This is fiber-scoped context, not module state: two fibers in two
- * transactions never see each other's list.
- */
-class Settlements extends Context.Service<Settlements, Array<Effect.Effect<void>>>()(
-  "@smthrs/journal/SqlJournal/Settlements"
-) {}
 
 const sourceKey = (runId: RunId, sourceId: SourceId): string => `${runId.length}:${runId}${sourceId.length}:${sourceId}`
 
@@ -1649,18 +1631,12 @@ export const layer = (
        * Reads the durable allocation floor for a run (or a producer) inside the
        * caller's transaction.
        *
-       * Unlike the retired 0.x database adapter's `MAX(seq) + 1` allocation
-       * under `BEGIN IMMEDIATE`, Effect's SQL client
-       * has no `beginTransaction` hook on the SQLite backends we ship
-       * (`@effect/sql-sqlite-node` never forwards one), so `DurableWriter.write`
-       * runs the default DEFERRED transaction. The read therefore takes a
-       * shared lock and the later INSERT upgrades it. Under WAL, enabled by
-       * `NodeDatabase`, a concurrent writer makes that upgrade fail with
-       * `SQLITE_BUSY_SNAPSHOT`, which `WriteRetry.isRetryableWriteError`
-       * classifies as retryable, so the whole transaction (floor read
-       * included) replays against the committed snapshot. Allocation is
-       * conflict-free by retry rather than by lock escalation; the invariant
-       * is proved by
+       * The pinned Node SQLite driver begins IMMEDIATE transactions, acquiring
+       * the writer lock before this floor read. A caller-supplied SQL client
+       * may instead use DEFERRED transactions, whose lock upgrade can fail
+       * with SQLITE_BUSY_SNAPSHOT. In either case DurableWriter retries the
+       * whole transaction, floor read included, against committed state.
+       * The cross-connection allocation invariant is exercised by
        * `packages/smithers/flows/journal/test/JournalDurable.test.ts` ("emitDurable never
        * collides when two connections write one run concurrently").
        *
@@ -1741,62 +1717,45 @@ export const layer = (
 
       /**
        * Records a committed entry in the in-process index and publishes it,
-       * immediately outside a transaction, parked on the enclosing
-       * {@link Settlements} list inside one.
+       * immediately outside a transaction, or deferred to its owning writer.
+       * A raw SQL transaction has no managed commit boundary: skip this optional
+       * publication rather than exposing uncommitted data. Database replay stays
+       * authoritative, including for tail subscribers.
        */
       const settleCommit = (
         queued: QueuedEntry,
         commit: Commit
       ): Effect.Effect<Effect.Effect<void>> =>
-        Effect.flatMap(Effect.serviceOption(Settlements), (enclosing) => {
+        Effect.gen(function*() {
           const mandatory = Effect.sync(() => rememberCommitted(queued, commit.entry.seq)).pipe(
             Effect.andThen(publish([commit]))
           )
           const maintenance = Effect.interruptible(noteCommitted(queued.runId, commit.inserted ? 1 : 0))
-          return Option.isNone(enclosing)
-            ? mandatory.pipe(Effect.as(maintenance))
-            : Effect.sync(() => {
-              enclosing.value.push(mandatory.pipe(Effect.andThen(maintenance)))
-            }).pipe(Effect.as(Effect.void))
+          const enclosing = yield* Effect.serviceOption(sql.transactionService)
+          if (Option.isNone(enclosing)) {
+            yield* mandatory
+            return maintenance
+          }
+          yield* afterCommit(mandatory.pipe(Effect.andThen(maintenance)), sql)
+          return Effect.void
         })
 
       /**
        * Opens (or joins) the write transaction that keeps the logical WAL
        * atomic with the executable state it describes.
        *
-       * The transaction body is re-entered verbatim when `DurableWriter.write`
-       * replays a transient conflict, so the settlement list is reset on each
-       * attempt: an abandoned attempt's entries were rolled back with it and
-       * must never be published or indexed.
+       * The shared writer owns publication across retries, nested savepoint
+       * rollbacks, and transactions opened by other stores on the same client.
        */
       const transact: Service["transact"] = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E | JournalError, R> =>
-        Effect.flatMap(Effect.serviceOption(Settlements), (enclosing) => {
-          const write = <A2, E2, R2>(body: Effect.Effect<A2, E2, R2>) =>
-            writer.write(body).pipe(
-              Effect.catchIf(
-                (cause): cause is DatabaseError => cause instanceof DatabaseError,
-                (cause) => Effect.fail(error("sink_failed", "journal transaction failed", cause))
-              )
-            )
-          // A nested transact is a savepoint of the enclosing one; the
-          // outermost owner of the list publishes for all of them.
-          if (Option.isSome(enclosing)) {
-            return write(effect)
-          }
-          const settlements: Array<Effect.Effect<void>> = []
-          return Effect.uninterruptibleMask((restore) =>
-            restore(write(
-              Effect.suspend(() => {
-                settlements.length = 0
-                return Effect.provideService(effect, Settlements, settlements)
-              })
-            )).pipe(
-              Effect.tap(() => Effect.forEach(settlements, (settlement) => settlement, { discard: true }))
-            )
+        writer.write(effect).pipe(
+          Effect.catchIf(
+            (cause): cause is DatabaseError => cause instanceof DatabaseError,
+            (cause) => Effect.fail(error("sink_failed", "journal transaction failed", cause))
           )
-        })
+        )
 
       const writeDurable = (
         input: Input,
@@ -2455,12 +2414,17 @@ export const layer = (
         emitDurable,
         emitDurableUnfenced,
         transact,
+        whenCommitted: (update) =>
+          Effect.flatMap(Effect.serviceOption(sql.transactionService), (transaction) =>
+            Option.isNone(transaction) ? Effect.as(update, true) : afterCommit(update, sql)),
         stream,
         entries: readPage,
         changes: PubSub.subscribe(changes),
         project,
         flush: Effect.fn("Journal.flush")(() =>
-          Effect.suspend(() => Effect.annotateCurrentSpan({ pending: state.pending })).pipe(
+          Effect.suspend(() =>
+            Effect.annotateCurrentSpan({ pending: state.pending })
+          ).pipe(
             Effect.andThen(flushInternal)
           )
         )(),

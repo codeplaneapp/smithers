@@ -3,11 +3,12 @@
  *
  * Run and attempt state live in `@smthrs/run-store`, sealed step results in
  * `@smthrs/step-cache`, and the durable deferred/clock tables in
- * `@smthrs/engine-store`; see `docs/pages/architecture/package-map.md`.
+ * `@smthrs/engine-store`.
  *
  * This entry point is browser-bundleable: every service here is written
- * against the driver-neutral `@smthrs/database` contract. The test doubles,
- * which bind a Node SQLite database, live under explicit subpaths:
+ * against the driver-neutral `@smthrs/database` contract. The test doubles are
+ * kept out of it and live under explicit subpaths; of the two, only
+ * `TestJournal` binds a Node SQLite database:
  *
  * ```ts
  * import { Journal, SqlJournal } from "@smthrs/journal"
@@ -23,6 +24,12 @@
  * @since 0.1.0
  */
 export * as JournalEvent from "./JournalEvent.ts"
+
+/**
+ * @category events
+ * @since 1.0.0
+ */
+export * as EngineEvent from "./EngineEvent.ts"
 
 /**
  * @category services

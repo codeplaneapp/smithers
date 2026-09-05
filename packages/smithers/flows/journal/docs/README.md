@@ -1,62 +1,83 @@
 ---
 title: "@smthrs/journal"
-description: "The Smithers event journal: the immutable history of a run, a durable lifecycle channel fenced on the run's owner, a lossy telemetry channel, and redaction applied once on the write path."
+description: "An append-only event history for Effect applications: a lossless lifecycle channel beside a lossy telemetry channel, credentials scrubbed before anything is persisted, and an owner fence that refuses a write from a process that lost the run."
 ---
 
-`@smthrs/journal` is the durable record of what happened during a run. It owns
-two SQLite tables above the driver-neutral [`@smthrs/database`](/api/database)
-contract, `flows_journal_events` and `flows_journal_checkpoints`, and exposes
-them as one Effect service with two write channels.
+`@smthrs/journal` records what a long-running piece of work did, in order, in
+SQLite. Rows are appended and never updated, so the history reads the same on
+the tenth pass as on the first, and a process that dies halfway through leaves
+behind everything it had already committed.
 
-The journal is Smithers' own logical write-ahead log. An entry is append-only,
-permanent, and replayed verbatim to every reader: a follower, a projection, a
-time-travel consumer, a support bundle. Three properties follow from that, and
-they are what this package is for:
+It is a set of [Effect](https://effect.website) services: every write returns a
+typed receipt or a typed failure, and the database arrives as a layer you
+compose. It belongs to the Smithers durable flow engine, but it runs on its
+own: no other Smithers package is required.
 
-- **Two channels, chosen by the caller.** `emitDurable` commits before it
-  returns, so a durable boundary can refuse to advance a run until its
-  lifecycle entry is on disk. `emitLossy` is a bounded, optimistic queue for
-  telemetry, where a `Dropped` receipt is an acceptable answer.
-- **An owner fence on the durable channel.** `emitDurable`, `checkpoint`, and
-  `compact` take an `OwnerId` and land only while the run still records that
-  owner. A process that lost the run writes nothing.
-- **Redaction on the write path.** Every payload passes one scrub before it is
-  encoded, so a credential never reaches a permanent row that every reader
-  replays.
-
-Run and attempt state live in [`@smthrs/run-store`](/api/run-store), sealed
-step results in [`@smthrs/step-cache`](/api/step-cache), and the durable
-deferred and clock tables in [`@smthrs/engine-store`](/api/engine-store). This
-package holds history and nothing else.
-
-## Who uses this package
-
-Engine and control-plane authors write lifecycle evidence through
-`emitDurable` and keep it consistent with executable state through `transact`.
-Read-path authors fold entries into a served view with `project`, or follow a
-run with `stream`. Host authors install `RedactedLogger.layer()` so the
-terminal gets the same redaction the durable rows get.
-
-If you are writing a flow, you almost certainly reach the journal through the
-engine rather than directly.
-
-## Install
+Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the
+release candidate publishes under the `next` tag, and this installs the
+journal, the database it writes through, and the `effect` version it pins:
 
 ```bash
-pnpm add @smthrs/journal
+pnpm add @smthrs/journal@next @smthrs/database@next effect@4.0.0-rc.112
 ```
 
-For the database layers a runnable composition adds, and for what a fenced
-write needs on top, see [Installation](./installation.md).
+`effect` is a peer dependency at exactly that version. Two copies of `effect`
+in one program are two sets of service tags, so a journal layer built against
+one copy cannot be provided to a program holding the other.
 
-## The smallest real example
+## What it solves
 
-`emitDurableUnfenced` is the one write that needs nothing but the journal's own
-tables, so it is the shortest end-to-end path:
+Application logs are the usual answer to "what happened here", and they stop
+being an answer the moment another program has to read them. A journal entry is
+a typed record with a sequence number, so a supervisor, a resumed run, or a UI
+can replay the history instead of parsing it.
+
+- **Two channels, one order.** A lifecycle event ("the run finished") is on
+  disk before its call returns. A telemetry event ("40 percent compiled") goes
+  through a bounded queue that drops under pressure rather than stalling the
+  writer. Both land in one per-run sequence, so the cheap channel cannot
+  reorder the expensive one.
+- **Every write gets an answer.** An emission returns `Accepted`, `Duplicate`,
+  or `Dropped`, and every failure carries one of fourteen stable codes. A
+  caller never has to guess whether an entry survived.
+- **A retry is not a second event.** Producer identity is
+  `(runId, sourceId, sourceSeq)`, unique in the database, so a producer that
+  replays after a crash gets `Duplicate` back rather than doubling its history.
+- **Credentials never reach the file.** Payloads are scrubbed on the write
+  path, before encoding, because a row is permanent and gets replayed verbatim
+  to every later reader.
+- **A stale process cannot append.** The durable channel takes an owner token
+  and commits only while the database still records that owner as the run's
+  owner. A process that was replaced fails with `fence_lost` instead of writing
+  into a history it no longer owns.
+- **State and its entry commit together.** `transact` puts your own writes and
+  the entry that describes them in one transaction, so the two can never
+  disagree about what happened.
+- **A long run stops growing.** A checkpoint pins replay state to a sequence,
+  and compaction deletes the entries below it.
+
+## One run, both channels
+
+This program writes a lifecycle event and a telemetry event to the same run,
+then reads the run back. It needs Node.js 22.19.0 or later, where the built-in
+SQLite module lives, and it writes a real `history.db` in the working
+directory:
 
 ```ts
-import { Journal, JournalEvent } from "@smthrs/journal"
+import * as DurableWriter from "@smthrs/database/DurableWriter"
+import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
+import { Journal, JournalEvent, Migrations, SqlJournal } from "@smthrs/journal"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+const database = Layer.provideMerge(
+  DurableWriter.layer(),
+  NodeDatabase.layer({ filename: "history.db" })
+)
+
+const journalLayer = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
+  Layer.provide(Layer.provideMerge(Migrations.layer, database))
+)
 
 const runId = "run-1" as JournalEvent.RunId
 const sourceId = "engine" as JournalEvent.SourceId
@@ -64,67 +85,86 @@ const sourceId = "engine" as JournalEvent.SourceId
 const program = Effect.gen(function*() {
   const journal = yield* Journal.Journal
 
-  const receipt = yield* journal.emitDurableUnfenced({
+  const created = yield* journal.emitDurableUnfenced({
     runId,
     sourceId,
     eventType: "run.created",
-    payload: { flow: "build", apiKey: "sk-ant-not-persisted" }
+    payload: { flow: "build", token: "ghp_0123456789abcdefghijklmnopqrstuvwxyz" }
   })
+  console.log("durable:", created._tag, "seq", created.seq)
+
+  yield* journal.emitLossy({
+    runId,
+    sourceId,
+    eventType: "step.progress",
+    payload: { step: "compile", percent: 40 }
+  })
+  yield* journal.flush
 
   const page = yield* journal.entries({ runId, limit: 100 })
-  return { receipt, entries: page.entries }
+  for (const entry of page.entries) {
+    console.log(entry.seq, entry.eventType, JSON.stringify(entry.payload))
+  }
 })
+
+await Effect.runPromise(program.pipe(Effect.provide(journalLayer), Effect.orDie))
 ```
 
-The receipt is `Accepted` with the committed `seq`, and the entry read back
-carries `payload.apiKey` as `"[REDACTED]"`: the credential was scrubbed before
-the row was encoded. For the layers that make this run, see the
-[Quickstart](./quickstart.md).
+```text
+durable: Accepted seq 0
+0 run.created {"flow":"build","token":"[REDACTED]"}
+1 step.progress {"percent":40,"step":"compile"}
+```
 
-## The package at a glance
+The token came back as `[REDACTED]` because it was scrubbed before the row was
+encoded, so the credential is not in `history.db` and never was. The two
+entries share one `seq` line because both channels write one history. The
+`flush` is the barrier for the lossy channel only: the durable entry was
+already committed when its receipt arrived.
 
-The root entry point exports these namespaces, and each is also importable from
-`@smthrs/journal/<Module>`:
+## Where this sits
 
-| Namespace        | What it is                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `Journal`        | The service: 12 operations over one run's history, plus the receipt, option, checkpoint, and error models.               |
-| `JournalEvent`   | The event envelope: branded `RunId`, `Seq`, `SourceId`, `SourceSeq`, the `Input` and `Entry` schemas, and `makeEventId`. |
-| `SqlJournal`     | The production layer over `@smthrs/database`, with the queue, byte, index, redaction, and compaction options.            |
-| `OwnerId`        | The fencing token the durable channel accepts: `hostId`, `pid`, `nonce`.                                                 |
-| `Redaction`      | The scrub applied to every payload before it is persisted, and the display-surface form for an already-encoded column.   |
-| `RedactedLogger` | The same rules applied to log output, so a credential does not reach the terminal or an OTLP collector.                  |
-| `Projection`     | A reproducible fold over entries: `{ name, initial, reduce }`.                                                           |
-| `JournalMetrics` | The `flows_journal_writes` counter and its per-channel, per-receipt views.                                               |
-| `Migrations`     | The journal's namespaced migration set, and the layer that installs it alone.                                            |
+The journal owns exactly the history and nothing else.
+[`@smthrs/flows`](/api/flows) is the engine's barrel: it re-exports this
+package as a namespace next to the flow language, the stores, and the runtime
+that wires them over one SQLite file, so
+`import { Journal } from "@smthrs/flows"` reaches the same code as
+`import * as Journal from "@smthrs/journal"`. Depend on the barrel when you
+want a working engine, and on this package when the event history is the part
+you need: an audit trail, a live feed for a UI, or the replay log of a system
+you are building yourself.
 
-Two test doubles bind a Node SQLite database and therefore live under explicit
-subpaths: `@smthrs/journal/test/TestJournal` and
-`@smthrs/journal/test/Notifying`. The root itself bundles for the browser.
+The neighboring stores hold what the journal deliberately does not.
+Run and attempt state live in [`@smthrs/run-store`](/api/run-store), sealed
+step results in [`@smthrs/step-cache`](/api/step-cache), and the durable
+deferred and clock tables in [`@smthrs/engine-store`](/api/engine-store), which
+composes all of them. Underneath every one of them,
+[`@smthrs/database`](/api/database) is the single write boundary they share,
+which is what makes `transact` possible.
 
-Every export, with signatures and error codes, is in the
-[API reference](./api.md).
+Above the whole engine sits the
+[`smithers` command-line interface](/api/cli), which runs flows out of a
+project directory without your composing any of this by hand.
 
-## Where to go next
-
-- [Installation](./installation.md): the database layers, the migration sets,
-  and what a fenced write needs.
-- [Quickstart](./quickstart.md): write, flush, and read one run end to end.
-- Concepts: [the two channels](./concepts/two-channels.md),
-  [the owner fence](./concepts/owner-fence.md),
-  [producer identity and idempotency](./concepts/idempotency.md),
-  [redaction](./concepts/redaction.md), and
-  [checkpoints and compaction](./concepts/compaction.md).
-- Guides: [write a fenced lifecycle event](./guides/write-lifecycle-events.md),
-  [commit state and its entry together](./guides/commit-state-and-entry.md),
-  [read and follow a run](./guides/read-a-run.md),
-  [fold a run into a projection](./guides/fold-a-projection.md),
-  [compact a long-running run](./guides/compact-a-run.md),
-  [keep credentials out of log output](./guides/redact-log-output.md), and
-  [test against a real journal](./guides/testing.md).
-- [Troubleshooting](./troubleshooting.md): every `JournalError` code, what
-  causes it, and what to change.
-
-`@smthrs/chain` has a journal of its own, an in-process event array that is a
-chain's only state. It is a different object with a different contract; see
+One name collides. [`@smthrs/chain`](/api/chain) also has a journal: an
+in-process event array that is a single chain's only state. It is a different
+object with a different contract, described in
 [the chain journal](/pkg/chain/concepts/journal).
+
+## Next steps
+
+- [Installation](./installation.md): the database layer, the migration sets a
+  journal needs, and which extra table the fenced write path reads.
+- [Quickstart](./quickstart.md): the program above built one step at a time,
+  with what each line of output proves.
+- [The two channels](./concepts/two-channels.md): which write to reach for,
+  what each receipt means, and why sequence gaps are valid.
+- [The owner fence](./concepts/owner-fence.md): why the durable channel takes
+  an owner, and when the unfenced one is correct.
+- [Read and follow a run](./guides/read-a-run.md): paging, the lossless
+  follower, and the buffer that drops for a slow subscriber.
+- [Test against a real journal](./guides/testing.md): the production layer over
+  an in-memory database, and injecting a crash at an exact transition.
+- [API reference](./api.md): every public export, grouped by namespace.
+- [Troubleshooting](./troubleshooting.md): every error code, what causes it,
+  and what to change.

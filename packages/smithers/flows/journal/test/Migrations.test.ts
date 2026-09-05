@@ -53,6 +53,6 @@ describe("journal migrations", () => {
   it.effect("namespaces its migration identity by package", () =>
     Effect.gen(function*() {
       const applied = yield* (Migrations.run.pipe(Effect.provide(TestDatabase.layer)))
-      expect(applied).toEqual([[1, "journal_initial"], [2, "journal_checkpoints"]])
+      expect(applied).toEqual([[1, "journal_initial"], [2, "journal_checkpoints"], [3, "journal_startup_index"]])
     }))
 })

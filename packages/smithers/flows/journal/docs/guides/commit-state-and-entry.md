@@ -7,7 +7,10 @@ sidebar:
 
 Committing an entry makes that entry durable. It does not by itself make a
 host's whole view crash-consistent, because the executable state lives in other
-stores: `RunStore`, `AttemptStore`, `CacheStore`, `DurableEngineState`.
+stores: `RunStore` and `AttemptStore` in
+[`@smthrs/run-store`](/api/run-store), `CacheStore` in
+[`@smthrs/step-cache`](/api/step-cache), and `DurableEngineState` in
+[`@smthrs/engine-store`](/api/engine-store).
 
 `transact` closes that seam. It runs a state transition and the `emitDurable`
 calls describing it in one write transaction, so either both land or neither
@@ -56,7 +59,28 @@ body. No flow bodies, no host calls, no waits. In particular, never call
 the transaction you are holding.
 
 **Nesting is a savepoint.** An inner `transact` becomes a savepoint of the
-outer one and defers its publication to the outermost commit.
+outer one and defers its publication to the outermost commit. If its failure
+is caught by the outer transaction, its publication is discarded even when
+the outer transaction succeeds. This also holds when another store opens the
+outer transaction through the same `DurableWriter` and SQL client.
+
+Projections can register short, non-failing cache updates with the service's
+`journal.whenCommitted(update)`. It uses the shared database commit owner and
+is bound to this journal's database: an unrelated database's nested commit
+cannot publish its updates. Outside a transaction the update runs immediately;
+inside a managed transaction it waits for the outer commit. Its `true` result
+means the update was accepted, not necessarily already executed. A `false`
+result means ownership is unknown; skip optional cache updates then. Raw
+`sql.withTransaction` and raw savepoints are not owned by this hook. Journal
+writes in them remain durable on commit, but skip process-local publication;
+`entries` and the polling `stream` still read the authoritative SQL history.
+Use `transact` or `DurableWriter.write` when immediate `changes` notifications
+are required.
+
+The lower-level `Journal.afterCommit` re-export has the database helper's
+different outside-transaction contract: it returns `false` without publishing.
+Test doubles implementing transactions must preserve commit/rollback semantics
+for `whenCommitted`, not run updates immediately from transaction bodies.
 
 ## What a transaction does not buy
 
@@ -69,16 +93,14 @@ need idempotency keys, fencing tokens, or compensation.
 
 ## A note on retries
 
-The SQLite backends this repository ships give Effect's SQL client no
-`beginTransaction` hook, so `DurableWriter.write` opens the default DEFERRED
-transaction. Under WAL, a concurrent writer can make the sequence allocation's
-lock upgrade fail with `SQLITE_BUSY_SNAPSHOT`, which
-[`@smthrs/database`](/api/database) classifies as retryable and replays: the
-whole transaction runs again against the committed snapshot, floor read
-included.
+The pinned Node SQLite driver uses `BEGIN IMMEDIATE`, acquiring its writer
+lock before reading allocation floors. A caller-supplied SQL client may use
+DEFERRED transactions; under WAL its lock upgrade can fail with
+`SQLITE_BUSY_SNAPSHOT`. The shared writer retries transient contention at the
+whole-transaction boundary in either case, floor read included.
 
-Allocation is therefore conflict-free by retry rather than by lock escalation.
-A `transact` body must be safe to run more than once for that reason as well.
+A `transact` body must therefore be safe to run more than once. Process-local
+publication belongs in `afterCommit`, outside that retry loop.
 
 ## Next steps
 

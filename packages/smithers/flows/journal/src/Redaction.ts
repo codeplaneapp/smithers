@@ -19,8 +19,8 @@
  * The rule set is a best-effort textual net over credential shapes seen in
  * real bug reports, plus structural redaction by sensitive field name. It is
  * finite, so a value that must never persist belongs in a `Redacted` field of
- * the caller's own schema. See `docs/pages/concepts/journal.md` for the journal
- * durability contract.
+ * the caller's own schema. See https://journal.smithers.sh/concepts/redaction/
+ * for the rule set and how to replace it.
  *
  * @since 0.1.0
  */

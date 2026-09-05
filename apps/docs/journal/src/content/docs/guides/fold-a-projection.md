@@ -95,9 +95,10 @@ same history again from the start.
 ## Where projections are used
 
 [`@smthrs/notifications`](https://notifications.smithers.sh/reference/api/) derives its pending-notification
-queue this way, and the gateway's read path recomputes a selector's rows from
-accumulated events rather than patching them, precisely because a reproducible
-fold is the only delta that cannot disagree with a fresh snapshot.
+queue this way, and [`@smthrs/gateway`](https://gateway.smithers.sh/reference/api/) recomputes a selector's
+rows from accumulated events rather than patching them, precisely because a
+reproducible fold is the only delta that cannot disagree with a fresh
+snapshot.
 
 ## Next steps
 

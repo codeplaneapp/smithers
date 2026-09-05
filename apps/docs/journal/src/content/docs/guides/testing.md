@@ -10,8 +10,9 @@ The journal is deterministic to test because its only nondeterministic input is
 the database, and the database is a layer. This package ships two doubles and
 one stub, and none of them reimplements the journal.
 
-Both doubles bind a Node SQLite database, so they are not in the root entry
-point. Import them by subpath.
+Neither double is exported from the root entry point, so import both by
+subpath. `TestJournal` binds a Node SQLite database and runs on Node only;
+`Notifying` wraps a service and is platform independent.
 
 ## Run the real journal in memory
 
@@ -42,9 +43,8 @@ The defaults are `capacity: 1024` and `overflow: "reject"`.
 
 Fenced writes still need `flows_runs`, which this bundle does not create. A
 suite that exercises `emitDurable`, `checkpoint`, or `compact` either creates
-the columns the fence reads as a fixture, as
-`test/JournalFence.test.ts` in this package does, or takes the whole engine
-bundle instead.
+the columns the fence reads as a fixture, or takes the whole engine bundle
+instead.
 
 ## Get every store over one database
 

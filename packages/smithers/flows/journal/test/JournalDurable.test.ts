@@ -306,7 +306,9 @@ describe("SqlJournal durable emission across connections", () => {
   // in effect@4.0.0-rc.109 — this workspace pins rc.108, so it is still live).
   // `withWriteRetry` classifies that defect as transient write contention and
   // retries it, so this holds as a real assertion.
-  it.effect(
+  // Actual cross-connection contention sleeps between retries. A frozen test
+  // clock with no adjuster hangs as soon as the first busy error is observed.
+  it.live(
     "emitDurable never collides when two connections write one run concurrently",
     () =>
       withTempFile((filename) =>

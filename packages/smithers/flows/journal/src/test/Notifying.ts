@@ -1,8 +1,6 @@
 /**
- * Effect-native analogue of Skyframe's `NotifyingHelper` /
- * `NotifyingInMemoryGraph` (see
- * `reference/bazel/src/main/java/com/google/devtools/build/skyframe/NotifyingHelper.java`):
- * wrap a record-of-Effect-methods service so a listener hook fires around
+ * Effect-native analogue of Bazel Skyframe's `NotifyingHelper` and
+ * `NotifyingInMemoryGraph`: wrap a record-of-Effect-methods service so a listener hook fires around
  * every operation. The hook runs in the calling fiber, so a hook that dies,
  * interrupts, or awaits a `Latch` injects crashes, fence loss, and exact
  * sequencing at any durable transition point, the mechanism that makes
@@ -13,9 +11,6 @@
  * Effect already gives us deterministic fibers, `TestClock`, `Latch`, and
  * failure propagation across fiber joins, so those helpers have no residue
  * here.
- *
- * Governing designs: `docs/pages/concepts/concurrency.md` and the bazel
- * Skyframe audit (test-harness gap).
  *
  * @since 0.1.0
  */

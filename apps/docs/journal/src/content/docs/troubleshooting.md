@@ -8,8 +8,8 @@ Every journal operation fails with a `JournalError` carrying a stable `code`.
 Find your code below. Three common problems produce no error at all, and they
 are at the end.
 
-The full error schema is in the [API reference](/reference/api/), and the repository's
-cross-package listing is in the
+The full error schema is in the [API reference](/reference/api/). Every Smithers error
+code across every package, this one's included, is listed under
 [`@smthrs/journal` error codes](https://smithers.sh/docs/reference/errors/#smthrsjournal).
 
 ## sink_failed with "no such table: flows_runs"

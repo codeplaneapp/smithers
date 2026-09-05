@@ -31,8 +31,10 @@ const journal = SqlJournal.layer({ capacity: 1024, overflow: "reject" }).pipe(
 Every module in the root is also importable from `@smthrs/journal/<Module>`.
 The root holds the journal and its contracts, written against the
 driver-neutral `@smthrs/database` service, and it bundles for the browser. The
-test doubles bind a Node SQLite database and therefore live under explicit
-subpaths. See [platform support](https://smithers.sh/docs/reference/api/#platform-support).
+test doubles are kept out of it and live under explicit subpaths; of the two,
+only `TestJournal` binds a Node SQLite database, which is what the platform
+column above records. See
+[platform support](https://smithers.sh/docs/reference/api/#platform-support).
 
 ## Journal
 
@@ -327,17 +329,20 @@ No exporter ships in this package. Provide one, for example
 | `layer` | `Layer<never, MigrationError \| SqlError, SqlClient>`                      |
 
 `0001_initial` creates `flows_journal_events` and its event-type index;
-`0002_checkpoints` creates `flows_journal_checkpoints`. `run` and `layer`
-install both alone.
+`0002_checkpoints` creates `flows_journal_checkpoints`;
+`0003_startup_index` indexes the timestamp/run/sequence ordering used by the
+bounded startup query. `run` and `layer` install this package's full set.
+The migration composer also applies the new index to an installed journal
+block when another package has already advanced the global migration cursor.
 
 Every other durable table belongs to the package that reads it.
 `@smthrs/database`'s `Migrations` composes several sets over one
 `flows_migrations` table, namespacing each package's ids into a reserved block
 so two packages' `0001_initial` cannot collide.
 `@smthrs/engine-store/Migrations` exports `sets`, the composed list a durable
-engine installs. The repository is unreleased, so each package has one
-authoritative initial schema rather than compatibility migrations for obsolete
-internal versions.
+engine installs. No version shipped before `1.0.0-rc.0`, so each package
+carries one authoritative initial schema rather than compatibility migrations
+for schemas no published release ever used.
 
 ## Test entry points
 
@@ -414,9 +419,11 @@ insert can only read the persisted bytes.
 ## transact
 
 Committing an entry makes that entry durable; it does not by itself make a
-host's whole view crash-consistent, because the executable state lives in
-`RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState`. `transact`
-closes that seam: those stores write through the same `DurableWriter`, so their
+host's whole view crash-consistent, because the executable state lives in the
+neighboring stores: `RunStore` and `AttemptStore` in
+[`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/), `CacheStore` in
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/), and `DurableEngineState` in
+[`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/). `transact` closes that seam: those stores write through the same `DurableWriter`, so their
 writes join this transaction as savepoints and the row and its lifecycle entry
 either both commit or both roll back.
 
@@ -483,6 +490,8 @@ caller who disables redaction.
 
 ## See also
 
+- [State and event authority](/concepts/state-event-authority/): shared
+  bounded identities, `EngineEvent` schemas, constructors and consumer decoders.
 - [Durable execution](https://smithers.sh/docs/concepts/durable-execution/) and
   [Execution IDs and ownership](https://smithers.sh/docs/concepts/ownership/).
 - [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), which composes this package with

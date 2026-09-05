@@ -6,8 +6,6 @@
  * `@smthrs/step-cache/test/TestCacheStore` over the same database, or takes
  * the whole engine bundle from `@smthrs/engine-store/test/TestStores`.
  *
- * Governing design: `docs/pages/concepts/journal.md`.
- *
  * @since 0.1.0
  */
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"

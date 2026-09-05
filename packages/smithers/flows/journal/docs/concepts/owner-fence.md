@@ -50,10 +50,10 @@ Two consequences follow:
   A finished run does not accept late lifecycle writes.
 
 `flows_runs` belongs to `@smthrs/run-store`, so a fenced write reads a table
-this package does not own. That coupling is deliberate and pinned by tests on
-both sides: `test/JournalFence.test.ts` here asserts against a fixture of the
-columns the fence reads, and `@smthrs/engine-store` asserts the same behavior
-against the real migrated schema.
+this package does not own. That coupling is deliberate, and both sides test it:
+this package asserts the fence against a fixture of the columns it reads, and
+[`@smthrs/engine-store`](/api/engine-store) asserts the same behavior against
+the real migrated schema.
 
 If the table is absent entirely, the write fails `sink_failed` with
 `no such table: flows_runs`, not `fence_lost`. That is a composition problem;

@@ -24,7 +24,7 @@
  * `Cause.pretty` of the cause as the span's `effect.cause` attribute, and
  * never reads `Console` at all. Redacting only the console would hide a
  * credential on stderr and export it in clear to whatever OTLP collector is
- * configured (`examples/src/10-telemetry-export.ts`, `docs/pages/telemetry.md`).
+ * configured.
  *
  * Cost is bounded by the rules themselves: `Redaction.defaultRules` are three
  * unanchored character-class scans with no nested quantifier and no

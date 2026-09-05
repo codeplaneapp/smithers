@@ -12,7 +12,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Deferred, Effect, Fiber, Layer, PubSub } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, PubSub } from "effect"
 import type * as Scope from "effect/Scope"
 import { TestClock } from "effect/testing"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -74,6 +74,47 @@ class Rejected extends Error {
 }
 
 describe("Journal.transact", () => {
+  effect("does not bind a journal update to another database's nested commit", () =>
+    withStack(Effect.gen(function*() {
+      const journal = yield* Journal
+      const other = yield* Layer.build(Layer.fresh(TestDatabase.layer))
+      const otherWriter = Context.get(other, DurableWriter)
+      let published = false
+      const accepted = yield* journal.transact(otherWriter.write(journal.whenCommitted(
+        Effect.sync(() => {
+          published = true
+        })
+      )))
+      expect(accepted).toBe(false)
+      expect(published).toBe(false)
+    })))
+
+  effect("publishes optional updates only at a known commit boundary", () =>
+    withStack(Effect.gen(function*() {
+      const journal = yield* Journal
+      const sql = yield* SqlClient.SqlClient
+      const published: Array<string> = []
+      const publish = (value: string) =>
+        journal.whenCommitted(Effect.sync(() => {
+          published.push(value)
+        }))
+      expect(yield* publish("already committed")).toBe(true)
+      yield* journal.transact(Effect.gen(function*() {
+        expect(yield* publish("outer")).toBe(true)
+        yield* journal.transact(publish("rolled back").pipe(Effect.andThen(Effect.fail("reject")))).pipe(Effect.exit)
+        expect(published).toEqual(["already committed"])
+      }))
+      expect(published).toEqual(["already committed", "outer"])
+      expect(yield* sql.withTransaction(publish("unmanaged"))).toBe(false)
+      expect(published).toEqual(["already committed", "outer"])
+      expect(
+        yield* makeNoop().whenCommitted(Effect.sync(() => {
+          published.push("test double")
+        }))
+      ).toBe(true)
+      expect(published.at(-1)).toBe("test double")
+    })))
+
   effect("rolls a committed entry back with the transaction that wrote it", () =>
     withStack(Effect.gen(function*() {
       const journal = yield* Journal
@@ -153,6 +194,49 @@ describe("Journal.transact", () => {
       expect(exit._tag).toBe("Failure")
       expect(yield* PubSub.remaining(subscription)).toBe(0)
       expect(yield* rowsOf(sql, run)).toHaveLength(0)
+    })))
+
+  effect(
+    "does not publish a caught inner rollback when the outer transaction commits",
+    () =>
+      withStack(Effect.gen(function*() {
+        const journal = yield* Journal
+        const sql = yield* SqlClient.SqlClient
+        const subscription = yield* journal.changes
+        const run = runId("caught-inner-rollback")
+        const record = input(run, sourceId("rolled-back"), "decision", { value: 1 })
+        yield* journal.transact(Effect.gen(function*() {
+          yield* journal.transact(
+            journal.emitDurableUnfenced(record).pipe(
+              Effect.andThen(Effect.fail(new Rejected("inner rollback")))
+            )
+          ).pipe(Effect.exit)
+        }))
+        expect(yield* rowsOf(sql, run)).toHaveLength(0)
+        expect(yield* PubSub.remaining(subscription)).toBe(0)
+        expect((yield* journal.emitDurableUnfenced(record))._tag).toBe("Accepted")
+        expect(yield* rowsOf(sql, run)).toHaveLength(1)
+      }))
+  )
+
+  effect("defers journal publication to an enclosing durable writer", () =>
+    withStack(Effect.gen(function*() {
+      const journal = yield* Journal
+      const writer = yield* DurableWriter
+      const sql = yield* SqlClient.SqlClient
+      const subscription = yield* journal.changes
+      const run = runId("writer-owned-rollback")
+      const record = input(run, sourceId("driver"), "decision", { value: 1 })
+      yield* writer.write(Effect.gen(function*() {
+        yield* journal.transact(journal.emitDurableUnfenced(record))
+        expect(yield* PubSub.remaining(subscription)).toBe(0)
+        return yield* Effect.fail(new Rejected("writer rollback"))
+      })).pipe(Effect.exit)
+      expect(yield* rowsOf(sql, run)).toHaveLength(0)
+      expect(yield* PubSub.remaining(subscription)).toBe(0)
+      yield* writer.write(journal.transact(journal.emitDurableUnfenced(record)))
+      expect(yield* PubSub.remaining(subscription)).toBe(1)
+      expect(yield* rowsOf(sql, run)).toHaveLength(1)
     })))
 
   effect("reports a storage failure as a journal error", () =>

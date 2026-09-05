@@ -7,9 +7,6 @@
  * The journal therefore defines the token, and the run store (which stores it
  * on runs and arbitrates who holds it) imports it.
  *
- * Governing design: `docs/pages/concepts/concurrency.md`.
- * Schema boundary: `docs/pages/concepts/durable-execution-model.md`.
- *
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"

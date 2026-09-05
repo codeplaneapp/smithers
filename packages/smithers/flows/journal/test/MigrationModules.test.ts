@@ -9,6 +9,7 @@
  * and the second case here fails as soon as a default export comes back.
  */
 import { describe, expect, it } from "vitest"
+import * as StartupIndex from "../src/internal/startupIndex.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as Initial from "../src/migrations/0001_initial.ts"
 import * as Checkpoints from "../src/migrations/0002_checkpoints.ts"
@@ -16,7 +17,7 @@ import * as Checkpoints from "../src/migrations/0002_checkpoints.ts"
 describe("migration modules", () => {
   it("registers an Effect for every migration in the set", () => {
     const entries = Object.entries(Migrations.set.migrations)
-    expect(entries.map(([id]) => id)).toEqual(["0001_initial", "0002_checkpoints"])
+    expect(entries.map(([id]) => id)).toEqual(["0001_initial", "0002_checkpoints", "0003_startup_index"])
     for (const [, migration] of entries) {
       expect(typeof migration.pipe).toBe("function")
     }
@@ -25,7 +26,9 @@ describe("migration modules", () => {
   it("exports each migration as a named binding and no default", () => {
     expect("default" in Initial).toBe(false)
     expect("default" in Checkpoints).toBe(false)
+    expect("default" in StartupIndex).toBe(false)
     expect(typeof Initial.initial.pipe).toBe("function")
     expect(typeof Checkpoints.checkpoints.pipe).toBe("function")
+    expect(typeof StartupIndex.startupIndex.pipe).toBe("function")
   })
 })

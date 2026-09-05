@@ -35,10 +35,23 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
     "./migrations/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Journal": "./src/Journal.ts",
+    "./JournalEvent": "./src/JournalEvent.ts",
+    "./EngineEvent": "./src/EngineEvent.ts",
+    "./JournalMetrics": "./src/JournalMetrics.ts",
+    "./Migrations": "./src/Migrations.ts",
+    "./OwnerId": "./src/OwnerId.ts",
+    "./Projection": "./src/Projection.ts",
+    "./RedactedLogger": "./src/RedactedLogger.ts",
+    "./Redaction": "./src/Redaction.ts",
+    "./SqlJournal": "./src/SqlJournal.ts",
+    "./index": "./src/index.ts",
+    "./test/Notifying": "./src/test/Notifying.ts",
+    "./test/TestJournal": "./src/test/TestJournal.ts",
+    "./JournalGeneration": "./src/JournalGeneration.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -62,14 +75,79 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
       "./migrations/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Journal": {
+        "types": "./dist/esm/Journal.d.ts",
+        "import": "./dist/esm/Journal.js",
+        "require": "./dist/cjs/Journal.js"
+      },
+      "./JournalEvent": {
+        "types": "./dist/esm/JournalEvent.d.ts",
+        "import": "./dist/esm/JournalEvent.js",
+        "require": "./dist/cjs/JournalEvent.js"
+      },
+      "./EngineEvent": {
+        "types": "./dist/esm/EngineEvent.d.ts",
+        "import": "./dist/esm/EngineEvent.js",
+        "require": "./dist/cjs/EngineEvent.js"
+      },
+      "./JournalMetrics": {
+        "types": "./dist/esm/JournalMetrics.d.ts",
+        "import": "./dist/esm/JournalMetrics.js",
+        "require": "./dist/cjs/JournalMetrics.js"
+      },
+      "./Migrations": {
+        "types": "./dist/esm/Migrations.d.ts",
+        "import": "./dist/esm/Migrations.js",
+        "require": "./dist/cjs/Migrations.js"
+      },
+      "./OwnerId": {
+        "types": "./dist/esm/OwnerId.d.ts",
+        "import": "./dist/esm/OwnerId.js",
+        "require": "./dist/cjs/OwnerId.js"
+      },
+      "./Projection": {
+        "types": "./dist/esm/Projection.d.ts",
+        "import": "./dist/esm/Projection.js",
+        "require": "./dist/cjs/Projection.js"
+      },
+      "./RedactedLogger": {
+        "types": "./dist/esm/RedactedLogger.d.ts",
+        "import": "./dist/esm/RedactedLogger.js",
+        "require": "./dist/cjs/RedactedLogger.js"
+      },
+      "./Redaction": {
+        "types": "./dist/esm/Redaction.d.ts",
+        "import": "./dist/esm/Redaction.js",
+        "require": "./dist/cjs/Redaction.js"
+      },
+      "./SqlJournal": {
+        "types": "./dist/esm/SqlJournal.d.ts",
+        "import": "./dist/esm/SqlJournal.js",
+        "require": "./dist/cjs/SqlJournal.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./test/Notifying": {
+        "types": "./dist/esm/test/Notifying.d.ts",
+        "import": "./dist/esm/test/Notifying.js",
+        "require": "./dist/cjs/test/Notifying.js"
+      },
+      "./test/TestJournal": {
+        "types": "./dist/esm/test/TestJournal.d.ts",
+        "import": "./dist/esm/test/TestJournal.js",
+        "require": "./dist/cjs/test/TestJournal.js"
+      },
+      "./JournalGeneration": {
+        "types": "./dist/esm/JournalGeneration.d.ts",
+        "import": "./dist/esm/JournalGeneration.js",
+        "require": "./dist/cjs/JournalGeneration.js"
+      }
     }
   },
   "scripts": {
@@ -84,29 +162,28 @@
   "dependencies": {
     "@smthrs/database": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/sql-sqlite-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
+    "@effect/language-service": "0.87.2",
+    "@effect/sql-sqlite-node": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
     "@smthrs/flow": "1.0.0-rc.0",
-    "@smthrs/flows": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

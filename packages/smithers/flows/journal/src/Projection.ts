@@ -1,8 +1,6 @@
 /**
  * Reproducible journal projections.
  *
- * Governing design: `docs/pages/concepts/journal.md`.
- *
  * @since 0.1.0
  */
 import type * as Effect from "effect/Effect"

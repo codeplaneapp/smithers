@@ -1,8 +1,6 @@
 /**
  * Durable event-envelope schemas for the journal.
  *
- * Governing design: `docs/pages/concepts/journal.md`.
- *
  * @since 0.1.0
  */
 import * as Schema from "effect/Schema"
@@ -261,3 +259,206 @@ export class Entry extends Schema.Class<Entry>("@smthrs/journal/JournalEvent/Ent
  */
 export const makeEventId = (runId: RunId, sourceId: SourceId, sourceSeq: SourceSeq): string =>
   `flows:event:${runId.length}:${runId}${sourceId.length}:${sourceId}${sourceSeq}`
+
+/**
+ * Bounded durable text shared by namespace contracts.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const Identifier = identifier
+
+/**
+ * A lineage coordinate, distinct from the run that currently hosts it.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const LineageId = identifier.pipe(Schema.brand("@smthrs/journal/LineageId"))
+/**
+ * A lineage coordinate.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type LineageId = typeof LineageId.Type
+
+/**
+ * A concrete wait identity.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const WaitId = identifier.pipe(Schema.brand("@smthrs/journal/WaitId"))
+/**
+ * A concrete wait identity.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type WaitId = typeof WaitId.Type
+
+/**
+ * An admitted command identity.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const CommandId = identifier.pipe(Schema.brand("@smthrs/journal/CommandId"))
+/**
+ * An admitted command identity.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CommandId = typeof CommandId.Type
+
+/**
+ * A plan identity, never interchangeable with a dispatch or artifact.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const PlanId = identifier.pipe(Schema.brand("@smthrs/journal/PlanId"))
+/**
+ * A plan identity.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type PlanId = typeof PlanId.Type
+
+/**
+ * A dispatch identity. Branding does not verify its digest.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const DispatchId = identifier.pipe(Schema.brand("@smthrs/journal/DispatchId"))
+/**
+ * A dispatch identity.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type DispatchId = typeof DispatchId.Type
+
+/**
+ * An artifact identity. Branding does not verify content.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const ArtifactId = identifier.pipe(Schema.brand("@smthrs/journal/ArtifactId"))
+/**
+ * An artifact identity.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type ArtifactId = typeof ArtifactId.Type
+
+/**
+ * Integer quantities in the inclusive safe range, including zero.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const NonNegativeQuantity = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER)
+)
+
+/**
+ * Integer quantities in the inclusive safe range, excluding zero.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const PositiveQuantity = NonNegativeQuantity.check(Schema.isGreaterThan(0))
+
+/**
+ * Non-negative integral milliseconds since the Unix epoch.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const TimestampMs = NonNegativeQuantity.pipe(Schema.brand("@smthrs/journal/TimestampMs"))
+/**
+ * Non-negative integral milliseconds since the Unix epoch.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type TimestampMs = typeof TimestampMs.Type
+
+/**
+ * Decode a run id without a cast; schema failures retain their issue.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeRunId = Schema.decodeUnknownEffect(RunId)
+/**
+ * Decode a lineage id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeLineageId = Schema.decodeUnknownEffect(LineageId)
+/**
+ * Decode a wait id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeWaitId = Schema.decodeUnknownEffect(WaitId)
+/**
+ * Decode a command id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeCommandId = Schema.decodeUnknownEffect(CommandId)
+/**
+ * Decode a plan id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodePlanId = Schema.decodeUnknownEffect(PlanId)
+/**
+ * Decode a dispatch id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeDispatchId = Schema.decodeUnknownEffect(DispatchId)
+/**
+ * Decode an artifact id without a cast.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeArtifactId = Schema.decodeUnknownEffect(ArtifactId)
+/**
+ * Decode an absolute timestamp without coercion.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeTimestampMs = Schema.decodeUnknownEffect(TimestampMs)
+/**
+ * Decode a budget that permits zero. Units belong to the field.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeNonNegativeQuantity = Schema.decodeUnknownEffect(NonNegativeQuantity)
+/**
+ * Decode a budget that requires positive capacity.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodePositiveQuantity = Schema.decodeUnknownEffect(PositiveQuantity)
