@@ -17,7 +17,7 @@ model: the package decides, and the caller acts.
 - The package installed:
 
 ```bash
-pnpm add @smthrs/capability
+pnpm add @smthrs/capability@next
 ```
 
 ## Parse the configured patterns into rules

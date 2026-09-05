@@ -1,11 +1,10 @@
 /**
  * Typed permission failures and capability policy rules.
  *
- * The schema ids below round-trip through the grant journal and are digested
- * into step keys, so renaming one invalidates recorded runs.
+ * The schema ids below are identity, not display text: a stored decision keeps
+ * those exact strings and is read back through them.
  *
- * Governing design: `docs/pages/concepts/hosts-and-capabilities.md`, rendered
- * at `/concepts/hosts-and-capabilities`.
+ * Reference: https://capability.smithers.sh/concepts/authorization-model/
  *
  * @since 0.1.0
  */

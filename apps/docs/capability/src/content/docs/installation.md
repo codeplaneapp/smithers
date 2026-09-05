@@ -9,8 +9,12 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/capability
+pnpm add @smthrs/capability@next
 ```
+
+The 1.0 line publishes under the npm `next` tag, so the specifier is part of
+the command until 1.0 is final. `npm install @smthrs/capability@next` and
+`bun add @smthrs/capability@next` install the same package.
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
 CommonJS with TypeScript declarations. It has one runtime dependency,
@@ -25,8 +29,8 @@ The root entry point re-exports both modules as namespaces:
 import { Capability, Permission } from "@smthrs/capability"
 ```
 
-Each module is also importable from its own subpath, which is the form host
-adapters in this repository use:
+Each module is also importable from its own subpath, which keeps the import
+narrow when you need only one of them:
 
 ```ts
 import * as Capability from "@smthrs/capability/Capability"

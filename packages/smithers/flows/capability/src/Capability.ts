@@ -2,8 +2,7 @@
  * Capability values, wildcard policy patterns, and effect-tier
  * classification.
  *
- * Governing design: `docs/pages/concepts/hosts-and-capabilities.md`, rendered
- * at `/concepts/hosts-and-capabilities`.
+ * Reference: https://capability.smithers.sh/concepts/resource-globs/
  *
  * @since 0.1.0
  */

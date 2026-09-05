@@ -1,18 +1,75 @@
 # @smthrs/capability
 
-This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
-all Smithers packages share one Effect runtime.
-
 **Documentation:** https://capability.smithers.sh
 
-Capability values and permission failures: the leaf vocabulary of the Smithers
-permission kernel.
+Capability values and permission failures: the vocabulary a program uses to
+decide whether one operation may proceed.
 
-This package holds **only** the words, never the enforcement. `@smthrs/kernel`
-owns the `GrantStore`, the decorating layers, and the journal; this package owns
-the `Capability` value, its wildcard `CapabilityPattern`, the effect tiers, and
-the three typed failures a guarded Host call can add:
+A `Capability` names one exact operation, such as `fs:write` on
+`/workspace/out.txt`. A `CapabilityPattern` names a set someone approved, such
+as `fs:write` on `/workspace/**`. One pure function reduces ordered rules over
+those two values into `allow`, `deny`, or `ask`, and three typed failures carry
+the answer back to a caller.
+
+The package holds no state. It reads no files, opens no sockets, and enforces
+nothing. Its one runtime dependency is [`effect`](https://effect.website), and
+it bundles for a browser unchanged. Enforcement, the grant store, the layers
+that decorate host services, and the journal live in
+[`@smthrs/kernel`](https://kernel.smithers.sh).
+
+## Install
+
+```bash
+pnpm add @smthrs/capability@next
+```
+
+The 1.0 line publishes under the npm `next` tag, so the specifier is part of
+the command until 1.0 is final.
+
+## Decide one request
+
+```typescript
+import { Capability, Permission } from "@smthrs/capability"
+
+const rule = (effect: Permission.RuleEffect, action: Capability.PatternAction, resource: string) =>
+  new Permission.Rule({ effect, pattern: new Capability.CapabilityPattern({ action, resource }) })
+
+const policy = [
+  rule("allow", "fs:read", "/workspace/**"),
+  rule("allow", "fs:write", "/workspace/**"),
+  rule("deny", "fs:write", "/workspace/.git/**")
+]
+
+Permission.evaluate([policy], Capability.make("fs:read", "/workspace/README.md"))
+// "allow"
+Permission.evaluate([policy], Capability.make("fs:write", "/workspace/.git/config"))
+// "deny"
+
+const deploy = Capability.make("net:post", "https://api.example.test/deploy")
+Permission.evaluate([policy], deploy)
+// "ask": nothing matched it, so a person has to answer
+```
+
+An `ask` becomes a typed failure the caller raises instead of proceeding,
+carrying the effect tier an approval surface shows a person:
+
+```typescript
+const tier = Capability.tierOf(deploy, { workspaceRoot: "/workspace" })
+// "irreversible"
+
+Permission.formatError(Permission.permissionRequired({
+  requestId: "req-1",
+  capability: deploy,
+  tier,
+  meta: { flow: "deploy", attempt: 1 }
+}))
+// "permission_required: net:post:https://api.example.test/deploy (tier irreversible, request req-1)"
+```
+
+## Modules
+
+Both are re-exported from the root entry point and are also importable from
+`@smthrs/capability/Capability` and `@smthrs/capability/Permission`.
 
 | Module       | Contents                                                                                                                                                                                                                                                                                                         |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -21,33 +78,20 @@ the three typed failures a guarded Host call can add:
 
 Full reference: <https://capability.smithers.sh/reference/api/>.
 
-## Why it is its own package
-
-A protected Host service declares permission failures in **its own** interface:
-`@smthrs/jj`'s `Jj` fails with `JjError | PermissionError`, not with a widened
-copy of itself minted by the kernel. That would make `@smthrs/jj` depend on
-`@smthrs/kernel`, which already depends on `@smthrs/jj`. Both depend on this
-leaf instead, and it depends on nothing but `effect`, so the browser bundle is
-unaffected.
-
-Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenied`, and the rest)
-are digested into step keys and round-trip through the grant journal, so
-renaming one invalidates recorded runs.
-
 ## Contracts
 
-These behaviours decide authorization and durability. They are pinned by tests
-and stated on the exported symbols; this list is the short form.
+These behaviours decide authorization and durability. Each is a guarantee of
+the exported symbol; this list is the short form.
 
-**Text form.** `format` renders both a `Capability` and a `CapabilityPattern` as
-`action:resource` and throws on an action outside the closed vocabulary. `parse`
-reads back an exact capability and `parsePattern` reads back a pattern. Both
-require every component and return `Option.none()` on anything else, including a
-missing resource. The action is the first two colon-separated components, except
-for the whole-authority selector `*`, which is the first component alone; all
-remaining text, colons included, is the resource.
+**Text form.** `format` renders both a `Capability` and a `CapabilityPattern`
+as `action:resource` and throws on an action outside the closed vocabulary.
+`parse` reads back an exact capability and `parsePattern` reads back a pattern.
+Both require every component and return `Option.none()` on anything else,
+including a missing resource. The action is the first two colon-separated
+components, except for the whole-authority selector `*`, which is the first
+component alone; all remaining text, colons included, is the resource.
 
-```ts
+```typescript
 import { Capability } from "@smthrs/capability"
 
 Capability.format(Capability.make("net:get", "example.test:8443/api:v1"))
@@ -61,11 +105,10 @@ Capability.parse("fs:read")
 **Glob grammar.** `*` matches any run of UTF-16 code units, path separators and
 newlines included. `?` matches exactly one code unit, so an astral character
 needs two. A pattern ending in a space and `*` also matches the bare resource
-without its argument text, which is what makes the `proc:spawn` grant
-`npm *` grant bare `npm`. `**`
-is the only form `subsumes` can prove, so a grant written with `*` matches but
-can never be shown to cover anything, and an envelope built from `*` patterns
-re-prompts forever.
+without its argument text, which is what makes the `proc:spawn` grant `npm *`
+cover bare `npm`. `**` is the only form `subsumes` can prove, so a grant
+written with `*` matches but can never be shown to cover anything, and an
+envelope built from `*` patterns re-prompts forever.
 
 **There is no escape.** A resource that genuinely contains `*` or `?` cannot be
 granted exactly, so `net:get:https://api.test/v1?k=1` reads as an exact URL and
@@ -103,11 +146,7 @@ site naming the key. `formatError` escapes C0 and C1 controls and caps each
 field at `maxDisplayFieldLength`, so an agent-chosen resource cannot forge extra
 log lines.
 
-## Documentation
-
-Every page of <https://capability.smithers.sh> is written in this package's
-`docs/` directory, and that directory is the only place to edit them. After
-changing a page, run `pnpm exec dprint fmt 'docs/**/*.md' 'README.md'` here,
-then `pnpm --filter @smithers/docs-capability sync:docs` from the repository
-root to stitch the site. `apps/docs/shared/AUTHORING.md` is the contract for
-file placement, frontmatter, and links.
+**Stable identity.** The schema ids and the `action:resource` text `format`
+renders are identity, not display text: a stored decision keeps those exact
+strings and is read back through them. Render capability text with `format`
+rather than assembling it yourself.

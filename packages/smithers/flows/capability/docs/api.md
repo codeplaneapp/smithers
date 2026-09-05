@@ -18,12 +18,12 @@ public. `@smthrs/capability/package.json` is exported.
 
 Every export is a value, a schema, or a pure function. Enforcement, the
 `GrantStore`, the decorating layers, and the journal live in
-[`@smthrs/kernel`](/api/kernel). This package depends on `effect` alone, so
-both the kernel and [`@smthrs/jj`](/api/jj) can depend on it without a cycle,
-and a protected service names permission failures in its own interface.
+[`@smthrs/kernel`](/api/kernel). This package has only the shared `effect` peer,
+so both the kernel and [`@smthrs/jj`](/api/jj) can depend on it without a
+cycle, and a protected service names permission failures in its own interface.
 
-:::danger
-Schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenied`, and the rest) are digested into step keys and round-trip through the grant journal. Renaming one invalidates recorded runs.
+:::note
+The schema ids (`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenied`, and the rest) and the `action:resource` text `format` renders are identity, not display text: a stored decision keeps those exact strings and is read back through them. Render capability text with `format` rather than assembling it yourself.
 :::
 
 ## Entry points
@@ -64,8 +64,9 @@ const Action: Schema.Literals<[...]>
 The closed vocabulary of host operations the permission kernel can authorize.
 Exported as both a type and a schema value, so a consumer can validate a bare
 selector at an RPC, config, or persistence boundary instead of copying the
-list. Actions are durable identity: add one when the kernel learns a new
-operation, never repurpose one.
+list. The set grows by addition and an existing action does not change meaning,
+so a stored payload naming an action outside it fails to decode rather than
+being read as something adjacent.
 
 ### Capability.PatternAction
 
@@ -121,12 +122,13 @@ const format: (
 ```
 
 Renders a capability or a pattern as `action:resource`. One renderer serves
-both, because they are structurally identical records and these bytes are
-durable identity: they are what a grant envelope is deduplicated and sorted by,
-and what reaches journal payloads.
+both, because they are structurally identical records and this text is identity
+rather than display: a stored decision keeps these exact bytes and is read back
+through them.
 
 Throws an `Error` naming the action when it is outside the closed vocabulary,
-so an invalid structural input cannot collide with a valid durable identity.
+so an invalid structural input cannot be rendered into a string that collides
+with a valid one.
 
 ```ts
 Capability.format(Capability.make("net:get", "example.test:8443/api:v1"))
@@ -153,11 +155,11 @@ const parsePattern: (input: string) => Option.Option<CapabilityPattern>
 
 Reads back a pattern, with one single-token exception. The whole-authority
 action `*` occupies the first component alone, so the bare string `*` parses to
-`{ action: "*", resource: "**" }`. That is the sentinel
-[`@smthrs/registry`](/api/registry) markdown discovery emits for a flow whose
-frontmatter declares no `capabilities:`, and plans persist it in durable key
-material. The resource is `**` rather than `*` because only `**` can be proven
-to cover anything. Every other missing component is a rejection, not a default.
+`{ action: "*", resource: "**" }`. That is how a source declaring no
+capabilities of its own is written down, and the string is stored and read back
+verbatim rather than rewritten, so this reader owns its meaning. The resource is
+`**` rather than `*` because only `**` can be proven to cover anything. Every
+other missing component is a rejection, not a default.
 
 ```ts
 Capability.parsePattern("*")
@@ -340,9 +342,10 @@ decision and `evaluate` returns `deny`, because skipping it could let an
 undecidable `deny` fall through to a later `allow`. The kernel turns that
 `deny` into a `PermissionDenied`.
 
-The kernel supplies four rulesets in this order: configured policy, the plan
-envelope, the grants this run holds, and the grants a person chose to remember.
-See [The authorization model](./concepts/authorization-model.md).
+[`@smthrs/kernel`](/api/kernel) supplies four rulesets in this order:
+configured policy, the patterns approved for a run before it starts, the grants
+the run holds, and the grants a person chose to remember. See
+[The authorization model](./concepts/authorization-model.md).
 
 ### Permission.PermissionRequired
 

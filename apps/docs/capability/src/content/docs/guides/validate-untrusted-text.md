@@ -54,12 +54,11 @@ Capability.parsePattern("*:**")
 // the same value
 ```
 
-That bare form is what [`@smthrs/registry`](https://registry.smithers.sh/reference/api/) markdown discovery
-emits for a flow whose frontmatter declares no `capabilities:`, and plans
-persist the string in durable key material, so its meaning lives in this
-parser. The resource is `**` rather than `*` because only `**` can be proven to
-cover anything. Apart from that one string, a missing component is still a
-rejection.
+The bare `*` is how a source that declares no capabilities of its own is
+written down, and it is stored and read back verbatim rather than rewritten, so
+this parser is the one place its meaning is defined. The resource is `**`
+rather than `*` because only `**` can be proven to cover anything. Apart from
+that one string, a missing component is still a rejection.
 
 ## Validate a bare selector with the exported schemas
 

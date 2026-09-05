@@ -12,8 +12,8 @@ instead. The full signatures are in the [API reference](/reference/api/).
 
 **What happened.** `Capability.format` was called with an action outside the
 closed vocabulary, usually because the value was assembled from parts or cast.
-The bytes `format` produces are durable identity, so it validates rather than
-render a string that could collide with a real one.
+The text `format` produces is identity rather than display, so it validates
+instead of rendering a string that could collide with a real one.
 
 **What to change.** Pass a real `Action` or `PatternAction`. If the value came
 from outside, parse it first with `Capability.parse` or
@@ -171,13 +171,16 @@ where an agent-chosen resource must not be able to forge a second line.
 the structured failure: `capability`, `reason`, `requestId`, and `tier` are all
 intact on the error itself.
 
-## Decoding a recorded run fails after an action was renamed
+## Decoding a stored capability fails on its action
 
-**What happened.** Schema ids and the `action:resource` bytes are digested into
-step keys and stored in the grant journal. Renaming an id or an action
-invalidates recorded runs, and a payload naming an action outside the current
-vocabulary fails to decode rather than being read as something adjacent.
+**What happened.** The payload names an action outside the vocabulary the
+installed version defines. The action set is closed, so decoding rejects an
+unknown member rather than reading it as something adjacent. A row written by a
+build whose vocabulary is newer than the reader's fails here instead of
+quietly changing meaning.
 
-**What to change.** Add a new action when the kernel learns a new operation;
-never repurpose or rename an existing one. If a rename already shipped, the
-recorded runs it invalidated cannot be recovered by this package.
+**What to change.** Read the payload with a version whose vocabulary includes
+the action, or discard the row. `Schema.is(Capability.Action)` tells you
+whether a bare string is in the vocabulary before you decode the payload around
+it, which is the check to run when you accept capability text from a store you
+did not write.

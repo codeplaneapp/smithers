@@ -1,87 +1,157 @@
 ---
 title: "@smthrs/capability"
-description: "The leaf vocabulary of the Smithers permission kernel: capability values, wildcard patterns, effect tiers, policy rules, and the three typed failures a guarded host call can add."
+description: "Capability values, glob patterns, effect tiers, and typed permission failures: the vocabulary a program uses to decide whether one operation may proceed, with no state and no enforcement of its own."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/capability/docs/README.md"
 ---
 
-`@smthrs/capability` is the vocabulary the Smithers permission kernel decides
-with. It holds the words, never the enforcement.
+`@smthrs/capability` describes what a program is about to do, then decides
+whether it may. A `Capability` names one exact operation, such as `fs:write` on
+`/workspace/out.txt`. A `CapabilityPattern` names a set of operations someone
+approved, such as `fs:write` on `/workspace/**`. One pure function reduces
+ordered rules over those two values into `allow`, `deny`, or `ask`.
 
-A **capability** is one host operation an agent asked for, written as an action
-and a resource: `fs:read` on `/workspace/README.md`, `proc:spawn` on
-`npm install`. A **capability pattern** is the same shape with a resource glob,
-so it names a set of operations instead of one. A **rule** pairs a pattern with
-`allow`, `deny`, or `ask`, and `Permission.evaluate` reduces the rules that
-match a request into one decision. An **effect tier** says what retrying that
-operation costs. Everything that acts on a decision, the grant store, the
-decorated host services, and the journal, lives in
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/).
+## The problem it solves
 
-The package depends on `effect` and nothing else. It provides no services and
-no layers: every export is a value, a schema, or a pure function.
+Anything that runs code on someone else's behalf, an agent, a plugin host, a CI
+job, faces the same question before every side effect: is this particular
+operation permitted right now. Answer it with a boolean at the call site and
+you have nothing to show a person, nothing to write to a log, and nothing to
+replay. The answer also widens the first time a resource is built by pasting
+strings together, and nothing throws when it does.
 
-## The smallest real example
+This package makes the question a value, and then refuses to guess about it:
+
+- A request that no rule matched is `ask`, never `allow`. Silence is not
+  consent.
+- A rule too expensive to match is `deny`, so an undecidable rule can never
+  fall through to a later allow.
+- A resource the glob grammar cannot express exactly, one containing `*` or
+  `?`, yields `Option.none()` instead of a pattern that would grant more than
+  was asked for.
+- A workspace root with no lexical boundary classifies every write as
+  `irreversible` rather than assume the write can be undone.
+
+Reach for it when permission decisions have to outlive the call that made them:
+the same request text must mean the same thing in an operator's policy file, in
+an approval prompt, and in a recorded run replayed six months later.
+
+The package holds no state. It reads no files, opens no sockets, and enforces
+nothing. It answers three questions, "what was asked for", "does a rule cover
+it", and "what would it cost to undo", and leaves acting on the answers to the
+caller.
+
+## Install
+
+```bash
+pnpm add @smthrs/capability@next
+```
+
+The 1.0 line publishes under the npm `next` tag, so the specifier is part of
+the command until 1.0 is final.
+
+## Decide one request
+
+Rules are ordered and the last match wins, so a policy reads top to bottom the
+way an operator wrote it:
 
 ```ts
 import { Capability, Permission } from "@smthrs/capability"
 
+const rule = (effect: Permission.RuleEffect, action: Capability.PatternAction, resource: string) =>
+  new Permission.Rule({ effect, pattern: new Capability.CapabilityPattern({ action, resource }) })
+
 const policy = [
-  new Permission.Rule({
-    effect: "allow",
-    pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: "/workspace/**" })
-  })
+  rule("allow", "fs:read", "/workspace/**"),
+  rule("allow", "fs:write", "/workspace/**"),
+  rule("deny", "fs:write", "/workspace/.git/**")
 ]
 
 Permission.evaluate([policy], Capability.make("fs:read", "/workspace/README.md"))
 // "allow"
-Permission.evaluate([policy], Capability.make("fs:write", "/workspace/README.md"))
-// "ask"
+Permission.evaluate([policy], Capability.make("fs:write", "/workspace/.git/config"))
+// "deny"
+
+const deploy = Capability.make("net:post", "https://api.example.test/deploy")
+Permission.evaluate([policy], deploy)
+// "ask": nothing matched it, so a person has to answer
 ```
 
-The second call returns `ask` because no rule matched, and the default for an
-unmatched request is to ask a person. Nothing here silently allows.
+## Suspend what a person has to answer
 
-## Who uses this package
+An `ask` becomes a typed failure the caller raises instead of proceeding. It
+carries the effect tier, which is what an approval surface shows a person and
+what decides whether a retry needs an idempotency key:
 
-Host adapters build a `Capability` for each operation they are about to perform
-and hand it to the kernel. Protected services name `Permission.PermissionError`
-in their own error channel, so a caller holding the service cannot forget that
-an operation may be suspended, denied, or left undecided. Operators and config
-readers write patterns, and `Capability.parsePattern` is what turns their text
-into a rule.
+```ts
+const tier = Capability.tierOf(deploy, { workspaceRoot: "/workspace" })
+// "irreversible"
+Capability.requiresIdempotencyKey(tier)
+// true
 
-## Why it is its own package
+const suspended = Permission.permissionRequired({
+  requestId: "req-1",
+  capability: deploy,
+  tier,
+  meta: { flow: "deploy", attempt: 1 }
+})
 
-A protected host service declares permission failures in its own interface:
-`@smthrs/jj`'s `Jj` fails with `JjError | PermissionError`, not with a widened
-copy of itself minted by the kernel. Minting that copy would make
-[`@smthrs/jj`](https://jj.smithers.sh/reference/api/) depend on [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/), which already
-depends on `@smthrs/jj`. Both depend on this leaf instead.
+Permission.formatError(suspended)
+// "permission_required: net:post:https://api.example.test/deploy (tier irreversible, request req-1)"
+```
 
-## The package at a glance
+The resource in that line came from whatever asked for it. `formatError`
+escapes control characters and caps each field, so a resource containing a
+newline cannot forge a second log line.
 
-The root entry point exports two namespaces, and each is also importable from
-`@smthrs/capability/<Module>`:
+## How this fits with @smthrs/flows
 
-| Namespace    | What it is                                                                                                                                       |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Capability` | The `Capability` value, the `CapabilityPattern` glob, the closed action vocabulary, the `action:resource` text form, matching, and effect tiers. |
-| `Permission` | The three typed failures, the policy `Rule`, `evaluate`, the one-line renderer, and the projection into Effect's `PlatformError` channel.        |
+This package is one piece of the Smithers durable flow engine, whose whole
+surface is re-exported by [`@smthrs/flows`](https://flows.smithers.sh/reference/api/). If you already depend
+on that barrel, this vocabulary is its `Capability` namespace and you do not
+need to install anything else:
 
-Every export, with signatures and behavior, is on the
-[API reference](/reference/api/).
+```ts
+import { Capability } from "@smthrs/flows"
+
+Capability.Permission.evaluate([policy], Capability.Capability.make("fs:read", "/workspace/README.md"))
+// "allow"
+```
+
+Install `@smthrs/capability` on its own when the vocabulary is all you want. It
+has one runtime dependency, [`effect`](https://effect.website), and no engine,
+no storage, and no I/O.
+
+Within that engine, this package is deliberately the leaf of the permission
+kernel: it holds the words, never the enforcement.
+[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) owns the grant store, the layers that decorate
+host services such as `FileSystem`, and the journal that records what a person
+approved. Keeping the two apart is what lets a protected service such as
+[`@smthrs/jj`](https://jj.smithers.sh/reference/api/) declare `JjError | PermissionError` in its own error
+channel without depending on the kernel, which already depends on it.
+
+`@smthrs/flows` is in turn the library behind the `smithers` command line tool,
+[`@smthrs/cli`](https://cli.smithers.sh/reference/api/), which runs durable flows and prompts a person when a
+step needs permission this package decided it does not have.
 
 ## Where to go next
 
-- [Installation](/installation/): requirements, import forms, and what this
-  package deliberately does not ship.
-- [Quickstart](/quickstart/): decide one request against a policy, end to
-  end.
-- Concepts: [the authorization model](/concepts/authorization-model/),
-  [resource globs](/concepts/resource-globs/), and
-  [effect tiers](/concepts/effect-tiers/).
-- Guides: [grant a capability safely](/guides/grant-a-capability-safely/),
-  [handle a permission failure](/guides/handle-a-permission-failure/), and
-  [validate capability text from an untrusted source](/guides/validate-untrusted-text/).
-- [Troubleshooting](/troubleshooting/): the refusals this package returns,
-  what causes each one, and what to change.
+- [Installation](/installation/): runtime requirements, the two import
+  forms, and what the export map keeps private.
+- [Quickstart](/quickstart/): turn operator text into a policy, decide three
+  requests, and produce the failure a suspended request raises.
+- [The authorization model](/concepts/authorization-model/): how ordered
+  rulesets reduce to one decision, and why a configured `deny` is final.
+- [Resource globs](/concepts/resource-globs/): what `*`, `?`, and `**` mean,
+  and the three edges that decide whether a grant covers what you meant.
+- [Effect tiers](/concepts/effect-tiers/): what `sealed`, `compensable`, and
+  `irreversible` mean, and why only a file write depends on its resource.
+- [Grant a capability safely](/guides/grant-a-capability-safely/): derive a
+  grant from an approved request instead of writing one by hand.
+- [Handle a permission failure](/guides/handle-a-permission-failure/): the
+  three typed failures, and what each one asks the caller to do.
+- [Validate capability text from an untrusted source](/guides/validate-untrusted-text/):
+  read patterns out of config, an RPC, or a journal without widening anything.
+- [API reference](/reference/api/): every export of the `Capability` and `Permission`
+  modules.
+- [Troubleshooting](/troubleshooting/): each refusal, what it means, and
+  what to change.

@@ -43,11 +43,13 @@ rulesets and one capability, and reduces them in three passes.
 3. **Everything.** All rulesets are reduced together, last match wins, and the
    default when nothing matches is `ask`.
 
-The kernel supplies four rulesets in this order: configured policy, the plan
-envelope, the grants this run has been given, and the grants a person chose to
-remember. So a later grant can raise a request from `ask` to `allow`, and it
-can lower an `allow` back to `deny`, but it can never lift what configured
-policy already denied.
+[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) supplies four rulesets in this order:
+configured policy, the patterns approved for a run before it starts, the grants
+the run has since been given, and the grants a person chose to remember. So a
+later grant can raise a request from `ask` to `allow`, and it can lower an
+`allow` back to `deny`, but it can never lift what configured policy already
+denied. That ordering is described in
+[how a grant decision is made](https://kernel.smithers.sh/concepts/grant-decisions/).
 
 Note what pass 2 reduces before it vetoes. A configured `deny` followed by a
 configured `allow` for the same request is not a veto: within configured policy
@@ -102,19 +104,20 @@ O(pattern length times resource length), both sides are capped at
 budget only bites when a structural input evaded the length check at the host
 boundary. `Capability.withinMatchBudget` reports that case before you evaluate.
 
-## Durable identity
+## Stable identity
 
-Two things this package renders are digested into step keys and round-trip
-through the grant journal: the schema ids
-(`@smthrs/capability/Capability`, `@smthrs/capability/PermissionDenied`, and
-the rest) and the `action:resource` bytes `Capability.format` produces.
-Renaming an id or moving those bytes invalidates recorded runs.
+Two of the strings this package produces are identity rather than display text:
+the schema ids (`@smthrs/capability/Capability`,
+`@smthrs/capability/PermissionDenied`, and the rest) and the `action:resource`
+text `Capability.format` renders. A stored decision keeps those exact strings
+and is read back through them, so render capability text with
+`Capability.format` wherever it will be read again, rather than assembling it
+yourself.
 
-The action vocabulary inherits the same constraint. `fs:read`, `net:post`,
-`jj:snapshot` and the rest are durable identity, so add an action when the
-kernel learns a new operation; never repurpose one. A journal payload naming an
-action outside the vocabulary fails to decode rather than being read as
-something adjacent.
+The action vocabulary carries the same weight. `fs:read`, `net:post`,
+`jj:snapshot` and the rest are a closed set that grows by addition; an existing
+action does not change meaning. A stored payload naming an action outside the
+set fails to decode rather than being read as something adjacent.
 
 ## Related
 
