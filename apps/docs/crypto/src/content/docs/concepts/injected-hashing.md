@@ -8,8 +8,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 
 Hashing is host access. The bytes go somewhere the program does not control:
 a Node binding, a Bun binding, a browser's Web Crypto, a hardware module. So
-`digest` does what every other host operation in Smithers does and takes the
-implementation as a service:
+`digest` takes that implementation as a service rather than importing one:
 
 ```ts
 import { digest } from "@smthrs/crypto"
@@ -26,14 +25,13 @@ fails, and the code under test does not change.
 ## Why one entry point does not inject
 
 Some hashing is not host access in any meaningful sense: it happens inside a
-pure, synchronous constructor that has no Effect to suspend in. A prompt
-section's identity, a context-window segment, a cell's source digest, a plan
-card's digest are all computed while a value is being built, not while an
-effect is running.
+pure, synchronous constructor that has no Effect to suspend in. A fingerprint
+on a record you are about to return, a cache key derived while an object is
+being assembled, the identity of one node in a tree you are building: each is
+computed while a value takes shape, not while an effect is running.
 
-`digestSync` serves exactly that case. It uses the package-owned FIPS 180-4
-implementation in `src/internal/sha256.ts`, so it needs no service and cannot
-suspend:
+`digestSync` serves exactly that case. It uses the package's own FIPS 180-4
+implementation, so it needs no service and cannot suspend:
 
 ```ts
 import { digestSync } from "@smthrs/crypto"
@@ -43,14 +41,14 @@ digestSync("hello")
 ```
 
 The digest is the same digest: the same bytes, the same hash, the same
-encoding, reached without suspending. The package's own suite pins that
-equality over arbitrary inputs precisely because the two paths compute it
+encoding, reached without suspending. That equality holds for every input both
+entry points accept, which matters because the two paths compute it
 differently.
 
-That handwritten implementation is the reason this package exists as a
-package. It is the only one in the repository, it lives behind a blocked
-`internal/` subpath, and everything that hashes synchronously reaches it
-through `digestSync` or `syncCrypto` rather than writing its own.
+That implementation is why the synchronous door can exist at all. It lives
+behind a blocked `internal/` subpath, so every synchronous caller reaches the
+same code through `digestSync` or `syncCrypto` instead of pasting in a hash
+function of its own.
 
 ## The third door: syncCrypto
 

@@ -1,6 +1,6 @@
 ---
 title: "Testing"
-description: "Hash deterministically in a test with syncCrypto, inject a failing Crypto service to exercise the typed failures, and what this package's own suite pins."
+description: "Hash deterministically in a test with syncCrypto, inject a failing Crypto service to exercise the typed failures, and read the evidence behind each guarantee."
 ---
 
 Hashing is deterministic, so the only question a test has to answer is which
@@ -39,6 +39,7 @@ purpose:
 ```ts
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import * as PlatformError from "effect/PlatformError"
 
 const host = (operation: Crypto.Crypto["digest"]): Crypto.Crypto =>
   Crypto.make({ randomBytes: (size) => new Uint8Array(size), digest: operation })
@@ -46,8 +47,14 @@ const host = (operation: Crypto.Crypto["digest"]): Crypto.Crypto =>
 // invalid_digest, naming the length it received.
 const short = host(() => Effect.succeed(new Uint8Array(31)))
 
-// digest_failed, with the host failure preserved as `cause`.
-const broken = host(() => Effect.fail(cause))
+// digest_failed, keeping this failure as `cause`.
+const hardware = PlatformError.systemError({
+  _tag: "Unknown",
+  module: "test-host",
+  method: "digest",
+  description: "hardware failure"
+})
+const broken = host(() => Effect.fail(hardware))
 ```
 
 Then flip the effect and match on the code, which is the stable part:
@@ -60,10 +67,12 @@ Effect.runSync(Effect.flip(Effect.provideService(digest("secret"), Crypto.Crypto
 The two input failures need no host at all: pass an unpaired surrogate for
 `invalid_text` and a non-`Uint8Array` value for `invalid_input`.
 
-## What this package's suite pins
+## The evidence behind the contract
 
-The package's own tests are the reason the guarantees on
-[the contract](./contract.md) are stated as facts rather than intentions:
+Each guarantee on [the contract](./contract.md) is stated as a fact because a
+test holds the package to it. The tests are not in the published tarball, but
+they are readable and runnable from the
+[public repository](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/crypto/test):
 
 - **Published vectors** for text and bytes through `digest`, `digestSync`, and
   the `Sha256` schema, including the million-character FIPS vector.
@@ -81,8 +90,8 @@ The package's own tests are the reason the guarantees on
 - **Irreversibility**: encoding through the `Sha256` schema always fails with
   the exact forbidden-encode message.
 
-The suite also runs under Bun through the repository's runtime-compatibility
-matrix, so the two entry points are checked against both hosts.
+The same tests run under Node and Bun, so both entry points are checked
+against both hosts.
 
 ## Related
 

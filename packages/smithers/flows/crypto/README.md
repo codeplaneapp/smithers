@@ -1,14 +1,29 @@
 # `@smthrs/crypto`
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://crypto.smithers.sh
 
-Strict SHA-256 hashing for Smithers. The package accepts well-formed JavaScript
-text or a `Uint8Array`, hashes a byte snapshot, and returns one branded wire
-form: 64 lowercase hexadecimal characters.
+Strict SHA-256 hashing for TypeScript. The package accepts well-formed
+JavaScript text or a `Uint8Array`, hashes a byte snapshot, and returns one
+branded wire form: 64 lowercase hexadecimal characters.
+
+## Install
+
+```bash
+pnpm add @smthrs/crypto@next
+```
+
+The current version is `1.0.0-rc.0`, and release candidates carry the `next`
+tag, which is what `@next` selects. `effect` is the only runtime dependency.
+`digest` additionally needs an Effect `Crypto` service, which
+`@effect/platform-node`, `@effect/platform-bun`, and `@effect/platform-browser`
+each provide as a layer. The package requires Node.js 22.19.0 or later, and it
+imports no `node:` built-in, so it also runs under Bun and in a browser.
+
+## Example
 
 ```typescript
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -93,5 +108,9 @@ is an unsatisfied Effect requirement and therefore a configuration defect, not a
 
 Canonical value serialization belongs to
 [`@smthrs/canonical`](https://canonical.smithers.sh). Domain-specific key
-formats belong to [`@smthrs/keys`](https://keys.smithers.sh). Full API
-documentation is at https://crypto.smithers.sh/reference/api/.
+formats belong to [`@smthrs/keys`](https://keys.smithers.sh). All three are
+part of the Smithers durable flow engine, which
+[`@smthrs/flows`](https://flows.smithers.sh) re-exports as one dependency, so
+a program that already depends on flows reaches this module as
+`Crypto.digestSync` with nothing further to install. Full API documentation is
+at https://crypto.smithers.sh/reference/api/.

@@ -68,7 +68,7 @@ failures for both halves:
 ```ts
 import { deriveKey } from "@smthrs/keys"
 
-deriveKey({ domain: "step", flow: "build", payload })
+deriveKey({ domain: "step", flow: "build", attempt: 1 })
 // Effect<KeyV1, KeyDerivationError, Crypto.Crypto>
 ```
 

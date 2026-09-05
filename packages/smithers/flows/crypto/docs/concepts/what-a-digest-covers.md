@@ -87,8 +87,8 @@ each require the complete input, and each holds the input and its snapshot in
 memory at once. Hashing a file means reading the whole file first.
 
 `digestSync` additionally runs the compression function in JavaScript on the
-calling thread, so a large input blocks until it finishes. The suite hashes
-the million-character FIPS vector through both entry points, which is the
+calling thread, so a large input blocks until it finishes. It stays correct
+at any size, including a million-character input, but that is roughly the
 scale at which to start preferring `digest` with a platform host.
 
 ## What a digest does not cover

@@ -12,6 +12,13 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 pnpm add @smthrs/crypto@next
 ```
 
+`npm install @smthrs/crypto@next` and `bun add @smthrs/crypto@next` are the
+equivalents.
+
+The current version is `1.0.0-rc.0`. Release candidates carry the `next` tag,
+which is what `@next` selects. Once 1.0 is final,
+`pnpm add @smthrs/crypto` resolves to it.
+
 The package ships as both ESM and CommonJS with TypeScript declarations. Its
 only runtime dependency is [`effect`](https://effect.website).
 
@@ -25,8 +32,8 @@ only runtime dependency is [`effect`](https://effect.website).
 - An Effect `Crypto` service, for `digest` only. The next section lists the
   implementations you can provide.
 
-The package imports no `node:` built-in and appears on the repository's
-browser-safe entry point list, so it bundles for a browser unchanged.
+The package imports no `node:` built-in, so it bundles for a browser
+unchanged.
 
 ## Import forms
 
@@ -36,8 +43,8 @@ The root entry point re-exports every public name:
 import { Digest, digest, digestSync, Sha256, Sha256Error, syncCrypto } from "@smthrs/crypto"
 ```
 
-The single module is also importable from its own subpath, which is the form
-the [API reference](/reference/api/) uses:
+The single module is also importable from its own subpath, which keeps the
+namespace explicit at every call site:
 
 ```ts
 import * as Sha256 from "@smthrs/crypto/Sha256"
@@ -62,13 +69,13 @@ const address = Crypto.digestSync("hello")
 `digest` returns an Effect that requires `Crypto.Crypto`. Choose the
 implementation that matches where the code runs:
 
-| Implementation                           | Provide it with                                    | Use it for                                                                                                                |
-| ---------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `@effect/platform-node/NodeCrypto`       | `NodeCrypto.layer`                                 | A Node process. Also re-exported by [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/).                                        |
-| `@effect/platform-bun/BunCrypto`         | `BunCrypto.layer`                                  | A Bun process.                                                                                                            |
-| `@effect/platform-browser/BrowserCrypto` | The layer that module exports                      | A browser tab. [`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/) does not re-export it, so add the dependency yourself. |
-| `syncCrypto` from this package           | `Effect.provideService(Crypto.Crypto, syncCrypto)` | Synchronous code and tests. It answers SHA-256 only and refuses randomness.                                               |
-| Your own                                 | `Crypto.make({ randomBytes, digest })`             | A custom host, a hardware module, or a fault-injecting test.                                                              |
+| Implementation                           | Provide it with                                    | Use it for                                                                                                                                          |
+| ---------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@effect/platform-node/NodeCrypto`       | `NodeCrypto.layer`                                 | A Node process. [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) re-exports it as `NodeHost.NodeCrypto`.                                               |
+| `@effect/platform-bun/BunCrypto`         | `BunCrypto.layer`                                  | A Bun process.                                                                                                                                      |
+| `@effect/platform-browser/BrowserCrypto` | The layer that module exports                      | A browser tab. Add `@effect/platform-browser` yourself: [`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/) leaves `Crypto` out of its host bundle. |
+| `syncCrypto` from this package           | `Effect.provideService(Crypto.Crypto, syncCrypto)` | Synchronous code and tests. It answers SHA-256 only and refuses randomness.                                                                         |
+| Your own                                 | `Crypto.make({ randomBytes, digest })`             | A custom host, a hardware module, or a fault-injecting test.                                                                                        |
 
 ```bash
 pnpm add @effect/platform-node

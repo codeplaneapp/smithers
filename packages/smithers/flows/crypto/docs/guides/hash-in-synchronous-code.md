@@ -85,9 +85,9 @@ export const provideSync = <A, E>(
 export const runSync = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>): A => Effect.runSync(provideSync(effect))
 ```
 
-This is how [`@smthrs/core`](/api/core) reaches a digest from a pure
-constructor while sharing one derivation with its Effect callers. The digest
-is the same digest either way.
+One derivation then serves both callers. The asynchronous path provides a
+platform layer, the synchronous path provides `syncCrypto`, and the digest is
+the same digest either way.
 
 `syncCrypto` answers `SHA-256` and nothing else. Ask it for `SHA-1`,
 `SHA-384`, or `SHA-512` and it fails with a `BadArgument` naming the algorithm

@@ -181,8 +181,8 @@ Normal application code should provide its platform `Crypto` layer instead.
 Text must be well-formed UTF-16. Unpaired surrogates are rejected before the
 standard `TextEncoder` converts text to UTF-8, which is what stops two
 different malformed strings from colliding on the digest of a replacement
-character. `TextEncoder` is an explicit host prerequisite available in every
-supported Smithers runtime.
+character. `TextEncoder` is a host prerequisite rather than an injected
+service: Node, Bun, and modern browser targets provide it as a global.
 
 No Unicode normalization is performed, so NFC and NFD text remain distinct
 inputs. Normalize before calling if your protocol needs canonically equivalent
@@ -202,8 +202,7 @@ are in [the contract](./contract.md).
 ## Requirements and platform
 
 - Node.js 22.19.0 or later. The package also runs under Bun and in a browser:
-  it imports no `node:` built-in and is on the repository's browser-safe entry
-  point list.
+  it imports no `node:` built-in.
 - One runtime dependency, `effect`.
 - `@smthrs/crypto/internal/*` and `@smthrs/crypto/*/index` are blocked in the
   export map. The handwritten implementation is reachable only through

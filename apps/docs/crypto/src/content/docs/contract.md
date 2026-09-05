@@ -4,9 +4,8 @@ description: "What @smthrs/crypto guarantees about a SHA-256 digest, what the in
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/crypto/docs/contract.md"
 ---
 
-The governing statement for `@smthrs/crypto`. It owns the repository's
-SHA-256 policy and its only handwritten implementation, so this page is the
-single place that says what a Smithers digest means.
+The governing statement for `@smthrs/crypto`: what a digest from this package
+means, what the package promises about it, and where those promises stop.
 
 ## What the package computes
 
@@ -17,9 +16,8 @@ and return the result as 64 lowercase hexadecimal characters branded as
 algorithm.
 
 `digest` delegates the computation to the injected Effect `Crypto` service.
-`digestSync` and `syncCrypto` use the package-owned implementation in
-`src/internal/sha256.ts`, which is not exported and is reachable only through
-those two entry points.
+`digestSync` and `syncCrypto` use the package's own implementation, which is
+not exported and is reachable only through those two entry points.
 
 ## What the package guarantees
 
@@ -49,8 +47,8 @@ those two entry points.
 - **Digests do not run backwards.** Encoding through the `Sha256` schema
   always fails with `A digest cannot be converted back into its source bytes`.
 - **The two entry points agree.** `digest` and `digestSync` produce the same
-  digest for every input both accept. The suite asserts this over arbitrary
-  text and byte views and cross-checks both against Node and Web Crypto.
+  digest for every input both accept, including arbitrary text and any byte
+  view, and both are cross-checked against Node and Web Crypto.
 
 ## What the injected host must supply
 

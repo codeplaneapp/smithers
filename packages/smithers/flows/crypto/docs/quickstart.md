@@ -112,8 +112,9 @@ digestSync("the quickstart bytes")
 // 43648540bc1311ad4731c914b68594dbf0cf1870f84de1f6c8511481dc1f76b7
 ```
 
-The package's suite asserts that equality over arbitrary text and byte views,
-and cross-checks both entry points against Node and Web Crypto.
+That equality holds for every input both entry points accept, including
+arbitrary text and any byte view, and both are cross-checked against Node and
+Web Crypto.
 
 ## What just happened
 

@@ -1,22 +1,41 @@
 ---
 title: "@smthrs/crypto"
-description: "Strict SHA-256 hashing for Smithers: one branded digest representation, an injected Effect entry point, a synchronous entry point, and a written statement of what the package does not defend against."
+description: "Strict SHA-256 for TypeScript: one branded digest representation, an injected Effect Crypto service, and a synchronous entry point that needs no service."
 ---
 
 `@smthrs/crypto` computes SHA-256 digests and gives them exactly one
 representation: 64 lowercase hexadecimal characters, branded as `Digest`.
 
-It is the package every other Smithers package hashes through. The content
-addresses in [`@smthrs/artifacts`](/api/artifacts), the flow keys in
-[`@smthrs/keys`](/api/keys), the execution ids in [`@smthrs/flow`](/api/flow),
-and the plan card digests in [`@smthrs/plan`](/api/plan) are all this digest,
-so one input policy and one wire format hold across the whole repository.
+Hashing is host access, so the cryptographic operation goes through
+[Effect](https://effect.website)'s `Crypto` service: a Node process, a Bun
+process, a browser, or a test supplies the implementation, and the code that
+hashes does not change. One entry point deliberately does not inject.
+`digestSync` uses the package's own FIPS 180-4 implementation, so a pure
+synchronous constructor can compute an identity without suspending.
 
-Hashing is host access, so the cryptographic operation goes through Effect's
-`Crypto` service: a Node process, a Bun process, a browser, or a test supplies
-the implementation. One entry point deliberately does not. `digestSync` uses
-the package-owned FIPS 180-4 implementation, so a pure synchronous constructor
-can compute an identity without suspending.
+## Why you would reach for it
+
+`node:crypto` already computes SHA-256. Reach for this package when the digest
+is part of a contract that two programs, or one program and its future self,
+have to agree on.
+
+- **Which bytes did you hash?** `TextEncoder` replaces an unpaired UTF-16
+  surrogate with U+FFFD, so two different broken strings hash to the same
+  value. This package refuses them with a typed `invalid_text` failure. It
+  applies no Unicode normalization, accepts `Uint8Array` and nothing else in
+  the byte position rather than coercing an `ArrayBuffer` or a plain array,
+  and hashes a subarray's own window.
+- **Which form is the digest?** `createHash().digest()` returns a `Buffer`
+  unless every call site remembers to ask for `"hex"`, and the casing is then
+  up to whoever wrote that line. Here there is one form, and `Digest` is a
+  schema that rejects an uppercase, truncated, or whitespace-padded value
+  before it reaches your storage layer.
+- **Where does the hashing happen?** A Node build, a browser build, and a test
+  with a scripted or deliberately broken host all run the same code, because
+  the host arrives as a service rather than an import.
+- **What about code that cannot suspend?** An identity computed inside a pure
+  constructor has no Effect to suspend in. `digestSync` requires no service
+  and returns the identical digest.
 
 ## What SHA-256 gives you here, and what it does not
 
@@ -31,22 +50,20 @@ does not stop, including length extension, brute-force recovery of a
 low-entropy input, and a `Crypto` service that returns bytes of its own
 choosing.
 
-## Who uses this package
-
-Package authors inside Smithers use `digest` and `digestSync` to derive
-identities: a content address, a step key, an execution id, a cache key.
-Application authors use `Digest` to validate a digest that came back out of
-storage, and `Sha256` where the natural boundary is a schema rather than a
-function call.
-
 ## Install
 
 ```bash
 pnpm add @smthrs/crypto@next
 ```
 
-For the runtime requirements, the import forms, and the `Crypto` services you
-can provide, see [Installation](./installation.md).
+The current version is `1.0.0-rc.0`, and release candidates carry the `next`
+tag, which is what `@next` selects.
+
+`effect` is the only runtime dependency. `digest` also needs a `Crypto`
+service, which `@effect/platform-node`, `@effect/platform-bun`, and
+`@effect/platform-browser` each provide as a layer. For the runtime
+requirements, the import forms, and the full list of services you can supply,
+see [Installation](./installation.md).
 
 ## The smallest real example
 
@@ -64,10 +81,26 @@ const synchronous = digestSync("hello")
 // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 ```
 
-The two entry points agree on every input they both accept, which is a
-property the package's own suite asserts over arbitrary text and byte views.
-The [Quickstart](./quickstart.md) takes one value through hashing, storage,
-and validation on the way back.
+The two entry points agree on every input they both accept: the same bytes,
+the same hash, and the same encoding, whether or not a service is involved.
+
+A digest that arrives from a database column, a URL segment, or a request body
+is an ordinary untrusted string. `Digest` settles the claim without hashing
+anything, so it needs no service:
+
+```ts
+import { Digest } from "@smthrs/crypto"
+import * as Schema from "effect/Schema"
+
+const address = Schema.decodeUnknownSync(Digest)(untrusted)
+// The same string, typed as Digest. Anything that is not 64 lowercase
+// hexadecimal characters throws a SchemaError instead.
+```
+
+That branded type is the point of the schema: a function declared to take a
+`Digest` cannot be called with a `string` nobody checked. The
+[Quickstart](./quickstart.md) takes one value through hashing, storage, and
+validation on the way back.
 
 ## The package at a glance
 
@@ -108,6 +141,33 @@ Every export, with its signature and its failure modes, is on the
 [what a digest covers](./concepts/what-a-digest-covers.md) explain why each of
 those holds.
 
+## How this fits with @smthrs/flows
+
+`@smthrs/crypto` is one package of the Smithers durable flow engine, published
+on its own so a program that needs SHA-256 does not have to take the engine
+with it. [`@smthrs/flows`](/api/flows) is the barrel that re-exports the whole
+engine, this package included, so code that already depends on flows reaches
+the same module as a namespace with no second dependency:
+
+```ts
+import { Crypto } from "@smthrs/flows"
+
+Crypto.digestSync("hello")
+```
+
+Inside that engine, digests are how work is identified: a step's cache key, an
+artifact's address, a flow's execution id, a plan card's identity. One input
+policy and one wire format hold across all of them because they all hash
+through this package. The layers above it belong to its neighbours:
+[`@smthrs/canonical`](/api/canonical) turns a structured value into stable
+bytes, [`@smthrs/keys`](/api/keys) turns bytes plus a domain into a versioned
+`key1_` string, and [`@smthrs/artifacts`](/api/artifacts) stores bytes under
+their digest and verifies them on the way back out. Reach for those rather
+than assembling a format out of `digest` yourself.
+
+The whole engine sits under the [`smithers` CLI](/api/cli), which is how you
+run and inspect flows from a terminal.
+
 ## Where to go next
 
 - [Installation](./installation.md): runtime requirements, import forms, and
@@ -121,7 +181,7 @@ those holds.
 - Guides: [hash inside synchronous code](./guides/hash-in-synchronous-code.md),
   [validate a digest read from storage](./guides/validate-a-stored-digest.md),
   and [hash a structured value](./guides/hash-a-structured-value.md).
-- [Testing](./testing.md): how to test code that hashes, and what this
-  package's own suite pins.
+- [Testing](./testing.md): how to test code that hashes, and the evidence
+  behind each guarantee.
 - [Troubleshooting](./troubleshooting.md): every failure this package reports,
   what causes it, and what to change.
