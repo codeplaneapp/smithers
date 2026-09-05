@@ -2,7 +2,8 @@
  * The native-structured-output toggle against a live Cerebras seat.
  *
  * Cerebras serves the Chat Completions wire shape and is the release-validation
- * seat for this check. The suite is gated on `CEREBRAS_API_KEY`; the credential is
+ * seat for this check. Live cases require `SMITHERS_LIVE_MODEL_TESTS=1` and
+ * `CEREBRAS_API_KEY`; the credential is
  * applied only by the route's auth layer and never enters a prepared request or
  * test output.
  *
@@ -72,6 +73,9 @@ const weather = ModelRequest.ToolDefinition.make({
 
 /** Skips with the missing credential named, never with a bare skipped count. */
 const requireKey = (ctx: TestContext): void => {
+  if (process.env["SMITHERS_LIVE_MODEL_TESTS"] !== "1") {
+    ctx.skip("live provider tests require SMITHERS_LIVE_MODEL_TESTS=1")
+  }
   if (apiKey === undefined || apiKey === "") ctx.skip("CEREBRAS_API_KEY is unset")
 }
 

@@ -1,8 +1,10 @@
 /**
  * The Chat Completions protocol against Google's compatible endpoint.
  *
- * The suite is gated on `GEMINI_API_KEY`; credentials are applied only by the
- * route's auth layer and never enter a prepared request or test output.
+ * Requires explicit `SMITHERS_LIVE_MODEL_TESTS=1` and `GEMINI_API_KEY`.
+ * Credentials are applied only by the route's auth layer and never enter a
+ * prepared request or test output. Merely having a credential must not turn
+ * the ordinary suite into billable provider traffic.
  */
 import { Effect, Layer, Redacted, Result, Stream } from "effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -13,6 +15,7 @@ import * as RequestExecutor from "../src/RequestExecutor.ts"
 import * as Route from "../src/Route.ts"
 
 const apiKey = process.env["GEMINI_API_KEY"]
+const live = process.env["SMITHERS_LIVE_MODEL_TESTS"] === "1"
 const MODEL_ID = "gemini-3-flash-preview"
 
 const executorLayer = Layer.provide(RequestExecutor.layer, FetchHttpClient.layer)
@@ -49,7 +52,7 @@ const collect = async (request: ModelRequest.ModelRequest): Promise<ReadonlyArra
   }
 }
 
-describe.skipIf(apiKey === undefined || apiKey === "")("OpenAIChatCompletions over Gemini", () => {
+describe.skipIf(!live || apiKey === undefined || apiKey === "")("OpenAIChatCompletions over Gemini", () => {
   it("targets the compatible chat-completions path", () => {
     const configured = Result.getOrThrow(route())
 

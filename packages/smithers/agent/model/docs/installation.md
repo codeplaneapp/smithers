@@ -1,23 +1,48 @@
 ---
 title: "Installation"
-description: "Install @smthrs/model, its runtime requirements, and its import forms."
+description: "Add @smthrs/model to a workspace package, plus its runtime requirements and import forms."
 sidebar:
   order: 1
 ---
 
-Install the package with pnpm:
+`@smthrs/model` is at 1.0.0-rc.0 and is not on the npm registry yet, so
+`npm install @smthrs/model` finds nothing. It is a workspace package of the
+[Smithers repository](https://github.com/smithersai/smithers), and you use it
+from a package in that workspace.
+
+## Get the workspace
 
 ```bash
-pnpm add @smthrs/model
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
+```
+
+## Add it to a workspace package
+
+Declare a workspace dependency from the package that calls a model:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/model": "workspace:*"
+  }
+}
+```
+
+Then install again:
+
+```bash
+pnpm install
 ```
 
 ## Requirements
 
-The package requires Node.js 22.19.0 or later, and installs `effect`,
-`@smthrs/capability`, and `@smthrs/kernel` as its own dependencies. Provider
-requests run through the kernel's permission-aware HTTP client, which checks a
-`model:call` capability for the target host and model before any bytes leave
-the process. For that contract, see the [kernel API](/api/kernel).
+- Node.js 22.19.0 or later, from the package's `engines` field.
+- `effect` 4.0.0-rc.112, declared as a peer dependency. Routes, streams, and
+  layers are all `Effect` values, so your package installs `effect` itself.
+- `@smthrs/capability` and `@smthrs/kernel` come along as dependencies of this
+  package. You do not import them to make a call.
 
 ## Import forms
 
@@ -38,11 +63,16 @@ Two subpath forms are blocked on purpose: `@smthrs/model/internal/*` and any
 nested `*/index`. `@smthrs/model/package.json` is exported for tooling that
 needs the version.
 
-## What installs alongside
+## What a running route needs
 
-A configured route executes through two services from the same dependency
-closure: `RequestExecutor` from this package and the kernel `HttpClient` from
-`@smthrs/kernel`. When you compose `Route.layer` yourself, you provide both;
-the [quickstart](./quickstart.md) shows the full layer graph, and
-[Handle failures](./guides/handle-failures.md) covers the permission errors
-the kernel can raise alongside `ModelError`.
+A configured route executes through `RequestExecutor`, and the executor needs
+an Effect `HttpClient`. `FetchHttpClient.layer` from `effect` is the plain
+one, and the [quickstart](./quickstart.md) builds the whole layer graph with
+it.
+
+Inside a Smithers run the kernel composes its permission middleware over that
+client, which checks a `model:call` capability for the target host and model
+before any bytes leave the process. That check is what raises
+`PermissionRequired` and `PermissionDenied` instead of a `ModelError`; see the
+[kernel API](/api/kernel) for the contract and
+[Handle failures](./guides/handle-failures.md) for how to branch on it.

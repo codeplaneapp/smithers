@@ -35,9 +35,26 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./AnthropicMessages": "./src/AnthropicMessages.ts",
+    "./Auth": "./src/Auth.ts",
+    "./CanonicalJson": "./src/CanonicalJson.ts",
+    "./DeferredTools": "./src/DeferredTools.ts",
+    "./Endpoint": "./src/Endpoint.ts",
+    "./Framing": "./src/Framing.ts",
+    "./Model": "./src/Model.ts",
+    "./ModelError": "./src/ModelError.ts",
+    "./ModelEvent": "./src/ModelEvent.ts",
+    "./ModelRequest": "./src/ModelRequest.ts",
+    "./OpenAIChatCompletions": "./src/OpenAIChatCompletions.ts",
+    "./OpenAIChatGPT": "./src/OpenAIChatGPT.ts",
+    "./OpenAIResponses": "./src/OpenAIResponses.ts",
+    "./Protocol": "./src/Protocol.ts",
+    "./RequestExecutor": "./src/RequestExecutor.ts",
+    "./Route": "./src/Route.ts",
+    "./ToolStream": "./src/ToolStream.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +78,98 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./AnthropicMessages": {
+        "types": "./dist/esm/AnthropicMessages.d.ts",
+        "import": "./dist/esm/AnthropicMessages.js",
+        "require": "./dist/cjs/AnthropicMessages.js"
+      },
+      "./Auth": {
+        "types": "./dist/esm/Auth.d.ts",
+        "import": "./dist/esm/Auth.js",
+        "require": "./dist/cjs/Auth.js"
+      },
+      "./CanonicalJson": {
+        "types": "./dist/esm/CanonicalJson.d.ts",
+        "import": "./dist/esm/CanonicalJson.js",
+        "require": "./dist/cjs/CanonicalJson.js"
+      },
+      "./DeferredTools": {
+        "types": "./dist/esm/DeferredTools.d.ts",
+        "import": "./dist/esm/DeferredTools.js",
+        "require": "./dist/cjs/DeferredTools.js"
+      },
+      "./Endpoint": {
+        "types": "./dist/esm/Endpoint.d.ts",
+        "import": "./dist/esm/Endpoint.js",
+        "require": "./dist/cjs/Endpoint.js"
+      },
+      "./Framing": {
+        "types": "./dist/esm/Framing.d.ts",
+        "import": "./dist/esm/Framing.js",
+        "require": "./dist/cjs/Framing.js"
+      },
+      "./Model": {
+        "types": "./dist/esm/Model.d.ts",
+        "import": "./dist/esm/Model.js",
+        "require": "./dist/cjs/Model.js"
+      },
+      "./ModelError": {
+        "types": "./dist/esm/ModelError.d.ts",
+        "import": "./dist/esm/ModelError.js",
+        "require": "./dist/cjs/ModelError.js"
+      },
+      "./ModelEvent": {
+        "types": "./dist/esm/ModelEvent.d.ts",
+        "import": "./dist/esm/ModelEvent.js",
+        "require": "./dist/cjs/ModelEvent.js"
+      },
+      "./ModelRequest": {
+        "types": "./dist/esm/ModelRequest.d.ts",
+        "import": "./dist/esm/ModelRequest.js",
+        "require": "./dist/cjs/ModelRequest.js"
+      },
+      "./OpenAIChatCompletions": {
+        "types": "./dist/esm/OpenAIChatCompletions.d.ts",
+        "import": "./dist/esm/OpenAIChatCompletions.js",
+        "require": "./dist/cjs/OpenAIChatCompletions.js"
+      },
+      "./OpenAIChatGPT": {
+        "types": "./dist/esm/OpenAIChatGPT.d.ts",
+        "import": "./dist/esm/OpenAIChatGPT.js",
+        "require": "./dist/cjs/OpenAIChatGPT.js"
+      },
+      "./OpenAIResponses": {
+        "types": "./dist/esm/OpenAIResponses.d.ts",
+        "import": "./dist/esm/OpenAIResponses.js",
+        "require": "./dist/cjs/OpenAIResponses.js"
+      },
+      "./Protocol": {
+        "types": "./dist/esm/Protocol.d.ts",
+        "import": "./dist/esm/Protocol.js",
+        "require": "./dist/cjs/Protocol.js"
+      },
+      "./RequestExecutor": {
+        "types": "./dist/esm/RequestExecutor.d.ts",
+        "import": "./dist/esm/RequestExecutor.js",
+        "require": "./dist/cjs/RequestExecutor.js"
+      },
+      "./Route": {
+        "types": "./dist/esm/Route.d.ts",
+        "import": "./dist/esm/Route.js",
+        "require": "./dist/cjs/Route.js"
+      },
+      "./ToolStream": {
+        "types": "./dist/esm/ToolStream.d.ts",
+        "import": "./dist/esm/ToolStream.js",
+        "require": "./dist/cjs/ToolStream.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -84,26 +186,26 @@
     "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

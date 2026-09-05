@@ -747,6 +747,19 @@ describe("Route.stream", () => {
     expect(JSON.stringify(error)).not.toContain("socket reset")
   })
 
+  it("reports built-in framing budget failures as non-retryable invalid provider output", async () => {
+    const error = await drainError(
+      routeOf({ protocol, framing: Framing.makeSse({ maxRecordBytes: 8 }) }),
+      executorOf(() => sseResponse(["private-response-text"]))
+    )
+    expect(error).toMatchObject({
+      code: "invalid_provider_output",
+      message: "Model stream record exceeds 8 bytes",
+      retryable: false
+    })
+    expect(JSON.stringify(error)).not.toContain("private-response-text")
+  })
+
   it("reports an oversized SSE event as a transport failure", async () => {
     const framing: Framing.Framing<string> = {
       id: "sse-too-large",

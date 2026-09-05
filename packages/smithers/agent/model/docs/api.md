@@ -477,3 +477,29 @@ must describe the bytes sent. Everything both encoders accept they encode
 identically, including an own member literally named `__proto__`. The
 [`@smthrs/canonical` encoder](/api/canonical) mirrors `JSON.stringify` and is
 the right choice everywhere that is not a provider request body.
+
+Provider framing has two finite budgets. `Framing.sse` and `Framing.ndjson`
+accept at most 4 MiB per record and 64 MiB per complete raw response, both
+inclusive. `Framing.makeSse` / `makeNdjson` accept `maxRecordBytes` and
+`maxResponseBytes` overrides; each must be a positive safe integer.
+
+NDJSON measures record UTF-8 bytes excluding its terminator. SSE measures all
+lines of one event, including ignored fields/comments, with CR/CRLF normalized
+to LF and excluding the terminating blank line. Response bytes count every raw
+byte, including delimiters. Guards run before text decoding/line buffering and
+stop pulling the producer when a budget is exceeded. The error is
+`invalid_provider_output`, with a limit-only message. A scoped producer is
+released on failure or interruption.
+
+The total response budget is the alternative aggregate argument contract:
+fragmenting tool arguments across individually valid events cannot bypass it.
+It bounds provider text admitted by built-in routes; direct standalone use of
+`ToolStream` or a custom `Framing` implementation remains caller-owned.
+Framing retains O(record budget) partial text plus the current upstream chunk;
+the transport owns chunk allocation. Protocol/transcript state can retain
+O(response budget) text, and collection consumers also own their retained output.
+
+UTF-8 decoding retains the existing replacement-character policy for malformed
+sequences. SSE drops an incomplete final event; NDJSON emits its partial final
+line so JSON decoding can report truncation. Transport failures propagate;
+retry directives in SSE do not terminate the response or discard later events.

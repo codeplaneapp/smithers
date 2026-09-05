@@ -103,9 +103,10 @@ survive a rebuilt client point at the network path: proxy, firewall, or the
 provider's reachability.
 
 **`PermissionRequired` or `PermissionDenied`.** These are kernel classes,
-not `ModelError` codes: the kernel HTTP client checks a `model:call`
-capability for the target host and model before the request leaves. Grant
-the capability through the host's permission layer; see the
+not `ModelError` codes. They appear when the kernel's permission middleware
+is composed over your HTTP client, as it is in a Smithers run: it checks a
+`model:call` capability for the target host and model before the request
+leaves. Grant the capability through the host's permission layer; see the
 [capability API](https://capability.smithers.sh/reference/api/).
 
 ## Streaming

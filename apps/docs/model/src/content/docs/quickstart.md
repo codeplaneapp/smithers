@@ -10,11 +10,11 @@ This quickstart takes you from an empty file to a folded assistant message:
 first against a stub model that runs anywhere, then against a real provider
 route. You need Node.js 22.19.0 or later.
 
-## 1. Install the package
+## 1. Get the package
 
-```bash
-pnpm add @smthrs/model
-```
+Add `@smthrs/model` as a workspace dependency of your package inside a clone
+of the [Smithers repository](https://github.com/smithersai/smithers).
+[Installation](/installation/) has the steps.
 
 ## 2. Run a stub model
 
@@ -72,6 +72,7 @@ environment first.
 ```ts
 import { Model, ModelEvent, ModelRequest, RequestExecutor, Route } from "@smthrs/model"
 import { Effect, Layer, Redacted, Result, Stream } from "effect"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 const route = Result.getOrThrow(
   Route.anthropic({ apiKey: Redacted.make(process.env["ANTHROPIC_API_KEY"] ?? "") })
@@ -91,19 +92,27 @@ const program = Effect.gen(function*() {
   return ModelEvent.settledMessage(events)
 })
 
-const modelLayer = Route.layer(route).pipe(Layer.provide(RequestExecutor.layer))
+const modelLayer = Route.layer(route).pipe(
+  Layer.provide(RequestExecutor.layer),
+  Layer.provide(FetchHttpClient.layer)
+)
+
+const result = await Effect.runPromise(Effect.provide(program, modelLayer))
 ```
 
-`Route.layer(route)` builds the `Model` implementation from the route, and
-`RequestExecutor.layer` supplies the bounded-retry executor it runs on. One
-requirement remains on that layer: the kernel `HttpClient` service, which
-checks a `model:call` capability per host and model. The Smithers runtime
-provides it; [the kernel API](https://kernel.smithers.sh/reference/api/) documents the client and the
-permission check.
+The layer graph is three deep. `Route.layer(route)` builds the `Model`
+implementation from the route. `RequestExecutor.layer` supplies the
+bounded-retry executor it runs on. `FetchHttpClient.layer` is the Effect HTTP
+client the executor sends through, and any other Effect `HttpClient` layer
+substitutes for it. Nothing else is required, so this file runs as written.
 
-With the layer fully provided, the same fold from step 2 answers the settled
-message: its content parts, its `stopReason`, and the token usage Anthropic
-reported.
+A Smithers run composes one more layer here: the kernel's permission
+middleware over the same HTTP client, which checks a `model:call` capability
+for the target host and model. See the [kernel API](https://kernel.smithers.sh/reference/api/) for that
+contract.
+
+The program answers the same fold as step 2: the settled message, its
+`stopReason`, and the token usage Anthropic reported.
 
 ## 4. Read the result
 

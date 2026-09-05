@@ -67,10 +67,9 @@ describe("CommonJS build", () => {
   it("keeps the README namespace list synchronized with the barrel", async () => {
     const index = await import("../src/index.ts")
     const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8")
-    const region = /<!-- generated:model-exports start -->([\s\S]*?)<!-- generated:model-exports end -->/.exec(readme)
-      ?.[1]
-    expect(region).toBeDefined()
-    const documented = [...(region ?? "").matchAll(/^- \*\*`([^`]+)`\*\*:/gm)].map((match) => match[1]).sort()
+    const section = readme.split(/^## /m).find((chunk) => chunk.startsWith("Public API\n"))
+    expect(section).toBeDefined()
+    const documented = [...(section ?? "").matchAll(/^- \*\*`([^`]+)`\*\*:/gm)].map((match) => match[1]).sort()
 
     expect(documented).toEqual(Object.keys(index).sort())
     expect(documented).toEqual(expectedExports)

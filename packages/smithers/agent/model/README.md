@@ -1,27 +1,73 @@
 # @smthrs/model
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://model.smithers.sh
 
-Schema-first Effect model protocols, routes, and streaming events for flows. It separates provider-neutral model requests from provider framing, authentication, endpoint selection, transport execution, and event normalization.
+Schema-first Effect model protocols, routes, and streaming events for flows. It
+separates provider-neutral model requests from provider framing,
+authentication, endpoint selection, transport execution, and event
+normalization.
 
-```sh
-npm install @smthrs/model
+Anthropic Messages, OpenAI Responses, OpenAI Chat Completions, and any server
+speaking one of those wire formats reach your code as the same typed
+`ModelEvent` values, through one service with one method:
+`model.stream(request)`.
+
+## Install
+
+The package is at 1.0.0-rc.0 and is not on the npm registry yet. It is a
+workspace package of https://github.com/smithersai/smithers, so you use it from
+a package in a clone of that repository. The steps are at
+https://model.smithers.sh/installation/.
+
+## Example
+
+```ts
+import { Model, ModelEvent, ModelRequest, RequestExecutor, Route } from "@smthrs/model"
+import { Effect, Layer, Redacted, Result, Stream } from "effect"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+
+const route = Result.getOrThrow(
+  Route.anthropic({ apiKey: Redacted.make(process.env["ANTHROPIC_API_KEY"] ?? "") })
+)
+
+const request = ModelRequest.ModelRequest.make({
+  modelId: "claude-sonnet-4-5",
+  system: [],
+  messages: [ModelRequest.Message.user("Say hello in one sentence.")],
+  tools: [],
+  params: ModelRequest.GenerationParams.make({ maxTokens: 256 })
+})
+
+const program = Effect.gen(function*() {
+  const model = yield* Model.Model
+  const events = yield* Stream.runCollect(model.stream(request))
+  return ModelEvent.settledMessage(events)
+})
+
+const modelLayer = Route.layer(route).pipe(
+  Layer.provide(RequestExecutor.layer),
+  Layer.provide(FetchHttpClient.layer)
+)
+
+Effect.runPromise(Effect.provide(program, modelLayer)).then(({ message, usage }) => {
+  console.log(message.content, usage.totalTokens)
+})
 ```
 
-Full documentation, including the failure vocabulary, retry ladder, redaction
-rules, and resource limits, is in [`docs/reference.md`](./docs/reference.md)
-and on the [documentation site](../../../../docs/pages/api/model.md). Both are
-generated from `docs/api.md` and the JSDoc under `src/`.
+`Route.layer` builds the `Model` service from a configured route,
+`RequestExecutor.layer` supplies the bounded-retry executor, and any Effect
+`HttpClient` layer carries the bytes. `Model.layer(implementation)` replaces the
+whole stack with your own provider or a scripted stub, so tests never reach the
+network.
 
 ## Public API
 
-The root entry point exports these namespaces; each is also importable from `@smthrs/model/<Namespace>`. The list below is generated from the barrel by `node packages/smithers/agent/model/scripts/docs.mjs`.
-
-<!-- generated:model-exports start -->
+The root entry point exports these namespaces. Each is also importable from
+`@smthrs/model/<Namespace>`.
 
 - **`AnthropicMessages`**: Anthropic Messages request lowering and streaming event parsing.
   `Body`, `protocol`
@@ -58,16 +104,23 @@ The root entry point exports these namespaces; each is also importable from `@sm
 - **`ToolStream`**: Pure accumulation of fragmented provider tool-call arguments.
   `OpenToolCall`, `State`, `Completed`, `EndResult`, `FlushResult`, `initial`, `start`, `delta`, `end`, `flushAborted`
 
-<!-- generated:model-exports end -->
+`@smthrs/model/package.json` is also exported. The `internal/*` and nested
+`*/index` subpaths are blocked.
 
-```ts
-import { Model } from "@smthrs/model"
-import { Effect } from "effect"
+## Reference
 
-const program = Effect.gen(function*() {
-  const model = yield* Model.Model
-  return model
-}).pipe(Effect.provide(Model.layerNoop()))
-```
+https://model.smithers.sh/reference/api/ documents every export, the failure
+vocabulary and its stable codes, the retry ladder, the redaction rules, and the
+declared resource limits.
 
-Use `Route.layer(config)` for a configured provider route or `Model.layer(implementation)` for a custom provider. `@smthrs/model/package.json` is also exported; `internal/*` and nested `*/index` subpaths are blocked.
+## Testing
+
+`pnpm --filter @smthrs/model test run` uses local fixtures by default. Merely
+having provider credentials in the environment does not enable live calls.
+
+Live integration tests consume provider quota and may incur charges. To run
+them intentionally, set `SMITHERS_LIVE_MODEL_TESTS=1` and the relevant
+`GEMINI_API_KEY` or `CEREBRAS_API_KEY`, then run
+`pnpm --filter @smthrs/model test run test/GeminiChatCompletions.integration.test.ts --coverage.enabled=false`
+or the corresponding Cerebras integration file. Keep credentials out of command
+arguments and test output. The live tier is separate from deterministic coverage.
