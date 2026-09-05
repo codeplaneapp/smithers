@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1435 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1437 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -281,6 +281,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **build-cli:** admit native tool installations to the sandbox ([05b5f32b7d](https://github.com/smithersai/smithers/commit/05b5f32b7d6ba4066f01a54590f99a26b99341db))
+- **build-cli:** reword the npx mention in the caching doc ([a609846cbf](https://github.com/smithersai/smithers/commit/a609846cbf650e853011d8e016830a26399df2dd))
 - **build-cli:** key selected executable contents ([c56ef91613](https://github.com/smithersai/smithers/commit/c56ef91613f1e0f8d8bdfd5c7c43581076f15ad9))
 - **build:** give fault suites an exclusive execution tier ([3c47b3057d](https://github.com/smithersai/smithers/commit/3c47b3057d6251dd876b084781b3dcf4c94f6dba))
 - **examples:** require explicit opt-in for live provider tests ([ce128e886f](https://github.com/smithersai/smithers/commit/ce128e886fae7c62e9cba8e5aa5eec5114748df2))
