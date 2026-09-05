@@ -1,6 +1,7 @@
 ---
 title: "@smthrs/patterns"
 description: "Higher-order patterns for agent flows: review loops, escalation ladders, sagas, merge queues, and model-authored delegation, each declared as a graph before any of it runs."
+editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/patterns/docs/README.md"
 ---
 
 `@smthrs/patterns` is a library of the shapes multi-step agent work keeps
@@ -26,7 +27,7 @@ Every pattern here answers both halves, and exports one function for each:
 
 - `make` returns a flow whose body declares the conservative topology: every
   round the bound allows, every rung of a ladder, every compensation, whether
-  or not a given run reaches it. [`@smthrs/core`](/api/core) builds that into a
+  or not a given run reaches it. [`@smthrs/core`](https://core.smithers.sh/reference/api/) builds that into a
   graph you can count, cost, and review before anything happens.
 - `run` returns an Effect that performs the branch a declaration cannot. It
   stops at the round the reviewer approved and skips what the topology
@@ -40,7 +41,7 @@ pnpm add @smthrs/patterns@next
 
 The Smithers 1.0 release candidates publish under the `next` tag. The package
 needs Node.js 22.19.0 or later. It shares its `effect` peer with the host,
-depends on [`@smthrs/core`](/api/core), and imports no Node built-ins.
+depends on [`@smthrs/core`](https://core.smithers.sh/reference/api/), and imports no Node built-ins.
 
 ## Revise a draft until a reviewer approves it
 
@@ -120,22 +121,22 @@ each step a stable identity.
 
 | Shape                                                                   | Patterns                                                                   | Reference                     |
 | ----------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------- |
-| Repeat until something is true, or until a score is high enough         | `Loop`, `Optimizer`, `ScanFixVerify`, `DriftDetector`, `Sidecar`           | [Loops](./loops.md)           |
-| Get a second opinion, then settle what it says                          | `Debate`, `Panel`, `ReviewLoop`                                            | [API reference](./api.md)     |
-| Try one strategy, then a stronger one, then ask a person                | `Escalation`                                                               | [API reference](./api.md)     |
-| Fan out, bound the concurrency, and decide what a failure interrupts    | `Bounded`, `Quarantine`, `MapReduce`, `Recursion`                          | [API reference](./api.md)     |
-| Recover, clean up, and undo                                             | `TryCatchFinally`, `Saga`                                                  | [API reference](./api.md)     |
-| Coordinate several agents as a team, with approvals and a landing order | `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, `MergeQueue` | [Teams](./teams.md)           |
-| Run a plan a model wrote, inside bounds it cannot widen                 | `Trellis`, `DelegationChain`                                               | [Delegation](./delegation.md) |
-| Wrap one flow with retries, a cache policy, or an approval              | `WithRetry`, `WithCache`, `WithApproval`, `Pattern`                        | [API reference](./api.md)     |
+| Repeat until something is true, or until a score is high enough         | `Loop`, `Optimizer`, `ScanFixVerify`, `DriftDetector`, `Sidecar`           | [Loops](/loops/)           |
+| Get a second opinion, then settle what it says                          | `Debate`, `Panel`, `ReviewLoop`                                            | [API reference](/reference/api/)     |
+| Try one strategy, then a stronger one, then ask a person                | `Escalation`                                                               | [API reference](/reference/api/)     |
+| Fan out, bound the concurrency, and decide what a failure interrupts    | `Bounded`, `Quarantine`, `MapReduce`, `Recursion`                          | [API reference](/reference/api/)     |
+| Recover, clean up, and undo                                             | `TryCatchFinally`, `Saga`                                                  | [API reference](/reference/api/)     |
+| Coordinate several agents as a team, with approvals and a landing order | `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, `MergeQueue` | [Teams](/teams/)           |
+| Run a plan a model wrote, inside bounds it cannot widen                 | `Trellis`, `DelegationChain`                                               | [Delegation](/delegation/) |
+| Wrap one flow with retries, a cache policy, or an approval              | `WithRetry`, `WithCache`, `WithApproval`, `Pattern`                        | [API reference](/reference/api/)     |
 
-The [module index](./modules.md) lists all 28 modules with their import
+The [module index](/modules/) lists all 28 modules with their import
 specifiers.
 
 ## How this fits with @smthrs/flows
 
-What `make` returns is an [`@smthrs/core`](/api/core) flow: inert data that
-describes work. [`@smthrs/flows`](/api/flows) is the package that runs work for
+What `make` returns is an [`@smthrs/core`](https://core.smithers.sh/reference/api/) flow: inert data that
+describes work. [`@smthrs/flows`](https://flows.smithers.sh/reference/api/) is the package that runs work for
 real, one barrel over the durable flow engine, its journal, its run store, its
 step cache, and its sandboxing. Reach for this package to say what the shape of
 the work is, and for that one to execute the work and survive a crash while it
@@ -144,8 +145,8 @@ happens.
 The two meet at execution. A `run` half is an ordinary Effect, so it runs
 inside a durable step like any other Effect. When each round has to survive a
 crash on its own, hand the round to the trampoline `@smthrs/flows` re-exports
-from [`@smthrs/flow`](/api/flow) instead of unrolling the loop inside one
-execution: [the durable round recipe](./loops.md#the-durable-round-recipe)
+from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/) instead of unrolling the loop inside one
+execution: [the durable round recipe](/loops/#the-durable-round-recipe)
 shows both forms side by side.
 
 `@smthrs/patterns` is not re-exported by `@smthrs/flows`, and neither is
@@ -154,21 +155,21 @@ barrel. The patterns compose the plan-time data model alone, which is what lets
 a linter, a catalog server, a browser tab, or a unit test declare one and read
 it back with no engine anywhere in the tree.
 
-Both sit under the `smithers` command line tool, [`@smthrs/cli`](/api/cli),
+Both sit under the `smithers` command line tool, [`@smthrs/cli`](https://cli.smithers.sh/reference/api/),
 which runs, resumes, and inspects flows from a terminal. If you arrived here
 from a dependency list and want the product rather than one of its libraries,
 start there.
 
 ## Where to go next
 
-- [API reference](./api.md): the two halves of a pattern, string identity and
+- [API reference](/reference/api/): the two halves of a pattern, string identity and
   ownership, the three error types, and every module the pages below do not
   cover.
-- [Module index](./modules.md): all 28 modules, their import specifiers, and
+- [Module index](/modules/): all 28 modules, their import specifiers, and
   where each one is documented.
-- [Loops](./loops.md): `Loop`, `Optimizer`, `ScanFixVerify`, `DriftDetector`,
+- [Loops](/loops/): `Loop`, `Optimizer`, `ScanFixVerify`, `DriftDetector`,
   and `Sidecar`, plus why a declaration cannot branch on a value.
-- [Teams](./teams.md): the six patterns that coordinate several agents, their
+- [Teams](/teams/): the six patterns that coordinate several agents, their
   approval gates, and their landing order.
-- [Delegation](./delegation.md): `Trellis` and `DelegationChain`, the two
+- [Delegation](/delegation/): `Trellis` and `DelegationChain`, the two
   patterns that admit and execute a plan a model wrote.

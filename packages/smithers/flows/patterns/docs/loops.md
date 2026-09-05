@@ -1,5 +1,10 @@
-This page is the public API reference for the loop-shaped patterns:
-[`Loop`](#loop), [`Optimizer`](#optimizer), [`ScanFixVerify`](#scanfixverify),
+---
+title: "Loops"
+description: "Loop, Optimizer, ScanFixVerify, DriftDetector, and Sidecar: the @smthrs/patterns shapes whose round count is a runtime fact, and how each one declares its worst case in advance."
+---
+
+This page covers the loop-shaped patterns: [`Loop`](#loop),
+[`Optimizer`](#optimizer), [`ScanFixVerify`](#scanfixverify),
 [`DriftDetector`](#driftdetector), and [`Sidecar`](#sidecar). They all answer
 one question: how does a plan express work whose round count is a runtime fact.
 They all answer it the same way.
@@ -10,7 +15,7 @@ Every pattern here exports `make` and `run`.
 
 `make` returns a `Flow` whose body is the **conservative topology**: every
 iteration the bound allows is declared, whether or not a run reaches it. Core
-plans a body by evaluating `Node.andThen` builders once against symbolic values
+plans a body by evaluating `Node.bindPlanned` builders once against symbolic values
 (`@smthrs/core/Graph.build`), so a declaration cannot branch on a value it does
 not have yet. Declaring the worst case is the honest answer: capability
 analysis, write-conflict analysis, and cost estimation all see every call a run
@@ -98,8 +103,9 @@ call. A Ralph loop that reaches its bound returns the last value with
 `exhausted: true`; pass `onMaxReached: "fail"` for a run that should fail
 instead.
 
-`continueAsNewEvery` has no equivalent here. Bounding retained history is a
-property of the durable round, described next, not of the pattern.
+Nothing here bounds how much history a run accumulates, because every iteration
+lives in one execution. Bounding retained history is a property of
+[the durable round](#the-durable-round-recipe), not of the pattern.
 
 ## Optimizer
 
@@ -407,8 +413,8 @@ const Fix: FixFlow = Flow.make("repo/fix", {
 
 `Flow`, `Action`, and `Flow.done` come from `@smthrs/flow`; `Node.branch` comes
 from `@smthrs/plan`. The alias on `Fix` is what lets the body name the flow it
-recurses into, the same way `docs/pages/examples/real-world.md` declares
-`ImplementUntilLgtmFlow`.
+recurses into: a flow whose body calls itself needs its own type before the
+constructor returns.
 
 `maxRounds` bounds one trampoline lineage. Exceeding it terminates the lineage
 with a `MaxRoundsExceeded` defect in the execution result; it is not a typed

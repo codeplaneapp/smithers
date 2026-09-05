@@ -1,20 +1,58 @@
 # @smthrs/patterns
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
-**Documentation:** https://patterns.smithers.sh
+**Documentation:** https://smithers-patterns.smithers.sh
 
-Higher-order flow patterns and decorators for flows. It composes `@smthrs/core` alone and imports no Node built-ins.
+Higher-order flow patterns and decorators for flows: review loops, escalation
+ladders, sagas, merge queues, check suites, and model-authored delegation. Every
+pattern declares the work as a graph before any of it runs, so a budget, a
+reviewer, or a scheduler can read the worst case in advance. It composes
+`@smthrs/core` alone and imports no Node built-ins.
 
 ```sh
-npm install @smthrs/patterns
+pnpm add @smthrs/patterns@next
 ```
 
-## Public API
+The Smithers 1.0 release candidates publish under the `next` tag. The package
+needs Node.js 22.19.0 or later and shares its `effect` peer with the host.
 
-<!-- generated:patterns-surface start -->
+## Produce, review, revise
+
+```ts
+import { ReviewLoop } from "@smthrs/patterns"
+import * as Effect from "effect/Effect"
+
+interface Review {
+  readonly approved: boolean
+  readonly note: string
+}
+
+// Your own two model calls. Each returns an Effect.
+declare const draft: (goal: string) => Effect.Effect<string>
+declare const critique: (notes: string) => Effect.Effect<Review>
+
+const result = await Effect.runPromise(
+  ReviewLoop.run("Write the release notes for 1.0.", {
+    maxRounds: 3,
+    produce: draft,
+    review: critique,
+    revise: ({ output, review }) => draft(`${output}\n\nThe reviewer asked for: ${review.note}`)
+  })
+)
+```
+
+`run` returns the approved value, or
+`{ output, review, approved: false, exhausted: true }` when every round is
+spent. The same loop declared instead of executed, `ReviewLoop.make`, is a
+graph of six calls you can count and cost before anything happens.
+
+The full API reference lives at
+[smithers-patterns.smithers.sh/reference/api](https://smithers-patterns.smithers.sh/reference/api/).
+
+## Public API
 
 The root entry point exports every public module as a namespace; each is also importable from its listed subpath.
 
@@ -49,20 +87,8 @@ The root entry point exports every public module as a namespace; each is also im
 | `Sidecar`         | `@smthrs/patterns/Sidecar`         | Run a cheap shadow beside the primary and measure the gap.                                                                                                         | `MakeOptions`, `Scores`, `Delta`, `Shadow`, `Result`, `RuntimeOptions`, `delta`, `make`, `run`                                                                                                                                           |
 | `Supervisor`      | `@smthrs/patterns/Supervisor`      | Supervisor pattern: one boss plans, workers execute in parallel, the boss reviews, and only the tasks the review calls retriable are re-delegated.                 | `Task`, `Plan`, `MakeOptions`, `Outcome`, `RuntimeOptions`, `Completed`, `Exhausted`, `make`, `run`                                                                                                                                      |
 
-<!-- generated:patterns-surface end -->
-
-```ts
-import { Debate } from "@smthrs/patterns"
-
-const debate = Debate.make({
-  proponent,
-  opponent,
-  judge,
-  rounds: 2
-})
-```
-
-`@smthrs/patterns/package.json` is also exported. `internal/*` and nested `*/index` subpaths are not public.
+`@smthrs/patterns/package.json` is also exported. `internal/*` and nested
+`*/index` subpaths are not public.
 
 ## Declaration size
 
@@ -83,16 +109,16 @@ Unicode normalization. Every `make`, `run`, and decorator factory snapshots
 its options at the call, so a later edit to the caller's objects does not
 change a declaration or a run. Flows, callbacks, inputs, and the values
 callbacks return stay the caller's references. The full contract is in
-[Identity and ownership](https://patterns.smithers.sh/reference/api/#identity-and-ownership).
+[Identity and ownership](https://smithers-patterns.smithers.sh/reference/api/#identity-and-ownership).
 
-## What `WithCache` declares today
+## Where a `WithCache` policy takes effect
 
 `WithCache` writes its policy under the annotation identifier
-`@smthrs/flow/Action/CachePolicy`, which is the key `@smthrs/engine-store` reads
-at dispatch. The durable engine executes `@smthrs/flow` actions, and flows HEAD
-has no bridge from a `@smthrs/core` `Flow.make` descriptor to that interpreter,
-so on a core flow the policy is a declaration: it renames the wrapper, enters its
-captured key material, and travels with the flow until the bridge lowers it onto
-the dispatched action. For a policy the engine acts on now, declare it on the
-action with `CacheEnvironment.withCache(action, policy)` from `@smthrs/flow`. See
-[Step cache](https://step-cache.smithers.sh/reference/api/).
+`@smthrs/flow/Action/CachePolicy`, the key the durable engine reads when it
+dispatches a step. On a `@smthrs/core` flow the policy is a declaration: it
+renames the wrapper, enters the flow's key material, and travels with the flow.
+To set the policy the engine acts on when it dispatches, declare it on the
+action itself with `CacheEnvironment.withCache(action, policy)` from
+[`@smthrs/flow`](https://flow.smithers.sh), and see
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for what
+the engine does with it.

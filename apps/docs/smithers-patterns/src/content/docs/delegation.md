@@ -1,16 +1,17 @@
 ---
 title: "Delegation"
-description: "Higher-order flow patterns and decorators for flows. It composes @smthrs/core alone and imports no Node built-ins."
+description: "Trellis and DelegationChain: how @smthrs/patterns admits, bounds, and executes a plan a model wrote, and what a refusal tells the plan's author."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/patterns/docs/delegation.md"
 ---
 
-This page is the public API reference for the two delegation patterns in
-[`@smthrs/patterns`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/patterns/README.md): `Trellis`, which runs a
-plan a model authored, and `DelegationChain`, which is the fixed six-stage chain
-built from `Trellis` and the other patterns in the package.
+A model can write a better plan for a task than you can write in advance. It
+can also write one that costs a thousand calls. The two patterns on this page
+are how you take the first without the second.
 
-Both modules compose `@smthrs/core` alone and import no Node built-ins. The
-package makes no browser-bundling claim.
+`Trellis` runs a plan a model authored, inside an envelope the plan cannot
+widen. `DelegationChain` is the fixed six-stage chain built from `Trellis` and
+the other patterns here: refine, plan, derisk, execute, review, settle. Both
+compose [`@smthrs/core`](https://core.smithers.sh/reference/api/) alone and import no Node built-ins.
 
 ## Why a plan needs two halves
 
@@ -162,9 +163,9 @@ bound is refused `fanout_exceeded`. Raise `maxDepth` to widen all three at once.
    maxDepth, fanout: maxDepth }`.
 4. Each leaf climbs the tier ladder weakest first. A tier spends `maxAttempts`
    retries before the next tier is admitted, and a tier whose result `review`
-   rejects escalates exactly the way a tier that failed does. The runtime now
-   consumes `Escalation.run`'s reworked `Reached`/`Exhausted` result directly:
-   only a reached attempt contributes its output, while exhaustion becomes
+   rejects escalates exactly the way a tier that failed does. The runtime
+   consumes `Escalation.run`'s `Reached` and `Exhausted` results directly:
+   only a reached attempt contributes its output, and exhaustion becomes
    `leaf_failed` before the leaf can reach settlement.
 5. `review` sees the assembled leaf outputs, then `settle` receives the prompt,
    goal, plan, leaf outputs in plan order, the review, and whether derisk was
@@ -186,7 +187,7 @@ loop unrolled to `maxDeriskRounds`, then `maxDepth` tier ladders, then review
 and settle. `DelegationChain.bound(bounds)` is the flow-call count that
 declaration contains:
 
-```
+```text
 4 + 2 * maxDeriskRounds + maxDepth * (3 + 2 * tierOrder.length)
 ```
 
@@ -211,7 +212,8 @@ call per rung, one review per rung, weakest first.
 round per authored plan instead, because a flow body is built before it runs and
 can only read values it already holds. The plan has to arrive as a payload.
 
-`examples/src/33-delegation-trellis.ts` is that recipe end to end:
+[Delegation trellis](https://smithers.sh/docs/examples/33-delegation-trellis/) is that recipe end
+to end:
 
 1. The first round calls the author step and hands the result off with
    `RunPlan.to({ goal, plan })`. Its body never looks inside the plan, because at
@@ -228,4 +230,4 @@ resumes at a round boundary.
 
 `@smthrs/memory` wraps a trellis so every generated leaf inherits one memory
 namespace, recall budget, and retention rule. See
-[`MemoryTrellis`](https://memory.smithers.sh/reference/api/#memory-policies).
+[`MemoryTrellis`](https://memory.smithers.sh/reference/api/#memorytrellis).

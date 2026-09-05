@@ -1,4 +1,9 @@
-This page is the reference for the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [the API reference](./api.md).
+---
+title: "Teams"
+description: "Supervisor, Intervene, CheckSuite, Kanban, Runbook, and MergeQueue: the @smthrs/patterns shapes that coordinate several agents, gate the risky steps, and fix a landing order."
+---
+
+This page covers the six `@smthrs/patterns` modules that coordinate several agents as a team: `Supervisor`, `Intervene`, `CheckSuite`, `Kanban`, `Runbook`, and `MergeQueue`. They build on the composition primitives `Pattern`, `WithApproval`, and `MapReduce`, which are in [the API reference](./api.md).
 
 Every module here follows the two-surface shape the package uses everywhere:
 
@@ -7,7 +12,7 @@ Every module here follows the two-surface shape the package uses everywhere:
 | `make(options)`       | A `Flow` whose body is a conservative plan-time topology over `@smthrs/core` `Flow`/`Node` | Planning, graph inspection, step keys, cost estimates |
 | `run(input, options)` | An `Effect` that performs the value-dependent branching                                    | Execution                                             |
 
-`make` declares a superset of any single execution. Graph planning evaluates a `Node.andThen` builder once against a symbolic value, so a loop or a short circuit that depends on a real result cannot narrow the plan. `run` performs that narrowing. The two surfaces agree on structure, not on how many calls a particular execution makes.
+`make` declares a superset of any single execution. Graph planning evaluates a `Node.bindPlanned` builder once against a symbolic value, so a loop or a short circuit that depends on a real result cannot narrow the plan. `run` performs that narrowing. The two surfaces agree on structure, not on how many calls a particular execution makes.
 
 Options that change behavior are declared through `Node.capture`, so two plans that differ only in a bound have different step identity.
 
@@ -110,7 +115,7 @@ const suite = CheckSuite.make({
 })
 ```
 
-`checks` is a record keyed by check id, the shape the old `<CheckSuite>` props accepted, so two checks cannot share an id. The checks run in the record's key order, which is the order the keys were written unless an id looks like an array index: JavaScript orders those first.
+`checks` is a record keyed by check id, so two checks cannot share an id. The checks run in the record's key order, which is the order the keys were written unless an id looks like an array index: JavaScript orders those first.
 
 ### Verdict strategies
 
@@ -142,7 +147,7 @@ A check that succeeds but returns a failure row is always listed in `failed`. It
 
 ### Command checks
 
-`CheckSuite` runs flows, not commands. A command check is a `@smthrs/std` shell flow, [`Bash`](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/std/src/Bash.ts) or [`ShellCommand`](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/std/src/ShellCommand.ts), composed under `CheckSuite` with a row that carries `ok`, `passed`, or `error` so `CheckSuite.passed` can classify it. The timeout, the output capture, and the exit-code reading belong to that std flow. `CheckSuite` adds the concurrency bound, the declaration order, and the verdict. A suite of command checks therefore reaches parity only once the std flow it wraps supplies the timeout and output limits the command needs. The old `<CheckSuite>` spawned each command check with a 10-minute default timeout and captured stdout and stderr into a 16 MiB tail buffer each, keeping the most recent bytes and letting the command run on so its exit code stayed trustworthy. A port composing `@smthrs/std` `Bash` under `CheckSuite` must configure those two limits on the std flow to match.
+`CheckSuite` runs flows, not commands. A command check is a shell flow from [`@smthrs/std`](/api/std), `Bash` or `ShellCommand`, composed under `CheckSuite` with a row that carries `ok`, `passed`, or `error` so `CheckSuite.passed` can classify it. The timeout, the output capture, and the exit-code reading belong to that shell flow, and you configure them there. `CheckSuite` adds the concurrency bound, the declaration order, and the verdict.
 
 ## `Kanban`
 
@@ -182,7 +187,7 @@ A column joins its batch with `Quarantine.all` under the `quarantine` policy: ev
 
 A column rejects an item by failing. The item is dropped from the board and listed in `failed`; the other items keep moving, and the column that rejected it is named. A rejected item never reaches a later column, so `board` has no row for an item the first column rejected.
 
-`maxIterations` is the number of passes the board runs over the same items, and defaults to one. A 0.x board reran its columns five times by default; a port that relied on that number passes `maxIterations: 5`. `until` stops the board early, after the pass whose result satisfies the predicate, and requires `maxIterations`, because a predicate that never holds would otherwise run forever. Each pass starts from an empty board, and the returned board is the last pass's.
+`maxIterations` is the number of passes the board runs over the same items, and defaults to one. `until` stops the board early, after the pass whose result satisfies the predicate, and requires `maxIterations`, because a predicate that never holds would otherwise run forever. Each pass starts from an empty board, and the returned board is the last pass's.
 
 `onComplete` runs exactly once after the final pass with `{ items, board }`. Its failure is the run's failure. `run` refuses the same empty item list and duplicate column names that `make` refuses.
 
@@ -254,7 +259,7 @@ const queue = MergeQueue.make(
 
 `MergeQueue.ordered(members, priority)` resolves each member's effective priority and sorts the queue: descending priority first, then declaration order for members of equal priority. The order is a function of the declaration alone, never of which member became ready first.
 
-A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1000`. That is the priority the old `<MergeQueue>` component gave its descendants, so a queue that relied on that default keeps its ordering.
+A member without its own priority gets `MergeQueue.DefaultPriority`, which is `1000`.
 
 ### Declaration
 
@@ -277,4 +282,4 @@ Each call carries `{ id, position, input }`, so a built graph names each member'
 
 ## Worked example
 
-[`examples/src/32-intervene.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/32-intervene.ts) runs `Intervene` over `@smthrs/std`: the declaration names `Read.flow` and `Edit.flow` and inherits their capabilities and effect envelopes, and the execution runs their implementations, `Read.run` and `Edit.run`, over a real temp directory. Its test checks both surfaces. On the declaration it checks that the built graph puts the approval ahead of the write and that a dry-run graph has no write in it. On the execution it checks that an approved run rewrites the file and that a denial fails before the edit.
+[Intervene on a real workspace](/docs/examples/32-intervene/) runs `Intervene` over [`@smthrs/std`](/api/std): the declaration names `Read.flow` and `Edit.flow` and inherits their capabilities and effect envelopes, and the execution runs their implementations, `Read.run` and `Edit.run`, over a real temp directory. Both surfaces are exercised there: the built graph puts the approval ahead of the write, and a dry-run graph holds no write at all, while the execution rewrites the file once the approval passes and fails before the edit when it is denied.

@@ -1,15 +1,17 @@
 ---
 title: "API reference"
-description: "Higher-order flow patterns and decorators for flows. It composes @smthrs/core alone and imports no Node built-ins."
+description: "The public API of @smthrs/patterns: the two halves every pattern exports, what it copies and compares, the three error types, and each module the other pages do not cover."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/patterns/docs/api.md"
 ---
 
-This page is the public API reference for the higher-order flow patterns:
-decorators that wrap one flow, and containers that compose several. The package
-composes `@smthrs/core` alone and imports no Node built-ins. Nothing in it
-reaches the engine, the journal, or a host capability. The package has no entry
-in the browser gate, so this page makes no claim about bundling it for a
-browser.
+This page is the API reference for the higher-order flow patterns: decorators
+that wrap one flow, and containers that compose several. The package composes
+[`@smthrs/core`](https://core.smithers.sh/reference/api/) alone and imports no Node built-ins. Nothing in it
+reaches the engine, the journal, or a host capability.
+
+The loop, team, and delegation patterns have their own pages:
+[Loops](/loops/), [Teams](/teams/), and [Delegation](/delegation/).
+The [module index](/modules/) lists every module and where it is documented.
 
 ## The two halves of a pattern
 
@@ -149,7 +151,80 @@ chain climbs its tier ladder and what a repair looks like.
 | `derisk_failed`  | `root`   | none                                                                                                      | A `PatternError` was raised inside the derisk loop; the message is that error's                                                              |
 | `leaf_failed`    | the leaf | The per-tier attempts, `{ tier, error }` or `{ tier, rejected }`, or the `PatternError` the ladder raised | No tier settled the leaf within `maxAttempts` attempts each                                                                                  |
 
-<!-- generated:modules -->
+## `Pattern`
+
+`Pattern.slot({ input, output, default? })` declares a flow-valued hole: two
+schemas, and optionally a default flow to fill it. The default is checked
+against the schemas at the call, and the slot comes back as a frozen copy.
+`Pattern.bind(slot, supplied?)` resolves the slot to the supplied flow or the
+default, applies the same check, and raises `missing_slot` when there is
+neither and `invalid_decorator` when the schemas do not fit.
+
+`Pattern.decorate(flow, decorator)` applies a decorator and re-declares the
+result under the wrapped flow's schemas and its authority ceiling: capabilities
+are intersected with the wrapped flow's, and a decorator result that widens the
+wrapped flow's effect envelope is refused with `envelope_conflict`. The
+decorator call becomes part of declaration identity, so a wrapped flow and a
+bare one are different steps. `Pattern.decorateAll(flow, decorators)` applies a
+list left to right, which puts the last decorator outermost.
+`Pattern.clipped(template, supplied)` reports what a template excludes from a
+supplied flow: the capabilities, reads, writes, mode, and tier that the
+re-declaration removes.
+
+The three `With*` modules are this combinator with a policy attached.
+
+## `WithRetry`
+
+`WithRetry.withRetry(flow, { attempts, backoff?, nonRetryable? })` wraps a flow
+in a retry declaration, and `WithRetry.make(options)` is the same thing as a
+decorator you can pass to `Pattern.decorateAll`. The wrapper preserves the
+wrapped flow's graph and records the policy as declaration identity, so two
+plans that differ only in an attempt budget are different declarations.
+`WithRetry.retryEffect(effect, options)` performs the retry at the Effect
+boundary, because a retry has no truthful form as a success-only `Node.andThen`
+chain.
+
+`attempts` is the total attempt count and must be a positive safe integer.
+`backoff` is `{ initialMs, factor, maxMs }`, and the delay before attempt
+`n + 1` is `min(initialMs * factor^(n - 1), maxMs)`. There is no jitter,
+because a plan built twice has to describe the same waits. `nonRetryable` lists
+error `_tag` values that end the sequence the first time one appears, whatever
+the budget says. Fiber interruption is never retried, so a cancelled run stays
+cancelled. The option names mirror `@smthrs/flow` `RetryPolicy`, so a pattern
+policy and an engine policy translate one to one. See
+[Retries](https://smithers.sh/docs/concepts/retries/).
+
+## `WithApproval`
+
+`WithApproval.withApproval(flow, { reason, approval })` runs an approval flow
+ahead of the flow it gates, calling it with `{ input, reason, scope }`, where
+`scope` is the string `"run"`. The approval flow must declare its output as
+`WithApproval.Approved`, the literal `"approved"`. A denial therefore cannot
+decode, and it fails on the typed schema-error channel before the gated flow
+starts, rather than arriving as a boolean the gated flow is trusted to honor.
+An empty `reason` is refused with `invalid_decorator`. `WithApproval.make`
+is the decorator form.
+
+## `WithCache`
+
+`WithCache.withCache(flow, { ttlMs?, scope?, version? })` declares how long a
+recorded result stays servable (`ttlMs`, counted from when it was recorded),
+how far it may travel (`scope`, one of `"run"`, `"flow"`, and `"shared"`), and
+which revision of the body produced it (`version`). Every field is optional and
+every default is the behavior the composition already had. All three are
+declaration identity, so a wrapper under one policy cannot serve a row recorded
+under another, and `version` is what you change when the inputs stayed the same
+but their meaning did not.
+
+`WithCache.CachePolicyAnnotation` is the annotation the wrapper writes, under
+the identifier `@smthrs/flow/Action/CachePolicy`, which is the key
+`@smthrs/engine-store` reads at dispatch. `WithCache.policyOf(annotations)`
+reads it back. The durable half is `ttlMs` and `scope`; `version` never reaches
+dispatch, because it has already done its work in the key. A policy declared
+here travels with the flow and enters its key material. To set the policy the
+durable engine acts on when it dispatches a step, declare it on the action
+itself with `CacheEnvironment.withCache` from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/), and
+see [`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/) for what the engine does with it.
 
 ## `Bounded`
 
@@ -179,6 +254,58 @@ interrupt siblings. `Quarantine.run` is the Effect form, and
 `isSucceeded` and `isQuarantined` narrow joined entries. Typed failures are
 isolated; defects and interruptions still propagate.
 
+## `MapReduce`
+
+`MapReduce.make({ map, reduce, concurrency, onEmpty })` declares one map call
+per shard, batched into `Node.all` groups of `concurrency` with the batches
+sequenced, then one reduce call. The flow input is `{ shards }`, and the array
+has to be a literal value available while the graph builds, because a
+declaration cannot count shards it does not hold. Members are keyed by ordinal
+(`shard-0`, `shard-1`), which makes the reduce input independent of the order
+the workers finish in.
+
+`MapReduce.run(input, options)` maps with `Effect.forEach` at `concurrency` and
+reduces in shard order. `map` receives `{ shard, index, input }` and `reduce`
+receives `{ input, mapped }`.
+
+`onEmpty` decides what an empty shard list means: `"reduce"` calls the reducer
+with an empty array, `"succeed"` returns an empty array without calling it, and
+`"fail"` reports `exhausted`. `concurrency` must be a positive safe integer.
+
+## `Recursion`
+
+`Recursion.recurse({ child, fuel, depth, fanout, parent? })` expands a tree of
+work into a declared graph. A plain value is a leaf; a `{ input, children }`
+branch expands recursively. Fuel is shared by the whole tree, depth is
+decremented per level, and every child list is checked against fan-out before
+any child is admitted. Each child call receives `{ input, envelope }`, where
+the envelope carries the fuel left, the depth left, and the fan-out bound, so a
+child can attenuate what it was given.
+
+The tree has to be a value you already hold, because the expansion happens
+while the graph is built. For a tree a model writes while the run is in flight,
+use [`Trellis`](/delegation/#trellis), which validates a plan before
+compiling it.
+
+A nested call may narrow its parent envelope and may not widen it, and `parent`
+is the envelope it is checked against. Every bound must be a positive safe
+integer. Exhausting fuel, nesting past `depth`, or exceeding `fanout` raises
+`recursion_bound`.
+
+## `Debate`
+
+`Debate.make({ proponent, opponent, judge, rounds })` declares `rounds`
+alternations of proponent then opponent, then one judge call over the whole
+transcript. `rounds` is expanded while the flow is declared, so the call count
+is a fact about the declaration rather than about a run.
+
+`Debate.run(input, options)` supplies the accumulated transcript instead:
+`proponent` receives `{ input, transcript, round }`, `opponent` receives that
+plus `proponent`, and `judge` receives `{ input, transcript }`. The judge's
+value is the result. Each turn is frozen as it is appended and each callback
+gets a frozen snapshot of the transcript, while the payloads inside a turn stay
+the caller's own references. `rounds` must be a positive safe integer.
+
 ## `Panel`
 
 `Panel.make({ panelists, moderator, roles?, concurrency? })` declares one call
@@ -186,6 +313,24 @@ per panelist, then the moderator over `{ input, opinions }`. A role named in
 `roles` is passed to that panelist as `{ input, role }` and enters its key
 material, so changing a role changes the declaration. `Panel.run` keys opinions
 by panelist name whatever order they complete in.
+
+## `ReviewLoop`
+
+`ReviewLoop.make({ produce, review, revise, maxRounds })` declares one produce
+call, then up to `maxRounds` reviews with a revise call between each pair:
+`maxRounds: 3` declares six calls. `ReviewLoop.run(input, options)` produces
+once, then reviews and revises until a review is accepted, and stops at that
+round.
+
+`review` receives `(output, round)` and `revise` receives
+`{ output, review, round }`. `ReviewLoop.accepted` is the acceptance reader:
+`true`, `"approved"`, `{ approved: true }`, or `{ accepted: true }`. A run that
+spends every round returns `{ output, review, approved: false, exhausted: true }`
+rather than failing, so the caller decides what an unapproved result is worth.
+`maxRounds` must be a positive safe integer.
+
+Use `ReviewLoop` when one artifact is revised in place. When every issue needs
+its own fix, use [`ScanFixVerify`](/loops/#scanfixverify).
 
 ## `Escalation`
 
@@ -243,11 +388,11 @@ behind it still run. See
 
 ## A worked release
 
-`examples/src/30-failure-control.ts` runs one release through five of these
-patterns: bounded checks, a quarantined flake, an escalating fixer, a saga that
-unwinds a half-finished deploy, and a lock the finalizer always releases. Its
-first assertion reads the declaration alone, before anything runs, to show the
-compensations in reverse order.
+[Failure control](https://smithers.sh/docs/examples/30-failure-control/) runs one release through
+five of these patterns: bounded checks, a quarantined flake, an escalating
+fixer, a saga that unwinds a half-finished deploy, and a lock the finalizer
+always releases. Its first assertion reads the declaration alone, before
+anything runs, to show the compensations in reverse order.
 
 ## Declaration size
 
@@ -263,9 +408,10 @@ unrolling it in `make`.
 
 ## Entry points
 
-The root exports each module as a namespace; every module is also importable as
-`@smthrs/patterns/<Module>`. `internal/*` and nested `*/index` subpaths are
-private.
+The root exports each module as a namespace, and every module is also
+importable as `@smthrs/patterns/<Module>`. The `internal/*` and nested
+`*/index` subpaths are private. The [module index](/modules/) lists all 28
+modules with their specifiers.
 
 `@smthrs/core` supplies `Flow`, `Node`, and `Graph`. See
 [Flows, actions, and plans](https://smithers.sh/docs/concepts/flows-actions-plans/) for what a built

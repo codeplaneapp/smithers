@@ -6,7 +6,7 @@ import { defineDocsSite } from "@smithers/docs-shared/starlight"
 
 export default defineDocsSite({
   starlight,
-  slug: "patterns",
+  slug: "smithers-patterns",
   title: "@smthrs/patterns",
   description: "Higher-order flow patterns and decorators for flows. It composes @smthrs/core alone and imports no Node built-ins.",
   sourceDir: "packages/smithers/flows/patterns",
