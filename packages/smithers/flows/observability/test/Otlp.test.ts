@@ -94,6 +94,33 @@ describe("Otlp", () => {
       expect(attributes["service.version"]).toBe(Otlp.defaultServiceVersion)
     }))
 
+  it.effect("preserves a collector base path for every signal and sends auth in headers", () =>
+    Effect.gen(function*() {
+      const collector = recordingFetch()
+      yield* runExporting(
+        Effect.gen(function*() {
+          yield* Effect.void.pipe(Effect.withSpan("base-path-span"))
+          yield* Effect.logInfo("base path record")
+          yield* Metric.update(Metric.counter("base_path_metric"), 1)
+        }),
+        Otlp.layerFetch({
+          baseUrl: "http://collector.invalid:4318/tenant/9//",
+          headers: { authorization: "Bearer synthetic-test-token" }
+        }),
+        collector.fetch
+      )
+      expect([...new Set(collector.requests.map((request) => new URL(request.url).pathname))].sort()).toEqual([
+        "/tenant/9/v1/logs",
+        "/tenant/9/v1/metrics",
+        "/tenant/9/v1/traces"
+      ])
+      for (const request of collector.requests) {
+        expect(request.headers.get("authorization")).toBe("Bearer synthetic-test-token")
+        expect(new URL(request.url).search).toBe("")
+        expect(new URL(request.url).hash).toBe("")
+      }
+    }))
+
   it.effect("prefers the caller's service identity and resource attributes", () =>
     Effect.gen(function*() {
       const collector = recordingFetch()

@@ -22,7 +22,7 @@ OpenTelemetry SDK. `@smthrs/observability/package.json` is exported.
 | `@smthrs/observability/NodeOtel`    | [src/NodeOtel.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/src/NodeOtel.ts)       | Node     |
 | `@smthrs/observability/BrowserOtel` | [src/BrowserOtel.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/src/BrowserOtel.ts) | browser  |
 
-The package is tested with `effect@4.0.0-rc.108`. Layers, services, and schemas
+The package is tested with `effect@4.0.0-rc.112`. Layers, services, and schemas
 are Effect constructs: a `Layer` provides services, a scoped layer releases on
 scope close, and a schema decodes to an `Effect`.
 
@@ -48,8 +48,8 @@ interface Options {
 ```
 
 - `baseUrl`: the collector base URL, for example `http://localhost:4318`. It
-  must be an absolute `http:` or `https:` URL without credentials and free of
-  spaces and control characters; anything else fails layer acquisition with
+  must be an absolute `http://` or `https://` URL without credentials, query,
+  fragment, backslashes, spaces, or controls; anything else fails acquisition with
   `Endpoint.InvalidExporterEndpoint` on path `baseUrl`.
 - `serviceName`, `serviceVersion`: the `service.name` and `service.version`
   resource attributes. Default to `defaultServiceName` and
@@ -120,9 +120,8 @@ const defaultServiceVersion: string // "1.0.0-rc.0"
 ```
 
 The `service.version` attribute installed when the caller supplies none. It
-mirrors this package's release version. A published package cannot read its own
-manifest on every runtime it supports, so the version is a literal that the
-release script rewrites and checks for drift.
+mirrors this package's release version, held as a literal because a published
+package cannot read its own manifest on every runtime it supports.
 
 ### Delivery behavior
 
@@ -145,8 +144,11 @@ const Endpoint: Schema.String.check(...)
 ```
 
 Runtime schema for an absolute `http:` or `https:` collector endpoint of at
-most `maximumEndpointLength` characters that carries no credentials, no spaces,
-and no control characters. A value the WHATWG URL parser would repair rather
+most `maximumEndpointLength` characters that carries no credentials, query,
+fragment, backslashes, spaces, or controls. A base path is allowed;
+authentication belongs in exporter headers. Query and fragment suffixes are
+rejected because appending `/v1/traces` to them does not change the request
+path. A value the WHATWG URL parser would repair rather
 than parse as written is refused, because the repaired URL is not the one the
 exporter would post to.
 
@@ -538,7 +540,7 @@ const registry: {
 ```
 
 All four handles as one object, for a host that enumerates them. The four
-series names are the dashboard contract and are pinned by a test.
+series names are the dashboard contract; treat them as public API.
 
 ## Otel
 

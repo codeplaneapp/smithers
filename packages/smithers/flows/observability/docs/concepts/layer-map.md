@@ -47,8 +47,9 @@ from the root would break the root's browser bundle for every consumer,
 including those that never wanted an SDK. `BrowserOtel` is kept beside it for
 symmetry: a module that binds one host belongs on a subpath.
 
-The guarantee is tested, not asserted. A test bundles `src/index.ts` for the
-browser and fails on any `node:` import or `require("node:...")` in the output.
+Nothing the root entry point reaches resolves a `node:` built-in, as an ESM
+import or as a `require("node:...")` call, so a browser bundle of the root
+carries no host module.
 
 ## `Resource` sits under all of them
 

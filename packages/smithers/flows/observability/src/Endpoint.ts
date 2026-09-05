@@ -44,19 +44,23 @@ const isAbsoluteHttpUrl = (value: string): boolean => {
   // request to a host nobody typed. No legal collector endpoint carries one of
   // these, so refusing them costs nothing and closes the silent case.
   if (repairedByUrlParser(value)) return false
+  // Exporters append /v1/<signal> to this base. A query or fragment would
+  // swallow that suffix instead of changing the request path. Also refuse
+  // missing authority separators and backslashes that WHATWG silently repairs.
+  if (!/^https?:\/\/[^/]/i.test(value) || /[?#\\]/.test(value)) return false
   let url: URL
   try {
     url = new URL(value)
   } catch {
     return false
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false
   return url.username === "" && url.password === ""
 }
 
 /**
  * Runtime schema for an absolute `http:` or `https:` collector endpoint that
- * carries no credentials, no spaces, and no control characters.
+ * carries no credentials, query, fragment, backslashes, spaces, or controls.
+ * A base path is allowed; authentication belongs in exporter headers.
  *
  * @category schemas
  * @since 1.0.0-rc.0
@@ -111,7 +115,7 @@ export const decode = (
         code: "invalid_exporter_endpoint",
         path,
         message:
-          `OTLP collector ${path} must be an absolute http or https URL carrying no credentials, spaces, or control characters`
+          `OTLP collector ${path} must be an absolute http:// or https:// base URL without credentials, query, fragment, backslashes, spaces, or control characters`
       })
     )
   )

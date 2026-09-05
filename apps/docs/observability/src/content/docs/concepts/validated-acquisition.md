@@ -36,8 +36,14 @@ resource.
 
 ## What an endpoint must be
 
-An absolute `http:` or `https:` URL, at most 2,048 characters, carrying no
-username or password, and free of spaces and control characters.
+An absolute `http://` or `https://` URL, at most 2,048 characters, carrying no
+username, password, query, fragment, backslashes, spaces, or control characters.
+Base paths such as `https://collector.example/tenant/9` are supported.
+
+Queries and fragments are refused because exporters append `/v1/<signal>` to
+the base. Appending it after `?tenant=9` or `#notes` would leave the HTTP request
+path unchanged, silently sending telemetry to the wrong route. Use exporter
+headers for authentication, not credentials embedded in the URL.
 
 The last clause is the one that surprises people, and it is the whole reason
 `Endpoint` exists rather than a bare `new URL` check. The WHATWG URL parser is a

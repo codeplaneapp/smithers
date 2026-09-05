@@ -19,8 +19,7 @@ Smithers belongs to the package that owns the behavior it measures.
 | `droppedLogRecords` | `flows/observability/log/dropped` | counter | A log record is lost before durable delivery: once per queue overflow, once per journal delivery failure, and once per defect the forwarding worker recovers from. |
 
 `Metric.registry` is the same four as one object, so a host can enumerate them.
-The series names are the dashboard contract and are pinned by a test; treat
-them as public API.
+The series names are the dashboard contract; treat them as public API.
 
 Step-cache lookup and write counters belong to
 [`@smthrs/step-cache`](/api/step-cache), and the store packages keep their own
@@ -47,9 +46,9 @@ A counter's value carries `count`; a gauge's carries `value`.
 ## Read a dimensioned counter through its attribute view
 
 Some packages update a counter through a tagged view rather than the bare
-handle. The engine's dispatch counter is the common example: it updates only
-the series tagged with the outcome, so reading the bare handle reads the
-attribute-less series and always sees zero.
+handle. The dispatch counter in [`@smthrs/engine-store`](/api/engine-store) is
+the common example: it updates only the series tagged with the outcome, so
+reading the bare handle reads the attribute-less series and always sees zero.
 
 ```ts
 import { EngineStoreMetrics } from "@smthrs/engine-store"

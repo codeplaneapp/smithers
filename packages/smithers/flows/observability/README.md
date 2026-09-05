@@ -1,67 +1,62 @@
 # @smthrs/observability
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://observability.smithers.sh
 
-The telemetry exporter for a Smithers process, and the Effect layers a host
-installs around it.
+# `@smthrs/observability`
 
-Every other package is already instrumented. The stores open spans through
-Effect's tracer and update their own metric handles on their hot paths;
-`JournalMetrics`, `RunStoreMetrics`, `CacheStoreMetrics`, `ArtifactStoreMetrics`
-and `DatabaseMetrics` among them. What none of them does is ship a signal off
-the process. That is this package, and in the common case it is one layer.
+Send an Effect program's logs, metrics, and traces to an OpenTelemetry collector with one layer.
+
+`Otlp` composes only what `effect` itself ships, so it allocates no OpenTelemetry SDK, never resolves a `node:` built-in, and runs unchanged in Node, Bun, and a browser. Around it the package ships the pieces a host installs beside an exporter: Effect logger layers, a validated `Resource` describing the service, a `JournalLogger` that mirrors a run's log records into a durable journal, the runtime `Metric` handles that cross package boundaries, and `Otel`, which bridges OpenTelemetry providers an application already built.
+
+`NodeOtel` and `BrowserOtel` are deliberately not re-exported from the root. Each binds a host-specific OpenTelemetry SDK: `NodeOtel` reaches `@effect/opentelemetry/NodeSdk` and `@opentelemetry/sdk-trace-node`, which pulls the bare `async_hooks` specifier through `@opentelemetry/context-async-hooks`. Re-exporting it would put a module a browser bundler cannot resolve in the root entry point. Import them by subpath instead: `@smthrs/observability/NodeOtel`.
 
 ## Install
 
 ```sh
-pnpm add @smthrs/observability effect@4.0.0-rc.108
+pnpm add @smthrs/observability effect@4.0.0-rc.112
 ```
 
-## Export to a collector
+Node.js 22.19.0 or later. Effect services are identified by module identity, so install the same `effect` release this package is built against.
+
+The default install supports the root, `Otlp`, `Otel`, and `Resource`, with
+required `@effect/opentelemetry@4.0.0-rc.112` and `@opentelemetry/api@1.9.1`
+peers. It includes no HTTP exporters or trace SDK. Select the optional peers
+for the host subpath you import:
+
+```sh
+# @smthrs/observability/NodeOtel
+pnpm add @opentelemetry/exporter-logs-otlp-http@0.222.0 @opentelemetry/exporter-metrics-otlp-http@0.222.0 @opentelemetry/exporter-trace-otlp-http@0.222.0 @opentelemetry/sdk-trace-base@2.11.0 @opentelemetry/sdk-trace-node@2.11.0
+# @smthrs/observability/BrowserOtel
+pnpm add @opentelemetry/sdk-trace-base@2.11.0 @opentelemetry/sdk-trace-web@2.11.0
+```
+
+## Use
 
 ```ts
 import * as Otlp from "@smthrs/observability/Otlp"
-import * as Effect from "effect/Effect"
 
-const telemetry = Otlp.layerFetch({
+const Telemetry = Otlp.layerFetch({
   baseUrl: "http://localhost:4318",
   serviceName: "my-service"
 })
-
-// `program` is your durable run, unchanged from its non-telemetry form.
-const outcome = program.pipe(Effect.provide(telemetry), Effect.scoped)
 ```
 
-`Otlp` posts logs, metrics, and traces over the host's global `fetch` and
-imports no OpenTelemetry SDK, so it runs unchanged on Node, on Bun, and in a
-browser. Nothing in the flow body or the rest of the composition changes;
-deleting the `Effect.provide` line removes telemetry and changes nothing else.
-
-## What else is in the package
-
-The root entry point also exports validated collector endpoints (`Endpoint`)
-and resource metadata (`Resource`), Effect logger layers (`Logger`), a bounded
-journal-forwarding logger (`JournalLogger`), the shared runtime metric handles
-(`Metric`), and a provider-neutral OpenTelemetry bridge (`Otel`).
-
-`NodeOtel` and `BrowserOtel` are deliberately not re-exported from the root.
-Each resolves a host-specific OpenTelemetry SDK, and `NodeOtel` reaches
-Node-only host modules, including the bare `async_hooks` specifier that
-`@opentelemetry/context-async-hooks` imports, so re-exporting it would break the
-browser bundle the root guarantees. Import them by subpath instead:
-
-```ts
-import * as NodeOtel from "@smthrs/observability/NodeOtel"
-```
+Provide the layer, give it a scope, and every span, log record, and metric series the program already produces posts to the collector. Deleting the provide removes telemetry and changes nothing else.
 
 ## Documentation
 
-The full documentation lives at [observability.smithers.sh](https://observability.smithers.sh):
-the [quickstart](https://observability.smithers.sh/quickstart/), guides for
-exporting to a collector and forwarding logs to a run's journal, and the
-[API reference](https://observability.smithers.sh/reference/api/) covering
-validation, backpressure, shutdown, retry, and platform contracts.
+Full documentation is at [observability.smithers.sh](https://observability.smithers.sh):
+
+- [Quickstart](https://observability.smithers.sh/quickstart/): export a trace, a log record, and a metric series to a collector you can watch.
+- [Installation](https://observability.smithers.sh/installation/): requirements, import forms, and the rule that keeps the root entry point bundling for a browser.
+- [The layer map](https://observability.smithers.sh/concepts/layer-map/): which builder to reach for, and what each one costs.
+- [API reference](https://observability.smithers.sh/reference/api/): every public export, with validation, backpressure, shutdown, retry, and platform contracts.
+- [Troubleshooting](https://observability.smithers.sh/troubleshooting/): the typed refusals this package reports, and the silent cases that are not refusals at all.
+
+## License
+
+MIT

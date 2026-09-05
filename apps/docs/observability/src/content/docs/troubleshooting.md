@@ -92,7 +92,8 @@ last, which is not worth reasoning about: pass `mergeWithExisting: true` on the
 `NodeOtel` binds the Node OpenTelemetry SDK and cannot bundle for a browser.
 Use `Otlp.layerFetch` for browser delivery, or `BrowserOtel` when you need the
 web SDK, and keep the `NodeOtel` import behind a Node-only entry point. The
-root entry point itself is browser-safe and is tested that way.
+root entry point itself resolves no `node:` built-in and bundles for a browser
+as it is.
 
 ## `Metric.value` reads zero
 
@@ -102,7 +103,8 @@ root entry point itself is browser-safe and is tested that way.
 
 - **A dimensioned counter read through its bare handle.** Some packages update
   only an attribute-tagged series, so the attribute-less parent stays at zero.
-  Read the exported view, for example `EngineStoreMetrics.dispatch.Success`.
+  Read the exported view, for example `EngineStoreMetrics.dispatch.Success`
+  from [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/).
 - **A registry provided per test.** Providing `Metric.MetricRegistry` with a
   fresh map isolates state; a read outside that scope sees a different
   registry.

@@ -54,7 +54,7 @@ describe("NodeOtel.layerOtel", () => {
    * `resourceLogs`), which is what makes a swap visible rather than just the
    * set of paths, which a swap preserves.
    */
-  it("posts each signal to its own path on a real collector", async () => {
+  it.each(["", "/tenant/9//"])("posts each signal below base path '%s' on a real collector", async (basePath) => {
     const received: Array<{ readonly path: string; readonly keys: ReadonlyArray<string> }> = []
     const server: Server = createServer((request, response) => {
       const chunks: Array<Buffer> = []
@@ -88,7 +88,7 @@ describe("NodeOtel.layerOtel", () => {
           yield* Metric.update(counter, 1)
         }).pipe(
           Effect.provide(NodeOtel.layerOtel({
-            endpoint: `http://127.0.0.1:${port}`,
+            endpoint: `http://127.0.0.1:${port}${basePath}`,
             resource: { serviceName: "flows-test", serviceVersion: "1" },
             // Release, not the interval, is the deterministic flush: closing
             // the scope force-flushes both batch processors and collects the
@@ -106,9 +106,9 @@ describe("NodeOtel.layerOtel", () => {
 
       const bySignal = new Map(received.map((request) => [request.keys.join(","), request.path]))
       expect(Object.fromEntries(bySignal)).toEqual({
-        resourceSpans: "/v1/traces",
-        resourceMetrics: "/v1/metrics",
-        resourceLogs: "/v1/logs"
+        resourceSpans: `${basePath.replace(/\/+$/, "")}/v1/traces`,
+        resourceMetrics: `${basePath.replace(/\/+$/, "")}/v1/metrics`,
+        resourceLogs: `${basePath.replace(/\/+$/, "")}/v1/logs`
       })
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()))

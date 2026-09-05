@@ -37,6 +37,16 @@ describe("Endpoint", () => {
       "file:///var/run/collector",
       "http://user:secret@collector.invalid:4318",
       "http://:secret@collector.invalid:4318",
+      "http://collector.invalid:4318?tenant=example",
+      "http://collector.invalid:4318/base/?token=secret",
+      "http://collector.invalid:4318/base#fragment",
+      "http://collector.invalid:4318?",
+      "http://collector.invalid:4318#",
+      "http:collector.invalid",
+      "http://[malformed",
+      "http:///collector.invalid",
+      "https:/collector.invalid",
+      "http://collector.invalid\\hidden",
       `http://collector.invalid/${"p".repeat(Endpoint.maximumEndpointLength)}`
     ]
 

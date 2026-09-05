@@ -21,13 +21,30 @@ resolves two copies of `effect` splits its context and a provided layer stops
 satisfying a requirement. Install the release this package is tested against:
 
 ```bash
-pnpm add @smthrs/observability effect@4.0.0-rc.108
+pnpm add @smthrs/observability effect@4.0.0-rc.112
 ```
 
 `Otlp` is written entirely against `effect`, including its HTTP client and its
-`effect/unstable/observability/Otlp` exporters. The OpenTelemetry SDK packages
-in this package's manifest install with it and are used only by `Otel`,
-`Resource`, `NodeOtel`, and `BrowserOtel`.
+`effect/unstable/observability/Otlp` exporters. The required peers
+`@effect/opentelemetry@4.0.0-rc.112` and `@opentelemetry/api@1.9.1`, plus
+the logs and metrics dependencies, support
+the root `Otel` and `Resource` modules. They install with ordinary peer-aware
+package managers. The default install includes no HTTP exporters or trace SDK.
+
+`NodeOtel` selects the optional Node trace SDK and three HTTP exporters:
+
+```bash
+pnpm add @opentelemetry/exporter-logs-otlp-http@0.222.0 @opentelemetry/exporter-metrics-otlp-http@0.222.0 @opentelemetry/exporter-trace-otlp-http@0.222.0 @opentelemetry/sdk-trace-base@2.11.0 @opentelemetry/sdk-trace-node@2.11.0
+```
+
+`BrowserOtel` selects the optional browser trace SDK instead:
+
+```bash
+pnpm add @opentelemetry/sdk-trace-base@2.11.0 @opentelemetry/sdk-trace-web@2.11.0
+```
+
+The browser adapter accepts the exporters you supply; those HTTP exporter
+packages are not prerequisites for constructing its layer.
 
 ## Import forms
 
@@ -61,9 +78,8 @@ import * as NodeOtel from "@smthrs/observability/NodeOtel"
 `@opentelemetry/sdk-trace-node`, which reaches the bare `async_hooks` specifier
 through `@opentelemetry/context-async-hooks`. Re-exporting it from the root
 would put a module a browser bundler cannot resolve in the entry point, and
-break the browser bundle the root guarantees. A test bundles `src/index.ts` for
-the browser and fails on any `node:` import, so the guarantee is checked rather
-than asserted.
+break the browser bundle the root guarantees. Nothing the root entry point
+reaches resolves a `node:` built-in, so it bundles for a browser as it is.
 
 Import `NodeOtel` only from code that runs on Node, and `BrowserOtel` only from
 code that runs in a browser. `Otlp` is safe in both, because it exports over

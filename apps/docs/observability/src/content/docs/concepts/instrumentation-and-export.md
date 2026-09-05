@@ -15,8 +15,11 @@ A flow execution opens spans without being asked. The flow lifecycle, the
 engine dispatch, a run claim, a heartbeat, a journal write, down to individual
 `sql.execute` statements: each is a span on Effect's own tracer. Alongside
 them, each store package declares and updates its own metric handles on its hot
-paths, `JournalMetrics`, `RunStoreMetrics`, `CacheStoreMetrics`,
-`ArtifactStoreMetrics`, and `DatabaseMetrics` among them.
+paths: `JournalMetrics` in [`@smthrs/journal`](https://journal.smithers.sh/reference/api/), `RunStoreMetrics`
+in [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/), `CacheStoreMetrics` in
+[`@smthrs/step-cache`](https://step-cache.smithers.sh/reference/api/), `ArtifactStoreMetrics` in
+[`@smthrs/artifacts`](https://artifacts.smithers.sh/reference/api/), and `DatabaseMetrics` in
+[`@smthrs/database`](https://database.smithers.sh/reference/api/).
 
 None of those packages allocates an exporter. Effect's tracer and metric
 registry are collection points; with no exporter installed they collect and
