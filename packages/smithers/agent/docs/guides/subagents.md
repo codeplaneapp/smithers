@@ -15,7 +15,7 @@ A dynamic flow (a `Flow.make` with a `model`) or a discovered markdown flow is
 already a subagent, and `ctx.call("review", { args })` already runs it inside
 its own durable boundary: the resolver hands the markdown body to the host's
 prompt runner, and the engine port keys the whole call on the cell identity.
-That is the common case, and it needed no new API.
+That is the common case, and it needs nothing from this package.
 
 ## Detached children need the lifecycle flows
 

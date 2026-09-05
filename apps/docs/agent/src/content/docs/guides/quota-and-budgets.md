@@ -1,6 +1,6 @@
 ---
-title: "Park on quota refusals and cap run spend"
-description: "Turn provider rate limits into durable waits with QuotaPolicy, and enforce token and latency ceilings across a run's model calls with Budget."
+title: "Park on quota refusals and limit model admission"
+description: "Turn provider rate limits into durable waits with QuotaPolicy, and coordinate soft token forecasts and latency admission with Budget."
 sidebar:
   order: 3
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/docs/guides/quota-and-budgets.md"
@@ -74,11 +74,11 @@ pointless. The port therefore fails every capacity refusal it normalizes
 carrying HTTP 429, 503, 504, or 529), which records an attempt rather than a
 result. Policy decides what happens on top of that floor; no policy weakens it.
 
-## Cap what a run spends
+## Limit admission using a spending forecast
 
 `Sandbox.Limits` bounds one cell and `Agent.Options.maxFrames` bounds one loop.
-Neither accumulates, so the tokens and milliseconds a control plane approved
-for a plan bound nothing until `Budget` existed:
+Neither accumulates usage across a run. `Budget` records that usage and gates
+new model calls against the plan's allowance:
 
 ```ts
 import * as Budget from "@smthrs/agent/Budget"
@@ -91,6 +91,14 @@ const budget = Budget.layer({
 // Or straight from what the control plane approved:
 const approved = Budget.layerFromEnvelope(envelope)
 ```
+
+`make`, `layer`, and `layerFromEnvelope` fail acquisition with
+`Budget.ConfigurationError` for invalid configuration. Token ceilings are
+non-negative safe integers; latency ceilings are finite non-negative
+milliseconds (fractions are allowed). `maxRuns` and `recoveryEntries` must be
+positive safe integers. Omit a ceiling to leave it unbounded; infinity and
+`NaN` are errors, not opt-outs. Acquisition snapshots the validated policy,
+so mutating the original object afterward cannot change a live budget.
 
 Enforcement sits at the model boundary in `FlowEngineLike`, which every model
 call passes through, so a step that assembles its own loop cannot evade a
@@ -109,11 +117,15 @@ budget declared for the run. Five rules make it usable:
   spend, from its live accumulator when the run is here and from its records
   when it is not. `Budget.defaultMaxRuns` (256) bounds how many tallies are
   held in memory, and `Budget.layer(policy, { maxRuns })` sets it.
-- **Refusal is a projection.** The check runs before a call and projects its
-  cost as the largest call the run has made. A budget that noticed afterwards
-  would always be exceeded by the call that exceeded it.
-- **The first call is never refused.** With nothing recorded, the only honest
-  projection is zero.
+- **Admission reserves a projection.** `reserve(stepKey)` atomically counts
+  actual spend plus estimates for all in-flight calls. The estimate is the
+  largest observed call; larger completed calls raise outstanding estimates.
+  `record` replaces a reservation's estimate with actual usage. Scope exit,
+  including failure or cancellation, releases its reservation.
+- **An unmeasured call holds capacity.** Until a positive cost is known, one
+  call holds the full token allowance. Zero refuses new calls unless `warn`
+  explicitly permits them. Concurrent duplicates of the same sealed key share
+  capacity, and every holder must finish before that reservation is released.
 - **The accounting fails closed.** A record that could not be written, a
   ledger that could not be read, and a ledger longer than one recovery reads
   (`Budget.defaultRecoveryEntries`, overridable with
@@ -127,6 +139,43 @@ budget declared for the run. Five rules make it usable:
 A step the ledger has already counted proceeds whatever the ceiling says: its
 replay costs nothing, and a run killed after its last model call must not come
 back dead on arrival.
+
+Usage reported before a capacity refusal or stream interruption is also spend.
+The model boundary flushes that last reported usage on exit under a distinct
+unsealed-invocation receipt, not the sealed step key. A later provider retry
+therefore requires fresh admission and adds its own spend. Cumulative usage
+updates count once per attempt, and reported usage from earlier transport
+retries remains included. Partial model text from failed attempts is not
+replayed. `Usage.calls` includes these charged unsealed invocations.
+
+This is a **soft spending forecast, not a hard provider billing cap**. An
+admitted call can cost more than its estimate, including the first call.
+Providers can bill work for which they never report usage, and a hard process
+kill cannot run an exit finalizer; this ledger is not invoice reconciliation.
+Concurrent admission is coordinated only within one shared `Budget` instance;
+it is not a distributed quota service. Provide one instance for all concurrent
+calls of a run and rely on durable execution ownership to exclude competing
+hosts. `check(stepKey)` is an advisory preview, not permission to dispatch
+concurrently. Custom model boundaries must use `reserve` inside a scope that
+lasts through the provider call and its `record`.
+
+Usage must be finite and non-negative. A failed or interrupted usage write
+remains pending. For a sealed result, retry that step with the same usage to
+finish the write. An unsealed invocation has no replayable model result;
+retrying the provider is not a repair for its failed usage write. New,
+uncounted steps fail closed while writes remain pending. A successful savepoint is
+not a durable commit; pending usage clears only after the outer transaction
+commits. Repeating a step with a different cost is an accounting error.
+Initial recovery must run outside a journal transaction: it flushes and reads
+committed history. Attempting recovery while holding a transaction fails
+before the flush, avoiding a writer deadlock or a speculative latency zero.
+
+The live tally conservatively includes actual usage whose write is pending.
+Active operations, pending writes, and accounts without a journal cannot be
+evicted to meet `maxRuns`. If no slot is safe to evict, new run admission fails
+with `AccountingUnavailable`. Retry pending writes, let active operations
+finish, or provision a larger bound; memory-only operation cannot safely
+forget an old run's allowance.
 
 ## Choose what running out means
 

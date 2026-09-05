@@ -1,7 +1,7 @@
 # @smthrs/agent
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://agent.smithers.sh
@@ -13,7 +13,7 @@ loop on the durable engine. A **cell** is the JavaScript program the model emits
 each frame; it runs in the sandbox, and its only authority is
 `ctx.call(flowName, input)`, so every capability a cell reaches is an ordinary
 flow settling through a durable boundary. The contract is
-[`@smthrs/harness/Cell`](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/harness/README.md#the-cell-loop).
+[`@smthrs/harness/Cell`](https://harness.smithers.sh/concepts/#the-cell-loop).
 
 `AgentSession` runs that agent as a durable control-plane run — the production
 `ControlExecutor`, where the launch is a flow execution, the events go to the
@@ -24,13 +24,40 @@ schema and replayed like any other action.
 Neither adapter reimplements the loop. A future agent that drives a foreign CLI
 is another implementation of `Agent.Service`, not a second loop beside this one.
 
+## Install
+
+```bash
+pnpm add @smthrs/agent
+```
+
+Node.js 22.19+ (Node 22) or 24.11+. The shortest real use is one model-backed step: an
+ordinary action that ships its own implementation and answers in the shape you
+declared.
+
+```ts
+import { AgentAction } from "@smthrs/agent"
+import * as Schema from "effect/Schema"
+
+const Research = AgentAction.make("docs/Research", {
+  payload: { topic: Schema.String },
+  output: Schema.Struct({ summary: Schema.String }),
+  seat: "anthropic:claude-sonnet-4-5",
+  system: ["You are a research assistant."],
+  prompt: ({ topic }) => `Research ${topic}.`
+})
+```
+
+[The quickstart](https://agent.smithers.sh/quickstart/) runs that step end to
+end against a scripted model, with no API key. The rest of this file is the
+composition guide: what each piece is, and what a host has to provide.
+
 ## `Agent`
 
 `Agent.layer` provides the production implementation and requires both a quota
 classifier and a budget. It composes the whole cell path, the controller in
 `@smthrs/harness/CellTurn`, registry-backed call
 resolution in `@smthrs/harness/CellCalls`, the QuickJS sandbox, the durable
-engine port in `./FlowEngineLike.ts`, and the plugin kernel, then returns the
+engine port `FlowEngineLike`, and the plugin kernel, then returns the
 framework-neutral `Stream<AgentEvent>` the controller emits. There is no
 callback, no event emitter, and no host-shaped result type; a caller renders the
 stream, journals it, or ignores it.
@@ -89,7 +116,8 @@ host that accepts mid-run messages provides its own `Steering.layer` instead.
 host names, taken from `QuickJSSandbox.Variant`. A runtime that refuses to
 compile WebAssembly from bytes, such as Cloudflare's workerd, uses it and
 provides `QuickJSSandbox.layerVariant(variant)` beneath. See
-`packages/smithers/agent/harness/README.md` for how a worker builds that variant.
+[Run on Cloudflare workerd](https://harness.smithers.sh/guides/workerd/) for how
+a worker builds that variant.
 
 `flows` is an ordered list of `FlowBinding.Source`s; plugin `cellFlows` handlers
 run after them, in resolution order. The composed catalog is what the model is
@@ -139,8 +167,9 @@ it. It is what a markdown flow's `model:` frontmatter carries and what
 `AgentAction`'s `seat` option takes. It carries no credentials, no endpoint, and
 no client — a declaration is portable, and a run that reads one out of a
 repository must not be handed the keys with it. `provider:modelId`
-(`anthropic:claude-sonnet-4-5`) is the convention the Node CLI resolver
-understands, not a rule the agent enforces.
+(`anthropic:claude-sonnet-4-5`) is the convention the resolver in
+[`@smthrs/cli`](https://cli.smithers.sh) understands, not a rule the agent
+enforces.
 
 `Seat.Seat` is the resolved half, and the only thing `Agent.run` accepts: a live
 `Model`, the `RouteResolver` that seals its requests, and the model's context
@@ -167,7 +196,7 @@ the flow up in the registry, loads its markdown prompt body, resolves its
 declared seat through `SeatResolver`, and runs the `Agent` service as the body
 of one durable flow execution whose id is the control run id.
 
-The composition declares what the spec demands of a host: explicit
+The composition declares everything a control-plane host has to supply: explicit
 `Sandbox.Limits` (never unlimited), a `Steering.Source` over the journal-backed
 notification queue `Control.steer` admits into, and an approval `ask` gated in
 `authorize` — before the durable boundary opens — that registers an in-run
@@ -187,8 +216,9 @@ when it wakes. A host that means to enforce nothing says so with
 
 `@smthrs/cli`'s `NodeControl.layerExecutor` is the Node wiring: a `SeatResolver`
 over real `Route.anthropic` / `Route.openai` routes with API keys read from the
-environment, and `StandardFlows.filesystem/shell/memory` over the kernel's
-guarded host layers.
+environment, and `StandardFlows.filesystem/shell/memory` over the
+permission-guarded host layers from
+[`@smthrs/kernel`](https://kernel.smithers.sh).
 
 The module also exports the pieces the session builds itself out of, and they
 stay public because a host that runs the agent its own way needs the same ones:
@@ -199,23 +229,10 @@ and `settleDriverFailure` are the wait and driver-lifecycle half.
 
 ## `AgentAction`
 
-`AgentAction.make` declares an ordinary `Action` — same tag, same payload
-schema, same `.call()`, same plan node, same durable replay — and ships the
-implementation with it. An author never writes `toLayer` for a model call,
-because there is only one implementation.
-
-```ts
-import { AgentAction } from "@smthrs/agent"
-import * as Schema from "effect/Schema"
-
-const Research = AgentAction.make("docs/Research", {
-  payload: { topic: Schema.String },
-  output: Schema.Struct({ summary: Schema.String }),
-  seat: "anthropic:claude-sonnet-4-5",
-  system: ["You are a research assistant."],
-  prompt: ({ topic }) => `Research ${topic}.`
-})
-```
+`AgentAction.make` declares an ordinary `Action` (same tag, same payload schema,
+same `.call()`, same plan node, same durable replay) and ships the
+implementation with it, as the `Research` step above does. An author never
+writes `toLayer` for a model call, because there is only one implementation.
 
 The declared output schema is rendered into the run's system teaching and
 enforced against the run's final answer; a decode miss spends a correction slot
@@ -291,8 +308,9 @@ decodes for a parked run resuming onto a newer package.
 ### Composing it
 
 Every layer a model-backed step needs, trimmed from
-`examples/src/11-agent-step.ts`. `AgentAction.make` returns the declaration and
-its `.layer` together, so the composition names the action once.
+[`examples/src/11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
+`AgentAction.make` returns the declaration and its `.layer` together, so the
+composition names the action once.
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -469,8 +487,8 @@ that would otherwise re-dispatch a skipped step gives up on the first refusal.
 `EngineLike.layerNoop()`. It deliberately does not depend on any engine: the
 browser app supplies its own in-tab implementation, and pulling the durable
 engine into the port package would put it in every harness consumer's bundle.
-`FlowEngineLike` is the other implementation, kept separate for the same reason
-`platform-node` is separate from the platform contracts in the effect repo.
+`FlowEngineLike` is the other implementation: the same port executed on the
+durable engine.
 
 ```ts
 import { FlowEngineLike } from "@smthrs/agent"
@@ -518,9 +536,9 @@ const program = Effect.gen(function*() {
   `Options.capabilities`, and the port never invents it. A sealed boundary is
   cross-run cacheable, so a result computed under a broad capability envelope
   must not be served to a run with an attenuated one, even when the call
-  declares identical capabilities — the envelope is what attenuates it
-  (issue #75). Supplying the composition's **complete** authority is what
-  makes a sealed boundary shareable across runs; omitting it is the honest
+  declares identical capabilities — the envelope is what attenuates it.
+  Supplying the composition's **complete** authority is what makes a sealed
+  boundary shareable across runs; omitting it is the honest
   "unknown", and the engine answers it by pinning every sealed key to the
   current execution. `Agent.run` declares the capability envelope it actually
   built, so hosts on that path get cross-run reuse without asserting anything
@@ -572,18 +590,17 @@ The root entry point exports these namespaces, and each is also importable from
 `QuotaPolicy`, `Seat`, `SeatResolver`, `StandardFlows`, `WorkspaceObservation`,
 `WorkspaceSandbox`.
 
-Every export of every one of them, with a one-line summary, is generated from
-this package's own JSDoc onto
-[the API page](https://agent.smithers.sh/reference/api/#exports). That page is the list;
-this README is the composition guide. `docs/README.md` explains how the two are
-generated and kept in step.
+Every export of every one of them, with its signature and its errors, is
+documented on [the API reference](https://agent.smithers.sh/reference/api/).
+That page is the list; this README is the composition guide.
 
 `@smthrs/agent/package.json` is also exported. `internal/*` and nested `*/index`
 subpaths are not public.
 
 ## Not to be confused with
 
-`@smthrs/testing`'s `FlowEngineLike` adapts the same engine to a different
-port — `EngineSubject` (`run` / `result` / `interrupt` / `resume` / `journal`),
-the testing library's conformance contract. The two share a backing engine and
-nothing else.
+[`@smthrs/testing`](https://testing.smithers.sh) exports a `FlowEngineLike` of
+its own, and it is a different thing. That one adapts the same engine to
+`EngineSubject` (`run` / `result` / `interrupt` / `resume` / `journal`), the
+conformance contract that library checks engine implementations against. The
+two share a backing engine and nothing else.

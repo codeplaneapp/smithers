@@ -72,8 +72,8 @@ The two adapters decide what a run _is_:
 
 Neither adapter reimplements the loop, and a future agent that drives a foreign
 CLI is another implementation of `Agent.Service`, not a second loop beside this
-one. The provider-tool-call loop that predated the cell path is gone, and
-nothing replaced it beside the cell path.
+one. The cell path is the only loop this package has: there is no
+provider-tool-call path beside it.
 
 For the durability machinery underneath the loop, see
 [The engine port](./engine-port.md). For the policies that keep a run alive,

@@ -11,10 +11,14 @@ sidebar:
 pnpm add @smthrs/agent
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and CommonJS
+The package requires Node.js 22.19+ (Node 22) or 24.11+ and ships as both ESM and CommonJS
 with TypeScript declarations. Its runtime dependencies, including
 [`effect`](https://effect.website) and the `@smthrs/*` packages the agent
 composes, install with it.
+
+The agent library selects no browser or Node host adapter. A host composition
+declares the platform package it uses; importing the agent does not install
+`@smthrs/platform-browser` or its browser filesystem implementation.
 
 ## Import forms
 

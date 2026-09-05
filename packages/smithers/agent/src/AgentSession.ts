@@ -53,7 +53,7 @@ import * as Permission from "@smthrs/capability/Permission"
 import { LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
-import type { ApprovalPayload, Envelope, RunStatus, SignalPayload } from "@smthrs/control/ControlSchema"
+import type { ApprovalPayload, Envelope, RunStatus } from "@smthrs/control/ControlSchema"
 import * as Digest from "@smthrs/core/Digest"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { DurableDeferred, Flow, FlowRuntime, WaitFor } from "@smthrs/flow"
@@ -84,6 +84,7 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
@@ -107,6 +108,8 @@ import * as StandardFlows from "./StandardFlows.ts"
  * @since 0.1.0
  */
 export interface Options {
+  /** Refuse resume delegation for a run routed to another workspace host. */
+  readonly canExecute?: ((runId: string) => Effect.Effect<boolean>) | undefined
   /** Host executable-flow sources composed into every run's catalog. */
   readonly flows?: ReadonlyArray<FlowBinding.Source> | undefined
   /** The explicit sandbox budget every cell runs under. Never unlimited. */
@@ -114,7 +117,7 @@ export interface Options {
   /** Required quota park/retry policy for every model call in the run. */
   readonly quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier>
   /** Builds the run-local spending policy from the plan that was approved. */
-  readonly budget: (envelope: Envelope) => Layer.Layer<Budget.Budget>
+  readonly budget: (envelope: Envelope) => Layer.Layer<Budget.Budget, Budget.ConfigurationError>
   /** Stable system teaching placed ahead of the cell contract. */
   readonly system?: ReadonlyArray<string> | undefined
   readonly maxFrames?: number | undefined
@@ -919,27 +922,10 @@ export const requestCancel = (
         message: `The engine could not record a cancellation for ${runId}`,
         cause
       })
-    // The read is a guard, not the answer: a store that cannot answer `get` —
-    // a stub host, a missing row — leaves the request itself to decide, which
-    // is exactly what this port did before the guard existed.
-    //
-    // The read and the write are not one transaction, and the window between
-    // them was a real one: a run that settled inside it still answered
-    // `recorded`, and `Control.cancel` went on to transition the control row
-    // while the engine ignored the request its cancel poll skips for a terminal
-    // row — the terminal disagreement B-11 forbids, with the CONTROL row as the
-    // half left wrong. `RunStore.requestCancel` now decides terminality in the
-    // same statement that writes the column, so its `Terminal` outcome is the
-    // atomic answer and this read is only an optimization: it saves a write on
-    // a row that is already settled, and a race it loses is decided below.
-    const current = yield* runs.get(input.runId).pipe(
-      Effect.map((row) => row.status as string | undefined),
-      Effect.catch(() => Effect.succeed(undefined))
-    )
-    if (current === "completed" || current === "failed" || current === "cancelled") {
-      return { _tag: "Terminal", status: current } as const
-    }
-    const outcome = yield* runs.requestCancel(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
+    // A completed round can have a live handoff successor. Resolve membership
+    // and record intent in one engine-store write transaction; neither a stale
+    // control row nor a read of just the predecessor decides terminality.
+    const outcome = yield* runs.requestCancelLineage(input.runId, at).pipe(Effect.mapError(failure(input.runId)))
     if (outcome._tag === "Terminal") return { _tag: "Terminal", status: outcome.status } as const
     if (outcome._tag === "NotFound") return "unknown"
     // The store already distinguishes the write that recorded the request from
@@ -949,6 +935,86 @@ export const requestCancel = (
     // `control.run.cancel-requested` for a cancellation that happened once.
     return outcome._tag === "AlreadyRequested" ? "already-requested" : "recorded"
   })
+
+/**
+ * Reads current-round lifecycle and the requested run's ancestry from the
+ * engine services captured by the host. The existing engine transaction keeps
+ * these reads coherent; the SQLite adapter holds a writer lock only for the
+ * scoped reads, without executing or waiting on the run.
+ *
+ * Control metadata is read separately. This is not a cross-database snapshot
+ * or a revisioned read projection. A later trampoline round supplies lifecycle
+ * and waiting state, while parent and round ordinal still name `runId`.
+ *
+ * @category queries
+ * @since 0.1.0
+ */
+export const readExecution = (
+  runId: string
+): Effect.Effect<
+  ControlExecutor.ExecutionObservation,
+  PersistenceError,
+  RunStore.RunStore | DurableEngineState.DurableEngineState
+> =>
+  Effect.gen(function*() {
+    const runs = yield* RunStore.RunStore
+    const state = yield* DurableEngineState.DurableEngineState
+    // The current round, its waiting reason and parent edge must come from
+    // one snapshot. Completion/handoff can otherwise split these three reads.
+    return yield* state.transaction(Effect.gen(function*() {
+      const row = yield* runs.latestRound(runId).pipe(
+        Effect.map(Option.some),
+        Effect.catch((error) =>
+          error.code === "not_found_row"
+            ? Effect.succeed(Option.none<RunStore.RunRow>())
+            : Effect.fail(
+              new PersistenceError({
+                operation: "read engine execution",
+                message: `Cannot read engine execution ${runId}`,
+                cause: error
+              })
+            )
+        )
+      )
+      if (Option.isNone(row)) return { _tag: "Missing" } as const
+      const waiting = yield* state.waiting(row.value.runId)
+      const reason = Option.isSome(waiting) ? waiting.value.reason : undefined
+      const current = row.value
+      const identity = current.runId === runId ? current : yield* runs.get(runId).pipe(
+        Effect.mapError((cause) =>
+          new PersistenceError({
+            operation: "read engine execution",
+            message: `Cannot read engine identity ${runId}`,
+            cause
+          })
+        )
+      )
+      return {
+        _tag: "Observed",
+        status: current.status === "pending"
+          ? "accepted"
+          : current.status === "suspended"
+          ? reason === "approval" ? "waiting-approval" : "parked"
+          : current.status,
+        waitingReason: current.status === "suspended" ? reason : undefined,
+        parentRunId: identity.parentRunId ?? (yield* state.runParents(identity.runId))[0]?.parentId,
+        lineageId: identity.lineageId ?? current.lineageId ?? undefined,
+        // Older lineage roots have null columns; membership was established by
+        // latestRound, so they remain round zero of that lineage.
+        roundOrdinal: identity.roundOrdinal ?? (current.runId === runId ? undefined : 0)
+      } as const
+    }))
+  }).pipe(Effect.catchCause((cause) => {
+    if (Cause.hasInterrupts(cause)) return Effect.failCause(cause)
+    const failure = Cause.squash(cause)
+    return Effect.fail(
+      failure instanceof PersistenceError ? failure : new PersistenceError({
+        operation: "read engine execution",
+        message: `Cannot read engine observation ${runId}`,
+        cause: failure
+      })
+    )
+  }))
 
 /** The deferred name a `WaitFor` wait point is recorded under. */
 const waitPointName = (signal: string): string => `WaitFor/${signal}`
@@ -984,11 +1050,15 @@ export const deliverSignal = (
 > =>
   Effect.gen(function*() {
     const state = yield* DurableEngineState.DurableEngineState
-    const waiting = yield* state.waiting(input.runId)
-    if (Option.isNone(waiting)) return "unknown" as const
-    const row = waiting.value
-    if (row.reason !== "event" || row.token === null) return "no-match" as const
-    const token = row.token
+    const control = yield* Effect.serviceOption(ControlRuntime)
+    let token = input.token ?? null
+    if (token === null) {
+      const waiting = yield* state.waiting(input.runId)
+      if (Option.isNone(waiting)) return "unknown" as const
+      const row = waiting.value
+      if (row.reason !== "event" || row.token === null) return "no-match" as const
+      token = row.token
+    }
     const parsed = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token).pipe(
       Effect.mapError((cause) =>
         new PersistenceError({
@@ -999,26 +1069,50 @@ export const deliverSignal = (
       )
     )
     if (parsed.deferredName !== waitPointName(input.signal.name)) return "no-match" as const
-    // `orDie`, not a typed failure: the only way completion refuses a token is
-    // by failing to parse it, and the line above just parsed this one. A
-    // refusal here would mean the two parsers disagree, which is a defect in
-    // this module rather than a condition a caller can answer.
-    yield* DurableDeferred.succeed(WaitFor.deferred(input.signal.name), {
-      token: token as DurableDeferred.Token,
-      value: input.signal.payload
-    }).pipe(Effect.orDie)
-    return "delivered" as const
+    // First binding wins in control.db. A crash before or after completion
+    // retries this exact token; the command can never move to a later wait.
+    if (input.commandId !== undefined) {
+      if (Option.isNone(control)) {
+        return yield* new PersistenceError({
+          operation: "AgentSession.deliverSignal",
+          message: "Durable signal admission requires ControlRuntime"
+        })
+      }
+      token = yield* control.value.bindSignal(input.commandId, token)
+      if (token === null) return "no-match" as const
+    }
+    const bound = yield* Schema.decodeEffect(DurableDeferred.TokenParsed.FromString)(token).pipe(Effect.orDie)
+    const completionMatches = (row: DurableEngineState.DeferredRow): boolean => {
+      const exit = row.exit as Exit.Exit<unknown, unknown>
+      return Exit.isExit(exit) && Exit.isSuccess(exit) &&
+        CanonicalJson.stringify(exit.value) === CanonicalJson.stringify(input.signal.payload)
+    }
+    const previous = yield* state.deferred(bound)
+    if (Option.isSome(previous)) return completionMatches(previous.value) ? "delivered" as const : "no-match" as const
+    const engine = yield* FlowRuntime.FlowRuntime
+    const outcome = yield* engine.deferredDoneIfWaiting(WaitFor.deferred(input.signal.name), {
+      flowName: bound.flowName,
+      executionId: bound.executionId,
+      deferredName: bound.deferredName,
+      reason: "event",
+      token,
+      exit: Exit.succeed(input.signal.payload)
+    })
+    // Completion rechecks the concrete token in the engine transaction. A
+    // competing resolver may have won; the durable stored result is the proof.
+    const completed = yield* state.deferred(bound)
+    if (Option.isSome(completed)) return completionMatches(completed.value) ? "delivered" as const : "no-match" as const
+    return outcome === "NotWaiting" ? "no-match" as const : "unknown" as const
   })
 
 /**
- * Delivers every signal recorded while no executor was running.
+ * Reconciles a bounded rotating page of admitted signal commands.
  *
- * `Control.signal` records the message whether or not an executor could deliver
- * it, which is the only honest thing to do when the process that owns the run
- * is down. This is the other half of that promise: at start, every non-terminal
- * run's recorded signals are replayed against its wait point. Delivery is
- * first-writer-wins at the deferred, so a signal that already landed is a
- * no-op, and a run parked on something else is left alone.
+ * The host runs this at startup and every 250 ms. A command without a
+ * concrete wait stays pending; a bound command always retries its original
+ * token, including after the run has settled but acknowledgment was lost.
+ * Legacy payload-only messages are not replayed because their application
+ * identity cannot be recovered safely.
  *
  * @category helpers
  * @since 0.1.0
@@ -1029,18 +1123,24 @@ export const drainRecordedSignals: Effect.Effect<
   ControlRuntime | DurableEngineState.DurableEngineState | FlowRuntime.FlowRuntime
 > = Effect.gen(function*() {
   const runtime = yield* ControlRuntime
-  const runs = yield* runtime.listRuns
-  yield* Effect.forEach(
-    runs.filter((run) => run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled"),
-    (run) =>
-      runtime.deliveredSignals(run.runId).pipe(
-        Effect.flatMap((signals: ReadonlyArray<SignalPayload>) =>
-          Effect.forEach(signals, (signal) => deliverSignal({ runId: run.runId, signal }), { discard: true })
-        ),
-        Effect.ignore
-      ),
-    { discard: true }
-  )
+  const commands = yield* runtime.pendingSignals
+  yield* Effect.forEach(commands, (command) =>
+    Effect.gen(function*() {
+      const current = yield* runtime.getRun(command.runId)
+      if (
+        command.token === null &&
+        (current.status === "completed" || current.status === "failed" || current.status === "cancelled")
+      ) {
+        yield* runtime.settleSignal(command.commandId, "terminal")
+        return
+      }
+      const delivery = yield* deliverSignal(command)
+      if (delivery !== "unknown") {
+        yield* runtime.settleSignal(command.commandId, delivery === "delivered" ? "delivered" : "rejected")
+      }
+    }).pipe(Effect.catchCause((cause) =>
+      Effect.logWarning("Pending signal delivery failed", { commandId: command.commandId, cause: Cause.pretty(cause) })
+    )), { discard: true })
 }).pipe(
   Effect.catchCause((cause) =>
     Effect.annotateLogs(
@@ -1082,6 +1182,7 @@ export const make = (
     const engine = yield* FlowRuntime.FlowRuntime
     const seats = yield* SeatResolver
     const agent = yield* Agent
+    const engineRuns = yield* RunStore.RunStore
     const scope = yield* Effect.scope
     const services = yield* Effect.context<Services>()
 
@@ -1172,7 +1273,7 @@ export const make = (
                 })
             )
           )
-          if (token.resolved) return
+          if (token._tag !== "Pending") return
           const payload: ApprovalPayload = {
             target,
             scope: "run",
@@ -1233,25 +1334,36 @@ export const make = (
         })
 
     /**
-     * Answers a decided ask from the grant store. The activity only runs once
-     * {@link authorize} has seen the token resolved, so the read is stable:
-     * an approval installed a grant under the request id, a denial did not.
+     * Answers from the decision itself, not from a scan of unrelated grants.
+     * A pending or unreadable answer is not an implicit denial or approval.
      */
     const asker = (runId: string): StandardFlows.Asker => ({
       ask: (input) =>
         Effect.gen(function*() {
           const identity = askIdentity(runId, input)
-          const grants = yield* runtime.grants.pipe(
+          const token = yield* runtime.registerApproval({
+            _tag: "Node",
+            runId,
+            requestId: identity.requestId,
+            digest: identity.digest,
+            envelope: askEnvelope
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new HarnessError.HarnessError({
                   code: "engine_failed",
-                  message: `The grant store could not be read for run ${runId}`,
+                  message: `The approval decision could not be read for run ${runId}`,
                   cause
                 })
             )
           )
-          const approved = grants.some((grant) => grant.tokenId === identity.requestId)
+          if (token._tag === "Pending") {
+            return yield* new HarnessError.HarnessError({
+              code: "engine_failed",
+              message: "The ask has no approval decision yet"
+            })
+          }
+          const approved = token._tag === "Approved"
           return { answer: approved ? "approved" : "denied", approved }
         })
     })
@@ -1310,7 +1422,8 @@ export const make = (
     const settle = (
       runId: string,
       suspended: boolean,
-      exit: Exit.Exit<unknown, unknown>
+      exit: Exit.Exit<unknown, unknown>,
+      waitingReason?: string
     ) =>
       Exit.isSuccess(exit)
         ? writeStatus(runId, "completed")
@@ -1320,7 +1433,7 @@ export const make = (
         // would leave a cancelled run looking resumable.
         : Cause.hasInterruptsOnly(exit.cause)
         ? suspended
-          ? writeStatus(runId, "waiting-approval")
+          ? writeStatus(runId, waitingReason === "approval" ? "waiting-approval" : "parked")
           // Cancellation and process shutdown both close the execution scope.
           // The control operation owns cancellation's terminal write, while a
           // shutdown must leave the run reclaimable rather than misreport it
@@ -1563,6 +1676,18 @@ export const make = (
           : Fiber.interrupt(fiber)
       )
 
+    const driveFibers = new Map<Drive, Fiber.Fiber<unknown, unknown>>()
+    yield* Scope.addFinalizer(
+      scope,
+      Effect.suspend(() =>
+        Effect.forEach(
+          Array.from(driveFibers),
+          ([drive, fiber]) => releaseDrive(drive, fiber),
+          { discard: true, concurrency: "unbounded" }
+        )
+      )
+    )
+
     const driver = (runId: string, planId: string) =>
       Effect.gen(function*() {
         const admitted = yield* waitForRunning(
@@ -1630,22 +1755,37 @@ export const make = (
       )
 
     const awaitParked = (runId: string, attempts: number): Effect.Effect<boolean, unknown> =>
-      waitForParked(
-        () =>
-          engine.poll(agentFlow, runId).pipe(
-            // The journal carries resume events for runs other executors own —
-            // a paused system flow, a shared control database. An execution
-            // this engine does not know will not become parked by waiting, so
-            // it is published as a settled non-parked state: the wait ends
-            // now instead of holding the single-concurrency bridge through
-            // the whole retry budget.
-            Effect.catchTag(
-              "@smthrs/flow/FlowExecutionNotFound",
-              () => Effect.succeed(Option.some({ _tag: "NotFound" }))
-            )
-          ),
-        attempts
-      )
+      Effect.gen(function*() {
+        // A time-travel fork has executable state but no previous Suspended
+        // result. Ownership columns prove it is available without waiting
+        // for a publication that only an already-executed run can produce.
+        const row = yield* engineRuns.get(runId).pipe(
+          Effect.catch((error) => error.code === "not_found_row" ? Effect.succeed(undefined) : Effect.fail(error))
+        )
+        if (
+          row !== undefined && (row.status === "pending" || row.status === "suspended") &&
+          row.owner === null && row.claim === null
+        ) {
+          const state = JSON.parse(row.stateJson) as { flowName?: unknown; result?: unknown }
+          if (state.flowName === agentFlow._tag && state.result === undefined) return true
+        }
+        return yield* waitForParked(
+          () =>
+            engine.poll(agentFlow, runId).pipe(
+              // The journal carries resume events for runs other executors own —
+              // a paused system flow, a shared control database. An execution
+              // this engine does not know will not become parked by waiting, so
+              // it is published as a settled non-parked state: the wait ends
+              // now instead of holding the single-concurrency bridge through
+              // the whole retry budget.
+              Effect.catchTag(
+                "@smthrs/flow/FlowExecutionNotFound",
+                () => Effect.succeed(Option.some({ _tag: "NotFound" }))
+              )
+            ),
+          attempts
+        )
+      })
 
     /**
      * Re-drives one execution `takeUpResume` has already found parked here and
@@ -1773,6 +1913,7 @@ export const make = (
       uptake: Uptake
     ): Effect.Effect<ControlExecutor.ResumeUptake, never> =>
       Effect.gen(function*() {
+        if (options.canExecute !== undefined && !(yield* options.canExecute(runId))) return "unknown" as const
         const parked = yield* parkedHere(runId, 500)
         if (!parked) return "unknown" as const
         const hosted = yield* hostsPark(runId, uptake)
@@ -1839,8 +1980,12 @@ export const make = (
         )
       )
 
-    yield* engine.register(agentFlow, (payload) =>
+    yield* engine.register(agentFlow, (input) =>
       Effect.gen(function*() {
+        const instance = yield* FlowRuntime.FlowInstance
+        // A fork copies the parent's input, but belongs to its own execution.
+        // Never settle or send approvals to the parent named by copied data.
+        const payload = { ...input, runId: instance.executionId }
         // A run the control plane has already settled is finished here without
         // being executed again.
         //
@@ -1856,7 +2001,6 @@ export const make = (
         // next `gc` can collect it. The control row is the run's outcome of
         // record and is not rewritten.
         if (yield* settledAlready(payload.runId)) return []
-        const instance = yield* FlowRuntime.FlowInstance
         const fiber = yield* Effect.forkChild(
           body(payload, instance).pipe(
             Effect.onExit((exit) =>
@@ -1865,7 +2009,7 @@ export const make = (
                   const drive = launchedDrives.get(payload.runId)
                   if (drive !== undefined) drive.settled = true
                 }),
-                settle(payload.runId, instance.suspended, exit)
+                settle(payload.runId, instance.suspended, exit, instance.waiting?.reason)
               )
             ),
             Effect.provide(services)
@@ -1874,7 +2018,9 @@ export const make = (
         )
         activeBodies.set(payload.runId, fiber)
         return yield* Fiber.join(fiber).pipe(
-          Effect.ensuring(Effect.sync(() => activeBodies.delete(payload.runId))),
+          Effect.ensuring(Effect.sync(() => {
+            if (activeBodies.get(payload.runId) === fiber) activeBodies.delete(payload.runId)
+          })),
           // `settle` above already read the true exit, so the operator's line
           // and the control plane's recorded cause are unchanged. This is
           // only the shape the engine has to persist.
@@ -1933,7 +2079,10 @@ export const make = (
     // A signal recorded while this process was down has a wait point still
     // open and nobody to complete it. Replaying at start is what makes
     // `Control.signal`'s record a promise rather than a note.
-    yield* Effect.forkIn(Effect.provide(drainRecordedSignals, services), scope)
+    yield* Effect.forkIn(
+      Effect.provide(drainRecordedSignals, services).pipe(Effect.repeat({ schedule: Schedule.spaced("250 millis") })),
+      scope
+    )
 
     const launch = (
       input: ControlExecutor.Launch
@@ -1997,10 +2146,14 @@ export const make = (
             Effect.andThen(driver(input.run.runId, input.plan.card.planId)),
             // The drive is over: whatever the engine was going to record, it
             // has. Nothing may wait on this fiber after this point.
-            Effect.ensuring(Effect.sync(() => launchedDrives.delete(input.run.runId)))
+            Effect.ensuring(Effect.sync(() => {
+              if (launchedDrives.get(input.run.runId) === drive) launchedDrives.delete(input.run.runId)
+              driveFibers.delete(drive)
+            })),
+            Effect.scoped
           )
         )
-        yield* Scope.addFinalizer(scope, releaseDrive(drive, fiber))
+        driveFibers.set(drive, fiber)
         yield* registerDriver(
           () => runtime.registerFiber(input.run.runId, fiber),
           input.run.runId
@@ -2012,6 +2165,7 @@ export const make = (
       })
 
     return ControlExecutor.make({
+      readExecution: (runId) => Effect.provide(readExecution(runId), services),
       launch: Effect.fn("AgentSession.launch")(launch),
       requestCancel: Effect.fn("AgentSession.requestCancel")((input) => Effect.provide(requestCancel(input), services)),
       deliverSignal: Effect.fn("AgentSession.deliverSignal")((input) => Effect.provide(deliverSignal(input), services)),

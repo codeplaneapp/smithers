@@ -6,17 +6,17 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/docs/concepts/engine-port.md"
 ---
 
-`@smthrs/harness` owns the port (`sealStep`, `splice`, `call`, `record`,
-`observe`, `capture`, `suspend`) and ships no implementation that depends on an
-engine: the browser app supplies its own in-tab one, and pulling the durable
-engine into the port package would put it in every harness consumer's bundle.
-`FlowEngineLike` is the durable implementation, kept separate for the same
-reason `platform-node` is separate from the platform contracts in the effect
-repo.
+[`@smthrs/harness`](https://harness.smithers.sh/reference/api/) owns the port (`sealStep`, `splice`, `call`,
+`record`, `observe`, `capture`, `suspend`) and ships no implementation that
+depends on an engine, so a browser host can supply its own in-tab one without
+pulling a durable engine into its bundle. `FlowEngineLike`, in this package, is
+the implementation that runs the port on the durable engine from
+[`@smthrs/engine`](https://engine.smithers.sh/reference/api/).
 
-It is also deliberately not `@smthrs/testing`'s `FlowEngineLike`: that module
-adapts the same engine to `EngineSubject`, the testing library's conformance
-contract. The two share a backing engine and nothing else.
+[`@smthrs/testing`](https://testing.smithers.sh/reference/api/) exports a `FlowEngineLike` of its own, and it
+is a different thing: it adapts the same engine to that library's conformance
+contract for engine implementations. The two share a backing engine and nothing
+else.
 
 ## What each member buys
 
@@ -24,7 +24,7 @@ contract. The two share a backing engine and nothing else.
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sealStep` | Resolves the route, runs `Route.prepare`, and digests the credential-free prepared request together with the declared key material into a `StepKey`. That key is the sealed activity's idempotency key: a replayed turn re-emits the recorded model events instead of calling the provider again, and a provider wire change produces a new key. Credentials are signed on after the digest and never enter it. |
 | `call`     | Runs one flow call from inside a running cell as its own activity at the tier the flow declares. Authorization is checked before the activity opens, because an activity's outcome is journaled and a permission requirement raised from inside one would replay forever.                                                                                                                                       |
-| `splice`   | Retains the port shape but refuses every non-empty elaborated batch with a typed `engine_failed` error: the cell loop superseded the provider-tool-call path. An empty batch produces no events.                                                                                                                                                                                                                |
+| `splice`   | Retains the port shape but refuses every non-empty elaborated batch with a typed `engine_failed` error, because this agent has no provider-tool-call path. An empty batch produces no events.                                                                                                                                                                                                                   |
 | `record`   | Journals one nondeterministic controller read (the turn-boundary steering drain is the canonical one) as its own run-scoped boundary, at the `irreversible` tier. A resumed run replays the recorded value instead of reading the world a second time.                                                                                                                                                          |
 | `observe`  | Measures the workspace through `WorkspaceObservation.Observer` when the composition provides one, and answers unobserved when it does not.                                                                                                                                                                                                                                                                      |
 | `capture`  | Asks the `Checkpoints` store for the pinned tree a cell call names, or answers none when the composition pins nothing.                                                                                                                                                                                                                                                                                          |

@@ -16,8 +16,9 @@ it. It is what a markdown flow's `model:` frontmatter carries and what
 and no client: a declaration is portable, and a run that reads one out of a
 repository must not be handed the keys with it.
 
-`provider:modelId` (`anthropic:claude-sonnet-4-5`) is the convention the Node
-CLI resolver understands, not a rule the agent enforces. Nothing below the
+`provider:modelId` (`anthropic:claude-sonnet-4-5`) is the convention the
+resolver in [`@smthrs/cli`](/api/cli) understands, not a rule the agent
+enforces. Nothing below the
 resolver parses the string, so a host that installs its own resolver may accept
 anything it likes, including a bare model id or a logical name like `fast` or
 `reviewer`.
@@ -41,7 +42,7 @@ conservative floor for the rest.
 ## The seam between them
 
 `SeatResolver` is the credentialed half of the composition, one method:
-`resolve(id)`. The CLI's `NodeControl` installs the resolver that reads keys
+`resolve(id)`. The `smthrs` command line installs the resolver that reads keys
 from the environment; a test installs one that answers with a scripted model
 and never touches the network. Because the resolver owns the seat vocabulary,
 the whole difference between a deterministic run and a live one is which

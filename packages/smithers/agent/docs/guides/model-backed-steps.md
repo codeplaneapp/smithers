@@ -57,7 +57,7 @@ export const SimpleWorkflow = Flow.make("docs/SimpleWorkflow", {
   error: AgentAction.AgentFailure,
   body: ({ topic }) =>
     Research.call({ topic }).pipe(
-      Node.andThen((research) => Write.call({ summary: research.summary }))
+      Node.bindPlanned((research) => Write.call({ summary: research.summary }))
     )
 })
 ```
@@ -128,7 +128,7 @@ A step fails with a member of `AgentAction.AgentFailure`:
   schema after its correction budget. This is the one an author handles.
 - `SeatUnresolved`: the host has no model for the declared seat.
 - `BudgetExceeded` and `Budget.Skipped`: the run has spent what it was approved
-  for. See [Park on quota refusals and cap run spend](./quota-and-budgets.md).
+  for. See [Park on quota refusals and limit model admission](./quota-and-budgets.md).
 - `HarnessError` and `PluginError`: the composition failed underneath the step.
 
 Provider refusals do not reach the caller as-is. The model boundary runs a

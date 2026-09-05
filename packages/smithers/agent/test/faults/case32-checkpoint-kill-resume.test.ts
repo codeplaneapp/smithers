@@ -5,8 +5,8 @@
  * `ctx.checkpoint` is the authoring name for this: a call that names a
  * checkpoint reads the tree as it was, so a "fails before, passes after" claim
  * is about two trees and not about whatever the working copy happened to hold
- * when the check ran. The pin is durable — it is a git ref, not a handle in a
- * process — which is what makes the kill below meaningful.
+ * when the check ran. The pin is a git object named in repository config, not
+ * a handle in a process — which is what makes the kill below meaningful.
  *
  * The refusals are part of the same contract: a path that is absolute, or that
  * climbs out of the checkout with `..`, would silently read the live tree while
@@ -87,8 +87,8 @@ describe("case32 a checkpoint is a pinned tree", () => {
     writeFileSync(ledger, "two\n")
     expect(readFileSync(ledger, "utf8")).toBe("two\n")
 
-    // A reading taken at the checkpoint is of the pinned tree, in a fresh
-    // process that learned nothing but the checkpoint's name.
+    // A reading taken at the checkpoint is of the pinned tree, through a
+    // fresh store that learned nothing but the checkpoint's name.
     expect(await readAtCheckpoint()).toBe("one\n")
     // Materializing did not disturb the live tree.
     expect(readFileSync(ledger, "utf8")).toBe("two\n")

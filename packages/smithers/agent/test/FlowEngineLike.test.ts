@@ -13,6 +13,7 @@ import * as ContextWindow from "@smthrs/harness/ContextWindow"
 import * as EngineLike from "@smthrs/harness/EngineLike"
 import { HarnessError } from "@smthrs/harness/HarnessError"
 import * as Plan from "@smthrs/harness/Plan"
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
@@ -31,6 +32,7 @@ import {
   Fiber,
   Layer,
   Option,
+  PlatformError,
   Redacted,
   Result,
   Schedule,
@@ -38,7 +40,7 @@ import {
   Scope,
   Stream
 } from "effect"
-import type * as Crypto from "effect/Crypto"
+import * as Crypto from "effect/Crypto"
 import { TestClock } from "effect/testing"
 import { describe, expect, it } from "vitest"
 import * as Budget from "../src/Budget.ts"
@@ -326,6 +328,295 @@ describe("FlowEngineLike.make", () => {
     // Same sealed step key, so the engine replayed the recorded events instead
     // of calling the provider a second time.
     expect(calls).toEqual(["test-model"])
+  })
+
+  it("reserves budget before a provider call so concurrent callers cannot spend the same allowance", async () => {
+    let calls = 0
+    const outcome = await drive(Effect.gen(function*() {
+      const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+      yield* budget.record("seed", { totalTokens: 400 })
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const model = Model.make({
+        stream: () =>
+          Stream.unwrap(Effect.gen(function*() {
+            calls++
+            yield* Deferred.succeed(entered, undefined)
+            yield* Deferred.await(release)
+            return Stream.make(
+              ModelEvent.ModelEvent.Usage({ totalTokens: 400 }),
+              ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+            )
+          }))
+      })
+      const engine = yield* FlowEngineLike.make({ model, route: staticRoute() }).pipe(
+        Effect.provideService(Budget.Budget, budget)
+      )
+      const first = yield* Stream.runCollect(engine.sealStep(step("first"))).pipe(Effect.forkChild)
+      yield* Deferred.await(entered)
+      const second = yield* Stream.runCollect(engine.sealStep(step("second"))).pipe(Effect.exit)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      return { second: classify(second), usage: yield* budget.usage }
+    }))
+    const result = completed(outcome) as { second: Outcome; usage: Budget.Usage }
+    expect(result.second._tag).toBe("failed")
+    expect(JSON.stringify(failure(result.second))).toContain("reserved")
+    expect(result.usage).toEqual({ tokens: 800, calls: 2, largestCall: 400 })
+    expect(calls).toBe(1)
+  })
+
+  it("sums final usage per retry attempt without replaying partial text or leaking recorder state", async () => {
+    let calls = 0
+    const model = Model.make({
+      stream: () =>
+        Stream.suspend((): Stream.Stream<ModelEvent.ModelEvent, ModelError> => {
+          calls++
+          return calls % 2 === 1
+            ? Stream.concat(
+              Stream.make(
+                ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "failed", text: "unsafe partial text" }),
+                ModelEvent.ModelEvent.Usage({ inputTokens: 100 }),
+                ModelEvent.ModelEvent.Usage({ inputTokens: 200, totalTokens: 260 }),
+                ModelEvent.ModelEvent.Usage({ inputTokens: undefined })
+              ),
+              Stream.fail(new ModelError({ code: "transport", message: "dropped after usage" }))
+            )
+            : Stream.make(
+              ModelEvent.ModelEvent.Usage({ outputTokens: 40 }),
+              ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+            )
+        })
+    })
+    const recording = InternalFlowEngineLike.recordModelStep(model, request("retry usage"), Schedule.recurs(1))
+    for (let i = 0; i < 2; i++) {
+      const recorded = InternalFlowEngineLike.normalizeRecordedModelStep(await Effect.runPromise(recording))
+      expect(recorded.events.map((event) => event.type)).toEqual(["retry", "usage", "settle"])
+      expect(ModelEvent.ModelEvent.settledMessage(recorded.events).usage).toEqual({
+        inputTokens: 200,
+        outputTokens: 40,
+        totalTokens: 300
+      })
+      expect(JSON.stringify(recorded.events)).not.toContain("unsafe partial text")
+    }
+    expect(calls).toBe(4)
+  })
+
+  it("cannot cancel invalid negative usage against a later positive retry", async () => {
+    let calls = 0
+    const model = Model.make({
+      stream: () =>
+        Stream.suspend(() => {
+          calls++
+          return calls === 1
+            ? Stream.concat(
+              Stream.make(ModelEvent.ModelEvent.Usage({ totalTokens: -600 })),
+              Stream.fail(new ModelError({ code: "transport", message: "retry after malformed usage" }))
+            )
+            : Stream.make(
+              ModelEvent.ModelEvent.Usage({ totalTokens: 700 }),
+              ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+            )
+        })
+    })
+    const recorded = InternalFlowEngineLike.normalizeRecordedModelStep(
+      await Effect.runPromise(
+        InternalFlowEngineLike.recordModelStep(model, request("malformed usage"), Schedule.recurs(1))
+      )
+    )
+    const usage = ModelEvent.ModelEvent.settledMessage(recorded.events).usage
+    // Previously this became an apparently valid 100-token bill. Preserve the
+    // invalid accounting signal so Budget.record cannot durably accept it.
+    expect(Number.isNaN(usage.totalTokens)).toBe(true)
+    const budget = await Effect.runPromise(Budget.make({ tokens: { max: 1_000 } }))
+    expect((await Effect.runPromiseExit(budget.record("malformed", usage)))._tag).toBe("Failure")
+    expect((await Effect.runPromiseExit(budget.check("next")))._tag).toBe("Failure")
+  })
+
+  it("accounts provider-reported usage even when the model stream fails", async () => {
+    const outcome = await drive(Effect.gen(function*() {
+      const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+      const model = Model.make({
+        stream: () =>
+          Stream.concat(
+            Stream.make(
+              ModelEvent.ModelEvent.Usage({ totalTokens: 300 })
+            ),
+            Stream.fail(new ModelError({ code: "invalid_request", message: "failed after usage" }))
+          )
+      })
+      const engine = yield* FlowEngineLike.make({ model, route: staticRoute() }).pipe(
+        Effect.provideService(Budget.Budget, budget)
+      )
+      const result = yield* Stream.runCollect(engine.sealStep(step("failed"))).pipe(Effect.exit)
+      return { result: classify(result), usage: yield* budget.usage }
+    }))
+    const result = completed(outcome) as { result: Outcome; usage: Budget.Usage }
+    expect(result.result._tag).toBe("failed")
+    expect(result.usage).toEqual({ tokens: 300, calls: 1, largestCall: 300 })
+  })
+
+  it("durably charges an unsealed capacity failure without marking its retry paid", async () => {
+    let calls = 0
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+        const model = Model.make({
+          stream: () =>
+            Stream.suspend(() => {
+              calls++
+              return Stream.concat(
+                Stream.make(ModelEvent.ModelEvent.Usage({ totalTokens: 600 })),
+                Stream.fail(new ModelError({ code: "rate_limited", message: "capacity after usage" }))
+              )
+            })
+        })
+        const engine = yield* FlowEngineLike.make({ model, route: staticRoute() }).pipe(
+          Effect.provideService(Budget.Budget, budget)
+        )
+        const first = yield* Stream.runCollect(engine.sealStep(step("capacity"))).pipe(Effect.exit)
+        const retry = yield* Stream.runCollect(engine.sealStep(step("capacity"))).pipe(Effect.exit)
+        const fresh = yield* Budget.make({ tokens: { max: 1_000 } })
+        return { first: classify(first), retry: classify(retry), live: yield* budget.usage, fresh: yield* fresh.usage }
+      }).pipe(Effect.provide(TestJournal.layer()))
+    )
+    const result = completed(outcome) as { first: Outcome; retry: Outcome; live: Budget.Usage; fresh: Budget.Usage }
+    expect(failure(result.first)).toMatchObject({ code: "rate_limited" })
+    expect(failure(result.retry)).toMatchObject({ code: "model_failed" })
+    expect(result.live).toEqual({ tokens: 600, calls: 1, largestCall: 600 })
+    expect(result.fresh).toEqual(result.live)
+    expect(calls).toBe(1)
+  })
+
+  it("counts a successful retry separately from its unsealed predecessor and replays it once", async () => {
+    let calls = 0
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 2_000 } })
+        const model = Model.make({
+          stream: () =>
+            Stream.suspend((): Stream.Stream<ModelEvent.ModelEvent, ModelError> => {
+              calls++
+              return calls === 1
+                ? Stream.concat(
+                  Stream.make(ModelEvent.ModelEvent.Usage({ totalTokens: 300 })),
+                  Stream.fail(new ModelError({ code: "rate_limited", message: "capacity" }))
+                )
+                : Stream.make(
+                  ModelEvent.ModelEvent.Usage({ totalTokens: 400 }),
+                  ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+                )
+            })
+        })
+        const invoke = Effect.gen(function*() {
+          const engine = yield* FlowEngineLike.make({ model, route: staticRoute() }).pipe(
+            Effect.provideService(Budget.Budget, budget)
+          )
+          return yield* Stream.runCollect(engine.sealStep(step("retry")))
+        })
+        // A retry is a new engine attempt; simply re-reading attempt 1 correctly
+        // replays its failure. Keep the model's sealed content key unchanged.
+        yield* invoke.pipe(Action.retry({ times: 1 }))
+        yield* invoke.pipe(Effect.provideService(Action.CurrentAttempt, 2))
+        const fresh = yield* Budget.make({})
+        return { live: yield* budget.usage, fresh: yield* fresh.usage }
+      }).pipe(Effect.provide(TestJournal.layer()))
+    )
+    expect(completed(outcome)).toEqual({
+      live: { tokens: 700, calls: 2, largestCall: 400 },
+      fresh: { tokens: 700, calls: 2, largestCall: 400 }
+    })
+    expect(calls).toBe(2)
+  })
+
+  it("flushes reported spend when a stream is interrupted before it can seal", async () => {
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+        const reported = yield* Deferred.make<void>()
+        const model = Model.make({
+          stream: () =>
+            Stream.concat(
+              Stream.make(ModelEvent.ModelEvent.Usage({ totalTokens: 600 })),
+              Stream.fromEffect(Effect.andThen(Deferred.succeed(reported, undefined), Effect.never))
+            )
+        })
+        const engine = yield* FlowEngineLike.make({ model, route: staticRoute() }).pipe(
+          Effect.provideService(Budget.Budget, budget)
+        )
+        const running = yield* Stream.runCollect(engine.sealStep(step("interrupted"))).pipe(Effect.forkChild)
+        yield* Deferred.await(reported)
+        yield* Fiber.interrupt(running)
+        const fresh = yield* Budget.make({ tokens: { max: 1_000 } })
+        return {
+          live: yield* budget.usage,
+          fresh: yield* fresh.usage,
+          next: (yield* Effect.scoped(fresh.reserve("new-call")))._tag
+        }
+      }).pipe(Effect.provide(TestJournal.layer()))
+    )
+    expect(completed(outcome)).toEqual({
+      live: { tokens: 600, calls: 1, largestCall: 600 },
+      fresh: { tokens: 600, calls: 1, largestCall: 600 },
+      next: "refuse"
+    })
+  })
+
+  it("fails before dispatch if a usage receipt cannot be allocated", async () => {
+    const calls: Array<string> = []
+    const outcome = await drive(Effect.gen(function*() {
+      const crypto = yield* Crypto.Crypto
+      const engine = yield* FlowEngineLike.make({ model: countingModel(calls), route: staticRoute() }).pipe(
+        Effect.provideService(Crypto.Crypto, {
+          ...crypto,
+          randomUUIDv4: Effect.fail(PlatformError.systemError({
+            module: "Crypto",
+            method: "randomUUIDv4",
+            _tag: "Unknown",
+            description: "injected entropy failure"
+          }))
+        })
+      )
+      return yield* Stream.runCollect(engine.sealStep(step("no-identity")))
+    }))
+    expect(failure(outcome)).toMatchObject({
+      code: "engine_failed",
+      message: "Could not allocate a model usage receipt"
+    })
+    expect(calls).toEqual([])
+  })
+
+  it("retains reported spend from earlier attempts when interrupted during retry backoff", async () => {
+    const outcome = await drive(
+      Effect.gen(function*() {
+        const budget = yield* Budget.make({ tokens: { max: 1_000 } })
+        const waiting = yield* Deferred.make<void>()
+        const model = Model.make({
+          stream: () =>
+            Stream.concat(
+              Stream.make(
+                ModelEvent.ModelEvent.Usage({ inputTokens: 200 }),
+                ModelEvent.ModelEvent.Usage({ totalTokens: 300 })
+              ),
+              Stream.fail(new ModelError({ code: "transport", message: "partial response" }))
+            )
+        })
+        const engine = yield* FlowEngineLike.make({
+          model,
+          route: staticRoute(),
+          modelRetryPolicy: Schedule.spaced("1 hour").pipe(Schedule.tap(() => Deferred.succeed(waiting, undefined)))
+        }).pipe(Effect.provideService(Budget.Budget, budget))
+        const running = yield* Stream.runCollect(engine.sealStep(step("backoff"))).pipe(Effect.forkChild)
+        yield* Deferred.await(waiting)
+        yield* Fiber.interrupt(running)
+        const fresh = yield* Budget.make({})
+        return { live: yield* budget.usage, fresh: yield* fresh.usage }
+      }).pipe(Effect.provide(TestJournal.layer()))
+    )
+    expect(completed(outcome)).toEqual({
+      live: { tokens: 300, calls: 1, largestCall: 300 },
+      fresh: { tokens: 300, calls: 1, largestCall: 300 }
+    })
   })
 
   it("measures the workspace through the composition's observer, and reports it unobserved without one", async () => {

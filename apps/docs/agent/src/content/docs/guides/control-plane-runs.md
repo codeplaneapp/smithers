@@ -17,7 +17,8 @@ built, sealed, and replayed belongs to `Agent`; what belongs here is the
 control-plane half: status fencing, the resume bridge, the approval gate, and
 the journal trail. The CLI wiring, `NodeControl.layerExecutor` in
 [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), composes this layer with a `SeatResolver` over real
-provider routes and the kernel's guarded host layers.
+provider routes and the permission-guarded host layers from
+[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/).
 
 ## Declare the composition
 
@@ -37,7 +38,7 @@ const executor = AgentSession.layer({
 })
 ```
 
-Two options are required by the spec, not defaulted by the session:
+Two options are required, and the session supplies no default for either:
 
 - `limits` is the explicit sandbox budget every cell runs under. There is no
   default-unlimited path, because an unlimited QuickJS cell can hang the frame.
@@ -85,9 +86,13 @@ approval token with the control plane, journals the exact
 `control.approval.requested` payload an operator replays through
 `smthrs approve`, and fails the call with an encoded
 `Permission.PermissionRequired`, which the controller turns into a real durable
-park annotated `reason: "approval"`. `Control.approve` resolves the token and
-installs the grant; the resumed attempt re-asks against the grant store as it
-now stands and proceeds.
+park annotated `reason: "approval"`. `Control.approve` records `Approved` and
+installs the grant; `Control.deny` records `Denied`. The resumed ask reads that
+durable decision and returns `{ answer: "approved", approved: true }` or
+`{ answer: "denied", approved: false }`. It never infers a decision by scanning
+grants. A missing/pending or unreadable decision is a typed failure, not an
+invented answer. Unlike an execution clearance gate, `ask` reports the denial
+to its caller; callers must honor `approved: false` before doing gated work.
 
 The park is decided outside the activity on purpose: an activity's outcome is
 journaled, so a permission requirement raised from inside one would replay

@@ -16,7 +16,7 @@
  * passes through, so a budget cannot be evaded by a step that assembles its own
  * loop.
  *
- * Three things make it usable rather than merely present:
+ * Its accounting and admission rules are:
  *
  * - **The accumulator is per run, keyed by the model step's content key, and
  *   projected from the journal.** Every call writes a {@link usageEvent}
@@ -40,13 +40,18 @@
  *   Only the {@link budgetWarningEvent} record is allowed to be lost: nothing
  *   reads it back, so losing one costs a line in an operator view and no
  *   decision.
- * - **Refusal is a projection, not a post-mortem.** The check happens BEFORE a
- *   call, and it projects the call's cost as the largest one the run has made.
- *   A budget that only noticed after the fact would always be exceeded by the
- *   call that exceeded it.
- * - **The first call is never refused.** With nothing recorded, the only honest
- *   projection is zero, and a budget that refused a run's first call would be a
- *   configuration error reported as a runtime one.
+ * - **Admission reserves a soft forecast.** Before dispatch, `reserve` counts
+ *   actual spend plus all in-flight estimates, using the largest observed
+ *   call. Before a positive cost is known, one call holds the whole allowance.
+ *   Zero refuses new calls unless `warn` explicitly permits them. Scope exit
+ *   releases reservations; recorded usage replaces the estimate. `check` only
+ *   previews admission and must not be used as a concurrency guard.
+ *
+ * A forecast is not a provider billing cap: admitted calls may cost more than
+ * estimated, including the first call. One shared Budget instance coordinates
+ * concurrent calls of each run; independent instances are not a distributed
+ * quota service. Durable execution ownership must prevent multiple hosts from
+ * dispatching the same run concurrently.
  *
  * `onExceeded` is the composition's choice of what that means: `fail` reports a
  * typed {@link BudgetExceeded}, `warn` journals and proceeds, and
@@ -56,6 +61,7 @@
  * @since 0.1.0
  */
 import type * as ControlSchema from "@smthrs/control/ControlSchema"
+import { digest } from "@smthrs/core/Digest"
 import { FlowRuntime } from "@smthrs/flow"
 import type * as RetryPolicy from "@smthrs/flow/RetryPolicy"
 import { Journal, JournalEvent } from "@smthrs/journal"
@@ -66,7 +72,9 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
 
 /**
@@ -86,12 +94,14 @@ export const OnExceeded = Schema.Literals(["fail", "warn", "skip-remaining"])
 export type OnExceeded = typeof OnExceeded.Type
 
 /**
- * The token ceiling for one run, and what exceeding it means.
+ * The soft token admission ceiling for one run, and what exceeding it means.
+ * Actual provider charges can exceed their pre-dispatch forecasts.
  *
  * @category models
  * @since 0.1.0
  */
 export interface TokenBudget {
+  /** Non-negative safe integer; omit the whole token policy for no ceiling. */
   readonly max: number
   readonly onExceeded?: OnExceeded | undefined
 }
@@ -109,6 +119,7 @@ export interface TokenBudget {
  * @since 0.1.0
  */
 export interface LatencyBudget {
+  /** Finite, non-negative milliseconds; fractional durations are allowed. */
   readonly maxMillis: number
   readonly onExceeded?: OnExceeded | undefined
 }
@@ -128,11 +139,25 @@ export interface Policy {
 }
 
 /**
+ * Invalid spending policy or accounting bounds, rejected when the budget is
+ * built, before a model can be dispatched. Omit a ceiling to leave it unbounded;
+ * `NaN`, infinity, negative limits, and unknown exceeded policies are not opt-outs.
+ *
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class ConfigurationError extends Schema.TaggedError<ConfigurationError>()(
+  "flows/agent/BudgetConfigurationError",
+  { message: Schema.String }
+) {}
+
+/**
  * A run that would exceed what it was approved for.
  *
- * `used` is what the run has spent, `max` what it was allowed, and `next` the
- * projected cost of the call that was refused — the largest call the run has
- * made so far, which is the only estimate available before a provider answers.
+ * `used` is actual spend, `reserved` the forecast held by other in-flight
+ * calls, `max` the soft admission ceiling, and `next` the refused call's
+ * forecast. The largest observed call sets forecasts; before a positive cost
+ * is known, one call reserves the full token allowance.
  *
  * @category errors
  * @since 0.1.0
@@ -143,6 +168,8 @@ export class BudgetExceeded extends Schema.TaggedError<BudgetExceeded>()(
     scope: Schema.Literals(["tokens", "latency"]),
     onExceeded: OnExceeded,
     used: Schema.Number,
+    /** Forecast held by other in-flight calls; absent on older encoded errors. */
+    reserved: Schema.optional(Schema.Number),
     max: Schema.Number,
     next: Schema.Number,
     message: Schema.String
@@ -266,7 +293,7 @@ export const neverRetrySkipped = (policy: RetryPolicy.RetryPolicy): RetryPolicy.
  */
 export interface Usage {
   readonly tokens: number
-  /** Distinct model steps counted, replays included exactly once. */
+  /** Charged sealed steps and unsealed invocations, each counted exactly once. */
   readonly calls: number
   /** The largest single call, which is what the next one is projected to cost. */
   readonly largestCall: number
@@ -318,7 +345,19 @@ export interface Service {
    * the run has not made.
    */
   readonly check: (stepKey: string | undefined) => Effect.Effect<Verdict, AccountingUnavailable>
-  /** Accounts one model step's usage, idempotently in its step key. */
+  /**
+   * Atomically admits a sealed step and reserves its forecast until the
+   * current scope closes. Use this at dispatch; `check` is advisory only.
+   * `record` reconciles the forecast with actual usage. Duplicate keys share
+   * one reservation, assuming the engine deduplicates their provider work.
+   * One Budget instance must serve all concurrent calls of a run.
+   */
+  readonly reserve: (stepKey: string) => Effect.Effect<Verdict, AccountingUnavailable, Scope.Scope>
+  /**
+   * Accounts finite, non-negative usage, idempotently in its step key. A
+   * failed/uncommitted write remains pending and retryable; new uncounted
+   * steps fail closed until it commits. Retries must supply the same cost.
+   */
   readonly record: (stepKey: string, usage: ModelEvent.Usage) => Effect.Effect<void, AccountingUnavailable>
   /** What the CURRENT run has spent. Outside a run, what the caller recorded. */
   readonly usage: Effect.Effect<Usage, AccountingUnavailable>
@@ -364,8 +403,11 @@ export const budgetWarningEvent = "flows.agent.budget-warning.v1"
  * dropped record here would silently hand a resumed run a second allowance.
  *
  * The write is unfenced. A budget is a client of the run it accounts for, not
- * its owner, and the record advances nothing: the accumulator's own step-key
- * dedupe, not the journal fence, is what makes a repeated write harmless. A
+ * its owner, and the record advances nothing. A stable producer identity per
+ * step deduplicates retries durably; different usage under that identity is
+ * an error. The accumulator counts actual spend immediately but keeps its
+ * write pending until the outer transaction commits, so rollback or an
+ * interrupted write can never turn a retry into a successful no-op. A
  * composition with no journal at all (the reference memory engine) still
  * accounts within one process and simply recovers nothing across a restart.
  *
@@ -408,7 +450,7 @@ export const usageEvent = "flows.agent.usage.v1"
  */
 export const UsageRecord = Schema.Struct({
   stepKey: Schema.String,
-  spent: Schema.Finite
+  spent: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 })
 
 /**
@@ -447,18 +489,31 @@ const recordSource = JournalEvent.SourceId.make("/agent/budget")
  * Providers report either a total or the parts, and some report both. The total
  * wins when it is there, because a provider that publishes one has already
  * decided what counts.
+ * Every supplied counter must nevertheless be finite and non-negative. An
+ * invalid component yields NaN so neither total precedence nor aggregation
+ * can conceal malformed usage; record rejects it and blocks fresh admission.
  *
  * @category accounting
  * @since 0.1.0
  */
-export const tokensOf = (usage: ModelEvent.Usage): number =>
-  usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) +
+export const tokensOf = (usage: ModelEvent.Usage): number => {
+  const counters = [
+    usage.totalTokens,
+    usage.inputTokens,
+    usage.outputTokens,
+    usage.reasoningTokens,
+    usage.cachedInputTokens,
+    usage.cacheWriteTokens
+  ]
+  if (counters.some((value) => value !== undefined && (!Number.isFinite(value) || value < 0))) return Number.NaN
+  return usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) +
       (usage.reasoningTokens ?? 0)
+}
 
 interface State {
   readonly tokens: number
   readonly largestCall: number
-  readonly counted: ReadonlySet<string>
+  readonly counted: ReadonlyMap<string, number>
   readonly latched: BudgetExceeded | undefined
 }
 
@@ -467,16 +522,18 @@ const exceeded = (
   onExceeded: OnExceeded,
   used: number,
   max: number,
-  next: number
+  next: number,
+  reserved = 0
 ): BudgetExceeded =>
   new BudgetExceeded({
     scope,
     onExceeded,
     used,
+    reserved,
     max,
     next,
     message: scope === "tokens"
-      ? `The run has spent ${used} of its ${max} approved tokens and the next call is projected at ${next}`
+      ? `The run has spent ${used} of its ${max} approved tokens, has ${reserved} reserved, and the next call is projected at ${next}`
       : `The run has been running for ${used} ms of its ${max} ms budget`
   })
 
@@ -585,9 +642,29 @@ const journalWarning = (payload: Record<string, unknown>): Effect.Effect<void> =
  */
 const journalUsage = (
   runId: string,
-  payload: typeof UsageRecord.Encoded
+  payload: typeof UsageRecord.Encoded,
+  committed: Effect.Effect<void>
 ): Effect.Effect<void, AccountingUnavailable> =>
-  emit((journal, input) => journal.emitDurableUnfenced(input), usageEvent, payload).pipe(
+  Effect.gen(function*() {
+    const journal = yield* Effect.serviceOption(Journal.Journal)
+    if (runId === looseRunId || Option.isNone(journal)) return yield* committed
+    yield* journal.value.emitDurableUnfenced(
+      new JournalEvent.Input({
+        runId: JournalEvent.RunId.make(runId),
+        // One durable identity per model step, including commit-then-interrupt
+        // retries. Hash the JSON string encoding so identifiers stay bounded
+        // and distinct even for long keys or unpaired UTF-16 surrogates.
+        sourceId: JournalEvent.SourceId.make(`${recordSource}/usage/${digest(JSON.stringify(payload.stepKey))}`),
+        sourceSeq: JournalEvent.SourceSeq.make(0),
+        eventType: usageEvent,
+        payload
+      })
+    )
+    const observable = yield* journal.value.whenCommitted(committed)
+    if (!observable) {
+      return yield* Effect.fail(new Error("usage was written inside an unmanaged transaction"))
+    }
+  }).pipe(
     Effect.mapError((cause) => unavailable("record", runId, String(cause), cause))
   )
 
@@ -651,6 +728,16 @@ const recoverUsage = (
     let startedAt = Number.POSITIVE_INFINITY
     const journal = yield* Effect.serviceOption(Journal.Journal)
     if (Option.isNone(journal)) return { usage: recovered, startedAt: undefined }
+    // Recovery flushes and reads committed history. Running it while holding
+    // a write transaction can deadlock its lossy writer or recover a clock
+    // zero that is later rolled back. Refuse before either operation.
+    let outsideTransaction = false
+    yield* journal.value.whenCommitted(Effect.sync(() => {
+      outsideTransaction = true
+    }))
+    if (!outsideTransaction) {
+      return yield* Effect.fail(unavailable("recover", runId, "budget recovery must run outside a journal transaction"))
+    }
     const id = JournalEvent.RunId.make(runId)
     const unreadable = (cause: unknown) => unavailable("recover", runId, String(cause), cause)
     const undecodable = (entry: JournalEvent.Entry, record: string) =>
@@ -675,6 +762,10 @@ const recoverUsage = (
           const payload = yield* Schema.decodeUnknownEffect(UsageRecord)(entry.payload).pipe(
             Effect.mapError(() => undecodable(entry, "usage"))
           )
+          const previous = recovered.get(payload.stepKey)
+          if (previous !== undefined && previous !== payload.spent) {
+            return yield* Effect.fail(unavailable("recover", runId, "its usage records disagree about one model step"))
+          }
           recovered.set(payload.stepKey, payload.spent)
         } else if (entry.eventType === budgetStartedEvent) {
           const payload = yield* Schema.decodeUnknownEffect(BudgetStartedRecord)(entry.payload).pipe(
@@ -717,6 +808,14 @@ interface RunAccount {
   /** The latency zero, replaced once when recovery finds its earlier durable value. */
   startedAt: number
   readonly state: Ref.Ref<State>
+  /** Actual spend whose journal write has not yet been confirmed committed. */
+  readonly pending: Map<string, AccountingUnavailable>
+  /** Operations holding this account cannot race its eviction/replacement. */
+  users: number
+  /** Memory-only accounts cannot be reconstructed after eviction. */
+  evictable: boolean
+  readonly admission: Semaphore.Semaphore
+  readonly reservations: Map<string, { holders: number }>
   /**
    * Serializes the one-time recovery.
    *
@@ -749,10 +848,10 @@ export const looseRunId = ""
  * scope closes at the end of every NODE dispatch, not at the end of the run,
  * so it cannot be the lifetime. The bound is what keeps a control plane that
  * drives runs for weeks from holding one tally per run it ever drove. It is
- * far above any plausible concurrency, so the entry a running run needs is
- * always the most recently used one and is never the one evicted; an evicted
- * run projects both its spend and its original latency zero back from its own
- * durable records the next time it asks a question.
+ * an upper bound, not permission to forget spend: active operations,
+ * uncommitted usage, and memory-only accounts cannot be evicted. If all slots
+ * are pinned, admission fails with AccountingUnavailable. An evicted durable
+ * account recovers its spend and original latency zero from the journal.
  *
  * @category constructors
  * @since 0.1.0
@@ -766,29 +865,58 @@ export const defaultMaxRuns = 256
  * @since 0.1.0
  */
 export interface Options {
-  /** How many runs' tallies to keep in memory. Defaults to {@link defaultMaxRuns}. */
+  /** Positive safe integer; defaults to {@link defaultMaxRuns}. */
   readonly maxRuns?: number | undefined
   /**
    * How many journal entries one recovery reads before it fails closed.
-   * Defaults to {@link defaultRecoveryEntries}.
+   * Positive safe integer; defaults to {@link defaultRecoveryEntries}.
    */
   readonly recoveryEntries?: number | undefined
 }
+
+const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
+const Configuration = Schema.Struct({
+  policy: Schema.Struct({
+    tokens: Schema.optional(Schema.Struct({
+      max: NonNegativeInteger,
+      onExceeded: Schema.optional(OnExceeded)
+    })),
+    latency: Schema.optional(Schema.Struct({
+      maxMillis: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+      onExceeded: Schema.optional(OnExceeded)
+    }))
+  }),
+  options: Schema.Struct({
+    maxRuns: Schema.optional(PositiveInteger),
+    recoveryEntries: Schema.optional(PositiveInteger)
+  })
+})
 
 /**
  * Builds a budget over one policy.
  *
  * One instance serves a whole composition: the accumulator is keyed by
  * execution id, so a layer built once above an engine accounts every run it
- * drives separately.
+ * drives separately. Validates and snapshots the configuration at acquisition;
+ * subsequent mutations of the caller's objects cannot change enforcement.
  *
  * @category constructors
  * @since 0.1.0
  */
-export const make = (policy: Policy, options: Options = {}): Effect.Effect<Service> =>
+export const make = (
+  declaredPolicy: Policy,
+  declaredOptions: Options = {}
+): Effect.Effect<Service, ConfigurationError> =>
   Effect.gen(function*() {
-    const maxRuns = Math.max(1, options.maxRuns ?? defaultMaxRuns)
-    const recoveryEntries = Math.max(1, options.recoveryEntries ?? defaultRecoveryEntries)
+    const { options, policy } = yield* Schema.decodeUnknownEffect(Configuration, { onExcessProperty: "error" })({
+      policy: declaredPolicy,
+      options: declaredOptions
+    }).pipe(
+      Effect.mapError((cause) => new ConfigurationError({ message: `Invalid budget configuration: ${cause.message}` }))
+    )
+    const maxRuns = options.maxRuns ?? defaultMaxRuns
+    const recoveryEntries = options.recoveryEntries ?? defaultRecoveryEntries
     const accounts = new Map<string, RunAccount>()
     const registry = yield* Semaphore.make(1)
 
@@ -797,11 +925,22 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
       const state = yield* Ref.make<State>({
         tokens: 0,
         largestCall: 0,
-        counted: new Set<string>(),
+        counted: new Map<string, number>(),
         latched: undefined
       })
       const recovery = yield* Semaphore.make(1)
-      return { startedAt, state, recovery, recovered: false } satisfies RunAccount
+      const admission = yield* Semaphore.make(1)
+      return {
+        startedAt,
+        state,
+        recovery,
+        admission,
+        reservations: new Map(),
+        recovered: false,
+        pending: new Map(),
+        users: 0,
+        evictable: false
+      } satisfies RunAccount
     })
 
     // The loose account exists from construction so a caller outside a run —
@@ -818,22 +957,34 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
      * A `Map` iterates in insertion order, so re-inserting on every touch
      * makes the first key the least recently used one.
      */
-    const accountFor = (runId: string): Effect.Effect<RunAccount> =>
+    const accountFor = (runId: string): Effect.Effect<RunAccount, AccountingUnavailable> =>
       registry.withPermits(1)(Effect.suspend(() => {
         const existing = accounts.get(runId)
         if (existing !== undefined) {
           accounts.delete(runId)
           accounts.set(runId, existing)
+          existing.users++
           return Effect.succeed(existing)
         }
-        return Effect.map(newAccount, (created) => {
+        return Effect.flatMap(newAccount, (created) => {
           // Evicted before the insert, so the map never exceeds the bound.
-          for (const oldest of accounts.keys()) {
+          for (const [oldest, account] of accounts) {
             if (accounts.size < maxRuns) break
+            if (account.users > 0 || account.pending.size > 0 || !account.evictable) continue
             accounts.delete(oldest)
           }
+          if (accounts.size >= maxRuns) {
+            return Effect.fail(
+              unavailable(
+                "recover",
+                runId,
+                "all cached accounts are active, uncommitted, or memory-only; none can be evicted safely"
+              )
+            )
+          }
           accounts.set(runId, created)
-          return created
+          created.users++
+          return Effect.succeed(created)
         })
       }))
 
@@ -843,21 +994,44 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
      * Answers whether this call was new, so a caller that also has to write the
      * call down does so exactly when the accumulator took it.
      */
-    const account = (run: RunAccount, stepKey: string, spent: number): Effect.Effect<boolean> =>
-      Ref.modify(run.state, (current) => {
-        if (current.counted.has(stepKey)) return [false, current] as const
-        const counted = new Set(current.counted)
-        counted.add(stepKey)
-        return [
-          true,
-          {
-            ...current,
-            tokens: current.tokens + spent,
-            largestCall: Math.max(current.largestCall, spent),
-            counted
+    const account = (
+      run: RunAccount,
+      runId: string,
+      stepKey: string,
+      spent: number,
+      pending?: AccountingUnavailable
+    ): Effect.Effect<boolean, AccountingUnavailable> =>
+      run.admission.withPermits(1)(
+        Ref.modify(run.state, (current): readonly [Result.Result<boolean, AccountingUnavailable>, State] => {
+          const previous = current.counted.get(stepKey)
+          if (previous !== undefined) {
+            const conflict = previous === spent
+              ? undefined
+              : unavailable("record", runId, "a model step was recorded with conflicting usage")
+            if (pending !== undefined && conflict !== undefined) run.pending.set(stepKey, conflict)
+            return [
+              conflict === undefined
+                ? Result.succeed(false)
+                : Result.fail(conflict),
+              current
+            ]
           }
-        ] as const
-      })
+          const counted = new Map(current.counted)
+          counted.set(stepKey, spent)
+          // Publish the actual cost and its pending durability in the same
+          // synchronous transition. A concurrent check cannot see only one.
+          if (pending !== undefined) run.pending.set(stepKey, pending)
+          return [
+            Result.succeed(true),
+            {
+              ...current,
+              tokens: current.tokens + spent,
+              largestCall: Math.max(current.largestCall, spent),
+              counted
+            }
+          ] as const
+        }).pipe(Effect.flatMap(Effect.fromResult))
+      )
 
     /** Recovers one run's earlier spend and latency zero once, before its first decision. */
     const ensureRecovered = (run: RunAccount, runId: string): Effect.Effect<void, AccountingUnavailable> =>
@@ -881,9 +1055,10 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
                 }
                 yield* Effect.forEach(
                   ledger.usage,
-                  ([stepKey, spent]) => account(run, stepKey, spent),
+                  ([stepKey, spent]) => account(run, runId, stepKey, spent),
                   { discard: true }
                 )
+                run.evictable = Option.isSome(yield* Effect.serviceOption(Journal.Journal))
               })
             ),
             Effect.andThen(Effect.sync(() => {
@@ -900,17 +1075,39 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
      * The id travels with the account because the write side needs it: a
      * record that cannot be written names the run whose ledger is now short.
      */
-    const recovered: Effect.Effect<
-      { readonly run: RunAccount; readonly runId: string },
-      AccountingUnavailable
-    > = Effect.gen(function*() {
+    const acquireAccount = Effect.gen(function*() {
       const instance = yield* Effect.serviceOption(FlowRuntime.FlowInstance)
       if (Option.isNone(instance)) return { run: loose, runId: looseRunId }
       const runId = instance.value.executionId
       const run = yield* accountFor(runId)
-      yield* ensureRecovered(run, runId)
       return { run, runId }
     })
+
+    const withRecovered = <A, E, R>(
+      use: (run: RunAccount, runId: string) => Effect.Effect<A, E, R>,
+      pendingStepKey?: string
+    ): Effect.Effect<A, E | AccountingUnavailable, R> =>
+      Effect.acquireUseRelease(
+        acquireAccount,
+        ({ run, runId }) =>
+          (runId === looseRunId ? Effect.void : ensureRecovered(run, runId)).pipe(
+            Effect.onError(() =>
+              Effect.sync(() => {
+                if (pendingStepKey !== undefined) {
+                  run.pending.set(
+                    pendingStepKey,
+                    unavailable("record", runId, "a paid step's initial recovery did not complete")
+                  )
+                }
+              })
+            ),
+            Effect.andThen(use(run, runId))
+          ),
+        ({ run, runId }) =>
+          Effect.sync(() => {
+            if (runId !== looseRunId) run.users--
+          })
+      )
 
     /** Applies one exceeded budget: latch, journal, or simply report. */
     const settle = (run: RunAccount, failure: BudgetExceeded): Effect.Effect<Verdict> =>
@@ -922,6 +1119,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           yield* journalWarning({
             scope: failure.scope,
             used: failure.used,
+            reserved: failure.reserved,
             max: failure.max,
             next: failure.next
           })
@@ -929,9 +1127,12 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         return verdictFor(failure)
       })
 
-    const check = (stepKey: string | undefined): Effect.Effect<Verdict, AccountingUnavailable> =>
+    const checkAccount = (
+      run: RunAccount,
+      stepKey: string | undefined,
+      reserving: boolean
+    ): Effect.Effect<Verdict, AccountingUnavailable> =>
       Effect.gen(function*() {
-        const { run } = yield* recovered
         const current = yield* Ref.get(run.state)
         // A step the ledger already holds is a step this run already paid for,
         // so the call about to be made is its replay and costs nothing. Every
@@ -940,7 +1141,12 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
         // call for spend the refusal is itself double-counting. It is checked
         // ahead of the latch for the same reason: `skip-remaining` stops the
         // calls a run has not made, not the ones it is replaying.
-        if (stepKey !== undefined && current.counted.has(stepKey)) return { _tag: "proceed" }
+        if (stepKey !== undefined && (current.counted.has(stepKey) || run.pending.has(stepKey))) {
+          return { _tag: "proceed" }
+        }
+        const pending = run.pending.values().next().value
+        if (pending !== undefined) return yield* Effect.fail(pending)
+        if (stepKey !== undefined && run.reservations.has(stepKey)) return { _tag: "proceed" }
         const now = yield* Clock.currentTimeMillis
         if (current.latched !== undefined) return verdictFor(current.latched)
         const latency = policy.latency
@@ -957,7 +1163,15 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           )
         }
         const tokens = policy.tokens
-        if (tokens !== undefined && current.tokens + current.largestCall > tokens.max) {
+        // Before any positive cost is known, hold the whole token allowance
+        // for one call. A zero-cost forecast must not admit unbounded fanout.
+        const forecast = current.largestCall || tokens?.max || 0
+        let reserved = 0
+        for (const key of run.reservations.keys()) {
+          if (!current.counted.has(key)) reserved += forecast
+        }
+        const next = reserving || run.reservations.size > 0 ? forecast : current.largestCall
+        if (tokens !== undefined && (tokens.max === 0 || current.tokens + reserved + next > tokens.max)) {
           return yield* settle(
             run,
             exceeded(
@@ -965,12 +1179,44 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
               tokens.onExceeded ?? "fail",
               current.tokens,
               tokens.max,
-              current.largestCall
+              next,
+              reserved
             )
           )
         }
         return { _tag: "proceed" }
       })
+
+    const check = (stepKey: string | undefined): Effect.Effect<Verdict, AccountingUnavailable> =>
+      withRecovered((run) => run.admission.withPermits(1)(checkAccount(run, stepKey, false)))
+
+    const reserve = (stepKey: string): Effect.Effect<Verdict, AccountingUnavailable, Scope.Scope> =>
+      withRecovered((run) =>
+        run.admission.withPermits(1)(Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function*() {
+            const verdict = yield* restore(checkAccount(run, stepKey, true))
+            if (verdict._tag === "refuse") return verdict
+            const current = yield* Ref.get(run.state)
+            if (current.counted.has(stepKey)) return verdict
+            // Each scope owns a holder, not a captured predecessor. Closing one
+            // duplicate's scope cannot release another still-live duplicate.
+            const scope = yield* Scope.Scope
+            const reservation = run.reservations.get(stepKey) ?? { holders: 0 }
+            reservation.holders++
+            run.reservations.set(stepKey, reservation)
+            run.users++
+            yield* Scope.addFinalizer(
+              scope,
+              Effect.sync(() => {
+                reservation.holders--
+                if (reservation.holders === 0) run.reservations.delete(stepKey)
+                run.users--
+              })
+            )
+            return verdict
+          })
+        ))
+      )
 
     const summarize = (current: State): Usage => ({
       tokens: current.tokens,
@@ -980,25 +1226,38 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
 
     return Budget.of({
       check,
+      reserve,
       record: (stepKey, usage) =>
-        Effect.gen(function*() {
-          const { run, runId } = yield* recovered
-          const spent = tokensOf(usage)
-          const counted = yield* account(run, stepKey, spent)
-          if (!counted) return
-          // Written only when the accumulator took the call, and after it: the
-          // record exists to be read back by the NEXT incarnation of this run,
-          // and a record whose call the live budget never counted would make
-          // the resumed run count it twice.
-          const payload = yield* Schema.encodeEffect(UsageRecord)({ stepKey, spent }).pipe(
-            Effect.mapError((cause) => unavailable("record", runId, "its usage record does not encode", cause))
-          )
-          yield* journalUsage(runId, payload)
-        }),
-      usage: recovered.pipe(
-        Effect.flatMap(({ run }) => Ref.get(run.state)),
-        Effect.map(summarize)
-      ),
+        withRecovered((run, runId) =>
+          Effect.gen(function*() {
+            const spent = tokensOf(usage)
+            // A malformed cost must not poison the numeric accumulator. Keep the
+            // ledger unavailable until that step supplies a valid record.
+            const payload = yield* Schema.encodeEffect(UsageRecord)({ stepKey, spent }).pipe(
+              Effect.mapError((cause) => unavailable("record", runId, "its usage record does not encode", cause)),
+              Effect.tapError((failure) =>
+                Effect.sync(() => {
+                  run.pending.set(stepKey, failure)
+                })
+              )
+            )
+            return yield* Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function*() {
+                const pending = run.pending.get(stepKey) ??
+                  unavailable("record", runId, "a paid model step has uncommitted usage")
+                const counted = yield* account(run, runId, stepKey, spent, pending)
+                if (!counted && !run.pending.has(stepKey)) return
+                yield* restore(journalUsage(
+                  runId,
+                  payload,
+                  Effect.sync(() => {
+                    if (run.pending.get(stepKey) === pending) run.pending.delete(stepKey)
+                  })
+                ))
+              })
+            )
+          }), stepKey),
+      usage: withRecovered((run) => Effect.map(Ref.get(run.state), summarize)),
       usageOf: (runId) =>
         Effect.suspend(() => {
           const live = runId === looseRunId ? loose : accounts.get(runId)
@@ -1006,9 +1265,19 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
           // calls are folded into. Reading its records instead would report a
           // call the journal has not flushed yet as unspent.
           if (live !== undefined) {
-            return ensureRecovered(live, runId).pipe(
-              Effect.andThen(Ref.get(live.state)),
-              Effect.map(summarize)
+            return Effect.acquireUseRelease(
+              Effect.sync(() => {
+                live.users++
+              }),
+              () =>
+                (runId === looseRunId ? Effect.void : ensureRecovered(live, runId)).pipe(
+                  Effect.andThen(Ref.get(live.state)),
+                  Effect.map(summarize)
+                ),
+              () =>
+                Effect.sync(() => {
+                  live.users--
+                })
             )
           }
           // No accumulator, so no caching either: answering about an arbitrary
@@ -1039,6 +1308,7 @@ export const make = (policy: Policy, options: Options = {}): Effect.Effect<Servi
 export const makeUnbounded = (): Service =>
   Budget.of({
     check: () => Effect.succeed<Verdict>({ _tag: "proceed" }),
+    reserve: () => Effect.succeed<Verdict>({ _tag: "proceed" }),
     record: () => Effect.void,
     usage: Effect.succeed({ tokens: 0, calls: 0, largestCall: 0 }),
     usageOf: () => Effect.succeed({ tokens: 0, calls: 0, largestCall: 0 })
@@ -1050,7 +1320,7 @@ export const makeUnbounded = (): Service =>
  * @category layers
  * @since 0.1.0
  */
-export const layer = (policy: Policy, options: Options = {}): Layer.Layer<Budget> =>
+export const layer = (policy: Policy, options: Options = {}): Layer.Layer<Budget, ConfigurationError> =>
   Layer.effect(Budget, make(policy, options))
 
 /**
@@ -1111,4 +1381,4 @@ export const policyFromEnvelope = (
 export const layerFromEnvelope = (
   envelope: ControlSchema.Envelope,
   options: { readonly onExceeded?: OnExceeded | undefined } = {}
-): Layer.Layer<Budget> => layer(policyFromEnvelope(envelope, options))
+): Layer.Layer<Budget, ConfigurationError> => layer(policyFromEnvelope(envelope, options))

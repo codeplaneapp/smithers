@@ -1,34 +1,35 @@
 ---
 title: "@smthrs/agent"
-description: "The Smithers agent: the production agent loop composed on the durable engine, plus the two adapters that run it, AgentSession for control-plane runs and AgentAction for typed workflow steps"
+description: "Run a coding agent as a durable program: the model writes JavaScript, every capability it reaches is a journaled flow call, and the answer arrives decoded by the schema you declared."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/docs/README.md"
 ---
 
-`@smthrs/agent` is the Smithers agent and the two ways to run it.
+`@smthrs/agent` runs a coding agent as a durable program. Each turn, the model
+writes a small JavaScript program called a cell, and the cell runs in a QuickJS
+sandbox. A cell's only authority is `ctx.call(flowName, input)`, so reading a
+file, running a command, or asking a person is an ordinary function call that a
+durable engine keys, journals, and can replay.
 
-`Agent` is the agent: one service whose single method runs one whole cell loop
-on the durable engine. A cell is the JavaScript program the model emits each
-frame. It runs in a QuickJS sandbox, and its only authority is
-`ctx.call(flowName, input)`, so every capability a cell reaches is an ordinary
-flow settling through a durable boundary. The loop returns a framework-neutral
-`Stream<AgentEvent>`: there is no callback, no event emitter, and no
-host-shaped result type. A caller renders the stream, journals it, or ignores
-it.
+## Why you would reach for it
 
-Two adapters run that loop, and neither reimplements it:
+Starting an agent loop takes an afternoon. Operating one is the hard part, and
+the same three failures end most runs:
 
-- `AgentSession` runs the agent as one durable control-plane run. The launch is
-  a flow execution, the events go to the journal, and an operator steers and
-  approves it. It is the production `ControlExecutor` for
-  [`@smthrs/control`](https://control.smithers.sh/reference/api/).
-- `AgentAction` runs the same agent as one typed step inside a larger flow,
-  bounded by a declared output schema and replayed like any other action.
+- **The process dies.** Every model call and every capability call is a sealed
+  step with a content key. A restart replays what already settled instead of
+  paying the provider for it a second time.
+- **The provider refuses.** A rate limit is a time, not a defect. A refusal that
+  names a reset parks the run as a durable wait, and the recorded wake time
+  survives a restart, so the resumed run waits out the deadline the first pass
+  chose.
+- **The answer is prose.** Every model-backed step declares an output schema.
+  The schema is taught to the model and enforced against the run's final answer,
+  so the next step in your flow reads typed fields instead of parsing text.
 
-## Who uses this package
-
-Workflow authors use `AgentAction` to add a model-backed step to a flow. Hosts
-and control planes use `AgentSession` and `Agent` to run durable agent sessions
-an operator can watch, steer, and approve.
+Two more controls come with the loop: durable run-wide spending records with
+atomic, soft-forecast model admission, and an explicit per-cell sandbox limit.
+The journal prevents restart from resetting recorded spend; reservations
+coordinate concurrent calls, but cannot hard-cap a provider's actual bill.
 
 ## Install
 
@@ -36,13 +37,12 @@ an operator can watch, steer, and approve.
 pnpm add @smthrs/agent
 ```
 
-For the full dependency picture and the import forms, see
-[Installation](/installation/).
+The package requires Node.js 22.19+ (Node 22) or 24.11+. For the import forms and the
+packages a runnable composition adds, see [Installation](/installation/).
 
-## The smallest declaration
+## The shortest real example
 
-A model-backed step is an ordinary action whose implementation ships with its
-declaration:
+A model-backed step is an ordinary action that ships its own implementation:
 
 ```ts
 import { AgentAction } from "@smthrs/agent"
@@ -58,10 +58,50 @@ const Research = AgentAction.make("docs/Research", {
 ```
 
 `Research.call({ topic })` records the same plan node any other action records,
-`Research.layer` is the already-written implementation, and the declared
-`output` schema is rendered into the run's teaching and enforced against its
-final answer. For a runnable first success, including the composition that
-executes this step with no API key, see the [Quickstart](/quickstart/).
+`Research.layer` is the implementation you never have to write, and the step
+answers with a decoded value, so a later step reads `summary` as a `string`. The
+`seat` string names a model without carrying a credential: resolving it into a
+live model is the host's job.
+[Quickstart](/quickstart/) runs this step end to end against a scripted
+model, with no API key.
+
+## Two ways to run the loop
+
+`Agent` is the loop itself: one service whose single method runs one whole cell
+loop and returns a `Stream<AgentEvent>`. There is no callback, no event emitter,
+and no host-shaped result type, so a caller renders the stream, journals it, or
+ignores it. Two adapters run that loop, and neither reimplements it:
+
+- `AgentAction` runs it as one typed step inside a larger flow, bounded by the
+  declared output schema and replayed like any other action. Workflow authors
+  reach for this when the model is one step among other steps.
+- `AgentSession` runs it as one whole durable run: the launch is a flow
+  execution, the events land on the run's journal, and an operator steers and
+  approves it. It is the production `ControlExecutor` for
+  [`@smthrs/control`](https://control.smithers.sh/reference/api/). Hosts and control planes reach for this
+  when the agent is the unit of work somebody manages.
+
+## How this fits with the smithers CLI
+
+Most people meet this agent through [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), the `smthrs`
+command line. Running `smthrs up my-flow` against a prompt flow composes
+`AgentSession` from this package as the run executor, resolves the flow's
+declared seat against the provider keys in your environment, and binds the
+standard capability flows. The operator verbs then act on that run:
+[`smthrs steer`](https://smithers.sh/docs/reference/cli/steer/) delivers a message the loop drains at its next
+frame boundary, and [`smthrs approve`](https://smithers.sh/docs/reference/cli/approve/) answers the approval a cell
+asked a person for.
+
+Install `@smthrs/agent` directly when you are embedding the loop in a program of
+your own: a host with its own control plane, or a flow that wants one
+model-backed step rather than a whole agent run. The pieces the loop is built
+from are their own packages, so you can go a level deeper without leaving the
+composition: the cell contract, the controller, and the sandbox are
+[`@smthrs/harness`](https://harness.smithers.sh/reference/api/), the provider-neutral model protocol is
+[`@smthrs/model`](https://model.smithers.sh/reference/api/), flow discovery is
+[`@smthrs/registry`](https://registry.smithers.sh/reference/api/), the built-in filesystem and shell flows are
+[`@smthrs/std`](https://std.smithers.sh/reference/api/), and durable cross-run facts are
+[`@smthrs/memory`](https://memory.smithers.sh/reference/api/).
 
 ## The package at a glance
 

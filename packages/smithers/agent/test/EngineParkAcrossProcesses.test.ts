@@ -328,11 +328,11 @@ const launch = Effect.gen(function*() {
  * does not give it, so the park would look durable in a test and be torn in
  * the field.
  */
-const awaitParkEvent = (runId: string) =>
+const awaitParkEvent = (runId: string, status: "parked" | "waiting-approval") =>
   Effect.gen(function*() {
     const control = yield* Control.Control
     yield* control.watch({ runId }).pipe(
-      Stream.filter((event) => event.kind === "control.run.waiting-approval"),
+      Stream.filter((event) => event.kind === `control.run.${status}`),
       Stream.take(1),
       Stream.runCollect
     )
@@ -374,7 +374,7 @@ describe("a run parked on a durable timer when its process exits", () => {
     const runId = await Effect.runPromise(
       Effect.gen(function*() {
         const id = yield* launch
-        yield* awaitParkEvent(id)
+        yield* awaitParkEvent(id, "parked")
         return id
       }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
     )
@@ -397,7 +397,7 @@ describe("a run parked on an in-run ask when its process exits", () => {
     const runId = await Effect.runPromise(
       Effect.gen(function*() {
         const id = yield* launch
-        yield* awaitParkEvent(id)
+        yield* awaitParkEvent(id, "waiting-approval")
         return id
       }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
     )
@@ -495,7 +495,7 @@ describe("a parked run resumed by a later process", () => {
       Effect.gen(function*() {
         const id = yield* launch
         const approval = yield* askPayload(id)
-        yield* awaitParkEvent(id)
+        yield* awaitParkEvent(id, "waiting-approval")
         return { runId: id, approval }
       }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
     )
@@ -556,7 +556,7 @@ describe("a run parked on an in-run ask that a later process cancels", () => {
       Effect.gen(function*() {
         const id = yield* launch
         const approval = yield* askPayload(id)
-        yield* awaitParkEvent(id)
+        yield* awaitParkEvent(id, "waiting-approval")
         return { runId: id, approval }
       }).pipe(Effect.provide(host(root, hostOwner)), Effect.scoped, Effect.orDie)
     )

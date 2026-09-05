@@ -172,8 +172,8 @@ const ParkedSteps = Flow.make("agent/test/budget/ParkedSteps", {
   error: AgentAction.AgentFailure,
   body: ({ diff }) =>
     First.call({ diff }).pipe(
-      Node.andThen(() => Pause.call({ id: "boundary" })),
-      Node.andThen(() => Second.call({ diff }))
+      Node.bindPlanned(() => Pause.call({ id: "boundary" })),
+      Node.bindPlanned(() => Second.call({ diff }))
     )
 })
 
@@ -181,13 +181,13 @@ const TwoSteps = Flow.make("agent/test/budget/TwoSteps", {
   payload: { diff: Schema.String },
   success: Review,
   error: AgentAction.AgentFailure,
-  body: ({ diff }) => First.call({ diff }).pipe(Node.andThen(() => Second.call({ diff })))
+  body: ({ diff }) => First.call({ diff }).pipe(Node.bindPlanned(() => Second.call({ diff })))
 })
 
 const memory = <ROut, RIn>(
   steps: Layer.Layer<ROut, never, RIn>,
   model: Model.Model,
-  budget: Layer.Layer<Budget.Budget>
+  budget: Layer.Layer<Budget.Budget, Budget.ConfigurationError>
 ) =>
   steps.pipe(
     Layer.provideMerge(AgentAction.layerHost(host)),
@@ -274,8 +274,8 @@ describe("a token budget", () => {
     const verdicts = await Effect.runPromise(
       Effect.gen(function*() {
         const budget = yield* Budget.make({ tokens: { max: 1_000 } })
-        // Nothing recorded yet: the first call is never refused, because the
-        // only honest projection of its cost is zero.
+        // This advisory check does not reserve. Actual dispatch uses reserve,
+        // which holds capacity for the unmeasured first call.
         const first = yield* budget.check(undefined)
         yield* budget.record("step-a", { totalTokens: 600 })
         const second = yield* budget.check(undefined)
@@ -759,14 +759,14 @@ const attributed = (
   policy: Budget.Policy,
   asked: Array<Verdict>,
   counted: Set<string>
-): Layer.Layer<Budget.Budget> =>
+): Layer.Layer<Budget.Budget, Budget.ConfigurationError> =>
   Layer.effect(Budget.Budget)(
     Effect.map(Budget.make(policy), (budget) =>
       Budget.Budget.of({
         ...budget,
-        check: (stepKey) =>
+        reserve: (stepKey) =>
           Effect.tap(
-            budget.check(stepKey),
+            budget.reserve(stepKey),
             (verdict) => Effect.sync(() => asked.push({ stepKey, verdict: verdict._tag }))
           ),
         record: (stepKey, usage) =>
@@ -1620,7 +1620,7 @@ describe("a budget shared by every run of one composition", () => {
    * `Budget` instance. A single accumulator behind it would spend run a's
    * tokens out of run b's allowance.
    */
-  const shared = (budget: Layer.Layer<Budget.Budget>, model: Model.Model) =>
+  const shared = (budget: Layer.Layer<Budget.Budget, Budget.ConfigurationError>, model: Model.Model) =>
     Layer.mergeAll(First.layer, Interpreter.layer(OneStep)).pipe(
       Layer.provideMerge(AgentAction.layerHost(host)),
       Layer.provideMerge(seats(model)),
@@ -1676,12 +1676,10 @@ describe("a budget shared by every run of one composition", () => {
     expect(observed.b).toEqual({ tokens: 600, calls: 1, largestCall: 600 })
   }, 60_000)
 
-  it("keeps at most maxRuns tallies in memory", async () => {
+  it("refuses a new memory-only run when no tally can be safely evicted", async () => {
     const calls: Array<string> = []
-    // The reference memory engine has no journal, so a forgotten run has
-    // nothing to project from and reports zero. That is the whole cost of the
-    // bound, and it is why the durable composition above is unaffected: there
-    // an evicted run reads its own usage records back.
+    // No journal means no way to recover an evicted allowance. Keep the bound
+    // and refuse admission instead of silently erasing the first run's spend.
     const observed = await Effect.runPromise(
       Effect.scoped(Effect.gen(function*() {
         const context = yield* Layer.build(
@@ -1698,21 +1696,23 @@ describe("a budget shared by every run of one composition", () => {
         )
         const budget = yield* Budget.Budget.pipe(Effect.provide(context))
         const beforeEviction = yield* budget.usageOf("budget-lru-a")
-        yield* OneStep.execute({ diff: "-  c\n+  d" }, { executionId: "budget-lru-b" }).pipe(
-          Effect.provide(context)
+        const second = yield* OneStep.execute({ diff: "-  c\n+  d" }, { executionId: "budget-lru-b" }).pipe(
+          Effect.provide(context),
+          Effect.exit
         )
         return {
           beforeEviction,
           afterEviction: yield* budget.usageOf("budget-lru-a"),
-          kept: yield* budget.usageOf("budget-lru-b")
+          second
         }
       }))
     )
 
     expect(observed.beforeEviction).toEqual({ tokens: 600, calls: 1, largestCall: 600 })
-    // Run a was the least recently used tally when run b needed the one slot.
-    expect(observed.afterEviction).toEqual({ tokens: 0, calls: 0, largestCall: 0 })
-    expect(observed.kept).toEqual({ tokens: 600, calls: 1, largestCall: 600 })
+    expect(observed.afterEviction).toEqual(observed.beforeEviction)
+    expect(observed.second._tag).toBe("Failure")
+    expect(JSON.stringify(failureOf(observed.second))).toContain("none can be evicted safely")
+    expect(calls).toHaveLength(1)
   }, 60_000)
 })
 

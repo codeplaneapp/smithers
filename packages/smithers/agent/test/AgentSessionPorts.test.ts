@@ -18,17 +18,22 @@ import { PersistenceError } from "@smthrs/control/ControlError"
 import * as ControlRuntimeModule from "@smthrs/control/ControlRuntime"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { Envelope, Principal } from "@smthrs/control/ControlSchema"
+import * as SqlControlRuntime from "@smthrs/control/SqlControlRuntime"
 import { FlowEngine } from "@smthrs/engine"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import * as EngineStore from "@smthrs/engine-store/EngineStore"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as TestStores from "@smthrs/engine-store/test/TestStores"
-import { Action, Flow, Interpreter, WaitFor } from "@smthrs/flow"
+import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter, WaitFor } from "@smthrs/flow"
 import * as Jj from "@smthrs/kernel/Jj"
 import { Node } from "@smthrs/plan"
 import { RunStore } from "@smthrs/run-store"
-import { Clock, Effect, Exit, Layer, Option, Schema } from "effect"
+import { Clock, type Crypto, Effect, Exit, Layer, Option, Schema } from "effect"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
+import { fileBundle } from "../../control/test/DurableStack.ts"
 import * as AgentSession from "../src/AgentSession.ts"
 
 const envelope: Envelope = { capabilities: [], flows: [], budget: {} }
@@ -43,7 +48,7 @@ const Gated = Flow.make("agent/test/ports/gated", {
   error: WaitFor.WaitForRequestInvalid,
   body: ({ name }) =>
     Mark.call({}).pipe(
-      Node.andThen(() => WaitFor.action.call({ name }))
+      Node.bindPlanned(() => WaitFor.action.call({ name }))
     )
 })
 
@@ -60,28 +65,34 @@ const jj = Jj.make({
  * The production durable engine over one in-memory SQLite database, with the
  * stores kept in the output because the ports read them.
  */
-const stack = Layer.mergeAll(
-  Mark.toLayer(() => Effect.succeed("before")),
-  WaitFor.layer,
-  Interpreter.layer(Gated),
-  ControlRuntimeModule.layerMemory({
-    flows: [{ flowId: "system/test", description: "Reserved test system flow", deployClass: false, envelope }]
-  })
-).pipe(
-  Layer.provideMerge(Action.layerImplementations),
-  Layer.provideMerge(
-    EngineStore.layer({
-      owner: { hostId: "agent-session-ports" },
-      journalSource: "agent-session-ports",
-      isAlive: () => Effect.succeed(false)
-    })
-  ),
-  Layer.provideMerge(StepBoundary.layerTest()),
-  // `layerAt` rather than `layer`: it keeps `DurableEngineState` in the
-  // output, and the signal bridge reads the waiting row through it.
-  Layer.provideMerge(TestStores.layerAt(":memory:")),
-  Layer.provideMerge(Layer.merge(Layer.succeed(Jj.Jj)(jj), NodeCrypto.layer))
-)
+const makeStack = (
+  controlLayer: Layer.Layer<ControlRuntime, never, Crypto.Crypto> = ControlRuntimeModule.layerMemory({
+    flows: [{ flowId: "system/test", description: "test", deployClass: false, envelope }]
+  }),
+  engineFilename = ":memory:"
+) =>
+  Layer.mergeAll(
+    Mark.toLayer(() => Effect.succeed("before")),
+    WaitFor.layer,
+    Interpreter.layer(Gated),
+    Layer.fresh(controlLayer)
+  ).pipe(
+    Layer.provideMerge(Action.layerImplementations),
+    Layer.provideMerge(
+      EngineStore.layer({
+        owner: { hostId: "agent-session-ports" },
+        journalSource: "agent-session-ports",
+        isAlive: () => Effect.succeed(false)
+      })
+    ),
+    Layer.provideMerge(StepBoundary.layerTest()),
+    // `layerAt` rather than `layer`: it keeps `DurableEngineState` in the
+    // output, and the signal bridge reads the waiting row through it.
+    Layer.provideMerge(TestStores.layerAt(engineFilename)),
+    Layer.provideMerge(Layer.merge(Layer.succeed(Jj.Jj)(jj), NodeCrypto.layer))
+  )
+
+const stack = makeStack()
 
 const run = <A, E, R>(body: Effect.Effect<A, E, R>): Promise<A> =>
   Effect.runPromise(
@@ -94,7 +105,7 @@ const startControlRun = Effect.gen(function*() {
   const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "ports" } })
   const token = yield* runtime.lookupApproval(card.approval.target)
   yield* runtime.installBulkGrant(token, card.envelope, "run")
-  yield* runtime.resolveApproval(token, "approved", principal)
+  yield* runtime.resolveApproval(token, "approved", yield* runtime.stampPrincipal())
   const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
   if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
   return launched.run.runId
@@ -125,6 +136,33 @@ const settled = (runId: string, attempts = 2_000): Effect.Effect<string, unknown
   })
 
 describe("AgentSession.requestCancel", () => {
+  it("observes and cancels the current handoff round through the original run ID", async () => {
+    await run(Effect.gen(function*() {
+      const store = yield* RunStore.RunStore
+      const owner = { hostId: "handoff-ports", pid: 1, nonce: "handoff-ports" }
+      yield* store.create("ports-root", "{}", { lineageId: "ports-root", roundOrdinal: 0 })
+      yield* store.claimAndOwn(
+        "ports-root",
+        { status: "pending", owner: null, heartbeatAtMs: null },
+        owner,
+        yield* Clock.currentTimeMillis
+      )
+      yield* store.create("ports-next", "{}", { parentRunId: "ports-root", lineageId: "ports-root", roundOrdinal: 1 })
+      yield* store.transitionOwned("ports-root", owner, "completed", "{}")
+      expect(yield* AgentSession.readExecution("ports-root")).toMatchObject({
+        _tag: "Observed",
+        status: "accepted",
+        lineageId: "ports-root",
+        roundOrdinal: 0,
+        parentRunId: undefined
+      })
+      expect(yield* AgentSession.requestCancel({ runId: "ports-root" })).toBe("recorded")
+      expect((yield* store.get("ports-next")).cancelRequestedAtMs).not.toBeNull()
+      expect(yield* AgentSession.requestCancel({ runId: "ports-root" })).toBe("already-requested")
+      expect((yield* store.get("ports-root")).status).toBe("completed")
+    }))
+  })
+
   it("records the cancellation on the engine row", async () => {
     const observed = await run(Effect.gen(function*() {
       const store = yield* RunStore.RunStore
@@ -245,13 +283,25 @@ describe("AgentSession.deliverSignal", () => {
 })
 
 describe("AgentSession.drainRecordedSignals", () => {
+  it("contains a pending-signal read failure without crashing executor startup", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const failure = new PersistenceError({ operation: "pendingSignals", message: "injected read failure" })
+      const exit = yield* AgentSession.drainRecordedSignals.pipe(
+        Effect.provideService(ControlRuntime, { ...runtime, pendingSignals: Effect.fail(failure) }),
+        Effect.exit
+      )
+      expect(exit._tag).toBe("Success")
+    }))
+  })
+
   it("delivers a signal recorded while no executor was running", async () => {
     const observed = await run(Effect.gen(function*() {
       const runtime = yield* ControlRuntime
       const runId = yield* startControlRun
       yield* parkedRun(runId, "approval")
       // What `Control.signal` writes when no executor can deliver it.
-      yield* runtime.deliverSignal(runId, { name: "approval", payload: { approved: true } })
+      yield* runtime.admitSignal("offline-approval", runId, { name: "approval", payload: { approved: true } })
       const beforeDrain = yield* statusOf(runId)
 
       yield* AgentSession.drainRecordedSignals
@@ -268,7 +318,7 @@ describe("AgentSession.drainRecordedSignals", () => {
       const state = yield* DurableEngineState.DurableEngineState
       const runId = yield* startControlRun
       yield* parkedRun(runId, "approval")
-      yield* runtime.deliverSignal(runId, { name: "shipped", payload: null })
+      yield* runtime.admitSignal("offline-shipped", runId, { name: "shipped", payload: null })
 
       yield* AgentSession.drainRecordedSignals
       const store = yield* RunStore.RunStore
@@ -290,7 +340,7 @@ const waitingAs = (reason: string, token: string | null) =>
 describe("the ports when a store answers badly", () => {
   it("reports an engine that cannot record the cancellation as a typed failure", async () => {
     const failing = RunStore.layerNoop({
-      requestCancel: () =>
+      requestCancelLineage: () =>
         Effect.fail(
           new RunStore.RunStoreError({
             method: "requestCancel",
@@ -309,20 +359,10 @@ describe("the ports when a store answers badly", () => {
   })
 
   it("reports the store's atomic terminal answer when the run settles mid-request", async () => {
-    // The guard read and the write are not one transaction. This is the run
-    // that settles inside that window: `get` still answers `suspended`, so the
-    // pre-read lets the request through, and the store — which decides
-    // terminality in the same statement that writes the column — answers
-    // `Terminal`. Mapping that to "recorded" is what let `Control.cancel`
-    // transition a control row the engine row disagrees with (triage B-11).
+    // The store's atomic logical-run answer is authoritative. The port must
+    // not map a terminal result to "recorded" and cancel a stale control row.
     const raced = RunStore.layerNoop({
-      get: (runId: string) =>
-        Effect.succeed({
-          runId,
-          status: "suspended",
-          cancelRequestedAtMs: null
-        } as never),
-      requestCancel: () => Effect.succeed({ _tag: "Terminal", status: "cancelled" } as const)
+      requestCancelLineage: () => Effect.succeed({ _tag: "Terminal", status: "cancelled" } as const)
     })
 
     const record = await Effect.runPromise(
@@ -361,5 +401,289 @@ describe("the ports when a store answers badly", () => {
 
     expect(failure).toBeInstanceOf(PersistenceError)
     expect((failure as PersistenceError).operation).toBe("AgentSession.deliverSignal")
+  })
+})
+
+describe("durable signal admission and engine observation", () => {
+  it("refuses durable delivery without the admitting control runtime before completing the wait", async () => {
+    const token = new DurableDeferred.TokenParsed({
+      flowName: Gated._tag,
+      executionId: "missing-control-runtime",
+      deferredName: "WaitFor/approval"
+    }).asToken
+    const state = DurableEngineState.makeMemory()
+    const failure = await Effect.runPromise(
+      AgentSession.deliverSignal({
+        commandId: "durable-command",
+        runId: "missing-control-runtime",
+        token,
+        signal: { name: "approval", payload: true }
+      }).pipe(
+        Effect.flip,
+        Effect.provideService(DurableEngineState.DurableEngineState, state),
+        Effect.provide(FlowEngine.layerMemory),
+        Effect.scoped
+      )
+    )
+    expect(failure).toBeInstanceOf(PersistenceError)
+    expect(failure.message).toContain("requires ControlRuntime")
+    expect(await Effect.runPromise(state.deferred(DurableDeferred.TokenParsed.fromString(token))))
+      .toEqual(Option.none())
+  })
+
+  it("refuses a command whose wait token belongs to another admission without consuming the wait", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const state = yield* DurableEngineState.DurableEngineState
+      const runId = yield* startControlRun
+      const waiting = yield* parkedRun(runId, "approval")
+      if (waiting.token === null) return yield* Effect.die("missing token")
+      yield* runtime.admitSignal("binding-winner", runId, { name: "approval", payload: "winner" })
+      yield* runtime.admitSignal("binding-loser", runId, { name: "approval", payload: "loser" })
+      yield* runtime.bindSignal("binding-winner", waiting.token)
+
+      expect(yield* AgentSession.deliverSignal((yield* runtime.signalCommand("binding-loser"))!)).toBe("no-match")
+      expect(yield* state.waiting(runId)).toEqual(Option.some(waiting))
+      expect(yield* state.deferred(DurableDeferred.TokenParsed.fromString(waiting.token))).toEqual(Option.none())
+      expect((yield* runtime.signalCommand("binding-loser"))?.token).toBeNull()
+      expect(yield* AgentSession.deliverSignal((yield* runtime.signalCommand("binding-winner"))!)).toBe("delivered")
+      expect(yield* settled(runId)).toBe("completed")
+    }))
+  })
+
+  it("rejects a retry whose payload disagrees with the previously applied completion", async () => {
+    await run(Effect.gen(function*() {
+      const state = yield* DurableEngineState.DurableEngineState
+      const waiting = yield* parkedRun("conflicting-retry", "approval")
+      if (waiting.token === null) return yield* Effect.die("missing token")
+      const command = {
+        runId: "conflicting-retry",
+        token: waiting.token,
+        signal: { name: "approval", payload: { accepted: "original" } }
+      }
+      expect(yield* AgentSession.deliverSignal(command)).toBe("delivered")
+      const before = yield* state.deferred(DurableDeferred.TokenParsed.fromString(waiting.token))
+      expect(yield* AgentSession.deliverSignal({ ...command, signal: { name: "approval", payload: "changed" } }))
+        .toBe("no-match")
+      expect(yield* state.deferred(DurableDeferred.TokenParsed.fromString(waiting.token))).toEqual(before)
+      expect(yield* AgentSession.deliverSignal(command)).toBe("delivered")
+    }))
+  })
+
+  it("does not claim delivery when another resolver wins between the read and atomic completion", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* FlowRuntime.FlowRuntime
+      const state = yield* DurableEngineState.DurableEngineState
+      const waiting = yield* parkedRun("competing-resolver", "approval")
+      if (waiting.token === null) return yield* Effect.die("missing token")
+      let races = 0
+      const interleaved: FlowRuntime.FlowRuntime["Service"] = {
+        ...runtime,
+        deferredDoneIfWaiting: (deferred, options) =>
+          Effect.gen(function*() {
+            races++
+            yield* runtime.deferredDoneIfWaiting(WaitFor.deferred("approval"), {
+              ...options,
+              exit: Exit.succeed("competing payload")
+            })
+            return yield* runtime.deferredDoneIfWaiting(deferred, options)
+          })
+      }
+      expect(
+        yield* AgentSession.deliverSignal({
+          runId: "competing-resolver",
+          token: waiting.token,
+          signal: { name: "approval", payload: "our payload" }
+        }).pipe(Effect.provideService(FlowRuntime.FlowRuntime, interleaved))
+      ).toBe("no-match")
+      expect(races).toBe(1)
+      const completed = yield* state.deferred(DurableDeferred.TokenParsed.fromString(waiting.token))
+      if (Option.isNone(completed)) return yield* Effect.die("missing competing completion")
+      expect(completed.value.exit).toEqual(Exit.succeed("competing payload"))
+      expect(yield* settled("competing-resolver")).toBe("completed")
+    }))
+  })
+
+  it("rejects a bound token when a competing wake removed the wait without completing it", async () => {
+    await run(Effect.gen(function*() {
+      const state = yield* DurableEngineState.DurableEngineState
+      const waiting = yield* parkedRun("competing-wake", "approval")
+      if (waiting.token === null) return yield* Effect.die("missing token")
+      yield* state.wake("competing-wake")
+      expect(
+        yield* AgentSession.deliverSignal({
+          runId: "competing-wake",
+          token: waiting.token,
+          signal: { name: "approval", payload: "late" }
+        })
+      ).toBe("no-match")
+      expect(yield* state.deferred(DurableDeferred.TokenParsed.fromString(waiting.token))).toEqual(Option.none())
+    }))
+  })
+
+  it("keeps an admitted command pending until a completion is observable, even if the write port acknowledges", async () => {
+    await run(Effect.gen(function*() {
+      const control = yield* ControlRuntime
+      const runtime = yield* FlowRuntime.FlowRuntime
+      const state = yield* DurableEngineState.DurableEngineState
+      const runId = yield* startControlRun
+      const waiting = yield* parkedRun(runId, "approval")
+      yield* control.admitSignal("unconfirmed-completion", runId, { name: "approval", payload: "confirm me" })
+      let acknowledgments = 0
+      yield* AgentSession.drainRecordedSignals.pipe(Effect.provideService(FlowRuntime.FlowRuntime, {
+        ...runtime,
+        // A remote/lagging adapter's acknowledgment is not durable read evidence.
+        deferredDoneIfWaiting: () =>
+          Effect.sync(() => {
+            acknowledgments++
+            return "Completed" as const
+          })
+      }))
+      expect(acknowledgments).toBe(1)
+      expect((yield* control.signalCommand("unconfirmed-completion"))?.state).toBe("pending")
+      expect((yield* control.signalCommand("unconfirmed-completion"))?.token).toBe(waiting.token)
+      expect(yield* state.waiting(runId)).toEqual(Option.some(waiting))
+      yield* AgentSession.drainRecordedSignals
+      expect((yield* control.signalCommand("unconfirmed-completion"))?.state).toBe("delivered")
+    }))
+  })
+
+  it.each(["completed", "failed", "cancelled"] as const)(
+    "settles an unbound command as terminal when the control run becomes %s",
+    async (status) => {
+      await run(Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const state = yield* DurableEngineState.DurableEngineState
+        const runId = yield* startControlRun
+        const waiting = yield* parkedRun(runId, "approval")
+        yield* runtime.admitSignal("terminal-command", runId, { name: "approval", payload: "too late" })
+        const fence = yield* runtime.claimFence(runId)
+        yield* runtime.writeStatus(runId, fence, status)
+
+        yield* AgentSession.drainRecordedSignals
+        expect(yield* runtime.signalCommand("terminal-command")).toMatchObject({ state: "terminal", token: null })
+        expect(yield* runtime.pendingSignals).toEqual([])
+        expect(yield* state.waiting(runId)).toEqual(Option.some(waiting))
+        yield* AgentSession.drainRecordedSignals
+        expect((yield* runtime.getRun(runId)).status).toBe(status)
+      }))
+    }
+  )
+
+  it("retains a failed command for retry while delivering the next command in the same page", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const first = yield* startControlRun
+      const second = yield* startControlRun
+      yield* parkedRun(first, "approval")
+      yield* parkedRun(second, "approval")
+      yield* runtime.admitSignal("transient-failure", first, { name: "approval", payload: "first" })
+      yield* runtime.admitSignal("independent-command", second, { name: "approval", payload: "second" })
+      let refusals = 0
+      yield* AgentSession.drainRecordedSignals.pipe(Effect.provideService(ControlRuntime, {
+        ...runtime,
+        getRun: (runId) =>
+          runId === first
+            ? Effect.sync(() => {
+              refusals++
+            }).pipe(Effect.andThen(Effect.fail(
+              new PersistenceError({
+                operation: "getRun",
+                message: "transient control read failure"
+              })
+            )))
+            : runtime.getRun(runId)
+      }))
+      expect(refusals).toBe(1)
+      expect((yield* runtime.signalCommand("transient-failure"))?.state).toBe("pending")
+      expect((yield* runtime.signalCommand("independent-command"))?.state).toBe("delivered")
+      expect(yield* statusOf(first)).toBe("suspended")
+      yield* AgentSession.drainRecordedSignals
+      expect((yield* runtime.signalCommand("transient-failure"))?.state).toBe("delivered")
+      expect(yield* settled(first)).toBe("completed")
+      expect(yield* settled(second)).toBe("completed")
+      expect(yield* runtime.pendingSignals).toEqual([])
+    }))
+  })
+
+  it("recovers lost acknowledgment using the original token with separate databases", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "smithers-signals-"))
+    try {
+      const controlLayer = SqlControlRuntime.layer({
+        flows: [{ flowId: "system/test", description: "test", deployClass: false, envelope }]
+      }).pipe(
+        Layer.provide(fileBundle(join(directory, "control.db"))),
+        Layer.provide(NodeCrypto.layer),
+        Layer.orDie
+      )
+      const live = makeStack(controlLayer, join(directory, "engine.db"))
+      const token = await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime
+          const runId = yield* startControlRun
+          yield* runtime.admitSignal("lost-ack", runId, { name: "approval", payload: { approved: true } })
+          yield* AgentSession.drainRecordedSignals
+          expect((yield* runtime.signalCommand("lost-ack"))?.token).toBeNull()
+          yield* parkedRun(runId, "approval")
+          expect(yield* AgentSession.readExecution(runId)).toMatchObject({
+            _tag: "Observed",
+            status: "parked",
+            waitingReason: "event"
+          })
+          expect((yield* runtime.getRun(runId)).waitingReason).toBeUndefined()
+          const command = (yield* runtime.signalCommand("lost-ack"))!
+          expect(yield* AgentSession.deliverSignal(command)).toBe("delivered")
+          const bound = (yield* runtime.signalCommand("lost-ack"))!
+          expect(bound.token).not.toBeNull()
+          expect(bound.state).toBe("pending")
+          // The engine applied, but the acknowledgment was lost. Retry the bound token.
+          expect(yield* AgentSession.deliverSignal(bound)).toBe("delivered")
+          yield* AgentSession.drainRecordedSignals
+          expect((yield* runtime.signalCommand("lost-ack"))?.state).toBe("delivered")
+          expect(yield* runtime.pendingSignals).toEqual([])
+          return bound.token
+        }).pipe(Effect.provide(live), Effect.scoped, Effect.orDie)
+      )
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime
+          const persisted = yield* runtime.signalCommand("lost-ack")
+          expect(persisted?.token).toBe(token)
+          expect(persisted?.state).toBe("delivered")
+        }).pipe(Effect.provide(controlLayer), Effect.scoped)
+      )
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("delivers early admission after a wait opens without restarting", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const runId = yield* startControlRun
+      yield* runtime.admitSignal("before-wait", runId, { name: "approval", payload: "early" })
+      yield* AgentSession.drainRecordedSignals
+      expect((yield* runtime.pendingSignals).length).toBe(1)
+      yield* parkedRun(runId, "approval")
+      yield* AgentSession.drainRecordedSignals
+      expect((yield* runtime.signalCommand("before-wait"))?.state).toBe("delivered")
+      expect(yield* settled(runId)).toBe("completed")
+    }))
+  })
+
+  it("binds only one admitted command to a concrete wait", async () => {
+    await run(Effect.gen(function*() {
+      const runtime = yield* ControlRuntime
+      const runId = yield* startControlRun
+      yield* parkedRun(runId, "approval")
+      yield* runtime.admitSignal("winner", runId, { name: "approval", payload: 1 })
+      yield* runtime.admitSignal("loser", runId, { name: "approval", payload: 2 })
+      const state = yield* DurableEngineState.DurableEngineState
+      const waiting = yield* state.waiting(runId)
+      if (Option.isNone(waiting) || waiting.value.token === null) return yield* Effect.die("missing token")
+      expect(yield* runtime.bindSignal("winner", waiting.value.token)).toBe(waiting.value.token)
+      expect(yield* runtime.bindSignal("loser", waiting.value.token)).toBeNull()
+      expect((yield* runtime.signalCommand("loser"))?.token).toBeNull()
+    }))
   })
 })

@@ -63,11 +63,12 @@ A seat the host cannot serve is a typed `Seat.SeatUnresolved`, not a run that
 fails halfway through:
 
 ```ts
-resolve: ;
-;((id) =>
-  keyFor(id) === undefined
-    ? Effect.fail(new Seat.SeatUnresolved({ seat: id, message: `No API key is configured for ${id}` }))
-    : Effect.succeed()) /* ... */
+const seats = SeatResolver.layer({
+  resolve: (id) =>
+    apiKeyFor(id) === undefined
+      ? Effect.fail(new Seat.SeatUnresolved({ seat: id, message: `No API key is configured for ${id}` }))
+      : Effect.succeed(Seat.make({ id, model: modelFor(id), route, contextWindowTokens: 200_000 }))
+})
 ```
 
 `AgentSession` resolves the declared seat at launch, so a missing key refuses
@@ -79,8 +80,8 @@ into a failed provider call halfway through a run.
 
 ## Own the vocabulary
 
-The `provider:modelId` convention is what the Node CLI resolver understands,
-not a rule the agent enforces. Nothing below the resolver parses the string, so
+The `provider:modelId` convention is what the resolver in
+[`@smthrs/cli`](/api/cli) understands, not a rule the agent enforces. Nothing below the resolver parses the string, so
 a host may define its own vocabulary: a resolver that maps `reviewer` onto a
 particular model is an ordinary implementation of the one method. `AgentSession`
 reads the string out of a flow's `model:` frontmatter and asks for it verbatim.

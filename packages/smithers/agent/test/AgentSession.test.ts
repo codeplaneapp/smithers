@@ -17,7 +17,7 @@
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import { Control, ControlError, ControlLive, ControlRuntime, ControlSchema } from "@smthrs/control"
+import { Control, ControlError, ControlExecutor, ControlLive, ControlRuntime, ControlSchema } from "@smthrs/control"
 import * as CoreFlow from "@smthrs/core/Flow"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
@@ -34,6 +34,7 @@ import type * as Route from "@smthrs/model/Route"
 import { NotificationQueue } from "@smthrs/notifications"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
+import { RunStore } from "@smthrs/run-store"
 import type * as Fixture from "@smthrs/testing/Fixture"
 import type * as ModelLike from "@smthrs/testing/ModelLike"
 import * as RecordedModel from "@smthrs/testing/RecordedModel"
@@ -566,25 +567,69 @@ describe("AgentSession", () => {
     expect(JSON.stringify(failed?.payload)).toContain("/harness/HarnessError")
     expect(JSON.stringify(failed?.payload)).toContain("predates harness journal format 2")
   })
-
-  it("waits through an accepted control row before driving the engine", async () => {
-    let reads = 0
-    await expect(Effect.runPromise(
-      AgentSession.waitForRunning(
-        () => Effect.sync(() => (reads++ === 0 ? "accepted" : "running")),
-        "run-wait",
-        1,
-        Effect.yieldNow
-      )
-    )).resolves.toBe(true)
-    expect(reads).toBe(2)
-    await expect(
-      Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("cancelled"), "run-cancelled", 1))
-    ).resolves.toBe(false)
-    await expect(
-      Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("accepted"), "run-stuck", 0))
-    ).rejects.toMatchObject({ code: "launch_failed", runId: "run-stuck" })
+  it("resumes a newly forked execution under the child's identity even when the copied parent is terminal", async () => {
+    let modelCalls = 0
+    const model = Model.make({
+      stream: () => {
+        modelCalls++
+        return Stream.fromIterable(cellEvents("ctx.done(\"child complete\")", "fork-cell"))
+      }
+    })
+    const outcome = await Effect.runPromise(
+      Effect.gen(function*() {
+        const gate = yield* Deferred.make<void>()
+        return yield* Effect.gen(function*() {
+          const control = yield* Control.Control
+          const runtime = yield* ControlRuntime.ControlRuntime
+          const runs = yield* RunStore.RunStore
+          const executor = yield* ControlExecutor.ControlExecutor
+          const card = yield* control.plan({ flowId: "agents/notes", input: {} })
+          yield* control.approve(card.approval)
+          const parent = yield* runtime.launch(card.planId, card.digest, card.envelope)
+          const child = yield* runtime.launch(card.planId, card.digest, card.envelope)
+          if (parent._tag !== "Started" || child._tag !== "Started") return yield* Effect.die("expected approved runs")
+          yield* runtime.writeStatus(parent.run.runId, yield* runtime.claimFence(parent.run.runId), "completed")
+          yield* runtime.writeStatus(child.run.runId, yield* runtime.claimFence(child.run.runId), "parked")
+          yield* runs.create(
+            child.run.runId,
+            JSON.stringify({
+              version: 1,
+              flowName: "agent/run",
+              payload: { runId: parent.run.runId, planId: card.planId }
+            })
+          )
+          // An operator resume claims its control row before delegating to the
+          // executor; a fresh fork itself has no parkedBy process identity.
+          yield* runtime.resume(child.run.runId)
+          expect(yield* executor.resumeRun({ runId: child.run.runId })).toBe("resuming")
+          yield* awaitStatus(runtime, child.run.runId, "completed")
+          return { parent: yield* runtime.getRun(parent.run.runId), child: yield* runtime.getRun(child.run.runId) }
+        }).pipe(Effect.provide(stack({ resolve: seat(model), notes: [], gate })))
+      }).pipe(Effect.scoped)
+    )
+    expect(modelCalls).toBe(1)
+    expect(outcome.parent.status).toBe("completed")
+    expect(outcome.child.status).toBe("completed")
+    expect(outcome.child.runId).not.toBe(outcome.parent.runId)
   })
+  it("waits through an accepted control row before driving the engine", async () => {
+  let reads = 0
+  await expect(Effect.runPromise(
+    AgentSession.waitForRunning(
+      () => Effect.sync(() => (reads++ === 0 ? "accepted" : "running")),
+      "run-wait",
+      1,
+      Effect.yieldNow
+    )
+  )).resolves.toBe(true)
+  expect(reads).toBe(2)
+  await expect(
+    Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("cancelled"), "run-cancelled", 1))
+  ).resolves.toBe(false)
+  await expect(
+    Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("accepted"), "run-stuck", 0))
+  ).rejects.toMatchObject({ code: "launch_failed", runId: "run-stuck" })
+})
 
   it("waits for a parked execution publication before resuming it", async () => {
     let polls = 0

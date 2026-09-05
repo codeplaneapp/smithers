@@ -37,7 +37,7 @@ const run = agent.run({
 | ------------ | ------------------------------------------------------------ | --------------------------------------- |
 | `filesystem` | `read`, `write`, `edit`, `apply_patch`, `ls`, `glob`, `grep` | `FileSystem \| Path`                    |
 | `shell`      | `bash`                                                       | `ChildProcessSpawner \| Path`           |
-| `tests`      | the repository's test runner                                 | `ChildProcessSpawner \| TestRunner`     |
+| `tests`      | the project's test runner                                    | `ChildProcessSpawner \| TestRunner`     |
 | `memory`     | `remember`, `recall`                                         | `MemoryStore \| Recall`                 |
 | `clock`      | `wait`                                                       | `Crypto \| FlowRuntime \| FlowInstance` |
 | `approval`   | `ask`                                                        | an `Asker` port, not a context          |

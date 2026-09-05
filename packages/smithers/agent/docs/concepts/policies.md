@@ -49,9 +49,9 @@ Two design points are easy to miss:
 ## Budget: the ledger is the allowance
 
 `Sandbox.Limits` bounds one cell and `maxFrames` bounds one loop, but neither
-accumulates, so an approved token and millisecond envelope bound nothing until
-`Budget` existed. The budget's enforcement is ordinary (a check before each
-call); what makes it trustworthy is where its numbers come from.
+accumulates, so neither can hold a run to an approved token and millisecond
+envelope. `Budget` is the piece that does. Its enforcement is ordinary (a check
+before each call); what makes it trustworthy is where its numbers come from.
 
 - **The accumulator is projected from the journal.** The engine resumes a run
   from recorded results and never re-enters a settled step, so an in-memory
@@ -59,15 +59,20 @@ call); what makes it trustworthy is where its numbers come from.
   Every accounted call writes a durable usage record keyed by the step's
   content key, and a budget entering a run folds those records back first. The
   content key is what stops the two sources double counting: a recovered record
-  and its own live call are the same key. The latency clock zero is durable for
+  and its own live call are the same key. Reported usage from an unsealed
+  capacity failure or interrupted stream has a separate invocation receipt:
+  it is still spend, but does not mark a future provider retry paid. The
+  latency clock zero is durable for
   the same reason, and the earliest recorded value wins, so a duplicate write
   cannot move the allowance forward.
-- **Refusal is a projection, and the first call is free.** The check runs
-  before a call and projects its cost as the largest call the run has made,
-  because a budget that noticed afterwards would always be exceeded by the call
-  that exceeded it. With nothing recorded, the only honest projection is zero,
-  and a budget that refused a run's first call would be a configuration error
-  reported as a runtime one.
+- **Admission reserves a soft projection.** `reserve` atomically accounts for
+  actual spend plus every in-flight forecast. The largest observed call sets
+  the forecast; until a positive cost is known, one call holds the full token
+  allowance. Zero refuses new calls unless `warn` permits them. Recording usage
+  replaces the forecast, and closing the call's scope releases its reservation.
+  The first call is not free and a forecast is not a provider billing cap:
+  admitted calls can cost more than estimated. All concurrent calls of a run
+  must share one Budget instance; separate instances do not coordinate quotas.
 - **The accounting fails closed.** A record that could not be written, a
   ledger that could not be read, and a ledger longer than one recovery reads
   are not smaller numbers; they are an unknown number, and answering "proceed"
@@ -109,5 +114,5 @@ failure, asked exactly once, and decoded by the same schema. That is why it is
 a separate slot rather than another rung, and why a repair that misses reports
 its own failure rather than the ladder's.
 
-For the procedures, see [Park on quota refusals and cap run spend](../guides/quota-and-budgets.md)
+For the procedures, see [Park on quota refusals and limit model admission](../guides/quota-and-budgets.md)
 and [Shape a model's answer into typed output](../guides/structured-output.md).

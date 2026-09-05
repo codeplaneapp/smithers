@@ -15,6 +15,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Schedule from "effect/Schedule"
 import * as Stream from "effect/Stream"
+import { tokensOf } from "../Budget.ts"
 
 type RecordedModelStep =
   | ReadonlyArray<ModelEvent.ModelEvent>
@@ -70,6 +71,17 @@ const retryableModelCodes: ReadonlySet<string> = new Set([
 ])
 
 const seconds = (millis: number): number => Math.round(millis / 1000)
+
+/** Final cumulative counters from distinct provider attempts, counted once each. */
+const combineUsage = (usages: ReadonlyArray<ModelEvent.Usage>): ModelEvent.Usage => {
+  const combined: Record<string, number> = { totalTokens: usages.reduce((sum, usage) => sum + tokensOf(usage), 0) }
+  for (const usage of usages) {
+    for (const [key, value] of Object.entries(usage)) {
+      if (key !== "totalTokens" && value !== undefined) combined[key] = (combined[key] ?? 0) + value
+    }
+  }
+  return combined
+}
 
 /**
  * How many times one sealed step re-issues a call its budget cut off.
@@ -187,6 +199,11 @@ export const withOverrunTeaching = (
  * the step's total model time stays bounded by twice the budget rather than by
  * six times it.
  *
+ * `onUsage` observes cumulative spend across this invocation's provider
+ * attempts. The caller uses its last snapshot when no sealed value survives
+ * (capacity refusal, permission failure, or interruption); partial text is
+ * never exposed. The callback must be synchronous and cannot perform I/O.
+ *
  * @category execution
  * @since 0.1.0
  */
@@ -195,107 +212,146 @@ export const recordModelStep = (
   request: ModelRequest.ModelRequest,
   policy: Schedule.Schedule<unknown, Model.ModelFailure>,
   budgetMillis?: number | undefined,
-  correction?: number | undefined
-): Effect.Effect<RecordedModelStep, Model.ModelFailure> => {
-  const retries: Array<ModelEvent.ModelEvent> = []
-  let attempt = 0
-  /** How many attempts this step has already had cut off at the budget. */
-  let overruns = 0
-  const schedule = policy.pipe(
-    Schedule.while(({ input }) =>
-      input instanceof ModelError.ModelError && retryableModelCodes.has(input.code) &&
-      // The overrun's own bound. `overruns` was incremented by the attempt
-      // this failure came from, so the first cut-off call reads 1 and is
-      // re-issued, and the re-issue's own cut-off reads 2 and is not.
-      (input.code !== "call_timeout" || overruns <= defaultModelOverruns)
-    ),
-    Schedule.tap(({ duration, input }) =>
-      Effect.sync(() => {
-        attempt++
-        // Only a retryable `ModelError` reaches the tap: the classification
-        // above stops the schedule before it on anything else.
-        const error = input as ModelError.ModelError
-        retries.push(
-          ModelEvent.ModelEvent.Retry({
-            type: "retry",
-            attempt,
-            code: error.code,
-            // Jitter produces a fractional millisecond. The whole millisecond
-            // is the honest resolution for a report to read.
-            delayMillis: Math.round(Duration.toMillis(duration))
-          })
-        )
-      })
-    )
-  )
-  const budget = budgetMillis === undefined || budgetMillis <= 0 ? undefined : budgetMillis
-  const collected = budget === undefined
-    // Disarmed. The call is bounded by nothing but the caller's own process,
-    // which is what every model call was before this budget existed.
-    ? Stream.runCollect(model.stream(request))
-    // Suspended so each attempt reads the overrun count the attempt before it
-    // left. That is what puts the teaching on a re-issue and never on the
-    // first call, and what keeps the original request the one thing every
-    // attempt derives from.
-    : Effect.suspend(() =>
-      Stream.runCollect(
-        model.stream(overruns === 0 ? request : withOverrunTeaching(request, budget))
-      ).pipe(
-        Effect.timeoutOrElse({
-          duration: budget,
-          orElse: () =>
-            Effect.sync(() => {
-              overruns++
-            }).pipe(
-              Effect.andThen(Effect.fail(
-                new ModelError.ModelError({
-                  code: "call_timeout",
-                  message: `The model call ran past its ${seconds(budget)}-second budget and was interrupted`
-                })
-              ))
-            )
+  correction?: number | undefined,
+  onUsage?: ((usage: ModelEvent.Usage) => void) | undefined
+): Effect.Effect<RecordedModelStep, Model.ModelFailure> =>
+  Effect.suspend(() => {
+    const retries: Array<ModelEvent.ModelEvent> = []
+    const failedUsage: Array<ModelEvent.Usage> = []
+    let attemptUsage: ModelEvent.Usage = {}
+    let attempt = 0
+    /** How many attempts this step has already had cut off at the budget. */
+    let overruns = 0
+    const schedule = policy.pipe(
+      Schedule.while(({ input }) =>
+        input instanceof ModelError.ModelError && retryableModelCodes.has(input.code) &&
+        // The overrun's own bound. `overruns` was incremented by the attempt
+        // this failure came from, so the first cut-off call reads 1 and is
+        // re-issued, and the re-issue's own cut-off reads 2 and is not.
+        (input.code !== "call_timeout" || overruns <= defaultModelOverruns)
+      ),
+      Schedule.tap(({ duration, input }) =>
+        Effect.sync(() => {
+          attempt++
+          // Only a retryable `ModelError` reaches the tap: the classification
+          // above stops the schedule before it on anything else.
+          const error = input as ModelError.ModelError
+          retries.push(
+            ModelEvent.ModelEvent.Retry({
+              type: "retry",
+              attempt,
+              code: error.code,
+              // Jitter produces a fractional millisecond. The whole millisecond
+              // is the honest resolution for a report to read.
+              delayMillis: Math.round(Duration.toMillis(duration))
+            })
+          )
         })
       )
     )
-  // A response body that ends without a settlement is a dead socket, and until
-  // now it was the one way a socket could end a run outright. `Stream.runCollect`
-  // *succeeds* on a truncated body — the events it did receive are returned,
-  // `settledMessage` folds them into an `aborted` assistant message, and the
-  // controller then raises `model_failed` because no `settle` is among them.
-  // That failure is a `HarnessError`, not a `ModelError`, so no retry
-  // classification ever saw it: one dropped HTTP/2 session, no backoff, run
-  // over. Two r91 instances were lost to that class and re-run as
-  // infrastructure crashes.
-  //
-  // Classifying it as `transport` puts it on the ladder every other socket
-  // failure already rides. It cannot be confused with an interruption: an
-  // interrupted fiber never reaches here with a value at all, and a settled
-  // stream always carries its settlement.
-  const attemptOnce = Effect.flatMap(collected, (events) =>
-    Array.from(events).some((event) => event.type === "settle")
-      ? Effect.succeed(events)
-      : Effect.fail(
-        new ModelError.ModelError({
-          code: "transport",
-          message: "The model response stream ended without a settlement"
-        })
-      ))
-  // Spread rather than always present: a call outside a correction ladder has
-  // no ordinal, and writing one anyway would make every ordinary model step
-  // claim to be correction zero of a ladder that never ran.
-  const ladder = correction === undefined ? {} : { correction }
-  return attemptOnce.pipe(
-    Effect.retry(schedule),
-    Effect.map((events) => ({ ...ladder, events: [...retries, ...events] })),
-    Effect.catchIf(
-      (error): error is ModelError.ModelError => error instanceof ModelError.ModelError,
-      (error) =>
-        isCapacityRefusal(error)
-          ? Effect.fail(error)
-          : Effect.succeed({ ...ladder, events: retries, error })
+    const budget = budgetMillis === undefined || budgetMillis <= 0 ? undefined : budgetMillis
+    const collect = (input: ModelRequest.ModelRequest) =>
+      Effect.suspend(() => {
+        attemptUsage = {}
+        return Stream.runCollect(
+          model.stream(input).pipe(Stream.tap((event) =>
+            Effect.sync(() => {
+              if (event.type !== "usage") return
+              const { type: _type, ...usage } = event
+              attemptUsage = {
+                ...attemptUsage,
+                ...Object.fromEntries(Object.entries(usage).filter(([, value]) => value !== undefined))
+              }
+              onUsage?.(combineUsage([...failedUsage, attemptUsage]))
+            })
+          ))
+        )
+      })
+    const collected = budget === undefined
+      // Disarmed. The call is bounded by nothing but the caller's own process,
+      // which is what every model call was before this budget existed.
+      ? collect(request)
+      // Suspended so each attempt reads the overrun count the attempt before it
+      // left. That is what puts the teaching on a re-issue and never on the
+      // first call, and what keeps the original request the one thing every
+      // attempt derives from.
+      : Effect.suspend(() =>
+        collect(overruns === 0 ? request : withOverrunTeaching(request, budget)).pipe(
+          Effect.timeoutOrElse({
+            duration: budget,
+            orElse: () =>
+              Effect.sync(() => {
+                overruns++
+              }).pipe(
+                Effect.andThen(Effect.fail(
+                  new ModelError.ModelError({
+                    code: "call_timeout",
+                    message: `The model call ran past its ${seconds(budget)}-second budget and was interrupted`
+                  })
+                ))
+              )
+          })
+        )
+      )
+    // A response body that ends without a settlement is a dead socket, and until
+    // now it was the one way a socket could end a run outright. `Stream.runCollect`
+    // *succeeds* on a truncated body — the events it did receive are returned,
+    // `settledMessage` folds them into an `aborted` assistant message, and the
+    // controller then raises `model_failed` because no `settle` is among them.
+    // That failure is a `HarnessError`, not a `ModelError`, so no retry
+    // classification ever saw it: one dropped HTTP/2 session, no backoff, run
+    // over. Two r91 instances were lost to that class and re-run as
+    // infrastructure crashes.
+    //
+    // Classifying it as `transport` puts it on the ladder every other socket
+    // failure already rides. It cannot be confused with an interruption: an
+    // interrupted fiber never reaches here with a value at all, and a settled
+    // stream always carries its settlement.
+    const attemptOnce = Effect.flatMap(collected, (events) =>
+      Array.from(events).some((event) => event.type === "settle")
+        ? Effect.succeed(events)
+        : Effect.fail(
+          new ModelError.ModelError({
+            code: "transport",
+            message: "The model response stream ended without a settlement"
+          })
+        )).pipe(Effect.tapError(() =>
+          Effect.sync(() => {
+            if (Object.keys(attemptUsage).length > 0) failedUsage.push(attemptUsage)
+          })
+        ))
+
+    // Partial text from a failed attempt is unsafe to replay, but provider usage
+    // is actual spend. Keep each attempt's final counters (not the sum of its
+    // cumulative updates), then fold attempts into one usage event for the
+    // sealed step. The explicit total also handles providers that report only
+    // totals on some attempts and component counters on others.
+    const accountFailedAttempts = (
+      events: ReadonlyArray<ModelEvent.ModelEvent>
+    ): ReadonlyArray<ModelEvent.ModelEvent> => {
+      if (failedUsage.length === 0) return events
+      const combined = combineUsage([...failedUsage, ModelEvent.ModelEvent.settledMessage(events).usage])
+      const result: Array<ModelEvent.ModelEvent> = events.filter((event) => event.type !== "usage")
+      const settlement = result.findIndex((event) => event.type === "settle")
+      result.splice(settlement < 0 ? result.length : settlement, 0, ModelEvent.ModelEvent.Usage(combined))
+      return result
+    }
+    // Spread rather than always present: a call outside a correction ladder has
+    // no ordinal, and writing one anyway would make every ordinary model step
+    // claim to be correction zero of a ladder that never ran.
+    const ladder = correction === undefined ? {} : { correction }
+    return attemptOnce.pipe(
+      Effect.retry(schedule),
+      Effect.map((events) => ({ ...ladder, events: [...retries, ...accountFailedAttempts(events)] })),
+      Effect.catchIf(
+        (error): error is ModelError.ModelError => error instanceof ModelError.ModelError,
+        (error) =>
+          isCapacityRefusal(error)
+            ? Effect.fail(error)
+            : Effect.succeed({ ...ladder, events: [...retries, ...accountFailedAttempts([])], error })
+      )
     )
-  )
-}
+  })
 
 /**
  * Failures that describe provider capacity rather than the request.

@@ -29,15 +29,35 @@
     "agent"
   ],
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "sideEffects": [],
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Agent": "./src/Agent.ts",
+    "./AgentAction": "./src/AgentAction.ts",
+    "./AgentSession": "./src/AgentSession.ts",
+    "./Budget": "./src/Budget.ts",
+    "./CellPlugin": "./src/CellPlugin.ts",
+    "./Checkpointed": "./src/Checkpointed.ts",
+    "./ChildFlows": "./src/ChildFlows.ts",
+    "./EngineChildren": "./src/EngineChildren.ts",
+    "./EventSink": "./src/EventSink.ts",
+    "./FlowEngineLike": "./src/FlowEngineLike.ts",
+    "./FlowStore": "./src/FlowStore.ts",
+    "./InMemoryWorkspaceSandbox": "./src/InMemoryWorkspaceSandbox.ts",
+    "./MemorySnapshotRecorder": "./src/MemorySnapshotRecorder.ts",
+    "./PromoteFlows": "./src/PromoteFlows.ts",
+    "./QuotaPolicy": "./src/QuotaPolicy.ts",
+    "./Seat": "./src/Seat.ts",
+    "./SeatResolver": "./src/SeatResolver.ts",
+    "./StandardFlows": "./src/StandardFlows.ts",
+    "./WorkspaceObservation": "./src/WorkspaceObservation.ts",
+    "./WorkspaceSandbox": "./src/WorkspaceSandbox.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +81,113 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Agent": {
+        "types": "./dist/esm/Agent.d.ts",
+        "import": "./dist/esm/Agent.js",
+        "require": "./dist/cjs/Agent.js"
+      },
+      "./AgentAction": {
+        "types": "./dist/esm/AgentAction.d.ts",
+        "import": "./dist/esm/AgentAction.js",
+        "require": "./dist/cjs/AgentAction.js"
+      },
+      "./AgentSession": {
+        "types": "./dist/esm/AgentSession.d.ts",
+        "import": "./dist/esm/AgentSession.js",
+        "require": "./dist/cjs/AgentSession.js"
+      },
+      "./Budget": {
+        "types": "./dist/esm/Budget.d.ts",
+        "import": "./dist/esm/Budget.js",
+        "require": "./dist/cjs/Budget.js"
+      },
+      "./CellPlugin": {
+        "types": "./dist/esm/CellPlugin.d.ts",
+        "import": "./dist/esm/CellPlugin.js",
+        "require": "./dist/cjs/CellPlugin.js"
+      },
+      "./Checkpointed": {
+        "types": "./dist/esm/Checkpointed.d.ts",
+        "import": "./dist/esm/Checkpointed.js",
+        "require": "./dist/cjs/Checkpointed.js"
+      },
+      "./ChildFlows": {
+        "types": "./dist/esm/ChildFlows.d.ts",
+        "import": "./dist/esm/ChildFlows.js",
+        "require": "./dist/cjs/ChildFlows.js"
+      },
+      "./EngineChildren": {
+        "types": "./dist/esm/EngineChildren.d.ts",
+        "import": "./dist/esm/EngineChildren.js",
+        "require": "./dist/cjs/EngineChildren.js"
+      },
+      "./EventSink": {
+        "types": "./dist/esm/EventSink.d.ts",
+        "import": "./dist/esm/EventSink.js",
+        "require": "./dist/cjs/EventSink.js"
+      },
+      "./FlowEngineLike": {
+        "types": "./dist/esm/FlowEngineLike.d.ts",
+        "import": "./dist/esm/FlowEngineLike.js",
+        "require": "./dist/cjs/FlowEngineLike.js"
+      },
+      "./FlowStore": {
+        "types": "./dist/esm/FlowStore.d.ts",
+        "import": "./dist/esm/FlowStore.js",
+        "require": "./dist/cjs/FlowStore.js"
+      },
+      "./InMemoryWorkspaceSandbox": {
+        "types": "./dist/esm/InMemoryWorkspaceSandbox.d.ts",
+        "import": "./dist/esm/InMemoryWorkspaceSandbox.js",
+        "require": "./dist/cjs/InMemoryWorkspaceSandbox.js"
+      },
+      "./MemorySnapshotRecorder": {
+        "types": "./dist/esm/MemorySnapshotRecorder.d.ts",
+        "import": "./dist/esm/MemorySnapshotRecorder.js",
+        "require": "./dist/cjs/MemorySnapshotRecorder.js"
+      },
+      "./PromoteFlows": {
+        "types": "./dist/esm/PromoteFlows.d.ts",
+        "import": "./dist/esm/PromoteFlows.js",
+        "require": "./dist/cjs/PromoteFlows.js"
+      },
+      "./QuotaPolicy": {
+        "types": "./dist/esm/QuotaPolicy.d.ts",
+        "import": "./dist/esm/QuotaPolicy.js",
+        "require": "./dist/cjs/QuotaPolicy.js"
+      },
+      "./Seat": {
+        "types": "./dist/esm/Seat.d.ts",
+        "import": "./dist/esm/Seat.js",
+        "require": "./dist/cjs/Seat.js"
+      },
+      "./SeatResolver": {
+        "types": "./dist/esm/SeatResolver.d.ts",
+        "import": "./dist/esm/SeatResolver.js",
+        "require": "./dist/cjs/SeatResolver.js"
+      },
+      "./StandardFlows": {
+        "types": "./dist/esm/StandardFlows.d.ts",
+        "import": "./dist/esm/StandardFlows.js",
+        "require": "./dist/cjs/StandardFlows.js"
+      },
+      "./WorkspaceObservation": {
+        "types": "./dist/esm/WorkspaceObservation.d.ts",
+        "import": "./dist/esm/WorkspaceObservation.js",
+        "require": "./dist/cjs/WorkspaceObservation.js"
+      },
+      "./WorkspaceSandbox": {
+        "types": "./dist/esm/WorkspaceSandbox.d.ts",
+        "import": "./dist/esm/WorkspaceSandbox.js",
+        "require": "./dist/cjs/WorkspaceSandbox.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -80,15 +200,12 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "@smthrs/artifacts": "1.0.0-rc.0",
     "@smthrs/capability": "1.0.0-rc.0",
     "@smthrs/control": "1.0.0-rc.0",
     "@smthrs/core": "1.0.0-rc.0",
-    "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/engine-store": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/harness": "1.0.0-rc.0",
-    "@smthrs/jj": "1.0.0-rc.0",
     "@smthrs/journal": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/memory": "1.0.0-rc.0",
@@ -96,36 +213,36 @@
     "@smthrs/notifications": "1.0.0-rc.0",
     "@smthrs/observability": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
-    "@smthrs/platform-browser": "1.0.0-rc.0",
     "@smthrs/plugin": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0",
-    "@smthrs/std": "1.0.0-rc.0",
-    "@smthrs/step-cache": "1.0.0-rc.0"
-  },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
+    "@smthrs/std": "1.0.0-rc.0"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flows": "1.0.0-rc.0",
+    "@smthrs/jj": "1.0.0-rc.0",
     "@smthrs/platform-node": "1.0.0-rc.0",
     "@smthrs/testing": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

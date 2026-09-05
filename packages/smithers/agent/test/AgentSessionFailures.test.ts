@@ -3,7 +3,7 @@
  *
  * `AgentSession.test.ts` drives the whole production stack along the path
  * where every collaborator answers. What that can never reach is the other
- * half of the composition: the control store, the journal, the grant store,
+ * half of the composition: the control store, the journal, the decision store,
  * the status fence, the registry, and the durable engine each have a refusal
  * the executor must contain rather than propagate, and a stack whose
  * collaborators all work cannot produce one. So this file assembles the same
@@ -12,7 +12,7 @@
  * Two collaborators stay real. The durable engine is `FlowEngine.layerMemory`,
  * so registration, execution, polling, and resumption behave as production
  * does; and the approval flow is the real `StandardFlows.approval` binding, so
- * an ask reaches the grant store exactly the way a cell's `ctx.call("ask", …)`
+ * an ask reads its decision exactly the way a cell's `ctx.call("ask", …)`
  * reaches it. The agent is a stub, because the loop itself is asserted in
  * `Agent.test.ts` — here it is the injection point for the two hooks the
  * executor hands it, `authorize` and the composed `ask` flow.
@@ -24,7 +24,7 @@ import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { RunStatus } from "@smthrs/control/ControlSchema"
 import { FlowEngine } from "@smthrs/engine"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
-import { FlowRuntime } from "@smthrs/flow"
+import { type Flow, FlowRuntime } from "@smthrs/flow"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import { Journal, JournalEvent } from "@smthrs/journal"
@@ -35,7 +35,7 @@ import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { RegistryError } from "@smthrs/registry/RegistryError"
 import { RunStore } from "@smthrs/run-store"
-import { Clock, Deferred, Duration, Effect, Fiber, Layer, Option, PubSub, Schema, Stream } from "effect"
+import { Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, PubSub, Schema, Scope, Stream } from "effect"
 import { describe, expect, it } from "vitest"
 import * as Agent from "../src/Agent.ts"
 import * as AgentSession from "../src/AgentSession.ts"
@@ -127,11 +127,13 @@ const accepted = { _tag: "Accepted" as const, seq: JournalEvent.Seq.make(1), sou
  * is about to re-drive and follows the durable resume delegations.
  */
 interface RuntimeStub {
+  readonly pendingSignals: ControlRuntime["Service"]["pendingSignals"]
+  readonly listRuns: ControlRuntime["Service"]["listRuns"]
+  readonly deliveredSignals: ControlRuntime["Service"]["deliveredSignals"]
   readonly getRun: ControlRuntime["Service"]["getRun"]
   readonly getPlan: ControlRuntime["Service"]["getPlan"]
   readonly registerFiber: ControlRuntime["Service"]["registerFiber"]
   readonly registerApproval: ControlRuntime["Service"]["registerApproval"]
-  readonly grants: ControlRuntime["Service"]["grants"]
   readonly claimFence: ControlRuntime["Service"]["claimFence"]
   readonly writeStatus: ControlRuntime["Service"]["writeStatus"]
   readonly resume: ControlRuntime["Service"]["resume"]
@@ -162,11 +164,13 @@ const runtimeLayer = (
   overrides: Partial<RuntimeStub> = {}
 ): Layer.Layer<ControlRuntime> => {
   const stub: RuntimeStub = {
+    pendingSignals: Effect.succeed([]),
+    listRuns: Effect.succeed([]),
+    deliveredSignals: () => Effect.succeed([]),
     getRun: () => Effect.succeed(launchInput.run),
     getPlan: () => Effect.succeed(launchInput.plan),
     registerFiber: () => Effect.void,
-    registerApproval: (target) => Effect.succeed({ tokenId: target.requestId, target, resolved: false }),
-    grants: Effect.succeed([]),
+    registerApproval: (target) => Effect.succeed({ tokenId: target.requestId, target, _tag: "Pending" }),
     claimFence: () => Effect.succeed("fence-1"),
     writeStatus: (_runId, _fence, status) =>
       Effect.sync(() => {
@@ -266,6 +270,8 @@ const answeringAgent = (answers: Array<unknown>): Agent.Service =>
 type EngineService = FlowRuntime.FlowRuntime["Service"]
 
 interface ScenarioOptions {
+  readonly canExecute?: AgentSession.Options["canExecute"]
+  readonly runs?: Partial<RunStore.Service> | undefined
   readonly agent?: Agent.Service | undefined
   readonly runtime?: Partial<RuntimeStub> | undefined
   readonly journal?: Partial<Journal.Service> | undefined
@@ -301,6 +307,7 @@ const withExecutor = <A>(
 ): Promise<A> =>
   Effect.gen(function*() {
     const executor = yield* AgentSession.make({
+      canExecute: options.canExecute,
       limits: { calls: 4 },
       maxFrames: 2,
       quotaPolicy: Safety.quotaPolicy,
@@ -320,7 +327,32 @@ const withExecutor = <A>(
         // The two engine stores the cancel and signal ports write through.
         // This suite exercises the control seam, not those ports, so the
         // stubs are the ones that record nothing.
-        RunStore.layerNoop(),
+        RunStore.layerNoop({
+          // This reference engine has no durable lineages either. Cancellation
+          // of an absent SQL execution is unknown, not a failed database.
+          requestCancelLineage: () => Effect.succeed({ _tag: "NotFound" } as const),
+          latestRound: () =>
+            Effect.fail(
+              new RunStore.RunStoreError({
+                code: "not_found_row",
+                method: "latestRound",
+                message: "The reference memory engine has no durable run row",
+                cause: undefined
+              })
+            ),
+          // The memory engine has no SQL rows, but it does answer poll(). An
+          // unavailable store is a different condition and prevents resume.
+          get: () =>
+            Effect.fail(
+              new RunStore.RunStoreError({
+                code: "not_found_row",
+                method: "get",
+                message: "The reference memory engine has no durable run row",
+                cause: undefined
+              })
+            ),
+          ...options.runs
+        }),
         DurableEngineState.layerMemory,
         NodeCrypto.layer
       )
@@ -422,13 +454,14 @@ describe("the executor's control-store seam", () => {
     expect(causeOf(record)).toContain("The approval request could not be journaled")
   })
 
-  it("reports a grant store that cannot be read when the ask asks it", async () => {
+  it("reports an unreadable approval decision instead of inventing an answer", async () => {
     const record = recorder()
     const answers: Array<unknown> = []
     const result = await launched(record, {
       agent: answeringAgent(answers),
       runtime: {
-        grants: Effect.fail(new PersistenceError({ operation: "grants", message: "the grant store is gone" }))
+        registerApproval: () =>
+          Effect.fail(new PersistenceError({ operation: "approval", message: "the decision store is gone" }))
       }
     })
 
@@ -436,16 +469,37 @@ describe("the executor's control-store seam", () => {
     // call result the cell could have caught.
     expect(answers).toEqual([])
     expect(result.status).toBe("failed")
-    expect(causeOf(record)).toContain(`The grant store could not be read for run ${runId}`)
+    expect(causeOf(record)).toContain(`The approval decision could not be read for run ${runId}`)
   })
 
-  it("answers a decided ask denied when no grant carries its request id", async () => {
+  it("answers an explicitly denied ask without inferring the answer from grants", async () => {
     const record = recorder()
     const answers: Array<unknown> = []
-    const result = await launched(record, { agent: answeringAgent(answers) })
+    const result = await launched(record, {
+      agent: answeringAgent(answers),
+      runtime: {
+        registerApproval: (target) =>
+          Effect.succeed({
+            _tag: "Denied",
+            tokenId: target.requestId,
+            target,
+            decisionPrincipal: { id: "reviewer", kind: "operator", stampedAt: 1 },
+            decidedAt: 1
+          })
+      }
+    })
 
     expect(result.status).toBe("completed")
     expect(answers).toEqual([{ answer: "denied", approved: false }])
+  })
+
+  it("refuses to answer a pending ask even when the authorization hook is bypassed", async () => {
+    const record = recorder()
+    const answers: Array<unknown> = []
+    const result = await launched(record, { agent: answeringAgent(answers) })
+    expect(result.status).toBe("failed")
+    expect(answers).toEqual([])
+    expect(causeOf(record)).toContain("The ask has no approval decision yet")
   })
 })
 
@@ -606,6 +660,93 @@ describe("the executor's registry seam", () => {
 })
 
 describe("the executor's driver admission fence", () => {
+  it("keeps the newer body cancellable when an older overlapping driver finishes", async () => {
+    const record = recorder()
+    const firstStarted = Deferred.makeUnsafe<void>()
+    const secondStarted = Deferred.makeUnsafe<void>()
+    const finishFirst = Deferred.makeUnsafe<void>()
+    const secondInterrupted = Deferred.makeUnsafe<void>()
+    const drives: Array<Fiber.Fiber<unknown, unknown>> = []
+    let bodies = 0
+    let registration: {
+      readonly flow: Flow.Any
+      readonly scope: Scope.Scope
+      readonly execute: (
+        payload: { readonly runId: string; readonly planId: string },
+        executionId: string
+      ) => Effect.Effect<unknown, unknown, FlowRuntime.FlowInstance>
+    } | undefined
+
+    await withExecutor(record, {
+      runtime: {
+        registerFiber: (_runId, fiber) =>
+          Effect.sync(() => {
+            drives.push(fiber)
+          })
+      },
+      agent: Agent.makeNoop({
+        run: () =>
+          Stream.unwrap(Effect.sync(() => {
+            bodies++
+            return bodies === 1
+              ? Stream.fromEffectDrain(
+                Deferred.succeed(firstStarted, void 0).pipe(Effect.andThen(Deferred.await(finishFirst)))
+              )
+              : Stream.fromEffectDrain(
+                Deferred.succeed(secondStarted, void 0).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(secondInterrupted, void 0))
+                )
+              )
+          }))
+      }),
+      engine: (engine) => ({
+        ...engine,
+        register: (flow, execute) =>
+          Effect.gen(function*() {
+            registration = { flow, execute, scope: yield* Effect.scope } as typeof registration
+            yield* engine.register(flow, execute)
+          }),
+        // Model a recovered owner starting the successor before its predecessor
+        // unwinds. Engine bodies have their own scope: interrupting a driver's
+        // join cannot stop them unless the executor retained the newest body.
+        execute: ((_flow: Flow.Any, options: {
+          readonly executionId: string
+          readonly payload: { readonly runId: string; readonly planId: string }
+        }) =>
+          Effect.gen(function*() {
+            if (registration === undefined) return yield* Effect.die("flow was not registered")
+            const registered = registration
+            const instance = FlowEngine.makeInstance(registered.flow, options.executionId)
+            const fiber = yield* registered.execute(
+              options.payload as { readonly runId: string; readonly planId: string },
+              options.executionId
+            ).pipe(
+              Effect.provideService(FlowRuntime.FlowInstance, instance),
+              Effect.ensuring(Scope.close(instance.scope, Exit.void)),
+              Effect.forkIn(registered.scope)
+            )
+            yield* Fiber.join(fiber)
+            return options.executionId
+          })) as EngineService["execute"]
+      })
+    }, (executor) =>
+      Effect.gen(function*() {
+        expect(yield* executor.launch(launchInput)).toBe("accepted")
+        yield* Deferred.await(firstStarted)
+        expect(yield* executor.launch(launchInput)).toBe("accepted")
+        yield* Deferred.await(secondStarted)
+        expect(drives).toHaveLength(2)
+        yield* Deferred.succeed(finishFirst, void 0)
+        expect((yield* Fiber.await(drives[0]!))._tag).toBe("Success")
+        expect(yield* Deferred.isDone(secondInterrupted)).toBe(false)
+
+        yield* Fiber.interrupt(drives[1]!)
+        yield* Deferred.await(secondInterrupted).pipe(Effect.timeout(Duration.seconds(10)))
+        expect(bodies).toBe(2)
+      }))
+  })
+
   it("interrupts a driver that is cancelled before its flow body starts", async () => {
     const record = recorder()
     const registered = Deferred.makeUnsafe<Fiber.Fiber<unknown, unknown>>()
@@ -1083,6 +1224,61 @@ describe("the executor's resume bridge", () => {
 })
 
 describe("the executor's resume port", () => {
+  it.each([false, true])("honors the workspace execution guard (%s) before taking up a resume", async (allowed) => {
+    const record = recorder()
+    const checked: Array<string> = []
+    let polls = 0
+    const uptake = await withExecutor(record, {
+      canExecute: (id) =>
+        Effect.sync(() => {
+          checked.push(id)
+          return allowed
+        }),
+      engine: (engine) =>
+        ({
+          ...engine,
+          poll: () =>
+            Effect.sync(() => {
+              polls++
+              return Option.some({ _tag: "Suspended" })
+            }),
+          resume: () => Effect.void
+        }) as unknown as EngineService
+    }, (executor) => executor.resumeRun({ runId: "routed-run" }))
+    expect(checked).toEqual(["routed-run"])
+    expect(uptake).toBe(allowed ? "resuming" : "unknown")
+    expect(polls).toBe(allowed ? 1 : 0)
+  })
+
+  it("keeps a resume pending when the durable run store is unavailable", async () => {
+    const record = recorder()
+    let polls = 0
+    const uptake = await withExecutor(record, {
+      runs: {
+        get: () =>
+          Effect.fail(
+            new RunStore.RunStoreError({
+              code: "persistence_failed",
+              method: "get",
+              message: "injected I/O failure",
+              cause: undefined
+            })
+          )
+      },
+      engine: (engine) =>
+        ({
+          ...engine,
+          poll: () =>
+            Effect.sync(() => {
+              polls++
+              return Option.some({ _tag: "Suspended" })
+            })
+        }) as unknown as EngineService
+    }, (executor) => executor.resumeRun({ runId: "unavailable-run" }))
+    expect(uptake).toBe("unknown")
+    expect(polls).toBe(0)
+  })
+
   it("re-drives a run it hosts and reports that it is driving", async () => {
     const record = recorder()
     const resumed: Array<string> = []

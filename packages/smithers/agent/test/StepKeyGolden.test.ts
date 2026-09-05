@@ -199,7 +199,7 @@ describe("the sealed model step key", () => {
     // public headers, canonical body bytes), the harness's declared key
     // material, and — because this port declares `capabilities` — the cache
     // environment carrying the composition token.
-    expect(observed.host).toBe("key1_132c02c3b31891b4c1b6362744cafd0860b72b57cc42973838b125a034baa314")
+    expect(observed.host).toBe("key1_7c2a7296d4c4d5706b4509987f48c0478818d7f74496bba9c62c57949403a85e")
     // Sealed means content-addressed: the same declaration through a second
     // port of the same composition is one recorded answer, not two calls.
     expect(observed.again).toBe(observed.host)

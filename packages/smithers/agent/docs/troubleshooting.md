@@ -26,7 +26,7 @@ step with `SeatUnresolved` in its `AgentFailure` union. See
 **What happened.** A control-plane launch named a prompt flow whose frontmatter
 has no `model:` line. No agent host can ever run one, so the launch is refused
 rather than left pending. The refusal message says to add the line and run
-`smthrs doctor` to see which provider keys the project has.
+[`smthrs doctor`](/cli/doctor) to see which provider keys the project has.
 
 **What to change.** Add `model: PROVIDER:MODEL_ID` to the flow's frontmatter.
 A flow with a module body is a different case: it stays `pending`, because only
@@ -56,17 +56,30 @@ where the number was written.
 **What to change.** Pass a non-negative safe integer. Zero is legal and means
 "a first miss is terminal".
 
+## Budget.ConfigurationError
+
+**What happened.** Budget acquisition rejected an invalid policy or accounting
+bound, before any model work. The message identifies the configuration path.
+
+**What to change.** Use non-negative safe integers for token ceilings, finite
+non-negative milliseconds for latency, and positive safe integers for
+`maxRuns` and `recoveryEntries`. Omit a ceiling for no limit; do not use infinity
+or `NaN`. `onExceeded` must be `fail`, `warn`, or `skip-remaining`.
+
 ## BudgetExceeded
 
 **What happened.** The run has spent `used` of its `max` approved `scope`
 (`tokens` or `latency`), and the next model call is projected at `next`, the
-largest call the run has made. The first call is never refused, and a step the
-ledger already counted always proceeds, so this refusal names genuinely new
-spend.
+largest call the run has made. `reserved` is capacity held by other in-flight
+calls. Until a positive cost is known, one call reserves the whole token
+allowance; zero refuses new calls unless `warn` permits them. A paid step's
+replay still proceeds for free. Estimates are soft, not provider billing caps.
 
 **What to change.** Raise the ceiling where it was approved (the plan envelope,
 or the `Budget.layer` policy), or switch `onExceeded` to `warn` to journal and
-proceed. `Budget.usageOf(runId)` reads the run's spend.
+proceed. If capacity is temporarily reserved, let those calls settle before
+retrying a `fail` refusal. `Budget.usageOf(runId)` reads actual spend, excluding
+reservations.
 
 ## Budget.Skipped
 
@@ -85,12 +98,20 @@ ceiling and restart it.
 what the run may spend. `phase: "record"` means a usage record or clock zero
 could not be written; `phase: "recover"` means the run's ledger could not be
 read, did not decode, or holds more than `recoveryEntries` journal entries.
+Recovery also refuses to flush from inside a journal transaction. An account
+with pending usage, active operations, or no durable journal cannot be evicted;
+when every cache slot is pinned, admitting another run fails closed.
 
 **What to change.** This fails closed on purpose: the run's spend is unknown,
 not zero. Fix the journal (space, permissions, connectivity), or raise
-`recoveryEntries` for a genuinely long run. A `record`-phase failure is worth
-re-dispatching: the sealed model step replays from its recorded answer, so the
-retry pays the ledger again, not the provider.
+`recoveryEntries` for a genuinely long run. If a sealed result exists, a
+`record`-phase failure can be repaired by re-dispatching: the result replays
+without another provider call. An unsealed capacity failure or interruption
+has no such result; a fresh provider retry must not be used to repair its
+pending usage write.
+Run initial recovery outside transactions. If the cache is full, finish active
+calls or retry their pending writes; increase `maxRuns` for the intended
+concurrency or number of memory-only runs.
 
 ## A quota refusal propagates instead of parking
 

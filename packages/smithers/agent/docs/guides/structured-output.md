@@ -92,4 +92,4 @@ The step fails with `StructuredOutputFailure`, a member of
 [`AgentAction.AgentFailure`](../api.md#agentactionagentfailure). Handle it at
 the flow boundary like any other typed action failure. For a run that should
 keep working through provider misbehavior rather than only through malformed
-answers, see [Park on quota refusals and cap run spend](./quota-and-budgets.md).
+answers, see [Park on quota refusals and limit model admission](./quota-and-budgets.md).

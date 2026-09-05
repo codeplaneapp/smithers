@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Approval asks now read the explicit durable `Approved` or `Denied` token
+  instead of inferring a decision from grants. Pending or unreadable decisions
+  fail closed; denial still returns `approved: false` to the caller.
+
+- `AgentSession.requestCancel` now records logical-run intent atomically across
+  trampoline rounds. A completed predecessor no longer makes a live successor
+  look terminal. Execution observation follows the current round's lifecycle
+  while preserving the requested run's identity; see the API's snapshot and
+  separate-control-database limits.
+
+- Validate every supplied usage counter before choosing or aggregating a token
+  total. Negative or non-finite components cannot be hidden by a valid total or
+  cancel against another attempt. `tokensOf` returns `NaN` for malformed
+  components; durable accounting refuses them without poisoning the tally.
+- Budget acquisition now validates and snapshots its configuration, failing with
+  `Budget.ConfigurationError` for invalid ceilings, exceeded policies, or cache
+  bounds. `make`, `layer`, `layerFromEnvelope`, and `AgentSession.Options.budget`
+  expose that typed failure. Omit ceilings for no limit; infinity is not valid.
+- Reported usage before an unsealed capacity refusal or stream interruption is
+  charged under a distinct invocation receipt. It survives journal recovery
+  without giving a later provider retry a paid sealed-step marker. Partial
+  failed text is still discarded; cumulative counters count once per attempt.
+- **Sealed model cache identity changes:** the model action's encoded failure
+  contract now includes infrastructure failures from receipt allocation and
+  usage persistence. This changes the schema-bearing activity key (the pinned
+  golden request moves from `key1_bd674ce5…` to `key1_7c2a7296…`); prior model
+  action keys will not be reused. Do not roll unfinished runs onto this change
+  assuming cache continuity. The release-wide unfinished-run migration policy
+  remains a prerequisite for that deployment.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added

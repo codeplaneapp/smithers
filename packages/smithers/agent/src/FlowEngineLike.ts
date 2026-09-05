@@ -72,6 +72,7 @@ import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schedule from "effect/Schedule"
@@ -552,15 +553,16 @@ const unlessParked = (quota: QuotaPolicy.Service) =>
 }
 
 /**
- * Every failure `Model.stream` may report, as one encodable schema. The engine
- * stores an activity's failure as well as its success, so the port's error
- * channel has to be expressible as a schema rather than an opaque value.
+ * Model, permission, and usage-infrastructure failures as one encodable
+ * boundary schema. The engine stores an activity's failure as well as its
+ * success, so the port's error channel cannot be an opaque value.
  */
 const ModelFailure = Schema.Union([
   ModelError.ModelError,
   Permission.PermissionRequired,
   Permission.PermissionDenied,
-  Permission.GrantStoreError
+  Permission.GrantStoreError,
+  HarnessError.HarnessError
 ])
 
 const sealStepActivityName = "harness/sealStep"
@@ -836,7 +838,7 @@ export const make = (
           // plus an estimate for a call the ledger already holds, and a run
           // killed after its last model call resumes straight into
           // `BudgetExceeded` for a call that costs zero.
-          const verdict = yield* budget.check(key).pipe(Effect.mapError(accountingFailed))
+          const verdict = yield* budget.reserve(key).pipe(Effect.mapError(accountingFailed))
           if (verdict._tag === "refuse") {
             return yield* Effect.fail(
               new HarnessError.HarnessError({
@@ -860,15 +862,42 @@ export const make = (
             error: ModelFailure,
             tier: "sealed",
             idempotencyKey: key,
-            execute: recordModelStep(
-              options.model,
-              step.request,
-              options.modelRetryPolicy ?? defaultModelRetryPolicy,
-              // The controller's armed budget, carried on the step, so the
-              // number a run journals as armed is the number it ran under.
-              step.modelCallMs,
-              correction
-            ).pipe(Effect.flatMap(unlessParked(quota)))
+            execute: Effect.suspend(() => {
+              let reported: ModelEvent.Usage | undefined
+              return Effect.gen(function*() {
+                // This names an actual, unsealed invocation, not the logical
+                // sealed key. A retry after capacity refusal is fresh provider
+                // work; charging it under `key` would mark every later retry
+                // paid and bypass admission. Allocate before dispatch, and keep
+                // the identity fixed through accounting's transaction retries.
+                const receipt = yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError((cause) => engineFailed("Could not allocate a model usage receipt", cause))
+                )
+                return yield* recordModelStep(
+                  options.model,
+                  step.request,
+                  options.modelRetryPolicy ?? defaultModelRetryPolicy,
+                  step.modelCallMs,
+                  correction,
+                  (usage) => {
+                    reported = usage
+                  }
+                ).pipe(
+                  Effect.flatMap(unlessParked(quota)),
+                  // The normal sealed result is accounted below, including on
+                  // replay. This finalizer covers only exits that cannot seal.
+                  // It runs uninterruptibly before releasing the reservation;
+                  // a failed write remains pending and blocks fresh admission.
+                  Effect.onExit((exit) =>
+                    Exit.isFailure(exit) && reported !== undefined
+                      ? budget.record(`unsealed-model/${key}/${receipt}`, reported).pipe(
+                        Effect.mapError(accountingFailed)
+                      )
+                      : Effect.void
+                  )
+                )
+              })
+            })
           })
           const normalized = normalizeRecordedModelStep(recorded)
           // Accounted after the step settles. The accumulator is keyed by the
@@ -882,7 +911,7 @@ export const make = (
           return normalized.error === undefined
             ? replay
             : Stream.concat(replay, Stream.fail(normalized.error))
-        }).pipe(Effect.provide(context))
+        }).pipe(Effect.scoped, Effect.provide(context))
       )
 
     const splice = (batch: Plan.Batch): Stream.Stream<Plan.SpliceEvent, HarnessError.HarnessError> =>
@@ -945,6 +974,7 @@ export const make = (
     const observer = yield* Effect.serviceOption(WorkspaceObservation.Observer)
     const quota = yield* QuotaPolicy.current
     const budget = yield* Budget.current
+    const crypto = yield* Crypto.Crypto
     const observe = Option.match(observer, {
       onNone: (): Effect.Effect<Option.Option<EngineLike.Observation>, HarnessError.HarnessError> =>
         Effect.succeed(Option.none()),

@@ -10,13 +10,12 @@ production one; only the model is scripted, so the run is deterministic and
 needs no API key. By the end you will have a step whose answer arrives as a
 typed value, decoded by the schema you declared.
 
-The runnable original of this walkthrough is
-[`examples/src/11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts) in the
-repository.
+A runnable version of this walkthrough lives in the Smithers repository, as
+[`examples/src/11-agent-step.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/11-agent-step.ts).
 
 ## Prerequisites
 
-- Node.js 22.19.0 or later.
+- Node.js 22.19+ (Node 22) or 24.11+.
 - A package with the dependencies installed:
 
 ```bash
@@ -172,7 +171,7 @@ const layer = Layer.mergeAll(
 Both policies are required by the type of `Agent.layer`. A composition that
 means to enforce nothing says so in writing, here with
 `Budget.layerUnbounded()`. For what the two policies do when armed, see
-[Park on quota refusals and cap run spend](./guides/quota-and-budgets.md).
+[Park on quota refusals and limit model admission](./guides/quota-and-budgets.md).
 
 ## Run it
 
