@@ -19,8 +19,8 @@ interface Source {
 
 `source` is opaque caller-supplied metadata. Discovery never interprets it; it
 copies the string onto every descriptor's `provenance`, so a catalog entry can
-say which source produced it. The repository's own hosts use `project` for a
-project's flows and `pack:<name>` for a pack's.
+say which source produced it. The `smthrs` CLI uses `project` for a project's
+own flows and `pack:<name>` for the flows a pack contributed.
 
 ## One directory, one flow
 

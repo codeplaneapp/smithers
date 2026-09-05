@@ -61,8 +61,7 @@ const built = Effect.gen(function*() {
 Nothing here raises. A delegate only another host registers
 (`missing_delegate`, `ambiguous_delegate`) and a defect in the entry itself
 (`body_unavailable`, `invalid_module`) are both reported rather than thrown,
-because one broken file must not take `ls`, `ps`, and every unrelated `up` down
-with it. The codes are what separate the two kinds: the first pair is a
+because one broken file must not take every unrelated flow down with it. The codes are what separate the two kinds: the first pair is a
 statement about this host, the second is a defect in the flow.
 
 ## Register everything runnable

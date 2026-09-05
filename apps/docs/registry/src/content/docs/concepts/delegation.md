@@ -83,7 +83,7 @@ so the step key an envelope carrying a placement hashes to does not move.
 A body annotation wins over the descriptor's frontmatter directive in all
 three, because the body is the later and more specific statement.
 
-Read the table with two limits the test suites pin as behavior:
+Read the table with two limits, both of which are guaranteed behavior:
 
 - **A cache policy changes the shape of the plan.** Without one, the delegate's
   own node goes into the plan the engine builds, so its fan-out, its priorities,

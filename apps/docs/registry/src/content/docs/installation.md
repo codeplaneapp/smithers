@@ -9,13 +9,22 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/age
 ## Install the package
 
 ```bash
-pnpm add @smthrs/registry
+pnpm add @smthrs/registry@next effect@4.0.0-rc.112
 ```
 
+Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the
+release candidate publishes under the `next` tag, which is what the command
+above installs.
+
+[`effect`](https://effect.website) is a peer dependency pinned at
+`4.0.0-rc.112`. Declare it yourself at that version: your own code imports
+`effect/Effect` and `effect/Layer` directly, and two copies of `effect` in one
+program are two sets of service tags. Everything else installs with the
+package: the `yaml` parser frontmatter is read with, and the `@smthrs/*`
+packages the descriptor model is built from.
+
 The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. Its runtime dependencies install with
-it: [`effect`](https://effect.website), the `yaml` parser frontmatter is read
-with, and the `@smthrs/*` packages the descriptor model is built from.
+CommonJS with TypeScript declarations.
 
 ## Import forms
 
@@ -26,8 +35,7 @@ import { Descriptor, Discovery, Executable, Registry } from "@smthrs/registry"
 ```
 
 Each module is also importable from its own subpath, which is the form the
-[API reference](/reference/api/) uses in its examples and the form the repository's
-own hosts use:
+[API reference](/reference/api/) uses in its examples:
 
 ```ts
 import * as Discovery from "@smthrs/registry/Discovery"
@@ -79,7 +87,7 @@ The durable engine does not: add [`@smthrs/flows`](https://flows.smithers.sh/ref
 registered flow on a SQLite-backed engine.
 
 ```bash
-pnpm add @smthrs/flows
+pnpm add @smthrs/flows@next
 ```
 
 See [Run a discovered flow](/guides/run-a-discovered-flow/) for the whole

@@ -32,8 +32,7 @@ const registry = Registry.makeNoop({
 })
 ```
 
-That is the value the repository's own agent hosts pass when a run must reach
-no flows at all. `Registry.layerNoop()` requires nothing, so it composes into a
+That is the value an agent host passes when a run must reach no flows at all. `Registry.layerNoop()` requires nothing, so it composes into a
 test that has no filesystem.
 
 ## An in-memory snapshot with real body loading
@@ -61,9 +60,9 @@ omitted `effects` would be testing against authority no real scan produces.
 
 ## Scanning a fixture directory
 
-`Discovery.layer` over a fixture tree is the closest thing to production, and
-it is what this package's own suites use. Point a source at the fixtures and
-provide a real platform:
+`Discovery.layer` over a fixture tree is the closest thing to production: the
+same scan, the same warnings, the same digests, over a directory you control.
+Point a source at the fixtures and provide a real platform:
 
 ```ts
 import * as Discovery from "@smthrs/registry/Discovery"
@@ -104,9 +103,10 @@ const options: Executable.Options = {
 }
 ```
 
-Leave `load` absent whenever the real loader is what is under test. This
-package's own suite does, so the `file:` specifier conversion is exercised by
-every module fixture rather than by one test of the conversion.
+Leave `load` absent whenever the real loader is what is under test. Every
+module fixture that runs through the default loader exercises the `file:`
+specifier conversion, which is better coverage than one test aimed at the
+conversion alone.
 
 `Executable.catalog` reports refusals instead of raising them, which is what
 makes a mixed fixture directory a single assertion: the runnable entries in

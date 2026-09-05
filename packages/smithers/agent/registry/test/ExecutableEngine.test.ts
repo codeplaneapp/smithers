@@ -17,14 +17,16 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
+import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import { EngineStore } from "@smthrs/engine-store"
 import * as PlanScheduler from "@smthrs/engine-store/PlanScheduler"
 import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import * as TestStores from "@smthrs/engine-store/test/TestStores"
 import * as WorkspaceSandbox from "@smthrs/engine-store/WorkspaceSandbox"
 import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
-import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
+import * as Workspace from "@smthrs/kernel/Workspace"
 import { Node, Plan } from "@smthrs/plan"
 import { type Ownership, RunStore } from "@smthrs/run-store"
 import * as Effect from "effect/Effect"
@@ -149,18 +151,23 @@ const workspace = (name: string): string => mkdtempSync(join(tmpdir(), `registry
  * for the step cache, and a complete cache environment so the engine may claim
  * a result is reusable at all.
  */
-const durable = (filename: string, hostId: string, registration: Layer.Layer<unknown, never, never>) =>
-  NodeRuntime.layer(
-    {
-      filename,
-      workspaceRoot: dirname(filename),
-      owner: { hostId },
-      isAlive: () => Effect.succeed(false)
-    },
-    StepBoundary.layer,
-    WorkspaceSandbox.layerFileSystem(),
-    registration
-  ).pipe(
+const durable = <A, E, R>(filename: string, hostId: string, registration: Layer.Layer<A, E, R>) =>
+  registration.pipe(
+    Layer.provideMerge(
+      EngineStore.layer({
+        owner: { hostId },
+        journalSource: `${hostId}-engine`,
+        isAlive: () => Effect.succeed(false)
+      }).pipe(
+        Layer.provideMerge(
+          Layer.merge(StepBoundary.layer, WorkspaceSandbox.layerFileSystem()).pipe(
+            Layer.provideMerge(ArtifactStore.layerMemory),
+            Layer.provideMerge(TestStores.layerAt(filename)),
+            Layer.provideMerge(Workspace.layer(dirname(filename)))
+          )
+        )
+      )
+    ),
     Layer.provideMerge(
       Layer.mergeAll(stubJj, Action.layerCacheEnvironment({ layers: [], capabilities: {} }))
     ),
@@ -470,25 +477,12 @@ describe("the host seam", () => {
       // The whole seam, composed the way a host composes it: discovery over
       // `<root>/flows/**` is the runtime's registry, and the registration phase
       // is the catalog built from it. Nothing lists a flow by hand.
-      const runtime = NodeRuntime.layer(
-        {
-          filename: join(directory, "engine.db"),
-          workspaceRoot: directory,
-          owner: { hostId: "registry-host" },
-          isAlive: () => Effect.succeed(false)
-        },
-        StepBoundary.layer,
-        WorkspaceSandbox.layerFileSystem(),
+      const runtime = durable(
+        join(directory, "engine.db"),
+        "registry-host",
         Layer.mergeAll(runLayer, Interpreter.layer(Echo), Executable.layer(options)).pipe(
           Layer.provideMerge(Action.layerImplementations)
-        ),
-        Executable.layerProject({ root: projectRoot })
-      ).pipe(
-        Layer.provideMerge(
-          Layer.mergeAll(stubJj, Action.layerCacheEnvironment({ layers: [], capabilities: {} }))
-        ),
-        Layer.provideMerge(NodeCrypto.layer),
-        Layer.provideMerge(platform)
+        ).pipe(Layer.provideMerge(Executable.layerProject({ root: projectRoot })))
       )
 
       const observed = yield* Effect.gen(function*() {

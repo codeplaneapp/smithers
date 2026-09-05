@@ -9,6 +9,12 @@ Every failure this package reports is typed and carries a stable `code`, the
 rather than only inside the prose message. Find the code and read the matching
 section.
 
+The three failure types are `DiscoveryError`, `RegistryError`, and
+`ExecutableError`. Each carries a `_tag` prefixed `flows/registry/`, which is
+the stable schema identifier a decoder matches on, so
+`flows/registry/DiscoveryError` is this package's error and not another
+package's.
+
 Non-fatal diagnostics are not here. A scan that survives a bad entry reports a
 `DiscoveryWarning` instead, and those are in
 [Diagnose a flow that did not appear](/guides/diagnose-a-missing-flow/).
@@ -193,7 +199,8 @@ metadata parses can still fail this check.
 `Executable.catalog` and `Executable.layer` collect every `ExecutableError`
 into `Catalog.refused` rather than failing. `flows/` is a directory a person
 edits, so one file in it is routinely mid-edit or wrong, and failing the
-catalog would take `ls`, `ps`, and every unrelated `up` down with it.
+catalog would take every command that touches the catalog down with it,
+including the ones that only list flows.
 `Executable.layer` also logs a warning for each refusal and provides the whole
 `Catalog` as a service, so a host can print what it declined instead of letting
 an operator discover it from a launch that fails inside the runtime.

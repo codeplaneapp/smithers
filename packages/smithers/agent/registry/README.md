@@ -1,20 +1,87 @@
 # @smthrs/registry
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://registry.smithers.sh
 
-Portable flow descriptor discovery and progressive-disclosure registry services. It scans ordered filesystem sources into serializable metadata, keeps prompt bodies lazy, and exposes lookup, disclosure, and execution to a host without evaluating modules during discovery.
+Answers the question "what flows does this project have" without running any of
+them. It scans ordered directories into serializable flow descriptors, keeps
+every prompt body behind a reference, and hands a host the lookups it needs to
+list a catalog, show it to a model, and execute one entry by name.
+
+A flow lives on disk as a directory holding one entry file: a markdown
+`flow.mdx`, its Agent Skills spelling `SKILL.md`, or a TypeScript `flow.ts`.
+Scanning one produces a `FlowDescriptor`, a plain value you can journal, send
+over a wire, or compare against another. The scan reads each entry file only far
+enough to find its declaration, so it imports nothing, and the body stays behind
+a path plus the SHA-256 digest measured during the scan.
+
+## Install
 
 ```sh
-npm install @smthrs/registry
+pnpm add @smthrs/registry@next effect@4.0.0-rc.112 @effect/platform-node
 ```
+
+Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the
+release candidate publishes under the `next` tag, which is what the command
+above installs.
+
+`effect` is a peer dependency at the pinned version. `@effect/platform-node`
+supplies the `FileSystem` and `Path` implementations the scan walks with; this
+package has no platform bindings of its own.
+
+## List what a directory holds
+
+The API is Effect services and layers: build a `Registry` layer over the sources
+you want scanned, then run a program that asks that service for the catalog.
+
+```ts
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
+import * as Discovery from "@smthrs/registry/Discovery"
+import * as Registry from "@smthrs/registry/Registry"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { join } from "node:path"
+
+const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
+const discovery = Discovery.layer.pipe(Layer.provide(platform))
+
+const registry = Registry.layer({
+  sources: [{ source: "project", root: join(process.cwd(), "flows"), naming: "path" }]
+}).pipe(Layer.provide([discovery, platform]))
+
+const main = Effect.gen(function*() {
+  const catalog = yield* Registry.Registry
+
+  for (const flow of yield* catalog.list()) {
+    console.log(`${flow.name}: ${flow.description}`)
+  }
+
+  for (const warning of yield* catalog.warnings()) {
+    console.log(`skipped ${warning.path}: ${warning.message}`)
+  }
+})
+
+await Effect.runPromise(main.pipe(Effect.provide(registry), Effect.orDie))
+```
+
+```text
+review: Reviews a proposed change and reports concrete correctness and maintainability risks.
+skipped /repo/flows/draft/flow.mdx: Markdown flows require a non-empty frontmatter description
+```
+
+`list()` and `warnings()` both answer from one complete snapshot and touch no
+files. A malformed entry becomes a warning rather than a failure, because a
+`flows/` directory is a directory a person edits and one file in it is routinely
+mid-edit.
 
 ## Public API
 
-The root entry point exports these namespaces; each is also importable from `@smthrs/registry/<Module>`.
+The root entry point exports these namespaces; each is also importable from
+`@smthrs/registry/<Module>`.
 
 | Module          | What it owns                                                                               |
 | --------------- | ------------------------------------------------------------------------------------------ |
@@ -27,48 +94,14 @@ The root entry point exports these namespaces; each is also importable from `@sm
 | `Registry`      | Ordered discovery, lookup, visibility, lazy body loading, refresh, and warnings.           |
 | `RegistryError` | Typed discovery and registry failures and their constructors.                              |
 
-Every export of every namespace, with signatures and errors, is on
-https://registry.smithers.sh/reference/api/. That page is the reference; this
-file is the orientation.
-
-## Discovering a project's flows
-
-```ts
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
-import * as Discovery from "@smthrs/registry/Discovery"
-import * as Registry from "@smthrs/registry/Registry"
-import { Effect, Layer } from "effect"
-
-const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer)
-const discovery = Discovery.layer.pipe(Layer.provide(platform))
-
-const registry = Registry.layer({
-  sources: [{ source: "project", root: "flows", naming: "path" }]
-}).pipe(Layer.provide([discovery, platform]))
-
-const program = Effect.gen(function*() {
-  const catalog = yield* Registry.Registry
-  return yield* catalog.list()
-}).pipe(Effect.provide(registry))
-```
-
-Scanning a source parses markdown frontmatter and module metadata without
-evaluating a module or reading a prompt body, so a catalog of a thousand flows
-costs a thousand frontmatter parses and no imports. Each descriptor records the
-SHA-256 of the bytes the scan read, and a body loaded later is checked against
-it.
-
-Use `Registry.layerFromDescriptors(entries)` for an in-memory snapshot with lazy
-body access, and `Registry.layerNoop()` for a composition that has no registry
-and must say so. `@smthrs/registry/package.json` is also exported; `internal/*`
-and nested `*/index` subpaths are blocked.
+`@smthrs/registry/package.json` is also exported; `internal/*` and nested
+`*/index` subpaths are blocked.
 
 ## Running a discovered flow
 
-`Executable` loads the body a descriptor points at, resolves the
-`@smthrs/flow` flow the descriptor delegates to, and returns a durable flow
-plus the `Interpreter` layer that registers it.
+Discovery answers _what flows exist_. `Executable` answers _how one runs_: it
+loads the body a descriptor points at, resolves the flow the descriptor
+delegates to, and returns a durable flow plus the layer that registers it.
 
 ```ts
 import { Action } from "@smthrs/flow"
@@ -91,41 +124,37 @@ const host = NodeRuntime.layerHost(
 )
 ```
 
-A descriptor declares what it delegates to in its `flows` field. One named flow
-is the delegate; no named flow, or several plus a declared `model`, delegates to
-the agent driver, whose name defaults to `Executable.defaultAgent`; several
-named flows and no model is
-`ExecutableError { code: "ambiguous_delegate" }`. A delegate no host registered
-is `missing_delegate`, raised while the executable is being built rather than at
-dispatch, naming the missing flow and listing what is registered.
+`Executable.layerProject({ root, packs })` scans `<root>/flows/**` first, then
+every installed pack, under one refreshable first-found registry.
+`Executable.layer` registers everything runnable, logs a warning naming each
+refusal, and provides the whole `Catalog` as a service, so a host can print what
+it declined instead of letting an operator find out from `smthrs up <flow>`.
 
-Every delegate receives the same serializable `Invocation` envelope, so one
-registered driver runs many descriptors. `Executable.catalog` reports every
-refusal instead of raising it, because one mid-edit file under `flows/` must not
-take every unrelated command down with it.
+Every delegate receives the same serializable `Invocation` envelope: the flow's
+name, the caller's input, the rendered prompt, the declared seat, the lowered
+placement, the declared capabilities, and the declared collaborator flows. One
+registered driver therefore runs many descriptors.
 
 ## Workflow packs
 
 A pack is a directory with a `pack.json` manifest, the shareable unit a project
-installs rather than copies.
+installs rather than copies. `Registry.layerFromPacks(packs, { runtimeVersion })`
+scans a set of installed packs into one registry, folded together by origin, and
+every descriptor a pack contributes carries `provenance.pack` with the pack
+name, version, and origin, so a catalog entry says where it came from. The
+manifest format, the path confinement rules, the content address, and the
+compatibility grammar are documented in
+[Load workflow packs](https://registry.smithers.sh/guides/load-packs/).
 
-```ts
-import { Registry } from "@smthrs/registry"
+## Documentation
 
-const packs = Registry.layerFromPacks(
-  [
-    { manifest: projectManifest, dir: "/repo/.flows/review-pack", origin: "local" },
-    { manifest: vendoredManifest, dir: "/repo/node_modules/review-pack", origin: "installed" }
-  ],
-  { runtimeVersion: "1.0.0" }
-)
-```
-
-Precedence is the pack's origin rather than the caller's order, every pack's
-`requires.smithers` range is checked before anything is scanned, and every
-contributed source is confined to its pack root. Every descriptor a pack
-contributes carries `provenance.pack`, so a catalog entry says where it came
-from.
-
-The `pack add | remove | list | update | eject` CLI verbs are not part of this
-package. This is the runtime contract underneath them.
+- [Installation](https://registry.smithers.sh/installation/) and
+  [Quickstart](https://registry.smithers.sh/quickstart/).
+- [Delegation](https://registry.smithers.sh/concepts/delegation/): the delegate
+  a descriptor names, and what the runtime does with its declarations.
+- [Run a discovered flow](https://registry.smithers.sh/guides/run-a-discovered-flow/):
+  the whole composition, from registered delegates to a running host.
+- [API reference](https://registry.smithers.sh/reference/api/): every export,
+  field, and constructor.
+- [Troubleshooting](https://registry.smithers.sh/troubleshooting/): every
+  failure code this package raises, and what to change.

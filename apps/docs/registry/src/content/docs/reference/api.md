@@ -139,9 +139,9 @@ const BodyRef: Schema.Union<[typeof BodyRefMarkdown, typeof BodyRefModule]>
 A serializable locator and content address for a body that is loaded only on
 demand. `baseDirectory` is the directory a markdown flow's own resource paths
 resolve against. `contentDigest` is the SHA-256 of the complete source bytes
-measured during discovery, as 64 lowercase hexadecimal characters; every
-current constructor supplies it, and it is optional only so descriptors
-journaled before rc.0 still decode. `Registry.loadBody` and
+measured during discovery, as 64 lowercase hexadecimal characters. Every
+constructor supplies it. The field is optional only so a descriptor journaled
+by an older version, before the digest existed, still decodes. `Registry.loadBody` and
 `Executable.fromDescriptor` rehash against it and refuse `body_unavailable` on
 a mismatch.
 
@@ -208,8 +208,7 @@ discovery can name a schema without evaluating the module that defines it.
 `Schema.toJsonSchemaDocument` output kept as plain JSON. The other four are
 locators; a host that binds a declaration it already holds has the schema
 itself and nothing to locate, and a locator pointing at a synthetic path would
-be unreadable downstream. That is the case that once left a cell describing
-every standard flow by name and prose alone, with no field names to call it by.
+be unreadable downstream. Use `Inline` when the binding already has the schema in memory.
 
 ### Descriptor.EffectDeclaration, EffectTier, Placement
 
