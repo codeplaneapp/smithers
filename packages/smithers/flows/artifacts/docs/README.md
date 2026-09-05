@@ -1,44 +1,48 @@
 ---
 title: "@smthrs/artifacts"
-description: "The content-addressed artifact store: bytes addressed by their own SHA-256 digest, with a filesystem tier, a shared HTTP tier, a local-first composition of the two, and a fenced sweep that reclaims them."
+description: "A content-addressed byte store for Effect: publish bytes, get back their SHA-256 address, and read them back verified from a directory, an in-memory map, an HTTP cache, or a local tier backed by a shared one."
 ---
 
-`@smthrs/artifacts` stores bytes under their own SHA-256 digest and hands them
-back only when they still hash to that address.
+`@smthrs/artifacts` stores bytes under their own SHA-256 digest. You hand it a
+`Uint8Array`, it hands back a 64 character address, and any store holding those
+bytes returns them for that address after checking that they still hash to it.
 
-It is the byte half of the Smithers cache. [`@smthrs/step-cache`](/api/step-cache)
-maps a step key to a recorded result; a result too large to sit inline is
-referenced by digest and its bytes live here. Nothing in this package knows
-what a step is: the contract is `put`, `get`, `has`, and `findMissing` over one
-address space, so the same four operations work over a directory on disk, a map
-in a browser tab, or an HTTP cache shared by a fleet.
+## The problem it solves
 
-The package depends on `effect` and [`@smthrs/crypto`](/api/crypto), owns no SQL,
-and bundles for the browser. Host access arrives through Effect's `FileSystem`
-and `HttpClient` tags, both of which the capability kernel decorates in place,
-so a filesystem write or a cache fetch is permission checked like any other
-host access.
+A program that caches large outputs (a compiled bundle, a build log, a model
+transcript, a tarball) has to answer two awkward questions: what to call each
+blob, and whether the blob is still what its name claims. Names collide, drift,
+and need a namespace of their own. Nothing about a name proves that the bytes
+behind it were not truncated by a crashed writer or replaced by a broken
+cache.
 
-## Who uses this package
+Addressing bytes by their digest answers both at once. Two callers that produce
+identical bytes produce one address, so the second write costs nothing and no
+copy is stored twice. An address is a claim the store can recheck on every
+read, so a mismatch surfaces as a typed failure instead of a wrong result
+flowing into whatever consumes it.
 
-Engine and host authors compose an `ArtifactStore` so large step outputs spill
-somewhere durable instead of into a database row. Build and CI operators
-compose the shared tier so a second machine reads what the first one produced.
-Backup and retention tooling uses `ArtifactSweep` and `ArtifactBackupLease` to
-reclaim disk without deleting bytes something still references.
+Reach for this package when you cache or ship large byte payloads and you care
+that a read either returns the exact bytes that were published or fails. It has
+two runtime dependencies, `effect` and [`@smthrs/crypto`](/api/crypto), owns no
+database, and opens no file and no socket by itself: the filesystem and the
+network arrive as Effect's `FileSystem` and `HttpClient` services, which is what
+lets the same store code run in Node.js, in Bun, in a browser tab, and inside a
+sandbox.
 
 ## Install
 
 ```bash
-pnpm add @smthrs/artifacts@next
+pnpm add @smthrs/artifacts@next @effect/platform-node
 ```
 
-For the peer packages a runnable composition adds, see
-[Installation](./installation.md).
+`@effect/platform-node` supplies the Node.js implementations of the services
+the store asks for. A browser or a test host provides different ones.
 
-## The smallest real example
+## Publish bytes and read them back
 
-Store bytes, get an address, read them back:
+This publishes a payload into `.flows/objects`, publishes the identical payload
+a second time, and reads it back:
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -47,70 +51,102 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
+const layer = ArtifactStore.layerFileSystem({ directory: ".flows/objects" }).pipe(
+  Layer.provideMerge(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer))
+)
+
 const program = Effect.gen(function*() {
   const store = yield* ArtifactStore.ArtifactStore
-  const digest = yield* store.put(new TextEncoder().encode("dist/server.js"))
-  return yield* store.get(digest)
+  const bytes = new TextEncoder().encode("the bytes a build step produced")
+
+  const address = yield* store.put(bytes)
+  const again = yield* store.put(bytes)
+
+  console.log(address)
+  console.log(again === address)
+  console.log(new TextDecoder().decode(yield* store.get(address)))
 })
 
-const store = ArtifactStore.layerFileSystem().pipe(Layer.provide(NodeFileSystem.layer))
-
-await Effect.runPromise(program.pipe(Effect.provide(store), Effect.provide(NodeCrypto.layer)))
+await Effect.runPromise(program.pipe(Effect.provide(layer)))
 ```
 
-`digest` is 64 lowercase hexadecimal characters, and it is the only name those
-bytes will ever have. The [Quickstart](./quickstart.md) takes the same store
-through dedupe, a miss, and a corrupted blob.
+```text
+6bb29e0869012afcfc246886c647422236e0b7d3419d3dc4ded8da758a4dfeb3
+true
+the bytes a build step produced
+```
 
-## The package at a glance
+One blob landed on disk, at
+`.flows/objects/6b/6bb29e0869012afcfc246886c647422236e0b7d3419d3dc4ded8da758a4dfeb3`.
+The second `put` measured the bytes, found the address already published,
+verified the blob already there, and returned the same address without writing
+anything. The `get` measured what it read before returning it, so a blob that
+had been truncated or overwritten would have failed with
+`ArtifactCorruption` rather than handing back the wrong bytes.
 
-The root entry point exports each module as a namespace, and each is also
-importable from `@smthrs/artifacts/<Module>`:
+## The stores you can compose
 
-| Namespace              | What it is                                                                                         |
-| ---------------------- | -------------------------------------------------------------------------------------------------- |
-| `ArtifactStore`        | The store contract, its typed errors, and the filesystem, memory, and no-op implementations.       |
-| `RemoteArtifacts`      | The same contract spoken over HTTP to a shared cache, plus the download policy that tier declares. |
-| `CombinedArtifacts`    | Local first, shared second, with write-back: the production composition.                           |
-| `ArtifactSweep`        | Host-local enumeration and mtime-fenced deletion, the mechanics half of garbage collection.        |
-| `ArtifactBackupLease`  | Cross-process exclusion between a running backup and a sweep deletion.                             |
-| `ArtifactStoreMetrics` | The two counters the local implementations update.                                                 |
+Every implementation is the same four operations, `put`, `get`, `has`, and
+`findMissing`, so a composition swaps one for another without touching a
+caller:
 
-Every export, with its signature and failure modes, is on the
-[API reference](./api.md).
+| Constructor                    | What backs it                               | Use it for                                 |
+| ------------------------------ | ------------------------------------------- | ------------------------------------------ |
+| `ArtifactStore.makeFileSystem` | A directory, reached through `FileSystem`   | The durable local tier                     |
+| `ArtifactStore.makeMemory`     | A private `Map`                             | Tests, and hosts with no durable disk      |
+| `ArtifactStore.makeNoop`       | Nothing, with per-method overrides          | Declaring a tier honestly unavailable      |
+| `RemoteArtifacts.make`         | An HTTP cache, reached through `HttpClient` | The tier several machines share            |
+| `CombinedArtifacts.make`       | A local store in front of a shared one      | Read local first, fall through, write back |
 
-## What the store guarantees
+Two more modules cover the lifecycle of the filesystem tier: `ArtifactSweep`
+enumerates an objects directory and deletes one blob behind a modification time
+fence, and `ArtifactBackupLease` keeps a sweep from deleting a blob that a
+running backup is still copying.
 
-- **Every read is digest verified.** A truncated blob left by a crashing
-  writer, or a shared tier serving the wrong bytes, fails with
-  `ArtifactCorruption` rather than being returned as the recorded artifact.
-- **Publication is atomic.** Bytes land at a unique temp path in the
-  destination directory, are fsynced, and are renamed into place, so no reader
-  ever observes a partial file at a content address.
-- **An existing blob is verified on every put.** The objects directory is
-  shared by the whole workspace, so a remembered proof could outlive the bytes
-  it proved. A mismatch falls through to the atomic rewrite and heals the
-  address.
-- **The endpoint and its credentials are a capability, never an input.** They
-  arrive as construction options: not hashed into a step key, not journaled,
-  and not part of any recorded result.
+## How this fits with @smthrs/flows
 
-[Content addressing](./concepts/content-addressing.md) explains why each of
-those holds.
+This package is one piece of the Smithers durable flow engine, whose whole
+surface is re-exported by [`@smthrs/flows`](/api/flows). Inside that engine the
+artifact store is the byte half of the result cache:
+[`@smthrs/step-cache`](/api/step-cache) records what a step returned, and any
+part of that result too large to sit inline is spilled here and referenced by
+digest. If you already depend on `@smthrs/flows`, this store is its
+`Artifacts` namespace and there is nothing further to install:
+
+```ts
+import { Artifacts } from "@smthrs/flows"
+
+const layer = Artifacts.ArtifactStore.layerFileSystem({ directory: ".flows/objects" })
+```
+
+Install `@smthrs/artifacts` on its own when a content-addressed byte store is
+all you want. Nothing in it knows what a flow, a step, or a run is.
+
+`@smthrs/flows` is in turn the library behind the `smithers` command line tool,
+[`@smthrs/cli`](/api/cli), which runs and inspects durable flows. The artifacts
+that tool stores, replays, and garbage collects are the blobs this package
+publishes.
 
 ## Where to go next
 
-- [Installation](./installation.md): the peer packages, the services a
-  composition must provide, and the import forms.
-- [Quickstart](./quickstart.md): publish, deduplicate, and repair a blob on a
-  real directory.
-- Concepts: [content addressing](./concepts/content-addressing.md),
-  [the three tiers](./concepts/tiers.md), and
-  [coordination between processes](./concepts/coordination.md).
-- Guides: [share artifacts across machines](./guides/share-artifacts-across-machines.md),
-  [serve the artifact protocol](./guides/serve-the-artifact-protocol.md),
-  [reclaim disk space](./guides/reclaim-disk-space.md),
-  [fence a backup against the sweep](./guides/fence-a-backup.md), and
-  [test against an artifact store](./guides/test-against-an-artifact-store.md).
-- [Troubleshooting](./troubleshooting.md): every typed failure, what causes it,
-  and what to change.
+- [Installation](./installation.md): the runtime it needs, which Effect service
+  each tier requires in scope, and the public import forms.
+- [Quickstart](./quickstart.md): publish an artifact against a real directory,
+  then corrupt a blob on purpose and watch the store refuse it and heal it.
+- [Content addressing](./concepts/content-addressing.md): why an address is a
+  measurement, and the four invariants that keep an address and its bytes from
+  disagreeing.
+- [The three tiers](./concepts/tiers.md): what a combined store does with a
+  miss, a refusal, and a corrupt address, and what the download policy changes.
+- [Coordination between processes](./concepts/coordination.md): the locks,
+  heartbeats, and fences that let several processes share one objects
+  directory.
+- [Share artifacts across machines](./guides/share-artifacts-across-machines.md):
+  compose a local store behind an HTTP cache.
+- [Serve the artifact protocol](./guides/serve-the-artifact-protocol.md): the
+  four requests a shared tier owes, if you are writing the service.
+- [Test against an artifact store](./guides/test-against-an-artifact-store.md):
+  the memory store, scripted refusals, and a loopback server.
+- [API reference](./api.md): every export, option, and error code.
+- [Troubleshooting](./troubleshooting.md): each failure, what caused it, and
+  what to change.

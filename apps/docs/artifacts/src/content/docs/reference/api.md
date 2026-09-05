@@ -220,8 +220,8 @@ ranged chunks:
 
 The offset never moves backward. If a server ignores ranges, omits a confirming
 length, or stores a partial body, the whole-blob `PUT` overwrites the partial
-result. Both of this repository's cache services answer a ranged `PUT` with
-`400` and cap one request body at 16 MiB, so `chunkBytes` against them degrades
+result. Both Smithers cache services answer a ranged `PUT` with `400` and cap
+one request body at 16 MiB, so `chunkBytes` against them degrades
 to one whole-blob `PUT` and a larger artifact is refused with `413`.
 
 ## CombinedArtifacts
@@ -374,11 +374,7 @@ increments a put indistinguishable from a producer publishing new bytes.
 Missing and corrupt reads are counted nowhere: they are error evidence, not
 throughput.
 
-## Package boundary
-
-The package uses Effect's `FileSystem` and `HttpClient` contracts and bundles
-for the browser. It owns no SQL tables and needs no migration. See
-[platform support](https://smithers.sh/docs/reference/api/#platform-support).
+## Reclaiming published blobs
 
 Reclaiming published blobs never happens as a side effect of a store call. The
 filesystem store sweeps only stale scratch and lock files. The mark policy and

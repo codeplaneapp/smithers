@@ -43,7 +43,7 @@ const layer = ArtifactStore.layerFileSystem({ directory }).pipe(Layer.provideMer
 ```
 
 `Layer.provideMerge` feeds the host services into the store and keeps them in
-the resulting layer, so the program below can use `FileSystem` directly to
+the resulting layer, so the snippets below can use `FileSystem` directly to
 tamper with a blob.
 
 ## Publish an artifact and read it back
@@ -53,13 +53,20 @@ verifies that the stored bytes still hash to the address before returning
 them:
 
 ```ts
-const program = Effect.gen(function*() {
-  const store = yield* ArtifactStore.ArtifactStore
+const digest = await Effect.runPromise(
+  Effect.gen(function*() {
+    const store = yield* ArtifactStore.ArtifactStore
+    const address = yield* store.put(payload)
 
-  const digest = yield* store.put(payload)
-  console.log("address:", digest)
-  console.log("read back:", new TextDecoder().decode(yield* store.get(digest)))
+    console.log("address:", address)
+    console.log("read back:", new TextDecoder().decode(yield* store.get(address)))
+    return address
+  }).pipe(Effect.provide(layer))
+)
 ```
+
+Each snippet below is another statement in the same file. They all provide the
+same `layer`, so they all reach the same directory.
 
 ## Put the same bytes twice
 
@@ -68,7 +75,13 @@ already at the address, freshens its modification time so a retention sweep
 reads it as recently referenced, and returns the same digest:
 
 ```ts
-const again = yield * store.put(payload)
+const again = await Effect.runPromise(
+  Effect.gen(function*() {
+    const store = yield* ArtifactStore.ArtifactStore
+    return yield* store.put(payload)
+  }).pipe(Effect.provide(layer))
+)
+
 console.log("same address:", again === digest)
 ```
 
@@ -79,10 +92,16 @@ tag rather than a generic failure, because a composition with a second tier
 acts on it:
 
 ```ts
-const absent = "0".repeat(64)
-const miss = yield * store.get(absent).pipe(
-  Effect.catchTag("@smthrs/artifacts/ArtifactMissing", (failure) => Effect.succeed(failure.code))
+const miss = await Effect.runPromise(
+  Effect.gen(function*() {
+    const store = yield* ArtifactStore.ArtifactStore
+    return yield* store.get("0".repeat(64))
+  }).pipe(
+    Effect.catchTag("@smthrs/artifacts/ArtifactMissing", (failure) => Effect.succeed(failure.code)),
+    Effect.provide(layer)
+  )
 )
+
 console.log("absent address:", miss)
 ```
 
@@ -93,29 +112,29 @@ disk at all: it fails with an `ArtifactStoreError` whose code is
 ## Corrupt a blob, then heal it
 
 Overwrite the published blob with different bytes. The next read measures what
-it found, sees that it no longer matches the address, and refuses:
+it found, sees that it no longer matches the address, and refuses. The repair
+is an ordinary put: because the store verifies the blob already at an address
+rather than trusting that the path exists, the mismatch falls through to the
+atomic rewrite:
 
 ```ts
-const fs = yield * FileSystem.FileSystem
-const blob = `${directory}/${digest.slice(0, 2)}/${digest}`
-yield * fs.writeFile(blob, new TextEncoder().encode("tampered"))
+await Effect.runPromise(
+  Effect.gen(function*() {
+    const store = yield* ArtifactStore.ArtifactStore
+    const fs = yield* FileSystem.FileSystem
+    const blob = `${directory}/${digest.slice(0, 2)}/${digest}`
 
-const refusal = yield * store.get(digest).pipe(
-  Effect.catchTag("@smthrs/artifacts/ArtifactCorruption", (failure) => Effect.succeed(failure.measuredDigest))
+    yield* fs.writeFile(blob, new TextEncoder().encode("tampered"))
+
+    const refusal = yield* store.get(digest).pipe(
+      Effect.catchTag("@smthrs/artifacts/ArtifactCorruption", (failure) => Effect.succeed(failure.measuredDigest))
+    )
+    console.log("measured instead:", refusal)
+
+    yield* store.put(payload)
+    console.log("healed:", new TextDecoder().decode(yield* store.get(digest)))
+  }).pipe(Effect.provide(layer))
 )
-console.log("measured instead:", refusal)
-```
-
-The repair is an ordinary put. Because the store verifies the existing blob on
-every put rather than trusting that the path exists, the mismatch falls through
-to the atomic rewrite:
-
-```ts
-  yield* store.put(payload)
-  console.log("healed:", new TextDecoder().decode(yield* store.get(digest)))
-})
-
-await Effect.runPromise(program.pipe(Effect.provide(layer)))
 ```
 
 ## Run it

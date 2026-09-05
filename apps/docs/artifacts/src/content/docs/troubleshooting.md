@@ -139,7 +139,7 @@ refusal, not a missing layer.
 **What to change.** Match the operation to the request in
 [Serve the artifact protocol](/guides/serve-the-artifact-protocol/). A
 `403` on a `PUT` while `GET` works means a read credential where a write one is
-needed. A `413` means the tier's request-body cap: this repository's cache
+needed. A `413` means the tier's request-body cap: the Smithers cache
 services cap one body at 16 MiB, and no `chunkBytes` setting works around that,
 because they refuse ranged `PUT` with `400`.
 
@@ -213,7 +213,7 @@ whole-blob `PUT`.
 that answers the empty `Content-Range: bytes */{total}` probe with `400`,
 `411`, or `416`, or that answers `2xx` to a chunk that does not complete the
 blob, is treated as range-unaware, and the client sends the blob whole so it
-always lands. Both of this repository's cache services answer `400`.
+always lands. Both Smithers cache services answer `400`.
 
 If you control the tier and want resumable transfers, implement the `308`
 sequence in

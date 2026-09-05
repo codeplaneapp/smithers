@@ -1,82 +1,117 @@
 # `@smthrs/artifacts`
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://artifacts.smithers.sh
 
 The content-addressed artifact store: bytes addressed by their own SHA-256
-digest.
+digest. You hand it a `Uint8Array`, it hands back a 64 character address, and
+any store holding those bytes returns them for that address after checking that
+they still hash to it.
 
-This is the byte half of the cache. [`@smthrs/step-cache`](https://step-cache.smithers.sh)
-maps a step key to a recorded result; large outputs are referenced **by digest**
-and live here. The package depends on `effect` and `@smthrs/crypto`, owns no
-SQL, and bundles for the browser.
+Reach for it when you cache or ship large byte payloads, a compiled bundle, a
+build log, a model transcript, a tarball, and you care that a read either
+returns the exact bytes that were published or fails. It opens no file and no
+socket by itself: the filesystem and the network arrive as Effect's
+`FileSystem` and `HttpClient` services, which is what lets the same store code
+run in Node.js, in Bun, in a browser tab, and inside a sandbox.
+
+## Install
 
 ```bash
-pnpm add @smthrs/artifacts@next
+pnpm add @smthrs/artifacts@next @effect/platform-node
 ```
 
+`@effect/platform-node` supplies the Node.js implementations of the services
+the store asks for. A browser or a test host provides different ones.
+
+## Publish bytes and read them back
+
 ```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+
+const layer = ArtifactStore.layerFileSystem({ directory: ".flows/objects" }).pipe(
+  Layer.provideMerge(Layer.merge(NodeFileSystem.layer, NodeCrypto.layer))
+)
 
 const program = Effect.gen(function*() {
   const store = yield* ArtifactStore.ArtifactStore
-  const digest = yield* store.put(new TextEncoder().encode("dist/server.js"))
-  return yield* store.get(digest)
+  const bytes = new TextEncoder().encode("the bytes a build step produced")
+
+  const address = yield* store.put(bytes)
+  const again = yield* store.put(bytes)
+
+  console.log(address)
+  console.log(again === address)
+  console.log(new TextDecoder().decode(yield* store.get(address)))
 })
+
+await Effect.runPromise(program.pipe(Effect.provide(layer)))
 ```
 
-## Documentation
+```text
+6bb29e0869012afcfc246886c647422236e0b7d3419d3dc4ded8da758a4dfeb3
+true
+the bytes a build step produced
+```
 
-The full documentation site is [artifacts.smithers.sh](https://artifacts.smithers.sh).
-Start with the [quickstart](https://artifacts.smithers.sh/quickstart/), then
-[content addressing](https://artifacts.smithers.sh/concepts/content-addressing/),
-[the three tiers](https://artifacts.smithers.sh/concepts/tiers/), and
-[coordination between processes](https://artifacts.smithers.sh/concepts/coordination/).
-The task guides cover
-[sharing artifacts across machines](https://artifacts.smithers.sh/guides/share-artifacts-across-machines/),
-[serving the artifact protocol](https://artifacts.smithers.sh/guides/serve-the-artifact-protocol/),
-[reclaiming disk space](https://artifacts.smithers.sh/guides/reclaim-disk-space/),
-[fencing a backup](https://artifacts.smithers.sh/guides/fence-a-backup/), and
-[testing](https://artifacts.smithers.sh/guides/test-against-an-artifact-store/).
-Every export is on the [API reference](https://artifacts.smithers.sh/reference/api/),
-and every typed failure is in
-[troubleshooting](https://artifacts.smithers.sh/troubleshooting/).
+One blob landed on disk, under the first two characters of its own address. The
+second `put` measured the bytes, found the address already published, verified
+the blob already there, and returned the same address without writing anything.
 
-## Public API
+## The stores you can compose
 
-| Export                                                                     | Meaning                                                                                                                                 |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ArtifactStore.ArtifactStore`                                              | The service tag. Identity `@smthrs/artifacts/ArtifactStore`                                                                             |
-| `ArtifactStore.Service`                                                    | `put(bytes)`, `get(digest)`, `has(digest)`, `findMissing(digests)`                                                                      |
-| `ArtifactStore.ArtifactMissing`                                            | The typed miss: the answer a read-through composition acts on                                                                           |
-| `ArtifactStore.ArtifactCorruption`                                         | Bytes at an address no longer hash to it                                                                                                |
-| `ArtifactStore.ArtifactStoreError`                                         | Typed digest, configuration, host, crypto, and transport failures                                                                       |
-| `ArtifactStore.Digest`                                                     | Schema and branded type for exactly 64 lowercase hexadecimal SHA-256 characters                                                         |
-| `ArtifactStore.ArtifactStoreErrorCode`                                     | Schema and type for the stable store error codes                                                                                        |
-| `ArtifactStore.validateDigest`                                             | Validates an untrusted string before a tier logs it or uses it in a path or URL                                                         |
-| `ArtifactStore.measureBytes`                                               | Measures an immutable byte snapshot with the injected `Crypto` service                                                                  |
-| `ArtifactStore.snapshotBytes`                                              | Copies caller-owned bytes when the returned Effect begins                                                                               |
-| `ArtifactStore.makeFileSystem`, `.layerFileSystem`                         | Over Effect's `FileSystem` tag                                                                                                          |
-| `ArtifactStore.FileSystemOptions.coordination`                             | `process` keeps in-process serialization but gives up cross-process writer/sweeper exclusion; the paired sweep also skips backup leases |
-| `ArtifactStore.makeMemory`, `.layerMemory`                                 | For tests and browser hosts with no durable filesystem                                                                                  |
-| `ArtifactStore.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
-| `ArtifactBackupLease.withLease`, `.unlessActive`                           | Cross-process exclusion between a filesystem backup and sweep deletion                                                                  |
-| `ArtifactSweep.ArtifactSweep`                                              | The sweep tag. Identity `@smthrs/artifacts/ArtifactSweep`                                                                               |
-| `ArtifactSweep.Service`                                                    | `inventory`, `remove(digest, { ifUnmodifiedSinceMs })`: host-local enumeration and mtime-fenced deletion for the engine's `ArtifactGc`  |
-| `ArtifactSweep.makeFileSystem`, `.layerFileSystem`                         | Over the same objects directory the store publishes into                                                                                |
-| `ArtifactSweep.makeNoop`, `.layerNoop`                                     | Everything unavailable, with per-method overrides                                                                                       |
-| `RemoteArtifacts.make`, `.layer`                                           | The shared tier over Effect's `HttpClient` tag, with `chunkBytes` for resumable `Content-Range` uploads                                 |
-| `RemoteArtifacts.Service`                                                  | An `ArtifactStore.Service` that also declares its `downloadPolicy`                                                                      |
-| `RemoteArtifacts.DownloadPolicy`, `.downloadPolicies`, `.downloadPolicyOf` | `all` \| `toplevel` \| `minimal`, the list of them, and the reader that answers `undefined` for a store declaring none                  |
-| `CombinedArtifacts.make`, `.layer`                                         | Local-first, remote-second, with local write-back under `all` and `toplevel`; `minimal` writes back only to repair a corrupt address    |
-| `ArtifactStoreMetrics.puts`                                                | `flows_artifact_puts`, updated by successful filesystem and memory puts                                                                 |
-| `ArtifactStoreMetrics.gets`                                                | `flows_artifact_gets`, updated by successful filesystem and memory gets                                                                 |
+Every implementation is the same four operations, `put`, `get`, `has`, and
+`findMissing`, so a composition swaps one for another without touching a
+caller:
 
-## Resource and failure contract
+| Constructor                    | What backs it                               | Use it for                                 |
+| ------------------------------ | ------------------------------------------- | ------------------------------------------ |
+| `ArtifactStore.makeFileSystem` | A directory, reached through `FileSystem`   | The durable local tier                     |
+| `ArtifactStore.makeMemory`     | A private `Map`                             | Tests, and hosts with no durable disk      |
+| `ArtifactStore.makeNoop`       | Nothing, with per-method overrides          | Declaring a tier honestly unavailable      |
+| `RemoteArtifacts.make`         | An HTTP cache, reached through `HttpClient` | The tier several machines share            |
+| `CombinedArtifacts.make`       | A local store in front of a shared one      | Read local first, fall through, write back |
+
+`ArtifactSweep` enumerates an objects directory and deletes one blob behind a
+modification time fence, and `ArtifactBackupLease` keeps a sweep from deleting
+a blob a running backup is still copying.
+
+Every export, option, and error code is in the
+[API reference](https://artifacts.smithers.sh/reference/api/).
+
+## What it guarantees
+
+- **Every read is digest verified.** A truncated blob left by a crashing
+  writer, a corrupted disk, or a mis-serving shared tier is refused with
+  `ArtifactCorruption`, never handed back as the recorded artifact. The memory
+  store is the one deliberate exception: its address space is a private `Map`
+  keyed by the digest it measured, so the address and the content cannot
+  disagree.
+- **Publication is atomic.** Bytes land at a temp path in the destination
+  directory, are fsynced, and are renamed into place. Temp names fold a random
+  per-instance token, so two processes publishing the same digest into one
+  workspace never share a scratch path.
+- **An existing blob is verified on every `put`.** The objects directory is
+  shared, so a remembered proof could outlive the bytes it proved. A mismatch
+  or failing read falls through to the atomic rewrite and heals the address.
+- **The endpoint and its credentials are a capability, never an input.** They
+  arrive as layer construction options, so they are never hashed into a cache
+  key and never recorded. `RemoteArtifacts` refuses a non-HTTPS endpoint, and
+  any endpoint carrying credentials, a query, or a fragment, at construction.
+  The sanitized message names only the violated rule, so the failure text never
+  echoes the endpoint.
+
+Every `put` snapshots its bytes when the Effect begins. Stores never retain a
+caller-owned buffer, and every successful `get` returns a new byte array.
+
+## Defaults
 
 | Boundary                                  | Default                 | Guarantee                                                                    |
 | ----------------------------------------- | ----------------------- | ---------------------------------------------------------------------------- |
@@ -84,92 +119,48 @@ and every typed failure is in
 | Cross-process coordination                | `required`              | Writers and sweepers share per-digest lock files; stale owners are recovered |
 | Remote request, upload, download deadline | 60 seconds each         | No remote exchange can wait forever                                          |
 | Maximum downloaded blob                   | 256 MiB                 | The body is rejected before or while buffering past the limit                |
-| `findMissing` batch / response            | 1,000 digests / 256 KiB | Inputs are validated and deduplicated in first-seen order                    |
-| Combined upload deadline                  | 60 seconds              | Local publication remains authoritative when the opportunistic upload fails  |
+| `findMissing` batch and response          | 1,000 digests / 256 KiB | Inputs are validated and deduplicated in first-seen order                    |
 
 `invalid_configuration` and `invalid_digest` are permanent caller failures.
 `ArtifactMissing` is an ordinary miss, and `ArtifactCorruption` is an integrity
 failure. `digest_failed`, `unavailable`, and `transport_failed` describe host
 or transport failures whose retryability depends on the host and operation.
-
-Every `put` snapshots its bytes when the Effect begins. Stores never retain a
-caller-owned buffer, and every successful `get` returns a new byte array.
-
-```ts
-import { ArtifactStore, CombinedArtifacts, RemoteArtifacts } from "@smthrs/artifacts"
-import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
-
-declare const token: string
-
-const layer = CombinedArtifacts.layer({
-  local: Effect.map(FileSystem.FileSystem, (fs) => ArtifactStore.makeFileSystem(fs)),
-  remote: RemoteArtifacts.make({
-    endpoint: "https://cache.example.com",
-    headers: { authorization: `Bearer ${token}` }
-  })
-})
-```
-
-## The invariants
-
-- **Every read is digest-verified.** A truncated blob left by a crashing writer,
-  a corrupted disk, or a mis-serving shared tier is refused with
-  `ArtifactCorruption`, never handed back as the recorded artifact. The memory
-  store is the one exception, and deliberately: its address space is a private
-  `Map` keyed by the digest it measured, so there is no window in which the
-  address and the content can disagree.
-- **Publication is atomic.** Bytes land at a temp path in the destination
-  directory, are fsynced, and are renamed into place. Temp names fold a random
-  per-instance token, so two processes publishing the same digest into one
-  workspace never share a scratch path.
-- **An existing blob is verified on every `put`.** The objects directory is
-  workspace-shared, so a remembered proof could outlive the bytes it proved; a
-  mismatch or failing read falls through to the atomic rewrite and heals the
-  address.
-- **The endpoint and its credentials are a capability, never an input.** They
-  arrive as layer construction options: they are not hashed into a step key, not
-  journaled, and not part of any recorded result. `RemoteArtifacts` refuses a
-  non-HTTPS endpoint and any endpoint carrying credentials, a query, or a
-  fragment at construction as `invalid_configuration`. The sanitized message
-  names only the violated rule, so the failure text never echoes the endpoint.
+[Troubleshooting](https://artifacts.smithers.sh/troubleshooting/) lists each
+one with what to change.
 
 ## Prior art
 
-The contract's ergonomics follow Effect's own `KeyValueStore`
-(`effect/unstable/persistence/KeyValueStore`): one small set of total
-operations over one address space, so memory, filesystem, and network
-implementations are the same shape.
+The contract's ergonomics follow Effect's own `KeyValueStore`: one small set of
+total operations over one address space, so memory, filesystem, and network
+implementations are the same shape. Everything else follows Bazel's
+remote-cache classes: `findMissing` is
+[`MissingDigestsFinder`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/common/MissingDigestsFinder.java),
+one batched probe whose result is a subset of its input; the two-hex fanout and
+the fsync before the rename are
+[`DiskCacheClient`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/disk/DiskCacheClient.java);
+and the wire protocol, CAS blobs under `/cas/base16-key`, is
+[`HttpCacheClient`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/http/HttpCacheClient.java).
+Where this package deviates, and why, is in
+[content addressing](https://artifacts.smithers.sh/concepts/content-addressing/).
 
-Everything else follows Bazel's remote-cache Java classes:
+## Where it fits
 
-| Taken from                                                                                                                                                                | What                                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| [`common/MissingDigestsFinder.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/common/MissingDigestsFinder.java) | `findMissing` as one batched probe whose result is guaranteed to be a subset of its input                                         |
-| [`disk/DiskCacheClient.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/disk/DiskCacheClient.java)               | The two-hex-prefix fanout layout, "to bypass possible folder file count limits", and the fsync of the temp file before the rename |
-| [`http/HttpCacheClient.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/http/HttpCacheClient.java)               | The wire protocol: CAS blobs under `/cas/base16-key`, `PUT` to upload, `GET` to download                                          |
-| [`CombinedCache.java`](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/remote/CombinedCache.java) (230-303)                   | Local first, remote second, write back what the remote returned                                                                   |
+This package is one piece of the Smithers durable flow engine, whose whole
+surface is re-exported by [`@smthrs/flows`](https://flows.smithers.sh). Inside
+that engine the artifact store is the byte half of the result cache:
+[`@smthrs/step-cache`](https://step-cache.smithers.sh) records what a step
+returned, and any part of that result too large to sit inline is spilled here
+and referenced by digest.
 
-**Deviations.** Bazel's HTTP client has no `findMissingDigests` at all: it
-answers "everything is missing" and re-uploads, so `POST /cas/findMissing` and
-`HEAD /cas/{digest}` are ours. Bazel's disk `findMissingDigests` likewise
-returns its whole input; ours probes for real, because our combined store uses
-the local answer to decide what to fetch. And Bazel threads a per-request
-read/write cache policy through every call; we have no such per-request object.
-The analogous dial is `RemoteArtifacts.Options.downloadPolicy`, declared once on
-the shared tier, and composing only the local tier is how a caller opts out of a
-shared tier entirely.
-
-## Not here
+Install `@smthrs/artifacts` on its own when a content-addressed byte store is
+all you want. Nothing in it knows what a flow, a step, or a run is.
 
 Reclaiming published artifacts is an explicit operation, never a side effect of
 a store call. The `.tmp-*` sweep in `layerFileSystem` reclaims crash orphans
-only; `ArtifactSweep` is the deletion surface, and the mark phase that decides
-what is live belongs to `@smthrs/engine-store`'s
-[`ArtifactGc`](https://engine-store.smithers.sh/reference/api/).
+only. `ArtifactSweep` is the deletion surface, and the mark phase that decides
+what is live belongs to
+[`@smthrs/engine-store`](https://engine-store.smithers.sh).
 
-Chunked and resumable transfer is `RemoteArtifacts.Options.chunkBytes`, and the
-`RemoteOutputChecker` analogue is `RemoteArtifacts.Options.downloadPolicy`
-(`all` | `toplevel` | `minimal`), honored by `CombinedArtifacts.get` and by
-[`@smthrs/engine-store`](https://engine-store.smithers.sh)'s
-`ArtifactSync.hydrate`.
+## License
+
+MIT

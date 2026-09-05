@@ -144,9 +144,9 @@ digest published over bytes the server does not hold.
 Set it when a proxy caps request bodies, or when artifacts are large enough
 that losing a transfer partway is expensive. It is absent by default.
 
-This repository's own hosted and self-hosted cache services do not implement
-the resumable sequence: both answer a ranged `PUT` with `400` and cap one
-request body at 16 MiB. Against them `chunkBytes` costs the probe round trip
+The hosted and self-hosted Smithers cache services do not implement the
+resumable sequence: both answer a ranged `PUT` with `400` and cap one request
+body at 16 MiB. Against them `chunkBytes` costs the probe round trip
 and the blob travels whole, and a blob past 16 MiB is refused with `413` in
 either mode.
 

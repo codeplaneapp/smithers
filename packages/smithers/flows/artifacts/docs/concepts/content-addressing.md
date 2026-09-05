@@ -40,8 +40,12 @@ digest or interpolates one into a path or a URL:
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as Effect from "effect/Effect"
 
-/** Fails with `invalid_digest` rather than reaching for `../../etc/passwd`. */
-const address = ArtifactStore.validateDigest("../../etc/passwd")
+/** Prints `invalid_digest` rather than reaching for `../../etc/passwd`. */
+const checked = ArtifactStore.validateDigest("../../etc/passwd").pipe(
+  Effect.catchTag("@smthrs/artifacts/ArtifactStoreError", (failure) => Effect.succeed(failure.code))
+)
+
+console.log(await Effect.runPromise(checked))
 ```
 
 The failure message is a constant. A hostile multi-megabyte value cannot copy
@@ -133,9 +137,8 @@ possible folder file count limits". The directory is workspace-relative rather
 than absolute so a workspace can be moved or copied whole and still resolve its
 own artifacts, and so a sandbox that mounts the workspace inherits them.
 
-There is no compatibility shim for the flat `<directory>/<digest>` layout this
-store used before it moved out of `@smthrs/engine-store`. Old addresses are
-cache misses that re-publish.
+Addresses published under the pre-1.0 flat `<directory>/<digest>` layout are
+cache misses that re-publish. There is no compatibility shim.
 
 ## Prior art
 

@@ -62,11 +62,11 @@ tier is the one this machine's replays resolve against, so an unreachable
 shared tier must not stop an artifact from being recorded.
 
 The upload that follows is opportunistic, and its refusal is dropped rather
-than propagated. Failing here would fail whatever produced the bytes, a step's
-settle for instance, because a cache was unreachable, which is the opposite of
-the line above. Two properties keep it contained:
+than propagated. Failing here would fail whatever produced the bytes because a
+cache was unreachable, which is the opposite of the line above. Two properties
+keep it contained:
 
-- **Deduplicated in flight by digest.** Two settles in one process that spill
+- **Deduplicated in flight by digest.** Two callers in one process that publish
   the same artifact join one upload instead of both pushing the same bytes.
   The entry is removed before its deferred is completed, so a later put starts
   a fresh upload rather than replaying a stale outcome, and an interrupted
@@ -128,8 +128,6 @@ no tier attribute. Read them as local artifact store traffic:
 - Missing and corrupt reads count nothing. They are error evidence, not
   throughput.
 
-Attributing operations per tier would need the tier in the metric, which would
-change the published counter shape. Until then, that is what the numbers mean.
 No exporter ships in this package; provide one, for example
 [`@smthrs/observability`](https://observability.smithers.sh/reference/api/), and the counters appear in it.
 

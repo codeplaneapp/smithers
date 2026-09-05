@@ -43,9 +43,13 @@ To assert on the address without hard-coding a digest, measure it the same way
 the store does:
 
 ```ts
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as Effect from "effect/Effect"
 
-const expectedAddress = ArtifactStore.measureBytes(new TextEncoder().encode("payload"))
+const expectedAddress = await Effect.runPromise(
+  ArtifactStore.measureBytes(new TextEncoder().encode("payload")).pipe(Effect.provide(NodeCrypto.layer))
+)
 ```
 
 ## Script a refusing host with the no-op stores

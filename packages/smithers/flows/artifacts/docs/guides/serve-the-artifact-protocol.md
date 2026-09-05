@@ -98,9 +98,9 @@ and stored the body it was handed, which is what plain WebDAV `PUT` does.
 
 **To refuse ranged uploads,** answer `400`, `411`, or `416`. `400` is RFC 9110
 section 14.5's answer from a resource that does not support partial `PUT`, and
-it is what both of this repository's cache services send. The client then sends
-one whole-blob `PUT`, which overwrites any partial body the sequence left
-behind, so the blob always lands whole.
+it is what the [reference implementation](#the-reference-implementation) below
+sends. The client then sends one whole-blob `PUT`, which overwrites any partial
+body the sequence left behind, so the blob always lands whole.
 
 Falling back on `400` cannot mask a genuine `400` from your service: the
 whole-blob `PUT` that follows presents the same URL, digest, and credential, so
@@ -108,9 +108,9 @@ a real refusal comes straight back on that request.
 
 ## The reference implementation
 
-This repository ships a conforming service, deployed as a Cloudflare Worker
-over R2 and D1, and a self-hosted build of the same protocol. Its behavior is a
-useful default when you are deciding what your own should do:
+Smithers ships a conforming service, deployed as a Cloudflare Worker over R2
+and D1, and a self-hosted build of the same protocol. Its behavior is a useful
+default when you are deciding what your own should do:
 
 | Request                 | What it does                                                                             |
 | ----------------------- | ---------------------------------------------------------------------------------------- |
@@ -127,7 +127,7 @@ the request body is read.
 
 Because it caps a request body at 16 MiB and refuses ranged `PUT` with `400`, a
 blob larger than 16 MiB is refused with `413` whether or not `chunkBytes` is
-set. See [`@smthrs/build`](/pkg/smithers-build) for how that service is
+set. See [`@smthrs/build`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build) for how that service is
 deployed and configured.
 
 ## Related
