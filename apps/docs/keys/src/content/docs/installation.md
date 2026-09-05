@@ -9,15 +9,21 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/keys
+pnpm add @smthrs/keys@next effect@4.0.0-rc.112
 ```
 
+`npm install` and `bun add` take the same arguments. The current version is
+`1.0.0-rc.0`. Release candidates publish on the `next` dist-tag, which is what
+`@next` selects; once 1.0 is final the plain package name gets it.
+
+[`effect`](https://effect.website) is a peer dependency at that exact version,
+because the schemas this package exports have to be the ones your own code
+composes with. Two more dependencies install with the package and are the only
+ones: [`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/) for the serialization and
+[`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/) for the digest.
+
 The package requires Node.js 22.19.0 or later and ships as ESM and CommonJS
-with TypeScript declarations. Three runtime dependencies install with it:
-[`effect`](https://effect.website) for the schema runtime,
-[`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/) for the serialization, and
-[`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/) for the digest. There are no others, and the
-package's own suite fails if one appears.
+with TypeScript declarations.
 
 ## Provide a Crypto service
 
@@ -58,8 +64,8 @@ const key = Effect.runSync(
 ```
 
 In a browser, compose `BrowserCrypto` from `@effect/platform-browser`, or the
-synchronous service above. `@smthrs/platform-browser` deliberately omits
-`Crypto`, so it does not pick for you.
+synchronous service above. [`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/)
+deliberately omits `Crypto`, so it does not pick for you.
 
 `StoredKey`, `KeyV1`, and `digest` require no `Crypto` service. A boundary that
 only validates keys installs nothing.

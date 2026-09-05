@@ -8,6 +8,12 @@ Every failure this package reports is typed. `deriveKey` fails with a
 `KeyDerivationError` carrying one of two codes, and the schemas refuse a value
 rather than coerce it. Nothing here fails silently.
 
+The examples below use a namespace import:
+
+```ts
+import * as Keys from "@smthrs/keys"
+```
+
 ## `canonicalization_failed`
 
 **Symptom.** `deriveKey` fails with:

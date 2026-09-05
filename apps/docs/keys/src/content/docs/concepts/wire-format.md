@@ -60,22 +60,24 @@ const payload = digest(Schema.decodeUnknownSync(StoredKey)(text))
 the accessor for a value the type system says is a key, not a parser. Validate
 first.
 
-## What a second format would take
+## What happens to your keys if a second format ships
 
-Adding `key2_` is a deliberate, auditable change, not a regex edit. It requires
-a complete schema for the new representation, a complete derivation that
-produces it, frozen wire vectors for that derivation, host parity coverage, and
-addition to the `StoredKey` union. `KeyV1` stays an explicit member; a widened
-pattern is not compatibility.
+They keep working. A `key1_` value written today still validates after the
+upgrade and still identifies exactly the work it always did, because `KeyV1`
+stays an explicit member of `StoredKey`. A second format arrives as an
+additional member beside it, with its own schema and its own derivation; it is
+never a loosened `KeyV1`, because a widened pattern is not compatibility.
 
-Existing keys keep their meaning. A `key1_` value written before the change
-still validates and still identifies exactly the work it always did.
+That is the practical reason to decode with `StoredKey` rather than `KeyV1` at
+a boundary. The set of formats the boundary accepts widens with the release you
+install, and your code does not change.
 
 ## Changing the format changes every identity
 
 The derivation is frozen because its output is persisted. Alter the
 canonicalization, the hash, or the framing and every key changes, which means
 every cache entry misses, every replay re-executes, and every stored row
-becomes unreachable under its new key. The repository pins the version-one
-vectors in this package's suite for exactly that reason. See
-[Testing](/testing/).
+becomes unreachable under its new key. So the version-one derivation does not
+change: a new one gets a new prefix instead, and every key you have already
+written keeps resolving. That is also what makes a key literal a safe
+assertion in your own tests. See [Testing](/testing/).

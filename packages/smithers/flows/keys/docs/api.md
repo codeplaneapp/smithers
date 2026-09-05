@@ -196,7 +196,6 @@ everywhere else. Canonicalization rules belong to
 to [`@smthrs/crypto`](/api/crypto). Domain material belongs to each caller: see
 [Separate identity namespaces](./guides/separate-identity-namespaces.md).
 
-Adding a version requires an explicit schema, a complete derivation, frozen
-wire vectors, host parity coverage, and addition to the `StoredKey` union.
-Existing versions remain explicit union members; a permissive version pattern
-is not compatibility. See [the wire format](./concepts/wire-format.md).
+A future version arrives as an additional member of `StoredKey`, never as a
+loosened `KeyV1`, so keys you have already stored keep validating. See
+[the wire format](./concepts/wire-format.md).

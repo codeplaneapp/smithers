@@ -1,13 +1,30 @@
 # `@smthrs/keys`
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://keys.smithers.sh
 
-Derive canonical flow keys and validate keys read from storage without
-accidentally hashing them again.
+Give a piece of structured data a name that any process can compute for itself:
+a 69-character key such as `key1_74a286a3...ec55c683`. The same input always
+derives the same key, on any machine, in any release that writes this format.
+Use it as a cache key, a row id, or an idempotency token.
+
+## Install
+
+```bash
+pnpm add @smthrs/keys@next effect@4.0.0-rc.112
+```
+
+The current version is `1.0.0-rc.0`, and release candidates carry the `next`
+tag, which is what `@next` selects. `effect` is a peer dependency at that exact
+version; [`@smthrs/canonical`](https://canonical.smithers.sh) and
+[`@smthrs/crypto`](https://crypto.smithers.sh) install with the package and are
+the only other runtime dependencies. Node.js 22.19.0 or later; the package
+imports no `node:` built-in, so the same code runs under Bun and in a browser.
+
+## Example
 
 ```typescript
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -24,25 +41,28 @@ const parsed = Schema.decodeUnknownSync(StoredKey)(derived)
 // parsed === derived
 ```
 
-`deriveKey` serializes input through
-[`@smthrs/canonical`](https://canonical.smithers.sh/reference/api/), hashes the exact
-canonical UTF-8 document through injected SHA-256 from
-[`@smthrs/crypto`](https://crypto.smithers.sh/reference/api/), and produces
-`key1_<64 lowercase hex>`.
+`deriveKey` serializes input to RFC 8785 canonical JSON through
+`@smthrs/canonical`, so member order cannot change the result, then hashes that
+exact document with SHA-256 through `@smthrs/crypto` and returns
+`key1_<64 lowercase hex>`. Hashing is host access, so derivation returns an
+Effect that requires `Crypto.Crypto`; you provide the layer.
 
-`KeyV1` validates that exact stored representation. `StoredKey` validates every
-format this release supports, currently only `KeyV1`. Unknown versions such as
-`key2_` are rejected until their complete format and derivation are implemented.
+`StoredKey` validates a key arriving from a database, an RPC, or a file and
+hands it back unchanged, with no hashing and no `Crypto` service. Keep the two
+apart: hand an existing key to a hash function and you get a different key
+back, silently, and every identity that crosses that boundary is rewritten.
+`DerivedKey` is the derivation as a schema transformation, for the places that
+need a codec; prefer `deriveKey` for typed `KeyDerivationError` failures.
 
-`Key` remains the compatibility schema for one-way derivation. Decoding
-key-shaped text through `Key` hashes that text into a new key; it does not parse
-the stored key. Prefer `deriveKey` for typed `KeyDerivationError` failures and
-`StoredKey` at persistence, RPC, journal, and external-input boundaries.
+`KeyV1` validates today's representation. `StoredKey` validates every format
+the release you installed understands, currently only `KeyV1`, so decode with
+`StoredKey` at a boundary and it widens with the release instead of with your
+code. An unknown prefix such as `key2_` is rejected rather than guessed.
 
-Treat keys as opaque. Include a stable domain and material-schema version in
-each protocol's structured input. Derivation inherits `Canonical` semantics,
-is one-shot, and imposes no size or depth limit of its own, so external callers
-must bound untrusted input before canonicalization.
+Treat keys as opaque. Include a stable domain and a material-schema version in
+each protocol's input so two subsystems cannot collide in a shared store.
+Derivation inherits `Canonical` semantics, is one-shot, and imposes no size or
+depth limit of its own, so bound untrusted input before canonicalizing it.
 
-Full documentation is at
-[keys.smithers.sh](https://keys.smithers.sh/reference/api/).
+Full documentation, including the `Crypto` layer to provide on Node.js, on Bun,
+and in a browser, is at https://keys.smithers.sh.
