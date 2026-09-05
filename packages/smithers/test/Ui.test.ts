@@ -7,9 +7,10 @@
  * text is what a log file, a pipe, and a `--json` consumer read.
  */
 import { Effect, Option } from "effect"
+import { getEventListeners } from "node:events"
 import { PassThrough, Writable } from "node:stream"
 import { stripVTControlCharacters } from "node:util"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as Doctor from "../src/Doctor.ts"
 import * as Ui from "../src/Ui.ts"
 import { packageVersion } from "../src/Version.ts"
@@ -72,8 +73,15 @@ describe("interactivity", () => {
     expect(Ui.isInteractive(pipe, tty, {})).toBe(false)
     expect(Ui.isInteractive(tty, pipe, {})).toBe(false)
     expect(Ui.isInteractive(tty, tty, { CI: "true" })).toBe(false)
-    expect(Ui.isInteractive(tty, tty, { CI: "1" })).toBe(true)
+    expect(Ui.isInteractive(tty, tty, { CI: "1" })).toBe(false)
     expect(Ui.isInteractive(tty, tty, { TERM: "dumb" })).toBe(false)
+  })
+
+  it("does not prompt inside an agent harness even when all streams are terminals", () => {
+    const tty = { isTTY: true }
+    expect(Ui.isInteractive(tty, tty, { CLAUDECODE: "1" })).toBe(false)
+    expect(Ui.isInteractive(tty, tty, { CODEX_THREAD_ID: "thread" })).toBe(false)
+    expect(Ui.isInteractive(tty, tty, { OPENCODE: "1" })).toBe(false)
   })
 
   it("falls back to the process streams when no layer provides the service", async () => {
@@ -254,22 +262,57 @@ describe("streamSuggestions", () => {
       const ui = make(term, interactive)
       const controller = new AbortController()
       let returned = false
+      let entered!: () => void
+      let release!: () => void
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve
+      })
       async function* slow(): AsyncGenerator<string> {
         try {
           yield "a"
-          await new Promise((resolve) => setTimeout(resolve, 10_000))
+          entered()
+          await blocked
           yield "never"
         } finally {
           returned = true
         }
       }
-      setTimeout(() => controller.abort(), 40)
-      const streamed = await Effect.runPromise(
+      const running = Effect.runPromise(
         ui.streamSuggestions(slow(), { ...options, signal: controller.signal })
       )
+      await waiting
+      controller.abort()
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      const stoppedBeforeCleanup = term.plain().includes("Scanning the tree stopped, 1 found")
+      const returnedBeforeRelease = returned
+      release()
+      const streamed = await running
       expect(streamed).toEqual({ items: ["a"], stopped: true })
+      expect(stoppedBeforeCleanup).toBe(true)
+      expect(returnedBeforeRelease).toBe(false)
       expect(returned).toBe(true)
       expect(term.plain()).toContain("Scanning the tree stopped, 1 found")
+    }
+  })
+
+  it("removes its abort listener when a scan completes normally", async () => {
+    const combined = vi.spyOn(AbortSignal, "any")
+    try {
+      const term = terminal()
+      await Effect.runPromise(
+        make(term, false).streamSuggestions(source(["a"]), {
+          ...options,
+          signal: new AbortController().signal
+        })
+      )
+      const signal = combined.mock.results.find((result) => result.type === "return")?.value as AbortSignal
+      expect(signal).toBeInstanceOf(AbortSignal)
+      expect(getEventListeners(signal, "abort")).toHaveLength(0)
+    } finally {
+      combined.mockRestore()
     }
   })
 

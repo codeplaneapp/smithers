@@ -1,12 +1,18 @@
 ---
 title: "smthrs run"
-description: "Run an approved plan payload, or resume a parked run"
+description: "Compatibility reference for approved flow payloads and parked-run resumption."
 area: cli
 order: 10
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/docs/reference/cli/run.md"
 ---
 
-## Synopsis
+Top-level `smthrs run <pattern>` now executes run-kind `PACKAGE.ts` targets.
+This page documents the retained JSON-payload and `--resume` compatibility
+forms. New scripts should use `smthrs flow execute <payload>` and
+`smthrs runs resume <run-id>`. See the [CLI index](/reference/cli/) for target
+execution and the canonical command groups.
+
+## Compatibility synopsis
 
 ```text
 smthrs run PLAN_PAYLOAD
@@ -16,9 +22,9 @@ smthrs run --resume RUN_ID
 ## Description
 
 `smthrs run` submits the serialized approval payload that `smthrs plan`
-printed and prints the control receipt. `Verb.ts` records `resume` as an
-alternate spelling, and the command tree registers it as a hidden
-`smthrs resume RUN_ID` that runs the same handler as `smthrs run --resume`.
+printed and prints the control receipt. `resume` is an alternate spelling: the
+command tree registers a hidden `smthrs resume RUN_ID` that runs the same
+handler as `smthrs run --resume`.
 
 The command plans nothing and approves nothing. A payload whose target is not a
 plan is rejected, and a plan that carries no approval grant parks instead of
@@ -88,8 +94,7 @@ smthrs --json approve "$approval" --scope run
 smthrs --json run "$approval"
 ```
 
-The accepted receipt, with the identifier placeholders that
-`packages/smithers/test/fixtures/json-receipts.json` pins the document against:
+The accepted receipt, with placeholders standing in for the identifiers:
 
 ```text
 {"_tag":"Accepted","receiptId":"<receipt-id>","runId":"<run-id>"}
@@ -105,20 +110,3 @@ The accepted receipt, with the identifier placeholders that
   one call.
 - [`smthrs ps`](https://smithers.sh/docs/reference/cli/ps/) lists the run this command started.
 - [Plan, approve, run](https://smithers.sh/docs/guides/plan-approve-run/) shows the procedure.
-
-## Sources
-
-- `packages/smithers/src/Verb.ts`
-- `packages/smithers/src/Command.ts`
-- `packages/smithers/src/CliError.ts`
-- `packages/smithers/src/Output.ts`
-- `packages/smithers/src/ExecutorOwnership.ts`
-- `packages/smithers/src/Application.ts`
-- `packages/smithers/src/NodeControl.ts`
-- `packages/smithers/src/bin.ts`
-- `packages/smithers/control/src/Control.ts`
-- `packages/smithers/control/src/ControlSchema.ts`
-- `packages/smithers/test/Golden.test.ts`
-- `packages/smithers/test/fixtures/json-receipts.json`
-- `packages/smithers/README.md`
-- `apps/site/src/data/help/run.txt`

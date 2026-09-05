@@ -44,13 +44,22 @@ describe("case15 WebSocket drop and reconnect", () => {
       Effect.gen(function*() {
         const control = yield* Control.Control
         const collected: Array<number> = []
+        let admittedBefore = 0
         const follow = control.watch({ runId }).pipe(
-          Stream.tap((event) => Effect.sync(() => collected.push(event.sequence))),
+          Stream.tap((event) =>
+            Effect.sync(() => {
+              collected.push(event.sequence)
+              if (event.kind === "control.signal.admitted") admittedBefore += 1
+            })
+          ),
           Stream.runDrain
         )
         const fiber = yield* Effect.forkChild(Effect.exit(follow), { startImmediately: true })
-        // Wait until the follower has caught up on committed history.
-        yield* Effect.sleep(500)
+        // Cut only after the follower has actually consumed all admissions,
+        // not after an arbitrary sleep that depends on host load.
+        yield* Effect.gen(function*() {
+          while (admittedBefore < 5) yield* Effect.sleep(10)
+        }).pipe(Effect.timeout("15 seconds"))
         const beforeDrop = [...collected]
         yield* Effect.promise(() => sockets.dropLatest("abrupt"))
         // The stream must SETTLE. A follower that hangs on a dead socket is the
@@ -81,6 +90,18 @@ describe("case15 WebSocket drop and reconnect", () => {
     expect(replayed.map((event) => event.sequence)).toEqual(
       replayed.map((_, index) => cursor + 1 + index)
     )
-    expect(replayed.filter((event) => event.kind === "control.signal.delivered").length).toBeGreaterThanOrEqual(5)
+    // Admission commits before delivery and is the durable journal contract.
+    // This fixture has no matching engine wait, so it cannot claim delivery.
+    const admissions = replayed.filter((event) => event.kind === "control.signal.admitted")
+    expect(admissions).toHaveLength(5)
+    for (const event of admissions) {
+      expect(event.runId).toBe(runId)
+      expect(event.payload).toEqual(expect.objectContaining({
+        commandId: expect.any(String),
+        runId,
+        name: "during"
+      }))
+    }
+    expect(new Set(admissions.map((event) => JSON.stringify(event.payload))).size).toBe(5)
   })
 })

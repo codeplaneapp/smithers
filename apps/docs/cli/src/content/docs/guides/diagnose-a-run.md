@@ -4,9 +4,9 @@ description: "Work out why a run stopped: check the machine with doctor, read th
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/docs/guides/diagnose-a-run.md"
 ---
 
-Four commands answer four different questions, and none of them opens a
-database directly. Every read goes through the control plane, so a `--remote`
-invocation renders exactly what a local one renders.
+Use `doctor` to inspect the local setup, then `status`, `logs`, and `output`
+to read a run through the control plane. Those run commands also support
+`--remote`.
 
 ## Is the machine ready?
 
@@ -14,12 +14,12 @@ invocation renders exactly what a local one renders.
 smthrs doctor
 ```
 
-`doctor` runs nothing. It reports the project root it resolved, how many flows
+`doctor` does not start a run. It reports the project root it resolved, how many flows
 the registry discovered and one line per discovery warning, both database files
 with how many migrations each has recorded, the running Node against the
-22.19.0 floor, whether `jj` is executable, which of `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `CEREBRAS_API_KEY` are set, and any
-Smithers 0.x state beside the project.
+supported range (22.19+ on Node 22, or 24.11+), whether `jj` is executable,
+which supported provider credential variables are set, and any Smithers 0.x
+state beside the project.
 
 Each check is `ok`, `warn`, or `fail`. A `warn` is a fact you should know that
 stops nothing. A `fail` is a fact that will stop the next command you run, and
@@ -65,6 +65,19 @@ the exact command that ends the wait, already quoted for a shell:
 
 `smthrs inspect` and `smthrs why` are aliases of the same verb. With no run id,
 `status` prints the run listing instead.
+
+## What happens to subprocesses after a crash?
+
+The local control executor records agent shell and configured MCP subprocesses
+in the execution journal. On normal shutdown it escalates termination after
+two seconds if a child does not stop. After a crash, the next local control
+executor startup checks those records and reaps verified children whose owner
+has died. It leaves another live CLI's children alone and refuses to signal a
+process whose identity it cannot verify.
+
+Startup cleanup can therefore happen while running a local control command,
+not only when resuming the crashed run. Remote clients do not reap local
+processes. Cleanup does not undo filesystem writes or other completed effects.
 
 ## What did it do, step by step?
 

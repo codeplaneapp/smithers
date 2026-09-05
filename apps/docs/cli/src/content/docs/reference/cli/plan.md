@@ -90,8 +90,7 @@ Plan the `deploy/status` flow with one input entry:
 smthrs plan deploy/status branch=main
 ```
 
-The human rendering, with the identifier placeholders that
-`packages/smithers/test/fixtures/json-receipts.json` pins the document against:
+The human rendering, with placeholders standing in for the identifiers:
 
 ```text
 {
@@ -133,22 +132,3 @@ The human rendering, with the identifier placeholders that
 - [`smthrs ls`](https://smithers.sh/docs/reference/cli/ls/) lists the flow ids this command
   accepts.
 - [Plan, approve, run](https://smithers.sh/docs/guides/plan-approve-run/) shows the procedure.
-
-## Sources
-
-- `packages/smithers/src/Verb.ts`
-- `packages/smithers/src/Command.ts`
-- `packages/smithers/src/CliError.ts`
-- `packages/smithers/src/Output.ts`
-- `packages/smithers/src/Unsupported.ts`
-- `packages/smithers/src/Environment.ts`
-- `packages/smithers/src/Project.ts`
-- `packages/smithers/src/NodeControl.ts`
-- `packages/smithers/src/bin.ts`
-- `packages/smithers/control/src/ControlSchema.ts`
-- `packages/smithers/control/src/internal/planning.ts`
-- `packages/smithers/flows/database/src/UnsupportedBackend.ts`
-- `packages/smithers/flows/canonical/src/internal/canonicalize.ts`
-- `packages/smithers/test/fixtures/json-receipts.json`
-- `packages/smithers/README.md`
-- `apps/site/src/data/help/plan.txt`

@@ -24,6 +24,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { isAbsolute, join } from "node:path"
 import * as Environment from "./Environment.ts"
+import { starterSeats } from "./Providers.ts"
 
 /**
  * The ignore rule rc.0 state needs.
@@ -119,21 +120,6 @@ export const ensureIgnored = (root: string): IgnoreStatus => {
 }
 
 /**
- * The seat `init` writes for each provider credential, in the order
- * `smthrs doctor` reports them.
- *
- * `CEREBRAS_API_KEY` is missing on purpose. `Doctor` names it a provider key,
- * and the resolver routes it since `smthrs suggest` landed, but the scaffold
- * keeps to the three providers `doctor` has always ordered; `suggest` is the
- * verb that reads the wider set (`Providers.detect`).
- */
-const providerSeats: ReadonlyArray<readonly [variable: string, seat: string]> = [
-  ["ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-5"],
-  ["OPENAI_API_KEY", "openai:gpt-5.6-sol"],
-  ["OPENROUTER_API_KEY", "openrouter:anthropic/claude-sonnet-4.5"]
-]
-
-/**
  * The seat a scaffold declares, and the credential that chose it.
  *
  * @category models
@@ -170,13 +156,13 @@ export const defaultSeat = (
   environment: Environment.Source
 ): Seat => {
   const chatgpt = Environment.read(environment, "SMITHERS_OPENAI_AUTH") === "chatgpt"
-  for (const [variable, seat] of providerSeats) {
+  for (const [variable, seat] of starterSeats) {
     if ((environment[variable] ?? "") !== "") return { seat, variable, resolved: true }
     if (variable === "OPENAI_API_KEY" && chatgpt) {
       return { seat, variable: "SMITHERS_OPENAI_AUTH", resolved: true }
     }
   }
-  const [variable, seat] = providerSeats[0]!
+  const [variable, seat] = starterSeats[0]!
   return { seat, variable, resolved: false }
 }
 
@@ -214,8 +200,8 @@ model: ${seat.seat}
 
 # ${name}
 
-Describe the work in prose. Every heading below is a step the agent performs in
-order, and the text under it is the instruction for that step.
+Describe the work in prose. Headings organize the instructions given to the
+agent; they do not create separate durable steps or enforce execution order.
 
 ## Read the request
 

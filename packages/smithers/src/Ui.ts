@@ -6,20 +6,21 @@
  * the part that is not a document: the brand line that opens a command, log
  * lines that arrive while work continues, a spinner that says a scan is still
  * running, the list of suggestions that scan streams out, and the questions a
- * verb asks before a follow-up. It wraps `@clack/prompts` (see
- * `docs/clack-notes.md`) and owns the one decision clack leaves to its caller:
- * whether the session is interactive at all.
+ * verb asks before a follow-up. It wraps `@clack/prompts` and owns the one
+ * decision clack leaves to its caller: whether the session is interactive at
+ * all.
  *
- * Every method has two renderings. Interactive (`stdout` and `stdin` are TTYs,
- * `CI` is not `"true"`, `TERM` is not `dumb`) is clack's: guide bars, symbols,
- * colour, animated spinners, modal prompts. Non-interactive is plain lines
- * with no escape sequences, the same lines a `--json` consumer or a log file
- * reads, and prompts resolve without asking. Nothing here decides the process
- * status; that stays with `Output.exitCode`.
+ * Every method has two renderings. Interactive human sessions use clack's
+ * guide bars, symbols, colour, animated spinners, and modal prompts. Harness,
+ * CI, pipe, and dumb-terminal detection comes from the shared Audience policy;
+ * non-interactive prompts resolve without asking. Document encoding is a
+ * separate choice: humans can request JSON and still receive progress on
+ * stderr. Nothing here decides process status; that stays with `Output.exitCode`.
  *
  * @since 1.0.0-rc.0
  */
 import * as clack from "@clack/prompts"
+import * as Audience from "@smthrs/build-cli/Audience"
 import { Context, Effect, Layer, Option } from "effect"
 import type { Readable, Writable } from "node:stream"
 import { Writable as WritableStream } from "node:stream"
@@ -188,8 +189,8 @@ interface Terminal {
 }
 
 /**
- * Whether a session can animate and ask: both streams are terminals, `CI` is
- * not `"true"` (clack's own test), and `TERM` is not `dumb`.
+ * Whether a human session can animate and ask. Harness detection and explicit
+ * audience overrides use the same policy as target and durable-run progress.
  *
  * @category predicates
  * @since 1.0.0-rc.0
@@ -199,7 +200,12 @@ export const isInteractive = (
   input: Terminal,
   environment: Environment.Source
 ): boolean =>
-  output.isTTY === true && input.isTTY === true && environment["CI"] !== "true" && environment["TERM"] !== "dumb"
+  Audience.resolve({
+    env: environment,
+    stdin: input.isTTY === true,
+    stdout: output.isTTY === true,
+    stderr: output.isTTY === true
+  }).interactive
 
 const levelWord = (level: Check["level"]): string => level === "ok" ? "ok  " : level === "warn" ? "warn" : "fail"
 
@@ -249,16 +255,21 @@ export const make = (options: Options): Service => {
 
   const streamSuggestions = <A>(items: AsyncIterable<A>, streamOptions: StreamOptions<A>) =>
     Effect.tryPromise({
-      try: async () => {
+      try: async (effectSignal) => {
         const scanning = streamOptions.scanning ?? "Scanning"
         const settled = streamOptions.settled ?? ((count: number) => `${count} suggestions`)
-        const signal = streamOptions.signal
+        const signal = streamOptions.signal === undefined
+          ? effectSignal
+          : AbortSignal.any([effectSignal, streamOptions.signal])
         const collected: Array<A> = []
         const iterator = items[Symbol.asyncIterator]()
+        let onAbort: (() => void) | undefined
         const aborted = new Promise<"aborted">((resolve) => {
-          if (signal === undefined) return
           if (signal.aborted) resolve("aborted")
-          else signal.addEventListener("abort", () => resolve("aborted"), { once: true })
+          else {
+            onAbort = () => resolve("aborted")
+            signal.addEventListener("abort", onAbort, { once: true })
+          }
         })
         // Non-interactive sessions print the item lines and the settling
         // line only: no frames, no "Scanning..." that a log reader has to
@@ -269,10 +280,13 @@ export const make = (options: Options): Service => {
           while (true) {
             const next = await Promise.race([iterator.next(), aborted])
             if (next === "aborted") {
-              await iterator.return?.()
               const message = `${scanning} stopped, ${settled(collected.length)}`
               if (live === undefined) write(output, message)
               else live.cancel(message)
+              // A generator cannot finish return() until its pending next()
+              // finishes. Stop animation immediately, then await cleanup so
+              // no source work is silently abandoned.
+              await iterator.return?.()
               return { items: collected, stopped: true }
             }
             if (next.done) break
@@ -283,7 +297,7 @@ export const make = (options: Options): Service => {
             } else {
               // The spinner frame sits on the last line. Clearing it, writing
               // the step line, and starting again is the one interleave that
-              // leaves scrollback intact (docs/clack-notes.md).
+              // leaves scrollback intact.
               live.clear()
               clack.log.step(line, common)
               live.start(`${scanning} (${collected.length} so far)`)
@@ -292,6 +306,8 @@ export const make = (options: Options): Service => {
         } catch (cause) {
           live?.error(`${scanning} failed`)
           throw cause
+        } finally {
+          if (onAbort !== undefined) signal.removeEventListener("abort", onAbort)
         }
         const message = settled(collected.length)
         if (live === undefined) write(output, message)

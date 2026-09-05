@@ -3,8 +3,8 @@
  * on disk, and the exit statuses the contract publishes.
  *
  * What the process boundary proves that an in-process case cannot: that the
- * verb is registered and reachable, that `--json` writes one document per
- * line to stdout in the order the checklist found them, that `--list` stops
+ * verb is registered and reachable, that `--json` returns ordered documents
+ * in the canonical result, that `--list` stops
  * without asking, and that the two refusals leave the shell with 1 and 2.
  *
  * No model is reached. `--json` and `--list` prompt for nothing and implement
@@ -97,11 +97,13 @@ afterAll(() => {
 })
 
 describe("smthrs suggest --json", processBudget, () => {
-  it("streams one document per suggestion, then the seat and the outcome", () => {
+  it("returns suggestions in order, then the seat and the outcome", () => {
     const result = run(["suggest", "--json"], seated)
 
     expect(result.status).toBe(0)
-    const documents = result.stdout.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
+    const outcome = JSON.parse(result.stdout) as { status: string; documents: Array<Record<string, unknown>> }
+    expect(outcome.status).toBe("listed")
+    const documents = outcome.documents
     // Suggestions first, in the order the checklist matched them, then the
     // two documents that close the stream.
     expect(documents.map((document) => document.document)).toEqual([
@@ -134,23 +136,22 @@ describe("smthrs suggest --json", processBudget, () => {
       root: project,
       implemented: []
     })
-    // Nothing but documents on stdout: a consumer parses every line.
-    expect(result.stdout.trim().split("\n").every((line) => line.startsWith("{"))).toBe(true)
+    expect(result.stderr).toBe("")
   })
 })
 
 describe("smthrs suggest --list", processBudget, () => {
-  it("names the seat, prints the suggestions, and exits without asking", () => {
-    const result = run(["suggest", "--list"], seated)
+  it("keeps redirected human output structured and exits without asking", () => {
+    const result = run(["suggest", "--list", "--audience", "human"], seated)
 
     expect(result.status).toBe(0)
-    const lines = result.stdout.split("\n").filter((line) => line !== "")
-    expect(lines[0]).toBe("smthrs suggest on moonshot:kimi-k3 (Kimi K3)")
-    expect(lines[1]).toContain("1. A test target that reruns only what changed (small): vitest is the test runner")
-    expect(lines.at(-2)).toBe("9 suggestions")
+    expect(result.stdout).toContain("status: listed")
+    expect(result.stdout).toContain("seat: \"moonshot:kimi-k3\"")
+    expect(result.stdout).toContain("vitest is the test runner")
+    expect(result.stdout).toContain("sandboxed-review")
     // No question was asked, so no answer is waiting to be given.
-    expect(result.stdout).not.toContain("Which one should I implement?")
-    expect(lines.at(-1)).toContain("without --list")
+    expect(result.stdout + result.stderr).not.toContain("Which one should I implement?")
+    expect(result.stderr).toBe("")
   })
 
   it("reads the directory it is pointed at, not the one it was started in", () => {
@@ -170,28 +171,35 @@ describe("smthrs suggest --list", processBudget, () => {
 
 describe("the refusals", processBudget, () => {
   it("exits 1 naming every seat it looked for when the machine has none", () => {
-    const result = run(["suggest", "--list"])
+    const result = run(["suggest", "--list", "--json"])
 
     expect(result.status).toBe(1)
-    expect(result.stdout).toBe("")
-    expect(result.stderr).toContain("No model seat is available for `smthrs suggest`. It looked for:")
-    expect(result.stderr).toContain("Kimi K3 (moonshot:kimi-k3): $MOONSHOT_API_KEY is not set")
+    const error = JSON.parse(result.stdout) as { code: string; message: string }
+    expect(error.code).toBe("UnsupportedError")
+    expect(error.message).toContain("No model seat is available for `smthrs suggest`. It looked for:")
+    expect(error.message).toContain("Kimi K3 (moonshot:kimi-k3): $MOONSHOT_API_KEY is not set")
     // The hint survives the redaction every failure line goes through.
-    expect(result.stderr).toContain("set MOONSHOT_API_KEY to your API key")
-    expect(result.stderr).toContain("Or pass --seat <provider:model>")
+    expect(error.message).toContain("set MOONSHOT_API_KEY to your API key")
+    expect(error.message).toContain("Or pass --seat <provider:model>")
   })
 
   it("exits 2 for a --seat that is not provider:model", () => {
-    const result = run(["suggest", "--seat", "kimi", "--list"], seated)
+    const result = run(["suggest", "--seat", "kimi", "--list", "--json"], seated)
 
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain("--seat must be spelled provider:model, got \"kimi\"")
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      code: "UsageError",
+      message: "--seat must be spelled provider:model, got \"kimi\""
+    })
   })
 
   it("exits 2 for a path that is not a directory", () => {
-    const result = run(["suggest", join(project, "package.json"), "--list"], seated)
+    const result = run(["suggest", join(project, "package.json"), "--list", "--json"], seated)
 
     expect(result.status).toBe(2)
-    expect(result.stderr).toContain("must be a directory")
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      code: "UsageError",
+      message: expect.stringContaining("must be a directory")
+    })
   })
 })

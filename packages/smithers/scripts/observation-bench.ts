@@ -16,17 +16,31 @@
  *   measurement plus the port's own boundary work, without SQLite.
  *
  * Usage: `bun packages/smithers/scripts/observation-bench.ts [root] [maxPaths] [which]`
- * where `which` is `both` (default), `guarded`, or `host`.
+ * where `which` is `both` (default), `guarded`, `host`, or `batch`.
+ * `batch` creates and cleans an independent fixture of `maxPaths` files.
+ * Numbers are local measurements, not a production speed claim. Wrap a batch
+ * run with `/usr/bin/time -l` to include helper CPU and OS peak memory.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import * as Budget from "@smthrs/agent/Budget"
 import * as FlowEngineLike from "@smthrs/agent/FlowEngineLike"
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
+import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
+import * as StepBoundary from "@smthrs/engine-store/StepBoundary"
 import { Engine, Flow, FlowRuntime, Plan } from "@smthrs/flows"
 import * as EngineLike from "@smthrs/harness/EngineLike"
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
+import * as GrantStore from "@smthrs/kernel/GrantStore"
+import * as Workspace from "@smthrs/kernel/Workspace"
 import * as Model from "@smthrs/model/Model"
 import { ModelError } from "@smthrs/model/ModelError"
-import { Effect, FileSystem, Layer, Schema, Scope, Stream } from "effect"
-import { resolve } from "node:path"
+import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import { Effect, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
+import { createHash } from "node:crypto"
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import * as NodeControl from "../src/NodeControl.ts"
 
 const root = resolve(process.argv[2] ?? "evals/swebench/work/django__django-16612")
@@ -88,14 +102,100 @@ const boundary = Effect.gen(function*() {
     Layer.mergeAll(
       Engine.FlowEngine.layerMemory,
       NodeCrypto.layer,
+      QuotaPolicy.layerDefault(),
+      Budget.layerUnbounded(),
       WorkspaceObservation.layer(root, { maxPaths }).pipe(Layer.provide(NodeControl.layerHostPlatform))
     )
   ),
   Effect.scoped
 )
 
+const batchedBoundary = Effect.gen(function*() {
+  if (!Number.isSafeInteger(maxPaths) || maxPaths <= 0 || maxPaths > 100_000) {
+    throw new Error("batch fixture size must be 1 to 100000")
+  }
+  const directory = yield* Effect.acquireRelease(
+    Effect.promise(async () => realpath(await mkdtemp(join(tmpdir(), "smithers-observation-batch-")))),
+    (path) => Effect.promise(() => rm(path, { recursive: true, force: true }))
+  )
+  const content = "filesystem-batching\n".repeat(4)
+  const digest = createHash("sha256").update(content).digest("hex")
+  const paths = Array.from({ length: maxPaths }, (_, index) => `${String(index).padStart(6, "0")}.txt`)
+  yield* Effect.forEach(paths, (path) => Effect.promise(() => writeFile(join(directory, path), content)), {
+    concurrency: 4,
+    discard: true
+  })
+  const host = KernelFileSystem.layer.pipe(
+    Layer.provide(AtomicFileSystem.layer),
+    Layer.provide(Path.layer),
+    Layer.provide(Workspace.layer(directory)),
+    Layer.provide(GrantStore.layerNoop)
+  )
+  yield* Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const batch = KernelFileSystem.batch(fs)!
+    let operations = 0
+    let bytes = 0
+    const measuredFs = Object.assign({ ...fs }, {
+      [KernelFileSystem.FileSystemBatchTypeId]: {
+        ...batch,
+        execute: (requests: ReadonlyArray<KernelFileSystem.BatchRequest>) => {
+          operations += requests.length
+          bytes += requests.filter((request) => request.operation === "digest").length * Buffer.byteLength(content)
+          return batch.execute(requests)
+        }
+      }
+    })
+    const service = StepBoundary.makeFileSystem(measuredFs, ArtifactStore.makeMemory())
+    const started = performance.now()
+    const cpu = process.cpuUsage()
+    const spawns = AtomicFileSystem.helperSpawns()
+    const prepared = yield* service.prepare({
+      readSet: [{ _tag: "Glob", include: ["**/*.txt"] }],
+      writeSet: [{ _tag: "Glob", include: ["**/*.txt"] }],
+      boundaryMode: "hard"
+    })
+    const settled = yield* service.settle(prepared)
+    if (
+      prepared.readSnapshot.length !== maxPaths ||
+      prepared.readSnapshot.some((entry, index) => entry.path !== paths[index] || entry.digest !== digest)
+    ) {
+      throw new Error("benchmark read-set mismatch")
+    }
+    const outputs =
+      (settled.declaredOutputs as { outputs: Array<{ path: string; digest: string; content: string }> }).outputs
+    if (
+      outputs.length !== maxPaths ||
+      outputs.some((entry, index) =>
+        entry.path !== paths[index] || entry.digest !== digest ||
+        entry.content !== Buffer.from(content).toString("base64")
+      )
+    ) {
+      throw new Error("benchmark output mismatch")
+    }
+    const helpers = AtomicFileSystem.helperSpawns() - spawns
+    const expectedHelpers = 2 + 5 * Math.ceil(maxPaths / batch.maxSize)
+    if (helpers !== expectedHelpers) throw new Error(`expected ${expectedHelpers} helper batches, received ${helpers}`)
+    const used = process.cpuUsage(cpu)
+    console.log(JSON.stringify({
+      measurement: "local, warm fixture, one repetition, no warmup",
+      node: process.version,
+      paths: maxPaths,
+      helpers,
+      operations,
+      contentBytesRead: bytes,
+      parentCpuMicros: used.user + used.system,
+      parentPeakRssBytes: process.resourceUsage().maxRSS * 1024,
+      elapsedMs: performance.now() - started,
+      diffIdentity: settled.diffIdentity,
+      verified: true
+    }))
+  }).pipe(Effect.provide(host), Effect.provide(NodeCrypto.layer))
+}).pipe(Effect.scoped)
+
 await Effect.runPromise(
   Effect.gen(function*() {
+    if (which === "batch") return yield* batchedBoundary
     if (which !== "host") yield* walk("guarded    ", NodeControl.layerGuardedPlatform(root))
     if (which !== "guarded") {
       yield* walk("host (open) ", NodeControl.layerHostPlatform)

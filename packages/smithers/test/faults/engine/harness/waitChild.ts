@@ -10,7 +10,7 @@ import type { WaitMode, WaitOptions } from "./waitFlows.ts"
 const runner = fileURLToPath(new URL("../fixtures/waitChild.ts", import.meta.url))
 
 /** What the child does with the run it finds. */
-export type WaitPhase = "linger" | "settle" | "resolve" | "notify"
+export type WaitPhase = "linger" | "settle" | "resolve" | "notify" | "race-timer"
 
 /**
  * A spawned wait host.

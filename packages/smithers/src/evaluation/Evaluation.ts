@@ -1,0 +1,286 @@
+/**
+ * File-backed evaluation commands over the public fixed-suite APIs.
+ *
+ * @since 1.0.0
+ */
+import { Baseline, CaseExecutor, Gate, Regression, Runner, Suite } from "@smthrs/evals"
+import { EvalError } from "@smthrs/evals/EvalError"
+import { Effect } from "effect"
+import { z } from "incur"
+import { randomUUID } from "node:crypto"
+import { link, mkdir, open, readdir, readFile, rename, unlink } from "node:fs/promises"
+import { dirname, isAbsolute, join, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
+import * as Project from "../Project.ts"
+
+/**
+ * Executable suite modules export this value as default, or export its two fields.
+ * @category models
+ * @since 1.0.0
+ */
+export interface EvaluationModule {
+  readonly suite: Suite.Suite | Promise<Suite.Suite> | Effect.Effect<Suite.Suite, unknown>
+  readonly executor: CaseExecutor.Service
+}
+
+/**
+ * Project selection accepted by local evaluation operations.
+ * @category models
+ * @since 1.0.0
+ */
+export interface Options {
+  readonly root?: string | undefined
+  readonly remote?: string | undefined
+}
+
+/**
+ * Resolves the local project root and refuses remote execution.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const localRoot = (options: Options): string => {
+  if (options.remote || process.env.SMITHERS_REMOTE) {
+    throw new Error("Evaluation commands execute local suite modules; --remote is not supported")
+  }
+  return Project.root(options.root, process.cwd())
+}
+
+/** File suffixes recognized as executable evaluation suites. */
+const modulePattern = /\.eval\.(?:ts|mts|js|mjs)$/
+
+/**
+ * Discovery does not import modules or run any suite/executor code.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const list = async (root: string) => {
+  const directory = join(root, "evals")
+  const found: Array<{ name: string; file: string }> = []
+  const visit = async (path: string, prefix: string): Promise<void> => {
+    let entries
+    try {
+      entries = await readdir(path, { withFileTypes: true })
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "ENOENT" && path === directory) return
+      throw cause
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith(".") || entry.name === "node_modules") continue
+      const name = prefix + entry.name
+      if (entry.isDirectory()) await visit(join(path, entry.name), `${name}/`)
+      else if (entry.isFile() && modulePattern.test(name)) {
+        found.push({ name: name.replace(modulePattern, ""), file: join(path, entry.name) })
+      }
+    }
+  }
+  await visit(directory, "")
+  return found
+}
+
+/**
+ * Loads and validates one discovered evaluation module.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const load = async (root: string, selector: string): Promise<{
+  readonly file: string
+  readonly suite: Suite.Suite
+  readonly executor: CaseExecutor.Service
+}> => {
+  const files = await list(root)
+  const matches = files.filter((entry) => entry.name === selector)
+  if (matches.length > 1) throw new Error(`Ambiguous evaluation suite ${selector}; specify its file`)
+  const file = matches[0]?.file ?? resolve(root, selector)
+  const imported: unknown = await import(pathToFileURL(file).href)
+  const exports = imported as Record<string, unknown>
+  const candidate = (exports.default ?? exports) as Partial<EvaluationModule>
+  if (candidate.suite === undefined || typeof candidate.executor?.run !== "function") {
+    throw new Error(`${file} must export { suite, executor }, where executor is a CaseExecutor.Service`)
+  }
+  const resolvedSuite = Effect.isEffect(candidate.suite)
+    ? await Effect.runPromise(candidate.suite)
+    : await candidate.suite
+  const suite = await Effect.runPromise(Suite.make(resolvedSuite))
+  return { file, suite, executor: candidate.executor }
+}
+
+/** Non-empty identity shared by persisted evaluation records. */
+const identity = z.string().min(1)
+/** Fields common to score and inconclusive observations. */
+const observationBase = {
+  case: identity,
+  scorer: identity,
+  scorerName: z.string().optional(),
+  stepKey: identity,
+  at: identity,
+  reason: z.string().optional(),
+  meta: z.unknown().optional()
+}
+/** Persisted observation schema. */
+const observation = z.discriminatedUnion("kind", [
+  z.object({ ...observationBase, kind: z.literal("score"), score: z.number().finite().min(0).max(1) }),
+  z.object({ ...observationBase, kind: z.literal("inconclusive"), reason: z.string() })
+])
+
+/**
+ * Artifacts intentionally exclude executable flow/scorer objects.
+ * @category schemas
+ * @since 1.0.0
+ */
+export const RunArtifact = z.object({
+  version: z.literal(1),
+  runId: identity,
+  suite: identity,
+  cases: z.array(z.object({
+    case: identity,
+    error: z.object({ code: z.string(), message: z.string() }).optional(),
+    observations: z.array(observation)
+  })),
+  observations: z.array(observation)
+})
+/**
+ * JSON-safe result of an evaluation run.
+ * @category models
+ * @since 1.0.0
+ */
+export type RunArtifact = z.infer<typeof RunArtifact>
+
+/**
+ * Removes executable values from a runner result for persistence.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const artifactOf = (run: Runner.RunResult): RunArtifact =>
+  RunArtifact.parse({
+    version: 1,
+    runId: run.runId,
+    suite: run.suite,
+    cases: run.cases.map((result) => ({
+      case: result.case,
+      ...(result.error === undefined ? {} : { error: { code: result.error.code, message: result.error.message } }),
+      observations: result.observations
+    })),
+    observations: run.observations
+  })
+
+/**
+ * Rehydrates a persisted artifact for baseline and regression APIs.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const runOf = (artifact: RunArtifact): Runner.RunResult => ({
+  runId: artifact.runId,
+  suite: artifact.suite,
+  cases: artifact.cases.map((result) => ({
+    case: result.case,
+    observations: result.observations,
+    ...(result.error === undefined ? {} : {
+      error: new EvalError({ code: "executor", message: `${result.error.code}: ${result.error.message}` })
+    })
+  })),
+  observations: artifact.observations
+})
+
+/**
+ * A caller-supplied identity cannot escape the artifact directory.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const runPath = (root: string, runId: string): string => {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(runId)) {
+    throw new Error("Run IDs must contain only letters, digits, '.', '_' or '-'")
+  }
+  return join(root, ".flows", "evals", "runs", `${runId}.json`)
+}
+
+/**
+ * Writes a JSON artifact atomically and refuses replacement by default.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const writeJson = async (file: string, source: string, overwrite = false): Promise<void> => {
+  await mkdir(dirname(file), { recursive: true })
+  const temporary = `${file}.${randomUUID()}.tmp`
+  // Enter cleanup only after exclusive creation proves we own this path.
+  // A colliding file or symlink belongs to another writer and must survive.
+  const handle = await open(temporary, "wx", 0o600)
+  try {
+    try {
+      await handle.writeFile(source, { encoding: "utf8" })
+    } finally {
+      await handle.close()
+    }
+    // link is an atomic no-replace publication; a crash never exposes partial JSON.
+    if (overwrite) await rename(temporary, file)
+    else await link(temporary, file)
+  } finally {
+    await unlink(temporary).catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code !== "ENOENT") throw cause
+    })
+  }
+}
+
+/**
+ * Executes a suite and returns its persistable artifact.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const execute = async (
+  suite: Suite.Suite,
+  executor: CaseExecutor.Service,
+  options: { readonly runId: string; readonly at: string }
+): Promise<RunArtifact> =>
+  artifactOf(
+    await Effect.runPromise(
+      Runner.run(suite, options).pipe(Effect.provideService(CaseExecutor.CaseExecutor, executor))
+    )
+  )
+
+/**
+ * Reads a saved run by identity or path.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const readRun = async (root: string, selector: string): Promise<RunArtifact> => {
+  const file = isAbsolute(selector) || selector.includes("/") || selector.endsWith(".json")
+    ? resolve(root, selector)
+    : runPath(root, selector)
+  return RunArtifact.parse(JSON.parse(await readFile(file, "utf8")))
+}
+
+/**
+ * Returns the committed baseline path for a suite.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const defaultBaselinePath = (root: string, suite: string): string => {
+  const safeName = encodeURIComponent(suite)
+  return join(root, "evals", `${safeName}.baseline.json`)
+}
+
+/**
+ * Serializes a complete run as a baseline.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const baseline = async (run: RunArtifact): Promise<string> =>
+  Effect.runPromise(
+    Baseline.fromRun(runOf(run)).pipe(Effect.map(Baseline.write))
+  )
+
+/**
+ * Compares a run with a baseline and returns its CI verdict.
+ * @category constructors
+ * @since 1.0.0
+ */
+export const compare = async (
+  run: RunArtifact,
+  source: string,
+  options: Gate.Options = {}
+) =>
+  Effect.runPromise(Effect.gen(function*() {
+    const committed = yield* Baseline.load(source)
+    const report = yield* Regression.compare(committed, runOf(run))
+    const verdict = yield* Gate.check(report, options)
+    return { report, verdict, ...Gate.ciGrade(verdict) }
+  }))

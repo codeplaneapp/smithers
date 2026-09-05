@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node waitChild.ts <filename> <executionId> <approval|event|timer> \
- *     <linger|settle|resolve> <counterFile> <hostId> [millis]
+ *     <linger|settle|resolve|notify|race-timer> <counterFile> <hostId> [millis]
  */
 import { DurableDeferred, FlowRuntime, HumanTask } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
@@ -29,7 +29,7 @@ if (
   phase === undefined || counterFile === undefined || hostId === undefined
 ) {
   process.stderr.write(
-    "usage: waitChild.ts <filename> <executionId> <mode> <linger|settle|resolve|notify> <counterFile> <hostId> [millis]\n"
+    "usage: waitChild.ts <filename> <executionId> <mode> <linger|settle|resolve|notify|race-timer> <counterFile> <hostId> [millis]\n"
   )
   process.exit(2)
 }
@@ -37,8 +37,12 @@ if (modeArg !== "approval" && modeArg !== "event" && modeArg !== "timer") {
   process.stderr.write(`waitChild: invalid mode ${modeArg}\n`)
   process.exit(2)
 }
-if (phase !== "linger" && phase !== "settle" && phase !== "resolve" && phase !== "notify") {
+if (phase !== "linger" && phase !== "settle" && phase !== "resolve" && phase !== "notify" && phase !== "race-timer") {
   process.stderr.write(`waitChild: invalid phase ${phase}\n`)
+  process.exit(2)
+}
+if (phase === "race-timer" && modeArg !== "timer") {
+  process.stderr.write("waitChild: race-timer requires timer mode\n")
   process.exit(2)
 }
 
@@ -114,6 +118,14 @@ const exit: Exit.Exit<unknown, unknown> = mode === "approval"
     Effect.void as never,
     phase === "linger"
       ? TimerFlow.execute({ millis }, { executionId, discard: true })
+      : phase === "race-timer"
+      ? Effect.gen(function*() {
+        // Both hosts register and observe the same suspended execution before
+        // its absolute deadline. They remain alive with their timers armed.
+        const parked = yield* TimerFlow.execute({ millis }, { executionId, discard: true })
+        process.stdout.write(`PARKED=${parked}\n`)
+        return yield* TimerFlow.execute({ millis }, { executionId })
+      })
       : TimerFlow.execute({ millis }, { executionId }),
     host("timer", options) as never
   )

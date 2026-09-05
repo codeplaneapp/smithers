@@ -160,6 +160,22 @@ export const defaultSeat: Readonly<Record<Candidate, string>> = {
   cerebras: "cerebras:gpt-oss-120b"
 }
 
+/**
+ * Ordered starter credential variables and seats supported by the executor's provider routes.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const starterSeats: ReadonlyArray<readonly [variable: string, seat: string]> = [
+  ["ANTHROPIC_API_KEY", "anthropic:claude-sonnet-4-5"],
+  ["OPENAI_API_KEY", defaultSeat.openai],
+  ["OPENROUTER_API_KEY", "openrouter:anthropic/claude-sonnet-4.5"],
+  ["MOONSHOT_API_KEY", defaultSeat["kimi-k3"]],
+  ["GEMINI_API_KEY", defaultSeat.gemini],
+  ["GOOGLE_API_KEY", defaultSeat.gemini],
+  ["CEREBRAS_API_KEY", defaultSeat.cerebras]
+]
+
 const labels: Readonly<Record<Candidate, string>> = {
   "codex-subscription": "Codex subscription",
   "kimi-k3": "Kimi K3",

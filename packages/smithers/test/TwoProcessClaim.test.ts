@@ -14,7 +14,7 @@
  * peer `smithers` leaves it. The loser is the real executable, spawned as an
  * operator spawns it, asked to resume a run it does not own. The promise is
  * "the loser is told it lost, and the row does not move", which only means
- * anything as an exit status and a line on stderr.
+ * anything as an exit status and a structured refusal from the public CLI.
  *
  * The row is written rather than raced for a reason. A race needs the winner
  * to still be holding the run when the loser arrives, and rc.0 ships no flow
@@ -118,21 +118,19 @@ describe("a second smithers process over one project root", { timeout: 240_000 }
     const root = project()
     // A real command first, so the project has the migrated control database a
     // peer would have left behind.
-    const listed = smithers(root, ["ls"])
+    const listed = smithers(root, ["flow", "list", "--json"])
     expect(listed.status).toBe(0)
 
     const peerPid = livePeer()
     seedRunOwnedBy(root, "peer-owned-run", peerPid)
 
-    const resumed = smithers(root, ["resume", "peer-owned-run"])
+    const resumed = smithers(root, ["runs", "resume", "peer-owned-run", "--json"])
 
-    // the release policy: a refusal is exit 1 with a sentence on stderr,
-    // and stdout stays empty so a `--json` reader never sees a diagnostic. The
-    // line names the run, because `ClaimLost: ` on its own told an operator
-    // holding two terminals nothing about which run they lost.
+    // Canonical commands return structured failures. The refusal must still
+    // identify the contested run, not just an empty ClaimLost message.
     expect(resumed.status).toBe(1)
-    expect(resumed.stdout).toBe("")
-    expect(resumed.stderr.trimEnd()).toBe("ClaimLost: claim_lost runId=peer-owned-run")
+    expect(JSON.parse(resumed.stdout)).toMatchObject({ code: "ClaimLost", message: "claim_lost runId=peer-owned-run" })
+    expect(resumed.stderr).toBe("")
 
     // The refused process changed nothing. Before the identity fix both
     // processes presented the same fence, so this row moved under the loser.

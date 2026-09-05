@@ -62,9 +62,9 @@ Refusing to bind 0.0.0.0: pass --listen to serve on a non-loopback address.
 Refusing to bind 0.0.0.0 without a Bearer [REDACTED_TOKEN]: set SMITHERS_API_KEY (preferred) or pass --credential.
 ```
 
-The second sentence is written as "without a bearer token" in `Serve.refuse`.
-The redaction pass every stderr line takes rewrites that phrase, so the message
-an operator reads is the one above.
+`[REDACTED_TOKEN]` in the second sentence is not a value you passed. The
+redaction pass every stderr line takes rewrites the phrase "bearer token" in
+the CLI's own message.
 
 The rule is strict because the failure it prevents is silent: an
 unauthenticated control plane on a laptop's LAN address can launch agents with
@@ -73,6 +73,16 @@ outside. Prefer the exported `SMITHERS_API_KEY` environment variable. The
 compatibility flag `--credential` warns on stderr even under `--quiet`: its
 value is visible in process listings and may remain in shell history. The
 warning never echoes the credential.
+
+A valid bearer is not automatically an approver. The default host allows local
+operator approval; a credentialed gateway stamps `gateway/bearer` and needs an
+explicit `ApprovalAuthority` delegation. A local operator can use
+`smthrs approvals approve` or `smthrs approvals deny` against the same workspace.
+Programmatic hosts can supply `approvalAuthority` through `Application.Config`
+(and `NodeControl.layer`) or the third argument to `NodeControl.engineDurable`.
+This policy is host configuration, not a request flag. Delegating a shared bearer
+delegates every holder, including agents. See
+[approval authority](https://control.smithers.sh/guides/approvals/#who-may-decide).
 
 Read the [control-plane guide](https://smithers.sh/docs/guides/control-plane/)
 before opting into a non-loopback bind.

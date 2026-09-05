@@ -47,7 +47,10 @@ const load = async (): Promise<Entrypoint> => {
   // it is checked against must come from the same fresh module graph.
   const cliError = await import("../src/CliError.ts")
   const database = await import("@smthrs/database/node/NodeDatabase")
-  await import("../src/bin.ts")
+  // These assertions exercise the Effect runtime teardown owned by the
+  // transition entrypoint. The public bin now dispatches canonical commands
+  // through Incur, whose lifecycle is covered by UnifiedEntry.test.ts.
+  await import("../src/cli/LegacyBin.ts")
   const call = runMain.mock.calls[0]
   if (call === undefined) throw new Error("the entrypoint did not start a Node runtime")
   const onSigint = process.listeners("SIGINT").find((listener) => !beforeSigint.includes(listener))

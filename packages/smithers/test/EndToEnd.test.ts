@@ -83,7 +83,8 @@ describe("one project, from init to gc", processBudget, () => {
   it("scaffolds a project and discovers the flow in it", () => {
     const scaffolded = json("init", "hello")
 
-    expect(scaffolded).toMatchObject({ name: "hello", created: true })
+    expect(scaffolded).toMatchObject({ flow: { name: "hello", created: true } })
+    expect(scaffolded.created).toEqual(expect.arrayContaining(["WORKSPACE.ts", "PACKAGE.ts"]))
     expect(existsSync(join(project, "flows", "hello", "flow.mdx"))).toBe(true)
     expect(json("ls")).toEqual({ _tag: "flows", items: [{ flowId: "hello", description: expect.any(String) }] })
   })
@@ -153,7 +154,7 @@ describe("one project, from init to gc", processBudget, () => {
     expect(json("ps", "--status", run.status).items.map((entry: { readonly runId: string }) => entry.runId))
       .toContain(runId)
     // An eighth status is not a status.
-    expect(smithers("ps", "--status", "sleeping").status).toBe(2)
+    expect(smithers("ps", "--status", "sleeping", "--json").status).toBe(2)
   })
 
   /**
@@ -215,47 +216,51 @@ describe("one project, from init to gc", processBudget, () => {
     expect(second.receiptId).not.toBe(first.receiptId)
   })
 
-  it("decides an in-run approval another process registered", async () => {
-    const engine = NodeControl.engineDurable(project)
-    const target = {
-      _tag: "Node" as const,
-      runId,
-      requestId: `${runId}:ask-1`,
-      digest: "e2e-ask-digest",
-      envelope: { capabilities: [], flows: ["ask"], budget: {} }
+  it.each(["approve", "deny"] as const)(
+    "%s: persists the decision for an in-run request from another process",
+    async (decision) => {
+      const engine = NodeControl.engineDurable(project)
+      const target = {
+        _tag: "Node" as const,
+        runId,
+        requestId: `${runId}:ask-${decision}`,
+        digest: "e2e-ask-digest",
+        envelope: { capabilities: [], flows: ["ask"], budget: {} }
+      }
+
+      const registered = await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime.ControlRuntime
+          return yield* runtime.registerApproval(target)
+        }).pipe(Effect.provide(engine.runtime), Effect.scoped, Effect.orDie)
+      )
+      expect(registered._tag).toBe("Pending")
+
+      const decided = json(
+        "approvals",
+        decision,
+        JSON.stringify({ target, scope: "run", idempotencyKey: `${decision}:${target.requestId}` })
+      )
+      expect(decided).toMatchObject({ _tag: "Accepted" })
+
+      const readBack = await Effect.runPromise(
+        Effect.gen(function*() {
+          const runtime = yield* ControlRuntime.ControlRuntime
+          return yield* runtime.registerApproval(target)
+        }).pipe(Effect.provide(engine.runtime), Effect.scoped, Effect.orDie)
+      )
+      // The decision is durable and cross-process: a resumed attempt reads it
+      // instead of parking again.
+      expect(readBack._tag).toBe(decision === "approve" ? "Approved" : "Denied")
     }
-
-    const registered = await Effect.runPromise(
-      Effect.gen(function*() {
-        const runtime = yield* ControlRuntime.ControlRuntime
-        return yield* runtime.registerApproval(target)
-      }).pipe(Effect.provide(engine.runtime), Effect.scoped, Effect.orDie)
-    )
-    expect(registered.resolved).toBe(false)
-
-    const decided = json(
-      "approve",
-      JSON.stringify({ target, scope: "run", idempotencyKey: `approve:${target.requestId}` })
-    )
-    expect(decided).toMatchObject({ _tag: "Accepted" })
-
-    const readBack = await Effect.runPromise(
-      Effect.gen(function*() {
-        const runtime = yield* ControlRuntime.ControlRuntime
-        return yield* runtime.registerApproval(target)
-      }).pipe(Effect.provide(engine.runtime), Effect.scoped, Effect.orDie)
-    )
-    // The decision is durable and cross-process: a resumed attempt reads it
-    // instead of parking again.
-    expect(readBack.resolved).toBe(true)
-  })
+  )
 
   it("keeps namespaced memory in the control database across processes", () => {
-    expect(json("memory", "set", "reviewer", "sol")).toMatchObject({ key: "reviewer", written: true })
-    expect(json("memory", "get", "reviewer")).toBe("sol")
+    expect(json("memory", "set", "reviewer", "sol")).toMatchObject({ key: "reviewer", stored: true })
+    expect(json("memory", "get", "reviewer")).toMatchObject({ value: "sol" })
     expect(json("memory", "list").map((entry: { readonly key: string }) => entry.key)).toContain("reviewer")
 
-    expect(json("memory", "rm", "reviewer")).toMatchObject({ key: "reviewer", removed: true })
+    expect(json("memory", "rm", "reviewer")).toMatchObject({ key: "reviewer", deleted: true })
     expect(json("memory", "list").map((entry: { readonly key: string }) => entry.key)).not.toContain("reviewer")
   })
 
@@ -269,24 +274,23 @@ describe("one project, from init to gc", processBudget, () => {
   })
 
   it("says a run recorded no node output rather than inventing one", () => {
-    const result = smithers("output", runId, "result")
+    const result = smithers("runs", "output", runId, "result", "--json")
 
     // A node id the run does not have is the argument being wrong, so this is
-    // the usage status, and the message names the run rather than printing an
-    // empty document to stdout.
+    // the usage status, and the structured refusal names the run.
     expect(result.status).toBe(2)
-    expect(result.stdout).toBe("")
-    expect(result.stderr).toContain(runId)
+    expect(JSON.parse(result.stdout)).toMatchObject({ code: "UsageError", message: expect.stringContaining(runId) })
   })
 
   it("reports the project it resolved, both databases, and the Node floor", () => {
-    const report = smithers("doctor")
+    const report = json("doctor")
 
-    expect(report.status).toBe(0)
-    expect(report.stdout).toContain(project)
-    expect(report.stdout).toContain(join(project, ".flows", "control.db"))
-    expect(report.stdout).toContain(join(project, ".flows", "engine.db"))
-    expect(report.stdout).toContain("node:")
+    expect(report.root).toBe(project)
+    expect(report.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: `database ${join(project, ".flows", "control.db")}`, level: "ok" }),
+      expect.objectContaining({ name: `database ${join(project, ".flows", "engine.db")}`, level: "ok" }),
+      expect.objectContaining({ name: "node", level: "ok" })
+    ]))
   })
 
   it("cancels the run durably", () => {
@@ -318,7 +322,10 @@ describe("one project, from init to gc", processBudget, () => {
     // names a window and waits it out.
     const refused = smithers("gc", "--older-than", "0s", "--dry-run", "--json")
     expect(refused.status).toBe(2)
-    expect(refused.stderr).toContain("--older-than must be a duration")
+    expect(JSON.parse(refused.stdout)).toMatchObject({
+      code: "UsageError",
+      message: expect.stringContaining("--older-than must be a duration")
+    })
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_100)
 
     const planned = json("gc", "--older-than", "1s", "--dry-run")

@@ -1,0 +1,316 @@
+import { Effect, Redacted } from "effect"
+import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
+import * as Path from "node:path"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
+import { withCredentials } from "../src/operator/Credentials.ts"
+import { createIntegrationsCli, probe, readIntegrations } from "../src/operator/Integrations.ts"
+import * as Store from "../src/operator/Store.ts"
+
+const directories: Array<string> = []
+afterAll(async () => {
+  await Promise.all(directories.map((directory) => Fs.rm(directory, { recursive: true, force: true })))
+})
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
+})
+const root = async () => {
+  vi.stubEnv("SMITHERS_REMOTE", "")
+  const directory = await Fs.mkdtemp(Path.join(Os.tmpdir(), "smthrs-integration-cli-"))
+  directories.push(directory)
+  await Fs.mkdir(Path.join(directory, ".smithers"))
+  return directory
+}
+const serve = async (root: string, args: ReadonlyArray<string>) => {
+  let code = 0
+  let output = ""
+  await createIntegrationsCli().serve([...args, "--root", root, "--json"], {
+    exit: (value) => {
+      code = value
+    },
+    stdout: (value) => {
+      output += value
+    }
+  })
+  return { code, output, data: JSON.parse(output) }
+}
+
+describe("integration CLI", () => {
+  it("discovers fallback credentials and listener-only GitHub configuration without exposing values", async () => {
+    const directory = await root()
+    expect(readIntegrations(directory, undefined, {})).toEqual([])
+    expect(readIntegrations(directory, undefined, { GITHUB_TOKEN: "fallback-fixture" })).toEqual([
+      { id: "github", provider: "github", tokenEnv: "GITHUB_TOKEN" }
+    ])
+    expect(readIntegrations(directory, undefined, {
+      SMITHERS_GITHUB_TOKEN: "preferred-fixture",
+      GITHUB_TOKEN: "fallback-fixture",
+      SMITHERS_TELEGRAM_BOT_TOKEN: "telegram-fixture"
+    })).toEqual([
+      { id: "github", provider: "github", tokenEnv: "SMITHERS_GITHUB_TOKEN" },
+      { id: "telegram", provider: "telegram", tokenEnv: "SMITHERS_TELEGRAM_BOT_TOKEN" }
+    ])
+    await Fs.writeFile(Path.join(directory, ".smithers/listeners.json"), "{}")
+    expect(readIntegrations(directory, undefined, {})).toEqual([
+      { id: "github", provider: "github", tokenEnv: "SMITHERS_GITHUB_TOKEN" }
+    ])
+    expect(() => readIntegrations(directory, "missing.json", {})).toThrow("configuration does not exist")
+  })
+
+  it.each([
+    "ftp://example.invalid",
+    "https://user:private-fixture@example.invalid",
+    "https://example.invalid?token=private-fixture",
+    "https://example.invalid#private-fixture"
+  ])("refuses unsafe provider endpoint %s without echoing its credentials", async (apiBaseUrl) => {
+    const directory = await root()
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/integrations.json"),
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "gh", provider: "github", apiBaseUrl }]
+      })
+    )
+    const result = await serve(directory, ["list"])
+    expect(result.code).toBe(1)
+    expect(result.output).toContain("API endpoint must be HTTP(S)")
+    expect(result.output).not.toContain("private-fixture")
+  })
+
+  it("refuses duplicate IDs and contradictory credential sources", async () => {
+    const directory = await root()
+    const config = Path.join(directory, ".smithers/integrations.json")
+    await Fs.writeFile(
+      config,
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "same", provider: "github" }, { id: "same", provider: "linear" }]
+      })
+    )
+    expect(() => readIntegrations(directory)).toThrow("Integration IDs must be unique")
+    await Fs.writeFile(
+      config,
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "gh", provider: "github", tokenEnv: "TOKEN", credentialId: "stored" }]
+      })
+    )
+    expect(() => readIntegrations(directory)).toThrow("Use tokenEnv or credentialId, not both")
+  })
+
+  it("checks every provider's default credential offline without sending requests", async () => {
+    const directory = await root()
+    const integrations = ["github", "linear", "telegram"].map((provider) => ({ id: provider, provider }))
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/integrations.json"),
+      JSON.stringify({ version: 1, integrations })
+    )
+    for (const name of ["SMITHERS_GITHUB_TOKEN", "SMITHERS_LINEAR_API_KEY", "SMITHERS_TELEGRAM_BOT_TOKEN"]) {
+      vi.stubEnv(name, "provider-fixture-secret")
+    }
+    const fetch = vi.fn(() => {
+      throw new Error("offline diagnostics sent a request")
+    })
+    vi.stubGlobal("fetch", fetch)
+    const result = await serve(directory, ["doctor", "--offline"])
+    expect(result.code, result.output).toBe(0)
+    expect(result.data).toEqual({
+      healthy: true,
+      integrations: integrations.map((item) => ({ ...item, healthy: true, check: "credential-present" }))
+    })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(result.output).not.toContain("provider-fixture-secret")
+  })
+
+  it("resolves encrypted credential references through the real local store", async () => {
+    const directory = await root()
+    vi.stubEnv("SMITHERS_CREDENTIAL_KEY", Buffer.alloc(32, 9).toString("base64"))
+    await withCredentials({ root: directory }, (service) =>
+      service.create({
+        id: "stored-token",
+        name: "GitHub fixture",
+        secret: Redacted.make("encrypted-fixture-secret")
+      }), true)
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/integrations.json"),
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "gh", provider: "github", credentialId: "stored-token" }]
+      })
+    )
+    const result = await serve(directory, ["doctor", "gh", "--offline"])
+    expect(result.code, result.output).toBe(0)
+    expect(result.data.integrations).toEqual([
+      { id: "gh", provider: "github", healthy: true, check: "credential-present" }
+    ])
+    expect(result.output).not.toContain("encrypted-fixture-secret")
+  })
+
+  it("reports online health without returning provider response bodies or request details", async () => {
+    const directory = await root()
+    vi.stubEnv("SMITHERS_GITHUB_TOKEN", "request-fixture-secret")
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/integrations.json"),
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "gh", provider: "github" }]
+      })
+    )
+    const fetch = vi.fn(async () => Response.json({ private: "response-fixture-secret" }))
+    vi.stubGlobal("fetch", fetch)
+    const healthy = await serve(directory, ["doctor", "gh"])
+    expect(healthy.code, healthy.output).toBe(0)
+    expect(healthy.data.integrations).toEqual([
+      { id: "gh", provider: "github", healthy: true, check: "provider-authentication" }
+    ])
+    fetch.mockResolvedValue(Response.json({ message: "response-fixture-secret" }, { status: 401 }))
+    const unhealthy = await serve(directory, ["doctor", "gh"])
+    expect(unhealthy.code).toBe(1)
+    expect(unhealthy.output).toContain("Credential lookup or provider authentication failed")
+    for (const result of [healthy, unhealthy]) {
+      expect(result.output).not.toContain("request-fixture-secret")
+      expect(result.output).not.toContain("response-fixture-secret")
+    }
+  })
+
+  it("refuses unknown, ambiguous, and unapproved destructive reconciliation before requests", async () => {
+    const directory = await root()
+    const fetch = vi.fn(() => {
+      throw new Error("invalid reconciliation sent a request")
+    })
+    vi.stubGlobal("fetch", fetch)
+    const config = Path.join(directory, ".smithers/integrations.json")
+    await Fs.writeFile(config, JSON.stringify({ version: 1, integrations: [{ id: "linear", provider: "linear" }] }))
+    expect((await serve(directory, ["doctor", "unknown"])).output).toContain("Unknown integration")
+    expect((await serve(directory, ["reconcile"])).output).toContain("Select exactly one")
+    await Fs.writeFile(
+      config,
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "first", provider: "github" }, { id: "second", provider: "github" }]
+      })
+    )
+    expect((await serve(directory, ["reconcile"])).output).toContain("Select exactly one")
+    const refused = await serve(directory, ["reconcile", "first", "--allow-delete"])
+    expect(refused.code).toBe(1)
+    expect(refused.output).toContain("--allow-delete requires --apply")
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("preserves service-free effects and redacts non-Error failures at the operator boundary", async () => {
+    expect(await Store.runEffect(Effect.succeed(42))).toBe(42)
+    let rendered: unknown
+    const result = await Store.execute({
+      error: (error) => {
+        rendered = error
+        return undefined as never
+      }
+    }, async () => {
+      throw "Authorization: Bearer operator-fixture-secret"
+    })
+    expect(result).toBeUndefined()
+    expect(rendered).toEqual({
+      code: "operator_failed",
+      exitCode: 1,
+      message: "Authorization: Bearer [REDACTED_TOKEN]"
+    })
+  })
+
+  it("lists only credential references and refuses raw secret fields", async () => {
+    const directory = await root()
+    const config = Path.join(directory, ".smithers/integrations.json")
+    await Fs.writeFile(
+      config,
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "github", provider: "github", tokenEnv: "TEST_MISSING_TOKEN" }]
+      })
+    )
+    expect((await serve(directory, ["list"])).data).toEqual([{
+      id: "github",
+      provider: "github",
+      tokenEnv: "TEST_MISSING_TOKEN"
+    }])
+    expect((await serve(directory, ["doctor", "--offline"])).code).toBe(1)
+    await Fs.writeFile(
+      config,
+      JSON.stringify({ version: 1, integrations: [{ id: "github", provider: "github", token: "secret-value" }] })
+    )
+    const result = await serve(directory, ["list"])
+    expect(result.code).toBe(1)
+    expect(result.output).not.toContain("secret-value")
+  })
+
+  it("discovers configured providers and verifies all three through their existing clients", async () => {
+    const directory = await root()
+    expect(readIntegrations(directory, undefined, { SMITHERS_LINEAR_API_KEY: "secret" })).toEqual([{
+      id: "linear",
+      provider: "linear",
+      tokenEnv: "SMITHERS_LINEAR_API_KEY"
+    }])
+    const calls: Array<string> = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        calls.push(url)
+        if (url.includes("linear")) return Response.json({ data: { viewer: { id: "me" } } })
+        if (url.includes("telegram")) return Response.json({ ok: true, result: { id: 1, is_bot: true } })
+        return Response.json({ resources: { core: { remaining: 5000 } } })
+      })
+    )
+    for (const provider of ["github", "linear", "telegram"] as const) {
+      expect(await probe({ id: provider, provider }, "test-token")).toMatchObject({ healthy: true })
+    }
+    expect(calls).toContain("https://api.github.com/rate_limit")
+    expect(calls).toContain("https://api.linear.app/graphql")
+    expect(calls.some((url) => url.endsWith("/getMe"))).toBe(true)
+  })
+
+  it("plans GitHub webhook reconciliation without making writes", async () => {
+    const directory = await root()
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/integrations.json"),
+      JSON.stringify({
+        version: 1,
+        integrations: [{ id: "gh", provider: "github", tokenEnv: "SMITHERS_TEST_INTEGRATION_TOKEN" }]
+      })
+    )
+    await Fs.writeFile(
+      Path.join(directory, ".smithers/listeners.json"),
+      JSON.stringify({
+        version: 1,
+        listeners: [{
+          id: "issues",
+          provider: "github",
+          repository: "acme/project",
+          events: ["issues"],
+          flowId: "triage",
+          callbackUrl: "https://example.com/webhooks/triage",
+          secretEnv: "SMITHERS_TEST_WEBHOOK_SECRET",
+          active: true
+        }]
+      })
+    )
+    vi.stubEnv("SMITHERS_TEST_INTEGRATION_TOKEN", "test-token")
+    vi.stubEnv("SMITHERS_TEST_WEBHOOK_SECRET", "test-secret")
+    const methods: Array<string> = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: unknown, init?: RequestInit) => {
+        methods.push(init?.method ?? "GET")
+        return Response.json([])
+      })
+    )
+    try {
+      const result = await serve(directory, ["reconcile", "gh"])
+      expect(result.code, result.output).toBe(0)
+      expect(result.output).toContain("create")
+      expect(result.output).not.toContain("test-secret")
+      expect(methods.every((method) => method === "GET")).toBe(true)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+})

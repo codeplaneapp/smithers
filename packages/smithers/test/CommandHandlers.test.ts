@@ -18,7 +18,9 @@ import { CliError as ParserError, Command } from "effect/unstable/cli"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { Writable } from "node:stream"
 import { describe, expect, it } from "vitest"
+import * as RunProgress from "../src/cli/RunProgress.ts"
 import * as CliError from "../src/CliError.ts"
 import { cli, latestSequence } from "../src/Command.ts"
 import * as ExecutorOwnership from "../src/ExecutorOwnership.ts"
@@ -970,6 +972,68 @@ describe("owned-run settlement", () => {
       }
       expect(Exit.isSuccess(exit)).toBe(true)
       expect(Exit.isSuccess(exit) ? exit.value : undefined).toMatchObject({ _tag: "Accepted" })
+    }
+  })
+})
+
+describe("attached human progress", () => {
+  it("streams tasks during resume and keeps --silent independent of the JSON receipt", async () => {
+    for (const silent of [false, true]) {
+      const progress: Array<string> = []
+      let following = 0
+      const output = new Writable({
+        write(chunk, _encoding, callback) {
+          progress.push(String(chunk))
+          callback()
+        }
+      })
+      const receipt = await Effect.runPromise(
+        json(["--json", "--audience", "human", ...(silent ? ["--silent"] : []), "resume", "run-1"]).pipe(
+          Effect.provideService(RunProgress.Configuration, {
+            policy: {
+              audience: "human",
+              source: "override",
+              harnesses: [],
+              structured: true,
+              progress: "plain",
+              interactive: false
+            },
+            output
+          }),
+          Effect.provide(ExecutorOwnership.layer(true)),
+          Effect.provide(
+            Layer.effect(
+              ControlService.Control,
+              Effect.gen(function*() {
+                const control = yield* ControlService.Control
+                return ControlService.make({
+                  ...control,
+                  resume: (input) =>
+                    Effect.succeed({ _tag: "Accepted", receiptId: input.idempotencyKey, runId: "run-1" }),
+                  watch: (filter) => {
+                    if (filter.follow === false) return Stream.empty
+                    following++
+                    return Stream.make(
+                      event(1, "control.agent.cell-call-started", { flowName: "test" }),
+                      event(2, "control.agent.cell-call-settled", { flowName: "test", outcome: "success" }),
+                      event(3, "control.run.completed")
+                    ).pipe(Stream.concat(Stream.never))
+                  }
+                })
+              })
+            ).pipe(Layer.provide(testControl))
+          ),
+          Effect.provide(services),
+          Effect.provide(NodeServices.layer)
+        )
+      )
+      expect(receipt).toMatchObject({ _tag: "Accepted", runId: "run-1" })
+      expect(following).toBe(1)
+      if (silent) expect(progress.join("")).toBe("")
+      else {
+        expect(progress.join("")).toContain("Running test")
+        expect(progress.join("")).toContain("test completed")
+      }
     }
   })
 })

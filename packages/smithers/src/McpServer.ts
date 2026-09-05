@@ -1,5 +1,6 @@
 /**
- * `smthrs --mcp`: the control plane as a Model Context Protocol server.
+ * Compatibility semantic MCP server. The canonical `smthrs --mcp` executable
+ * uses the unified Incur command tree; this module retains its 0.x tool API.
  *
  * The protocol is newline-delimited JSON-RPC 2.0 over stdio, which is what
  * `@smthrs/mcp`'s own client speaks, so the round trip is testable in-process
@@ -19,12 +20,14 @@
  *
  * Every result is the 0.x `{ ok, data?, error? }` envelope, serialized into the
  * text content block and repeated as `structuredContent`.
+ * Approval-bearing tools are excluded by default. Host exposure alone grants
+ * no authority: calls carry an agent principal checked by Control's policy.
  *
  * @since 1.0.0
  */
 import { Control as ControlService, ControlError, ControlSchema } from "@smthrs/control"
 import * as Redaction from "@smthrs/journal/Redaction"
-import { Effect, Queue, Schema, Stream } from "effect"
+import { Context, Effect, Queue, Schema, Stream } from "effect"
 import * as CliError from "./CliError.ts"
 import * as Forensics from "./Forensics.ts"
 import * as History from "./internal/History.ts"
@@ -132,6 +135,11 @@ const inputSchemaOf = (schema: Schema.Codec<unknown, unknown>): Record<string, u
 const makeTool = (definition: Omit<Tool, "inputSchema">): Tool => ({
   ...definition,
   inputSchema: inputSchemaOf(definition.schema)
+})
+
+const approvalTools = new Set(["run_flow", "resolve_approval"])
+const actor = Context.Reference<Omit<ControlSchema.Principal, "stampedAt">>("/cli/McpApprovalActor", {
+  defaultValue: () => ({ id: "mcp", kind: "agent" })
 })
 
 const emptyArguments = Schema.Record(Schema.String, Schema.Never)
@@ -327,6 +335,7 @@ export const supportedTools: ReadonlyArray<Tool> = [
       return envelope(
         Effect.gen(function*() {
           const control = yield* ControlService.Control
+          const principal = { ...(yield* actor), stampedAt: 0 }
           const card = yield* control.plan({ flowId, input })
           yield* control.approve({ ...card.approval, scope: "run", principal })
           return yield* control.run({
@@ -474,13 +483,13 @@ export const supportedTools: ReadonlyArray<Tool> = [
         return Effect.succeed(failed("INVALID_INPUT", "scope must be \"once\", \"run\", or \"remembered\""))
       }
       return envelope(
-        Effect.flatMap(
-          ControlService.Control,
-          (control) =>
-            decision === "approve"
-              ? control.approve({ ...payload, scope, principal })
-              : control.deny({ ...payload, principal })
-        ),
+        Effect.gen(function*() {
+          const control = yield* ControlService.Control
+          const principal = { ...(yield* actor), stampedAt: 0 }
+          return yield* (decision === "approve"
+            ? control.approve({ ...payload, scope, principal })
+            : control.deny({ ...payload, principal }))
+        }),
         (receipt) => succeeded(receipt)
       )
     }
@@ -601,6 +610,14 @@ export const rawTools = (
  * @since 1.0.0
  */
 export interface Options {
+  /**
+   * Host opt-in to expose tools that make approval decisions. This grants no
+   * authority: the receiving Control runtime must independently delegate to
+   * this session's authenticated principal and the requested approval scope.
+   */
+  readonly approvalTools?: boolean | undefined
+  /** Host-authenticated session identity, never read from tool arguments. */
+  readonly principal?: Omit<ControlSchema.Principal, "stampedAt"> | undefined
   readonly surface?: Surface | undefined
   readonly allowedTools?: ReadonlyArray<string> | undefined
   readonly readOnly?: boolean | undefined
@@ -620,9 +637,13 @@ export const tools = (options: Options = {}): ReadonlyArray<Tool> => {
   const raw = surface === "semantic" ? [] : rawTools(options.verbs ?? [])
   const all = [...semantic, ...raw]
   const allowed = options.allowedTools === undefined ? undefined : new Set(options.allowedTools)
+  const principal = options.principal === undefined
+    ? { id: "mcp", kind: "agent" }
+    : { id: options.principal.id, kind: options.principal.kind }
   return all.filter((tool) =>
-    (allowed === undefined || allowed.has(tool.name)) && (options.readOnly !== true || tool.readOnly)
-  )
+    (allowed === undefined || allowed.has(tool.name)) && (options.readOnly !== true || tool.readOnly) &&
+    (options.approvalTools === true || !approvalTools.has(tool.name))
+  ).map((tool) => ({ ...tool, call: (args) => tool.call(args).pipe(Effect.provideService(actor, principal)) }))
 }
 
 /**

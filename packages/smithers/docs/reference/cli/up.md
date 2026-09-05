@@ -49,7 +49,7 @@ spawns a local executor. `smthrs up` takes no `KEY=VALUE` positional entries;
 
 `smthrs up` accepts `--root`, `--remote`, `--credential`, `--json`,
 `--quiet`, `--mcp-config`, and `--log-level`, listed in the
-[CLI reference index](/docs/reference/cli/).
+[CLI reference index](/cli).
 
 ## Output
 
@@ -107,31 +107,12 @@ The compact document, with a run id and project root standing in for yours:
 
 ## See also
 
-- [`smthrs plan`](/docs/reference/cli/plan/) performs the planning half
+- [`smthrs plan`](/cli/plan) performs the planning half
   alone.
-- [`smthrs run`](/docs/reference/cli/run/) submits a payload that is already
+- [`smthrs run`](/cli/run) submits a payload that is already
   approved, and resumes a parked run.
-- [`smthrs logs`](/docs/reference/cli/logs/) reads the events of the run this
+- [`smthrs logs`](/cli/logs) reads the events of the run this
   command started.
-- [`smthrs cancel`](/docs/reference/cli/cancel/) ends a run no executor
+- [`smthrs cancel`](/cli/cancel) ends a run no executor
   takes.
 - [Plan, approve, run](/docs/guides/plan-approve-run/) shows the procedure.
-
-## Sources
-
-- `packages/smithers/src/Verb.ts`
-- `packages/smithers/src/Command.ts`
-- `packages/smithers/src/Detached.ts`
-- `packages/smithers/src/CliError.ts`
-- `packages/smithers/src/Output.ts`
-- `packages/smithers/src/Unsupported.ts`
-- `packages/smithers/src/Environment.ts`
-- `packages/smithers/src/Project.ts`
-- `packages/smithers/src/ExecutorOwnership.ts`
-- `packages/smithers/src/Application.ts`
-- `packages/smithers/src/NodeControl.ts`
-- `packages/smithers/src/bin.ts`
-- `packages/smithers/control/src/ControlSchema.ts`
-- `packages/smithers/test/EndToEnd.test.ts`
-- `packages/smithers/README.md`
-- `apps/site/src/data/help/up.txt`

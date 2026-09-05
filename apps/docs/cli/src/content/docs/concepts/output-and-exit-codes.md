@@ -89,11 +89,12 @@ no sentence is reported by the fields it does carry, contract code first:
 ClaimLost: claim_lost runId=run-42
 ```
 
-Effect's own error reporting is disabled in `bin.ts`, because it logs the cause
-to stdout with a timestamp and a stack. Every built-in logger is redirected to
-stderr, and every log line passes through the same redaction rules
-`@smthrs/journal` applies on its write path, so a credential handed to
-`Effect.logInfo` reaches neither the terminal nor `.flows/logs/<run-id>.log`.
+Nothing else reaches stdout. The runtime's own cause reporting is turned off,
+so a timestamped stack never lands on top of the document a script is reading.
+Every built-in logger is redirected to stderr, and every log line passes
+through the same redaction rules `@smthrs/journal` applies on its write path,
+so a credential handed to `Effect.logInfo` reaches neither the terminal nor
+`.flows/logs/<run-id>.log`.
 
 ## Resource bounds on reads
 
@@ -114,5 +115,5 @@ spinners on a terminal and a plain-line fallback everywhere else.
 terminals, `CI` to be anything but `"true"`, and `TERM` to be anything but
 `dumb`. Under `--json` a verb prints its document through `Output` and does not
 call the terminal renderer at all. See
-[the terminal rendering notes](/clack-notes/) for the research and the
-design decision behind it.
+[Embed the command tree](/guides/embed-the-command-tree/) for driving the
+terminal renderer from your own program.

@@ -1,0 +1,75 @@
+/**
+ * Public spelling aliases shared by target and durable command invocations.
+ * @since 1.0.0
+ */
+
+const targets = new Set([
+  "build",
+  "test",
+  "lint",
+  "docs",
+  "review",
+  "ci",
+  "run",
+  "target",
+  "targets",
+  "query",
+  "graph",
+  "owners",
+  "install",
+  "git-hooks",
+  "gitHooks",
+  "show",
+  "affected",
+  "watch",
+  "explain",
+  "cache",
+  "clean",
+  "info"
+])
+const valued = new Set(["--root", "--workspace", "-w", "--ui", "--format", "--filter", "--fields", "--audience"])
+const switches = new Set([
+  "--json",
+  "--help",
+  "-h",
+  "--schema",
+  "--llms",
+  "--verbose",
+  "--no-color",
+  "--silent",
+  "--no-silent"
+])
+
+/**
+ * Accept --root for target commands while preserving the published --workspace schema.
+ * Durable commands keep --root unchanged, and arguments after -- are never rewritten.
+ * @category parsing
+ * @since 1.0.0
+ */
+export const normalizeArguments = (args: ReadonlyArray<string>): Array<string> => {
+  let index = 0
+  while (index < args.length && args[index]!.startsWith("-")) {
+    const flag = args[index]!
+    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
+    else if (valued.has(flag)) index += 2
+    else return [...args]
+  }
+  const command = args[index]
+  if (command === undefined) return [...args]
+  const bare = command.startsWith("//") || command.startsWith(":")
+  const generator = command === "generate" && ["ci", "package"].includes(args[index + 1] ?? "")
+  if (!bare && !targets.has(command) && !generator) return [...args]
+  const depth = generator || command === "show" || command === "cache" ? 2 : 1
+  const commandPath = bare ? ["target", command] : args.slice(index, index + depth)
+  const options = [...args.slice(0, index), ...args.slice(index + (bare ? 1 : depth))]
+  let positional = false
+  return [
+    ...commandPath,
+    ...options.map((argument) => {
+      if (argument === "--") positional = true
+      if (positional) return argument
+      if (argument === "--root") return "--workspace"
+      return argument.startsWith("--root=") ? `--workspace=${argument.slice(7)}` : argument
+    })
+  ]
+}

@@ -1,9 +1,10 @@
 /**
- * The fault tier: the served control-plane cases.
+ * The fault tier: process, durability, time-travel, redaction, and served
+ * control-plane cases.
  *
- * Every case here spawns `smithers serve` on an ephemeral port and talks to
- * it over a real socket. Ports and server processes are machine-global, so
- * the tier runs serially.
+ * These cases spawn real hosts and child processes, kill or suspend them, and
+ * use real SQLite files and sockets. Ports, pids, and process groups are
+ * machine-global, so the tier runs serially.
  *
  * Coverage is off. The work these cases do happens in child processes this one
  * never instruments, and `vitest.config.ts` beside this file stays the coverage

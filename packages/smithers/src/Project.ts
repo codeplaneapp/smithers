@@ -18,9 +18,10 @@
  * @since 1.0.0
  */
 import { Context, Layer } from "effect"
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 import * as Environment from "./Environment.ts"
+import * as CliError from "./CliError.ts"
 
 /**
  * Directory and file names that mark a Smithers 0.x project.
@@ -299,3 +300,21 @@ export const layer = (
     Layer.succeed(MigrationRoot, migrationRoot),
     Layer.succeed(LegacyState, legacyState(projectRoot))
   )
+
+/**
+ * Refuses an inaccessible project before a command creates durable state.
+ * @category validation
+ * @since 1.0.0
+ */
+export const assertRoot = (projectRoot: string): void => {
+  try {
+    if (!statSync(projectRoot).isDirectory()) {
+      throw new CliError.UsageError({ message: `--root ${JSON.stringify(projectRoot)} must be a directory` })
+    }
+  } catch (cause) {
+    if (cause instanceof CliError.UsageError) throw cause
+    throw new CliError.UsageError({
+      message: `--root ${JSON.stringify(projectRoot)} is not an accessible directory`
+    })
+  }
+}

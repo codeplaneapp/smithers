@@ -20,6 +20,7 @@ import { DatabaseSync } from "node:sqlite"
 import * as Environment from "./Environment.ts"
 import * as Legacy from "./Legacy.ts"
 import * as Project from "./Project.ts"
+import { starterSeats } from "./Providers.ts"
 
 /**
  * The outcome of one check.
@@ -63,11 +64,23 @@ export interface Report {
  */
 export const minimumNode = "22.19.0"
 
-const order = (version: string): ReadonlyArray<number> =>
-  version.replace(/^v/, "").split(".").map((part) => Number.parseInt(part, 10) || 0)
+/**
+ * Node versions supported by the CLI and its runtime dependencies.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const supportedNodeRange = "^22.19.0 || >=24.11.0"
+
+const order = (version: string): ReadonlyArray<number> | undefined => {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version)
+  if (match === null) return undefined
+  const parts = match.slice(1).map(Number)
+  return parts.every(Number.isSafeInteger) ? parts : undefined
+}
 
 /**
- * Whether a Node version satisfies the rc.0 floor.
+ * Whether a Node version is supported and satisfies an optional higher floor.
  *
  * @category predicates
  * @since 1.0.0
@@ -75,6 +88,9 @@ const order = (version: string): ReadonlyArray<number> =>
 export const satisfiesNode = (version: string, minimum: string = minimumNode): boolean => {
   const actual = order(version)
   const required = order(minimum)
+  if (actual === undefined || required === undefined) return false
+  const [major, minor] = actual as readonly [number, number, number]
+  if (major === 22 ? minor < 19 : major < 24 || major === 24 && minor < 11) return false
   for (let index = 0; index < required.length; index++) {
     const left = actual[index] ?? 0
     const right = required[index]!
@@ -193,7 +209,7 @@ const registry = (root: string, discoveredFlows: ReadonlyArray<DiscoveredFlow> |
 
 /** Which provider credentials are present, and which are exported but empty. */
 const providers = (environment: Environment.Source): Check => {
-  const variables = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "CEREBRAS_API_KEY"]
+  const variables = starterSeats.map(([variable]) => variable)
   const present = variables.filter((variable) => (environment[variable] ?? "") !== "")
   const blank = variables.filter((variable) => environment[variable] === "")
   const auth = Environment.read(environment, "SMITHERS_OPENAI_AUTH")
@@ -275,7 +291,7 @@ export const inspect = (options: Options): Report => {
     level: satisfiesNode(nodeVersion) ? "ok" : "fail",
     detail: satisfiesNode(nodeVersion)
       ? `v${nodeVersion.replace(/^v/, "")}`
-      : `v${nodeVersion.replace(/^v/, "")} is below the ${minimumNode} floor the durable engine requires`
+      : `v${nodeVersion.replace(/^v/, "")} is unsupported; use Node 22.19+ within Node 22, or Node 24.11+`
   })
 
   if (options.jj !== undefined) {

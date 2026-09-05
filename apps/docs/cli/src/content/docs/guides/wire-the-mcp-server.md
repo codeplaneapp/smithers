@@ -1,12 +1,12 @@
 ---
 title: "Wire the MCP server into an agent"
-description: "Register smthrs --mcp with Claude Code or Codex, scope the tool list a session sees, and know which 0.x tools answer unsupported."
+description: "Connect the canonical MCP command surface, keep approval decisions independent, and configure an explicitly delegated compatibility host."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/docs/guides/wire-the-mcp-server.md"
 ---
 
 `smthrs --mcp` serves the Smithers MCP server on stdio, over the same control
-plane the verbs use. An agent that speaks MCP can list flows, watch runs, and
-inspect pending approvals without shelling out.
+plane the verbs use. An agent can inspect flows, plan work, execute an already
+approved plan, and observe runs. Approval decisions are excluded by default.
 
 ## Register it
 
@@ -29,8 +29,8 @@ name is a usage error that lists the known ids. `smthrs mcp` on its own prints
 the group's help; `add` is its only subcommand.
 
 The entry records the current executable and entry path verbatim, not a package
-runner. A checkout under development therefore registers the CLI under edit,
-and an installed CLI registers its own installed path. Smithers 0.x registered
+runner. An installed CLI therefore registers its own installed path, and a
+local development install registers itself. Smithers 0.x registered
 `bunx smthrs --mcp`, which silently pointed every agent at the last published
 build.
 
@@ -50,71 +50,53 @@ smthrs --mcp
 command rather than a subcommand. The flag is read from the raw argument vector
 before the command tree parses anything.
 
-Three flags scope one session, and they are read the same way:
+## Canonical tools and independent approval
 
-| Flag | Effect |
-| --- | --- |
-| `--surface semantic` | The eleven control-backed tools. The default. |
-| `--surface raw` | One directory entry per shipped CLI verb, naming the shell command. |
-| `--surface both` | Both lists. |
-| `--allowed-tools a,b,c` | Only these tool names. |
-| `--read-only` | Only tools that read. |
+The executable uses the unified command tree through Incur's MCP discovery
+tools: `search_tools`, `get_tool_details`, and `call_write_tool`. Discover
+canonical names such as `flow_list`, `flow_plan`, `flow_execute`, `runs_show`,
+and `approvals_list`; fetch their schema before invoking them.
 
-The raw surface is a directory, not a second execution path. Smithers 0.x
-mirrored every CLI command as an MCP tool by reflecting its argument parser,
-which made MCP an undocumented copy of the command line. Naming the verbs and
-pointing at the semantic tool that performs each one keeps exactly one
-execution path.
+`approvals_approve`, `approvals_deny`, and `flow_start` are absent from both
+discovery and dispatch. `flow_start` is excluded because it implicitly approves
+the plan. The operator can instead review the payload and use
+`smthrs approvals approve` or `smthrs approvals deny` locally. An agent can then
+execute the approved plan. Changing `--audience` changes presentation, not
+approval authority. MCP invocations carry the local actor `mcp/agent`.
 
-## The tool surface
+This is an approval boundary, not an operating-system sandbox. Do not grant
+arbitrary host shell, code execution, or database write access to an actor that
+must not bypass a human gate.
 
-Eleven tools reach the control plane: `list_flows`, `run_flow`,
-`list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`,
-`list_pending_approvals`, `resolve_approval`, `get_node_detail`, and
-`get_chat_transcript`.
+## Compatibility hosts
 
-Every tool answers one envelope:
+The separately exported `McpServer` library retains the 0.x semantic tool names
+and its `{ ok, data?, error? }` result envelope. It is not the canonical
+executable's discovery protocol. Its `Options` choose `surface` (`semantic`,
+`raw`, or `both`), `allowedTools`, and `readOnly`. Raw tools are shell-command
+directory entries, not another execution path. An allowlist cannot enable
+approval-bearing tools on its own.
 
-```json
-{ "ok": true, "data": {} }
-```
+The default semantic session exposes nine Control-backed tools plus ten
+unsupported compatibility entries. `run_workflow` and `resolve_approval` are
+excluded. A custom host can set `approvalTools: true` and a host-authenticated
+`principal: { id, kind }`; that only exposes the tools. The receiving Control
+runtime must independently delegate the exact identity, target kind, and scope
+using `ApprovalAuthority`. Without a configured principal the actor is
+`mcp/agent`, never the local operator. Tool arguments cannot choose that actor.
 
-```json
-{ "ok": false, "error": { "code": "unsupported", "message": "..." } }
-```
+`resolve_approval` defaults to `once`; `run_workflow` needs `run`-scope Plan
+approval. `remembered` must be explicitly delegated. See
+[approval authority](https://control.smithers.sh/guides/approvals/#who-may-decide).
+If a host delegates approval to an agent, describe that as automated approval,
+not independent human review. When using a remote Control client, the remote
+server authenticates the connection; give each trust domain its own credential
+and policy rather than sharing an operator credential.
 
-Ten 0.x tool names are still listed and answer `{ ok: false, error: { code:
-"unsupported" } }` with the reason, rather than disappearing:
-`revert_attempt`, `fork_run`, `replay_run`, `rewind_run`, `get_timeline`, and
-`time_travel` because time travel is a library API in
-[`@smthrs/time-travel`](https://time-travel.smithers.sh/reference/api/) that the CLI does not compose;
-`restore_checkpoint` and `list_snapshots` because worktree lanes and snapshot
-restore are deferred; `list_artifacts` because the artifact projection is not
-in this release; and `ask_human` because there is no question RPC at all, so
-`list_pending_approvals` is the replacement.
-
-`McpServer.unsupportedTools` and `McpServer.unsupportedReasons` are the
-authority for that list.
-
-Reserved `system/*` flows are not listed and cannot be launched, matching
-`smthrs up` and `smthrs ls`.
-
-Every MCP mutation is attributed to an `agent` principal. Approval and denial
-are operator-only: `resolve_approval` returns `UNAUTHORIZED` at every scope,
-including `remembered`. `run_flow` also returns `UNAUTHORIZED` when it
-attempts to approve its plan, and launches no run. Operators use `smthrs up`
-to launch a flow and `smthrs approve` or `smthrs deny` to decide an approval.
-Read tools, including `list_pending_approvals`, remain available.
-
-## Bounds
-
-One request or response frame is limited to 4 MiB, and an oversized input line
-is discarded incrementally before JSON decoding rather than buffered. One
-history result is limited to 10,000 events and 1 MiB. Crossing either boundary
-returns `RESOURCE_LIMIT` in the envelope.
-
-Failures are redacted before they cross the protocol boundary, and every tool
-argument is decoded against the same closed schema the server advertises.
+Compatibility frames are bounded to 4 MiB; history results to 10,000 events and
+1 MiB. These are the `McpServer` library's bounds, not a claim about Incur's
+transport limits. `McpServer.unsupportedTools` and `unsupportedReasons` enumerate
+the retained tools that answer `unsupported`.
 
 ## The other direction
 

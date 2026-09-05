@@ -6,8 +6,7 @@ sidebar:
 ---
 
 This quickstart takes one directory from empty to a settled run. Every command
-here is a real `smthrs` process against one real project, which is how
-`packages/smithers/test/EndToEnd.test.ts` exercises the same loop.
+here is a real `smthrs` process against one real project.
 
 By the end you will have a project with `.flows/control.db` and
 `.flows/engine.db` on disk, one flow discovered from `flows/`, and one durable
@@ -23,8 +22,8 @@ mkdir hello-smithers && cd hello-smithers
 smthrs doctor
 ```
 
-`doctor` runs nothing. It reports the project root it resolved, both database
-files, the Node version against the 22.19.0 floor, whether `jj` is on the
+`doctor` inspects discovery and existing state without creating execution databases. It reports the project root it resolved, both database
+files, the supported Node range (22.19+ on Node 22, or 24.11+), whether `jj` is on the
 `PATH`, and which provider keys are set. A `fail` line is a fact that will stop
 the next command you run; fix those first.
 
@@ -34,10 +33,20 @@ the next command you run; fix those first.
 smthrs init hello
 ```
 
-`init` writes `flows/hello/flow.mdx` and creates the empty `.flows/` state
-directory, which is what anchors every later command on this project. It also
-adds `.flows/` to `.gitignore` when the directory is a repository. An existing
-flow file is left exactly as it is, so a second `init` destroys nothing.
+`init` creates workspace declarations, a package manifest when absent, and
+`flows/hello/flow.mdx`. Existing declarations are retained. It adds `.flows/`
+to `.gitignore` in a repository; execution databases are acquired by runtime
+commands, not by generating a flow.
+
+For an existing npm workspace, use the supported flow-only path:
+
+```bash
+smthrs generate flow hello
+```
+
+This preserves `packageManager` and adds the flow without inventing an npm
+workspace executor. `init` refuses an unsupported package manager before
+writing project files and points to this command.
 
 The scaffold declares a model seat chosen from the provider credentials this
 environment sets, in the order `doctor` reports them:
@@ -176,7 +185,7 @@ The plan, approve, run sequence collapses into one verb when the plan needs no
 human review:
 
 ```bash
-smthrs up hello --data '{"topic":"durable runs"}'
+smthrs up hello --data '{"args":"Describe how durable runs work"}'
 ```
 
 `up` plans the flow, grants the plan's own approval at `run` scope, and submits

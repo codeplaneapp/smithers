@@ -9,12 +9,13 @@
  * running at all — because that is the ordering a crash actually produces.
  */
 import { isAlive, killProcess } from "@smthrs/testing/Faults"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
 import { journalEventTypes, waitingRow } from "./harness/durableState.ts"
 import { spawnWaitChild } from "./harness/waitChild.ts"
+import { timerFiredStep } from "./harness/waitFlows.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "smithers-e2e-case05-"))
 afterAll(() => rmSync(directory, { recursive: true, force: true }))
@@ -47,6 +48,7 @@ describe("case05 restart while waiting on a timer", () => {
     const resuming = spawnWaitChild({ ...shared, phase: "settle", millis: timerMs })
     await resuming.settled
     expect(await resuming.exited).toBe(0)
+    expect(readFileSync(counterFile, "utf8")).toBe(`${timerFiredStep}\n`)
 
     expect(await waitingRow(filename, executionId)).toBeUndefined()
     const events = await journalEventTypes(filename, executionId)

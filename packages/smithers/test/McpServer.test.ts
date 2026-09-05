@@ -6,7 +6,7 @@
  * by the code that consumes them rather than by a reimplementation.
  */
 import { NodeServices } from "@effect/platform-node"
-import { Control as ControlService, ControlError, ControlRuntime } from "@smthrs/control"
+import { ApprovalAuthority, Control as ControlService, ControlError, ControlRuntime } from "@smthrs/control"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import * as McpClient from "@smthrs/mcp/McpClient"
 import { Cause, Effect, Exit, Layer, Schema, Stream } from "effect"
@@ -26,7 +26,13 @@ afterEach(() => {
   while (staged.length > 0) rmSync(staged.pop()!, { recursive: true, force: true })
 })
 
-const control = TestControl.layer({ now: () => 0 })
+// These existing decoder/handler tests opt in at BOTH the tool catalog and
+// host policy. McpApprovalAuthority.test exercises the nondelegated default.
+const approvalAuthority = Effect.runSync(ApprovalAuthority.make([
+  { principal: { id: "mcp", kind: "agent" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] },
+  { principal: { id: "memory", kind: "test" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] }
+]))
+const control = TestControl.layer({ now: () => 0, approvalAuthority })
 
 const callWith = <E>(
   provided: Layer.Layer<ControlService.Control, E>,
@@ -44,7 +50,7 @@ const rpcCallWith = async <E>(
   const reply = await Effect.runPromise(
     McpServer.respond(
       { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } as never,
-      McpServer.tools(),
+      McpServer.tools({ approvalTools: true }),
       "1.0.0-rc.0"
     ).pipe(Effect.provide(provided))
   ) as { readonly result: { readonly structuredContent: McpServer.Envelope } }
@@ -54,7 +60,7 @@ const rpcCallWith = async <E>(
 const rpcCall = (name: string, args: Record<string, unknown> = {}) => rpcCallWith(control, name, args)
 
 const find = (name: string) =>
-  McpServer.tools({ surface: "both", verbs: Verb.shipped })
+  McpServer.tools({ surface: "both", verbs: Verb.shipped, approvalTools: true })
     .find((tool) => tool.name === name)!
 
 describe("the tool surface", () => {
@@ -107,8 +113,8 @@ describe("the tool surface", () => {
     expect(JSON.stringify(result)).toContain("unsupported")
   })
 
-  it("defaults to the semantic surface, all twenty-three tools", () => {
-    expect(McpServer.tools().map((tool) => tool.name)).toHaveLength(23)
+  it("defaults to the semantic surface without the two approval-bearing tools", () => {
+    expect(McpServer.tools().map((tool) => tool.name)).toHaveLength(21)
   })
 
   it("mirrors the shipped verbs on the raw surface", () => {
@@ -117,11 +123,13 @@ describe("the tool surface", () => {
     expect(raw).toHaveLength(Verb.shipped.length)
     expect(raw.map((tool) => tool.name)).toContain("cli_ps")
     expect(raw.find((tool) => tool.name === "cli_ps")?.description).toContain("smthrs ps")
-    expect(McpServer.tools({ surface: "both", verbs: Verb.shipped })).toHaveLength(23 + Verb.shipped.length)
+    expect(McpServer.tools({ surface: "both", verbs: Verb.shipped })).toHaveLength(21 + Verb.shipped.length)
   })
 
   it("scopes a session to an allowlist and to read-only tools", () => {
     expect(McpServer.tools({ allowedTools: ["get_run", "run_flow"] }).map((tool) => tool.name))
+      .toEqual(["get_run"])
+    expect(McpServer.tools({ approvalTools: true, allowedTools: ["get_run", "run_flow"] }).map((tool) => tool.name))
       .toEqual(["run_flow", "get_run"])
     expect(McpServer.tools({ readOnly: true }).map((tool) => tool.name))
       .not.toContain("run_flow")
@@ -280,7 +288,7 @@ describe("the envelope", () => {
         })
         const grants = yield* runtime.grants
         return { result, scopes: grants.map((grant) => grant.scope) }
-      }).pipe(Effect.provide(control), Effect.orDie)
+      }).pipe(Effect.provide(TestControl.layer({ now: () => 0 })), Effect.orDie)
     )
 
   it("refuses approval when MCP omits scope", async () => {
@@ -315,7 +323,7 @@ describe("the envelope", () => {
         Effect.gen(function*() {
           const service = yield* ControlService.Control
           const runtime = yield* ControlRuntime.ControlRuntime
-          const operator = { id: "human", kind: "operator", stampedAt: 0 } as const
+          const operator = { id: "local", kind: "operator", stampedAt: 0 } as const
           const card = yield* service.plan({ flowId: "system/test", input: {} })
           yield* service.approve({ ...card.approval, principal: operator })
           const receipt = yield* service.run({
@@ -343,12 +351,12 @@ describe("the envelope", () => {
           const result = yield* find("resolve_approval").call({ approval, decision, scope: "remembered" })
           expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
           expect(yield* runtime.grants).toEqual(before)
-          expect((yield* runtime.lookupApproval(target)).resolved).toBe(false)
+          expect((yield* runtime.lookupApproval(target))._tag).toBe("Pending")
           expect((yield* runtime.getRun(receipt.runId)).status).toBe("waiting-approval")
           expect(yield* find("list_pending_approvals").call({})).toMatchObject({ ok: true })
           expect(yield* find("get_run").call({ runId: receipt.runId })).toMatchObject({ ok: true })
           expect((yield* service.approve({ ...approval, principal: operator }))._tag).toBe("Accepted")
-        }).pipe(Effect.provide(control))
+        }).pipe(Effect.provide(TestControl.layer({ now: () => 0 })))
       )
     }
   )
@@ -509,7 +517,7 @@ describe("what each tool answers on the path through", () => {
     envelope: { capabilities: [], flows: [], budget: {} }
   } as const
 
-  const projectControl = TestControl.layer({ now: () => 0, flows: [demoFlow] })
+  const projectControl = TestControl.layer({ now: () => 0, flows: [demoFlow], approvalAuthority })
 
   const event = (sequence: number, kind: string, payload: unknown) => ({
     sequence,
@@ -548,16 +556,16 @@ describe("what each tool answers on the path through", () => {
         }))
     ).pipe(Layer.provide(projectControl))
 
-  it("refuses self-approval through run_flow and leaves no launched run", async () => {
-    await Effect.runPromise(
-      Effect.gen(function*() {
-        const runtime = yield* ControlRuntime.ControlRuntime
-        const result = yield* find("run_flow").call({ flowId: "demo/ship", input: { target: "main" } })
-        expect(result).toMatchObject({ ok: false, error: { code: "UNAUTHORIZED" } })
-        expect(yield* runtime.grants).toEqual([])
-        expect(yield* runtime.listRuns).toEqual([])
-      }).pipe(Effect.provide(projectControl))
-    )
+  it("plans, approves for the run, and launches a project flow", async () => {
+    const result = await callWith(projectControl, find("run_flow"), {
+      flowId: "demo/ship",
+      input: { target: "main" }
+    }) as { readonly ok: true; readonly data: { readonly runId: string } }
+
+    // This test host explicitly delegated run-scope Plan approval to its MCP
+    // actor. Undelegated hosts leave the decision for an authorized operator.
+    expect(result.ok).toBe(true)
+    expect(result.data.runId).toBeTypeOf("string")
   })
 
   it("answers a watch with the run's status and the events past the cursor", async () => {
@@ -673,7 +681,7 @@ describe("the JSON-RPC surface", () => {
       readonly result: { readonly tools: ReadonlyArray<Record<string, unknown>> }
     }
 
-    expect(listed.result.tools).toHaveLength(23)
+    expect(listed.result.tools).toHaveLength(21)
     expect(listed.result.tools[0]).toMatchObject({ name: "list_flows", annotations: { readOnlyHint: true } })
   })
 
@@ -848,7 +856,7 @@ describe("the in-process stdio loop", () => {
 })
 
 describe("a real stdio round trip", () => {
-  it("connects, lists the tools, and calls one of each kind", async () => {
+  it("discovers canonical tools, invokes a read, and reports a refused request", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "smithers-mcp-"))
     staged.push(cwd)
 
@@ -874,26 +882,29 @@ describe("a real stdio round trip", () => {
             // arrives with, so a change to that number is never silent.
             handshakeTimeoutMs: 45_000
           })
-          const supported = yield* client.callTool("list_flows", {})
-          const unsupported = yield* client.callTool("time_travel", {})
-          return { tools: client.tools.map((tool) => tool.name), supported, unsupported }
+          const search = yield* client.callTool("search_tools", { query: "flow list" })
+          const details = yield* client.callTool("get_tool_details", { name: "flow_list" })
+          const supported = yield* client.callTool("call_write_tool", { name: "flow_list", arguments: {} })
+          const refused = yield* client.callTool("call_write_tool", {
+            name: "runs_show",
+            arguments: { run: "missing-run" }
+          })
+          return { tools: client.tools.map((tool) => tool.name), search, details, supported, refused }
         })
       ).pipe(Effect.provide(NodeServices.layer), Effect.orDie)
     )
 
     expect(McpClient.defaultHandshakeTimeoutMs).toBe(10_000)
-    expect(result.tools).toHaveLength(23)
-    expect(result.tools).toContain("list_flows")
-    expect(result.tools).toContain("ask_human")
+    expect(result.tools.sort()).toEqual(["call_read_tool", "call_write_tool", "get_tool_details", "search_tools"])
+    expect(result.search.content[0]?.text).toContain("flow_list")
+    expect(result.details.content[0]?.text).toContain("inputSchema")
 
-    // One Control-backed tool answering over the real transport, and one
-    // unsupported envelope pinned as the contract states it.
-    const supported = JSON.parse(String(result.supported.content[0]?.text)) as McpServer.Envelope
-    expect(supported).toMatchObject({ ok: true })
-    expect(result.supported.isError).toBe(false)
-
-    const unsupported = JSON.parse(String(result.unsupported.content[0]?.text)) as McpServer.Envelope
-    expect(unsupported).toMatchObject({ ok: false, error: { code: "unsupported" } })
-    expect(result.unsupported.isError).toBe(true)
+    // Progressive discovery wraps unclassified tools in call_write_tool;
+    // neither invocation here requests a mutation. Results may include CTA
+    // text after the JSON document, as specified by Incur's MCP adapter.
+    expect(result.supported.content[0]?.text).toMatch(/"items":\s*\[\]/)
+    expect(result.supported.isError).not.toBe(true)
+    expect(result.refused.content[0]?.text).toContain("Unknown run missing-run")
+    expect(result.refused.isError).toBe(true)
   }, 60_000)
 })

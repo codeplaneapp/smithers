@@ -1,18 +1,26 @@
 ---
 title: "The command surface"
-description: "How one executable answers in three modes, why the shipped verb list and the removed verb list are both closed, and where the canonical per-verb reference lives."
+description: "The unified public parser and the retained Effect compatibility tree."
 sidebar:
   order: 1
 ---
 
-`smthrs` is one executable with a closed surface in both directions. It names
+The public `smthrs` command tree is `Cli.makeCli`: Incur parses Zod schemas,
+then Effect supplies execution and durable services. It combines target
+execution, `flow`, `runs`, `approvals`, and operator groups. See the
+[canonical command reference](../reference/cli/README.md) for current names,
+formatting, and project selection.
+
+The executable routes hidden flat aliases through the retained `Command.cli`
+Effect tree; the implementation notes below describe that compatibility path.
+Its legacy catalog names
 every verb that ships and every verb that was removed, so a script written
 against Smithers 0.x is told what happened to each spelling instead of getting
 a parser error.
 
 ## Three modes, decided before parsing
 
-`src/bin.ts` inspects the raw argument vector before it builds anything:
+The executable inspects the raw argument vector before it builds anything:
 
 1. **A document.** If the first flag is `--help` or `--version`, the command
    tree renders the document and nothing else runs. No project is resolved, no
@@ -54,8 +62,7 @@ one. `Verb.subcommands` is the same list minus `completions`, which
 rather than as a subcommand.
 
 The contract is that a verb either ships with a handler or is removed and says
-so. A verb that appears in neither list, or in both, fails
-`packages/smithers/test/Verb.test.ts`.
+so. Neither list may omit a verb, and no verb may appear on both.
 
 Six aliases survive, and all six are hidden from `--help` so the help document
 shows the canonical surface only:
@@ -127,14 +134,11 @@ launch would park with nothing to run.
 
 ## Where the per-verb reference lives
 
-The canonical reference for each verb, with its arguments, flags, output, exit
-codes, and captured `--help`, is on smithers.sh under `/cli/<verb>`: for
-example [`smthrs plan`](/cli/plan), [`smthrs run`](/cli/run), and
-[`smthrs up`](/cli/up). Those pages are generated from the real parser and the
-release policy by `apps/site/scripts/gen-cli-data.mjs`, so they cannot drift
-from the binary.
+The reference for each verb, with its arguments, flags, output, exit codes, and
+verbatim `--help` text, is on smithers.sh under `/cli/<verb>`: for example
+[`smthrs plan`](/cli/plan), [`smthrs run`](/cli/run), and
+[`smthrs up`](/cli/up). Those pages are generated from the parser the
+executable runs, so they describe the binary you installed.
 
-This package also carries source-generated reference pages for three verbs
-under `reference/cli/`. See
-[the CLI reference index](../reference/cli/README.md) for what those pages are
-for and which source wins when the two disagree.
+This site carries longer pages for the three verbs that start a run. See
+[the CLI reference index](../reference/cli/README.md).

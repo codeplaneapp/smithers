@@ -11,6 +11,7 @@
  */
 import { Action, DurableDeferred, Flow, HumanTask, Interpreter, Sleep } from "@smthrs/flow"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import { Node } from "@smthrs/plan"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
@@ -22,6 +23,9 @@ export type WaitMode = "approval" | "event" | "timer"
 
 /** The step recorded in the execution counter by the waiting-event flow. */
 export const preparedStep = "prepared"
+
+/** The externally counted action after a durable timer fires. */
+export const timerFiredStep = "timer-fired"
 
 /** The human task's name; its deferred and token are derived from it. */
 export const taskName = "release"
@@ -62,12 +66,18 @@ export const EventFlow = Flow.make("e2e/wait/event", {
   body: (payload) => EventStep.call(payload)
 })
 
-/** A run that parks on a timer. */
+/** A counted action that must not execute twice when timer hosts race. */
+export const TimerStep = Action.make("e2e/wait/TimerStep", {
+  payload: {},
+  success: Schema.Void
+})
+
+/** A run that parks on a timer, then records one observable action. */
 export const TimerFlow = Flow.make("e2e/wait/timer", {
   payload: { millis: Schema.Number },
   success: Schema.Void,
   error: Sleep.SleepRequestInvalid,
-  body: ({ millis }) => Sleep.action.call({ millis })
+  body: ({ millis }) => Node.andThen(Sleep.action.call({ millis }), TimerStep.call({}))
 })
 
 /** Everything a parking child needs. */
@@ -84,10 +94,14 @@ export const approvalRegistration = Interpreter.layer(ApprovalFlow).pipe(
 )
 
 /** The registration layer of the waiting-timer flow. */
-export const timerRegistration = Interpreter.layer(TimerFlow).pipe(
-  Layer.provideMerge(Sleep.layer),
-  Layer.provideMerge(Action.layerImplementations)
-)
+export const timerRegistration = (options: WaitOptions) =>
+  Interpreter.layer(TimerFlow).pipe(
+    Layer.provideMerge(Sleep.layer),
+    Layer.provideMerge(
+      TimerStep.toLayer(() => Effect.sync(() => appendFileSync(options.counterFile, `${timerFiredStep}\n`)))
+    ),
+    Layer.provideMerge(Action.layerImplementations)
+  )
 
 /** The registration layer of the waiting-event flow. */
 export const eventRegistration = (options: WaitOptions) =>
@@ -120,6 +134,6 @@ export const hostOptions = (options: WaitOptions) => ({
  */
 export const host = (mode: WaitMode, options: WaitOptions) => {
   if (mode === "approval") return NodeRuntime.layerHost(hostOptions(options), approvalRegistration)
-  if (mode === "timer") return NodeRuntime.layerHost(hostOptions(options), timerRegistration)
+  if (mode === "timer") return NodeRuntime.layerHost(hostOptions(options), timerRegistration(options))
   return NodeRuntime.layerHost(hostOptions(options), eventRegistration(options))
 }

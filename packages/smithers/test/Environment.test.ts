@@ -7,8 +7,13 @@ import * as Environment from "../src/Environment.ts"
 describe("the environment contract", () => {
   it("names every variable rc.0 reads", () => {
     expect(Environment.names.map((name) => name.name)).toEqual([
+      "SMITHERS_AUDIENCE",
       "SMITHERS_REMOTE",
       "SMITHERS_API_KEY",
+      "SMITHERS_CREDENTIAL_KEY",
+      "SMITHERS_CACHE_URL",
+      "SMITHERS_CACHE_TOKEN",
+      "SMITHERS_CACHE_NAMESPACE",
       "SMITHERS_MCP_CONFIG",
       "SMITHERS_OPENAI_AUTH",
       "SMITHERS_TEST_COMMAND",

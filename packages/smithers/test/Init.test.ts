@@ -201,12 +201,14 @@ describe("the seat the scaffold writes", () => {
     })
   })
 
-  it("skips a provider doctor lists and this host cannot route", () => {
-    // `Doctor` names CEREBRAS_API_KEY a provider key and
-    // `NodeControl.seatResolver` has no route for the provider, so a scaffold
-    // that chose it would write a flow that cannot launch (release rehearsal).
-    expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).seat).toBe("anthropic:claude-sonnet-4-5")
-    expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" }).resolved).toBe(false)
+  it("selects a compatible provider the production executor can route", () => {
+    expect(Init.defaultSeat({ CEREBRAS_API_KEY: "k" })).toEqual({
+      seat: "cerebras:gpt-oss-120b",
+      variable: "CEREBRAS_API_KEY",
+      resolved: true
+    })
+    expect(Init.defaultSeat({ MOONSHOT_API_KEY: "k" }).seat).toBe("moonshot:kimi-k3")
+    expect(Init.defaultSeat({ GOOGLE_API_KEY: "k" }).seat).toBe("gemini:gemini-2.5-pro")
   })
 
   it("writes the seat, and the sentence that says how to change it, into the frontmatter", () => {

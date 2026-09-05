@@ -27,7 +27,7 @@ ordinary directory name: requiring a project marker next to a bare `flows/`
 keeps the anchor on the directory a project actually starts at.
 
 The upward walk stops at the repository root, inclusive, on `.git` or `.jj`.
-Without that bound, a command run in a checkout under `$HOME` would keep
+Without that bound, a command run in a repository under `$HOME` would keep
 climbing into the home directory, and rc.0 reads no global state at all.
 
 ## What lives under the root
@@ -87,9 +87,9 @@ The notice names the path, states that rc.0 does not load, resume, or migrate
 CLI before running `smthrs migrate` on the project source.
 
 `smthrs migrate` resolves a different root again, `Project.legacyRoot`, which
-anchors on the 0.x markers rather than on `.flows/`. Anchoring it on `.flows/`
-made `migrate --apply` rewrite an ancestor project's tree when the 0.x project
-had no repository marker of its own.
+anchors on the 0.x markers rather than on `.flows/`. That keeps
+`migrate --apply` on the 0.x project holding those markers, even when it sits
+inside a larger repository and carries no repository marker of its own.
 
 ## The environment
 

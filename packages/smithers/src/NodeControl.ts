@@ -39,8 +39,10 @@ import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import { Migrations, SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
 import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Workspace from "@smthrs/kernel/Workspace"
 import type * as McpClient from "@smthrs/mcp/McpClient"
 import * as McpFlows from "@smthrs/mcp/McpFlows"
@@ -53,6 +55,7 @@ import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import * as Route from "@smthrs/model/Route"
 import type { NotificationQueue } from "@smthrs/notifications"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Registry from "@smthrs/registry/Registry"
@@ -72,7 +75,7 @@ import { RpcSerialization } from "effect/unstable/rpc"
 import { Socket } from "effect/unstable/socket"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { randomUUID } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createServer } from "node:http"
 import type { ListenOptions } from "node:net"
 import { hostname } from "node:os"
@@ -81,6 +84,8 @@ import * as Application from "./Application.ts"
 import * as CliError from "./CliError.ts"
 import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
+import * as HistoryWorkspace from "./history/Workspace.ts"
+import * as CommandStatus from "./internal/CommandStatus.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Providers from "./Providers.ts"
@@ -250,17 +255,7 @@ export const makeConfig = (
 export const config: Effect.Effect<Application.Config, CliError.UsageError> = Effect.try({
   try: () => {
     const configured = makeConfig(process.argv.slice(2), process.env, process.cwd())
-    const projectRoot = configured.root ?? process.cwd()
-    try {
-      if (!statSync(projectRoot).isDirectory()) {
-        throw new CliError.UsageError({ message: `--root ${JSON.stringify(projectRoot)} must be a directory` })
-      }
-    } catch (cause) {
-      if (cause instanceof CliError.UsageError) throw cause
-      throw new CliError.UsageError({
-        message: `--root ${JSON.stringify(projectRoot)} is not an accessible directory`
-      })
-    }
+    Project.assertRoot(configured.root ?? process.cwd())
     return configured
   },
   catch: (cause) =>
@@ -567,7 +562,8 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
  */
 export const engineDurable = (
   root: string,
-  registry?: Layer.Layer<Registry.Registry> | undefined
+  registry?: Layer.Layer<Registry.Registry> | undefined,
+  authority: Pick<SqlControlRuntime.Options, "approvalAuthority" | "principal"> = {}
 ): EngineDurable => {
   const file = databasePath(root)
   // One real process identity per local control plane. A constant pid made two
@@ -608,12 +604,16 @@ export const engineDurable = (
     Layer.orDie
   )
   const runtime = registry === undefined
-    ? SqlControlRuntime.layer({ owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
+    ? SqlControlRuntime.layer({ ...authority, owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
     : Layer.effect(ControlRuntime.ControlRuntime)(
       Effect.gen(function*() {
         const registryService = yield* Registry.Registry
         const discovered = yield* registryService.list()
-        return yield* SqlControlRuntime.make({ owner, flows: [...systemFlows, ...discovered.map(durableFlow)] })
+        return yield* SqlControlRuntime.make({
+          ...authority,
+          owner,
+          flows: [...systemFlows, ...discovered.map(durableFlow)]
+        })
       })
     ).pipe(Layer.provide([stores, NodeCrypto.layer, registry]), Layer.orDie)
   return {
@@ -991,22 +991,34 @@ export const layerExecutor = (
   mcpServers: ReadonlyArray<McpClient.ConnectOptions> = [],
   grants: Layer.Layer<GrantStore.GrantStore> = layerGrantStore(root),
   requestExecutor: Layer.Layer<RequestExecutor.RequestExecutor> = layerRequestExecutor,
-  quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault()
+  quotaPolicy: Layer.Layer<QuotaPolicy.QuotaClassifier> = QuotaPolicy.layerDefault(),
+  executionRoot: string = root
 ): Layer.Layer<
   ControlExecutor.ControlExecutor,
   never,
   ControlRuntime.ControlRuntime | Journal.Journal | NotificationQueue.NotificationQueue | Registry.Registry
 > => {
-  const workspaceRoot = resolve(root)
+  const workspaceRoot = resolve(executionRoot)
+  const canExecute = (runId: string) => Effect.sync(() => HistoryWorkspace.canExecute(root, workspaceRoot, runId))
   // The same guarded platform the registry discovers under: kernel FileSystem
   // over descriptor-relative atomic access, with the Node service bundle
   // (Path, raw spawner, crypto) merged through. `grants` is passed rather than
   // defaulted so the filesystem and the shell below it can never end up asking
   // two different stores.
-  const platform = layerGuardedPlatform(root, grants)
+  const platform = layerGuardedPlatform(workspaceRoot, grants)
+  // Permission checks do not contain a process after its CLI owner crashes.
+  // Keep one durable ledger under the shell, native search/test runners and
+  // MCP connections, and reap only verified children of dead owners before
+  // exposing the spawner. The registration phase receives the engine journal
+  // from NodeFlowsRuntime.layer, so these records survive this process.
+  const contained = ContainedSpawner.layer({ platform: process.platform }).pipe(
+    Layer.provideMerge(platform),
+    Layer.provideMerge(ProcessReaper.layer()),
+    Layer.provide(ProcessLedger.layer({ hostId: hostname(), ownerPid: process.pid }))
+  )
   const guarded = KernelChildProcessSpawner.layer.pipe(
     Layer.provide(grants),
-    Layer.provideMerge(platform)
+    Layer.provideMerge(contained)
   )
   const memory = MemoryStore.layer.pipe(Layer.provide(engine.stores), Layer.orDie)
   // AgentSession installs the effective budget from the approved card around
@@ -1049,6 +1061,7 @@ export const layerExecutor = (
       // than running silently short of the tools it was configured to have.
       const mcp = yield* Effect.forEach(mcpServers, (server) => Effect.orDie(McpFlows.connected(server)))
       return yield* AgentSession.make({
+        canExecute,
         flows: [
           StandardFlows.filesystem(filesystemServices, nativeSearch),
           StandardFlows.shell(shellServices, container),
@@ -1073,13 +1086,13 @@ export const layerExecutor = (
       // themselves, which is blind to every `bash` write. It runs on the host
       // platform rather than on `platform`, for the reasons `layerObserver`
       // states.
-      layerObserver(root),
+      layerObserver(workspaceRoot),
       // Where a run's checkpoints live. Without it `ctx.checkpoint()` and
       // `ctx.base` answer `checkpoint_unavailable`, honestly, and the run
       // takes its readings on the live tree. This is the difference
       // between a run that can prove fails-before without reverting its own
       // work and one that cannot.
-      Checkpoints.layerGit(checkpointStore(environment, root)),
+      Checkpoints.layerGit(checkpointStore(environment, workspaceRoot)),
       layerSeatResolver(environment).pipe(Layer.provide(requestExecutor))
     ])
   )
@@ -1101,7 +1114,8 @@ export const layerExecutor = (
       // 30 seconds after any heartbeat stall. The probe asks the process
       // table instead, and answers only about this host: a run recorded on
       // another host is left to the lease, which `RunStore.steal` verifies.
-      isAlive: Ownership.sameHostPidProbe
+      isAlive: Ownership.sameHostPidProbe,
+      canExecute: (row) => canExecute(row.runId)
     },
     StepBoundary.layer,
     WorkspaceSandbox.layerFileSystem(),
@@ -1131,7 +1145,17 @@ const layerControlFromEngine = (
   const remote = applicationConfig.remote ?? "http://127.0.0.1"
   const root = applicationConfig.root ?? process.cwd()
   const executor = applicationConfig.remote === undefined
-    ? layerExecutor(registry, engine, root, process.env, applicationConfig.mcpServers ?? [])
+    ? layerExecutor(
+      registry,
+      engine,
+      root,
+      process.env,
+      applicationConfig.mcpServers ?? [],
+      undefined,
+      undefined,
+      undefined,
+      applicationConfig.executionRoot ?? root
+    )
     : undefined
   return Application.layer(applicationConfig, registry, engine, executor).pipe(
     Layer.provide([
@@ -1191,11 +1215,7 @@ export const layerOutput = Layer.succeed(
   Output.Output.of({
     render: Effect.fn("Output.render")((value, format) =>
       output.render(value, format).pipe(
-        Effect.tap((rendered) =>
-          Effect.sync(() => {
-            process.exitCode = rendered.exitCode
-          })
-        )
+        Effect.tap((rendered) => CommandStatus.set(rendered.exitCode))
       )
     )
   })
@@ -1215,7 +1235,7 @@ export const layerOutput = Layer.succeed(
 export const layer = (applicationConfig: Application.Config) => {
   const root = applicationConfig.root ?? process.cwd()
   const registry = layerRegistry(root)
-  const durable = engineDurable(root, registry)
+  const durable = engineDurable(root, registry, applicationConfig)
   // Sampled here, before anything opens the control database. `Project.layer`
   // reads the 0.x markers eagerly when it is called, and opening the control
   // database writes `<root>/.flows`, which is the very absence release policy

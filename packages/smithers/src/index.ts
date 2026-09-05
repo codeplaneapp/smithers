@@ -47,6 +47,11 @@ export * as CodexAuth from "./CodexAuth.ts"
  */
 export * as Command from "./Command.ts"
 /**
+ * @category presentation
+ * @since 1.0.0
+ */
+export * as Audience from "./Audience.ts"
+/**
  * @category execution
  * @since 1.0.0
  */
@@ -151,3 +156,8 @@ export * as Verb from "./Verb.ts"
  * @since 1.0.0
  */
 export * as Version from "./Version.ts"
+/**
+ * @category commands
+ * @since 1.0.0
+ */
+export * as Cli from "./Cli.ts"

@@ -4,7 +4,7 @@
  * @since 0.1.0
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
-import type { Control, ControlExecutor } from "@smthrs/control"
+import type { ApprovalAuthority, Control, ControlExecutor, ControlSchema } from "@smthrs/control"
 import { ControlClient, ControlLive, ControlRuntime } from "@smthrs/control"
 import type { Journal } from "@smthrs/journal"
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
@@ -30,6 +30,12 @@ import * as ExecutorOwnership from "./ExecutorOwnership.ts"
  * @since 0.1.0
  */
 export interface Config {
+  /** Trusted local host configuration, never decoded from command arguments. */
+  readonly approvalAuthority?: ApprovalAuthority.Service | undefined
+  /** Transport-owned local identity; remote RPC authentication owns its own actor. */
+  readonly principal?: Omit<ControlSchema.Principal, "stampedAt"> | undefined
+  /** Execution worktree for a durable fork; database and registry stay under root. */
+  readonly executionRoot?: string | undefined
   readonly remote?: string | undefined
   readonly credential?: string | undefined
   /**

@@ -4,11 +4,7 @@ description: "Every public export of @smthrs/cli, module by module: the command 
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/docs/api.md"
 ---
 
-The root entry point exports every module under `src/` as a namespace, and each
-is also importable from `@smthrs/cli/<Module>`. The barrel is complete on
-purpose: a module reachable through one spelling and not the other would be
-public and invisible at once, and `test/Readme.test.ts` compares the package
-README's table against the barrel so the two cannot drift.
+The root entry point exports each public module as a namespace. Import a module directly with `@smthrs/cli/<Module>`.
 
 `@smthrs/cli/package.json` is exported. `@smthrs/cli/internal/*` and
 `@smthrs/cli/*/index` are blocked in the export map.
@@ -42,18 +38,48 @@ redacted before they cross the protocol boundary. Stored and projected values
 are rendered through `Output.renderValue`, so only a validated control receipt
 can set a nonzero process status.
 
+## Cli
+
+`Cli.makeCli(config?)` builds the unified Incur command tree. Its Zod schemas
+describe target, flow, run, approval, and operator commands; handlers acquire
+Effect services only after parsing. Use `.serve(argv)` to run the tree in a
+Node host. See the [CLI reference](/reference/cli/) for command
+groups, machine output, and local-only features.
+
+## Audience
+
+`Audience` is also available from `@smthrs/cli/Audience`. It re-exports the
+shared build/control presentation policy, without acquiring runtime services.
+
+| Export | Purpose |
+| --- | --- |
+| `Mode` | Explicit `auto`, `human`, or `agent` selection. |
+| `Options` | Injected environment, stream capabilities, format, MCP, and verbosity choices. |
+| `Policy` | Audience, selection source, matched harness names, result encoding policy, progress mode, and prompt capability. |
+| `Marker`, `markers` | Source-verified runtime marker registry; no credential or installation probing. |
+| `resolve(options?)` | Pure audience and presentation resolution; evidence contains names, never environment values. |
+| `fromArguments(argv, options?)` | Resolves presentation flags without loading a workspace. |
+| `incurArguments(argv, policy)` | Selects structured Incur formatting for agent-owned terminals; logs default to incremental JSONL. |
+
+Explicit selection overrides detection, and MCP always remains machine-clean.
+This policy affects rendering only, not approvals or permissions. See
+[human and agent output](/reference/cli/#human-and-agent-output).
+
 ## Command
 
-The `smthrs` command tree.
+The retained Effect CLI compatibility tree, used by hidden flat aliases.
+New hosts should use `Cli.makeCli` for the unified public surface.
 
 | Export | Signature | Meaning |
 | --- | --- | --- |
 | `cli` | `Command` | The root command: every shipped verb with a handler, every removed verb and flag as a hidden refusal. |
+| `migrationCli` | `Command` | Local migration inspection tree, composed without opening execution databases. |
+| `doctorCli` | `Command` | Local diagnostics tree using the discovery snapshot without opening execution databases. |
 | `signalKey` | `(runId: string, payload: SignalPayload) => string` | The idempotency key of one signal delivery: `cli:signal:<run-id>:<digest>`. The payload digest is part of the key because two different signals to one run are two mutations. |
 | `latestSequence` | `<E, R>(events: Stream<{ sequence: number }, E, R>) => Effect<number \| undefined, E, R>` | The greatest sequence in a stream, folded without retaining history. Stream failures are preserved, so a caller never substitutes a weaker cursor after a failed read. |
 
-Handlers talk to `Control` and nothing else, so a verb answers the same way
-locally and against `--remote`.
+Run-control handlers use `Control` for local and remote execution. Local
+diagnostic and filesystem commands retain their documented remote refusals.
 
 ## Application
 
@@ -196,7 +222,7 @@ The removal surface.
 | `message`, `flagMessage` | `(...) => string` | The removal sentence for a verb, and for a flag. |
 | `verbError`, `flagError` | `(...) => UnsupportedError` | Those sentences as failures. |
 | `findFlag` | `(parent, flag) => RemovedFlag` | One removed flag, so a handler cannot cite the wrong entry. |
-| `refusal` | `(args: ReadonlyArray<string>) => UnsupportedError \| undefined` | The pre-parse refusal `bin.ts` applies, so a removed verb never opens a database on its way to being refused. |
+| `refusal` | `(args: ReadonlyArray<string>) => UnsupportedError \| undefined` | The refusal for one raw argv, matched before the parser runs, so a removed verb never opens a database on its way to being refused. |
 | `isReservedFlow` | `(flowId: string) => boolean` | Whether an id starts with `system/`. |
 | `reservedFlowError` | `(verb, flowId) => UnsupportedError` | The refusal for one. |
 
@@ -264,7 +290,8 @@ Readiness as one report.
 | `Level` | `"ok" \| "warn" \| "fail"` | A `warn` stops nothing; a `fail` will stop the next command. |
 | `Check`, `Report` | `{ name, level, detail }`, `{ root, checks }` | The report is data. `--json` prints it verbatim. |
 | `minimumNode` | `"22.19.0"` | The floor the durable engine requires. |
-| `satisfiesNode` | `(version, minimum?) => boolean` | Whether a Node version clears it. |
+| `supportedNodeRange` | `"^22.19.0 \|\| >=24.11.0"` | The Node range supported by the CLI's runtime dependencies. |
+| `satisfiesNode` | `(version, minimum?) => boolean` | Whether a Node version is supported and clears an optional higher floor. |
 | `Options` | interface | Every host fact is a parameter, so the report is deterministic in a test. |
 | `inspect` | `(options) => Report` | Runs every check. |
 | `render` | `(report) => string` | One line per check. |
@@ -327,7 +354,7 @@ The agent configurations `smthrs mcp add` writes into.
 | `serverName` | `"smithers"` | The `mcpServers` key written. |
 | `Agent`, `agents` | `{ id, mcpConfig }` | `claude` at `~/.claude.json`, `codex` at `~/.codex/mcp.json`. |
 | `find` | `(id) => Agent \| undefined` | One agent by id. |
-| `launchCommand` | `(execPath?, entry?) => { command, args }` | The current executable and entry, verbatim, so a checkout registers the CLI under edit. |
+| `launchCommand` | `(execPath?, entry?) => { command, args }` | The current executable and entry, verbatim, so a local development install registers itself rather than a package runner. |
 | `Wired` | `{ agent, path, status, reason? }` | What one wiring attempt did. |
 | `addMcp` | `(agent, home?) => Wired` | Registers the server, through a lock file and a temp-plus-rename with the mode preserved. |
 | `manualInstructions` | `(targets?) => string` | What to do by hand when every write failed. |
@@ -394,6 +421,7 @@ Which seats this machine can run.
 | `Chosen`, `chooseSeat` | | The seat picked, and why. |
 | `compatible`, `compatibleKey` | | The provider compatibility table and its lookup. |
 | `defaultSeat` | `Record<Candidate, string>` | The seat string each candidate resolves to. |
+| `starterSeats` | `ReadonlyArray<readonly [variable: string, seat: string]>` | Ordered credential-variable and model-seat pairs used by scaffolding, aligned with the executor's supported provider routes. |
 | `NoSeatError`, `SeatSyntaxError`, `noSeatMessage` | | The two refusals, and the sentence that names what to set. |
 
 ## Gc
@@ -415,7 +443,7 @@ Retention.
 | `Legacy` | `read(path)` opens a 0.x `smithers.db` read-only; `refusal(databases)` is the sentence that names its non-terminal runs; `terminalStatuses` is the vocabulary it counts against. |
 | `ClaudeMirror` | The Claude Code plugin mirror protocol: `contract`, `subscriptionsPath`, `subscriptionTtlMs`, `Subscription`, `readSubscriptions`, `subscribe`, `unsubscribe`, `MirrorNode`, `Frame`, `frame`, `defaultMaxOutputChars`, `terminalStatuses`, `isTerminal`, `Transition`, `notableKinds`, `transition`. |
 | `CodexAuth` | Locates and refreshes the Codex credential store: `refreshUrl`, `clientId`, `locate`, `parse`, `Store`, `MakeOptions`, `make`. |
-| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `next` and `latest` dist-tags and prints the install line. It changes nothing. |
+| `Update` | `packageName`, `registryUrl`, `Status`, `isNewer`, `compare(current, tags)`, `render(status)`. Compares the installed version against the `next` and `latest` dist-tags, `next` first, and prints the install line. It changes nothing. |
 | `Bug` | `defaultEndpoint`, `timeoutMs`, `scrubText`, `scrub`, `Report`, `report`. Everything collected takes the journal's redaction rules before it leaves the machine, and a value carrying a callable, a proxy, or a `toJSON` member is refused rather than rendered. |
 | `Version` | `packageVersion`, read from the shipped manifest. The module throws at import when the manifest declares no version, because printing `undefined` to an operator is worse than refusing to start. |
 

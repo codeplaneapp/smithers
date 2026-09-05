@@ -22,6 +22,7 @@ import * as ResolveJj from "@smthrs/jj/node/resolveJjBinary"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
 import * as Namespace from "@smthrs/memory/Namespace"
 import * as MigrateCommand from "@smthrs/migrate/flow/Command"
+import * as Registry from "@smthrs/registry/Registry"
 import { Ownership } from "@smthrs/run-store"
 import { Clock, Console, Effect, Option, Schema, SchemaIssue, Stream } from "effect"
 import { Argument, CliError as ParserError, Command, Flag, Prompt } from "effect/unstable/cli"
@@ -31,6 +32,7 @@ import { resolve } from "node:path"
 import * as Agents from "./Agents.ts"
 import * as Bug from "./Bug.ts"
 import * as ClaudeMirror from "./ClaudeMirror.ts"
+import * as RunProgress from "./cli/RunProgress.ts"
 import * as CliError from "./CliError.ts"
 import * as Detached from "./Detached.ts"
 import * as Doctor from "./Doctor.ts"
@@ -39,6 +41,7 @@ import * as ExecutorOwnership from "./ExecutorOwnership.ts"
 import * as Forensics from "./Forensics.ts"
 import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
+import * as CommandStatus from "./internal/CommandStatus.ts"
 import * as History from "./internal/History.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
@@ -58,6 +61,7 @@ const global = {
     Flag.withDescription("Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv")
   ),
   json: Flag.boolean("json").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Print the machine-readable document instead of the human rendering")
   ),
   remote: Flag.string("remote").pipe(
@@ -65,7 +69,20 @@ const global = {
     Flag.withDescription("http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE")
   ),
   quiet: Flag.boolean("quiet").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Suppress banners and progress on stderr; stdout documents still print")
+  ),
+  silent: Flag.boolean("silent").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Suppress progress while preserving the command result")
+  ),
+  audience: Flag.choice("audience", ["auto", "human", "agent"] as const).pipe(
+    Flag.withDefault("auto"),
+    Flag.withDescription("Choose human or agent presentation; auto detects the calling harness")
+  ),
+  verbose: Flag.boolean("verbose").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Show progress even when running inside an agent harness")
   ),
   // Declared here so the CLI's own flag validation accepts them; the values
   // are read from raw argv by `NodeControl.makeConfig`, which runs before the
@@ -148,7 +165,7 @@ const removedVerb = (name: string): Unsupported.RemovedVerb =>
   Unsupported.removedVerbs.find((verb) => verb.name === name)!
 
 /** A hidden boolean flag whose presence is a refusal. */
-const removedFlag = (parent: string, name: string) => Flag.boolean(name).pipe(Flag.withHidden)
+const removedFlag = (parent: string, name: string) => Flag.boolean(name).pipe(Flag.withDefault(false), Flag.withHidden)
 
 /** A hidden value flag whose presence is a refusal. */
 const removedValueFlag = (name: string) => Flag.string(name).pipe(Flag.optional, Flag.withHidden)
@@ -333,14 +350,21 @@ const awaitRun = (
   control: ControlService.Service,
   runId: string,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, ControlError.TransportError> =>
-  control.watch(afterSequence === undefined ? { runId } : { runId, afterSequence }).pipe(
-    Stream.filter((event) => settled(event.kind)),
-    Stream.take(1),
-    Stream.runCollect,
-    Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
-    Effect.mapError((error) => watchFailure(error, runId, "settlement"))
-  )
+): Effect.Effect<string | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
+  Effect.gen(function*() {
+    const globals = yield* rootCommand
+    return yield* RunProgress.observe(
+      control.watch(afterSequence === undefined ? { runId } : { runId, afterSequence }),
+      runId,
+      globals.silent || globals.quiet
+    ).pipe(
+      Stream.filter((event) => settled(event.kind)),
+      Stream.take(1),
+      Stream.runCollect,
+      Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
+      Effect.mapError((error) => watchFailure(error, runId, "settlement"))
+    )
+  })
 
 /**
  * Finds the greatest sequence in a stream without retaining its history.
@@ -382,7 +406,7 @@ const awaitOwnedRun = (
   control: ControlService.Service,
   receipt: ControlSchema.Receipt,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, ControlError.TransportError> =>
+): Effect.Effect<string | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
   Effect.gen(function*() {
     // A run that had already settled when the verb reached it has no
     // settlement event left to wait for, and the receipt carries the answer.
@@ -482,9 +506,9 @@ const settlementStatus = (settlement: string | undefined): number | undefined =>
  * `smthrs migrate` reports its own status too.
  */
 const reportSettlement = (settlement: string | undefined) =>
-  Effect.sync(() => {
+  Effect.suspend(() => {
     const status = settlementStatus(settlement)
-    if (status !== undefined) process.exitCode = status
+    return status === undefined ? Effect.void : CommandStatus.set(status)
   })
 
 /** Every event of one run, oldest first. */
@@ -598,7 +622,7 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
 
 const run = Command.make("run", {
   plan: requiredArgument("plan-payload"),
-  resume: Flag.boolean("resume").pipe(Flag.withDescription("Resume the parked run named by the positional argument"))
+  resume: Flag.boolean("resume").pipe(Flag.withDefault(false), Flag.withDescription("Resume the parked run named by the positional argument"))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -615,8 +639,7 @@ const resume = Command.make("resume", { runId: requiredArgument("run-id") }, (co
 const upFlags = {
   flow: requiredArgument("flow", true),
   data,
-  detached: Flag.boolean("detached").pipe(
-    Flag.withAlias("d"),
+  detached: Flag.boolean("detached").pipe(Flag.withDefault(false), Flag.withAlias("d"),
     Flag.withDescription("Launch a local executor in the background and print its run id and log path")
   ),
   serve: removedFlag("up", "serve"),
@@ -1072,14 +1095,14 @@ const readLogs = (runId: Option.Option<string>, follow: boolean, forceJson: bool
 
 const logs = Command.make("logs", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow").pipe(Flag.withDescription("Keep streaming new run events after the recorded history"))
+  follow: Flag.boolean("follow").pipe(Flag.withDefault(false), Flag.withDescription("Keep streaming new run events after the recorded history"))
 }, (config) => readLogs(config.runId, config.follow, false)).pipe(
   Command.withDescription(Verb.find("logs")!.help)
 )
 
 const events = Command.make("events", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow").pipe(Flag.withDescription("Keep streaming new run events after the recorded history"))
+  follow: Flag.boolean("follow").pipe(Flag.withDefault(false), Flag.withDescription("Keep streaming new run events after the recorded history"))
 }, (config) => readLogs(config.runId, config.follow, true)).pipe(
   Command.withDescription("Alias of `logs --json`"),
   Command.unlisted
@@ -1155,6 +1178,7 @@ const suggest = Command.make("suggest", {
     Flag.withDescription("The provider:model seat to scan and implement with, instead of the first available one")
   ),
   list: Flag.boolean("list").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Print the suggestions and exit without asking which one to implement")
   )
 }, (config) =>
@@ -1181,9 +1205,7 @@ const suggest = Command.make("suggest", {
     // The status is the outcome's, not a rendering's: this verb prints as it
     // scans, so there is no one document for `Output.render` to publish a
     // status from. A cancelled prompt is 130, everything else is 0.
-    yield* Effect.sync(() => {
-      process.exitCode = Suggest.exitStatus(outcome)
-    })
+    yield* CommandStatus.set(Suggest.exitStatus(outcome))
   })).pipe(Command.withDescription(Verb.find("suggest")!.help))
 
 /**
@@ -1197,9 +1219,11 @@ const suggest = Command.make("suggest", {
  */
 const migrateFlags = {
   scan: Flag.boolean("scan").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Inventory the project and write the report without planning any unit")
   ),
   apply: Flag.boolean("apply").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Convert the project source, instead of planning the conversion")
   ),
   seat: Flag.string("seat").pipe(
@@ -1211,12 +1235,15 @@ const migrateFlags = {
     Flag.optional
   ),
   acknowledgeRunState: Flag.boolean("acknowledge-run-state").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Accept the 0.x run state the report lists and migrate the source anyway")
   ),
   allowNoVcs: Flag.boolean("allow-no-vcs").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Accept a file copy as the only checkpoint, in a project under no version control")
   ),
   keepOldSources: Flag.boolean("keep-old-sources").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Leave the 0.x sources in place beside the flows written from them")
   ),
   unit: Flag.string("unit").pipe(
@@ -1307,15 +1334,19 @@ const migrate = Command.make("migrate", {
     if (outcome._tag === "Failure") {
       const error = outcome.failure
       // A refused gate is not a crash: it prints the operator's own
-      // instructions and leaves the project untouched. The two gates that park
-      // for a decision exit 3, the way `smithers-migrate` and every parked
-      // Smithers run report one.
+      // instructions and leaves the project untouched. Operator gates and an
+      // existing apply owner exit 3, matching the standalone migration CLI.
       const message = `smthrs migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
-      if (error.code === "run-state-blocked" || error.code === "unsafe-blocked") {
-        yield* Console.error(message)
-        return yield* Effect.sync(() => {
-          process.exitCode = 3
-        })
+      if (error.code === "run-state-blocked" || error.code === "unsafe-blocked" || error.code === "apply-in-progress") {
+        if (root.json) {
+          yield* Console.log(JSON.stringify({
+            code: error.code,
+            message: error.message,
+            root: target,
+            ...(error.details === undefined ? {} : { details: error.details })
+          }))
+        } else yield* Console.error(message)
+        return yield* CommandStatus.set(3)
       }
       return yield* Effect.fail(new CliError.UnsupportedError({ message }))
     }
@@ -1327,9 +1358,7 @@ const migrate = Command.make("migrate", {
     // "parked, the operator has a decision", not a failure. `bin.ts` hands a
     // successful exit whatever `process.exitCode` holds, which is also how
     // `NodeControl.layerOutput` transfers a rendered status.
-    yield* Effect.sync(() => {
-      process.exitCode = MigrateCommand.exitCode(report)
-    })
+    yield* CommandStatus.set(MigrateCommand.exitCode(report))
   })).pipe(Command.withDescription(Verb.find("migrate")!.help))
 
 const memoryNamespace = (
@@ -1519,7 +1548,7 @@ const claudeNodeWait = Command.make("node-wait", {
 
 const claudeMonitor = Command.make("monitor", {
   session: claudeSession,
-  allRuns: Flag.boolean("all-runs").pipe(Flag.withDescription("Include all runs, beyond this session’s subscriptions")),
+  allRuns: Flag.boolean("all-runs").pipe(Flag.withDefault(false), Flag.withDescription("Include all runs, beyond this session’s subscriptions")),
   limit: Flag.integer("limit").pipe(
     Flag.withDefault(200),
     Flag.withDescription("Maximum number of runs in the monitor frame")
@@ -1720,7 +1749,7 @@ const bug = Command.make("bug", {
     yield* render({ reported: true, endpoint })
   })).pipe(Command.withDescription(Verb.find("bug")!.help))
 
-const doctor = Command.make("doctor", {}, () =>
+const doctorReport = (catalog: Pick<FlowPage, "items" | "warnings">) =>
   Effect.gen(function*() {
     yield* noticeCredentialFlag
     // Doctor owns the unsupported-backend check. The shared guard would fail
@@ -1730,8 +1759,6 @@ const doctor = Command.make("doctor", {}, () =>
     yield* noticeLegacyState
     const root = yield* rootCommand
     const projectRoot = yield* Project.ProjectRoot
-    const control = yield* ControlService.Control
-    const catalog = yield* flowCatalog(control)
     const jj = ResolveJj.resolveJjBinary()
     const configuredBackend = Option.getOrUndefined(root.backend)
     const report = Doctor.inspect({
@@ -1756,6 +1783,22 @@ const doctor = Command.make("doctor", {}, () =>
     if (Doctor.failed(report)) {
       yield* Effect.fail(new CliError.UnsupportedError({ message: "doctor found a blocking problem" }))
     }
+  })
+
+const doctor = Command.make("doctor", {}, () =>
+  Effect.gen(function*() {
+    const control = yield* ControlService.Control
+    return yield* doctorReport(yield* flowCatalog(control))
+  })).pipe(Command.withDescription(Verb.find("doctor")!.help))
+
+const localDoctor = Command.make("doctor", {}, () =>
+  Effect.gen(function*() {
+    const registry = yield* Registry.Registry
+    const [descriptors, warnings] = yield* Effect.all([registry.list(), registry.warnings()])
+    return yield* doctorReport({
+      items: descriptors.map((descriptor) => ({ flowId: descriptor.name, description: descriptor.description })),
+      warnings
+    })
   })).pipe(Command.withDescription(Verb.find("doctor")!.help))
 
 const gc = Command.make("gc", {
@@ -1763,9 +1806,9 @@ const gc = Command.make("gc", {
     Flag.withDefault(Gc.defaultRetention),
     Flag.withDescription("Delete terminal runs older than this duration, for example 7d")
   ),
-  dryRun: Flag.boolean("dry-run").pipe(
+  dryRun:  Flag.boolean("dry-run").pipe(
     Flag.withDescription("Report the runs and rows that would be deleted without deleting them")
-  )
+  ).pipe(Flag.withDefault(false))
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -1789,7 +1832,7 @@ const serveFlags = {
     Flag.withDefault(Serve.defaultBind.port),
     Flag.withDescription("TCP port for the control server")
   ),
-  listen: Flag.boolean("listen").pipe(
+  listen: Flag.boolean("listen").pipe(Flag.withDefault(false),
     Flag.withDescription("Allow binding a non-loopback host; also requires --credential or SMITHERS_API_KEY")
   )
 }
@@ -1910,3 +1953,19 @@ export const cli = rootCommand.pipe(
     ...removedCommands
   ])
 )
+
+/**
+ * The migration command uses filesystem inspection without acquiring the local execution databases.
+ *
+ * @category commands
+ * @since 1.0.0
+ */
+export const migrationCli = rootCommand.pipe(Command.withSubcommands([migrate]))
+
+/**
+ * Local diagnostics use the discovery snapshot without opening execution databases.
+ *
+ * @category commands
+ * @since 1.0.0
+ */
+export const doctorCli = rootCommand.pipe(Command.withSubcommands([localDoctor]))

@@ -1,32 +1,86 @@
 # @smthrs/cli
 
 This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
-`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+`4.0.0-rc.112` peer dependencies. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://cli.smithers.sh
 
-Node command-line projection of the Smithers control plane. It turns `@smthrs/control` operations into the `smthrs` executable (with `smithers` as an alias) and supplies the Node HTTP, WebSocket, and output layers used by the CLI host.
+`@smthrs/cli` installs `smthrs`, the command line for Smithers target graphs and durable agent flows. Build, test, lint, review, and query `PACKAGE.ts` targets, then start flows and manage their persisted runs, approvals, memory, and schedules through the same executable.
+
+Flow control, run management, and approvals support `--remote https://host:3000`. Target execution and local operator commands use the selected workspace; history, memory, triggers, credentials, integrations, and evaluations refuse remote access. The package also exports its command tree for Node hosts.
+
+The public parser is **Incur**, with **Zod** argument and option schemas. **Effect** runs the services, streams, cancellation, and durable work underneath; **Clack** supplies interactive prompts. The older Effect CLI tree remains behind compatibility aliases.
+
+## Install
 
 ```sh
-npm install @smthrs/cli@next
+npm install --global @smthrs/cli@1.0.0-rc.0
 ```
+
+Node 22.19+ (Node 22) or 24.11+ is required. The package installs one executable under two names, `smthrs` and its `smithers` alias.
+
+Name the version. This README describes 1.0.0-rc.0, and until that release candidate reaches the registry the unqualified package name still resolves to the 0.x line, whose commands and output it does not describe.
+
+## The shortest real example
+
+Initialize a workspace, discover targets, and start a flow after configuring a provider key:
+
+```sh
+smthrs init hello
+smthrs targets
+smthrs flow plan hello
+smthrs flow start hello
+smthrs runs list
+smthrs runs logs <run-id> --follow
+```
+
+`init` creates workspace and target declarations plus `flows/hello/flow.mdx`, preserving existing files. `flow plan` compiles without execution; `flow start` plans, approves, and starts the flow. Use `flow execute <payload>` to execute a separately approved plan. Top-level `run <pattern>` executes run-kind targets, while `runs` manages durable flow execution records.
+
+When a run parks, `approvals list` returns its exact approval payload; submit it to `approvals approve`, then use `runs resume <run-id>`. A launch without a configured provider key is refused with the missing variable named.
+
+## Command groups
+
+| Commands                                                               | Purpose                                                                   |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `build`, `test`, `lint`, `docs`, `review`, `ci`, `run`                 | Execute selected target kinds; `--plan` previews execution.               |
+| `target <label>`, `//package:target`                                   | Execute an exact target using its declared kind.                          |
+| `targets`, `show target`, `show workspace`, `query`, `graph`, `owners` | Discover and inspect declarations, dependencies, and ownership.           |
+| `affected`, `watch`, `explain`                                         | Select changed work, rerun on changes, and inspect local cache decisions. |
+| `flow list/show/plan/start/execute`                                    | Discover and launch durable workflows.                                    |
+| `runs list/show/logs/output/cancel/cancel-all/resume/signal/steer`     | Inspect and operate durable runs.                                         |
+| `runs inspect/replay/fork/rewind`                                      | Read historical frames and branch or restore eligible local runs.         |
+| `approvals list/approve/deny`                                          | Inspect and resolve human decisions.                                      |
+| `memory`, `credentials`, `triggers`, `integrations`, `eval`            | Administer persistent agent state and configured integrations.            |
+| `init`, `generate app/flow/package/ci`, `install`, `git-hooks`         | Set up a workspace and run its declared generators.                       |
+| `cache status/prune/clear`, `clean`, `info`, `doctor`, `gc`            | Inspect configuration and maintain explicitly selected state.             |
+
+Use `--help` on a command for its arguments, and `--schema` for the machine contract. Canonical commands use Incur formatting (`--json`, `--format jsonl`, and other formats); hidden flat aliases such as `up`, `ps`, and `status` retain their prior output. The Claude mirror protocol is available as `internal claude` and omitted from normal help. See the [command reference](./docs/reference/cli/README.md) for storage, compatibility, and operator details.
+
+## Human and agent output
+
+Smithers detects agent harness markers, CI, and terminal capabilities. Humans get live progress on standard error; agents get concise Incur results and useful next commands, with progress silent by default. Override detection with `--audience human|agent|auto` or `SMITHERS_AUDIENCE`.
+
+`--silent` hides progress, not the result or failures. `--quiet` remains supported where previously defined; use `--silent` across command groups. `--verbose` opts agents into plain progress. `--json` keeps standard output machine-readable while human progress stays on standard error. Agent log pulls return at most 100 events by default, with a next-page command; use `--limit` or `--after` to adjust. Stream explicitly with `smthrs runs logs <run-id> --follow --format jsonl`.
+
+See [output policy](./docs/reference/cli/README.md#human-and-agent-output) and the [verified harness registry](./build/build-cli/docs/reference/agent-detection.md). Detection affects presentation only, never approvals or permissions.
 
 ## Public API
 
-The root entry point exports the following namespaces; each is also available from `@smthrs/cli/<Module>`.
+The root entry point exports the following namespaces; each is also available from `@smthrs/cli/<Module>`. `Cli.makeCli` builds the unified Incur tree; `Command.cli` is the retained Effect compatibility tree.
 
 | Module              | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Description                                                                                                               |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `Cli`               | `makeCli`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Builds the unified Incur command tree without acquiring runtime services.                                                 |
 | `Agents`            | `serverName`, `Agent`, `agents`, `find`, `launchCommand`, `Wired`, `addMcp`, `manualInstructions`                                                                                                                                                                                                                                                                                                                                                                                                                                            | The agent configurations `mcp add` writes the Smithers MCP server into.                                                   |
 | `Application`       | `Config`, `Engine`, `engineMemory`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Selects the local or authenticated RPC-backed Control layer from transport-neutral configuration.                         |
 | `Bug`               | `defaultEndpoint`, `scrubText`, `scrub`, `Report`, `report`, `timeoutMs`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Scrubs and posts a `smthrs bug` report.                                                                                   |
 | `ClaudeMirror`      | `contract`, `subscriptionTtlMs`, `subscriptionsPath`, `Subscription`, `readSubscriptions`, `subscribe`, `unsubscribe`, `MirrorNode`, `Frame`, `defaultMaxOutputChars`, `frame`, `terminalStatuses`, `isTerminal`, `Transition`, `notableKinds`, `transition`                                                                                                                                                                                                                                                                                 | The Claude Code plugin mirror protocol: subscriptions, frames, and status transitions.                                    |
 | `CliError`          | `UsageError`, `UnsupportedError`, `ResourceLimitError`, `RenderingError`, `CliError`, `exitCode`                                                                                                                                                                                                                                                                                                                                                                                                                                             | Typed CLI failures and their stable process exit codes.                                                                   |
 | `CodexAuth`         | `refreshUrl`, `clientId`, `locate`, `parse`, `Store`, `MakeOptions`, `make`                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Locates and refreshes the Codex credential store.                                                                         |
-| `Command`           | `latestSequence`, `signalKey`, `cli`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | The Effect CLI command tree.                                                                                              |
+| `Command`           | `latestSequence`, `signalKey`, `cli`, `migrationCli`, `doctorCli`                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The Effect CLI command tree.                                                                                              |
 | `Detached`          | `admissionVariable`, `defaultTimeoutMs`, `defaultTerminationGraceMs`, `admissionLine`, `admittedRunId`, `logTail`, `terminate`, `Launched`, `Rejected`, `Options`, `launch`, `discard`, `isLaunched`                                                                                                                                                                                                                                                                                                                                         | Launches `up -d`, and reads the admission line its child prints.                                                          |
-| `Doctor`            | `Level`, `Check`, `Report`, `minimumNode`, `satisfiesNode`, `Options`, `inspect`, `render`, `failed`                                                                                                                                                                                                                                                                                                                                                                                                                                         | Registry, database, runtime, and provider readiness as one report.                                                        |
+| `Doctor`            | `Level`, `Check`, `Report`, `minimumNode`, `satisfiesNode`, `Options`, `inspect`, `render`, `failed`, `supportedNodeRange`                                                                                                                                                                                                                                                                                                                                                                                                                   | Registry, database, runtime, and provider readiness as one report.                                                        |
 | `Environment`       | `Name`, `names`, `Source`, `ambientWorkingDirectory`, `read`, `readInteger`, `unsupportedBackendMessage`, `unsupportedBackend`                                                                                                                                                                                                                                                                                                                                                                                                               | The closed `SMITHERS_*` set rc.0 reads, with the four `FLOWS_*` aliases.                                                  |
 | `ExecutorOwnership` | `ExecutorOwnership`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Whether this process owns the executor that settles accepted runs.                                                        |
 | `Forensics`         | `Refusal`, `Digest`, `digest`, `shellQuote`, `renderDiagnosis`, `eventLine`, `renderTranscript`                                                                                                                                                                                                                                                                                                                                                                                                                                              | Projects a run's watch events into the transcript and diagnosis renderings.                                               |
@@ -38,7 +92,7 @@ The root entry point exports the following namespaces; each is also available fr
 | `NodeOutput`        | `resultNodeId`, `Node`, `project`, `find`, `notFound`, `render`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Reads one registered node output from the node-output projection.                                                         |
 | `Output`            | `Format`, `Rendered`, `Service`, `Output`, `renderValue`, `maximumDepth`, `maximumMembers`, `maximumOutputBytes`, `make`, `layer`, `exitCode`                                                                                                                                                                                                                                                                                                                                                                                                | Renders deterministic human or JSON output through an injectable service.                                                 |
 | `Project`           | `legacyMarkers`, `root`, `legacyRoot`, `stateDirectory`, `logDirectory`, `logFile`, `flowsDirectory`, `legacyDatabases`, `legacyState`, `legacyNotice`, `ProjectRoot`, `LegacyState`, `MigrationRoot`, `layer`                                                                                                                                                                                                                                                                                                                               | Resolves the rc.0 project root, the 0.x root `migrate` converts, the state directories, and the 0.x state beside them.    |
-| `Providers`         | `order`, `compatible`, `compatibleKey`, `defaultSeat`, `detect`, `NoSeatError`, `SeatSyntaxError`, `noSeatMessage`, `chooseSeat`                                                                                                                                                                                                                                                                                                                                                                                                             | Which model seats this machine can run `smthrs suggest` on, and which one it runs.                                        |
+| `Providers`         | `order`, `compatible`, `compatibleKey`, `defaultSeat`, `starterSeats`, `detect`, `NoSeatError`, `SeatSyntaxError`, `noSeatMessage`, `chooseSeat`                                                                                                                                                                                                                                                                                                                                                                                             | Which model seats this machine can run `smthrs suggest` on, and which one it runs.                                        |
 | `Serve`             | `loopbackHosts`, `defaultBind`, `Mount`, `mounts`, `isLoopback`, `Bind`, `GatewayHost`, `refuse`, `workspaceHash`, `health`, `banner`, `host`                                                                                                                                                                                                                                                                                                                                                                                                | The gateway bind rule, the mount list, and the banner rendered from it.                                                   |
 | `Suggest`           | `Implementation`, `Outcome`, `exitStatus`, `Implement`, `Options`, `isDirectory`, `suggestionDocument`, `seatDocument`, `outcomeDocument`, `introLine`, `streamLabel`, `wroteNote`, `run`                                                                                                                                                                                                                                                                                                                                                    | Reads the project, streams the ways Smithers can help, and implements the one picked.                                     |
 | `Ui`                | `brand`, `Check`, `Spinner`, `StreamOptions`, `Streamed`, `PickOptions`, `ConfirmOptions`, `Service`, `Ui`, `Options`, `isInteractive`, `make`, `renderChecklist`, `layer`, `current`, `prompting`                                                                                                                                                                                                                                                                                                                                           | Interactive human rendering: brand line, log lines, spinners, streamed suggestions, prompts, and the plain-line fallback. |
@@ -47,6 +101,9 @@ The root entry point exports the following namespaces; each is also available fr
 | `Verb`              | `Verb`, `shipped`, `subcommands`, `names`, `find`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | The shipped verb catalog and lookup.                                                                                      |
 | `Version`           | `packageVersion`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | The version declared by the installed `@smthrs/cli` package metadata.                                                     |
 | `bin` / `smthrs`    | side-effect entry point                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Runs `Command.cli`; the package also installs it as the `smthrs` executable, with `smithers` as an alias.                 |
+| `Audience`          | `Mode`, `Options`, `Policy`, `Marker`, `markers`, `resolve`, `fromArguments`, `incurArguments`                                                                                                                                                                                                                                                                                                                                                                                                                                               | Pure, injectable human/agent detection and a shared policy for structured results, progress, and prompting.               |
+
+The existing Effect embedding API remains supported:
 
 ```ts
 import { Command, NodeControl, Version } from "@smthrs/cli"
@@ -66,6 +123,8 @@ const main = Cli.run(Command.cli, { version: Version.packageVersion }).pipe(
 
 `@smthrs/cli/package.json` is exported for package metadata. `internal/*` and nested `*/index` subpaths are not public.
 
+Every export of every namespace is on the [API reference](https://cli.smithers.sh/reference/api/), and [Embed the command tree](https://cli.smithers.sh/guides/embed-the-command-tree/) is the guide.
+
 Control servers bind `127.0.0.1` by default. See the [control-plane guide](https://smithers.sh/docs/guides/control-plane/) before opting into a non-loopback bind.
 
 `SMITHERS_API_KEY` is the preferred credential channel. The compatibility
@@ -76,14 +135,15 @@ visible in process listings and may remain in shell history.
 
 `smthrs` uses one status vocabulary, so a script can branch on it.
 
-| Code  | Meaning                                                                               |
-| ----- | ------------------------------------------------------------------------------------- |
-| `0`   | The command did what it was asked.                                                    |
-| `1`   | The command failed, or the run it reports settled `failed`.                           |
-| `2`   | The invocation was wrong. Retype the command; the message names the flag or argument. |
-| `3`   | The run is parked at `waiting-approval`. Answer it with `smthrs approve` and resume.  |
-| `130` | The run was cancelled or interrupted.                                                 |
-| `143` | The run was terminated.                                                               |
+| Code  | Meaning                                                                                             |
+| ----- | --------------------------------------------------------------------------------------------------- |
+| `0`   | The command did what it was asked.                                                                  |
+| `1`   | The command failed, or the run it reports settled `failed`.                                         |
+| `2`   | A legacy invocation was invalid, or explicit confirmation was missing; Incur argument errors use 1. |
+| `3`   | The run is parked at `waiting-approval`. Resolve it through `smthrs approvals` and resume.          |
+| `5`   | An evaluation failed to produce conclusive results.                                                 |
+| `130` | The run was cancelled or interrupted.                                                               |
+| `143` | The run was terminated.                                                                             |
 
 Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone. See [the CLI reference](https://smithers.sh/docs/reference/cli/) for the per-verb detail.
 
@@ -91,28 +151,24 @@ Codes 3, 130, and 143 report a run outcome rather than a failure of the command,
 
 rc.0 reads a closed set of variables, all listed by `Environment.names`, with four `FLOWS_*` aliases retained from the import. The ones an operator sets most often:
 
-| Variable                                 | Meaning                                                           |
-| ---------------------------------------- | ----------------------------------------------------------------- |
-| `SMITHERS_REMOTE`                        | Fallback for `--remote`.                                          |
-| `SMITHERS_API_KEY`                       | Preferred credential channel; avoids argv exposure.               |
-| `SMITHERS_MCP_CONFIG`                    | Fallback for `--mcp-config`.                                      |
-| `SMITHERS_BACKEND`                       | SQLite only. Any other value exits 1 with `unsupported_database`. |
-| `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` | How long `up -d` waits for its child to report admission.         |
+| Variable                                 | Meaning                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| `SMITHERS_REMOTE`                        | Fallback for `--remote`.                                                              |
+| `SMITHERS_API_KEY`                       | Preferred credential channel; avoids argv exposure.                                                          |
+| `SMITHERS_MCP_CONFIG`                    | Fallback for `--mcp-config`.                                                          |
+| `SMITHERS_CREDENTIAL_KEY`                | Base64-encoded 32-byte host key for encrypted credential add, rotate, and resolution. |
+| `SMITHERS_BACKEND`                       | SQLite only. Any other value exits 1 with `unsupported_database`.                     |
+| `SMITHERS_DETACHED_ADMISSION_TIMEOUT_MS` | How long `up -d` waits for its child to report admission.                             |
 
 Provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `CEREBRAS_API_KEY`) are read by the seat resolver, not by the CLI itself. `smthrs doctor` reports which are present.
 
 ## MCP
 
-`smthrs --mcp` serves the Smithers MCP server on stdio, so an agent inspects runs through the same control plane the verbs use. `smthrs mcp add --agent <id>` writes the server entry into one agent's configuration, and `smthrs mcp add` with no `--agent` writes it into every agent the CLI knows: `claude` and `codex`.
+`smthrs --mcp` serves Incur's generated command surface on stdio. `smthrs mcp add` registers it with a supported agent; use `smthrs mcp add --help` for client selection. The CLI schemas also drive MCP arguments, so target and operator commands share their command-line contracts. Long-running host commands marked `mcp: false` are omitted.
 
-The server answers a `{ ok, data?, error? }` envelope on every tool. Twelve retired tools answer `{ ok: false, error: { code: "unsupported" } }` in rc.0; `McpServer.unsupportedTools` names them and `McpServer.unsupportedReasons` says why. Reserved `system/*` flows are not listed and cannot be launched, matching `smthrs up` and `smthrs ls`.
+The separately exported `McpServer` module retains the older named-tool protocol for existing hosts. Its compatibility tool names and unsupported responses do not define the generated public server. Reserved `system/*` flows remain unavailable through normal flow discovery and launch.
 
-MCP mutations carry an `agent` principal. Approval and denial are operator-only:
-`resolve_approval` and the automatic approval in `run_flow` return `UNAUTHORIZED`,
-including for `remembered` grants. An operator launches flows with `smthrs up` and
-resolves approvals with `smthrs approve` or `smthrs deny`. Read tools remain available.
-
-Each MCP request and response frame is limited to 4 MiB. One MCP history result is limited to 10,000 events and 1 MiB. Crossing either boundary returns `RESOURCE_LIMIT`; an oversized input line is discarded incrementally before JSON decoding.
+The legacy `McpServer` adapter limits frames to 4 MiB and history results to 10,000 events and 1 MiB. Generated command responses follow their command-specific limits.
 
 `--mcp-config <path>` is the other direction: it connects MCP servers the local executor projects into a run's flow catalog. It is meaningless against `--remote`, where the executor is not this process's to configure.
 
@@ -120,45 +176,6 @@ Each MCP request and response frame is limited to 4 MiB. One MCP history result 
 
 Finite CLI history projections retain at most 50,000 events and 16 MiB, with a 1 MiB per-event cap. Follow mode applies the per-event cap without retaining prior events. Rendered output accepts at most 128 nested levels, 10,000 data members, and 4 MiB of UTF-8 output. Exceeding a bound fails with a typed resource or rendering error instead of truncating or executing caller-owned objects.
 
-## Manual smoke: run an agent flow with a real key
-
-The local composition executes approved agent flows through the production
-executor and the SQLite-backed `@smthrs/flows/NodeRuntime`. To verify
-against a real provider:
-
-1. Create a markdown prompt flow in the project:
-
-   ```sh
-   mkdir -p flows/hello
-   cat > flows/hello/flow.mdx <<'EOF'
-   ---
-   description: Replies with one short greeting sentence.
-   model: anthropic:claude-sonnet-4-5
-   ---
-   Reply with one short greeting sentence, then complete with that sentence
-   as your output.
-   EOF
-   ```
-
-2. Export the provider key for the seat's provider: `ANTHROPIC_API_KEY` for
-   `anthropic:*` seats, `OPENAI_API_KEY` for `openai:*` seats. A missing key
-   refuses the launch with a typed `LaunchFailed` naming the variable.
-
-3. Run it and watch the run settle:
-
-   ```sh
-   export ANTHROPIC_API_KEY=sk-ant-...
-   approval="$(smthrs --json plan hello | jq -c '.approval')"
-   smthrs --json approve "$approval" --scope run
-   smthrs --json run "$approval"
-   smthrs ps
-   smthrs logs <run-id> --follow
-   ```
-
-   `smthrs run` prints the accepted receipt with the run id; `smthrs ps` shows
-   the durable run state. A run that asks for approval parks as
-   `waiting-approval` and journals a `control.approval.requested` event whose
-   `payload` field is the exact argument for `smthrs approve '<payload>'`;
-   `smthrs run --resume <run-id>` then re-drives the parked execution.
-
 `smthrs bug "summary" --run <id> --dry-run` previews the redacted payload and endpoint. Only the named run is included; omitting `--run` includes no runs. Posting requires `--yes` or confirmation on a TTY, after the exact payload is printed.
+
+Compatibility MCP approval tools are omitted by default. Enabling them also requires explicit host-owned approval delegation; an undelegated agent cannot approve or launch its own plan.

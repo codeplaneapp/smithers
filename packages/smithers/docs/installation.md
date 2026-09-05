@@ -7,19 +7,25 @@ sidebar:
 
 ## Install the executable
 
+As checked on September 4, 2026, `1.0.0-rc.0` is not published to npm and the CLI has no `next` dist-tag. For now, use the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication). The npm commands on this page apply after publication.
+
 ```bash
-npm install --global @smthrs/cli@next
+npm install --global @smthrs/cli@1.0.0-rc.0
 ```
 
 The package installs one executable under two names, `smthrs` and its
 `smithers` alias. Both are the same file, `bin/smithers.mjs`.
 
-This documentation describes 1.0.0-rc.0. Release candidates publish under
-the `next` dist-tag rather than `latest`, so name that tag when installing:
+The executable declares `@effect/sql-sqlite-node@4.0.0-rc.112` as a required
+peer because its default runtime opens SQLite. Modern npm and pnpm install
+that peer with the CLI, along with its required Effect Node adapter. The
+database library itself keeps SQLite optional for driver-neutral consumers.
 
-```bash
-npm install --global @smthrs/cli@next
-```
+Name the version. These pages describe 1.0.0-rc.0, and until that release
+candidate reaches the registry the unqualified package name still resolves to
+the 0.x line, whose commands and output these pages do not describe. A release
+candidate publishes under the `next` dist-tag rather than `latest`, so
+`@next` names the newest one once it is there.
 
 Confirm what you got, and what the registry offers, with the CLI itself:
 
@@ -30,20 +36,21 @@ smthrs update
 
 `smthrs update` compares `Version.packageVersion` against the `next` and
 `latest` dist-tags and prints the `npm install` line for the newer one. It
-changes nothing.
+changes nothing, and it prefers `next`, so an rc install is never told to
+downgrade to a 0.x `latest`.
 
 ## Requirements
 
-- Node 22.19.0 or later. The durable engine requires it, `smthrs doctor`
-  reports it as a `fail` when the running Node is below the floor, and
-  `Doctor.minimumNode` is the constant both read.
+- Node 22.19+ (Node 22) or 24.11+. The durable engine requires it, `smthrs doctor`
+  reports a `fail` outside this range. `Doctor.supportedNodeRange` matches the
+  published manifest; Node 23 and Node 24.0–24.10 are not supported.
 - A project directory. Commands that touch durable state resolve a project
   root and write `.flows/` under it. See
   [The project and its state](./concepts/project-and-state.md).
 - A provider credential, for flows that call a model. `smthrs doctor` reports
-  which of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and
-  `CEREBRAS_API_KEY` are set, and names any that are exported but empty. The
-  CLI itself never reads them; the seat resolver does.
+  which of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`,
+  `MOONSHOT_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `CEREBRAS_API_KEY` are set, and names any that are exported but empty. The
+  doctor check reports presence without printing credential values.
 
 ## Runners
 
@@ -58,19 +65,6 @@ not supported on Bun. That makes every installation path run on Node:
 
 Bun honours the shebang, so `bun x` starts Node. Running the CLI with
 `bun --bun` overrides the shebang and is not supported.
-
-## Running from a source checkout
-
-A published install ships `dist/esm/bin.js` and the shim runs it. A checkout
-has no `dist/`, so the shim runs `src/bin.ts` through Node's own type
-stripping instead. `pnpm exec smthrs` therefore runs the working tree with no
-build step, and the experimental type-stripping warning is suppressed for that
-one path so it does not prepend noise to every invocation.
-
-If a checkout's workspace links point into a git worktree that has since been
-removed, the entry fails with `ERR_MODULE_NOT_FOUND` for a package that is
-present in the tree. The shim detects that case and prints the real diagnosis
-before rethrowing.
 
 ## Using the library
 

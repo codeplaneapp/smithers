@@ -43,7 +43,7 @@ export interface RemovedVerb {
   readonly subcommands?: ReadonlyArray<string> | undefined
 }
 
-const timeTravel = "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred"
+const timeTravel = "use `smthrs runs inspect|replay|fork|rewind` for current execution history"
 const recovery = "the run driver's heartbeat sweep owns recovery"
 const uiHosting = "replaced by `smthrs serve`; the terminal monitor is deleted"
 const control = "not available; use `steer`, `signal`, `approve`, `deny`, `cancel`, `run --resume`"
@@ -52,7 +52,7 @@ const packs = "JSX pack tooling is gone; `smthrs migrate` replaces `upgrade`"
 const approvals = "approvals park the run; use `ps --status waiting-approval`, `approve`, and `deny`"
 const nodeDetail = "use `output`, `logs --json`, and the node-output projection"
 const jsx = "removed with the JSX inline workflow"
-const evaluation = "not part of the engine release"
+const evaluation = "use `smthrs eval list|run|baseline|compare`; automatic optimization remains unavailable"
 const reserved = "not an rc.0 verb"
 
 const removed = (group: string, reason: string, names: ReadonlyArray<string>): ReadonlyArray<RemovedVerb> =>
@@ -117,7 +117,7 @@ export const removedVerbs: ReadonlyArray<RemovedVerb> = [
   removedGroup("Accounts and providers", plugins, "herdr", ["status", "attach", "open", "clean"]),
   removedGroup("Accounts and providers", plugins, "openapi", ["list", "generate"]),
   removedGroup("Accounts and providers", plugins, "token", ["issue", "exec", "revoke"]),
-  removedGroup("Accounts and providers", `${plugins} (cron returns on @smthrs/triggers)`, "cron", [
+  removedGroup("Accounts and providers", "use `smthrs triggers register|list|show|enable|disable|fire|serve`", "cron", [
     "start",
     "add",
     "list",

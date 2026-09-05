@@ -31,8 +31,13 @@ const entry = (suffix: string, purpose: string): Name => ({ name: `SMITHERS_${su
  * @since 1.0.0
  */
 export const names: ReadonlyArray<Name> = [
+  entry("AUDIENCE", "Consumer override: auto, human, or agent; presentation only, never authority"),
   entry("REMOTE", "Control-plane base URL; the environment form of --remote"),
   entry("API_KEY", "Bearer credential; the environment form of --credential"),
+  entry("CREDENTIAL_KEY", "Base64 32-byte host encryption key for stored credentials"),
+  entry("CACHE_URL", "Remote target-cache endpoint captured before workspace evaluation"),
+  entry("CACHE_TOKEN", "Remote target-cache credential, removed from declaration environments"),
+  entry("CACHE_NAMESPACE", "Target-cache trust domain for result publication"),
   entry("MCP_CONFIG", "Path to the --mcp-config server array"),
   entry("OPENAI_AUTH", "`api-key` or `chatgpt`, selecting how openai seats authenticate"),
   entry("TEST_COMMAND", "The command the `test` flow runs"),

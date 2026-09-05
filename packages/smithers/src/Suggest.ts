@@ -363,7 +363,8 @@ const humanRendering = (
     }
     const chosenSuggestion = picked.value
     const context: Brief.Context = { seat: chosen.seat, facts: Checklist.evidence(repository) }
-    const implement = options.implement ?? nodeImplement(options, chosen.seat)
+    const implement = options.implement ??
+      nodeImplement({ ...options, environment: { ...options.environment, ...chosen.environment } }, chosen.seat)
     const implemented: Array<Implementation> = []
     const first = yield* carryOut(ui, implement, chosenSuggestion.title, Brief.suggestion(context, chosenSuggestion))
     implemented.push({ kind: "suggestion", suggestion: chosenSuggestion.id, ...first })

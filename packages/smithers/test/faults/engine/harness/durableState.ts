@@ -20,6 +20,35 @@ const storage = (filename: string) =>
     Layer.provideMerge(Layer.mergeAll(NodeHost.layer, NodeHost.NodeCrypto.layer))
   )
 
+/** Reads the actual persisted deadlines without arming an engine host. */
+export const pendingClocks = (
+  filename: string,
+  executionId: string
+): Promise<ReadonlyArray<DurableEngineState.ClockRow>> =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const state = yield* DurableEngineState.DurableEngineState
+      return yield* state.pendingClocks({ executionId })
+    }).pipe(Effect.provide(storage(filename)), Effect.scoped, Effect.orDie)
+  )
+
+/** Reads committed timer identity, its first completion, and the full host records. */
+export const timerEvidence = (filename: string, address: DurableEngineState.ClockRow) =>
+  Effect.runPromise(
+    Effect.gen(function*() {
+      const state = yield* DurableEngineState.DurableEngineState
+      const journal = yield* Journal.Journal
+      const clock = yield* state.clock(address)
+      const deferred = yield* state.deferred(address)
+      const page = yield* journal.entries({ runId: address.executionId as JournalEvent.RunId, limit: 1_000 })
+      return {
+        clock: Option.getOrUndefined(clock),
+        deferred: Option.getOrUndefined(deferred),
+        entries: page.entries
+      }
+    }).pipe(Effect.provide(storage(filename)), Effect.scoped, Effect.orDie)
+  )
+
 /**
  * The waiting row an execution is parked on, if it is parked at all.
  *

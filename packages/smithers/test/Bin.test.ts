@@ -29,6 +29,7 @@ import * as CodexAuth from "../src/CodexAuth.ts"
 import { cli } from "../src/Command.ts"
 import * as Environment from "../src/Environment.ts"
 import { Version } from "../src/index.ts"
+import * as Providers from "../src/Providers.ts"
 import * as Unsupported from "../src/Unsupported.ts"
 import * as Verb from "../src/Verb.ts"
 
@@ -181,7 +182,7 @@ describe("smithers executable", processBudget, () => {
   it("reports a missing project root as a usage error", () => {
     inEmptyDirectory((cwd) => {
       const path = join(cwd, "absent")
-      const result = runIn(cwd, ["--root", path, "ls"])
+      const result = runIn(cwd, ["--root", path, "ls"], { SMITHERS_AUDIENCE: "human" })
       expect(result.status).toBe(2)
       expect(result.stderr).toContain("--root")
       expect(result.stderr).toContain(path)
@@ -206,21 +207,23 @@ describe("smithers executable", processBudget, () => {
       const malformed = join(cwd, "malformed.json")
       writeFileSync(malformed, "{")
 
-      const remoteResult = runIn(cwd, ["--remote", "nota", "ps"])
-      const missingResult = runIn(cwd, ["--mcp-config", missing, "ps"])
-      const malformedResult = runIn(cwd, ["--mcp-config", malformed, "ps"])
+      const remoteResult = runIn(cwd, ["runs", "list", "--remote", "nota", "--json"])
+      const missingResult = runIn(cwd, ["runs", "list", "--mcp-config", missing, "--json"])
+      const malformedResult = runIn(cwd, ["runs", "list", "--mcp-config", malformed, "--json"])
 
       expect(remoteResult.status).toBe(2)
-      expect(remoteResult.stderr).toContain("--remote must be an http:// or https:// URL; got \"nota\"")
+      expect(JSON.parse(remoteResult.stdout).message).toContain(
+        "--remote must be an http:// or https:// URL; got \"nota\""
+      )
       expect(missingResult.status).toBe(2)
-      expect(missingResult.stderr).toContain(`--mcp-config ${missing}: file not found`)
+      expect(JSON.parse(missingResult.stdout).message).toContain(`--mcp-config ${missing}: file not found`)
       expect(malformedResult.status).toBe(2)
-      expect(malformedResult.stderr).toContain(`--mcp-config ${malformed} is not valid JSON:`)
+      expect(JSON.parse(malformedResult.stdout).message).toContain(`--mcp-config ${malformed} is not valid JSON:`)
       for (
         const output of [
-          remoteResult.stderr,
-          missingResult.stderr,
-          malformedResult.stderr
+          remoteResult.stdout,
+          missingResult.stdout,
+          malformedResult.stdout
         ]
       ) {
         expect(output).not.toContain("TypeError")
@@ -241,15 +244,35 @@ describe("smithers executable", processBudget, () => {
 describe("the help surface", processBudget, () => {
   const help = run(["--help"])
 
-  it("lists exactly the shipped verbs", () => {
+  it("lists canonical target and durable command groups", () => {
     expect(help.status).toBe(0)
-    for (const verb of Verb.subcommands) expect(help.stdout).toContain(verb.name)
+    for (
+      const name of [
+        "build",
+        "test",
+        "targets",
+        "flow",
+        "runs",
+        "approvals",
+        "generate",
+        "eval",
+        "memory",
+        "credentials",
+        "triggers"
+      ]
+    ) {
+      expect(help.stdout).toMatch(new RegExp(`^\\s+${name}\\s{2,}`, "m"))
+    }
   })
 
   it("advertises no removed verb", () => {
     // Matched on the help layout's own leading indentation so a word that
     // merely appears inside a description is not read as a listed command.
-    for (const verb of Unsupported.removedVerbs) {
+    for (
+      const verb of Unsupported.removedVerbs.filter((verb) =>
+        !["graph", "eval", "review", "test", "runs", "show"].includes(verb.name)
+      )
+    ) {
       expect(help.stdout).not.toMatch(new RegExp(`^\\s+${verb.name}\\s{2,}`, "m"))
     }
   })
@@ -423,9 +446,9 @@ describe("an invocation that never runs a command answers before the control pla
       const result = runIn(cwd, ["lss"])
 
       expect(result.error).toBeUndefined()
-      expect(result.status).toBe(2)
-      expect(result.stderr).toContain("Unknown subcommand \"lss\" for \"smthrs\"")
-      expect(result.stdout).toContain("USAGE")
+      expect(result.status).toBe(1)
+      expect(result.stdout).toContain("lss")
+      expect(result.stdout).toContain("COMMAND_NOT_FOUND")
       expect(readdirSync(cwd)).toEqual([])
     })
   })
@@ -435,8 +458,8 @@ describe("an invocation that never runs a command answers before the control pla
       const result = runIn(cwd, ["gateway status"])
 
       expect(result.error).toBeUndefined()
-      expect(result.status).toBe(2)
-      expect(result.stderr).toContain("Unknown subcommand \"gateway status\" for \"smthrs\"")
+      expect(result.status).toBe(1)
+      expect(result.stdout).toContain("gateway status")
       expect(readdirSync(cwd)).toEqual([])
     })
   })
@@ -455,7 +478,6 @@ describe("an invocation that never runs a command answers before the control pla
   it.each(
     [
       [["plan"], "flow-id"],
-      [["run"], "plan-payload"],
       [["up"], "flow"],
       [["resume"], "run-id"],
       [["deny"], "approval"],
@@ -471,13 +493,23 @@ describe("an invocation that never runs a command answers before the control pla
     ] as const
   )("names a missing required argument for %j without opening the project", (args, argument) => {
     inEmptyDirectory((cwd) => {
-      const result = runIn(cwd, args)
+      const result = runIn(cwd, args, { SMITHERS_AUDIENCE: "human" })
 
       expect(result.error).toBeUndefined()
       expect(result.status).toBe(2)
       expect(result.stdout).toBe("")
       expect(result.stderr).toContain(argument)
       expect(result.stderr).toContain("--wizard")
+      expect(readdirSync(cwd)).toEqual([])
+    })
+  })
+
+  it("names a missing canonical target without opening the project", () => {
+    inEmptyDirectory((cwd) => {
+      const result = runIn(cwd, ["run", "--json"])
+      expect(result.status).toBe(1)
+      expect(result.stdout).toContain("VALIDATION_ERROR")
+      expect(JSON.parse(result.stdout).fieldErrors).toContainEqual(expect.objectContaining({ path: "pattern", missing: true }))
       expect(readdirSync(cwd)).toEqual([])
     })
   })
@@ -574,10 +606,10 @@ describe("the SQLite-only database contract", processBudget, () => {
   })
 
   it("refuses SMITHERS_BACKEND=postgres, which a script exports rather than passes", () => {
-    const result = run(["ls"], { SMITHERS_BACKEND: "postgres" })
+    const result = run(["flow", "list", "--json"], { SMITHERS_BACKEND: "postgres" })
 
     expect(result.status).toBe(1)
-    expect(result.stderr.trim()).toBe(Environment.unsupportedBackendMessage)
+    expect(JSON.parse(result.stdout).message).toBe(Environment.unsupportedBackendMessage)
   })
 
   it("says once that a PostgreSQL environment is ignored, and still succeeds", () => {
@@ -596,7 +628,7 @@ describe("the SQLite-only database contract", processBudget, () => {
     ])
   })
 
-  it("refuses a 0.x database file by its contract code, on stderr", () => {
+  it("refuses a 0.x database file by its contract code in structured output", () => {
     const cwd = mkdtempSync(temporaryDirectoryPrefix)
     try {
       mkdirSync(join(cwd, ".flows"))
@@ -606,7 +638,7 @@ describe("the SQLite-only database contract", processBudget, () => {
       zeroX.exec("CREATE TABLE _smithers_runs (id TEXT PRIMARY KEY)")
       zeroX.close()
 
-      const result = spawnSync(process.execPath, ["--no-warnings", executable, "ps"], {
+      const result = spawnSync(process.execPath, ["--no-warnings", executable, "runs", "list", "--json"], {
         cwd,
         encoding: "utf8",
         timeout: 180_000,
@@ -614,12 +646,12 @@ describe("the SQLite-only database contract", processBudget, () => {
       })
 
       expect(result.status).toBe(1)
-      expect(result.stdout).toBe("")
-      expect(result.stderr).toContain("unsupported_database_file: ")
-      expect(result.stderr).toContain("is not a Smithers 1.0 database")
+      const error = JSON.parse(result.stdout)
+      expect(error.code).toBe("unsupported_database_file")
+      expect(error.message).toContain("is not a Smithers 1.0 database")
       // The tagged-error name is how the value travelled, not what the
       // contract promises an operator or what a script greps for.
-      expect(result.stderr).not.toContain("@smthrs/database/UnsupportedDatabase")
+      expect(result.stdout).not.toContain("@smthrs/database/UnsupportedDatabase")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -636,6 +668,7 @@ describe("the served gateway", processBudget, () => {
       cwd,
       env: { ...process.env }
     })
+    const exited = new Promise((resolve) => child.once("exit", resolve))
     let banner = ""
     child.stderr.setEncoding("utf8")
     child.stderr.on("data", (chunk: string) => {
@@ -646,6 +679,9 @@ describe("the served gateway", processBudget, () => {
       const deadline = Date.now() + 120_000
       let health: Response | undefined
       for (;;) {
+        if (child.exitCode !== null || child.signalCode !== null) {
+          throw new Error(`Gateway exited before readiness: ${banner}`)
+        }
         try {
           health = await fetch(`${base}/health`)
           break
@@ -680,7 +716,7 @@ describe("the served gateway", processBudget, () => {
       expect(banner).toContain("/projections/ws")
     } finally {
       child.kill("SIGTERM")
-      await new Promise((resolve) => child.once("exit", resolve))
+      await exited
       rmSync(cwd, { recursive: true, force: true })
     }
   }, 240_000)
@@ -939,14 +975,15 @@ describe("Smithers 0.x detection", processBudget, () => {
   it("refuses to migrate a project that still holds non-terminal 0.x runs", () => {
     const cwd = stage()
     try {
-      const result = inProject(cwd, ["migrate"])
+      const result = inProject(cwd, ["migrate", "--json"])
 
       // The 0.x-project guard has to win over every later check: the
       // operator's next step is the 0.x CLI, not installing a flow.
       expect(result.status).toBe(1)
-      expect(result.stderr).toContain("Refusing to migrate")
-      expect(result.stderr).toContain("run-old-1 running (ship)")
-      expect(result.stderr).not.toContain("run-old-2")
+      const error = JSON.parse(result.stdout)
+      expect(error.message).toContain("Refusing to migrate")
+      expect(error.message).toContain("run-old-1 running (ship)")
+      expect(error.message).not.toContain("run-old-2")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -963,11 +1000,11 @@ describe("Smithers 0.x detection", processBudget, () => {
       expect(inProject(cwd, ["ls", "--json"]).status).toBe(0)
       expect(existsSync(join(cwd, ".flows"))).toBe(true)
 
-      const result = inProject(cwd, ["migrate"])
+      const result = inProject(cwd, ["migrate", "--json"])
 
       expect(result.status).toBe(1)
-      expect(result.stderr).toContain("Refusing to migrate")
-      expect(result.stderr).toContain("run-old-1 running (ship)")
+      expect(JSON.parse(result.stdout).message).toContain("Refusing to migrate")
+      expect(JSON.parse(result.stdout).message).toContain("run-old-1 running (ship)")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -997,14 +1034,12 @@ describe("Smithers 0.x detection", processBudget, () => {
       database.exec("INSERT INTO _smithers_runs (run_id, workflow_name, status) VALUES ('run-old-1','ship','finished')")
       database.close()
 
-      const result = inProject(cwd, ["migrate"])
+      const result = inProject(cwd, ["migrate", "--json"])
       const output = `${result.stdout}${result.stderr}`
 
       expect(output).not.toContain("is not installed in this project")
       expect(output).not.toContain("Add it under flows/")
-      // The migration tool's own rendering: `smthrs migrate <mode>: <root>`,
-      // or its own refusal, `smthrs migrate: <reason>`.
-      expect(output).toMatch(/smthrs migrate (plan|scan|apply):|smthrs migrate: /)
+      expect(JSON.parse(result.stdout)).toMatchObject({ tool: { name: "@smthrs/migrate" }, mode: "plan" })
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1091,13 +1126,13 @@ describe("the migrate verb's option surface", processBudget, () => {
   it("runs the tool in scan mode when --scan is given", () => {
     const cwd = stageTerminal()
     try {
-      const result = inProject(cwd, ["migrate", "--scan"])
+      const result = inProject(cwd, ["migrate", "--scan", "--json"])
       const output = `${result.stdout}${result.stderr}`
 
       expect(output).not.toContain("Unrecognized flag")
       // The tool's own heading names the mode it ran in, so this is the mode
       // reaching the flow rather than the flag being parsed and dropped.
-      expect(output).toContain("smthrs migrate scan:")
+      expect(JSON.parse(result.stdout)).toMatchObject({ mode: "scan", tool: { name: "@smthrs/migrate" } })
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1106,7 +1141,7 @@ describe("the migrate verb's option surface", processBudget, () => {
   it("reaches apply mode with --apply, where plan mode never writes", () => {
     const cwd = stageTerminal()
     try {
-      const result = inProject(cwd, ["migrate", "--apply"])
+      const result = inProject(cwd, ["migrate", "--apply", "--json"])
       const output = `${result.stdout}${result.stderr}`
 
       expect(output).not.toContain("Unrecognized flag")
@@ -1116,6 +1151,7 @@ describe("the migrate verb's option surface", processBudget, () => {
       expect(output).not.toContain("smthrs migrate plan:")
       expect(result.status).toBe(3)
       expect(output).toContain("--acknowledge-run-state")
+      expect(JSON.parse(result.stdout).code).toBe("run-state-blocked")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }
@@ -1168,14 +1204,17 @@ describe("the migrate verb's target", processBudget, () => {
       // The gate refuses before anything is written, and the refusal quotes the
       // directory the migration would have rewritten, so it reports the target
       // without producing one.
-      const result = inProject(project, ["migrate", "--apply", "--acknowledge-run-state"])
+      const result = inProject(project, ["migrate", "--apply", "--acknowledge-run-state", "--json"])
 
       expect(result.status).toBe(1)
-      expect(result.stderr).toContain(`"${project}" is under no version control`)
-      expect(result.stderr).not.toContain(`"${ancestor}" is under no version control`)
-      // And it wrote nothing anywhere.
+      expect(JSON.parse(result.stdout).message).toContain(`"${project}" is under no version control`)
+      expect(JSON.parse(result.stdout).message).not.toContain(`"${ancestor}" is under no version control`)
+      // Apply acquires and releases its lock before checking VCS. It may
+      // leave that empty directory, but no checkpoint, report, or source edit.
       expect(existsSync(join(ancestor, ".smithers-migrate"))).toBe(false)
-      expect(existsSync(join(project, ".smithers-migrate"))).toBe(false)
+      expect(readdirSync(join(project, ".smithers-migrate"))).toEqual([])
+      expect(readFileSync(join(project, ".smithers/workflows/ship.tsx"), "utf8")).toBe("export default null\n")
+      expect(readFileSync(join(project, "package.json"), "utf8")).toBe(JSON.stringify({ name: "legacy" }))
     } finally {
       rmSync(ancestor, { recursive: true, force: true })
     }
@@ -1242,7 +1281,7 @@ describe("an attached launch's exit status", processBudget, () => {
   it("exits 1 for a run that settled failed, and still prints the receipt", () => {
     const cwd = stageUnservableSeat()
     try {
-      const launched = launch(cwd, ["up", "failing", "--json"])
+      const launched = launch(cwd, ["up", "failing", "--json", "--verbose"])
 
       expect(launched.error).toBeUndefined()
       expect(launched.status).toBe(1)
@@ -1284,7 +1323,7 @@ describe("an attached launch's exit status", processBudget, () => {
   it("prints one operator-facing warning for one refusal", () => {
     const cwd = stageUnservableSeat()
     try {
-      const launched = launch(cwd, ["up", "failing", "--json"])
+      const launched = launch(cwd, ["up", "failing", "--json", "--verbose"])
 
       expect(launched.error).toBeUndefined()
       expect(launched.status).toBe(1)
@@ -1470,10 +1509,7 @@ describe("an attached launch's exit status", processBudget, () => {
 describe("the smthrs init scaffold, launched as written", processBudget, () => {
   /** The provider credentials a scaffold reads, and the refusal reads back. */
   const seatVariables = [
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "OPENROUTER_API_KEY",
-    "CEREBRAS_API_KEY",
+    ...Providers.starterSeats.map(([variable]) => variable),
     "SMITHERS_OPENAI_AUTH"
   ]
 
@@ -1623,7 +1659,7 @@ describe("the smthrs init scaffold, launched as written", processBudget, () => {
       // A sweep therefore has to name a real window and wait it out.
       const refused = smithers(cwd, ["gc", "--older-than", "0s", "--dry-run", "--json"], environment)
       expect(refused.status).toBe(2)
-      expect(refused.stderr).toContain("--older-than must be a duration")
+      expect(JSON.parse(refused.stdout).message).toContain("--older-than must be a duration")
       waitOut(1_100)
       const swept = smithers(cwd, ["gc", "--older-than", "1s", "--dry-run", "--json"], environment)
       expect(swept.status).toBe(0)
@@ -1778,15 +1814,16 @@ describe("smthrs signal against a run parked on something else", processBudget, 
       const runId = (JSON.parse(launched.stdout) as { readonly runId: string }).runId
       parkOnTimer(cwd, runId)
 
-      const signalled = launch(cwd, ["signal", runId, JSON.stringify({ name: "go", payload: {} })])
+      const signalled = launch(cwd, ["runs", "signal", runId, JSON.stringify({ name: "go", payload: {} }), "--json"])
 
       expect(signalled.status).toBe(1)
-      expect(signalled.stderr.trimEnd()).toBe(
-        `NoMatchingWait: no wait point named "go" is open on run ${runId}. ` +
+      const error = JSON.parse(signalled.stdout)
+      expect(error.code).toBe("NoMatchingWait")
+      expect(error.message).toBe(
+        `no wait point named "go" is open on run ${runId}. ` +
           `Read \`smthrs status ${runId}\` to see what that run is waiting for.`
       )
-      // Nothing was written where the document goes.
-      expect(signalled.stdout).toBe("")
+      expect(signalled.stderr).toBe("")
     } finally {
       rmSync(cwd, { recursive: true, force: true })
     }

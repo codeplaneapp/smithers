@@ -42,9 +42,17 @@ List each finding with the file and line, then say whether the change is ready.`
 
 const samplePackage = `import { Smithers } from "@smthrs/targets"
 
-const { check, lint, test } = Smithers.StandardPackage({ deps: [], cwd: "packages/core" })
+const test = Smithers.Vitest({
+  tests: [Smithers.glob("test/**/*.test.ts")],
+  sources: [Smithers.glob("src/**/*.ts")],
+  deps: [],
+  config: null,
+  environment: "node",
+  passWithNoTests: false,
+  cwd: "packages/core"
+})
 
-export const Package = Smithers.Package({ targets: { check, lint, test } })`
+export const Package = Smithers.Package({ targets: { test } })`
 
 /**
  * The stable teaching, placed ahead of every brief.

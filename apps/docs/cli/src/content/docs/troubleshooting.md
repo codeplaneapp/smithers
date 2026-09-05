@@ -237,28 +237,16 @@ terminal, or unset `CI`, if you want the prompts.
 
 ## The installation is wrong
 
-### `v<version> is below the 22.19.0 floor the durable engine requires`
+### `v<version> is unsupported; use Node 22.19+ within Node 22, or Node 24.11+`
 
 **Symptom.** `smthrs doctor` reports a `fail` on the `node` check, and exits 1.
 
-**Cause.** `Doctor.satisfiesNode` compares `process.versions.node` against
-`Doctor.minimumNode`.
+**Cause.** The running Node does not satisfy `Doctor.supportedNodeRange`.
+This includes Node 23 and Node 24.0–24.10, not just versions below Node 22.19.
 
-**Fix.** Install Node 22.19.0 or later. The CLI's shebang pins Node for every
+**Fix.** Install Node 22.19+ (Node 22) or 24.11+. The CLI's shebang pins Node for every
 installation path, so this is about the Node on your `PATH`, not about the
 runner you typed.
-
-### `ERR_MODULE_NOT_FOUND` for a package that is in the tree
-
-**Symptom.** A source checkout fails to start, naming a workspace package that
-is right there.
-
-**Cause.** The checkout's workspace links point into a git worktree that has
-since been removed.
-
-**Fix.** Reinstall the workspace. The shim prints this diagnosis before it
-rethrows, because without it the message names a build problem that does not
-exist.
 
 ### `Could not register the MCP server`
 

@@ -8,8 +8,8 @@
  * `--bun` is passed, and `--bun` execution of this CLI is unsupported.
  *
  * A published install ships `dist/esm/bin.js`, so the shim runs the built
- * entry. A source checkout has no `dist`, so it runs `src/bin.ts` through
- * Node's own type stripping — the same path `test/Bin.test.ts` executes. That
+ * entry. A source checkout always runs `src/bin.ts`, even when stale `dist`
+ * output is present, through Node's type stripping — the same path the tests use. That
  * is what makes `pnpm exec smthrs` run the working tree during development
  * with no build step, which `scripts/check-local-smithers.mjs` requires.
  */
@@ -19,6 +19,8 @@ import { fileURLToPath } from "node:url"
 import { danglingWorkspaceLinkHint } from "./dangling-workspace-links.mjs"
 
 const built = new URL("../dist/esm/bin.js", import.meta.url)
+// A checkout may also have old build output; only registry installations use it.
+const checkout = existsSync(new URL("../../../pnpm-workspace.yaml", import.meta.url))
 
 /**
  * Imports the entry, and explains the one failure whose message names the
@@ -39,7 +41,7 @@ const start = async (entry) => {
   }
 }
 
-if (existsSync(fileURLToPath(built))) {
+if (!checkout && existsSync(fileURLToPath(built))) {
   await start(built.href)
 } else {
   // Type stripping is experimental on Node 22, and its warning would prepend a

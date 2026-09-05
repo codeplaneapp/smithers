@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Breaking: default MCP discovery and dispatch exclude approval/denial and
+  auto-approving start tools. The compatibility MCP server stamps an agent
+  identity and needs both explicit host exposure and independent Control
+  approval delegation. Local CLI approval remains available to the operator.
+- `NodeControl.engineDurable` and application configuration accept a host-owned
+  `approvalAuthority`. A bearer gateway is not automatically an approver.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Added
