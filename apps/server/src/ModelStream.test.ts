@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { MODEL_STREAM_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
 
@@ -85,6 +85,32 @@ describe("the model relay route", () => {
     const runId = captured[0]!.headers.get("x-smithers-run-id")
     expect(runId).not.toBe("attacker-chosen")
     expect(runId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  test("legacy turns keep client frame ids separate from unique charge ids on repeated requests", async () => {
+    const captured = withFetch((request) => new URL(request.url).hostname === "identity.test"
+      ? identityAnswer("will", true)
+      : ndjson([
+        { type: "card", card: { kind: "approval", payload: { runId: request.headers.get("x-smithers-run-id") } } },
+        { type: "card", card: { kind: "approval", payload: { runId: "independent-workflow" } } },
+        { type: "done" }
+      ]))
+    for (const content of ["first", "different prompt"]) {
+      const response = await worker.fetch(new Request(`https://app.test${TURN_PATH}`, {
+        method: "POST", headers: { "content-type": "application/json", cookie: "session=test" },
+        body: JSON.stringify({ runId: "repeated-client-id", instructions: "", messages: [{ role: "user", content }] })
+      }), gatedEnv())
+      expect(response.status).toBe(200)
+      const frames = (await response.text()).trim().split("\n").map((line) => JSON.parse(line))
+      expect(frames.every((frame) => frame.runId === "repeated-client-id")).toBe(true)
+      expect(frames[0].card.payload.runId).toBe("repeated-client-id")
+      expect(frames[1].card.payload.runId).toBe("independent-workflow")
+    }
+    const chargeIds = captured.filter((request) => new URL(request.url).hostname === "upstream.test")
+      .map((request) => request.headers.get("x-smithers-run-id"))
+    expect(chargeIds).toHaveLength(2)
+    expect(new Set(chargeIds).size).toBe(2)
+    for (const id of chargeIds) expect(id).toMatch(/^[0-9a-f-]{36}$/)
   })
 
   test("vouches a validated login so the charge lands on the user's own account", async () => {

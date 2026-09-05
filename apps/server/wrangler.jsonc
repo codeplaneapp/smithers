@@ -46,7 +46,7 @@
 		// proxies its stale Vercel CNAME; billing is on its public hostname.
 		"IDENTITY_UPSTREAM_URL": "https://smithers-cloud-identity.willcory10.workers.dev",
 		"BILLING_UPSTREAM_URL": "https://billing.smithers.sh",
-		// Wave 11: Smithers Cloud (jjhub) API — the per-user gateway provision route
+		// Wave 11: Smithers Cloud API — the per-user gateway provision route
 		// (POST /api/repos/{owner}/{repo}/gateway) lives here; the Cloud token comes
 		// from the identity worker's /api/identity/cloud-token door (wave-11b).
 		"SMITHERS_CLOUD_API_BASE_URL": "https://api.jjhub.tech",
@@ -84,9 +84,10 @@
 		//                              the validated login so the turn's comped charge lands on the user's OWN account
 		// The identity and billing workers both gate on the browser Origin, so their
 		// ALLOWED_ORIGINS must list this Worker's own origin — it is what the proxy sends.
-		//   GATEWAY_UPSTREAM_URL     — the engine gateway; /v1/rpc/*, /v1/api/*, /workflows/* and POST /api/approvals/decision
-		//   GATEWAY_AUTH_TOKEN       — service-token auth branch for the gateway seam
-		//   GATEWAY_SESSION_USER_ID / _ROLE / _SCOPES — trusted-proxy placeholder session until the identity seam feeds it
+		// The legacy GATEWAY_UPSTREAM_URL / GATEWAY_AUTH_TOKEN / GATEWAY_SESSION_USER_*
+		// static proxy was removed in 1.0. Raw /rpc, /projections, /sync and /health
+		// return 410. Product clients use the session-validated /api/workflow/*
+		// relay and GATEWAY_SESSIONS binding above. Remove leftover legacy secrets.
 		//   IDENTITY_ADMIN_TOKEN     — identity's ADMIN_SERVICE_TOKEN, spent by POST /api/admin/allowlist and GET /api/admin/requests
 		//   BILLING_ADMIN_TOKEN      — billing's ADMIN_SERVICE_TOKEN, spent by POST /api/admin/grant
 		// Every /api/admin/* route first validates the session as admin:true through identity;

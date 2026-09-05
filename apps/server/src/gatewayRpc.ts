@@ -32,9 +32,9 @@
  *
  * The two streaming procedures (`Watch`, `Projection.Subscribe`) are
  * deliberately absent for a different reason: a stream belongs on the
- * gateway's own WebSocket mounts, which a path-prefixed relay proxies
- * directly, not on a request/response Worker route that would have to buffer
- * it.
+ * gateway's separately authenticated WebSocket mounts, not on this product
+ * Worker's request/response route. The product's old deployment-identity raw
+ * proxy was removed; it is not a streaming escape hatch.
  */
 export const GATEWAY_PROCEDURE_MOUNTS: Readonly<Record<string, "/rpc" | "/projections">> = {
   Plan: "/rpc",

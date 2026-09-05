@@ -183,6 +183,26 @@ describe("uptime-probe.ts against a live HTTP origin", () => {
 describe("uptime-report.ts", () => {
   const runUrl = "https://github.com/smithersai/smithers/actions/runs/7"
 
+  test("the workflow captures a failing verdict under bash -e before running the alert", async () => {
+    const workflow = readFileSync(join(serverDir, "../../.github/workflows/canary.yml"), "utf8")
+    const decision = workflow.split("      - name: Decide the alert\n")[1]!.split("      - name:")[0]!
+    const script = decision.split("        run: |\n")[1]!.split("\n").map((line) => line.replace(/^          /, "")).join("\n")
+    const temp = mkdtempSync(join(workDir, "workflow-"))
+    const output = join(temp, "output.txt")
+    // A missing probe report is the deploy/crash failure path. Run the actual
+    // workflow body using Actions' errexit semantics, without contacting GitHub.
+    const child = Bun.spawn(["bash", "-e", "-o", "pipefail", "-c", script], {
+      cwd: serverDir, stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, RUNNER_TEMP: temp, GITHUB_OUTPUT: output, RUN_URL: runUrl, OPEN_ISSUE: "" }
+    })
+    const diagnostics = await new Response(child.stderr).text()
+    expect(await child.exited, diagnostics).toBe(0)
+    expect(readFileSync(output, "utf8")).toContain("verdict=1\n")
+    expect(readFileSync(output, "utf8")).toContain("action=create\n")
+    expect(readFileSync(join(temp, "canary-alert.md"), "utf8")).toContain(runUrl)
+    expect(workflow).toContain("      - name: Raise or clear the alert\n        if: always()")
+  })
+
   test("a failing report with nothing open asks for the issue to be created", async () => {
     mode = "spa-down"
     const jsonPath = join(workDir, "alert-fail.json")

@@ -161,6 +161,38 @@ describe("the client-error route and its admin read", () => {
     expect((await readClientErrors(logs)).reports[0]?.report).toBe("boom, not json")
   })
 
+  test("an over-cap report is refused before the whole body is read", async () => {
+    const logs = memoryLog()
+    // A declared content-length over the 16 KiB cap: refused up front.
+    const declared = await worker.fetch(
+      new Request("https://mvp.test/api/client-errors", {
+        method: "POST",
+        headers: { "content-length": String(17 * 1024) },
+        body: "x".repeat(17 * 1024)
+      }),
+      adminEnv(logs)
+    )
+    expect(declared.status).toBe(413)
+    // A chunked body declares no length: the read stops at the cap instead.
+    let cancelled = false
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(10 * 1024))
+        controller.enqueue(new Uint8Array(10 * 1024))
+      },
+      cancel() {
+        cancelled = true
+      }
+    })
+    const streamed = await worker.fetch(
+      new Request("https://mvp.test/api/client-errors", { method: "POST", body }),
+      adminEnv(logs)
+    )
+    expect(streamed.status).toBe(413)
+    expect(cancelled).toBe(true)
+    expect((await readClientErrors(logs)).total).toBe(0)
+  })
+
   test("every deployment writes to one log, so any request finds every report", async () => {
     const logs = memoryLog()
     await worker.fetch(report("/api/client-errors", { message: "a" }), adminEnv(logs))

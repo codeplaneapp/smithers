@@ -191,11 +191,12 @@ const STRIPPED_IDENTITY_HEADERS = [
 ] as const
 
 /*
- * The rc.0 gateway's own mounts, as the static GATEWAY_UPSTREAM_URL stub stack
- * addresses them directly. The 0.x `/v1/rpc/<method>`, `/v1/api/*`, and
- * `/workflows/*` surfaces are gone with the 0.x gateway.
+ * Retired raw gateway mounts. The old static proxy used deployment credentials
+ * without a per-request user/target authority. Product clients use the
+ * session-validated, per-user /api/workflow/* relay instead. Leftover secrets
+ * must never reactivate this path.
  */
-const GATEWAY_ROUTE_PREFIXES = ["/rpc", "/projections", "/sync", "/health"] as const
+const RETIRED_GATEWAY_ROUTE_PREFIXES = ["/rpc", "/projections", "/sync", "/health"] as const
 
 /*
  * Server-side turn cancellation, the workerd-legal way. workerd forbids
@@ -228,7 +229,16 @@ type TurnCancelStateName = "active" | "cancelled" | "settled"
 interface TurnCancelState {
   readonly state: TurnCancelStateName
   readonly at: number
+  /**
+   * The validated login that registered the run, when the deployment has an
+   * identity seam. Only the owner may cancel an owned registration; an
+   * ownerless one (local dev, no seam) is cancellable by anyone, as before.
+   */
+  readonly owner?: string
 }
+
+/** Internal header carrying the registering/cancelling login between this Worker and its Durable Object. */
+const TURN_OWNER_HEADER = "x-turn-owner"
 
 const TURN_STATE_KEY = "state"
 /**
@@ -246,8 +256,8 @@ export class TurnCancelRegistry {
     return this.ctx.storage.get<TurnCancelState>(TURN_STATE_KEY)
   }
 
-  private async write(state: TurnCancelStateName): Promise<void> {
-    await this.ctx.storage.put(TURN_STATE_KEY, { state, at: Date.now() })
+  private async write(state: TurnCancelStateName, owner?: string): Promise<void> {
+    await this.ctx.storage.put(TURN_STATE_KEY, { state, at: Date.now(), ...(owner === undefined ? {} : { owner }) })
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -258,11 +268,14 @@ export class TurnCancelRegistry {
     switch (new URL(request.url).pathname) {
       case "/register": {
         if (current?.state === "active" && !stale) return answer({ status: "already-running" })
-        await this.write("active")
+        await this.write("active", request.headers.get(TURN_OWNER_HEADER) ?? undefined)
         return answer({ status: "started" })
       }
       case "/cancel": {
         if (current?.state !== "active" || stale) return answer({ status: "not-found" })
+        if (current.owner !== undefined && request.headers.get(TURN_OWNER_HEADER) !== current.owner) {
+          return answer({ status: "forbidden" })
+        }
         await this.write("cancelled")
         return answer({ status: "cancelled" })
       }
@@ -287,6 +300,8 @@ const readStubJson = async <T>(response: Response): Promise<T | undefined> =>
   (response.json().catch(() => undefined)) as Promise<T | undefined>
 
 export interface WorkerEnv {
+  /** Trusted service implementing docs/browser-egress.md's pinned HTTPS transport. */
+  readonly BROWSER_EGRESS?: { readonly fetch: (request: Request) => Promise<Response> }
   readonly ASSETS: { readonly fetch: (request: Request) => Promise<Response> }
   readonly SMITHERS_BUILD_SHA?: string
   readonly SMITHERS_CHAT_URL?: string
@@ -305,14 +320,6 @@ export interface WorkerEnv {
    * charge lands on the user's own account (wave 13, D-2).
    */
   readonly CHAT_PRODUCT_SERVICE_TOKEN?: string
-  /** Per-session upstream engine gateway URL. Unset = the seam answers 501. */
-  readonly GATEWAY_UPSTREAM_URL?: string
-  /** Service-token branch: attached as the upstream bearer when configured. */
-  readonly GATEWAY_AUTH_TOKEN?: string
-  /** Trusted-proxy branch placeholder session: injected identity, when set. */
-  readonly GATEWAY_SESSION_USER_ID?: string
-  readonly GATEWAY_SESSION_USER_ROLE?: string
-  readonly GATEWAY_SESSION_USER_SCOPES?: string
   /**
    * How long any one upstream gets to answer, in milliseconds. Unset uses
    * UPSTREAM_TIMEOUT_MS; a deployment behind a slow sibling can raise it
@@ -468,9 +475,10 @@ const TRANSCRIPT_TOO_LARGE =
 /*
  * Live turns keyed by runId so /cancel can abort one. Per-isolate best effort,
  * used only when no TURN_CANCELS binding exists (unit tests): a disconnect of
- * the turn's own request always cancels upstream regardless.
+ * the turn's own request always cancels upstream regardless. The owner is the
+ * validated login the turn was registered with — only it may cancel.
  */
-const activeTurns = new Map<string, AbortController>()
+const activeTurns = new Map<string, { readonly controller: AbortController; readonly owner: string | undefined }>()
 
 /** How often the streaming pump re-checks the kill state while the upstream is silent. */
 const CANCEL_POLL_MS = 500
@@ -518,7 +526,8 @@ interface TurnStreamHooks {
 const tagRunId = (
   body: ReadableStream<Uint8Array>,
   runId: string,
-  hooks?: TurnStreamHooks
+  hooks?: TurnStreamHooks,
+  upstreamRunId?: string
 ): ReadableStream<Uint8Array> => {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -596,8 +605,18 @@ const tagRunId = (
           }
           if (typeof parsed === "object" && parsed !== null && "type" in parsed) {
             if ((parsed as { type?: unknown }).type === "done") await settleOnce()
+            // Upstream-generated approvals can echo the charge id. Keep
+            // those correlated with the client's turn as well; unrelated
+            // workflow run identities inside cards remain untouched.
+            const card = "card" in parsed ? parsed.card : undefined
+            if (upstreamRunId !== undefined && typeof card === "object" && card !== null && "payload" in card) {
+              const payload = card.payload
+              if (typeof payload === "object" && payload !== null && "runId" in payload && payload.runId === upstreamRunId) {
+                parsed = { ...parsed, card: { ...card, payload: { ...payload, runId } } }
+              }
+            }
             controller.enqueue(
-              encoder.encode(`${JSON.stringify({ ...parsed, runId })}\n`)
+              encoder.encode(`${JSON.stringify({ ...(parsed as object), runId })}\n`)
             )
           } else {
             controller.enqueue(encoder.encode(`${line}\n`))
@@ -691,7 +710,12 @@ const handleTurn = async (
     // The registry is the cross-isolate authority on duplicate turns; the
     // per-isolate map only ever sees this isolate's requests.
     const registration = await readStubJson<{ status?: string }>(
-      await registry.fetch(new Request("https://turn-cancel.internal/register", { method: "POST" }))
+      await registry.fetch(
+        new Request("https://turn-cancel.internal/register", {
+          method: "POST",
+          headers: turnSession === undefined ? {} : { [TURN_OWNER_HEADER]: turnSession.login }
+        })
+      )
     )
     if (registration?.status !== "started") {
       return json(409, { status: "error", message: "That Smithers turn is already running." })
@@ -710,17 +734,21 @@ const handleTurn = async (
   }
 
   const upstream = new AbortController()
-  activeTurns.set(body.runId, upstream)
+  activeTurns.set(body.runId, { controller: upstream, owner: turnSession?.login })
   // The client going away cancels the upstream turn exactly like the native
   // CloudAgent's cancel does.
   request.signal.addEventListener("abort", () => upstream.abort())
 
+  const upstreamRunId = crypto.randomUUID()
   let response: Response
   try {
     response = await fetch(chatUpstreamUrl(env), {
       method: "POST",
       signal: upstream.signal,
-      headers: chatUpstreamHeaders(env, body.runId, turnSession),
+      // The caller's id correlates frames and cancellation only. Every
+      // inference request needs a server-owned charge id, including retries:
+      // reusing a client id must never hide a second provider invocation.
+      headers: chatUpstreamHeaders(env, upstreamRunId, turnSession),
       body: JSON.stringify({
         messages: body.messages,
         // The hidden runtime context renders server-side into the
@@ -768,7 +796,7 @@ const handleTurn = async (
       settle
     }
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>()
-  void tagRunId(response.body, body.runId, hooks)
+  void tagRunId(response.body, body.runId, hooks, upstreamRunId)
     .pipeTo(writable)
     .catch(() => {})
     .finally(() => void settle())
@@ -879,7 +907,11 @@ const handleModelStream = async (
   )
 }
 
-const handleCancel = async (request: Request, env: WorkerEnv): Promise<Response> => {
+const handleCancel = async (
+  request: Request,
+  env: WorkerEnv,
+  session: ValidatedIdentity | undefined
+): Promise<Response> => {
   let body: unknown
   try {
     body = await readTurnBody(request)
@@ -900,15 +932,26 @@ const handleCancel = async (request: Request, env: WorkerEnv): Promise<Response>
     // "cancelled" between chunks and aborts its own upstream fetch, then
     // ends the stream with an honest terminal frame.
     const result = await readStubJson<{ status?: string }>(
-      await registry.fetch(new Request("https://turn-cancel.internal/cancel", { method: "POST" }))
+      await registry.fetch(
+        new Request("https://turn-cancel.internal/cancel", {
+          method: "POST",
+          headers: session === undefined ? {} : { [TURN_OWNER_HEADER]: session.login }
+        })
+      )
     )
+    if (result?.status === "forbidden") {
+      return json(403, { status: "error", message: "That turn belongs to a different account." })
+    }
     return json(200, { status: result?.status === "cancelled" ? "cancelled" : "not-found" })
   }
   // In-isolate fallback (unit tests only; the bindingless dev boundary keeps
   // its own implementation). Same-request abort is legal everywhere.
   const active = activeTurns.get(runId)
   if (active === undefined) return json(200, { status: "not-found" })
-  active.abort()
+  if (active.owner !== undefined && active.owner !== session?.login) {
+    return json(403, { status: "error", message: "That turn belongs to a different account." })
+  }
+  active.controller.abort()
   activeTurns.delete(runId)
   return json(200, { status: "cancelled" })
 }
@@ -916,72 +959,14 @@ const handleCancel = async (request: Request, env: WorkerEnv): Promise<Response>
 const notConfigured = (name: string, detail: string): Response =>
   json(501, { status: "error", message: `${name} is not configured on this deployment (${detail}).` })
 
-const gatewayNotConfigured = (): Response =>
-  notConfigured(
-    "The engine gateway seam",
-    "GATEWAY_UPSTREAM_URL is unset. The engine itself does not ship in Wave 1"
-  )
+const retiredGatewayProxy = (): Response => json(410, {
+  status: "error",
+  code: "gateway_proxy_removed",
+  message: "The static gateway proxy was removed. Use the session-validated /api/workflow/provision and /api/workflow/rpc routes, or connect directly to a separately authenticated gateway."
+})
 
-/**
- * The identity the gateway seam injects: a service-token bearer, or the
- * deployment-configured placeholder session. An upstream with neither branch
- * configured is a 501, never an unauthenticated forward.
- */
-const gatewayIdentityHeaders = (env: WorkerEnv): Record<string, string> | Response => {
-  const serviceToken = env.GATEWAY_AUTH_TOKEN?.trim()
-  const sessionUserId = env.GATEWAY_SESSION_USER_ID?.trim()
-  if ((serviceToken === undefined || serviceToken === "") && (sessionUserId === undefined || sessionUserId === "")) {
-    return json(501, {
-      status: "error",
-      message: "The engine gateway seam has an upstream but no auth branch configured " +
-        "(neither GATEWAY_AUTH_TOKEN nor a validated session)."
-    })
-  }
-  if (serviceToken !== undefined && serviceToken !== "") {
-    return { authorization: `Bearer ${serviceToken}` }
-  }
-  const headers: Record<string, string> = { "x-user-id": sessionUserId ?? "" }
-  if (env.GATEWAY_SESSION_USER_ROLE !== undefined) headers["x-user-role"] = env.GATEWAY_SESSION_USER_ROLE
-  if (env.GATEWAY_SESSION_USER_SCOPES !== undefined) headers["x-user-scopes"] = env.GATEWAY_SESSION_USER_SCOPES
-  return headers
-}
-
-/**
- * Validate the caller before attaching the deployment's gateway identity.
- * The shared relay guards every RPC alias and WebSocket upgrade, since its
- * service credential grants the upstream gateway's operator authority.
- */
-const proxyToGateway = async (request: Request, env: WorkerEnv): Promise<Response> => {
-  const upstream = env.GATEWAY_UPSTREAM_URL?.trim()
-  if (upstream === undefined || upstream === "") return gatewayNotConfigured()
-
-  const url = new URL(request.url)
-  // Supervisors probe workspace identity without a session. Keep that
-  // exception confined to the exact health mount, excluding upgrades.
-  const anonymousProbe = url.pathname === "/health" &&
-    (request.method === "GET" || request.method === "HEAD") &&
-    request.headers.get("upgrade") === null
-  if (!anonymousProbe) {
-    const session = await requireWorkflowSession(request, env)
-    if (session instanceof Response) return session
-  }
-
-  const identity = gatewayIdentityHeaders(env)
-  if (identity instanceof Response) return identity
-
-  const target = new URL(url.pathname + url.search, upstream)
-  const headers = new Headers(request.headers)
-  for (const name of STRIPPED_IDENTITY_HEADERS) headers.delete(name)
-  for (const [name, value] of Object.entries(identity)) headers.set(name, value)
-  return forwardUnderDeadline(
-    "The engine gateway",
-    new Request(target.toString(), new Request(request, { headers })),
-    upstreamTimeoutMs(env)
-  )
-}
-
-const isGatewayRoute = (pathname: string): boolean =>
-  GATEWAY_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+const isRetiredGatewayRoute = (pathname: string): boolean =>
+  RETIRED_GATEWAY_ROUTE_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 
 /**
  * A proxy whose upstream never answered. Returning the raw rejection would end
@@ -1053,8 +1038,23 @@ const proxyToIdentity = (request: Request, env: WorkerEnv): Promise<Response> =>
  * the HTTP status is preserved either way.
  *
  * The heading/detail strings below are constants composed with an integer
- * status code only — no upstream or user input reaches the page unescaped.
+ * status code, plus — on the OAuth refusal path — GitHub's `error` and
+ * `error_description` query params. Those two are attacker-controllable (any
+ * site can link a user at the callback with a crafted query string), so they
+ * are HTML-escaped at interpolation time in oauthCallbackRefusal below; no
+ * user input reaches the page raw.
  */
+const HTML_ENTITIES: Readonly<Record<string, string>> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  "\"": "&quot;",
+  "'": "&#39;"
+}
+
+const escapeHtml = (value: string): string =>
+  value.replace(/[&<>"']/g, (char) => HTML_ENTITIES[char] ?? char)
+
 const prefersJson = (request: Request): boolean => {
   const accept = request.headers.get("accept") ?? ""
   return accept.includes("application/json") && !accept.includes("text/html")
@@ -1147,6 +1147,7 @@ const authErrorResponse = (status: number, heading: string, detail: string): Res
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
       ...ISOLATION_HEADERS
     }
   })
@@ -1180,11 +1181,14 @@ const oauthCallbackRefusal = (url: URL): { status: number; heading: string; deta
     }
   }
   const described = url.searchParams.get("error_description")?.trim()
+  // Both query params are interpolated into the branded HTML error page, so
+  // they are escaped HERE, at interpolation time — the page design is
+  // untouched and markup in a crafted callback URL renders as inert text.
   return {
     status: 400,
     heading: "GitHub sign-in didn't finish.",
-    detail: `GitHub stopped the sign-in and called it "${error}"${
-      described === undefined || described === "" ? "" : ` — ${described}`
+    detail: `GitHub stopped the sign-in and called it "${escapeHtml(error)}"${
+      described === undefined || described === "" ? "" : ` — ${escapeHtml(described)}`
     }. Nothing was signed in — head back and try again.`
   }
 }
@@ -1656,9 +1660,11 @@ const handleAdminHealth = async (env: WorkerEnv, proxyOrigin: string): Promise<R
   const identityAdmin = env.IDENTITY_ADMIN_TOKEN?.trim()
   if (identityBase !== undefined && identityBase !== "" && identityAdmin !== undefined && identityAdmin !== "") {
     try {
-      const queue = await fetch(new URL("/api/identity/admin/requests", identityBase).toString(), {
-        headers: { "x-smithers-admin-token": identityAdmin }
-      })
+      const queue = await withDeadline("identity", (signal) =>
+        fetch(new URL("/api/identity/admin/requests", identityBase).toString(), {
+          headers: { "x-smithers-admin-token": identityAdmin },
+          signal
+        }))
       if (queue.ok) {
         const body = (await queue.json()) as { requests?: unknown }
         if (Array.isArray(body.requests)) queueDepth = body.requests.length
@@ -1975,7 +1981,7 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
   return json(200, frame)
 }
 
-const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") || isGatewayRoute(pathname)
+const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") || isRetiredGatewayRoute(pathname)
 
 /*
  * The browser tool's fetch route (Wave 10, §2d): server-side, hard-guarded
@@ -1984,7 +1990,7 @@ const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") |
  * deployment's network egress is a resource — and read-tier: it changes
  * nothing upstream.
  */
-const handleBrowserFetch = async (request: Request): Promise<Response> => {
+const handleBrowserFetch = async (request: Request, env: WorkerEnv): Promise<Response> => {
   let body: unknown
   try {
     body = await readTurnBody(request)
@@ -2000,7 +2006,23 @@ const handleBrowserFetch = async (request: Request): Promise<Response> => {
   if (url === undefined || url.trim() === "") {
     return json(400, { status: "error", message: "Body must be { url }." })
   }
-  const outcome = await browserFetch(url.trim(), { resolveHost: resolveHostOverHttps })
+  const egress = env.BROWSER_EGRESS
+  if (egress === undefined) {
+    return json(501, { status: "error", message: "Web page reading is unavailable on this host. Open it in the native app." })
+  }
+  const outcome = await browserFetch(url.trim(), {
+    resolveHost: resolveHostOverHttps,
+    fetchImpl: (target, init, address) => egress.fetch(new Request("https://browser-egress.internal/fetch", {
+      method: "POST",
+      redirect: "manual",
+      signal: init.signal,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: 1, url: target, address, method: "GET",
+        headers: Object.fromEntries(new Headers(init.headers))
+      })
+    }))
+  })
   return json(outcome.ok ? 200 : 422, browserFetchResponseBody(outcome))
 }
 
@@ -2130,6 +2152,39 @@ const CLIENT_ERROR_WINDOW_MS = 60_000
 const CLIENT_ERROR_WINDOW_MAX = 120
 let clientErrorWindow = { start: 0, count: 0 }
 
+/**
+ * Read the report body under the cap: a declared content-length over the cap
+ * is refused before a byte is read, and a chunked body (which declares no
+ * length) is cut off the moment the running byte count crosses it — the same
+ * discipline readTurnBody keeps. Returns undefined when the cap is exceeded.
+ */
+const readClientErrorBody = async (request: Request): Promise<string | undefined> => {
+  const declared = Number(request.headers.get("content-length") ?? "0")
+  if (declared > CLIENT_ERROR_MAX_BODY) return undefined
+  const reader = request.body?.getReader()
+  const chunks: Array<Uint8Array> = []
+  let byteLength = 0
+  if (reader !== undefined) {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      byteLength += value.byteLength
+      if (byteLength > CLIENT_ERROR_MAX_BODY) {
+        await reader.cancel().catch(() => {})
+        return undefined
+      }
+      chunks.push(value)
+    }
+  }
+  const bytes = new Uint8Array(byteLength)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
 const handleClientError = async (request: Request, env: WorkerEnv): Promise<Response> => {
   const now = Date.now()
   if (now - clientErrorWindow.start > CLIENT_ERROR_WINDOW_MS) {
@@ -2139,11 +2194,10 @@ const handleClientError = async (request: Request, env: WorkerEnv): Promise<Resp
   if (clientErrorWindow.count > CLIENT_ERROR_WINDOW_MAX) {
     return json(429, { status: "error", message: "Too many error reports." })
   }
-  const body = await request.arrayBuffer()
-  if (body.byteLength > CLIENT_ERROR_MAX_BODY) {
+  const text = await readClientErrorBody(request)
+  if (text === undefined) {
     return json(413, { status: "error", message: "Error report too large." })
   }
-  const text = new TextDecoder().decode(body)
   console.error("client-error:", text)
   // console.error alone lives exactly as long as someone is tailing. The log
   // is what makes an alpha user's crash readable afterwards, through
@@ -2257,7 +2311,7 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
 /*
  * The `/api/cloud/<inner>` bridge (apps/ui/docs/web-mode/PLAN.md §0
  * correction 4). The product's cloud seams call CLOUD_ROUTE_PREFIX + path;
- * the Bun origin forwards that with its jjhub PAT, and this Worker answered
+ * the Bun origin forwards that with its Smithers Cloud PAT, and this Worker answered
  * the canonical 404, so on the web the repository list never loaded. The
  * inner path goes through the SAME allowlist and the SAME cookie-to-cloud-
  * token bridge as the direct platform proxy above — one function, so the
@@ -2292,8 +2346,10 @@ const handleCloudProxy = async (request: Request, env: WorkerEnv, url: URL): Pro
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url)
-    const gatewayBound = isGatewayRoute(url.pathname) || request.headers.get("upgrade") === "websocket"
-    if ((isApiRoute(url.pathname) || gatewayBound) && isCrossOriginRequest(request, url)) {
+    // Retired mounts never forward, even on WebSocket upgrade or when legacy
+    // deployment credentials are still configured.
+    const retiredGatewayRoute = isRetiredGatewayRoute(url.pathname)
+    if (isApiRoute(url.pathname) && isCrossOriginRequest(request, url)) {
       return json(403, {
         status: "error",
         message: "This API only answers requests from its own origin."
@@ -2302,7 +2358,7 @@ export default {
     if (url.pathname === APP_BOOTSTRAP_PATH) {
       if (request.method !== "GET") return json(405, { status: "error", message: "Method not allowed." })
       const identity = (env.IDENTITY_UPSTREAM_URL?.trim() ?? "") !== ""
-      const jjhub = (env.SMITHERS_CLOUD_API_BASE_URL?.trim() ?? "") !== ""
+      const cloud = (env.SMITHERS_CLOUD_API_BASE_URL?.trim() ?? "") !== ""
       const agent = Boolean(env.SMITHERS_CHAT_AUTH_TOKEN?.trim() || env.CHAT_PRODUCT_SERVICE_TOKEN?.trim())
       return json(200, {
         apiVersion: APP_API_VERSION,
@@ -2312,7 +2368,7 @@ export default {
         // The shared table the Bun host and the parity matrix read. `terminal`
         // is the W4 relay: it stays false until that lane lands, so the Worker
         // never claims a door it has not opened.
-        capabilities: cloudCapabilities({ identity, jjhub, agent, checkout: checkoutEnabled(env), terminal: false }),
+        capabilities: cloudCapabilities({ identity, cloud, agent, checkout: checkoutEnabled(env), terminal: false, browser: env.BROWSER_EGRESS !== undefined }),
         authFlow: identity ? "redirect" : "none",
         sandbox: null
       })
@@ -2323,7 +2379,7 @@ export default {
       }
       const refusal = await requireTurnSession(request, env)
       if (refusal instanceof Response) return refusal
-      return handleCancel(request, env)
+      return handleCancel(request, env, refusal)
     }
     // The two routes that spend a model credential. Both gate on the
     // session first and then on the login's turn ceiling, so a refusal
@@ -2372,7 +2428,7 @@ export default {
       }
       const refusal = await requireTurnSession(request, env)
       if (refusal instanceof Response) return refusal
-      return handleBrowserFetch(request)
+      return handleBrowserFetch(request, env)
     }
     if (
       (url.pathname === AUTH_SIGN_IN_PATH || url.pathname === AUTH_CALLBACK_PATH) &&
@@ -2401,9 +2457,7 @@ export default {
     if (url.pathname.startsWith(ADMIN_ROUTE_PREFIX)) {
       return handleAdmin(request, env, url)
     }
-    // `proxyToGateway` requires the validated session itself, beside the
-    // service credential that relay attaches.
-    if (gatewayBound) return proxyToGateway(request, env)
+    if (retiredGatewayRoute) return retiredGatewayProxy()
     // Any other /api/* path is an unknown route: the same canonical 404 the
     // admin surface answers non-admins with, so nothing is enumerable.
     if (url.pathname.startsWith("/api/")) return notFound()

@@ -28,7 +28,7 @@ const env = (extra: Partial<WorkerEnv> = {}): WorkerEnv => ({
   ASSETS: { fetch: async () => new Response("<html></html>", { status: 200 }) },
   IDENTITY_UPSTREAM_URL: "https://identity.test",
   IDENTITY_SERVICE_TOKEN: "service-token",
-  SMITHERS_CLOUD_API_BASE_URL: "https://api.jjhub.test",
+  SMITHERS_CLOUD_API_BASE_URL: "https://api.smithers-cloud.test",
   ...extra
 })
 
@@ -87,7 +87,7 @@ const withRelay = async (
       return (
         script.provision?.(call, attempts.provision) ??
           json(200, {
-            base_url: "https://api.jjhub.test/api/gateways/gw-1",
+            base_url: "https://api.smithers-cloud.test/api/gateways/gw-1",
             token: GATEWAY_TOKEN,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: "gw-1",
@@ -140,7 +140,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       expect(door?.serviceToken).toBe("service-token")
       expect(door?.body).toEqual({ login: "codeplanesmithers" })
       const provision = calls.find((call) => call.url.includes("/gateway"))
-      expect(provision?.url).toBe("https://api.jjhub.test/api/repos/codeplanesmithers/smithers-demo/gateway")
+      expect(provision?.url).toBe("https://api.smithers-cloud.test/api/repos/codeplanesmithers/smithers-demo/gateway")
       expect(provision?.authorization).toBe(`Bearer ${CLOUD_TOKEN}`)
 
       // Inside the half-life a second resolve is free: no second provision.
@@ -179,7 +179,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       {
         provision: (_call, attempt) =>
           json(200, {
-            base_url: `https://api.jjhub.test/api/gateways/gw-${attempt}`,
+            base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
             token: `${GATEWAY_TOKEN}-${attempt}`,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: `gw-${attempt}`,
@@ -194,7 +194,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         expect(second.status === "ready" && second.record.gatewayId).toBe("gw-2")
         expect(second.status === "ready" && second.record.token).toBe(`${GATEWAY_TOKEN}-2`)
         expect(second.status === "ready" && second.record.baseUrl).toBe(
-          "https://api.jjhub.test/api/gateways/gw-2"
+          "https://api.smithers-cloud.test/api/gateways/gw-2"
         )
         // And the renewed record is what a later resolve reads back.
         const third = await ensureGateway(env(), "will", "will/mvp")
@@ -211,7 +211,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       {
         provision: () =>
           json(200, {
-            base_url: "https://api.jjhub.test/api/gateways/gw-1",
+            base_url: "https://api.smithers-cloud.test/api/gateways/gw-1",
             token: GATEWAY_TOKEN,
             expires_at: new Date(Date.now() + 2).toISOString(),
             gateway_id: "gw-1"
@@ -407,7 +407,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       expect(call.status).toBe("ok")
       const rpc = calls.find((entry) => entry.url.endsWith("/rpc"))
       // base_url is a PATH base — URL-joining an absolute path would drop it.
-      expect(rpc?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/rpc")
+      expect(rpc?.url).toBe("https://api.smithers-cloud.test/api/gateways/gw-1/rpc")
       expect(rpc?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
     })
   })
@@ -424,7 +424,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       {
         provision: (_call, attempt) =>
           json(200, {
-            base_url: `https://api.jjhub.test/api/gateways/gw-${attempt}`,
+            base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
             token: `${GATEWAY_TOKEN}-${attempt}`,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: `gw-${attempt}`
@@ -474,7 +474,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       {
         provision: (_call, attempt) =>
           json(200, {
-            base_url: `https://api.jjhub.test/api/gateways/gw-${attempt}`,
+            base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
             token: `${GATEWAY_TOKEN}-${attempt}`,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: `gw-${attempt}`
@@ -512,7 +512,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       {
         provision: (_call, attempt) =>
           json(200, {
-            base_url: `https://api.jjhub.test/api/gateways/gw-${attempt}`,
+            base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
             token: `${GATEWAY_TOKEN}-${attempt}`,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: `gw-${attempt}`
@@ -527,7 +527,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
         // behind it has since idle-suspended.
         seedMemoryGatewayRecord("will", "will/mvp", {
           gatewayId: "gw-0",
-          baseUrl: "https://api.jjhub.test/api/gateways/gw-0",
+          baseUrl: "https://api.smithers-cloud.test/api/gateways/gw-0",
           token: `${GATEWAY_TOKEN}-0`,
           vmId: "msb_0",
           expiresAt: Date.now() + 30 * 60 * 1000,
@@ -558,7 +558,7 @@ describe("wave 11 — provision-or-resume (§5)", () => {
       async (calls) => {
         seedMemoryGatewayRecord("will", "will/mvp", {
           gatewayId: "gw-0",
-          baseUrl: "https://api.jjhub.test/api/gateways/gw-0",
+          baseUrl: "https://api.smithers-cloud.test/api/gateways/gw-0",
           token: `${GATEWAY_TOKEN}-0`,
           vmId: null,
           expiresAt: Date.now() + 30 * 60 * 1000,
@@ -740,7 +740,7 @@ describe("wave 11 — the /api/workflow/* routes", () => {
       {
         provision: (_call, attempt) =>
           json(200, {
-            base_url: `https://api.jjhub.test/api/gateways/gw-${attempt}`,
+            base_url: `https://api.smithers-cloud.test/api/gateways/gw-${attempt}`,
             token: `${GATEWAY_TOKEN}-${attempt}`,
             expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
             gateway_id: `gw-${attempt}`,
@@ -794,7 +794,7 @@ describe("wave 11 — the /api/workflow/* routes", () => {
         })
         const relayed = calls.find((call) => call.url.endsWith("/projections"))
         // The credential the browser can never hold is added on this side.
-        expect(relayed?.url).toBe("https://api.jjhub.test/api/gateways/gw-1/projections")
+        expect(relayed?.url).toBe("https://api.smithers-cloud.test/api/gateways/gw-1/projections")
         expect(relayed?.authorization).toBe(`Bearer ${GATEWAY_TOKEN}`)
         expect(relayed?.body).toMatchObject({ _tag: "Request", tag: "Projection.Snapshot" })
       }

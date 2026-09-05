@@ -63,7 +63,7 @@ describe("smithers mvp worker", () => {
       host: "cloud",
       version: "1.0.0",
       buildSha: "build-abc",
-      capabilities: ["agent", "identity", "jjhub", "billing.checkout"],
+      capabilities: ["agent", "identity", "cloud", "billing.checkout"],
       authFlow: "redirect",
       sandbox: null
     })
@@ -325,7 +325,8 @@ describe("smithers mvp worker", () => {
         { runId: "run-1", type: "done" }
       ])
       expect(upstreamCall?.origin).toBe("https://smithers.sh")
-      expect(upstreamCall?.runId).toBe("run-1")
+      expect(upstreamCall?.runId).not.toBe("run-1")
+      expect(upstreamCall?.runId).toMatch(/^[0-9a-f-]{36}$/)
       expect(upstreamCall?.body).toEqual({
         messages: turnBody.messages,
         instructions: turnBody.instructions
@@ -372,250 +373,38 @@ describe("smithers mvp worker", () => {
     expect(await response.json()).toEqual({ status: "not-found" })
   })
 
-  test("gateway seam 501s honestly when no upstream is configured", async () => {
+  test("retired raw gateway mounts return an explicit migration response", async () => {
     for (const path of ["/rpc", "/projections", "/sync", "/health"]) {
       const response = await worker.fetch(new Request(`https://mvp.test${path}`), assetsEnv())
-      expect(response.status).toBe(501)
+      expect(response.status).toBe(410)
       const body = (await response.json()) as { message: string }
-      expect(body.message).toContain("GATEWAY_UPSTREAM_URL")
+      expect(body.message).toContain("/api/workflow/rpc")
     }
   })
 
-  test("gateway RPC refuses an anonymous relay before spending the Worker's gateway credential", async () => {
-    let gatewayCalls = 0
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_AUTH_TOKEN: "gateway-service-token",
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
+  test("WebSocket upgrades on retired or unknown mounts never activate a proxy", async () => {
+    let upstreamCalls = 0
+    const env = assetsEnv()
     await withMockedFetch(
       (request) => {
-        const hostname = new URL(request.url).hostname
-        if (hostname === "identity.test") return new Response("{}", { status: 401 })
-        if (hostname === "gateway.test") {
-          gatewayCalls += 1
-          return new Response("{}", { status: 200 })
-        }
-        return undefined
+        if (new URL(request.url).hostname !== "gateway.test") return undefined
+        upstreamCalls += 1
+        return new Response("{}", { status: 200 })
       },
       async () => {
-        for (
-          const path of ["/rpc", "/rpc/", "/rpc;transport-parameter", "/projections", "/sync", "/healthz"]
-        ) {
-          const response = await worker.fetch(post(path, {}), env)
-          expect([path, response.status]).toEqual([path, 401])
-        }
-        // A socket upgrade carries the same operator authority as `POST /rpc`
-        // and is a `GET`, so a method-shaped gate relays it anonymously. The
-        // Worker treats any upgrade as gateway-bound, so the path does not
-        // narrow this either.
-        for (const path of ["/rpc/ws", "/projections/ws", "/sync/ws", "/anything"]) {
-          const response = await worker.fetch(
-            new Request(`https://mvp.test${path}`, { headers: { upgrade: "websocket" } }),
-            env
-          )
-          expect([path, response.status]).toEqual([path, 401])
-        }
-      }
-    )
-    expect(gatewayCalls).toBe(0)
-  })
-
-  test("the gateway relay keeps GET /health anonymous, and only that exact mount", async () => {
-    let healthCalls = 0
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_AUTH_TOKEN: "gateway-service-token",
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
-    await withMockedFetch(
-      (request) => {
-        const hostname = new URL(request.url).hostname
-        if (hostname === "identity.test") return new Response("{}", { status: 401 })
-        if (hostname === "gateway.test") {
-          healthCalls += 1
-          return new Response(JSON.stringify({ workspace: "local" }), { status: 200 })
-        }
-        return undefined
-      },
-      async () => {
-        // A supervisor asks which workspace a gateway belongs to before it
-        // decides to keep or replace it, and it holds no session to do it.
-        const probe = await worker.fetch(new Request("https://mvp.test/health"), env)
-        expect(probe.status).toBe(200)
-        expect(healthCalls).toBe(1)
-        // The route table matches `/health` by prefix. The anonymous door is
-        // the exact mount, never everything the prefix admits.
-        const upgraded = await worker.fetch(
-          new Request("https://mvp.test/health", { headers: { upgrade: "websocket" } }),
+        const probe = await worker.fetch(
+          new Request("https://mvp.test/api/not-a-gateway-route", { headers: { upgrade: "websocket" } }),
           env
         )
-        expect(upgraded.status).toBe(401)
-        expect(healthCalls).toBe(1)
-      }
-    )
-  })
-
-  test("gateway RPC fails closed without an identity service", async () => {
-    let gatewayCalls = 0
-    await withMockedFetch(
-      () => {
-        gatewayCalls += 1
-        return new Response("{}", { status: 200 })
-      },
-      async () => {
-        const response = await worker.fetch(post("/rpc", {}), {
-          ...assetsEnv(),
-          GATEWAY_UPSTREAM_URL: "https://gateway.test",
-          GATEWAY_AUTH_TOKEN: "gateway-service-token"
-        })
-        expect(response.status).toBe(501)
-        expect(await response.text()).toContain("IDENTITY_UPSTREAM_URL")
-      }
-    )
-    expect(gatewayCalls).toBe(0)
-  })
-
-  test("gateway RPC refuses an invalid or unallowlisted session and identity failures", async () => {
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_AUTH_TOKEN: "gateway-service-token",
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
-    for (
-      const [identityStatus, identityBody, expectedStatus] of [
-        [401, {}, 401],
-        [200, { login: "will", allowlisted: false }, 403],
-        [200, {}, 502],
-        [503, {}, 502]
-      ] as const
-    ) {
-      let gatewayCalls = 0
-      await withMockedFetch(
-        (request) => {
-          if (new URL(request.url).hostname === "identity.test") {
-            expect(request.headers.get("cookie")).toBe("smithers_session=untrusted")
-            return new Response(JSON.stringify(identityBody), { status: identityStatus })
-          }
-          gatewayCalls += 1
-          return new Response("{}", { status: 200 })
-        },
-        async () => {
-          const request = post("/rpc", {})
-          request.headers.set("cookie", "smithers_session=untrusted")
-          const response = await worker.fetch(request, env)
-          expect(response.status).toBe(expectedStatus)
-        }
-      )
-      expect(gatewayCalls).toBe(0)
-    }
-  })
-
-  test("gateway RPC validates a session before attaching the Worker's gateway credential", async () => {
-    let seen: Headers | undefined
-    let validations = 0
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_AUTH_TOKEN: "gateway-service-token",
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
-    const originalFetch = globalThis.fetch
-    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
-      const request = input instanceof Request ? input : new Request(String(input), init)
-      if (new URL(request.url).hostname === "identity.test") {
-        validations += 1
-        expect(new URL(request.url).pathname).toBe("/api/identity/validate")
-        expect(request.headers.get("cookie")).toBe("smithers_session=abc")
-        expect(request.headers.get("authorization")).toBeNull()
-        return new Response(JSON.stringify({ login: "will", allowlisted: true }), {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        })
-      }
-      if (new URL(request.url).hostname === "gateway.test") {
-        seen = request.headers
-        return new Response("{}", { status: 200 })
-      }
-      return originalFetch(request)
-    }) as typeof fetch
-    try {
-      const request = new Request("https://mvp.test/rpc", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-user-id": "evil",
-          "x-user-scopes": "admin:*",
-          "x-user-role": "admin",
-          "x-smithers-token-id": "forged",
-          authorization: "Bearer stolen",
-          cookie: "smithers_session=abc"
-        },
-        body: "{}"
-      })
-      const response = await worker.fetch(request, env)
-      expect(response.status).toBe(200)
-      expect(validations).toBe(1)
-      expect(seen?.get("authorization")).toBe("Bearer gateway-service-token")
-      expect(seen?.get("x-user-id")).toBeNull()
-      expect(seen?.get("x-user-role")).toBeNull()
-      expect(seen?.get("x-user-scopes")).toBeNull()
-      expect(seen?.get("x-smithers-token-id")).toBeNull()
-    } finally {
-      globalThis.fetch = originalFetch
-    }
-  })
-
-  /*
-   * The placeholder-session branch is the other half of `gatewayIdentityHeaders`,
-   * and it injects the caller's identity rather than a bearer. The session gate
-   * runs ahead of it too: which identity the relay attaches never decides
-   * whether the relay happens.
-   */
-  test("a placeholder-session deployment still injects its identity, and still needs a session", async () => {
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_SESSION_USER_ID: "user-123",
-      GATEWAY_SESSION_USER_ROLE: "member",
-      GATEWAY_SESSION_USER_SCOPES: "run:read run:write",
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
-    let seen: Headers | undefined
-    let gatewayCalls = 0
-    let allowlisted = false
-    await withMockedFetch(
-      (request) => {
-        if (new URL(request.url).hostname === "identity.test") {
-          return new Response(JSON.stringify({ login: "will", allowlisted }), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          })
-        }
-        gatewayCalls += 1
-        seen = request.headers
-        return new Response("{}", { status: 200 })
-      },
-      async () => {
-        const sessioned = (): Request => {
-          const request = post("/rpc", {})
-          request.headers.set("cookie", "smithers_session=abc")
-          request.headers.set("x-user-id", "evil")
-          return request
-        }
-        expect((await worker.fetch(sessioned(), env)).status).toBe(403)
-        expect(gatewayCalls).toBe(0)
-
-        allowlisted = true
-        expect((await worker.fetch(sessioned(), env)).status).toBe(200)
-        expect(gatewayCalls).toBe(1)
-        expect(seen?.get("x-user-id")).toBe("user-123")
-        expect(seen?.get("x-user-role")).toBe("member")
-        expect(seen?.get("x-user-scopes")).toBe("run:read run:write")
-        expect(seen?.get("authorization")).toBeNull()
+        expect(probe.status).toBe(404)
+        expect(upstreamCalls).toBe(0)
+        // Former raw mounts name their retirement; they do not forward either.
+        const forwarded = await worker.fetch(
+          new Request("https://mvp.test/rpc", { headers: { upgrade: "websocket" } }),
+          env
+        )
+        expect(forwarded.status).toBe(410)
+        expect(upstreamCalls).toBe(0)
       }
     )
   })
@@ -823,6 +612,32 @@ describe("auth navigation seam (wave 8)", () => {
         expect(html).toContain("redirect_uri_mismatch")
         expect(html).toContain("The redirect_uri is not associated.")
         expect(html).toContain("href=\"/\"")
+      }
+    )
+  })
+
+  test("markup in the OAuth error query params is escaped into inert text, never rendered", async () => {
+    await withIdentity(
+      () => new Response("{}", { status: 400 }),
+      async () => {
+        const payload = "<script>alert(1)</script>"
+        const description = "</p><img src=x onerror='alert(2)'>&\""
+        const response = await worker.fetch(
+          new Request(
+            `https://mvp.test/api/auth/github/callback?error=${encodeURIComponent(payload)}&error_description=${encodeURIComponent(description)}&state=zzz`,
+            { headers: { accept: BROWSER_ACCEPT } }
+          ),
+          env
+        )
+        expect(response.status).toBe(400)
+        expect(response.headers.get("content-type")).toContain("text/html")
+        const html = await response.text()
+        expect(html).not.toContain(payload)
+        expect(html).not.toContain("<script")
+        expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;")
+        expect(html).not.toContain("<img")
+        expect(html).toContain("&lt;/p&gt;&lt;img src=x onerror=&#39;alert(2)&#39;&gt;&amp;&quot;")
+        expect(response.headers.get("content-security-policy")).toContain("default-src 'none'")
       }
     )
   })
@@ -1158,8 +973,6 @@ describe("same-origin guard", () => {
     let upstreamCalls = 0
     const env: WorkerEnv = {
       ...assetsEnv(),
-      GATEWAY_UPSTREAM_URL: "https://gateway.test",
-      GATEWAY_SESSION_USER_ID: "user-123",
       IDENTITY_UPSTREAM_URL: "https://identity.test",
       BILLING_UPSTREAM_URL: "https://billing.test",
       BILLING_AUTH_TOKEN: "cloud-bearer-123",
@@ -1858,6 +1671,37 @@ describe("the turn-cancel registry (Durable Object state)", () => {
     expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "not-found" })
     expect(await (await doPost(registry, "/register")).json()).toEqual({ status: "started" })
   })
+
+  test("only the registering owner may cancel an owned registration", async () => {
+    const registry = new TurnCancelRegistry({ storage: memoryStorage() })
+    const as = (login: string, path: string): Promise<Response> =>
+      registry.fetch(
+        new Request(`https://turn-cancel.internal${path}`, {
+          method: "POST",
+          headers: { "x-turn-owner": login }
+        })
+      )
+    expect(await (await as("alice", "/register")).json()).toEqual({ status: "started" })
+    // A different login — and an anonymous caller — cannot kill alice's turn.
+    expect(await (await as("bob", "/cancel")).json()).toEqual({ status: "forbidden" })
+    expect(await (await doPost(registry, "/cancel")).json()).toEqual({ status: "forbidden" })
+    // The run is untouched, and its owner can still kill it.
+    expect(await (await as("alice", "/cancel")).json()).toEqual({ status: "cancelled" })
+  })
+
+  test("an owned active registration refuses a squatting re-register from anyone", async () => {
+    const registry = new TurnCancelRegistry({ storage: memoryStorage() })
+    const registerAs = (login: string): Promise<Response> =>
+      registry.fetch(
+        new Request("https://turn-cancel.internal/register", {
+          method: "POST",
+          headers: { "x-turn-owner": login }
+        })
+      )
+    expect(await (await registerAs("alice")).json()).toEqual({ status: "started" })
+    expect(await (await registerAs("bob")).json()).toEqual({ status: "already-running" })
+    expect(await (await registerAs("alice")).json()).toEqual({ status: "already-running" })
+  })
 })
 
 describe("the server-side kill route (B-3)", () => {
@@ -1969,6 +1813,95 @@ describe("the server-side kill route (B-3)", () => {
     )
   })
 
+  /*
+   * Owner scoping: any allowlisted login may hold a runId (they arrive in
+   * client logs, URLs, bug reports), so the kill must check WHO asks, not
+   * just WHICH run. The registry records the validated login at register
+   * time and refuses everyone else; the in-isolate fallback does the same.
+   */
+  const signedPost = (path: string, body: unknown, login: string): Request =>
+    new Request(`https://mvp.test${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: `smithers_session=${login}` },
+      body: JSON.stringify(body)
+    })
+
+  const ownerScopedEnv = (cancels: boolean): WorkerEnv => ({
+    ...assetsEnv(),
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    SMITHERS_CHAT_URL: "https://upstream.test/chat",
+    ...(cancels ? { TURN_CANCELS: memoryCancels() } : {})
+  })
+
+  const withSessions = async (
+    upstream: ReturnType<typeof hangingUpstream>,
+    run: () => Promise<void>
+  ): Promise<void> =>
+    withMockedFetch(
+      (request) => {
+        const host = new URL(request.url).hostname
+        if (host === "identity.test") {
+          const login = request.headers.get("cookie")?.includes("smithers_session=bob") ? "bob" : "alice"
+          return new Response(JSON.stringify({ login, allowlisted: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          })
+        }
+        if (host === "upstream.test") return upstream.response()
+        return undefined
+      },
+      run
+    )
+
+  test("only the turn's owner may kill it, through the registry", async () => {
+    const upstream = hangingUpstream()
+    const env = ownerScopedEnv(true)
+    await withSessions(upstream, async () => {
+      const turn = await worker.fetch(
+        signedPost("/api/agent/turn", { ...turnBody, runId: "run-owned" }, "alice"),
+        env
+      )
+      expect(turn.status).toBe(200)
+      // Bob is signed in and allowlisted and knows the runId — not his turn.
+      const stranger = await worker.fetch(
+        signedPost("/api/agent/turn/cancel", { runId: "run-owned" }, "bob"),
+        env
+      )
+      expect(stranger.status).toBe(403)
+      const mine = await worker.fetch(
+        signedPost("/api/agent/turn/cancel", { runId: "run-owned" }, "alice"),
+        env
+      )
+      expect(mine.status).toBe(200)
+      expect(await mine.json()).toEqual({ status: "cancelled" })
+      await turn.body?.cancel()
+    })
+  })
+
+  test("only the turn's owner may kill it, through the in-isolate fallback", async () => {
+    const upstream = hangingUpstream()
+    const env = ownerScopedEnv(false)
+    await withSessions(upstream, async () => {
+      const turn = await worker.fetch(
+        signedPost("/api/agent/turn", { ...turnBody, runId: "run-local" }, "alice"),
+        env
+      )
+      expect(turn.status).toBe(200)
+      const stranger = await worker.fetch(
+        signedPost("/api/agent/turn/cancel", { runId: "run-local" }, "bob"),
+        env
+      )
+      expect(stranger.status).toBe(403)
+      const mine = await worker.fetch(
+        signedPost("/api/agent/turn/cancel", { runId: "run-local" }, "alice"),
+        env
+      )
+      expect(mine.status).toBe(200)
+      expect(await mine.json()).toEqual({ status: "cancelled" })
+      await turn.body?.cancel()
+    })
+  })
+
   test("a long stream does not spend one Durable Object subrequest per chunk", async () => {
     // A Worker request may make ~1000 subrequests, and every kill check is
     // one: a token-streamed turn delivers far more chunks than that, so an
@@ -2051,20 +1984,82 @@ describe("the server-side kill route (B-3)", () => {
 })
 
 describe("the browser tool route (§2d)", () => {
+  test("without a pinned egress binding the capability is absent and reads fail closed without DNS", async () => {
+    const original = globalThis.fetch
+    globalThis.fetch = (async () => { throw new Error("unexpected outbound fetch") }) as unknown as typeof fetch
+    try {
+      const bootstrap = await worker.fetch(new Request("https://mvp.test/api/bootstrap"), assetsEnv())
+      expect(AppBootstrapSchema.parse(await bootstrap.json()).capabilities).not.toContain("browser.read")
+      const response = await worker.fetch(post("/api/tools/browser-fetch", { url: "https://example.com/" }), assetsEnv())
+      expect(response.status).toBe(501)
+    } finally { globalThis.fetch = original }
+  })
+
+  test("a configured binding receives the validated address and revalidates every redirect without caller credentials", async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: unknown) => {
+      const url = new URL(String(input))
+      expect(url.hostname).toBe("cloudflare-dns.com")
+      const name = url.searchParams.get("name")
+      return Response.json({ Answer: url.searchParams.get("type") === "A"
+        ? [{ type: 1, data: name === "next.test" ? "8.8.4.4" : "8.8.8.8" }]
+        : [] })
+    }) as typeof fetch
+    const env: WorkerEnv = { ...assetsEnv(), BROWSER_EGRESS: { fetch: async (request) => {
+      expect(request.url).toBe("https://browser-egress.internal/fetch")
+      expect(request.redirect).toBe("manual")
+      expect(request.headers.has("authorization")).toBe(false)
+      expect(request.headers.has("cookie")).toBe(false)
+      calls.push(await request.json() as Record<string, unknown>)
+      return calls.length === 1
+        ? new Response(null, { status: 302, headers: { location: "https://next.test/page" } })
+        : new Response("<p>Read securely</p>", { headers: { "content-type": "text/html" } })
+    } } }
+    try {
+      const bootstrap = await worker.fetch(new Request("https://mvp.test/api/bootstrap"), env)
+      expect(AppBootstrapSchema.parse(await bootstrap.json()).capabilities).toContain("browser.read")
+      const request = post("/api/tools/browser-fetch", { url: "https://first.test/" })
+      request.headers.set("authorization", "Bearer never-forward-this")
+      request.headers.set("cookie", "never=forward-this")
+      const response = await worker.fetch(request, env)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ finalUrl: "https://next.test/page", text: "Read securely" })
+      expect(calls.map(({ address, url, version }) => ({ address, url, version }))).toEqual([
+        { address: "8.8.8.8", url: "https://first.test/", version: 1 },
+        { address: "8.8.4.4", url: "https://next.test/page", version: 1 }
+      ])
+      expect(JSON.stringify(calls)).not.toContain("never-forward-this")
+      expect(JSON.stringify(calls)).not.toContain("never=forward-this")
+    } finally { globalThis.fetch = original }
+  })
+
+  test("a pinned-egress redirect to a private host is refused before a second binding call", async () => {
+    let calls = 0
+    const env: WorkerEnv = { ...assetsEnv(), BROWSER_EGRESS: { fetch: async () => {
+      calls += 1
+      return new Response(null, { status: 302, headers: { location: "https://127.0.0.1/private" } })
+    } } }
+    const response = await worker.fetch(post("/api/tools/browser-fetch", { url: "https://8.8.8.8/" }), env)
+    expect(response.status).toBe(422)
+    expect(calls).toBe(1)
+  })
+
   test("a malformed body is a 400, a non-https URL a guarded 422 — no fetch happens", async () => {
     const bad = await worker.fetch(post("/api/tools/browser-fetch", { nope: true }), assetsEnv())
     expect(bad.status).toBe(400)
-    const http = await worker.fetch(post("/api/tools/browser-fetch", { url: "http://example.com/" }), assetsEnv())
+    const env: WorkerEnv = { ...assetsEnv(), BROWSER_EGRESS: { fetch: async () => { throw new Error("must not fetch") } } }
+    const http = await worker.fetch(post("/api/tools/browser-fetch", { url: "http://example.com/" }), env)
     expect(http.status).toBe(422)
     expect(((await http.json()) as { message: string }).message).toContain("https")
     const privateIp = await worker.fetch(
       post("/api/tools/browser-fetch", { url: "https://127.0.0.1/" }),
-      assetsEnv()
+      env
     )
     expect(privateIp.status).toBe(422)
     const internal = await worker.fetch(
       post("/api/tools/browser-fetch", { url: "https://db.internal/" }),
-      assetsEnv()
+      env
     )
     expect(internal.status).toBe(422)
   })
@@ -2176,7 +2171,7 @@ describe("the browser tool route (§2d)", () => {
 
   /*
    * Repro apps/ui/canary-repros/admin/28.5 and cards/8.21: the proxy forwarded
-   * every allowlisted path, and the jjhub Go router's plain-text
+   * every allowlisted path, and the Smithers Cloud Go router's plain-text
    * `404 page not found` came back through it and was rendered verbatim into
    * the user's toast. A body written for a router is never a message for a
    * reader.
@@ -2397,7 +2392,7 @@ describe("the browser tool route (§2d)", () => {
 /*
  * The `/api/cloud/<inner>` bridge (apps/ui/docs/web-mode/PLAN.md §0 correction
  * 4, lane W0). Seven product seams call `CLOUD_ROUTE_PREFIX + path`, which the
- * Bun origin proxies with the jjhub PAT and this Worker answered with the
+ * Bun origin proxies with the Smithers Cloud PAT and this Worker answered with the
  * canonical 404, so on the web the repository list never loaded. The Worker
  * strips the prefix and hands the inner path to the SAME allowlist and the
  * SAME cookie-to-cloud-token bridge as the direct platform proxy; anything
@@ -2568,20 +2563,20 @@ describe("the /api/cloud bridge", () => {
       [{ SMITHERS_CHAT_AUTH_TOKEN: " " }, false]
     ]
     for (const identity of [false, true]) {
-      for (const jjhub of [false, true]) {
+      for (const cloud of [false, true]) {
         for (const [agentEnv, agent] of agentShapes) {
           for (const checkout of ["1", "0", undefined]) {
             const env: WorkerEnv = {
               ...assetsEnv(),
               ...agentEnv,
               ...(identity ? { IDENTITY_UPSTREAM_URL: "https://identity.test" } : {}),
-              ...(jjhub ? { SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test" } : {}),
+              ...(cloud ? { SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test" } : {}),
               ...(checkout === undefined ? {} : { BILLING_CHECKOUT_ENABLED: checkout })
             }
             const response = await worker.fetch(new Request("https://mvp.test/api/bootstrap"), env)
             const body = AppBootstrapSchema.parse(await response.json())
             expect(body.capabilities).toEqual(
-              cloudCapabilities({ identity, jjhub, agent, checkout: checkout === "1", terminal: false })
+              cloudCapabilities({ identity, cloud, agent, checkout: checkout === "1", terminal: false })
             )
             expect(body.capabilities).not.toContain("cloud.terminal")
             expect(body.capabilities).not.toContain("cloud.pat")
