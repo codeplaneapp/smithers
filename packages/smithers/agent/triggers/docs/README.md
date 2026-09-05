@@ -3,34 +3,50 @@ title: "@smthrs/triggers"
 description: "Durable cron triggers and verified inbound channels for flows: a scheduler that survives restarts, a claim protocol that keeps two hosts from firing one occurrence twice, and webhook doors that carry no execution authority."
 ---
 
-A flow starts one of three ways: a person asks for it, a clock reaches a
-boundary, or something outside sends a request. `@smthrs/triggers` owns the
-last two.
+`@smthrs/triggers` starts flows on a clock, and lets an outside system start
+them over HTTP. A **flow** is a durable workflow, declared with
+[`@smthrs/flow`](/api/flow) and addressed by a stable id. A **trigger** is a
+durable row: a flow id, a JSON input, and a cron expression. A **channel** is a
+verified door: it authenticates raw request bytes and maps them onto a start or
+a signal.
 
-The package is deliberately small in authority and large in bookkeeping.
-A trigger names a flow id, a JSON input, and a cron expression. A channel
-authenticates opaque bytes and maps them onto a control-plane start or
-signal. Neither one executes anything: the launch goes through
-[`@smthrs/control`](/api/control), so the target flow's envelope, approvals,
-and permission checks apply unchanged.
+## What it is for
 
-What the package spends its code on is the part that is hard to get right:
-firing exactly once across two hosts, deciding what a boundary means when the
-previous run is still going, and knowing what a process owes after it was down
-for six hours.
+Writing a cron loop is easy. The parts that are not easy are the ones this
+package spends its code on:
+
+- **Firing once across two hosts.** Both hosts notice the 03:00 boundary. The
+  claim protocol runs inside the store's transaction, so exactly one of them
+  launches and the other learns it lost.
+- **Deciding what a boundary means when the previous run is still going.** Skip
+  it, remember the newest one, or cancel the run in flight and replace it.
+- **Knowing what a trigger owes after the process was down for six hours.** Owe
+  nothing, owe the most recent missed boundary, or owe all of them, bounded by
+  a number the declaration states.
+- **Accepting an inbound request without handing it authority.** A verified
+  webhook payload can ask for a start or a signal. It cannot widen what the run
+  is then allowed to do: the capabilities and the budget stay the ones
+  [`@smthrs/control`](/api/control) already grants that flow. A mistaken
+  declaration starts the wrong flow rather than escalating a privilege.
+
+Reach for a queue instead when every unit of work must survive: a trigger
+coalesces, and that is deliberate. A nightly report that ran long owes you the
+latest report, not four of them.
 
 ## Who uses this package
 
-Hosts use it. A host composes the scheduler into its runtime so registered
-triggers keep firing, and declares webhook doors so an outside system can start
-a flow. Flow authors do not import it: a trigger points at a flow by id, and
-the flow itself never learns that a clock started it.
+Hosts use it. A **host** is the long-lived process that keeps flows running: a
+server, a worker, or the `smthrs` command line. It composes the scheduler into
+its runtime so registered triggers keep firing, and declares webhook doors so an
+outside system can start a flow. Flow authors do not import it: a trigger points
+at a flow by id, and the flow itself never learns that a clock started it.
 
-## Availability
+## Install
 
-`@smthrs/triggers` is a private workspace package for the 1.0.0-rc.0 release.
-Only code in this workspace may depend on it, and it is not published to npm.
-See [Installation](./installation.md).
+`@smthrs/triggers` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](./installation.md) covers how to depend on it from a checkout,
+what it requires at runtime, and which packages a running host adds.
 
 ## The smallest declaration
 
@@ -57,6 +73,26 @@ const nightly = Trigger.make({
 `TriggerStore` makes it durable, and a running `Scheduler` fires it from there.
 For the whole path, including the launch, see the
 [Quickstart](./quickstart.md).
+
+## Where this sits
+
+Flows themselves are written with [`@smthrs/flow`](/api/flow), and nothing here
+executes one. A trigger names a flow and hands the launch to
+[`@smthrs/control`](/api/control), the control plane every run is admitted
+through, so the flow's own authority, its approvals, and the host's permission
+checks apply exactly as they would if a person had started it.
+
+When that flow is an agent session, the package that executes it is
+[`@smthrs/agent`](/api/agent), which owns the agent loop and ships
+`AgentSession` as the production executor Control launches through.
+`@smthrs/triggers` is one layer out from that: the clock and the front door in
+front of an agent, rather than any part of the agent itself. Read
+[`@smthrs/agent`](/api/agent) for what a launched run actually does.
+
+[`@smthrs/cli`](/api/cli) is the top of that stack: the `smthrs` command line
+an operator installs, which composes `@smthrs/agent` and the rest of Smithers
+into one executable. Start there if you want the whole product rather than one
+of its parts.
 
 ## The package at a glance
 

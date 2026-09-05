@@ -138,10 +138,15 @@ describe("package boundaries", () => {
       expect(map["./internal/*"]).toBeNull()
       expect(map["./package.json"]).toBe("./package.json")
     }
-    expect(exports["./*"]).toBe("./src/*.ts")
+    expect(exports["./*"]).toBeUndefined()
+    expect(published["./*"]).toBeUndefined()
+    expect(exports["./TriggerStore"]).toBe("./src/TriggerStore.ts")
+    expect(exports["./test/TestTriggers"]).toBe("./src/test/TestTriggers.ts")
   })
 
-  it("stays private at 1.0.0-rc.0", () => {
-    expect(manifest.private).toBe(true)
+  it("publishes the release candidate on the next tag", () => {
+    expect(manifest.private).toBeUndefined()
+    expect(manifest.version).toBe("1.0.0-rc.0")
+    expect(manifest.publishConfig).toMatchObject({ access: "public", provenance: true, tag: "next" })
   })
 })

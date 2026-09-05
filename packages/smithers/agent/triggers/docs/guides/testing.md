@@ -24,9 +24,9 @@ const store = TestTriggers.layer
 
 It is not a kinder set of rules. It returns the same refusal codes in the same
 order as the SQL store, holds the same 5-minute reservation lease from
-`TriggerStore.reservationLeaseMs`, and follows the same watermark rules. Both
-stores run one shared conformance suite, so a test that passes against this one
-is testing the protocol rather than the implementation.
+`TriggerStore.reservationLeaseMs`, and follows the same watermark rules, so a
+test that passes against this one is testing the protocol rather than the
+implementation.
 
 Use `SqlTriggerStore.layer` over an in-memory SQLite database when the thing
 under test is a SQL behavior, such as migration application or a row shape.

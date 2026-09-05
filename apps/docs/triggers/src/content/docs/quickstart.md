@@ -19,7 +19,7 @@ one launch carrying an idempotency key derived from the occurrence.
 ## Prerequisites
 
 - Node.js 22.19.0 or later.
-- A workspace package that depends on `@smthrs/triggers` and
+- A TypeScript project that depends on `@smthrs/triggers` and
   `@smthrs/database`. See [Installation](/installation/).
 
 ## Compose the store, the runner, and the clock

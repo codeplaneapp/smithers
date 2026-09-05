@@ -283,7 +283,11 @@ interface Due {
   readonly watermark: number
 }
 
-const idempotencyKey = (triggerId: string, occurrence: number): string =>
+/** Stable Control request identity for one manual or scheduled occurrence.
+ * @category constructors
+ * @since 0.1.0
+ */
+export const idempotencyKey = (triggerId: string, occurrence: number): string =>
   `${triggerId}:${new Date(occurrence).toISOString()}`
 
 /**
@@ -808,6 +812,9 @@ export const make = (
     ): Effect.Effect<void, TriggerError> =>
       Effect.gen(function*() {
         const running = yield* resolveActive(trigger)
+        // Disable prevents future claims, not recovery of an already active
+        // occurrence (including a plan waiting for a human decision).
+        if (!trigger.enabled) return
         if (running === undefined || trigger.overlap === "supersede") yield* resumePending(trigger)
         const due = yield* dueOccurrences(trigger, now)
         let dispatched: number | undefined
@@ -828,7 +835,7 @@ export const make = (
     const runOnce = semaphore.withPermits(1)(
       Effect.gen(function*() {
         const now = yield* Clock.currentTimeMillis
-        const triggers = yield* store.listEnabled()
+        const triggers = yield* store.list()
         yield* Effect.forEach(
           triggers,
           (trigger) => isolate(trigger.id, "tick", processTrigger(trigger, now)),

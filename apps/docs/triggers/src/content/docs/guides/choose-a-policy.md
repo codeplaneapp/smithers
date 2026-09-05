@@ -88,8 +88,7 @@ for the longest outage you can imagine.
 
 ## The nine combinations
 
-Every pair is legal, and the package's own test suite exercises all nine. Two
-are worth calling out:
+Every pair is legal. Two are worth calling out:
 
 - `supersede` with `all` fires each owed occurrence and cancels the one before
   it, so the practical effect is that the newest occurrence survives and the

@@ -1,21 +1,23 @@
 ---
 title: "Installation"
-description: "How to depend on @smthrs/triggers inside the Smithers workspace, its runtime requirements and import forms, and the packages a running host adds."
+description: "How to get @smthrs/triggers, what it requires at runtime, the import forms it publishes, and the packages a running host adds on top."
 sidebar:
   order: 1
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/triggers/docs/installation.md"
 ---
 
-## Availability
+## Get the package
 
-`@smthrs/triggers` is a private workspace package for the 1.0.0-rc.0 release.
-It is not published to npm, and `pnpm add @smthrs/triggers` does not resolve.
-Only packages inside this workspace may depend on it:
+```bash
+pnpm add @smthrs/triggers@next
+```
+
+The installed manifest resolves to the synchronized RC:
 
 ```json
 {
   "dependencies": {
-    "@smthrs/triggers": "workspace:*"
+    "@smthrs/triggers": "1.0.0-rc.0"
   }
 }
 ```
@@ -23,7 +25,7 @@ Only packages inside this workspace may depend on it:
 ## Requirements
 
 - Node.js 22.19.0 or later.
-- [`effect`](https://effect.website) 4.0.0-rc.108, which supplies the `Effect`,
+- [`effect`](https://effect.website) 4.0.0-rc.112, which supplies the `Effect`,
   `Schema`, `Clock`, and SQL client types this package's signatures use.
 - [`@smthrs/control`](https://control.smithers.sh/reference/api/), the authoritative launch boundary. The
   scheduler's Control-backed runner and every channel dispatch go through it.

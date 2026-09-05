@@ -135,6 +135,29 @@ const seed = (
   })
 
 describe("Scheduler", () => {
+  it("recovers disabled active occurrences without scheduling new ones", async () => {
+    const results: Array<TriggerStore.Result> = []
+    const runner = runnerFixture()
+    await Effect.runPromise(provideTest(
+      Effect.scoped(Effect.gen(function*() {
+        const store = yield* TriggerStore.TriggerStore
+        const declaration = trigger("skip", "none")
+        yield* seed(store, declaration, runner)
+        yield* store.register({ ...declaration, enabled: false })
+        yield* TestClock.setTime(hour)
+        const scheduler = yield* Scheduler.make().pipe(Effect.provide(Layer.succeed(Scheduler.Runner)(runner.service)))
+        yield* scheduler.runOnce
+        expect(runner.inspected).toContain("seed")
+        expect(runner.starts).toEqual([])
+        runner.active.delete("seed")
+        yield* scheduler.runOnce
+        expect(yield* store.activeRun(declaration.id)).toMatchObject({ _tag: "None" })
+        expect(runner.starts).toEqual([])
+      })),
+      results
+    ))
+  })
+
   for (const overlap of ["skip", "buffer-one", "supersede"] as const) {
     for (const catchUp of ["none", "one", "all"] as const) {
       it(`${overlap} × ${catchUp}`, async () => {
@@ -523,8 +546,7 @@ describe("Scheduler", () => {
             ...store,
             // The first tick dies the way an exhausted occurrence search used
             // to: a defect, which `Effect.catch` does not handle.
-            listEnabled: () =>
-              dueCalls++ === 0 ? Effect.die(new Error("Unable to find cron date")) : store.listEnabled()
+            list: () => dueCalls++ === 0 ? Effect.die(new Error("Unable to find cron date")) : store.list()
           })
           // A minute and a half before the hour, so the tick after the failing
           // one establishes the watermark and the tick after that crosses the

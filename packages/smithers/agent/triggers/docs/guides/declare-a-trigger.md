@@ -43,11 +43,10 @@ const nightly = Trigger.make(declaration)
 | `enabled`    | yes      | A disabled trigger is listed but never claimed.                                |
 
 `input` is typed as JSON rather than `unknown` because the store persists it
-with `JSON.stringify` into a `NOT NULL` column. Left open, `undefined`
-serialized to nothing and arrived as a generic write failure, while `NaN`, a
-`Date`, and a property getter were each silently transformed on the way in.
-Declaring the type refuses all four where the caller can still see which field
-is wrong.
+with `JSON.stringify` into a `NOT NULL` column. The type refuses what that call
+would drop or rewrite: `undefined`, `NaN`, a `Date`, and a function are each
+rejected here, where the failure names the field, instead of reaching the column
+as a write error or a silently changed value.
 
 ## Validate before you persist
 

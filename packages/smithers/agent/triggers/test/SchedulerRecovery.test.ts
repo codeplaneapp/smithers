@@ -610,7 +610,7 @@ describe("Scheduler revision fencing", () => {
     claims: Array<number>
   ): TriggerStore.Service =>
     TriggerStore.makeNoop({
-      listEnabled: () => Effect.succeed([registered(1)]),
+      list: () => Effect.succeed([registered(1)]),
       get: () => Effect.succeed(stored),
       activeRun: () => Effect.succeed(Option.none()),
       claimPending: () => Effect.succeed(Option.none()),
@@ -823,7 +823,7 @@ describe("Scheduler dispatch edges", () => {
     stored: TriggerStore.Registered = base
   ): TriggerStore.Service =>
     TriggerStore.makeNoop({
-      listEnabled: () => Effect.succeed([stored]),
+      list: () => Effect.succeed([stored]),
       get: () => Effect.succeed(Option.some(stored)),
       activeRun: () => Effect.succeed(Option.none()),
       activeOccurrence: () => Effect.succeed(Option.none()),
@@ -1202,7 +1202,7 @@ describe("Scheduler dispatch edges", () => {
     const runner = runnerFixture()
     let calls = 0
     const store = TriggerStore.makeNoop({
-      listEnabled: () =>
+      list: () =>
         Effect.suspend(() => {
           calls++
           return Effect.interrupt

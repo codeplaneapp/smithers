@@ -26,10 +26,11 @@ type Inbound =
 ```
 
 Start a flow, or resolve a step that is waiting. There is no third shape, and
-neither of the two carries capabilities, grants, or an execution envelope. A
-verified payload names a flow; it does not get to say what that flow is allowed
-to do. The target flow's envelope, its approvals, and the host's permission
-checks apply exactly as they would if a person had started it.
+neither of the two carries capabilities, grants, or an execution envelope, which
+is the authority a run executes under. A verified payload names a flow; it does
+not get to say what that flow is allowed to do. The target flow's envelope, its
+approvals, and the host's permission checks apply exactly as they would if a
+person had started it.
 
 That is what "authority-free" means here, and it is why a channel declaration is
 safe to accept from an integration author: the worst a mistaken declaration can
@@ -58,14 +59,14 @@ operation. A request with a bad signature never reaches the mapping function.
 **The credential arrives per request, as a reference.** It is a
 `Redacted<CredentialRef>`, which is a name for a stored secret rather than the
 secret. The verifier resolves it through the host's resolver when it needs the
-bytes. The parameter exists because dropping it left a verifier no way to reach
-a secret except by capturing it in plain memory at declaration time, which is
-the shape the reference exists to prevent.
+bytes. Handing it over per request is what lets a verifier hold no secret of its
+own: the alternative is capturing one in plain memory at declaration time, which
+is the shape the reference exists to prevent.
 
-`Webhook.Config.credential` is required for a related reason. It used to default
-to a reference named after the channel, so a webhook declared without one
-verified against whatever credential happened to share its name, and two
-declarations differing only in credential verified identically.
+`Webhook.Config.credential` is required for a related reason. A door has to name
+the credential it verifies against, because two declarations that differ only in
+credential are two different doors. There is no default, and nothing is inferred
+from the channel's name.
 
 ## The request is snapshotted before anything reads it
 

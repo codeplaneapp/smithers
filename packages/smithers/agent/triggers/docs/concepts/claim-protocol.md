@@ -165,7 +165,7 @@ first sight of a trigger establishes one instead of firing from it.
 
 ## Both stores obey this contract
 
-`SqlTriggerStore` and the in-memory `TestTriggers` store share a conformance
-suite: the same refusal codes, the same claim decisions, the same lease timing,
-the same watermark rules. A test that swaps one for the other is testing the
+`SqlTriggerStore` and the in-memory `TestTriggers` store implement one contract:
+the same refusal codes, the same claim decisions, the same lease timing, the
+same watermark rules. A test that swaps one for the other is testing the
 same protocol. See [Test trigger code](../guides/testing.md).

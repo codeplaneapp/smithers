@@ -6,7 +6,6 @@
   "smthrs": {
     "group": "agent"
   },
-  "private": true,
   "description": "Durable cron triggers and channel contracts for flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
@@ -36,10 +35,22 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./migrations/*": null,
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./CatchUp": "./src/CatchUp.ts",
+    "./Channel": "./src/Channel.ts",
+    "./Cron": "./src/Cron.ts",
+    "./Overlap": "./src/Overlap.ts",
+    "./Schedule": "./src/Schedule.ts",
+    "./Scheduler": "./src/Scheduler.ts",
+    "./SqlTriggerStore": "./src/SqlTriggerStore.ts",
+    "./Trigger": "./src/Trigger.ts",
+    "./TriggerError": "./src/TriggerError.ts",
+    "./TriggerStore": "./src/TriggerStore.ts",
+    "./Webhook": "./src/Webhook.ts",
+    "./index": "./src/index.ts",
+    "./test/TestTriggers": "./src/test/TestTriggers.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -55,6 +66,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "next",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -62,14 +74,74 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./migrations/*": null,
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./CatchUp": {
+        "types": "./dist/esm/CatchUp.d.ts",
+        "import": "./dist/esm/CatchUp.js",
+        "require": "./dist/cjs/CatchUp.js"
+      },
+      "./Channel": {
+        "types": "./dist/esm/Channel.d.ts",
+        "import": "./dist/esm/Channel.js",
+        "require": "./dist/cjs/Channel.js"
+      },
+      "./Cron": {
+        "types": "./dist/esm/Cron.d.ts",
+        "import": "./dist/esm/Cron.js",
+        "require": "./dist/cjs/Cron.js"
+      },
+      "./Overlap": {
+        "types": "./dist/esm/Overlap.d.ts",
+        "import": "./dist/esm/Overlap.js",
+        "require": "./dist/cjs/Overlap.js"
+      },
+      "./Schedule": {
+        "types": "./dist/esm/Schedule.d.ts",
+        "import": "./dist/esm/Schedule.js",
+        "require": "./dist/cjs/Schedule.js"
+      },
+      "./Scheduler": {
+        "types": "./dist/esm/Scheduler.d.ts",
+        "import": "./dist/esm/Scheduler.js",
+        "require": "./dist/cjs/Scheduler.js"
+      },
+      "./SqlTriggerStore": {
+        "types": "./dist/esm/SqlTriggerStore.d.ts",
+        "import": "./dist/esm/SqlTriggerStore.js",
+        "require": "./dist/cjs/SqlTriggerStore.js"
+      },
+      "./Trigger": {
+        "types": "./dist/esm/Trigger.d.ts",
+        "import": "./dist/esm/Trigger.js",
+        "require": "./dist/cjs/Trigger.js"
+      },
+      "./TriggerError": {
+        "types": "./dist/esm/TriggerError.d.ts",
+        "import": "./dist/esm/TriggerError.js",
+        "require": "./dist/cjs/TriggerError.js"
+      },
+      "./TriggerStore": {
+        "types": "./dist/esm/TriggerStore.d.ts",
+        "import": "./dist/esm/TriggerStore.js",
+        "require": "./dist/cjs/TriggerStore.js"
+      },
+      "./Webhook": {
+        "types": "./dist/esm/Webhook.d.ts",
+        "import": "./dist/esm/Webhook.js",
+        "require": "./dist/cjs/Webhook.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./test/TestTriggers": {
+        "types": "./dist/esm/test/TestTriggers.d.ts",
+        "import": "./dist/esm/test/TestTriggers.js",
+        "require": "./dist/cjs/test/TestTriggers.js"
+      }
     }
   },
   "scripts": {
@@ -83,25 +155,28 @@
   },
   "dependencies": {
     "@smthrs/control": "1.0.0-rc.0",
-    "@smthrs/database": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "@smthrs/database": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }

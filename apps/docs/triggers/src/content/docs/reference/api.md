@@ -21,11 +21,8 @@ Effect reads it from context. Launching goes through
 [`@smthrs/control`](https://control.smithers.sh/reference/api/), and persistence through the SQL client and
 durable writer of [`@smthrs/database`](https://database.smithers.sh/reference/api/).
 
-## Availability
-
-`@smthrs/triggers` is a private workspace package for the 1.0.0-rc.0 release.
-Only code in this workspace may consume it, and the current workspace has zero
-consumers. Do not install this package from npm.
+The package is not on npm at 1.0.0-rc.0. See [Installation](/installation/)
+for how to get it.
 
 ## Trigger
 
@@ -61,10 +58,10 @@ type Trigger = typeof Trigger.Type
 | `enabled`    | A disabled trigger is listed and never claimed.                                          |
 
 `input` is `Schema.Json` rather than `Schema.Unknown` because the store persists
-it with `JSON.stringify` into a `NOT NULL` column. Typed as `unknown`,
-`undefined` serialized to nothing and reached the column as a generic write
-failure, while `NaN`, a `Date`, and a getter were each silently transformed on
-the way in.
+it with `JSON.stringify` into a `NOT NULL` column. The schema refuses what that
+call would drop or rewrite: `undefined`, `NaN`, a `Date`, and a function each
+fail as `invalid_trigger` with `TriggerError.path` set to `input`, at the
+declaration boundary where the caller can still see which field is wrong.
 
 `Trigger.Overlap` and `Trigger.CatchUp` are re-exports of the schemas and types
 of the same names from `Schedule`.
@@ -695,10 +692,9 @@ interface Webhook {
 }
 ```
 
-`credential` is required. It used to default to a reference named after the
-channel, so a webhook declared without one verified against whatever credential
-happened to share its name, and two declarations differing only in credential
-verified identically.
+`credential` is required, and nothing is inferred from the channel's name. Two
+declarations that differ only in credential are two different doors, so a door
+has to name the credential it verifies against.
 
 ### Webhook.make
 
@@ -720,8 +716,7 @@ const layer: Layer.Layer<TriggerStore.TriggerStore>
 An in-memory `TriggerStore` with real claim and overlap semantics and no
 database. It returns the same refusal codes in the same order as the SQL store
 and holds the same reservation lease, so a test that swaps one for the other is
-testing the protocol rather than the implementation. Both stores run one shared
-conformance suite.
+testing the protocol rather than the implementation.
 
 ## Failure codes
 
@@ -753,10 +748,10 @@ carrying `code`, `message`, an optional `path`, and an optional `cause`. Its
 expectation and the path only, so a secret submitted in a declaration reaches
 neither the message nor the cause.
 
-`TriggerError.fromSchemaError(code, summary, error)` builds a declaration
-failure that names the offending field. It keeps the rendered issue tree rather
-than the whole `SchemaError`, because serializing one costs about five
-kilobytes of schema AST per failure and repeats what the tree already says.
+`TriggerError.fromSchemaError(code, summary, error)` is the constructor behind
+those failures. It walks the issue tree for the first offending path, sets
+`path` when it finds one, and prefixes `message` with a summary naming what was
+being decoded.
 
 For symptom-first guidance, see [Troubleshooting](/troubleshooting/).
 
