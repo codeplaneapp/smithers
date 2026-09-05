@@ -6,8 +6,7 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/integrations/docs/concepts/control-plane.md"
 ---
 
-Smithers 1.0 has no `listeners` verb and no gateway-level webhook
-configuration. A webhook door is library code: a provider builds a
+A webhook door is library code, not a server setting: a provider builds a
 `@smthrs/control` `Channel`, the application registers it with `Channels`,
 and `Channels.ingest` runs the delivery. This page explains the contract that
 channel binding enforces, because every guarantee the adapters have sits on

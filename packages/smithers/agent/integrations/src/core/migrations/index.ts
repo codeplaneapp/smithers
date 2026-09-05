@@ -13,7 +13,7 @@
  */
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
-import { integrationCursors } from "./0001_integration_cursors.ts"
+import { integrationCursors } from "../../internal/IntegrationCursorMigration.ts"
 
 /**
  * The integration cursor set, in migration id block 6000.

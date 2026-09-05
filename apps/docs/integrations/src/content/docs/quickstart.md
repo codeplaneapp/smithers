@@ -17,12 +17,16 @@ works.
 
 ## 1. Install
 
-In the Smithers workspace, install the package plus the pieces the runnable
-examples import: the flow declaration layer, the in-memory flow engine, and
-the Node platform layer.
+`@smthrs/integrations` is not on the npm registry yet. Until it is, get it
+from source: build the package from the
+[Smithers repository](https://github.com/smithersai/smithers/tree/main/packages/smithers/agent/integrations)
+and link it into your project.
+
+Alongside it, this tutorial imports the flow declaration layer, the in-memory
+flow engine, the Node platform layer, and Effect itself:
 
 ```bash
-pnpm add @smthrs/integrations @smthrs/flow @smthrs/engine @effect/platform-node effect
+pnpm add @smthrs/flow @smthrs/engine @effect/platform-node effect
 ```
 
 ## 2. Configure the credential

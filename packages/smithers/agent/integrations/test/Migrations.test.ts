@@ -1,8 +1,9 @@
 import * as Effect from "effect/Effect"
+import { createRequire } from "node:module"
 import { describe, expect, it } from "vitest"
 import * as Core from "../src/core.ts"
-import * as IntegrationCursors from "../src/core/migrations/0001_integration_cursors.ts"
 import * as Migrations from "../src/core/migrations/index.ts"
+import * as IntegrationCursors from "../src/internal/IntegrationCursorMigration.ts"
 
 // `scripts/build.mjs` converts every module to CommonJS with esbuild under
 // `"type": "module"`, and esbuild reads a default import of a sibling as the
@@ -13,6 +14,19 @@ import * as Migrations from "../src/core/migrations/index.ts"
 // through the named binding, and the second test pins that the module offers
 // no default export to regress onto.
 describe("migration module exports", () => {
+  it("blocks direct imports of the schema installation while retaining Core.Migrations", () => {
+    const require = createRequire(import.meta.url)
+    for (
+      const path of [
+        "@smthrs/integrations/core/migrations/0001_integration_cursors",
+        "@smthrs/integrations/internal/IntegrationCursorMigration"
+      ]
+    ) {
+      expect(() => require.resolve(path)).toThrow(/not defined by "exports"/)
+    }
+    expect(Core.Migrations.set.migrations["0001_integration_cursors"]).toBe(IntegrationCursors.integrationCursors)
+  })
+
   it("exposes every migration in the set as an Effect", () => {
     const entries = Object.entries(Migrations.set.migrations)
     expect(entries.length).toBeGreaterThan(0)
@@ -23,7 +37,7 @@ describe("migration module exports", () => {
     expect(Core.Migrations.set).toBe(Migrations.set)
   })
 
-  it("publishes the cursor table migration as a named binding with no default export", () => {
+  it("keeps the private cursor table migration as a named binding with no default export", () => {
     expect("default" in IntegrationCursors).toBe(false)
     expect(Object.keys(IntegrationCursors)).toEqual(["integrationCursors"])
     expect(typeof IntegrationCursors.integrationCursors.pipe).toBe("function")

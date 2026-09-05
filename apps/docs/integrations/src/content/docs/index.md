@@ -1,22 +1,127 @@
 ---
 title: "@smthrs/integrations"
-description: "GitHub, Linear, and Telegram adapters over the Smithers control plane."
+description: "GitHub, Linear, and Telegram adapters for Smithers: verified webhook ingress, typed provider clients, and durable actions a flow can call."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/integrations/docs/README.md"
 ---
 
-`@smthrs/integrations` is the provider adapter layer for a Smithers host
-application. It gives each provider a client, a verified webhook channel,
-payload schemas, and the durable actions a flow calls, all built on the
-[control plane](https://control.smithers.sh/reference/api/).
+Smithers is a durable control plane for long-running agents: work runs as a
+flow whose every step is journaled, so a crash resumes where it stopped
+instead of starting over. `@smthrs/integrations` connects a Smithers
+application to GitHub, Linear, and Telegram. Each provider gets a typed
+client, a webhook door that verifies the delivery's signature before anything
+else runs, one normalized event shape, and a durable action a flow calls to
+comment, file an issue, or send a message.
 
-You use this package when a Smithers application needs to answer a GitHub,
-Linear, or Telegram event (a pull request opened, an issue updated, a button
-pressed) or needs a flow to act on one of those providers (comment on an
-issue, file an issue, send a message) as a journaled, replay-safe step.
+## What it solves
 
-What an event means, which flow a pull request starts and which run an issue
-comment signals, stays a flow the application writes. The adapters stop at
-verification, normalization, and transport.
+Connecting an automated system to a provider means writing the same delicate
+code once per provider: constant-time signature verification over the exact
+delivered bytes, rate-limit retries that know which failures are safe to
+repeat, redelivery detection, and a write path that does not post the comment
+twice when a process restarts halfway through. Each of those has a failure
+mode you find in production: a forged webhook that starts a run, a duplicated
+issue, a comment reposted on every retry.
+
+This package writes them once and gives all three providers the same
+vocabulary. A delivery that does not verify never reaches a decoder. A write
+whose answer was lost reports `outcomeUnknown` instead of being repeated. A
+provider redelivery is dropped on the idempotency key you derive with the
+provider's own helper. Every failure carries a machine-readable `reason` you
+can branch on.
+
+What an event _means_ stays yours. Which flow a pull request starts, and
+which run an issue comment signals, is application logic. The adapters stop
+at verification, normalization, and transport.
+
+## Availability
+
+`@smthrs/integrations` is not on the npm registry yet. The
+[quickstart](/quickstart/) installs it from source and builds a working
+flow on top of it.
+
+## Import paths
+
+Import the whole surface or one provider at a time. The aggregate entry point
+and the per-provider subpaths export the same names:
+
+```ts
+import { Core, GitHub, Linear, Telegram } from "@smthrs/integrations"
+// or only what you use:
+import * as Core from "@smthrs/integrations/core"
+import * as GitHub from "@smthrs/integrations/github"
+import * as Linear from "@smthrs/integrations/linear"
+import * as Telegram from "@smthrs/integrations/telegram"
+```
+
+## The shortest real example
+
+Comment on a GitHub issue. `make` is a plain constructor, so this needs no
+layers, and the client reads its token from `SMITHERS_GITHUB_TOKEN` or
+`GITHUB_TOKEN`:
+
+```ts
+import { GitHub } from "@smthrs/integrations"
+import { Effect } from "effect"
+
+const client = GitHub.GitHubClient.make({})
+
+await Effect.runPromise(
+  client.request("POST", "/repos/OWNER/REPO/issues/1/comments", { body: "Triaged." })
+)
+```
+
+Replace `OWNER` and `REPO` with your repository's coordinates.
+
+That call already retries a rate limit, keeps the token out of every header
+but `Authorization`, and refuses to repeat the POST if the connection drops,
+because GitHub may have created the comment and lost the answer. To make the
+same comment a step a crash cannot duplicate, call
+`GitHub.Actions.CommentOnIssue` inside a flow instead: the engine journals
+the result, and a restart replays it rather than posting again. The
+[quickstart](/quickstart/) builds that flow end to end.
+
+The other direction is a webhook door. Build a channel and register it with
+the control plane's channel coordinator:
+
+```ts
+import * as Channels from "@smthrs/control/Channels"
+import { Core, GitHub } from "@smthrs/integrations"
+import { Effect, Redacted } from "effect"
+
+const channel = GitHub.Webhook.channel({
+  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
+  secret: Core.Channel.constantSecret(Redacted.make(webhookSecret)),
+  route: Core.Channel.startFlow("triage")
+})
+
+const register = Effect.flatMap(Channels.Channels, (channels) => channels.register(channel))
+```
+
+Replace `webhookSecret` with the secret GitHub signs deliveries with, read
+from your environment or secret store. `Channels.ingest` then runs one fixed
+order on every delivery: verify the raw bytes, decode, map, dispatch. The
+[GitHub guide](/guides/github/) shows the HTTP handler that feeds it.
+
+## Where this sits
+
+This package is the outward-facing half of the Smithers agent stack.
+[`@smthrs/agent`](https://agent.smithers.sh/reference/api/) is the agent itself: a loop that reaches every
+capability it has by calling a flow through a durable boundary.
+`@smthrs/integrations` supplies the provider side of that picture, the door
+an outside event arrives through and the journaled step that acts back on the
+provider.
+
+Neither package imports the other, and that is deliberate. An application
+that only receives webhooks needs no agent, and an agent that never touches
+GitHub needs no adapter. The two meet in the flow: a channel `route` starts a
+flow or signals a waiting run, and an agent step calls
+`GitHub.Actions.CommentOnIssue` the way it calls any other action.
+
+Underneath both is the [control plane](https://control.smithers.sh/reference/api/), which owns runs,
+credentials, and the channel registry. Above them is the
+[`smthrs` command line](https://cli.smithers.sh/reference/api/), the executable that plans, approves, runs,
+and inspects the flows these adapters feed and act through. Start there if
+you have not run a Smithers flow before.
 
 ## What is in the box
 
@@ -41,66 +146,13 @@ Each provider ships the same four parts:
 | `Linear.Actions.CreateIssue`    | `integrations/linear/create-issue`     | Files an issue, resolving team, state, and label names to ids. |
 | `Telegram.Actions.SendMessage`  | `integrations/telegram/send-message`   | Sends a message, chunked, with a plain-text fallback.          |
 
+Three actions is not the closed set. They are declarations over the clients,
+and an endpoint they do not cover is your own `Action.make` over the same
+client. See [durable actions](/concepts/durable-actions/).
+
 The shared, provider-agnostic pieces (signature verification, the channel
 binding, the normalized event, cursor persistence, the error vocabulary, and
 the OAuth helpers) live in the `Core` namespace.
-
-## Install
-
-The package is private at `1.0.0-rc.0`: it is documented as the worked
-example of a Smithers integration, and only code in the Smithers workspace
-consumes it. Inside the workspace, add it with:
-
-```bash
-pnpm add @smthrs/integrations
-```
-
-Webhook ingress also imports the control plane's channel coordinator, and
-durable flows import the flow and engine layers:
-
-```bash
-pnpm add @smthrs/control @smthrs/flow @smthrs/engine
-```
-
-Import one provider at a time when that is all you need. The aggregate entry
-point and the per-provider subpaths export the same names:
-
-```ts
-import { Core, GitHub, Linear, Telegram } from "@smthrs/integrations"
-// or only what you use:
-import * as Core from "@smthrs/integrations/core"
-import * as GitHub from "@smthrs/integrations/github"
-import * as Linear from "@smthrs/integrations/linear"
-import * as Telegram from "@smthrs/integrations/telegram"
-```
-
-## The smallest working example
-
-A verified door for GitHub webhooks, registered with the control plane's
-channel coordinator:
-
-```ts
-import * as Channels from "@smthrs/control/Channels"
-import { Core, GitHub } from "@smthrs/integrations"
-import { Effect, Redacted } from "effect"
-
-const channel = GitHub.Webhook.channel({
-  credential: Redacted.make({ id: "github-webhook", name: "github-webhook" }),
-  secret: Core.Channel.constantSecret(Redacted.make(webhookSecret)),
-  route: Core.Channel.startFlow("triage")
-})
-
-const register = Effect.flatMap(Channels.Channels, (channels) => channels.register(channel))
-```
-
-Replace `webhookSecret` with the secret GitHub signs deliveries with, read
-from your environment or secret store.
-
-`Channels.ingest` then runs one fixed order on every delivery: verify the raw
-bytes, decode, map, dispatch. A delivery that does not verify never reaches a
-decoder, a plan, or a database. For the redelivery guarantee that makes this
-safe to expose to a provider, see
-[how adapters sit on the control plane](/concepts/control-plane/).
 
 ## Credentials
 
@@ -132,6 +184,7 @@ which account a call runs as.
   [events, signals, and cursors](/concepts/events-and-signals/), and
   [durable actions](/concepts/durable-actions/).
 - [API reference](/reference/api/): every public export, with signatures and errors.
-- [Testing](/testing/): the fixture and live suites.
+- [Testing](/testing/): how to test code that uses these adapters, with no
+  mocking library and no live credentials.
 - [Troubleshooting](/troubleshooting/): the failure modes the package
   raises, and what to do about each.

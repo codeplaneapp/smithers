@@ -111,7 +111,7 @@ batch it acknowledges has been handled.
 
 ### Core.Migrations
 
-The cursor table's schema migrations, in migration id block 6000, run through
+The cursor table's schema migrations. They run through
 [the database API](https://database.smithers.sh/reference/api/)'s migration ladder.
 
 | Export  | Signature           | Notes                                                                |
@@ -639,8 +639,8 @@ authorize that group's members; include approvers' individual user ids.
 
 Telegram Mini App `initData` verification, on Web Crypto with no `node:`
 builtin. Two paths: HMAC when you hold the bot token, and Ed25519 for a third
-party holding only the numeric bot id. Only Node is verified by this
-package's test matrix; read any other runtime as untested.
+party holding only the numeric bot id. Node is the only runtime these two
+paths are verified on; read any other as untested.
 
 | Export                    | Signature                                                                                            | Notes                                                                                                                                                                                                                                                                    |
 | ------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

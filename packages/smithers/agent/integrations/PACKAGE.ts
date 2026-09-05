@@ -1,3 +1,4 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
 /**
  * Standard package targets.
  *
@@ -5,7 +6,7 @@
  */
 import { Smithers } from "@smthrs/targets"
 
-const { check, circular, docs, docsFiles, fmt, lib, lint, test } = Smithers.StandardPackage({
+const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
   cwd: "packages/smithers/agent/integrations"
 })
