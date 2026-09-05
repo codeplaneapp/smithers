@@ -1,6 +1,6 @@
 ---
 title: "Run jj in a browser tab"
-description: "Compose BrowserJj over a synchronous filesystem and the flows_jj wasm reactor, keep the mount durable, and know the six places the wasm backend answers differently from the CLI."
+description: "Compose BrowserJj over a synchronous filesystem and the flows_jj wasm module, keep the mount durable, and know the seven places the WebAssembly backend answers differently from the jj command line."
 sidebar:
   order: 5
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/jj/docs/guides/run-jj-in-a-browser.md"
@@ -8,10 +8,11 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 
 A tab cannot spawn the `jj` binary. It can run jj-lib itself: the library is
 compiled to `wasm32-wasip1` and shipped in this package as
-`wasm/flows_jj.wasm`, and `BrowserJj` runs it over a WASI preview 1 shim
-written in this repository, on whatever synchronous filesystem the page mounts.
-All eight contract operations work, with real change ids and a real operation
-log.
+`wasm/flows_jj.wasm`, and `BrowserJj` runs it over the WASI preview 1 shim this
+package also ships, on whatever synchronous filesystem the page mounts. Seven
+of the eight contract operations work there, with real change ids and a real
+operation log. The eighth, `revert`, has no operation in the compiled ABI and
+reports `not_installed`.
 
 ## Compose the layer
 
@@ -86,6 +87,19 @@ an absent capability is a capability with an answer, never a missing tag.
 These divergences are real, deliberate, and pinned by tests. Read them before
 you assume parity with the CLI.
 
+### `revert` is not available
+
+The compiled ABI has no revert operation, so `BrowserJj.layer` defines `revert`
+and fails it with `not_installed` and the message "jj is not available in the
+browser". Calling it is how you find that out: the method stays defined so that
+feature detection never depends on an optional property disappearing. A host
+that offers an "undo this attempt" affordance should call `revert` once and hide
+the affordance on `not_installed`, rather than branching on which layer it
+provided.
+
+`restore` is unaffected, so rewinding a run to a recorded change id works here
+exactly as it does on the CLI.
+
 ### Repository initialization is explicit in the wasm ABI
 
 Only the `init` ABI operation creates a repository. `status`, `diff`, and
@@ -145,14 +159,15 @@ finish. A host that cares should put the Smithers runtime in a worker; this
 layer does not do it for you. jj's parallel working-copy paths degrade to
 serial execution, which is correct but not parallel.
 
-`status` and `diff` are rendered by the `flows-jj` crate rather than by jj's
-command-line interface. `diff` is git-format unified diff and `status` is a
+`status` and `diff` are rendered by the WebAssembly module this package ships
+rather than by jj's command-line interface. `diff` is git-format unified diff and `status` is a
 concise change-id listing with A, M, and D markers. Both are stable and tested,
 and neither is byte identical to what the CLI prints.
 
-Finally, `not_installed` on this layer means "no wasm module". The wasm side
-produces only `conflict`, `invalid_ref`, and `unknown`; `not_installed` comes
-from `layerUnsupported` on the TypeScript side.
+Finally, `not_installed` here means "this host cannot do that", never "jj is
+missing from your `PATH`". The wasm module itself produces only `conflict`,
+`invalid_ref`, and `unknown`; every `not_installed` comes from the TypeScript
+side, either from `revert` or from `layerUnsupported`.
 
 ## The WASI shim is public too
 
@@ -178,17 +193,3 @@ values. Both ZenFS and `node:fs` satisfy it already.
 
 The shim's honest divergences from a kernel WASI host are listed in the
 [API reference](/reference/api/).
-
-## Rebuild the wasm artifact
-
-```bash
-pnpm run build:wasm
-```
-
-from this package. It drives `crates/flows-jj/build-wasm.mjs`, which runs a
-release build for `wasm32-wasip1` and copies the result. Reproducible means per
-host triple: cargo builds build scripts for the host, which puts the host
-triple into every symbol hash, so the committed bytes are the
-`x86_64-unknown-linux-gnu` build that CI reproduces. The script refuses to run
-on another host and prints the container command that produces those bytes
-anywhere.

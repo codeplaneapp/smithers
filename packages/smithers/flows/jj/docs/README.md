@@ -1,109 +1,153 @@
 ---
 title: "@smthrs/jj"
-description: "Jujutsu version control as a portable Effect host service: one small contract for snapshot, restore, diff, and workspace lanes, with CLI, Bun, and WebAssembly layers behind it."
+description: "Jujutsu version control as an Effect service: snapshot a working copy, restore it, diff two revisions, and open a workspace lane, through the jj CLI on Node and Bun or through jj-lib compiled to WebAssembly in a browser tab."
 ---
 
-`@smthrs/jj` is version control as a host capability. It defines one service,
-`Jj`, whose methods are the operations that make a step reversible: snapshot the
-working copy, restore it, diff two revisions, add and forget the workspaces
-parallel agents run in, read status, find the repository root, and revert a
-single change.
-
-Smithers snapshots the working copy around every step. That makes jj host
-access, not a tool a program happens to shell out to, so it goes through a layer
-the way the filesystem and the clock do. A caller holds the contract; the host
-decides whether jj is the native CLI, the CLI routed through a contained process
-spawner, or jj-lib compiled to WebAssembly and running in a browser tab.
+`@smthrs/jj` gives you eight version-control operations as an
+[Effect](https://effect.website) service: snapshot the working copy, restore
+it, diff two revisions, add and forget a workspace, read status, find the
+repository root, and revert one change. One program written against that
+service runs against the [Jujutsu](https://jj-vcs.github.io) command line on
+Node and Bun, or against jj-lib compiled to WebAssembly in a browser tab.
 
 ## The problem it solves
 
-An orchestrator that runs untrusted work has to be able to undo it. Reaching for
-`spawn("jj", ...)` inside a step buys the undo and loses everything else: the
-child escapes the host's process ledger, the failure arrives as an untyped
-`Error` that serializes to `{}` in a journal, and the same program cannot run
-anywhere without a `jj` binary on `PATH`.
+Any program that runs code on someone else's checkout eventually needs to put
+that checkout back: an agent that edits files and has to undo a bad attempt, a
+build step you want to be able to rewind, a tool that forks one repository into
+several parallel working copies. The usual answer is `spawn("jj", [...])` at
+the call site, and it costs you four things at once. You cannot tell which
+repository was touched, because the child inherits whatever `process.cwd()`
+happens to be. You cannot substitute a fake in a test without a real binary and
+a real repository. You cannot tell "jj refused" from "jj is not installed",
+because both arrive as a nonzero exit code and some text. And the same code
+cannot run anywhere a `jj` binary does not exist.
 
-This package answers all three. Every failure is a `JjError` with a code from a
-closed set, projected onto data that survives a journal round trip. Every layer
-classifies the same failure onto the same code, so a run recorded against the
-CLI replays against WebAssembly. The root entry point resolves no `node:`
-built-in, so a page bundles the contract and provides whichever implementation
-it has.
+Behind a service, each of those becomes a decision the composition makes once:
 
-## Install
+- **The repository is explicit.** `NodeJj.layerAt(root)` pins one absolute
+  repository root, so a `chdir` in unrelated code cannot redirect a restore
+  into another checkout.
+- **Failures are a closed set of four codes.** `not_installed`, `conflict`,
+  `invalid_ref`, and `unknown`, each carrying the command that produced it and
+  a plain-data cause you can store and replay. Nothing escapes as an untyped
+  throw.
+- **Tests swap the layer, not the code.** `layerNoop({ ... })` stubs every
+  operation, and the ones you did not stub fail by name instead of silently
+  succeeding.
+- **The same program runs in a tab.** `BrowserJj.layer({ fs, wasm })` runs the
+  real jj-lib over a synchronous filesystem you mount, with real change ids and
+  a real operation log. Seven of the eight operations work there; `revert` is
+  not in the compiled module and says so when you call it.
 
-```bash
-pnpm add @smthrs/jj
-```
+The contract stays small on purpose. There is no `commit`, no `push`, and no
+`log`, because every backend owes an answer for every operation, including one
+compiled to WebAssembly.
 
-The Node and Bun layers need a `jj` executable on the host. For versions, the
-binary override, and the browser asset, see [Installation](./installation.md).
+## Availability
 
-## The shortest real example
+`@smthrs/jj` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](./installation.md) covers how to depend on it from a checkout,
+the `effect` version it pins, and the wasm asset a browser layer needs.
+
+`NodeJj` and `BunJj` spawn the `jj` executable, which this package does not
+vendor. Install it once with `brew install jj` or
+`cargo install --locked jj-cli`. With no usable jj, every operation fails with
+the `not_installed` code and a message naming the fix, rather than throwing.
+
+## Snapshot a working copy and put it back
 
 ```ts
 import { Jj } from "@smthrs/jj"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import * as Effect from "effect/Effect"
+import { writeFileSync } from "node:fs"
 
-const program = Effect.gen(function*() {
+const repository = "/srv/checkouts/main"
+
+const reversible = Effect.gen(function*() {
   const jj = yield* Jj
-  const { changeId } = yield* jj.snapshot("before the step")
-  return changeId
-}).pipe(Effect.provide(NodeJj.layer))
+
+  // Record a point to come back to. `snapshot` describes the current change,
+  // reads its id, and opens a fresh one, so the id names the change just
+  // closed.
+  const { changeId } = yield* jj.snapshot("before the risky step")
+
+  // Do the work a step would do.
+  yield* Effect.sync(() => writeFileSync(`${repository}/note.txt`, "attempt\n"))
+
+  // Read what changed, then put the working copy back the way it was.
+  const patch = yield* jj.diff(changeId, "@")
+  yield* jj.restore(changeId)
+
+  return patch
+}).pipe(Effect.provide(NodeJj.layerAt(repository)))
 ```
 
-The body never changes when the host does. Swap `NodeJj.layer` for
-`BunJj.layer`, for `NodeJj.layerSpawner` under a contained spawner, or for
-`BrowserJj.layer({ fs, wasm })` in a page, and the program above is untouched.
+`changeId` is a durable handle: it is the string jj prints, it survives a
+process restart, and it is what you store to reach the same tree later.
 
-## Entry points
+## How this fits with @smthrs/flows
 
-The root is platform neutral and browser bundleable: the contract, its error,
-and the no-op layer only. Every implementation lives under an explicit subpath,
-the way `effect` keeps `@effect/platform-node` out of `effect`. `package.json`
-maps `./*` onto `src/`, so every module below is public.
+This package is one piece of the Smithers durable flow engine, whose whole
+surface is re-exported by [`@smthrs/flows`](/api/flows). If you already depend
+on that barrel, this service is its `Jj` namespace and you do not need to
+install anything else:
 
-| Import                            | Platform                                                       |
-| --------------------------------- | -------------------------------------------------------------- |
-| `@smthrs/jj`                      | Any host. Contract only, and it bundles for the browser.       |
-| `@smthrs/jj/node/NodeJj`          | Node, through `node:child_process` or a host spawner.          |
-| `@smthrs/jj/node/resolveJjBinary` | Node. Which `jj` file this host spawns, and why.               |
-| `@smthrs/jj/bun/BunJj`            | Bun, reusing the Node adapter.                                 |
-| `@smthrs/jj/browser/BrowserJj`    | Browser. jj-lib compiled to wasm over a virtual filesystem.    |
-| `@smthrs/jj/browser/WasiPreview1` | Browser. The WASI preview 1 shim that module runs on.          |
-| `@smthrs/jj/browser/WasiFs`       | Browser. The synchronous filesystem surface the shim needs.    |
-| `@smthrs/jj/wasm/flows_jj.wasm`   | The compiled reactor `BrowserJj` runs. An asset, not a module. |
+```ts
+import { Jj } from "@smthrs/flows"
 
-`pnpm run browser` at the repository root pins that table: it asserts that the
-first row and `BrowserJj` bundle for a browser, and that `NodeJj` and `BunJj`
-still do not, because of `node:child_process`.
+const tag = Jj.Jj
+const stub = Jj.layerNoop({})
+```
 
-## Who uses this package
+The barrel re-exports this package's root entry point only, which is the
+contract and the no-op layer. A layer that actually runs jj is chosen by the
+program, not by the library, so import `@smthrs/jj/node/NodeJj`,
+`@smthrs/jj/bun/BunJj`, or `@smthrs/jj/browser/BrowserJj` directly, the same
+way you pick a platform bundle.
 
-[`@smthrs/kernel`](/api/kernel) decorates the same `Jj` tag with capability
-checks, so a host composition guards every jj operation behind a grant.
-[`@smthrs/time-travel`](/api/time-travel) calls `snapshot`, `restore`, and
-`workspaceAdd` to fork a run into a lane and rewind it.
-[`@smthrs/platform-node`](/api/platform-node) and
-[`@smthrs/platform-bun`](/api/platform-bun) pick the layer that matches their
-containment posture, and [`@smthrs/platform-browser`](/api/platform-browser)
-wires `BrowserJj` over the page's mount.
+Depend on `@smthrs/jj` on its own when version control is all you want from the
+engine. It adds one package, [`@smthrs/capability`](/api/capability), on top of
+the `effect` peer the whole engine shares, and neither pulls in a process
+spawner or an HTTP client.
+
+Within that engine, `@smthrs/jj` is where the snapshots come from.
+[`@smthrs/time-travel`](/api/time-travel) forks a run by adding a workspace and
+rewinds it by restoring a recorded change id, and
+[`@smthrs/kernel`](/api/kernel) decorates this same service tag so every
+operation asks for a capability grant such as `jj:snapshot` before it runs.
+`@smthrs/flows` is in turn the library behind the `smithers` command line tool,
+[`@smthrs/cli`](/api/cli), which is what snapshots a working copy around each
+step of a run you start from a terminal.
 
 ## Where to go next
 
-- [Installation](./installation.md): the `jj` binary, the Node version, the
-  import forms, and the wasm asset.
-- [Quickstart](./quickstart.md): snapshot a real repository, diff it, and put it
-  back, in one file.
-- Concepts: [version control as a capability](./concepts/version-control-as-a-capability.md)
-  and [how a jj failure is reported](./concepts/failures.md).
-- Guides: [snapshot and restore](./guides/snapshot-and-restore.md),
-  [workspace lanes](./guides/workspace-lanes.md),
-  [binding and containing the child process](./guides/bind-and-contain.md),
-  [choosing the jj binary](./guides/choose-the-jj-binary.md),
-  [running jj in a browser](./guides/run-jj-in-a-browser.md), and
-  [testing against Jj](./guides/testing.md).
-- [API reference](./api.md): every export, with signatures.
-- [Troubleshooting](./troubleshooting.md): each failure code, its cause, and
-  what to change.
+- [Installation](./installation.md): runtime requirements, installing jj
+  itself, the import forms, and the wasm asset a browser layer needs.
+- [Quickstart](./quickstart.md): snapshot a real repository, diff two
+  snapshots, and restore the working copy, in one file.
+- [Version control as a capability](./concepts/version-control-as-a-capability.md):
+  why the contract holds these eight operations and no others, and the grants
+  the kernel checks.
+- [How a jj failure is reported](./concepts/failures.md): the four codes, how
+  each backend classifies onto them, and why a cause is plain data.
+- [Snapshot a working copy and put it back](./guides/snapshot-and-restore.md):
+  what `restore` does to uncommitted edits, and when to reach for `revert`
+  instead.
+- [Give each parallel agent its own workspace lane](./guides/workspace-lanes.md):
+  `workspaceAdd`, pinned revisions, and what a forget leaves behind.
+- [Bind jj to a repository and contain its child process](./guides/bind-and-contain.md):
+  which of the four Node and Bun layers to provide.
+- [Choose which jj binary runs](./guides/choose-the-jj-binary.md):
+  `SMITHERS_JJ_PATH`, the resolution order, and reading the answer back.
+- [Run jj in a browser tab](./guides/run-jj-in-a-browser.md): composing
+  `BrowserJj`, keeping the mount durable, and where the WebAssembly backend
+  answers differently.
+- [Test code that depends on Jj](./guides/testing.md): stubs, partial
+  implementations, and when a test needs a real binary.
+- [API reference](./api.md): every export of the root entry point and of each
+  implementation subpath.
+- [Troubleshooting](./troubleshooting.md): every failure this package reports,
+  grouped by code.

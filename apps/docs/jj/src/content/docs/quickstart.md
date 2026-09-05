@@ -16,11 +16,8 @@ Smithers relies on to undo a step, and the change id that ties them together.
 - Node.js 22.19.0 or later.
 - `jj` on `PATH`. Check with `jj --version`; see
   [Installation](/installation/) if it is missing.
-- The package and its peer:
-
-```bash
-pnpm add @smthrs/jj effect
-```
+- `@smthrs/jj` and its `effect` peer resolvable from the file you are about to
+  write. [Installation](/installation/) has the workspace form.
 
 ## Create a repository to work in
 

@@ -46,9 +46,10 @@ const makeProgram = (options: BrowserJj.BrowserJjOptions) =>
 
 The package root holds the contract, its error, and the no-op layer only, so it
 bundles for the browser. Implementations live under `/node`, `/bun`, and
-`/browser`. The package depends on `effect` and `@smthrs/capability` (its error
-channel names `Permission.PermissionError`); [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)
-depends on it, because `Jj` is one of the tags in the closed host list.
+`/browser`. The package shares its `effect` peer with the host and depends on
+`@smthrs/capability` (its error channel names
+`Permission.PermissionError`); [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/) depends on it,
+because `Jj` is one of the tags in the closed host list.
 
 ## @smthrs/jj
 
@@ -280,7 +281,8 @@ spawner that hands the child a different `PATH` still decides for itself.
 `resolveJjBinary` always returns a command: when jj is genuinely absent it
 answers the bare name `jj` with `executable: false` and a hint, which keeps
 every caller's soft-failure behavior while giving `doctor` something specific
-to print. rc.0 vendors no `jj` platform packages, so there is no bundled branch.
+to print. The package vendors no `jj` binaries and downloads none, so there is
+no bundled-package branch to fall back to.
 
 Every probe in `Options` is injectable, so a test pins the resolution order
 without staging a filesystem. `isExecutable` checks the execute bit on POSIX and
@@ -324,9 +326,13 @@ operation reports `not_installed`, the same code the Node adapter reports for a
 missing binary, so a caller needs no browser-specific branch. The command each
 failure names is the one `NodeJj` would have run.
 
-Two places where the browser backend answers differently from the CLI, both
-because the frozen wasm ABI has no field for them:
+Three places where the browser backend answers differently from the CLI, each
+because the frozen wasm ABI has no operation or field for it:
 
+- `revert` is defined and always fails `not_installed`, with the message "jj is
+  not available in the browser". The ABI has no revert operation. The method
+  stays present so feature detection never depends on an optional property
+  disappearing: ask, and read the code you get back.
 - `workspaceAdd` with a revision is two calls, an add followed by a restore
   rooted at the new lane. The whole sequence runs uninterruptibly. If the pin
   fails, the adapter attempts a `workspaceForget` and reports the pin failure
@@ -427,12 +433,26 @@ round-trips through the journal, so renaming either invalidates recorded runs.
 [test/index.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/index.test.ts)
 pins both. See [Content addressing](https://smithers.sh/docs/concepts/content-addressing/).
 
-## Browser support
+## Which entry points bundle for a browser
 
-`@smthrs/jj` and `@smthrs/jj/browser/BrowserJj` are gated as browser entry
-points by `scripts/browser-check.mjs` (`pnpm run browser`, and one CI step). The
-same gate asserts that `@smthrs/jj/node/NodeJj` and `@smthrs/jj/bun/BunJj` still
-do **not** bundle, and that the reason is `node:child_process`.
+| Entry point                       | Bundles for a browser                  |
+| --------------------------------- | -------------------------------------- |
+| `@smthrs/jj`                      | Yes. Contract, error, and no-op layer. |
+| `@smthrs/jj/browser/BrowserJj`    | Yes.                                   |
+| `@smthrs/jj/browser/WasiPreview1` | Yes.                                   |
+| `@smthrs/jj/browser/WasiFs`       | Yes. Types only, and imports nothing.  |
+| `@smthrs/jj/node/NodeJj`          | No. Imports `node:child_process`.      |
+| `@smthrs/jj/node/resolveJjBinary` | No. Imports `node:fs` and `node:path`. |
+| `@smthrs/jj/bun/BunJj`            | No. Re-exports the Node adapter.       |
+
+Those answers are executed rather than asserted. Every entry point in the table
+is bundled for a browser target and the result is required to match the column:
+`@smthrs/jj` and `@smthrs/jj/browser/BrowserJj` must bundle, while
+`@smthrs/jj/node/NodeJj` and `@smthrs/jj/bun/BunJj` must still fail, and fail
+only because `node:child_process` is unresolvable. A Node dependency can
+therefore neither creep into the contract nor silently disappear from the
+adapters. Import the contract anywhere and pick the implementation per platform,
+the same way `effect` keeps `@effect/platform-node` out of `effect`.
 
 ## Reading next
 

@@ -5,11 +5,12 @@ sidebar:
   order: 1
 ---
 
-Smithers snapshots the working copy around every step. An orchestrator that
-calls `spawn("jj", ...)` from inside a step gets the snapshot and gives up
-everything a host needs to reason about it: which repository was touched,
-whether the operator authorized it, whether the child is inside the process
-ledger, and what the failure meant. `Jj` is the same operations expressed as a
+Smithers, the durable flow engine this package belongs to, snapshots the
+working copy around every step so a step that goes wrong can be put back. An
+orchestrator that calls `spawn("jj", ...)` from inside a step gets the snapshot
+and gives up everything a host needs to reason about it: which repository was
+touched, whether the operator authorized it, whether the child is inside the
+process ledger, and what the failure meant. `Jj` is the same operations expressed as a
 service, so the host decides all of that in one place.
 
 ## One small contract
@@ -118,5 +119,7 @@ For the whole permission model, see
 The tag key `@smthrs/jj/Jj` and the error `_tag` `@smthrs/jj/JjError` are
 durable identity, not implementation detail. Step keys digest the resolved
 service set, and `JjError` round-trips through the journal, so renaming either
-one invalidates recorded runs. The package pins both in a test for exactly that
-reason. See [Content addressing](/docs/concepts/content-addressing/).
+one invalidates recorded runs.
+[test/index.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/index.test.ts)
+pins both for exactly that reason. See
+[Content addressing](/docs/concepts/content-addressing/).

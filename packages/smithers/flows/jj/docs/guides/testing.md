@@ -41,9 +41,9 @@ example to call a method in a unit test with no Effect context.
 ## Hand-write an implementation
 
 `root` and `revert` are optional on the interface, so a double may define the
-six required members and nothing else. This is the stub the repository's own
-examples use, where the engine calls jj for compensable snapshots and the
-examples all use sealed actions:
+six required members and nothing else. Reach for this shape when the code under
+test never calls `root` or `revert`, and you want the six it does call to
+succeed quietly:
 
 ```ts
 import { Jj, make } from "@smthrs/jj"
@@ -53,7 +53,7 @@ import * as Layer from "effect/Layer"
 const stubJj = Layer.succeed(
   Jj,
   make({
-    snapshot: () => Effect.succeed({ changeId: "examples-snapshot" }),
+    snapshot: () => Effect.succeed({ changeId: "stub-snapshot" }),
     restore: () => Effect.void,
     diff: () => Effect.succeed(""),
     workspaceAdd: () => Effect.void,
@@ -134,3 +134,32 @@ rather than importing a backend.
 For a browser host that ships no wasm module, `BrowserJj.layerUnsupported` is
 the layer to provide: every operation reports `not_installed` with the jj
 command the CLI adapter would have run.
+
+## Run the package's ABI conformance gate
+
+From `packages/smithers/flows/jj`, run `pnpm exec vitest run --maxWorkers=1`.
+The normal configuration requires the committed `wasm/flows_jj.wasm` before
+collecting any selected tests, including a focused selection. A missing artifact
+fails the command. A subprocess sentinel verifies that failure and proves the
+same configuration succeeds after its fixture receives the artifact.
+
+The generated real-WASM test checks zero-length allocation, repeated owned
+allocate/call/free cycles, initialized byte prefixes, memory growth, explicit
+allocation/growth rejection and successful operations after failures. It never
+passes arbitrary pointers or mismatched sizes to `free`. Every operation uses
+a temporary repository, and cleanup accounts for both buffers and host files.
+
+From the repository root, run `node scripts/run-jj-abi-campaign.mjs` for the
+parser-only Rust target, native ABI sequences and exact WASM corpus replay.
+`SMITHERS_ABI_SEED`, `SMITHERS_ABI_CASES`, `SMITHERS_ABI_STEPS` and
+`SMITHERS_ABI_ARTIFACT_DIR` control replay and retained evidence. The default
+scheduled workload is 5,000 cases and 32 sequences. A local 2,000-case /
+16-sequence run is bounded local evidence. The normal Rust and package suites
+use 256 cases and four sequences.
+
+`crates/flows-jj/ABI_CAMPAIGN.md` documents the reports, independent result
+checks and separate scheduled AddressSanitizer tier. Native parser tests run
+on stable Rust without changing the runtime dependencies. Instrumentation needs
+its declared nightly toolchain; an uninstrumented pass does not certify it.
+Developer runs with a separate configuration must report their reduced scope
+and do not replace the supported package gate.

@@ -36,11 +36,20 @@ fix. Or point `SMITHERS_JJ_PATH` at a working jj. See
 
 ### "jj is not available in the browser"
 
-**What happened.** The composition provided `BrowserJj.layerUnsupported`, the
-layer for a host that ships no wasm module. The `command` field names the jj
-command the CLI adapter would have run.
+**What happened.** One of two things, and the failing `method` tells you which.
 
-**What to change.** If the page should be able to run jj, provide
+If the method is `revert`, you called the one contract operation the compiled
+WebAssembly ABI has no operation for. Every other operation on
+`BrowserJj.layer` works.
+
+If the method is anything else, the composition provided
+`BrowserJj.layerUnsupported`, the layer for a host that ships no wasm module. In
+both cases the `command` field names the jj command the CLI adapter would have
+run.
+
+**What to change.** For `revert`, either use `restore` to rewind to a recorded
+change id, or run the operation on a host with the jj command line. For the
+rest, if the page should be able to run jj, provide
 `BrowserJj.layer({ fs, wasm })` with a compiled module and a synchronous
 filesystem. See [Run jj in a browser tab](/guides/run-jj-in-a-browser/). If
 the host genuinely cannot, this is the intended answer and callers should treat

@@ -5,19 +5,41 @@ sidebar:
   order: 1
 ---
 
-## Install the package
+## Get the package
+
+`@smthrs/jj` is not on npm at 1.0.0-rc.0. It ships as a member of the
+[smithers repository](https://github.com/smithersai/smithers) workspace, so
+using it today means working from a checkout:
 
 ```bash
-pnpm add @smthrs/jj
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. It has two runtime dependencies:
-[`effect`](https://effect.website) and
-[`@smthrs/capability`](/api/capability), the leaf that names the permission
-failures a guarded `Jj` adds to the error channel. Neither pulls in a process
-spawner or an HTTP client, which is what keeps the root entry point
-browser bundleable.
+Code that consumes it lives in that workspace too, either an existing package
+or one you add, and depends on it with a workspace specifier:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/jj": "workspace:*"
+  }
+}
+```
+
+## Requirements
+
+- Node.js 22.19.0 or later.
+- [`effect`](https://effect.website) 4.0.0-rc.112. It is a peer dependency, so
+  the application owns the single copy every layer resolves against.
+- [`@smthrs/capability`](/api/capability), the only package `@smthrs/jj`
+  depends on. It names the permission failures a guarded `Jj` adds to the error
+  channel.
+
+Neither dependency pulls in a process spawner or an HTTP client, which is what
+keeps the root entry point browser bundleable. The package builds to both ESM
+and CommonJS with TypeScript declarations.
 
 ## Install jj for the Node and Bun layers
 
@@ -99,7 +121,8 @@ pnpm add @zenfs/core @zenfs/dom
 ```
 
 See [Run jj in a browser tab](./guides/run-jj-in-a-browser.md) for the whole
-composition, and for rebuilding the wasm artifact from `crates/flows-jj`.
+composition and for the places the WebAssembly backend answers differently from
+the jj command line.
 
 ## What a host composition adds
 

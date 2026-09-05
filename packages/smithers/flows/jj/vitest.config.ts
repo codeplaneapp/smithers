@@ -1,9 +1,11 @@
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { configDefaults, defineConfig } from "vitest/config"
 
 export default defineConfig({
   test: {
+    globalSetup: [fileURLToPath(new URL("./test/RequireWasm.ts", import.meta.url))],
     // The fault tier lives under `test/faults` and runs from
     // `vitest.faults.config.ts` instead, serially and without coverage: its
     // cases kill process groups and bind ports, which no unit suite sharing

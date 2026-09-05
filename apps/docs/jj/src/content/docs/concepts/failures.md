@@ -48,10 +48,11 @@ usage error that classifies as `unknown`, and the WebAssembly layer guards the
 same case in Rust.
 
 That agreement is the point, and it is tested rather than asserted:
-`LayerParity.test.ts` drives one table of failures through both the CLI layer
-and the wasm layer and requires the same code from each. A run that snapshots
-through one backend and replays against the other needs the same code for the
-same failure, or a branch on it takes a different arm.
+[test/LayerParity.test.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/test/LayerParity.test.ts)
+drives one table of failures through both the CLI layer and the wasm layer and
+requires the same code from each. A run that snapshots through one backend and
+replays against the other needs the same code for the same failure, or a branch
+on it takes a different arm.
 
 ## The cause is data, not an Error
 
