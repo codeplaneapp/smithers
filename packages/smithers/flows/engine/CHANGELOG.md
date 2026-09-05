@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The memory engine follows trampoline membership and child ownership when
+  cancelling through any round ID. Requests persist across the gap before a
+  successor exists, and children admitted after cancellation cannot dispatch
+  their bodies. Completed round results remain readable; normal cancellation
+  requests do not wait for uninterruptible user cleanup.
+
 ## [1.0.0-rc.0] - 2026-08-31
 
 ### Added

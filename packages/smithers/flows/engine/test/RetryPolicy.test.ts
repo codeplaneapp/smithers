@@ -50,7 +50,7 @@ describe("expiration (issue #36)", () => {
           const fiber = yield* engine.actionExecute(action, 1).pipe(Effect.forkChild)
           yield* Effect.yieldNow
           // Attempts at t=0, 100, 200; the delay to t=300 crosses the 250ms
-          // expiration, so the sequence stops with a die.
+          // expiration, so the sequence stops with the final typed failure.
           yield* TestClock.adjust(1_000)
           const result = yield* Fiber.join(fiber)
           return result._tag === "Complete" ? result.exit : Exit.succeed("suspended" as never)
@@ -74,7 +74,7 @@ describe("expiration (issue #36)", () => {
       expect(attempts).toBe(3)
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
-        expect(JSON.stringify(exit.cause)).toContain("retry_policy_expired")
+        expect(exit.cause.reasons).toContainEqual(expect.objectContaining({ _tag: "Fail", error: "dependency-down" }))
       }
     }))
 })
@@ -185,7 +185,7 @@ describe("engine retry decision point", () => {
       expect(timestamps).toEqual([0, 100, 300, 700])
     }))
 
-  effect("maxAttempts exhaustion fails with a typed RetryAttemptsExhausted defect", () =>
+  effect("maxAttempts exhaustion preserves the declared typed failure", () =>
     Effect.gen(function*() {
       let attempts = 0
       const action = Action.make({
@@ -209,23 +209,15 @@ describe("engine retry decision point", () => {
       const exit = yield* Fiber.join(fiber)
       expect(attempts).toBe(3)
       expect(Exit.isFailure(exit)).toBe(true)
-      const defect = Exit.isFailure(exit)
-        ? exit.cause.reasons.find((reason) => reason._tag === "Die")
-        : undefined
-      expect(defect).toBeDefined()
-      const error = (defect as { defect: unknown }).defect
-      expect(Schema.is(RetryPolicy.RetryAttemptsExhausted)(error)).toBe(true)
-      expect((error as RetryPolicy.RetryAttemptsExhausted).attempt).toBe(3)
-      expect((error as RetryPolicy.RetryAttemptsExhausted).maxAttempts).toBe(3)
-      // the terminal operation failure is not discarded by the exhaustion
-      // wrapper: callers can still recover the error that actually ended the
-      // retry sequence (Temporal `retry_test.go:222` parity)
-      // it is stored in its *encoded* form so the defect stays serializable
-      const last = (error as RetryPolicy.RetryAttemptsExhausted).lastError
-      expect(last).toEqual({ _tag: "RetryPolicy/Flaky" })
+      if (Exit.isFailure(exit)) {
+        const failure = exit.cause.reasons.find((reason) => reason._tag === "Fail")
+        expect(failure).toBeDefined()
+        expect(failure?._tag === "Fail" && failure.error).toBeInstanceOf(Flaky)
+        expect(exit.cause.reasons.some((reason) => reason._tag === "Die")).toBe(false)
+      }
     }))
 
-  effect("the exhaustion defect carries the *final* failure, not the first one", () =>
+  effect("exhaustion preserves the final typed failure, not the first one", () =>
     Effect.gen(function*() {
       let attempts = 0
       const action = Action.make({
@@ -244,12 +236,10 @@ describe("engine retry decision point", () => {
       yield* Effect.yieldNow
       yield* TestClock.adjust(300)
       const exit = yield* Fiber.join(fiber)
-      const defect = Exit.isFailure(exit)
-        ? exit.cause.reasons.find((reason) => reason._tag === "Die")
-        : undefined
-      const error = (defect as { defect: unknown }).defect as RetryPolicy.RetryAttemptsExhausted
       expect(attempts).toBe(3)
-      expect(error.lastError).toBe("failure-3")
+      expect(Exit.isFailure(exit) && exit.cause.reasons).toContainEqual(
+        expect.objectContaining({ _tag: "Fail", error: "failure-3" })
+      )
     }))
 
   effect(

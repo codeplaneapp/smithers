@@ -55,6 +55,7 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
     type ExecutionState = {
       readonly payload: unknown
       readonly parent: string | undefined
+      readonly logicalLineageId: string
       instance: FlowRuntime.FlowInstance["Service"]
       fiber: Fiber.Fiber<Flow.Result<unknown, unknown>> | undefined
       /**
@@ -66,12 +67,17 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       bodyFiber: Fiber.Fiber<unknown, unknown> | undefined
     }
     const executions = new Map<string, ExecutionState>()
+    // This is trampoline membership, not the journal frame lineage on an
+    // instance. A cancellation survives the gap before the next round exists.
+    const rounds = new Map<string, Set<string>>()
+    const cancelledLineages = new Set<string>()
 
     // Every child execution request records an edge, including a fan-in that
     // joins an existing execution. This mirrors the durable engine's edge
     // table: keeping only ExecutionState.parent would miss second-parent
     // cycles and let the participants join one another forever.
     const parents = new Map<string, Set<string>>()
+    const children = new Map<string, Set<string>>()
     const recordParent = (
       child: string,
       parent: string
@@ -101,8 +107,40 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         } else {
           existing.add(parent)
         }
+        const linked = children.get(parent) ?? new Set<string>()
+        linked.add(child)
+        children.set(parent, linked)
         return Effect.void
       })
+
+    // Publish all intent synchronously before sending an interrupt or re-drive.
+    // A body that admits another child during cleanup inherits this intent.
+    const requestCancellation = (executionId: string): ReadonlyArray<string> => {
+      if (!executions.has(executionId)) return []
+      const pending = [executionId]
+      const seen = new Set(pending)
+      const visitedLineages = new Set<string>()
+      const admit = (id: string) => {
+        if (seen.has(id)) return
+        seen.add(id)
+        pending.push(id)
+      }
+      for (let index = 0; index < pending.length; index++) {
+        const id = pending[index]!
+        const state = executions.get(id)
+        if (state !== undefined) {
+          state.instance.interrupted = true
+          const lineageId = state.logicalLineageId
+          cancelledLineages.add(lineageId)
+          if (!visitedLineages.has(lineageId)) {
+            visitedLineages.add(lineageId)
+            for (const round of rounds.get(lineageId)!) admit(round)
+          }
+        }
+        for (const child of children.get(id) ?? []) admit(child)
+      }
+      return pending
+    }
 
     type ActionState = {
       readonly settlement: Deferred.Deferred<Flow.Result<unknown, unknown>>
@@ -304,20 +342,42 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
         }
         if (options.parent !== undefined) {
           yield* recordParent(options.executionId, options.parent.executionId)
+          if (
+            state !== undefined && (options.parent.interrupted ||
+              executions.get(options.parent.executionId)?.instance.interrupted === true)
+          ) {
+            // Joining is also child admission. An existing independent run
+            // must not escape an already-cancelled parent's ownership edge.
+            // The memory implementation below has no persistence failure.
+            yield* engine.interrupt(flow, options.executionId).pipe(Effect.orDie)
+          }
         }
         if (!state) {
           const storedPayload = yield* snapshot(flow, options.payload)
+          // makeUnsafe always supplies the initial or advanced round; this
+          // encoded implementation is private to that adapter.
+          const logicalLineageId = options.round!.lineageId
+          const instance = makeInstance(flow, options.executionId)
+          const parent = options.parent
+          instance.interrupted = cancelledLineages.has(logicalLineageId) ||
+            (parent !== undefined && (parent.interrupted ||
+              executions.get(parent.executionId)?.instance.interrupted === true))
+          if (instance.interrupted) cancelledLineages.add(logicalLineageId)
           state = {
             // The stored value never crosses into user code. Every drive
             // rebuilds its own copy, so caller and handler mutation cannot
             // alter a replay.
             payload: storedPayload,
-            instance: makeInstance(flow, options.executionId),
+            instance,
+            logicalLineageId,
             fiber: undefined,
             bodyFiber: undefined,
             parent: options.parent?.executionId
           }
           executions.set(options.executionId, state)
+          const members = rounds.get(logicalLineageId) ?? new Set<string>()
+          members.add(options.executionId)
+          rounds.set(logicalLineageId, members)
           yield* resume(options.executionId)
         }
         if (options.discard) return
@@ -325,41 +385,44 @@ export const layerMemory: Layer.Layer<FlowRuntime.FlowRuntime> = Layer.effect(Fl
       }),
       // Untraced because interruption is coordinated from recursive execution.
       interrupt: Effect.fnUntraced(function*(_flow, executionId) {
-        const state = executions.get(executionId)
-        if (!state) return
-        state.instance.interrupted = true
-        // `execute` installs the state and synchronously starts `resume`
-        // before it can return its execution id, so every publicly
-        // observable execution has a round fiber to inspect.
-        const exit = state.fiber!.pollUnsafe()
-        if (exit === undefined) {
-          // The round is LIVE. The interruption is delivered to the body
-          // fiber rather than the round fiber: the round fiber then converts
-          // it into the recorded cancellation — `Complete` with an interrupt
-          // cause, after the body's finalizers ran — where interrupting the
-          // round fiber itself would leave `poll` dying on a bare interrupt
-          // exit. Delivery is a send, not an await: the contract is a
-          // cancellation REQUEST, and a body pinned in an uninterruptible
-          // region settles on its own time with the request already
-          // recorded. A round fiber that has not started yet has no body
-          // fiber; its body observes the flag and self-interrupts on start.
-          if (state.bodyFiber !== undefined) {
-            const bodyFiber = state.bodyFiber
-            yield* Effect.withFiber((fiber) => Effect.sync(() => bodyFiber.interruptUnsafe(fiber.id)))
+        const targets = requestCancellation(executionId)
+        for (const target of targets) {
+          const state = executions.get(target)
+          if (state === undefined) continue
+          // `execute` installs the state and synchronously starts `resume`
+          // before it can return its execution id, so every publicly
+          // observable execution has a round fiber to inspect.
+          const exit = state.fiber!.pollUnsafe()
+          if (exit === undefined) {
+            // The round is LIVE. The interruption is delivered to the body
+            // fiber rather than the round fiber: the round fiber then converts
+            // it into the recorded cancellation — `Complete` with an interrupt
+            // cause, after the body's finalizers ran — where interrupting the
+            // round fiber itself would leave `poll` dying on a bare interrupt
+            // exit. Delivery is a send, not an await: the contract is a
+            // cancellation REQUEST, and a body pinned in an uninterruptible
+            // region settles on its own time with the request already
+            // recorded. A round fiber that has not started yet has no body
+            // fiber; its body observes the flag and self-interrupts on start.
+            if (state.bodyFiber !== undefined) {
+              const bodyFiber = state.bodyFiber
+              yield* Effect.withFiber((fiber) => Effect.sync(() => bodyFiber.interruptUnsafe(fiber.id)))
+            }
+            continue
           }
-          return
+          yield* resume(target)
         }
-        yield* resume(executionId)
       }),
       // Untraced because interruption is coordinated from recursive execution.
       interruptUnsafe: Effect.fnUntraced(function*(_flow, executionId) {
-        const state = executions.get(executionId)
-        if (!state) return
-        state.instance.interrupted = true
+        const targets = requestCancellation(executionId)
         // `execute` installs the state and synchronously starts `resume`
         // before it can return its execution id. `resume` assigns this fiber
         // without yielding, so every publicly observable execution has one.
-        yield* Fiber.interrupt(state.fiber!)
+        yield* Effect.forEach(targets, (target) => {
+          const state = executions.get(target)
+          return state === undefined ? Effect.void : Fiber.interrupt(state.fiber!)
+        }, { concurrency: "unbounded", discard: true })
       }),
       resume(_flow, executionId) {
         return resume(executionId)

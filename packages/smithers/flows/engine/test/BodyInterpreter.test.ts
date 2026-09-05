@@ -27,7 +27,7 @@ const Pipeline = Flow.make("body/pipeline", {
   success: Schema.Number,
   body: ({ path }) =>
     Read.call({ path }).pipe(
-      Node.andThen((result) => Double.call({ value: result.value })),
+      Node.bindPlanned((result) => Double.call({ value: result.value })),
       Node.map((doubled) => doubled + 1)
     )
 })
@@ -182,7 +182,7 @@ describe("bodied flow on the memory engine", () => {
         success: Schema.Number,
         body: ({ path }) =>
           Read.call({ path }).pipe(
-            Node.andThen((result): Node.Node<Flow.Park | Flow.Done<Planned.Planned<number>>> =>
+            Node.bindPlanned((result): Node.Node<Flow.Park | Flow.Done<Planned.Planned<number>>> =>
               approved ? Flow.done(result.value) : Flow.park({ reason: "approval", token: "body-gate" })
             )
           )
@@ -320,7 +320,7 @@ describe("graph failure semantics on the memory engine", () => {
         error: Schema.String,
         body: () =>
           Node.all({ left: Fails.call({}), right: Slow.call({}) }).pipe(
-            Node.andThen(({ left, right }) => After.call({ left, right }))
+            Node.bindPlanned(({ left, right }) => After.call({ left, right }))
           )
       })
 

@@ -91,12 +91,7 @@ describe("retry origin fallback when the durable hook yields none", () => {
       if (result._tag === "Complete") {
         expect(Exit.isFailure(result.exit)).toBe(true)
         if (Exit.isFailure(result.exit)) {
-          expect(Cause.squash(result.exit.cause)).toMatchObject({
-            _tag: "@smthrs/flow/RetryPolicyExpired",
-            actionName: "RetryOriginFallback/pruned",
-            expirationMs: 1,
-            lastError: "still-failing"
-          })
+          expect(Cause.squash(result.exit.cause)).toBe("still-failing")
         }
       }
     }).pipe(
@@ -207,7 +202,7 @@ describe("retry origin fallback when the durable hook yields none", () => {
         expect(outcome.logs.filter((entry) => entry.logLevel === "Warn")).toEqual([])
         expect(outcome.result._tag).toBe("Complete")
         if (outcome.result._tag === "Complete" && Exit.isFailure(outcome.result.exit)) {
-          expect(Cause.squash(outcome.result.exit.cause)).toBeInstanceOf(RetryPolicy.RetryPolicyExpired)
+          expect(Cause.squash(outcome.result.exit.cause)).toBe("still-failing")
         }
       })
   )

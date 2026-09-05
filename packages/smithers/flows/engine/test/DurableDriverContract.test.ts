@@ -245,11 +245,7 @@ describe("durable driver contract across an engine restart", () => {
           : undefined
         expect(exit !== undefined && Exit.isFailure(exit)).toBe(true)
         const defect = exit !== undefined && Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
-        expect(defect).toBeInstanceOf(RetryPolicy.RetryPolicyExpired)
-        expect(defect instanceof RetryPolicy.RetryPolicyExpired && defect.expirationMs).toBe(30_000)
-        expect(defect instanceof RetryPolicy.RetryPolicyExpired && defect.actionName).toBe(
-          "DurableContract/expiring"
-        )
+        expect(defect).toBe("still-broken")
         // Replay only: the restarted engine never re-dispatched the attempt.
         expect(dispatched).toEqual([1])
       }).pipe(Effect.provide(stack))

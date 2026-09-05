@@ -18,11 +18,12 @@ replays a request, and a sweep that resubmits all converge on one execution.
 Joining works whether the run is finished or still going. A duplicate submit of
 an in-flight id waits on the body that is already running.
 
-When a caller supplies no id at all, the flow uses its declared
-`idempotencyKey` when it has one and otherwise asks the ambient execution-id
-source. That source refuses by default. A host may explicitly install the
-payload-derived source when equal payloads should converge; a flow with an
-`idempotencyKey` is content-addressed by construction.
+When a caller supplies no id, a declared `idempotencyKey` selects intentional
+reattachment. Otherwise the ambient source defaults to a fresh UUID, so equal
+unkeyed payloads start independent executions. `Flow.layerExecutionIds(Flow.derived)`
+explicitly restores deterministic payload identity for hosts that require it.
+After a crash, use a captured execution id or an explicit key to reattach; another
+unkeyed `execute` call starts new work. Historical id encodings are unchanged.
 
 ## Two reuses are refused
 

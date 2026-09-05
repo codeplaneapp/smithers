@@ -649,32 +649,13 @@ export const makeUnsafe = (options: Encoded): FlowRuntime.FlowRuntime["Service"]
               currentAttempt = currentAttempt + 1
               continue
             }
-            if (decision.reason === "exhausted") {
-              return new Flow.Complete({
-                exit: Exit.die(
-                  new RetryPolicy.RetryAttemptsExhausted({
-                    actionName: action.name,
-                    attempt: currentAttempt,
-                    maxAttempts: policy.maxAttempts ?? currentAttempt,
-                    lastError: failure.error
-                  })
-                )
-              })
-            }
-            if (decision.reason === "expired") {
-              return new Flow.Complete({
-                exit: Exit.die(
-                  new RetryPolicy.RetryPolicyExpired({
-                    actionName: action.name,
-                    attempt: currentAttempt,
-                    // `expired` is only ever produced by a policy that
-                    // declares `expirationMs`, so the bound is always present.
-                    expirationMs: policy.expirationMs as number,
-                    lastError: failure.error
-                  })
-                )
-              })
-            }
+            // Exhaustion is a retry decision, not a change to the action's
+            // declared error channel. Preserve the final business failure so
+            // ordinary typed recovery (including a graph Catch) still runs.
+            yield* Effect.annotateCurrentSpan({
+              "retry.stopReason": decision.reason,
+              "retry.attempt": currentAttempt
+            })
             // nonRetryable: fall through and propagate the original failure.
           }
         }

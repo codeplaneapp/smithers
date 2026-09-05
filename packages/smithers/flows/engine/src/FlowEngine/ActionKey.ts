@@ -52,6 +52,9 @@ const fileBoundary = (
  * counter and remain allocation-ordered — indistinguishable dispatches have
  * no material to order them by. Omitting the site preserves the prior scope
  * encoding byte for byte.
+ * A declared implementation version appends its own length-framed `/v:`
+ * component; absence appends nothing. Version changes belong to newly planned
+ * executions, not upgrades of existing runs.
  *
  * @private
  * @since 0.1.0
@@ -66,7 +69,11 @@ export const ordinalScope = (
     name: action.name,
     idempotency: action.idempotencyKey,
     site
-  })
+  }).pipe(Effect.map((scope) =>
+    action.implementationVersion === undefined
+      ? scope
+      : `${scope}/v:${action.implementationVersion.length}:${action.implementationVersion}`
+  ))
 
 const renderIssuePath = (segments: ReadonlyArray<PropertyKey>): string =>
   // The type argument is explicit because `"$"` is itself a `PropertyKey`, so
@@ -223,6 +230,10 @@ export const actionKey = Effect.fn("FlowEngine.actionKey")(function*(
       kind: environment === undefined ? "run" : "cache",
       form,
       input,
+      // This is outside caller-owned input, retaining object-key rename
+      // stability while preventing it from masking an explicit version. An
+      // absent version emits no field and preserves all legacy key bytes.
+      ...(action.implementationVersion === undefined ? {} : { implementationVersion: action.implementationVersion }),
       ...(environment === undefined ? { runId: executionId } : { environment }),
       ...(action.nondeterministic === undefined ? {} : { nondeterministic: action.nondeterministic }),
       ...(boundary === undefined ? {} : { boundary })

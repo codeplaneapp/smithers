@@ -9,8 +9,8 @@ A store implements `FlowEngine.Encoded`. It never implements the typed
 decision, trampoline rounds, and the suspended-resume loop, and a store that
 reimplemented them would diverge from every other store.
 
-The two implementations in this repository are worth reading beside this guide:
-`FlowEngine.layerMemory` in this package, and `EngineStore` in
+Two implementations already exist, and both are worth reading beside this
+guide: `FlowEngine.layerMemory` in this package, and `EngineStore` in
 [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/).
 
 ## The shape
@@ -66,8 +66,9 @@ table.
 
 ## Match the required behaviors
 
-Four behaviors are contract, not convention, and the conformance tests in this
-package check them:
+Four behaviors are contract, not convention. A store that gets one of them
+wrong still compiles, so treat them as the acceptance criteria for your
+implementation:
 
 - A repeated `executionId` joins the run that already owns it. A reuse that
   names a different flow declaration, or that arrives with a different payload,
@@ -102,11 +103,10 @@ where the fallback is observable.
 
 ## Verify against the contract
 
-The durable-driver contract tests in this package run the same scenarios
-against the memory engine and a durable driver, including an engine restart. A
-new store earns its confidence the same way: run it through
-[`@smthrs/testing`](https://testing.smithers.sh/reference/api/), whose engine subject drives identity,
-replay, race, and interruption against a real engine rather than a model.
+Run your store through [`@smthrs/testing`](https://testing.smithers.sh/reference/api/). Its engine subject
+drives identity, replay, race, and interruption against a real engine rather
+than a model. The in-memory engine and a durable driver are held to the same
+scenarios that way, an engine restart included.
 
 ## Related
 

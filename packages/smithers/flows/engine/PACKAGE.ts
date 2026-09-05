@@ -1,3 +1,4 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
 /**
  * Standard package targets plus cross-package and dependency-policy edges.
  *
@@ -11,7 +12,7 @@ import { Package as flowPackage } from "../flow/PACKAGE.ts"
 
 const flow = flowPackage.lib
 
-const standard = Smithers.StandardPackage({ deps: [flow], cwd: "packages/smithers/flows/engine" })
+const standard = BuildAndCheckTypeScriptPackage({ deps: [flow], cwd: "packages/smithers/flows/engine" })
 
 const lib = standard.lib
 const check = standard.check

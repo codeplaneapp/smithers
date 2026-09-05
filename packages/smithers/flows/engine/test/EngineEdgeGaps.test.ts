@@ -254,7 +254,7 @@ describe("retry decisions on defects", () => {
     return Effect.gen(function*() {
       const exit = yield* flow.execute({ id: "x" }, { executionId: "run-retry" }).pipe(Effect.exit)
       const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
-      expect((defect as RetryPolicy.RetryAttemptsExhausted).maxAttempts).toBe(3)
+      expect(defect).toBe("again")
       expect(attempts).toBe(3)
     }).pipe(Effect.provide(layer))
   })

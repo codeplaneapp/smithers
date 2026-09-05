@@ -1,35 +1,30 @@
 ---
 title: "@smthrs/engine"
-description: "The runtime that executes @smthrs/flow flows: the FlowRuntime port built over a low-level Encoded seam, an in-memory implementation of that seam, and derived RPC and HTTP transports."
+description: "The runtime that executes @smthrs/flow flows: it records every step, answers a repeated submission with the recorded result instead of running the work twice, resumes a parked run, and derives RPC and HTTP transports from flow declarations."
 ---
 
-`@smthrs/engine` runs the flows that [`@smthrs/flow`](/api/flow) declares.
+`@smthrs/engine` is the runtime that executes durable flows. A flow, written
+with [`@smthrs/flow`](/api/flow), declares what should happen; this package
+makes it happen, records every step it took, and picks the run back up after it
+parks waiting on something, after a crash, and after a process restart.
 
-A `Flow` is a durable program and an `Action` is one recorded operation inside
-it. Neither runs anything by itself: both are declarations, and `FlowRuntime`
-is the port they talk to. This package is the implementation of that port.
+## The problem it solves
 
-It implements it in two layers, and that split is the design:
+Retrying a job that already charged a card, resuming work after a deploy killed
+the process, waiting three days for a human approval without holding a thread
+open: these are one problem, and a retry loop around a function does not solve
+it. Something has to remember what already ran.
 
-- `FlowEngine.makeUnsafe` adapts a low-level `Encoded` implementation into the
-  typed `FlowRuntime` service. Step identity, the retry decision, trampoline
-  rounds, and the suspended-resume loop all live in the adapter, so every store
-  inherits one behavior instead of reimplementing it.
-- An `Encoded` implementation decides where state lives. This package ships
-  `FlowEngine.layerMemory`, which keeps it in the process.
-  [`@smthrs/engine-store`](/api/engine-store) keeps it in a durable journal.
+This package is that memory. It records each action dispatch under a derived
+step identity, so a re-drive finds the recorded outcome instead of dispatching
+again. It names each execution by a caller-supplied id, so a client that times
+out and resubmits joins the run it already started rather than starting a second
+one. Retries, parked runs, cancellation, and handoffs to a following round are
+all decided here, in one place, and they behave the same whether the state lives
+in a process or in a database.
 
-`FlowProxy` and `FlowProxyServer` project the same flows onto a wire. Every
-flow gets three operations, execute, discard, and resume, as Effect RPC
-definitions or HTTP endpoints, so one process can start a flow that another
-process runs.
-
-## Who uses this package
-
-Flow authors use `FlowEngine.layerMemory` to run and test a flow with no store
-to configure. Hosts that expose flows to other processes use `FlowProxy` and
-`FlowProxyServer`. Store authors implement `FlowEngine.Encoded` and adapt it
-with `FlowEngine.makeUnsafe`.
+Reach for it when you need a program to survive the process that started it, and
+when running a step twice would be worse than running it late.
 
 ## Install
 
@@ -37,12 +32,15 @@ with `FlowEngine.makeUnsafe`.
 pnpm add @smthrs/engine @smthrs/flow
 ```
 
-For the peer packages a real composition adds, see
-[Installation](./installation.md).
+Node 22.19.0 or later, plus a platform crypto service.
 
-## The shortest real program
+Everything here is built on [Effect](https://effect.website). Flows, actions,
+and the engine itself are Effect values, you compose them as layers, and the
+program below is Effect code end to end. `effect` is a peer dependency, and
+this release pins one exact version: see [Installation](./installation.md) for
+that pin and for the four things a runnable composition provides.
 
-An action declares the work, a flow declares the plan, and the engine runs it:
+## Run a flow twice, compile once
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -63,8 +61,15 @@ const Build = Flow.make("build/Build", {
   body: (payload) => Compile.call(payload)
 })
 
+let compiles = 0
+
 const BuildLayer = Layer.mergeAll(
-  Compile.toLayer(({ target }) => Effect.succeed(`${target}.js`)),
+  Compile.toLayer(({ target }) =>
+    Effect.sync(() => {
+      compiles = compiles + 1
+      return `${target}.js`
+    })
+  ),
   Interpreter.layer(Build)
 ).pipe(
   Layer.provideMerge(Action.layerImplementations),
@@ -72,46 +77,80 @@ const BuildLayer = Layer.mergeAll(
   Layer.provideMerge(NodeCrypto.layer)
 )
 
-const built: Effect.Effect<string> = Build.execute(
-  { target: "app" },
-  { executionId: "build-app-1" }
-).pipe(Effect.orDie, Effect.provide(BuildLayer))
+const program = Effect.gen(function*() {
+  const first = yield* Build.execute({ target: "app" }, { executionId: "build-app-1" })
+  const second = yield* Build.execute({ target: "app" }, { executionId: "build-app-1" })
+  return { first, second, compiles }
+}).pipe(Effect.orDie, Effect.provide(BuildLayer))
+
+Effect.runPromise(program).then(console.log)
 ```
 
-Running `built` a second time under the same engine and the same
-`executionId` returns the recorded result and never calls `Compile` again.
-The [Quickstart](./quickstart.md) proves that by counting.
+It prints:
 
-## The package at a glance
+```text
+{ first: 'app.js', second: 'app.js', compiles: 1 }
+```
 
-The root entry point exports three namespaces, each also importable from
-`@smthrs/engine/<Namespace>`:
+Both submissions answered `app.js`, and only the first one compiled. The second
+joined the run that already owned `build-app-1` and replayed its recorded
+result. That is the guarantee, in one file, with no database configured.
 
-| Namespace         | What it is                                                                                                                                                                                                                                                        |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine`      | The runtime: the `Encoded` seam a store implements, the `makeUnsafe` adapter that turns one into the typed port, the in-memory `layerMemory`, per-run instance state, journal and trampoline identity, the compensable snapshot boundary, and the coded refusals. |
-| `FlowProxy`       | Client-side and definition-side transport: derives an Effect `RpcGroup` or `HttpApiGroup` from a list of flows.                                                                                                                                                   |
-| `FlowProxyServer` | Server-side transport: binds those derived definitions to a running engine.                                                                                                                                                                                       |
+`FlowEngine.layerMemory` keeps its state for the life of its layer scope, which
+makes it a deterministic runtime for tests and local development.
+[`@smthrs/engine-store`](/api/engine-store) implements the same contract over a
+durable journal, and swapping that one layer is the only change a program makes
+to keep its runs after the process exits.
 
-Every export, with its signature, is on the
-[API reference](./api.md). The generated per-export page with field-level
-tables is [@smthrs/engine exports](./reference/engine.md).
+## What the package exports
+
+| Namespace         | What it gives you                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FlowEngine`      | The runtime: the in-memory `layerMemory`, the `Encoded` contract a durable store implements, and the identity, retry, suspension, and round machinery above it. |
+| `FlowProxy`       | RPC and HTTP definitions derived from a list of flows, so one process can execute a flow that another process declared.                                         |
+| `FlowProxyServer` | The layers that bind those derived definitions to a running engine.                                                                                             |
+
+Full signatures are in the [API reference](./api.md).
+
+## How this fits with @smthrs/flows
+
+`@smthrs/engine` is one package of a larger durable flow engine.
+[`@smthrs/flows`](/api/flows) is the barrel that re-exports the whole engine as
+namespaces: this runtime, the flow-authoring package, the durable store, the
+journal, and the rest. It re-exports this package as `Engine`, so
+`Engine.FlowEngine.layerMemory` from the barrel is the same layer
+`FlowEngine.layerMemory` names here. Install `@smthrs/engine` when you want the
+runtime and its transports alone, and `@smthrs/flows` when one dependency for
+the whole engine is the better trade.
+
+Its sibling is [`@smthrs/flow`](/api/flow), the package you author against:
+`Flow`, `Action`, `DurableDeferred`, `DurableClock`, and `RetryPolicy` are all
+declared there. It defines `FlowRuntime` as a port and ships no implementation.
+This package is the implementation.
+
+Above all of them sits [`@smthrs/cli`](/api/cli), the `smthrs` command line
+these packages are built for: it plans, approves, runs, and inspects durable
+flows through one control plane. Nothing here needs it. The CLI is what a
+finished product on top of this engine looks like, and it is the place to start
+if you want the whole system rather than the runtime.
 
 ## Where to go next
 
-- [Installation](./installation.md): peer packages, the `Crypto` requirement,
-  and the import forms.
-- [Quickstart](./quickstart.md): run a flow, then prove the second run replays.
-- Concepts: [the port and the seam](./concepts/port-and-seam.md),
-  [execution identity](./concepts/execution-identity.md),
-  [step identity](./concepts/step-identity.md),
-  [retries and attempts](./concepts/retries.md),
-  [suspension and cancellation](./concepts/suspension.md), and
-  [trampoline rounds](./concepts/trampoline-rounds.md).
-- Guides: [serve flows over RPC or HTTP](./guides/serve-flows.md),
-  [namespace execution ids per tenant](./guides/namespace-execution-ids.md),
-  [run a compensable action](./guides/compensable-actions.md),
-  [implement the Encoded seam](./guides/implement-the-encoded-seam.md), and
-  [test flows on the in-memory engine](./guides/test-in-memory.md).
-- [Troubleshooting](./troubleshooting.md): each refusal this package raises,
-  what causes it, and what to change.
+- [Installation](./installation.md): the packages, the version pin, and the
+  services a composition provides.
+- [Quickstart](./quickstart.md): the program above, built up one layer at a
+  time.
+- [The port and the seam](./concepts/port-and-seam.md): why the engine is two
+  layers, and what a store has to implement.
+- [Execution identity](./concepts/execution-identity.md) and
+  [Step identity](./concepts/step-identity.md): the two names that decide what a
+  replay finds.
+- [Retries and attempts](./concepts/retries.md),
+  [Suspension and cancellation](./concepts/suspension.md), and
+  [Trampoline rounds](./concepts/trampoline-rounds.md): what the engine does
+  when a step fails, parks, or hands off.
+- [Serve flows over RPC or HTTP](./guides/serve-flows.md) and
+  [Test flows on the in-memory engine](./guides/test-in-memory.md): the two
+  things most programs do next.
+- [Troubleshooting](./troubleshooting.md): every refusal and warning, with the
+  fix.

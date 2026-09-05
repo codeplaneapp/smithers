@@ -1,11 +1,13 @@
 ---
-title: "@smthrs/engine"
-description: "What @smthrs/engine exports: FlowEngine, FlowProxy, and FlowProxyServer, with types and defaults from source."
+title: "Export reference"
+description: "Every export of @smthrs/engine one at a time: FlowEngine, FlowProxy, and FlowProxyServer, each with its full type, its defaults, and its field tables."
 area: api
 order: 20
 ---
 
-Version `1.0.0-rc.0`. The package implements `FlowRuntime`, the port `@smthrs/flow` declares, over a low-level `Encoded` seam, and derives RPC and HTTP transports from flow declarations.
+The package implements `FlowRuntime`, the port `@smthrs/flow` declares, over a low-level `Encoded` seam, and derives RPC and HTTP transports from flow declarations.
+
+This page is the long form: one entry per export, with the full type and every field. [API reference](../api.md) is the short tour of the same surface, grouped by what each export is for.
 
 ## Install
 
@@ -208,7 +210,7 @@ Returns the round a lineage starts at: ordinal zero, under the caller's executio
 - **Signature:** `executionId(round: Round): Effect.Effect<string, InvalidRound, Crypto.Crypto>`
 - **Since:** `0.1.0`
 
-Derives the execution id a round runs under. The id comes from `(lineageId, ordinal)` alone through the injected SHA-256. It is therefore the same id in every process and after every restart, which is what makes a handoff at-most-once. The preimage is `["flow-round/v2", lineageId, ordinal]`, and changing it is a durable-identity break.
+Derives the execution id a round runs under. The id comes from `(lineageId, ordinal)` alone through the injected SHA-256. It is therefore the same id in every process and after every restart, which is what makes a handoff at-most-once. The preimage is `["flow-round/v2", lineageId, ordinal]`, and it is part of the package's durable contract: a lineage opened under one release derives the same round ids under the next.
 
 #### `FlowEngine.Round.next`
 
@@ -398,25 +400,7 @@ const program: Effect.Effect<string> = Build.execute(
 
 ## See also
 
-- [`@smthrs/flow`](/docs/reference/api/flow/) declares `Flow`, `Action`, `RetryPolicy`, and the `FlowRuntime` port this package implements.
-- [`@smthrs/engine-store`](/docs/reference/api/engine-store/) supplies the durable implementation of the `Encoded` seam.
-- [Durable execution](/docs/concepts/durable-execution/) owns the journal and replay model.
-- [Retries](/docs/concepts/retries/) owns the retry and attempt-numbering rationale.
-
-## Sources
-
-- `packages/smithers/flows/engine/src/index.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/index.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/Encoded.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/Errors.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/FlowInstance.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/layerMemory.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/Lineage.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/make.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/Round.ts`
-- `packages/smithers/flows/engine/src/FlowEngine/SnapshotBoundary.ts`
-- `packages/smithers/flows/engine/src/FlowProxy.ts`
-- `packages/smithers/flows/engine/src/FlowProxyServer.ts`
-- `packages/smithers/flows/engine/README.md`
-- `packages/smithers/flows/engine/docs/api.md`
-- `packages/smithers/flows/engine/package.json`
+- [API reference](../api.md) covers the same exports grouped by purpose, with the design notes each group needs.
+- [`@smthrs/flow`](/api/flow) declares `Flow`, `Action`, `RetryPolicy`, and the `FlowRuntime` port this package implements.
+- [`@smthrs/engine-store`](/api/engine-store) supplies the durable implementation of the `Encoded` seam.
+- [Durable execution](/docs/concepts/durable-execution/) and [Retries](/docs/concepts/retries/) on smithers.sh own the cross-package journal, replay, and attempt-numbering model.

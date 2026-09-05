@@ -125,6 +125,10 @@ export interface Encoded {
   /**
    * Requests cancellation with normal cleanup and compensation semantics.
    * This is not a pause operation.
+   * The execution ID may name any trampoline round: cancel its logical lineage
+   * and linked child lineages, including successors admitted during a race.
+   * Returning acknowledges intent, not completed cleanup. Preserve terminal
+   * predecessor results and keep fork ancestry separate from child ownership.
    *
    * Reports `FlowRuntime.CancelRequestFailed` when a durable implementation
    * could not record the request; an in-memory one never raises it.

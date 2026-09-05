@@ -41,9 +41,10 @@ process that dies between settling round N and opening round N+1 re-derives the
 same id when it comes back, so the re-drive lands on the round that already
 exists instead of starting a second copy of it.
 
-Those derived ids are persisted as run rows, so their preimage is frozen by
-golden vectors in this package's test suite. Changing it is a durable-identity
-break, not a refactor.
+Those derived ids are persisted as run rows, which makes the derivation a
+compatibility surface rather than an implementation detail. Its preimage is
+part of the package's durable contract, so an upgrade does not silently
+re-address the rounds a lineage already opened.
 
 ## maxRounds counts rounds
 

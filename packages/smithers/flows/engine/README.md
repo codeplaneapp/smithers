@@ -1,7 +1,7 @@
 # @smthrs/engine
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://engine.smithers.sh
@@ -15,6 +15,11 @@ durable persistence over the same seam.
 ```sh
 pnpm add @smthrs/engine @smthrs/flow
 ```
+
+Built on [Effect](https://effect.website): flows, actions, and the engine are
+Effect values you compose as layers. `effect` is a peer dependency pinned to
+one exact version per release, listed under `peerDependencies` in
+`package.json`.
 
 ## Mental model
 
@@ -35,14 +40,8 @@ operations, both defined in `@smthrs/flow`. This package is what runs them.
 Everything that decides behavior lives above the seam, in `makeUnsafe`: step
 identity, the retry decision, trampoline rounds, and the suspended-resume loop.
 Everything below it decides only where state lives. That is what makes
-`layerMemory` a real engine rather than a mock.
-
-| Source               | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FlowEngine/`        | Interprets flows, executes actions, stores outcomes, and resumes suspended executions. `Encoded.ts` is the low-level seam, `make.ts` adapts it to the typed port, `layerMemory.ts` is the in-memory implementation, `ActionKey.ts` derives step identity, `FlowInstance.ts` builds per-execution state, `Lineage.ts` and `Round.ts` mint journal and trampoline identity, `Errors.ts` holds the coded refusals, and `SnapshotBoundary.ts` is the compensable host hook. |
-| `FlowProxy.ts`       | Derives HTTP and RPC definitions for remotely invoking flows.                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `FlowProxyServer.ts` | Connects those definitions to the actual flows and engine.                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `index.ts`           | Exposes the public namespaces.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+`layerMemory` a real engine rather than a mock, and what lets
+`@smthrs/engine-store` swap in durability without changing a single decision.
 
 ## The shortest program
 

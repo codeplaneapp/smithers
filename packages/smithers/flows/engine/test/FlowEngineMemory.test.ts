@@ -781,22 +781,11 @@ describe("flow definition surface", () => {
       body: () => Node.succeed(undefined)
     })
     return Effect.gen(function*() {
-      const missing = yield* flow.executionId({ id: "x" }).pipe(Effect.exit)
-      expect(Exit.isFailure(missing)).toBe(true)
-      expect(Exit.isFailure(missing) && Cause.hasDies(missing.cause)).toBe(true)
-
-      // This host intentionally treats equal payloads as one execution, so it
-      // opts into the derived source rather than inheriting that policy.
-      const first = yield* flow.executionId({ id: "x" }).pipe(
-        Effect.provide(Flow.layerExecutionIds(Flow.derived))
-      )
-      const second = yield* flow.executionId({ id: "x" }).pipe(
-        Effect.provide(Flow.layerExecutionIds(Flow.derived))
-      )
-      const other = yield* flow.executionId({ id: "y" }).pipe(
-        Effect.provide(Flow.layerExecutionIds(Flow.derived))
-      )
-      expect(first).toBe(second)
+      // The default source names independent work, even for equal payloads.
+      const first = yield* flow.executionId({ id: "x" })
+      const second = yield* flow.executionId({ id: "x" })
+      const other = yield* flow.executionId({ id: "y" })
+      expect(first).not.toBe(second)
       expect(first).not.toBe(other)
       const hosted = yield* flow.executionId({ id: "x" }).pipe(
         Effect.provide(Flow.layerExecutionIds({ mint: () => Effect.succeed("host-selected") }))

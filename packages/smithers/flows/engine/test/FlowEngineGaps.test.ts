@@ -486,13 +486,7 @@ describe("action retry give-up reasons", () => {
       expect(result._tag).toBe("Complete")
       if (result._tag === "Complete") {
         expect(Exit.isFailure(result.exit)).toBe(true)
-        expect(Exit.isFailure(result.exit) && Cause.squash(result.exit.cause)).toMatchObject({
-          _tag: "@smthrs/flow/RetryPolicyExpired",
-          actionName: "Gaps/durable-retry-origin",
-          attempt: 1,
-          expirationMs: 1,
-          lastError: "unavailable"
-        })
+        expect(Exit.isFailure(result.exit) && Cause.squash(result.exit.cause)).toBe("unavailable")
       }
     }).pipe(
       Effect.provideService(
@@ -503,7 +497,7 @@ describe("action retry give-up reasons", () => {
     )
   })
 
-  effect("reports the observed attempt as maxAttempts when the policy declares none", () => {
+  effect("preserves the failure when a zero-delay policy stops without maxAttempts", () => {
     // A policy whose first delay is not positive gives up as `exhausted`
     // without ever declaring maxAttempts; the reported bound is the attempt
     // actually reached.
@@ -538,12 +532,7 @@ describe("action retry give-up reasons", () => {
       const exit = yield* flow.execute({ id: "x" }, { executionId: "run" }).pipe(Effect.exit)
       expect(Exit.isFailure(exit)).toBe(true)
       const defect = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
-      expect((defect as RetryPolicy.RetryAttemptsExhausted)._tag).toBe(
-        "@smthrs/flow/RetryAttemptsExhausted"
-      )
-      expect((defect as RetryPolicy.RetryAttemptsExhausted).attempt).toBe(1)
-      expect((defect as RetryPolicy.RetryAttemptsExhausted).maxAttempts).toBe(1)
-      expect((defect as RetryPolicy.RetryAttemptsExhausted).lastError).toBe("nope")
+      expect(defect).toBe("nope")
       expect(attempts).toBe(1)
     }).pipe(Effect.provide(layer))
   })

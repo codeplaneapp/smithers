@@ -46,8 +46,8 @@ const layer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Action.layerImplementations), Layer.provideMerge(FlowEngine.layerMemory))
 ```
 
-For the generated page that lists every export with field-level tables, see
-[@smthrs/engine exports](./reference/engine.md).
+For a per-export reference with field-level tables, see the
+[Export reference](./reference/engine.md).
 
 ## FlowEngine
 
@@ -86,7 +86,7 @@ The members, in full:
 | `register`              | `(flow, execute) => Effect<void, never, Scope>`                                                                   | Records a flow declaration and the execute function that drives one round of it. Registrations of one tag stack: the last still-open one serves.                                                             |
 | `execute`               | `(flow, { executionId, payload, discard, parent?, round? }) => Effect<Result \| void, FlowCycleDetected>`         | Starts or joins one execution and answers with its settlement. `discard: true` answers with nothing. `round` carries the execution's trampoline position, and names the preceding execution on later rounds. |
 | `poll`                  | `(flow, executionId) => Effect<Option<Result>, FlowExecutionNotFound>`                                            | The settlement of one execution, when it has one.                                                                                                                                                            |
-| `interrupt`             | `(flow, executionId) => Effect<void, CancelRequestFailed>`                                                        | Requests cancellation with normal cleanup and compensation. Not a pause.                                                                                                                                     |
+| `interrupt`             | `(flow, executionId) => Effect<void, CancelRequestFailed>`                                                        | Requests cancellation across the named round's logical lineage and linked child lineages. Acknowledges intent, not finished cleanup. Not a pause. |
 | `interruptUnsafe`       | `(flow, executionId) => Effect<void, CancelRequestFailed>`                                                        | Forces cancellation without guaranteeing cleanup or compensation.                                                                                                                                            |
 | `resume`                | `(flow, executionId) => Effect<void>`                                                                             | Re-drives a durably suspended execution. Does not undo cancellation.                                                                                                                                         |
 | `resumeSignal`          | optional `(flow, executionId) => Effect<void>`                                                                    | An in-process wake the engine races against its suspension backoff sleep.                                                                                                                                    |
@@ -225,8 +225,8 @@ an authentication policy, or a durable engine.
 
 ## See also
 
-- [@smthrs/engine exports](./reference/engine.md): the generated per-export
-  page with field-level tables.
+- [Export reference](./reference/engine.md): every export of every namespace,
+  one at a time, with field-level tables.
 - [`@smthrs/flow`](/api/flow) declares `Flow`, `Action`, `RetryPolicy`, and the
   `FlowRuntime` port this package implements.
 - [`@smthrs/engine-store`](/api/engine-store) supplies the durable

@@ -69,7 +69,7 @@ describe("incremental invalidation across engine instances", () => {
       error: Schema.String,
       body: ({ digest }) =>
         buildDeclaration.call({ digest }).pipe(
-          Node.andThen((artifact) => packDeclaration.call({ artifact }))
+          Node.bindPlanned((artifact) => packDeclaration.call({ artifact }))
         )
     })
     const stack = Layer.mergeAll(
@@ -150,7 +150,7 @@ describe("incremental invalidation across engine instances", () => {
       error: Schema.String,
       body: ({ digest }) =>
         buildDeclaration.call({ digest }).pipe(
-          Node.andThen((artifact) => packDeclaration.call({ artifact }))
+          Node.bindPlanned((artifact) => packDeclaration.call({ artifact }))
         )
     })
     const stack = Layer.mergeAll(
