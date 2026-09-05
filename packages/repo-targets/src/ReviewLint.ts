@@ -18,9 +18,9 @@
  *
  * @since 0.1.0
  */
-import * as Input from "./Input.ts"
-import { LlmLint } from "./LlmLint.ts"
-import type * as Target from "./Target.ts"
+import * as Input from "@smthrs/targets/Input"
+import { LlmLint } from "@smthrs/targets/LlmLint"
+import type * as Target from "@smthrs/targets/Target"
 
 /** The base revision a review diffs against when the caller names none. */
 const defaultBase = "origin/main"
@@ -34,7 +34,7 @@ const defaultModel = "gpt-5.6-luna"
  * @category constants
  * @since 0.1.0
  */
-export const reviewPrompt = "You are reviewing a diff in `smithers`, an Effect v4 coding-agent harness written from " +
+export const smithersReviewPrompt = "You are reviewing a diff in `smithers`, an Effect v4 coding-agent harness written from " +
   "scratch. Report only violations of the rubric below. Judgment calls that the rubric does not " +
   "cover are not findings. Prefer no finding over a speculative one."
 
@@ -116,7 +116,7 @@ const review = (options: Options, rubric: Rubric): ReviewLint => {
     include,
     context,
     deps: options.deps ?? [],
-    prompt: reviewPrompt,
+    prompt: smithersReviewPrompt,
     rubric: rubric.rubric,
     engine: "codex",
     model: options.model ?? defaultModel,
@@ -136,15 +136,15 @@ const review = (options: Options, rubric: Rubric): ReviewLint => {
  *
  * @example
  * ```ts
- * import { Smithers } from "@smthrs/targets"
+ * import { ReviewTagsMigrationsAndKeys, ReviewDocsAgainstCode, ReviewJsdocAgainstCode } from "./ReviewLint.ts"
  *
- * const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smithers/flows/journal" })
+ * const reviewTagsMigrationsAndKeys = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/journal" })
  * ```
  *
  * @category macros
  * @since 0.1.0
  */
-export const DurableIdentityGuard = (options: Options = {}): ReviewLint =>
+export const ReviewTagsMigrationsAndKeys = (options: Options = {}): ReviewLint =>
   review(options, {
     summary:
       "A cheap Codex review of the diff against origin/main for identity strings, migrations, persisted schemas and durable keys.",
@@ -179,15 +179,15 @@ export const DurableIdentityGuard = (options: Options = {}): ReviewLint =>
  *
  * @example
  * ```ts
- * import { Smithers } from "@smthrs/targets"
+ * import { ReviewTagsMigrationsAndKeys, ReviewDocsAgainstCode, ReviewJsdocAgainstCode } from "./ReviewLint.ts"
  *
- * const docsReferenceSync = Smithers.DocsReferenceSync({ cwd: "packages/smithers/flows/journal" })
+ * const reviewDocsAgainstCode = ReviewDocsAgainstCode({ cwd: "packages/smithers/flows/journal" })
  * ```
  *
  * @category macros
  * @since 0.1.0
  */
-export const DocsReferenceSync = (options: Options = {}): ReviewLint =>
+export const ReviewDocsAgainstCode = (options: Options = {}): ReviewLint =>
   review(options, {
     summary: "A cheap Codex review of changed public APIs against the hand-written reference and concept pages.",
     include: [Input.glob("src/**")],
@@ -221,15 +221,15 @@ export const DocsReferenceSync = (options: Options = {}): ReviewLint =>
  *
  * @example
  * ```ts
- * import { Smithers } from "@smthrs/targets"
+ * import { ReviewTagsMigrationsAndKeys, ReviewDocsAgainstCode, ReviewJsdocAgainstCode } from "./ReviewLint.ts"
  *
- * const jsdocTruthfulness = Smithers.JsdocTruthfulness({ cwd: "packages/smithers/flows/journal" })
+ * const reviewJsdocAgainstCode = ReviewJsdocAgainstCode({ cwd: "packages/smithers/flows/journal" })
  * ```
  *
  * @category macros
  * @since 0.1.0
  */
-export const JsdocTruthfulness = (options: Options = {}): ReviewLint =>
+export const ReviewJsdocAgainstCode = (options: Options = {}): ReviewLint =>
   review(options, {
     summary: "A cheap Codex review of changed exports against their JSDoc.",
     include: [Input.glob("src/**/*.ts")],

@@ -8,7 +8,7 @@ const workspaceConfig = S.file("//pnpm-workspace.yaml")
 // fails when package.json `engines` and `packageManager`, flake.nix, or the
 // generated CI workflow disagree with what is declared here.
 export const runtime = S.Runtime.Node({ version: ">=22.19.0" })
-export const packageManager = S.PackageManager.Pnpm({ version: "11.21.0", runtime })
+export const packageManager = S.PackageManager.Pnpm({ version: "11.25.0", runtime })
 export const bunRuntime = S.Runtime.Bun({ version: ">=1.4.0" })
 /** Exact Bun release installed by CI and the Nix environment. @since 1.0.0-rc.0 @category configuration */
 export const bunVersion = "1.4.1"

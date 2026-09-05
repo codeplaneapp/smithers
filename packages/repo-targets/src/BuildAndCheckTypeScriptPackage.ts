@@ -3,20 +3,20 @@
  *
  * @since 0.1.0
  */
-import { DocsParity } from "./DocsParity.ts"
-import { Dprint } from "./Dprint.ts"
-import { EsLint } from "./EsLint.ts"
-import { Filegroup } from "./Filegroup.ts"
-import * as Input from "./Input.ts"
-import { entrypoint, NodeTest } from "./NodeTest.ts"
-import type * as PackageManager from "./PackageManager.ts"
-import type * as Target from "./Target.ts"
-import { TsBuild } from "./TsBuild.ts"
-import { Typecheck } from "./Typecheck.ts"
-import { Vitest } from "./Vitest.ts"
+import { DocsParity } from "@smthrs/targets/DocsParity"
+import { Dprint } from "@smthrs/targets/Dprint"
+import { EsLint } from "@smthrs/targets/EsLint"
+import { Filegroup } from "@smthrs/targets/Filegroup"
+import * as Input from "@smthrs/targets/Input"
+import { entrypoint, NodeTest } from "@smthrs/targets/NodeTest"
+import type * as PackageManager from "@smthrs/targets/PackageManager"
+import type * as Target from "@smthrs/targets/Target"
+import { TsBuild } from "@smthrs/targets/TsBuild"
+import { Typecheck } from "@smthrs/targets/Typecheck"
+import { Vitest } from "@smthrs/targets/Vitest"
 
 /**
- * Options accepted by {@link StandardPackage}.
+ * Options accepted by {@link BuildAndCheckTypeScriptPackage}.
  *
  * `cwd` is the workspace-relative package directory every emitted target's
  * tool runs in. It defaults to the workspace root, so a package-level
@@ -59,12 +59,12 @@ export interface Options {
 }
 
 /**
- * The conventional targets emitted by {@link StandardPackage}.
+ * The conventional targets emitted by {@link BuildAndCheckTypeScriptPackage}.
  *
  * @category models
  * @since 0.1.0
  */
-export interface StandardTargets {
+export interface PackageTargets {
   readonly lib: ReturnType<typeof TsBuild>
   readonly check: ReturnType<typeof Typecheck>
   readonly test: ReturnType<typeof Vitest>
@@ -111,7 +111,7 @@ export interface StandardTargets {
  * @category macros
  * @since 0.1.0
  */
-export const StandardPackage = (options: Options): StandardTargets => {
+export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets => {
   const cwd = options.cwd ?? "."
   const deps = options.deps ?? []
   const sources = options.sources ?? Input.glob("src/**/*.ts")

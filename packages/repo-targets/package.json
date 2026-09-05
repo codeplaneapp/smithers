@@ -1,0 +1,27 @@
+{
+  "name": "@smthrs/repo-targets",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "smthrs": {
+    "group": "tooling"
+  },
+  "description": "Build defaults and AI review rules for the Smithers repository.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@smthrs/targets": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "4.1.9",
+    "@smthrs/plan": "workspace:*",
+    "@vitest/coverage-v8": "4.1.9"
+  }
+}

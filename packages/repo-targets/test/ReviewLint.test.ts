@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import * as Input from "../src/Input.ts"
-import { DocsReferenceSync, DurableIdentityGuard, JsdocTruthfulness, reviewPrompt } from "../src/ReviewLint.ts"
-import * as Target from "../src/Target.ts"
+import * as Input from "@smthrs/targets/Input"
+import { ReviewDocsAgainstCode, ReviewTagsMigrationsAndKeys, ReviewJsdocAgainstCode, smithersReviewPrompt } from "../src/ReviewLint.ts"
+import * as Target from "@smthrs/targets/Target"
 
 /**
  * The three review macros replaced one workspace-wide `lint/PACKAGE.ts` that
@@ -22,8 +22,8 @@ const attrsOf = (target: Target.AnyTarget): {
   readonly failOn: string
 } => Target.metadata(target).attrs as never
 
-describe("DurableIdentityGuard", () => {
-  const target = DurableIdentityGuard({ cwd: "packages/smithers/flows/journal" })
+describe("ReviewTagsMigrationsAndKeys", () => {
+  const target = ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/journal" })
 
   it("declares one non-cacheable review-kind LlmLint, gated to that verb", () => {
     const metadata = Target.metadata(target)
@@ -59,13 +59,13 @@ describe("DurableIdentityGuard", () => {
     expect(attrs.model).toBe("gpt-5.6-luna")
     expect(attrs.batchSize).toBe(2)
     expect(attrs.failOn).toBe("error")
-    expect(attrs.prompt).toBe(reviewPrompt)
+    expect(attrs.prompt).toBe(smithersReviewPrompt)
     expect(attrs.rubric).toContain("must add a NEW migration")
     expect(attrs.context).toEqual([])
   })
 
   it("re-roots a caller's package-relative override and leaves a rooted one alone", () => {
-    const overridden = DurableIdentityGuard({
+    const overridden = ReviewTagsMigrationsAndKeys({
       cwd: "packages/smithers/flows/database",
       include: [Input.glob("src/schema/**", { exclude: ["src/schema/generated/**"] }), Input.glob("//scripts/**")]
     })
@@ -81,17 +81,17 @@ describe("DurableIdentityGuard", () => {
   })
 
   it("defaults to the workspace root, and is not featured unless a caller says so", () => {
-    expect(attrsOf(DurableIdentityGuard()).include).toEqual([
+    expect(attrsOf(ReviewTagsMigrationsAndKeys()).include).toEqual([
       { _tag: "Glob", pattern: "//src/**", exclude: [] }
     ])
-    expect(Target.metadata(DurableIdentityGuard({ cwd: "packages/smithers/flows/journal" })).featured).toBe(false)
-    expect(Target.metadata(DurableIdentityGuard({ cwd: "packages/smithers/flows/journal", featured: true })).featured)
+    expect(Target.metadata(ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/journal" })).featured).toBe(false)
+    expect(Target.metadata(ReviewTagsMigrationsAndKeys({ cwd: "packages/smithers/flows/journal", featured: true })).featured)
       .toBe(true)
   })
 })
 
-describe("DocsReferenceSync", () => {
-  const attrs = attrsOf(DocsReferenceSync({ cwd: "packages/smithers/flows/journal" }))
+describe("ReviewDocsAgainstCode", () => {
+  const attrs = attrsOf(ReviewDocsAgainstCode({ cwd: "packages/smithers/flows/journal" }))
 
   it("reads the package prose and the site pages into every batch", () => {
     expect(attrs.context).toEqual([
@@ -109,8 +109,8 @@ describe("DocsReferenceSync", () => {
   })
 })
 
-describe("JsdocTruthfulness", () => {
-  const attrs = attrsOf(JsdocTruthfulness({ cwd: "packages/smithers/flows/journal" }))
+describe("ReviewJsdocAgainstCode", () => {
+  const attrs = attrsOf(ReviewJsdocAgainstCode({ cwd: "packages/smithers/flows/journal" }))
 
   it("covers the package's TypeScript sources alone", () => {
     expect(attrs.include).toEqual([{
@@ -129,7 +129,7 @@ describe("JsdocTruthfulness", () => {
 
 describe("the macros take a caller's summary and context", () => {
   it("replaces the baked summary and the baked context set", () => {
-    const target = DocsReferenceSync({
+    const target = ReviewDocsAgainstCode({
       cwd: "packages/smithers/flows/journal",
       summary: "Journal prose review.",
       context: [Input.glob("//README.md")]
@@ -142,8 +142,8 @@ describe("the macros take a caller's summary and context", () => {
 
 describe("the macros take a caller's base revision, model tier and dependencies", () => {
   it("threads all three into the emitted target", () => {
-    const dependency = JsdocTruthfulness({ cwd: "packages/smithers/flows/journal" })
-    const target = DurableIdentityGuard({
+    const dependency = ReviewJsdocAgainstCode({ cwd: "packages/smithers/flows/journal" })
+    const target = ReviewTagsMigrationsAndKeys({
       cwd: "packages/smithers/flows/journal",
       base: "origin/next",
       model: "gpt-5.6-sol",

@@ -1,4 +1,7 @@
+import { BuildAndCheckTypeScriptPackage } from "@smthrs/repo-targets"
+import { ReviewDocsAgainstCode, ReviewJsdocAgainstCode } from "@smthrs/repo-targets"
 import { Smithers } from "@smthrs/targets"
+import project from "./apps/site/src/data/project.json" with { type: "json" }
 
 export const cacheToken = Smithers.Secret("SMITHERS_CACHE_TOKEN")
 export const cacheUrl = Smithers.Secret("SMITHERS_CACHE_URL")
@@ -77,6 +80,48 @@ const nodeModules = Smithers.Install({
   workspaceManifest: workspace
 })
 
+/**
+ * The public project copy derived from one small data file: the root README,
+ * the shared regions on the docs overview, and the repository manifest's
+ * description. The generated files stay committed so GitHub, npm tooling, and
+ * the static site all work without first running the build.
+ *
+ * `run` writes the files and `lint` checks them for drift. The GIFs are data
+ * edges even though the renderer only writes their paths: deleting either
+ * asset must break the graph instead of leaving a dead README and docs page.
+ *
+ * @since 1.0.0
+ * @category build
+ */
+const projectCopySource = Smithers.file("//apps/site/src/data/project.json")
+const projectCopy = Smithers.Generate({
+  summary: "Regenerate and drift-check the README and shared public project copy.",
+  featured: true,
+  script: Smithers.file("//apps/site/scripts/generate-project-copy.mjs"),
+  data: [
+    projectCopySource,
+    Smithers.file("//apps/site/public/images/how-smithers-works.gif"),
+    Smithers.file("//apps/site/public/images/how-smithers-works-light.gif")
+  ],
+  changes: ["README.md", "package.json", "apps/site/src/content/docs/docs/index.mdx"]
+})
+
+/**
+ * Applies the canonical one-sentence description to the GitHub About panel.
+ * ToolRun is an explicit run-only irreversible operation, so no build, lint,
+ * test, or CI traversal can update the remote repository accidentally.
+ *
+ * @since 1.0.0
+ * @category release
+ */
+const repoAbout = Smithers.ToolRun({
+  command: "gh",
+  args: ["repo", "edit", "smithersai/smithers", "--description", project.description],
+  inputs: [projectCopySource],
+  deps: [projectCopy],
+  cwd: "."
+})
+
 const ubuntu = "ubuntu-latest"
 
 const node = Smithers.CiToolchain.Node({ release: "22.19.0" })
@@ -118,7 +163,7 @@ const ci = Smithers.GithubCiGen({
   mode: "check",
   gates: [
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
-    { name: "browser contract", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }
+    { name: "web bundle compatibility", verb: Smithers.Verb.Test, pattern: "//scripts:webBundleContract" }
   ],
   requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "browser", "e2e-faults", "packages"],
   jobs: [
@@ -134,6 +179,16 @@ const ci = Smithers.GithubCiGen({
         go,
         foundry,
         docker: dockerImageStore,
+        artifacts: Smithers.CiToolchain.Artifacts({
+          artifact: "ci-test-tier-evidence",
+          sources: [
+            { from: "/tmp/smithers-ci-inventory-*.json" },
+            { from: "/tmp/smithers-mutations-*" },
+            { from: "/tmp/smithers-benchmark-*" },
+            { from: "/tmp/smithers-runner-*.log" },
+            { from: "/tmp/smithers-runner-*.json" }
+          ]
+        }),
         workflowLint: Smithers.CiToolchain.Actionlint({
           release: "1.7.11",
           workflows: [
@@ -141,7 +196,8 @@ const ci = Smithers.GithubCiGen({
             ".github/workflows/release.yml",
             ".github/workflows/apps-deploy.yml",
             ".github/workflows/canary.yml",
-            ".github/workflows/pr-review.yml"
+            ".github/workflows/pr-review.yml",
+            ".github/workflows/reliability.yml"
           ]
         })
       }),
@@ -178,10 +234,13 @@ const ci = Smithers.GithubCiGen({
         // repository replaced: `//packages/...` does not reach `apps/`, and the
         // apps-e2e job runs `//apps/ui` alone. They sit in this job rather than
         // in apps-e2e because none of them needs a browser.
-        { name: "Server", verb: Smithers.Verb.Ci, pattern: "//apps/server/..." },
+        { name: "UI typecheck", verb: Smithers.Verb.Build, pattern: "//apps/ui:check" },
+        { name: "UI unit tests", verb: Smithers.Verb.Test, pattern: "//apps/ui:unitTests" },
+        { name: "Server typecheck and tests", verb: Smithers.Verb.Ci, pattern: "//apps/server/..." },
         { name: "Review app and workers", verb: Smithers.Verb.Ci, pattern: "//apps/review/..." },
         { name: "Bug worker", verb: Smithers.Verb.Ci, pattern: "//apps/bug-worker/..." },
         { name: "Status site", verb: Smithers.Verb.Ci, pattern: "//apps/status-site/..." },
+        { name: "Project copy drift", verb: Smithers.Verb.Lint, pattern: "//:projectCopy" },
         // smithers.sh: the landing page and the Starlight docs. `astro check`
         // and `astro build` over apps/site/src/content/docs.
         { name: "Site", verb: Smithers.Verb.Ci, pattern: "//apps/site/..." },
@@ -218,21 +277,22 @@ const ci = Smithers.GithubCiGen({
     },
     {
       id: "apps-e2e",
-      name: "apps e2e (worker + browser)",
+      name: "apps e2e (Playwright T1)",
       runsOn: ubuntu,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({
         runtimes: [node, bun],
-        browser: Smithers.CiToolchain.Browser({
-          executable: "/usr/bin/google-chrome",
-          reason: "findBrowser only probes BROWSER_CANDIDATES in apps/ui/src/launch-checklist/BrowserLaunch.ts"
-        }),
         artifacts: Smithers.CiToolchain.Artifacts({
           artifact: "apps-e2e-artifacts",
-          sources: [{ from: "/tmp/smithers-*.png" }, { from: "apps/reports", as: "reports" }]
+          sources: [
+            { from: "/tmp/smithers-*.png" },
+            { from: "apps/reports", as: "reports" },
+            { from: "apps/ui/test-results", as: "playwright-test-results" },
+            { from: "apps/ui/playwright-report", as: "playwright-report" }
+          ]
         })
       }),
-      steps: [{ name: "UI end-to-end suites", verb: Smithers.Verb.Test, pattern: "//apps/ui/..." }]
+      steps: [{ name: "UI browser end-to-end suite", verb: Smithers.Verb.Test, pattern: "//apps/ui:browserE2e" }]
     },
     {
       id: "rust",
@@ -310,11 +370,13 @@ const ci = Smithers.GithubCiGen({
     },
     {
       id: "browser",
-      name: "browser bundle gate",
+      // This historical job id is pinned by the release roster contract.
+      // The displayed name and selected suite describe compilation, not E2E.
+      name: "web bundle compatibility",
       runsOn: ubuntu,
       timeoutMinutes: 10,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node] }),
-      steps: [{ name: "Browser bundle guard", verb: Smithers.Verb.Test, pattern: "//scripts:browserContract" }]
+      steps: [{ name: "Web bundle compilation guard", verb: Smithers.Verb.Test, pattern: "//scripts:webBundleContract" }]
     },
     {
       // One matrix over the three platforms, replacing the two copy-pasted
@@ -401,8 +463,8 @@ const ci = Smithers.GithubCiGen({
 // with one wildcard rather than a hand-kept list of packages, so a new package
 // is under both rubrics the day it exists. A package that wants a narrower or
 // stricter review of its own declares one from the same macro in its own
-// PACKAGE.ts, the way the storage packages declare `durableIdentityGuard`.
-const docsReferenceSync = Smithers.DocsReferenceSync({
+// PACKAGE.ts, the way the storage packages declare `reviewTagsMigrationsAndKeys`.
+const reviewDocsAgainstCode = ReviewDocsAgainstCode({
   featured: true,
   include: [
     Smithers.glob("//packages/*/src/**"),
@@ -421,7 +483,7 @@ const docsReferenceSync = Smithers.DocsReferenceSync({
   ]
 })
 
-const jsdocTruthfulness = Smithers.JsdocTruthfulness({
+const reviewJsdocAgainstCode = ReviewJsdocAgainstCode({
   featured: true,
   include: [
     Smithers.glob("//packages/*/src/**/*.ts"),
@@ -508,19 +570,21 @@ const changelog = Smithers.Generate({
 // `dist` tree can never be mistaken for a package.
 export const packageDefaults = Smithers.PackageDefaults({
   directories: "packages/{*,*/*,*/*/*}",
-  macro: Smithers.StandardPackage
+  macro: BuildAndCheckTypeScriptPackage
 })
 
 export const Package = Smithers.Package({
   targets: {
     changelog,
     ci,
-    docsReferenceSync,
+    reviewDocsAgainstCode,
     jsdocRules,
     jsdocTree,
-    jsdocTruthfulness,
+    reviewJsdocAgainstCode,
     lockfile,
     nodeModules,
+    projectCopy,
+    repoAbout,
     tsconfig
   }
 })
