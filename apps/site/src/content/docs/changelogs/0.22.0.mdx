@@ -1,11 +1,16 @@
 ---
 title: "0.22.0"
 description: "Major release: Smithers ships Smithers Studio 2, a ground-up dark agent operations console with three-tier progressive-disclosure navigation, a…"
+pagefind: false
 ---
+
+:::note[Archived release]
+This page describes Smithers 0.22.0. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
 
 import Frame from "../../../components/Frame.astro"
 
-Major release: Smithers ships **Smithers Studio 2**, a ground-up dark agent operations console with three-tier progressive-disclosure navigation, a Cmd-K/Cmd-P command palette, a color-equals-run-state design system, and a full suite of live data surfaces (Runs, Workflows, terminal, chat, JJHub, and DevTools) all wired to real Gateway and workspace-API backends. Studio 2 now defaults to a **chat-first shell**: one conversation that drives issues, runs, PRs, and workflows, with the tabbed shell one toggle away. Alongside Studio 2, this release de-mocks every e2e test onto real seeded backends, adds a live Gateway Run Chronicle plus init-pack-generated per-workflow UIs and a new `bunx smthrs ui` command, grows the CLI with a starter gallery and GEPA-style prompt optimization, and ships a drop-in agent-facing `smithers` skill so a coding agent can drive Smithers without reading the whole docs site. A focused security pass closes XSS, local-RCE, path-traversal, DoS, and auth-bypass vectors, and a broad correctness sweep hardens the engine, time-travel, DB, graph, and observability stacks.
+Major release: Smithers ships **Smithers Studio 2**, a ground-up dark agent operations console with three-tier progressive-disclosure navigation, a Cmd-K/Cmd-P command palette, a color-equals-run-state design system, and a full suite of live data surfaces (Runs, Workflows, terminal, chat, Smithers Cloud, and DevTools) all wired to real Gateway and workspace-API backends. Studio 2 now defaults to a **chat-first shell**: one conversation that drives issues, runs, PRs, and workflows, with the tabbed shell one toggle away. Alongside Studio 2, this release de-mocks every e2e test onto real seeded backends, adds a live Gateway Run Chronicle plus init-pack-generated per-workflow UIs and a new `bunx smthrs ui` command, grows the CLI with a starter gallery and GEPA-style prompt optimization, and ships a drop-in agent-facing `smithers` skill so a coding agent can drive Smithers without reading the whole docs site. A focused security pass closes XSS, local-RCE, path-traversal, DoS, and auth-bypass vectors, and a broad correctness sweep hardens the engine, time-travel, DB, graph, and observability stacks.
 
 ---
 
@@ -71,7 +76,7 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 - **Home welcome and operations strip.** `Home` is a calm welcome column with recent workspaces and a live Operations strip that derives running / waiting / pending-approval counts from the same `listRuns` + `listApprovals` RPCs as the Runs surface, polled on a lighter 5s cadence. When the workspace backend is unreachable it shows a connect/boot panel instead of empty recents.
 
-- **JJHub issues, landings, and workspaces.** The `IssuesPanel` lists, filters, opens, creates, and closes/reopens JJHub issues; the `LandingsPanel` shows a landing's info, diff, checks, and conflicts in tabs and supports review and land actions; the `WorkspacesPanel` manages cloud workspaces (create, suspend, resume, fork, delete) and their snapshots alongside local workspace recents. All three read JJHub auth status and route through the real `jj`/`jjhub` CLIs behind the workspace API.
+- **Smithers Cloud issues, landings, and workspaces.** The `IssuesPanel` lists, filters, opens, creates, and closes/reopens Smithers Cloud issues; the `LandingsPanel` shows a landing's info, diff, checks, and conflicts in tabs and supports review and land actions; the `WorkspacesPanel` manages cloud workspaces (create, suspend, resume, fork, delete) and their snapshots alongside local workspace recents. All three read Smithers Cloud auth status and route through the real `jj` and Smithers Cloud CLIs behind the workspace API.
 
 - **Memory, Scores, and Search.** `Memory` queries cross-run memory facts by namespace/key with a debounced search; `Scores` shows aggregate and per-run scorer results; `Search` is a global workspace search with a Code / Issues / Repos / Transcripts scope control, request-generation guarding to drop stale responses, and serves as the full-page fallback for the palette's search mode. Each is wired to the real `/memory`, `/scores`, and `/search` workspace endpoints.
 
@@ -84,7 +89,7 @@ Behind the shell, every surface is a real, live view over the Gateway and worksp
 
 ## Studio 2: Real Backends, De-Mocking, and Hardening
 
-- **`bun dev` now boots a real Gateway and real workspace API.** The Studio 2 dev stack runs an actual Gateway (`server/startGatewayServer.ts`) and workspace-API backend (`server/createWorkspaceApiServer.ts`, `server/workspaceBackend.ts`) against the real workspace `smithers.db`, wiring real SQL, scores, memory, chat-agent, and `jj`/`jjhub` operations instead of fabricated responses. No mocks remain in the product runtime path. Seeded fixtures are now strictly opt-in behind the `SMITHERS_DEV_USE_FIXTURES` flag for both the gateway and workspace API.
+- **`bun dev` now boots a real Gateway and real workspace API.** The Studio 2 dev stack runs an actual Gateway (`server/startGatewayServer.ts`) and workspace-API backend (`server/createWorkspaceApiServer.ts`, `server/workspaceBackend.ts`) against the real workspace `smithers.db`, wiring real SQL, scores, memory, chat-agent, and `jj` and Smithers Cloud operations instead of fabricated responses. No mocks remain in the product runtime path. Seeded fixtures are now strictly opt-in behind the `SMITHERS_DEV_USE_FIXTURES` flag for both the gateway and workspace API.
 
 - **The e2e suite drives real backends with seeded data, with no route mocks.** Playwright specs across every surface (runs live-inspection, rewind/resume, home, command palette, SQL browser, DevTools tree, terminal lifecycle, landings, chat) now exercise the real Gateway and workspace backend rather than `page.route`/`routeWebSocket` stand-ins, including a real read-only SQL exec path that genuinely rejects `DELETE`. Per-test `x-studio-session` isolation makes the parallel suite deterministic, and Playwright is restricted to `*.spec.ts` so `bun` `*.test.ts` units aren't node-loaded by the browser runner.
 

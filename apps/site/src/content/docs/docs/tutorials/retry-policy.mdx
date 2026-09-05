@@ -48,10 +48,6 @@ A policy may also declare `expirationMs`, a wall-clock budget for the whole sequ
 
 An action declares the policy it runs under with the `retryPolicy` option of `Action.make`; this tutorial keeps the policy as a standalone value so part 2 has something to inspect.
 
-```text
-You should see: no output. A policy is data; nothing retries until an
-engine or a retry block consumes it.
-```
 
 ## 2. Read the backoff ladder
 
@@ -110,14 +106,10 @@ export const Publish = Flow.make("examples/Publish", {
 })
 ```
 
-```text
-You should see: no output. Publish is a plan over one node; the retry loop
-arrives in the step's implementation in the next part.
-```
 
 ## 4. Run it and read the recorded attempts
 
-`Action.retry` is the runtime side: it re-dispatches the action and advances `Action.CurrentAttempt`, the attempt number the durable store addresses each attempt row by. The loop lives in the step's implementation, because retrying is what the atom does; the plan shows one node either way. Add to `publish.ts`:
+`Action.retry` is the runtime side: it re-dispatches the action and advances `Action.CurrentAttempt`, the attempt number the durable store addresses each attempt row by. The loop lives in the step's implementation, because the implementation owns the retry loop; the plan shows one node either way. Add to `publish.ts`:
 
 ```ts title="publish.ts"
 export interface Summary {
@@ -183,14 +175,6 @@ dispatches 3, and attempts [ 1, 2, 3 ]: the first two attempts failed and
 the third succeeded.
 ```
 
-## Summary
-
-You learned how to:
-
-- Declare a `RetryPolicy` with `initialMs`, `factor`, `maxMs`, `maxAttempts`, `jitterRatio`, and `nonRetryable`.
-- Read the backoff ladder with `nextDelay` and `decide` without running anything.
-- Retry a flaky action with `Action.retry` and read the recorded attempt numbers.
-- Recognize the terminal failures `RetryAttemptsExhausted` and `RetryPolicyExpired`.
 
 ## Next steps
 

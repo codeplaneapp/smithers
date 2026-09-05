@@ -5,7 +5,20 @@ sidebar:
   order: 9
 ---
 
-Most of Smithers is mechanism: journal, engine, stores, sync. `@smthrs/agent` is where that mechanism becomes an agent. It is one service, `Agent`, whose single method runs one whole cell loop on the durable engine, plus the two adapters that embed the loop: `AgentSession` runs it as a control-plane run, and `AgentAction` runs it as one typed step inside a larger flow.
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
+
+`@smthrs/agent` runs a model-driven loop on the durable engine. A model emits a JavaScript cell, the cell calls permitted flows, and the next model request receives the results. Completed flow-call boundaries can replay after a restart.
+
+<DocsDiagram
+  id="agent-loop"
+  title="One agent frame"
+  caption="The model emits a JavaScript cell. A QuickJS realm evaluates it, and ctx.call dispatches permitted flows through durable boundaries. Results feed the next frame until the agent finishes or reaches a limit."
+  rows={[
+    [{ label: "Model request", detail: "Context and available flow declarations" }],
+    [{ label: "Cell evaluated in QuickJS", detail: "ctx.call requests a permitted flow" }],
+    [{ label: "Durable flow result", detail: "Record the outcome → next frame or final answer" }]
+  ]}
+/>
 
 ## The cell loop
 
@@ -30,7 +43,7 @@ const Research = AgentAction.make("docs/Research", {
 
 ## Seats and seat resolution
 
-A seat has two halves that live in different places on purpose. The declared half is an ordinary string: what a markdown flow's `model:` frontmatter carries and what `AgentAction`'s `seat` option takes. It holds no credentials, no endpoint, and no client. `provider:modelId` such as `anthropic:claude-sonnet-4-5` is the convention the Node CLI resolver understands, not a rule the agent enforces. The resolved half, `Seat.Seat`, is the only thing `Agent.run` accepts: a live model, the route resolver that seals its requests, and the model's context window in tokens so compaction has a real budget. `SeatResolver` is the credentialed seam between them. The CLI installs a resolver that reads keys from the environment; a test installs one that answers with a scripted model and never touches the network. A seat the host cannot serve is a typed `Seat.SeatUnresolved`, not a run that fails halfway through.
+A seat has two halves that live in different places on purpose. The declared half is an ordinary string: what a markdown flow's `model:` frontmatter carries and what `AgentAction`'s `seat` option takes. It holds no credentials, no endpoint, and no client. `provider:modelId` such as `anthropic:claude-sonnet-4-5` is the convention the Node CLI resolver understands, not a rule the agent enforces. The resolved half, `Seat.Seat`, is the only thing `Agent.run` accepts: a live model, the route resolver that seals its requests, and the model's context window in tokens so compaction has a real budget. `SeatResolver` is the service that resolves one into the other. The CLI installs a resolver that reads keys from the environment; a test installs one that answers with a scripted model and never touches the network. A seat the host cannot serve is a typed `Seat.SeatUnresolved`, not a run that fails halfway through.
 
 ## CellPlugin hooks
 

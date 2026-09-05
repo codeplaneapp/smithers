@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+/**
+ * Renders the public Smithers copy from src/data/project.json.
+ *
+ * The JSON is the one human-edited source for the project description,
+ * support policy, tagline, overview animation, and introductory commands. This generator owns
+ * the root README, the matching regions of the docs overview, and the root
+ * manifest description. PACKAGE.ts makes both writing and drift checking part
+ * of the target graph.
+ */
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { dirname, join, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const here = dirname(fileURLToPath(import.meta.url))
+const site = resolve(here, "..")
+const root = resolve(site, "../..")
+const check = process.argv.includes("--check")
+const project = JSON.parse(readFileSync(join(site, "src/data/project.json"), "utf8"))
+
+const requiredString = (value, path) => {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`project.json ${path} must be a non-empty string`)
+  return value
+}
+
+const description = requiredString(project.description, "description")
+const support = {
+  requiredPlatform: requiredString(project.support?.requiredPlatform, "support.requiredPlatform"),
+  advisoryPlatforms: requiredString(project.support?.advisoryPlatforms, "support.advisoryPlatforms"),
+  uiCoverage: requiredString(project.support?.uiCoverage, "support.uiCoverage"),
+  separateAcceptance: requiredString(project.support?.separateAcceptance, "support.separateAcceptance")
+}
+const supportSection = `## Supported platforms
+
+${support.requiredPlatform} ${support.advisoryPlatforms}
+
+${support.uiCoverage} ${support.separateAcceptance}`
+const tagline = requiredString(project.tagline, "tagline")
+const animation = {
+  dark: requiredString(project.animation?.dark, "animation.dark"),
+  light: requiredString(project.animation?.light, "animation.light"),
+  alt: requiredString(project.animation?.alt, "animation.alt")
+}
+const cliInstall = requiredString(project.install?.cli, "install.cli")
+if (!Array.isArray(project.install?.getStarted) || project.install.getStarted.length === 0) {
+  throw new Error("project.json install.getStarted must be a non-empty array")
+}
+const getStarted = project.install.getStarted.map((command, index) =>
+  requiredString(command, `install.getStarted[${index}]`)
+)
+
+const siteAssetInReadme = (path) => `apps/site/public${path}`
+const logo = String.raw`<pre align="center">
+███████╗███╗   ███╗██╗████████╗██╗  ██╗███████╗██████╗ ███████╗
+██╔════╝████╗ ████║██║╚══██╔══╝██║  ██║██╔════╝██╔══██╗██╔════╝
+███████╗██╔████╔██║██║   ██║   ███████║█████╗  ██████╔╝███████╗
+╚════██║██║╚██╔╝██║██║   ██║   ██╔══██║██╔══╝  ██╔══██╗╚════██║
+███████║██║ ╚═╝ ██║██║   ██║   ██║  ██║███████╗██║  ██║███████║
+╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+</pre>`
+
+const readme = `<!-- Generated from apps/site/src/data/project.json by apps/site/scripts/generate-project-copy.mjs. -->
+
+${logo}
+
+<p align="center"><strong>${tagline}</strong></p>
+
+${description}
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="${siteAssetInReadme(animation.dark)}">
+    <source media="(prefers-color-scheme: light)" srcset="${siteAssetInReadme(animation.light)}">
+    <img src="${siteAssetInReadme(animation.light)}" alt="${animation.alt}">
+  </picture>
+</p>
+
+${supportSection}
+
+## Install
+
+The 1.0 release candidate is not on npm yet. Use the
+[source-checkout installation](https://smithers.sh/docs/installation/#use-the-source-checkout-before-publication)
+until publication. After publication, install it with:
+
+\`\`\`bash
+${cliInstall}
+\`\`\`
+
+## Get started
+
+Run these commands from your project directory. Before launching, edit the
+scaffolded flow and configure the credential its \`model:\` field requires.
+The [quickstart](https://smithers.sh/docs/quickstart/) covers each step.
+
+\`\`\`bash
+${getStarted.join("\n")}
+\`\`\`
+
+> [!TIP]
+> Ask your agent to help you figure out how Smithers can help you and your project, based on everything it knows about you.
+
+## Documentation
+
+Read the [Smithers documentation](https://smithers.sh/docs/) for tutorials, guides, and the full reference. For the top-level build API, keep the [Smithers API cheat sheet](https://smithers.sh/docs/reference/api/cheat-sheet/) handy.
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for local setup, testing, and pull request guidance.
+
+## License
+
+Smithers is MIT licensed. See [LICENSE](./LICENSE) for details.
+
+## Join our community
+
+Join the [Smithers community on Telegram](https://t.me/+ANThR9bHDLAwMjUx).
+`
+
+const markers = (name) => ({
+  start: `{/* generated:${name} start. Edit apps/site/src/data/project.json; do not edit. */}`,
+  end: `{/* generated:${name} end */}`
+})
+
+const replaceRegion = (text, name, body, path) => {
+  const { start, end } = markers(name)
+  const a = text.indexOf(start)
+  const b = text.indexOf(end)
+  if (a === -1 || b === -1 || b < a) throw new Error(`${relative(root, path)} has no valid generated:${name} region`)
+  return text.slice(0, a) + `${start}\n\n${body}\n\n${end}` + text.slice(b + end.length)
+}
+
+const docsPath = join(site, "src/content/docs/docs/index.mdx")
+let docs = readFileSync(docsPath, "utf8")
+docs = docs.replace(/^description:.*$/m, `description: ${JSON.stringify(description)}`)
+docs = replaceRegion(docs, "project-description", description, docsPath)
+docs = replaceRegion(docs, "project-support", supportSection, docsPath)
+docs = replaceRegion(
+  docs,
+  "project-animation",
+  `<img src="${animation.dark}" class="theme-only-dark hero-anim" alt="${animation.alt}" />\n` +
+    `<img src="${animation.light}" class="theme-only-light hero-anim" alt="${animation.alt}" />`,
+  docsPath
+)
+docs = replaceRegion(
+  docs,
+  "project-quickstart",
+  `The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first workflow. The npm command below applies after publication.\n\n` +
+    `<LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>\n` +
+    `<LinkButton href="/docs/quickstart/" variant="secondary">Read the quickstart</LinkButton>\n\n` +
+    `\`\`\`bash\n${cliInstall}\n\`\`\`\n\n` +
+    `From your project directory, scaffold a workflow, edit its instructions, and configure the credential its \`model:\` field requires before running it:\n\n` +
+    `\`\`\`bash\n${getStarted.join("\n")}\n\`\`\`\n\n` +
+    `That creates \`flows/change/flow.mdx\`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.`,
+  docsPath
+)
+
+const manifestPath = join(root, "package.json")
+const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
+manifest.description = description
+
+const outputs = new Map([
+  [join(root, "README.md"), readme],
+  [docsPath, docs],
+  [manifestPath, JSON.stringify(manifest, null, 2) + "\n"]
+])
+
+let drift = 0
+for (const [path, content] of outputs) {
+  const current = existsSync(path) ? readFileSync(path, "utf8") : undefined
+  if (current === content) continue
+  drift += 1
+  if (check) console.error(`drift: ${relative(root, path)} ${current === undefined ? "is missing" : "differs"}`)
+  else {
+    writeFileSync(path, content)
+    console.log(`wrote ${relative(root, path)}`)
+  }
+}
+if (check && drift > 0) process.exit(1)
+if (drift === 0) console.log(check ? "up to date" : "nothing to write")

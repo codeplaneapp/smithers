@@ -1,6 +1,7 @@
 ---
-title: "10 telemetry-export"
+title: "Telemetry export"
 description: "Add the one telemetry layer to a durable run and read the granular trace data back three ways."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/10-telemetry-export.ts"
 sidebar:
   order: 10
 ---
@@ -17,9 +18,17 @@ The three read paths this example demonstrates:
 
 `main` wraps the caller's `fetch` with a recorder so the summary can list what the collector received; a production program provides `Otlp.layerFetch` exactly as written here and skips the recording.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/10-telemetry-export.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/10-telemetry-export.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/10-telemetry-export.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/10-telemetry-export.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/10-telemetry-export.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

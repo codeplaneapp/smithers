@@ -1,12 +1,21 @@
 ---
+/**
+ * A captioned figure. The changelogs under src/content/docs/changelogs came
+ * from the vocs site, whose MDX provided `<Frame caption="…">` implicitly;
+ * Starlight provides nothing implicitly, so each page imports this one.
+ */
 interface Props {
   caption?: string
 }
-
 const { caption } = Astro.props
 ---
-
-<figure>
+<figure class="frame">
   <slot />
   {caption && <figcaption>{caption}</figcaption>}
 </figure>
+
+<style>
+  .frame { margin: 1.5rem 0; }
+  .frame :global(img), .frame :global(video) { display: block; max-width: 100%; border-radius: 0.5rem; }
+  .frame figcaption { margin-top: 0.5rem; font-size: 0.9em; color: var(--sl-color-gray-2); }
+</style>

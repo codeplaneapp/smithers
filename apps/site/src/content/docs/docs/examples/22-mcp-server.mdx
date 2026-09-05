@@ -1,6 +1,7 @@
 ---
-title: "22 mcp-server"
+title: "Mcp server"
 description: "The MCP server 22-mcp-tools.ts connects to."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/22-mcp-server.ts"
 sidebar:
   order: 22
 ---
@@ -13,9 +14,11 @@ It is a separate process on purpose: an MCP session is a subprocess speaking new
 
 Usage: `node 22-mcp-server.ts`. It answers `initialize`, `tools/list`, and `tools/call` and exits when its standard input closes.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/22-mcp-server.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-server.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/22-mcp-server.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-server.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+This program has no dedicated test file. Read its setup requirements before running it; importing an example alone may only define its exports.
 
 ## Related reference
 

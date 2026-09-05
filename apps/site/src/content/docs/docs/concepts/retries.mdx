@@ -1,11 +1,19 @@
 ---
 title: "Retries and interruption"
-description: "A retry policy is a plain value over a persisted attempt count, cancellation propagates at once, and only infrastructure interrupts are retried."
+description: "Choose between retrying a typed action failure, recovering an infrastructure interruption, and cancelling a run."
 sidebar:
   order: 5
 ---
 
-A durable engine cannot keep retry state in a fiber: the fiber dies with the process, and the retry has to outlive it. Smithers therefore treats a retry policy as data, treats cancellation as final, and reserves automatic retry for one explicitly marked class of interrupt.
+A failed action, a lost host, and a cancellation need different responses. Smithers keeps those cases separate so recovery does not restart work the caller cancelled.
+
+| Event | Mechanism | Result |
+| --- | --- | --- |
+| An expected typed failure, such as a temporary upload error | Explicit `Action.retry` around the effect | Retry under the supplied options, then return the result or final error. |
+| An interruption marked `InfraInterrupt` | The action's `interruptRetryPolicy` | Retry within the declared infrastructure budget. |
+| User cancellation | The driver's cancellation path | Stop the run; do not consume an infrastructure retry budget. |
+
+The [retry tutorial](/docs/tutorials/retry-policy/) demonstrates ordinary typed failures. The infrastructure policy applies to marked interruptions and has its own terminal failures.
 
 ## A retry policy is a plain value
 
@@ -24,15 +32,15 @@ The next delay is derived from a persisted attempt count, not from fiber-local `
 
 Because the decision reads durable state, retry deadlines survive restarts. A policy whose `expirationMs` elapsed while the process was down is already expired when the run resumes. Inside a body, `Action.retry` is Effect retry with durable attempt context, and `CurrentAttempt` exposes the one-based durable attempt, so every attempt of one retry sequence reuses its own action's ordinals.
 
-## Cancellation propagates at once
+## The driver observes cancellation
 
-Effect's own workflow package retries any interruption ten times by default. Smithers diverges on purpose: cancellation propagates at once. A cancel is a statement about the run, not an accident of the network, and retrying it would redo work the caller already refused. Durable cancellation is observed, not only recorded: while a run executes, the driver polls the run's cancel-requested flag on the heartbeat cadence and interrupts the flow fiber, and terminal transitions are guarded inside the ownership compare-and-swap, so a request that races past the last poll turns finalize into a cancellation. A cancel requested against a parked run is re-driven by the periodic sweep, so parking does not hide a run from its caller's refusal.
+Cancellation stops the flow fiber when the driver observes it. A cancel is a statement about the run, not an accident of the network, and retrying it would redo work the caller already refused. Durable cancellation is observed, not only recorded: while a run executes, the driver polls the run's cancel-requested flag on the heartbeat cadence and interrupts the flow fiber, and terminal transitions are guarded inside the ownership compare-and-swap, so a request that races past the last poll turns finalize into a cancellation. A cancel requested against a parked run is re-driven by the periodic sweep, so parking does not hide a run from its caller's refusal.
 
-## Explicit infrastructure markers consume a policy
+## Infrastructure interruptions have a separate policy
 
-An action implementation or transport adapter can fail with `InfraInterrupt` when it knows an infrastructure event is retryable. Only that explicit tagged failure is retried, and only under the action's `interruptRetryPolicy`. The shipped memory and durable engines do not convert owner loss, host shutdown, or ordinary fiber interruption into this marker: those interruptions propagate immediately, and the durable driver releases interrupted work for another owner to reclaim. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final marker.
+An interrupt marked `InfraInterrupt` means the host was lost or the work was rebalanced, not that the work failed. Only marked infrastructure interruptions use the action's `interruptRetryPolicy`. Ordinary typed failures use an explicit retry loop. An exhausted `interruptRetryPolicy` dies with the typed `InfraInterruptRetriesExhausted`, carrying the action, the attempts, and the final interrupt.
 
-A policy that runs out of road ends one of two ways, each a terminal failure with a stable code: `RetryPolicyExpired` when the deadline passed, and `RetryAttemptsExhausted` when the attempt budget did.
+The policy-driven engine path reports a terminal failure when its budget ends: `RetryPolicyExpired` when the deadline passed, and `RetryAttemptsExhausted` when the attempt budget did.
 
 ## A recorded failure replays as itself
 
@@ -40,17 +48,15 @@ Retry state survives the process because it is ordinary durable state. The attem
 
 ## Tiers bound what may be retried
 
-Every action declares a tier. `sealed` work is deterministic and cacheable. `compensable` work can be undone. `irreversible` work permits neither: a payment, a post. An irreversible action may be retried only with a declared idempotency key, because retrying an unkeyed irreversible effect is how a charge happens twice; attempting it fails with `IrreversibleRetryRequiresIdempotencyKey`.
+Actions have an effect tier. `sealed` work is deterministic and cacheable. `compensable` work can be undone. `irreversible` work permits neither: a payment, a post. An irreversible action may be retried only with a declared idempotency key, because retrying an unkeyed irreversible effect is how a charge happens twice; attempting it fails with `IrreversibleRetryRequiresIdempotencyKey`.
 
 Ordinal-keyed work is serialized for the same reason. `ConcurrentKeylessDispatch` refuses two live dispatches of one keyless allocation scope, because arrival order would otherwise assign the ordinals the attempts replay under.
 
-## Boundaries and trade-offs
+## Choose a retry budget deliberately
 
-A retry policy is not a schedule. It answers one question, how long until the next attempt and whether there is one, and it holds no state of its own.
+Use a retry count for a bounded number of attempts and an expiration budget when elapsed time matters. A persisted infrastructure deadline can expire while the process is stopped.
 
-An infrastructure interrupt is not a domain failure. A domain failure is recorded and replayed as itself; an infrastructure interrupt is evidence about the host, and it is the only thing a retry policy may consume.
-
-The trade-off is deliberateness over coverage. Upstream's default retries everything and so retries cancels; Smithers retries nothing by default, so an author must declare which interrupts are infrastructure. The cost is annotation. The benefit is that a cancel is honored at once, and every retried step is a step someone marked as safe to redo.
+`Action.retry` accepts Effect retry options except `schedule`; it maintains durable attempt context around those retries. It does not consume a `RetryPolicy` value directly. Exhausting an ordinary `Action.retry` loop returns the effect's final error; `InfraInterruptRetriesExhausted` belongs to the infrastructure interruption path.
 
 ## Related
 

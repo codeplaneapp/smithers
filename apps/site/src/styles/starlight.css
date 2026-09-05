@@ -80,7 +80,35 @@
 	letter-spacing: -0.01em;
 }
 
-/* Mermaid sources ship as plain code blocks; keep them from wrapping oddly. */
+/* Preserve the indentation used by examples. */
 .expressive-code .frame pre {
 	tab-size: 2;
+}
+
+/* Theme-aware docs images: each variant renders only under its own theme. */
+.theme-only-dark {
+	display: block;
+}
+.theme-only-light {
+	display: none;
+}
+:root[data-theme="light"] .theme-only-dark {
+	display: none;
+}
+:root[data-theme="light"] .theme-only-light {
+	display: block;
+}
+
+/* The hero animation reads better wide: let it break out of the text column
+   on viewports with room, never causing horizontal scroll on small ones. */
+img.hero-anim {
+	width: 100%;
+	height: auto;
+}
+@media (min-width: 1100px) {
+	img.hero-anim {
+		width: 122%;
+		max-width: 122%;
+		margin-inline-start: -11%;
+	}
 }

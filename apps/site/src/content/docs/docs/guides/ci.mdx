@@ -1,69 +1,26 @@
 ---
 title: "Run flows in CI"
-description: "Run Smithers flows from a CI pipeline with the --json output contract, the exit-code vocabulary, provider keys as secrets, and a GitHub Actions workflow."
+description: "Launch a flow from CI, handle its exit status, and keep evidence when the run fails or waits."
 sidebar:
   order: 22
 ---
 
-Run a flow unattended from a CI job and branch on its exit code.
+Run a flow from CI with `smthrs flow start`. A local attached invocation stays with the run and gives the job an exit status when it completes, fails, or parks.
+
+This guide covers durable flows. `smthrs ci <pattern>` runs build, test, lint, and docs targets from `PACKAGE.ts`; it does not launch every flow in the repository.
 
 ## Before you start
 
-- A Smithers project checked into the repository: the `flows/` sources. Run state lives in `.flows/` (`control.db`, `engine.db`, and `logs/`), which `smthrs init` adds to the repository's ignore file, so a fresh CI checkout starts with no run history.
-- Node.js 22.19.0 or later on the runner.
-- The CLI installed: `npm install --global @smthrs/cli@next`. The `@next` suffix is required while 1.0 is a release candidate.
-- A provider credential for the flow's model seat, stored as a CI secret.
+Commit your flow sources under `flows/` and configure their model seats. The runner needs Node.js 22.19.0 or later and the Smithers CLI. Store provider credentials in your CI system's secret store and expose only the variables the chosen seat needs.
 
-## 1. Script against the non-interactive contract
+A fresh checkout has no `.flows/` history. Work that needs to survive the job belongs on a persistent host.
 
-Two things make the CLI scriptable: `--json` and one exit-code vocabulary.
+## Add a GitHub Actions job
 
-To have a machine read the output, pass `--json` before the verb. `smthrs run` prints the control plane's receipt compact instead of indented, and a script reads `runId` from the `Accepted` document whatever the run does next:
+This job runs the existing `deploy/status` flow after a push to `main`. Replace that ID with your own flow. The example assumes its seat uses `ANTHROPIC_API_KEY`.
 
-```json
-{"_tag":"Accepted","receiptId":"<receipt-id>","runId":"<run-id>"}
-```
-
-`smthrs ps` prints the durable runs listing, compact under `--json`: one item per durable run with its run id, flow id, status, waiting reason, and timestamps.
-
-Every verb exits with one status vocabulary, so a pipeline branches on the code:
-
-| Code | Meaning | In a pipeline |
-| --- | --- | --- |
-| `0` | The command did what it was asked. | The step passes. |
-| `1` | The command failed, or the run it reports settled `failed`. | Fail the job and inspect the run. |
-| `2` | The invocation was wrong; the message names the flag or argument. | Fail the job; the pipeline itself has a bug, for example malformed `--data` JSON. |
-| `3` | The run is parked at `waiting-approval`. | By design: answer the approval outside the band, or fail the job. |
-| `130` | The run was cancelled or interrupted (SIGINT). | Treat as aborted, not as a defect in the flow. |
-| `143` | The run was terminated (SIGTERM). | The runner stopped the process, for example on a job timeout. |
-
-Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone.
-
-`smthrs up <flow>` is the verb most CI jobs want: it plans the flow, approves the plan with scope `run`, and launches it in one invocation. It never prompts, and attached it stays until the run settles and exits with the run's terminal status.
-
-## 2. Decide what exit 3 does to the job
-
-`up` grants the plan approval itself, so plan approval never parks a CI run. Only an in-run ask parks the run at `waiting-approval` and exits 3. Choose one policy per job:
-
-- **Fail the job.** A flow that asks a human mid-run does not fit an unattended pipeline. Change the flow so it runs to completion without an ask.
-- **Approve outside the band.** The parked run journals a `control.approval.requested` event whose `payload` field is the exact argument for `smthrs approve`. A human answers it with `smthrs approve '<payload>'`, then `smthrs run --resume <run-id>` re-drives the parked execution.
-
-The second policy needs the run's state to outlive the job. A CI runner is ephemeral and `.flows/` is not in the checkout, so a run parked on the runner dies with it. To approve from outside, point the job at a persistent control plane instead of the local one; [Run a control plane](/docs/guides/control-plane/) covers that setup.
-
-## 3. Keep provider keys in CI secrets
-
-The seat resolver, not the CLI, reads provider keys: `ANTHROPIC_API_KEY` for `anthropic:*` seats, `OPENAI_API_KEY` for `openai:*` seats, `OPENROUTER_API_KEY` for `openrouter:*` seats. A missing key refuses the launch with a typed `LaunchFailed` naming the variable.
-
-Store the key as a CI secret and pass it through the step's environment. Never commit it. To check which provider keys a job environment carries before launching, run `smthrs doctor`, which reports which are present.
-
-Two more variables matter against a remote control plane: `SMITHERS_REMOTE` is the environment form of `--remote`, and `SMITHERS_API_KEY` is the environment form of `--credential`. An exported-but-empty variable reads as unset.
-
-## 4. Add the workflow
-
-This GitHub Actions workflow installs the CLI and runs the `deploy/status` flow on every push to `main`:
-
-```yaml
-name: smithers
+```yaml title=".github/workflows/smithers.yml"
+name: Smithers flow
 on:
   push:
     branches: [main]
@@ -71,39 +28,67 @@ on:
 jobs:
   flow:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm install --global @smthrs/cli@next
-      - run: smthrs --json up deploy/status
+      - name: Run the flow
+        run: smthrs flow start deploy/status --format json
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Inspect runs after a failure
+        if: failure()
+        run: smthrs runs list --format json
 ```
 
-The `22` label tracks the newest 22.x the runner offers, which satisfies the 22.19.0 floor. The job runs from the checkout root, so the CLI resolves the project's `flows/` sources there and writes fresh state under `.flows/`. Because `.flows/` is ignored, every job starts clean: no carried-over runs, no resume across jobs.
+The `@next` tag selects the release-candidate line. Pin a specific tested package version when you need repeatable CI installs. The timeout bounds the job; choose a value appropriate for your flow.
 
-## 5. Know what CI cannot do
+`flow start` approves its launch with run scope and does not prompt. Use it only for work the pipeline is authorized to run.
 
-- **Approve interactively.** Nothing inside the job answers an in-run ask; that is what exit 3 is for. Handle it with the policy from step 2.
-- **Resume across jobs.** Run state is local SQLite under `.flows/`, and a fresh checkout starts clean. Long runs and parked runs belong on a persistent control plane: pass `--remote` (or set `SMITHERS_REMOTE`) so the run outlives any job. A remote invocation owns no executor, so there is no settlement wait and the printed receipt is the whole answer. `up -d` against `--remote` is refused with exit 1, because a detached launch spawns a local executor.
+## Handle the exit status
 
-## Verify it worked
+For a local attached launch, these outcomes matter to the job:
 
-Rehearse the exact contract locally before pushing:
+| Code | Meaning | Response |
+| --- | --- | --- |
+| `0` | The run completed. | Continue the pipeline. |
+| `1` | The command or run failed. | Read the diagnosis and events. |
+| `2` | The invocation is invalid. | Fix arguments or malformed input. |
+| `3` | The run is waiting for approval. | Apply the job's approval policy below. |
+| `130` | Cancellation or SIGINT. | Treat the job as interrupted. |
+| `143` | SIGTERM. | Check runner shutdown or timeout. |
+
+A read command such as `runs show` can succeed while reporting a failed run. Its exit status reports the read, not the workflow outcome.
+
+Use `--format json` for structured results and `--format jsonl` for event streams. Keep scripts on the canonical command groups; older flat aliases retain compatibility output contracts.
+
+## Decide how the job handles approvals
+
+Run-scope launch approval does not eliminate every possible in-run request. If the flow parks, choose one of these arrangements:
+
+- **Keep the job unattended.** Treat exit `3` as a failed pipeline requirement and change the flow so it does not need a human response during that job.
+- **Use persistent execution.** Run the work on a persistent control-plane host, submit the exact approval there, and resume the same run after the decision.
+
+A remote launch returns an admission receipt rather than waiting for terminal completion. If your pipeline launches remotely, it must separately inspect that run and enforce its completion policy. A successful remote launch alone is not a successful workflow.
+
+See [Run a control plane](/docs/guides/control-plane/) for remote connections, and [Plan, approve, and run](/docs/guides/plan-approve-run/) for the approval sequence.
+
+## Keep useful failure evidence
+
+Before the runner exits, inspect the run ID returned at launch:
 
 ```bash
-smthrs --json up deploy/status
-echo "exit=$?"
+smthrs runs show <run-id> --format json
+smthrs runs logs <run-id> --limit 100 --format jsonl
 ```
 
-You should see the compact `Accepted` receipt on stdout and `exit=0` once the run settles `completed`. In the action, the step log shows the same receipt, and GitHub marks the step failed on any non-zero exit. Afterwards, `smthrs ps` lists the durable run with its status.
+Replace `<run-id>` with the actual ID. Save the output using your CI system's artifact facility if you need it after the job. Log exports help diagnosis; they are not a backup that can resume the execution.
 
-## See also
+For resumable state, follow [Back up and retain run state](/docs/guides/retention/). A new checkout cannot resume a run merely because the previous job printed its ID.
 
-- [Run a control plane](/docs/guides/control-plane/): the persistent home for long runs and out-of-band approvals.
-- [Plan, approve, run](/docs/guides/plan-approve-run/): the lifecycle `up` compresses into one command.
-- [smthrs up](/docs/reference/cli/up/) and [smthrs run](/docs/reference/cli/run/): per-verb output, receipts, and exit codes.
-- [Inspect runs](/docs/guides/inspecting-runs/): the read path across `ps`, `status`, and `logs` when a job fails.
-- [Waiting for approval](/docs/troubleshooting/waiting-approval/): the parked-run state exit 3 reports.
+## Verify the job
+
+Run the launch command locally against the same flow and credentials, then inspect its status. In CI, confirm that a failed or parked flow fails the job and that the diagnostic step still runs. [Inspect runs](/docs/guides/inspecting-runs/) explains how to narrow a failure to its recorded events and outputs.

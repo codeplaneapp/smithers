@@ -1,23 +1,30 @@
 ---
-title: "36 detached-children"
-description: "Spawn a child that outlives its parent, then collect it after a restart."
+title: "Detached children"
+description: "Let a child outlive its parent and collect its output after a restart."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/36-detached-children.ts"
 sidebar:
   order: 36
 ---
 
 {/* Generated from examples/src/36-detached-children.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Spawn a child that outlives its parent, then collect it after a restart.
+Let a child outlive its parent and collect its output after a restart.
 
-An attached child needs nothing special: a flow that calls another flow and waits for its value already runs inside a durable boundary, and the engine cancels it if the parent exits. A DETACHED child is the other shape (start it now, collect it later, possibly in another process) and it is a real run of its own: its own row, its own claim, its own journal.
+The first engine spawns a detached child and completes the parent. A fresh engine opens the same SQLite state and reads the child's result. The child's recorded detach policy keeps it alive when the parent settles.
 
-The two phases below build separate engines over one SQLite file, which is what a process restart looks like from the database's point of view. Phase one spawns the child and lets the parent COMPLETE while the child is still going. Phase two attaches a fresh engine that never spawned anything and collects the child's output out of durable state.
+This differs from an attached child, whose parent-exit policy requests cancellation when the parent exits.
 
-The parent completing is the point. Before `onParentExit`, a terminal parent left every linked child exactly as it was, so a child that nobody waited for became an orphan. Now the parent applies each child's recorded policy inside its own terminal transaction: an attached child is cancel-requested with the parent, and a child spawned through `Children.spawn` records `detach` and is left alone.
+## Run the test
 
-## Run it
+The complete program is [`examples/src/36-detached-children.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/36-detached-children.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The program is [`examples/src/36-detached-children.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/36-detached-children.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/36-detached-children.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

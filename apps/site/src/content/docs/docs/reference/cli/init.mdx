@@ -1,6 +1,6 @@
 ---
 title: "smthrs init"
-description: "Scaffold flows/<name>/flow.mdx and ignore .flows/"
+description: "Initialize target declarations and a starter durable flow while preserving existing files."
 ---
 
 import { Code } from "@astrojs/starlight/components"
@@ -9,18 +9,21 @@ import help from "../../../../../data/help/init.txt?raw"
 ## Synopsis
 
 ```text
-smthrs init [name]
+smthrs init [name] [--root <directory>]
 ```
 
 ## Description
 
-`smthrs init` scaffolds the smallest project a flow can run from: one markdown flow at `flows/<name>/flow.mdx`, plus the empty `.flows/` state directory the project's runs use. In a git or jj repository it also adds `.flows/` to the repository's `.gitignore`, once, and never inside a directory that is not a repository. Reach for it once per project, or again per flow when you want the starter body. It never overwrites an existing flow file, and it performs no other setup: seats resolve from environment keys, so the 0.x `init --global` flag was removed ([what replaced it](/docs/migration/1.0/#init)).
+`smthrs init` creates a `WORKSPACE.ts`, a starter `PACKAGE.ts`, a Markdown flow at `flows/<name>/flow.mdx`, and the `.flows/` state directory. A missing `package.json` is scaffolded with a Node/Pnpm toolchain; an existing supported Yarn, Bun, or Pnpm declaration is reused. Existing declarations and flows are preserved; an existing `.smithers/WORKSPACE.ts` also counts as the workspace declaration. In a git or jj repository it adds `.flows/` to `.gitignore`. Use `--root` to choose the directory and `generate flow <name>` to add another flow later. Seats resolve from provider configuration; the old `init --global` flag remains unsupported.
 
 The scaffolded flow declares a `model:` seat chosen from the first provider credential the environment sets, in the order `smthrs doctor` reports them:
 
 - `ANTHROPIC_API_KEY` resolves `anthropic:claude-sonnet-4-5`.
 - `OPENAI_API_KEY` resolves `openai:gpt-5.6-sol`. The ChatGPT session `SMITHERS_OPENAI_AUTH=chatgpt` resolves the same seat.
 - `OPENROUTER_API_KEY` resolves `openrouter:anthropic/claude-sonnet-4.5`.
+- `MOONSHOT_API_KEY` resolves `moonshot:kimi-k3`.
+- `GEMINI_API_KEY`, then `GOOGLE_API_KEY`, resolves `gemini:gemini-2.5-pro`.
+- `CEREBRAS_API_KEY` resolves `cerebras:gpt-oss-120b`.
 
 With no credential set, the scaffold still declares the default (`anthropic:claude-sonnet-4-5`), and the frontmatter comment names the key to set. A scaffold without a `model:` line would not be launchable at all.
 
@@ -32,9 +35,9 @@ With no credential set, the scaffold still declares the default (`anthropic:clau
 
 ## Output
 
-Prints the scaffold record: the flow `name`, the `flowFile` path, whether the file was `created` (`false` when a flow already stood there), the `gitignore` status (`created`, `updated`, `unchanged`, or `skipped` outside a repository), the `stateDirectory`, and the `seat` the flow declares. `--json` prints the same record as JSON.
+Prints `root`, the `created` and `retained` declaration paths, the nested `flow` scaffold record, and suggested `next` commands. The flow record includes its file, seat, state directory, and Git ignore result. `--json` prints the machine-readable result.
 
-An invalid name exits 2:
+An invalid name fails with:
 
 ```text
 a flow name is one path segment of letters, digits, '-' and '_'; got "<name>"
@@ -42,7 +45,7 @@ a flow name is one path segment of letters, digits, '-' and '_'; got "<name>"
 
 ## Exit codes
 
-This verb adds no codes beyond the generic set; an invalid `name` is a usage error and exits 2.
+Success exits 0; invalid input or a filesystem failure exits nonzero.
 
 ## Help output
 
@@ -52,6 +55,5 @@ The flag list above is curated. This is what the binary prints, captured by `app
 
 ## See also
 
-- [smthrs up](/docs/reference/cli/up/): plan, approve, and run the flow `init` scaffolded.
-- [smthrs ls](/docs/reference/cli/ls/): list the flows discovery finds under the project.
+- [CLI groups](/docs/reference/cli/): use `flow start` to launch the new flow and `flow list` to discover it.
 - [Markdown flows](/docs/guides/markdown-flows/): the `flow.mdx` authoring model the scaffold uses.

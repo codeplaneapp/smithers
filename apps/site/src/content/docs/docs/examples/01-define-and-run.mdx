@@ -1,6 +1,7 @@
 ---
-title: "01 define-and-run"
+title: "Define and run"
 description: "Define a typed flow and run it on the in-memory engine."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/01-define-and-run.ts"
 sidebar:
   order: 1
 ---
@@ -9,13 +10,21 @@ sidebar:
 
 Define a typed flow and run it on the in-memory engine.
 
-This is the shortest complete program in the library, and it is the two nouns of the unified flow-authoring model at their smallest. `Action.make` declares the atom that does the work (schemas and a stable tag, no code) and `toLayer` attaches the implementation separately, where the code can run. `Flow.make` declares the composite, and its `body` names the action rather than calling it: a body is planned, so `Greet.call` records one node and executes nothing.
+`Action.make` declares the greeting operation and its schemas. `toLayer` supplies its implementation. The flow body describes one `Greet.call`, which the interpreter executes through the registered implementation.
 
-`Interpreter.layer` is what turns that plan into a run, over the `Action.layerImplementations` table the implementation files itself in, and `FlowEngine.layerMemory` supplies an engine that keeps its state in the process.
+`FlowEngine.layerMemory` keeps state in the process. The result is useful for learning the authoring API and for tests; it does not survive process exit.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/01-define-and-run.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/01-define-and-run.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/01-define-and-run.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/01-define-and-run.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/01-define-and-run.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

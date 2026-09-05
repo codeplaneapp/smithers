@@ -1,7 +1,12 @@
 ---
 title: "0.25.1"
 description: "Smithers 0.25.1 hardens the 0.25 migration path, accounts loading, CLI flag parsing, Gateway auth, Codex subscription preflight, child-failure visibility, and Pi diagnostics after real store migration dogfooding."
+pagefind: false
 ---
+
+:::note[Archived release]
+This page describes Smithers 0.25.1. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
 
 Smithers 0.25.1 is a focused maintenance release for operators and workflow authors upgrading from 0.25.0. It improves failure messages around legacy SQLite migrations, keeps old account files from blocking CLI commands, fixes documented negated flags, hardens Gateway auth with JWT canonicalization and an Origin allow-list for token and JWT modes, honors Codex CLI subscription auth in `<Task>` preflight, surfaces masked child failures on finished runs, and makes Pi launch diagnostics provider-aware.
 

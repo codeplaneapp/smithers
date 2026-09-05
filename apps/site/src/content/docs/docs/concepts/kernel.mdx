@@ -7,6 +7,20 @@ sidebar:
 
 A flow that edits files, spawns processes, and calls models holds real authority over the host it runs on. The kernel question is who granted that authority. Smithers answers with a closed list of host services, a closed vocabulary of capabilities over them, and a grant check on every call, so no flow reaches the host ambiently.
 
+
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
+
+<DocsDiagram
+  id="capability"
+  title="Authorization at a host-service boundary"
+  caption="An operation through a guarded host service resolves its resource and checks the run's capability ceiling and grants. Allowed operations reach the adapter; denied operations fail, and requests that need a decision wait or return PermissionRequired."
+  rows={[
+    [{ label: "Requested host operation", detail: "Resolve the concrete resource" }],
+    [{ label: "Capability and grant check", detail: "Allow, deny, or request a decision" }],
+    [{ label: "Host adapter", detail: "Only an authorized operation proceeds" }]
+  ]}
+/>
+
 ## The closed host surface
 
 The host surface is a fixed list: `FileSystem`, `HttpClient`, `CommandLine`, `ChildProcessSpawner`, `Workspace`, and `Jj`. Each is a service a platform adapter supplies, and the kernel decorates the same tags with middleware layers. There is no second protected tag: composing a decorator over a raw host layer shadows that raw implementation for every consumer of the original tag, so a flow cannot walk past the check by importing the platform service directly. `Path` is pure manipulation and passes through unchecked.
@@ -47,11 +61,11 @@ The failures are part of the contract: `PermissionRequired`, `PermissionDenied`,
 
 A permission failure is journal-safe by construction: the capability is defensively copied and the metadata snapshotted at the construction site, so a value the journal could not encode fails there, not later at the persistence boundary.
 
-## Why grant-checked, not ambient
+## What the boundary guarantees
 
 Ambient authority asks nothing, which is exactly the problem: any code holding the service tag could reach the host, and nothing could say later why an operation was allowed. A grant check at the adapter call site makes authority explicit, attributable, and replayable. The journal holds the decision, the suspended fiber means the answer can take as long as a person needs, and mutable inputs are snapshotted so the operation executed after an attended grant is the operation that was authorized.
 
-The boundary is honest about its limit. The kernel checks capabilities at adapter call sites; it does not sandbox the operating system and cannot observe host access that bypasses the decorated services. Hermetic execution additionally requires a `StepBoundary`. `GrantStore.makeNoop` is an explicit allow-all seam for tests, not a production policy. What the kernel guarantees is narrower and real: every access through the declared surface was granted, and the grant is on the record.
+The kernel checks capabilities at adapter call sites; it does not sandbox the operating system and cannot observe host access that bypasses the decorated services. Hermetic execution additionally requires a `StepBoundary`. `GrantStore.makeNoop` is an explicit allow-all implementation for tests, not a production policy. Through those adapters, every access through the declared surface was granted, and the grant is on the record.
 
 ## Related
 

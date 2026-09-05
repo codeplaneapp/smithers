@@ -6,20 +6,20 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node scripts/check-built-site.mjs",
     "check": "astro check",
     "preview": "astro preview",
-    "sync:docs": "node scripts/sync-support-docs.mjs && node scripts/sync-api-docs.mjs && node scripts/ingest-reference.mjs && node scripts/gen-examples.mjs && node scripts/generate-llms.mjs",
-    "check:docs": "node --test scripts/support-matrix.test.mjs && node scripts/check-docs.mjs && node scripts/sync-api-docs.mjs --check && node scripts/gen-examples.mjs --check && node scripts/generate-llms.mjs --check",
+    "sync:docs": "node scripts/sync-support-docs.mjs && node scripts/gen-cli-data.mjs && node scripts/sync-api-docs.mjs && node scripts/ingest-reference.mjs && node scripts/gen-examples.mjs && node scripts/generate-llms.mjs",
+    "check:docs": "node --test scripts/support-matrix.test.mjs && node --test scripts/docs-text.test.mjs && node scripts/check-docs.mjs && node scripts/gen-cli-data.mjs --check && node scripts/sync-api-docs.mjs --check && node scripts/ingest-reference.mjs --check && node scripts/gen-examples.mjs --check && node scripts/generate-llms.mjs --check",
     "deploy": "alchemy deploy",
     "destroy": "alchemy destroy",
     "lint": "eslint --no-config-lookup scripts/support-matrix.test.mjs scripts/sync-support-docs.mjs --rule \"no-unused-vars:error\" && node scripts/check-docs.mjs && node scripts/sync-support-docs.mjs --check",
     "test": "node --test scripts/support-matrix.test.mjs"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.4",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
+    "@astrojs/check": "^0.9.10",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
     "@smthrs/agent": "workspace:*",
     "@smthrs/capability": "workspace:*",
     "@smthrs/database": "workspace:*",
@@ -42,13 +42,13 @@
     "@smthrs/sync": "workspace:*",
     "@smthrs/testing": "workspace:*",
     "@smthrs/time-travel": "workspace:*",
-    "alchemy": "^0.93.12",
-    "effect": "4.0.0-rc.108",
-    "typescript": "~6.0.3"
+    "alchemy": "2.0.0-beta.76",
+    "effect": "4.0.0-rc.112",
+    "typescript": "~5.9.3"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.36.0",
-    "@shikijs/themes": "^3.23.0",
-    "astro": "^5.13.2"
+    "@astrojs/starlight": "^0.42.0",
+    "@shikijs/themes": "^4.4.3",
+    "astro": "^7.3.1"
   }
 }

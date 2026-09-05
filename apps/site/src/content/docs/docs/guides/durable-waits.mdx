@@ -9,7 +9,7 @@ Wait inside a flow without holding a process open: the wait is recorded, the run
 
 ## Before you start
 
-- The flow package: `pnpm add @smthrs/flow@next effect@4.0.0-rc.108`.
+- The flow package: `pnpm add @smthrs/flow@next effect@4.0.0-rc.112`.
 - You know the journal is what makes a wait survive a crash. [Durable execution](/docs/concepts/durable-execution/) covers the mechanism; this page covers choosing and composing the primitives.
 
 ## 1. Pick the primitive
@@ -92,7 +92,7 @@ The schedule options are `intervalMs` and `backoff`: `fixed`, `linear` (interval
 
 `DurableQueue` is work handoff over Effect's `PersistedQueue`. `DurableQueue.process` offers a payload, attaches a token, and suspends until a worker records the handler's exit against it. Its `retrySchedule` option bounds how a failing offer is retried; the default retries with exponential backoff, capped at one minute, and never gives up before the call dies. `DurableQueue.worker` and `DurableQueue.makeWorker` take a `concurrency` that must be a positive safe integer.
 
-{/* verify: which layer a Node composition provides as DurableQueue's PersistedQueue backing */}
+A queue needs an Effect `PersistedQueue` service backed by durable storage. The examples above do not supply one. Use the [DurableQueue API reference](/docs/reference/api/flow/) when adding a queue to your host composition.
 
 ## Verify it worked
 

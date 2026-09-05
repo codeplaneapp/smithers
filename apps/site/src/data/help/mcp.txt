@@ -1,23 +1,18 @@
-DESCRIPTION
-  Wire the Smithers MCP server into an agent
+smthrs mcp — Register as MCP server
 
-USAGE
-  smthrs mcp <subcommand> [flags]
+Usage: smthrs mcp <command>
 
-FLAGS
-  --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
-  --json                 Print the machine-readable document instead of the human rendering
-  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Suppress banners and progress on stderr; stdout documents still print
-  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
-  --root string          Project root to act on, instead of walking up from the working directory
+Commands:
+  add     Register as MCP server
+  doctor  Validate MCP server startup and tool listing
 
-GLOBAL FLAGS
-  --help, -h                                                          Show help information
-  --version, -v                                                       Show version information
-  --wizard                                                            Start wizard mode for a command
-  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
-  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
-
-SUBCOMMANDS
-  add    Register the Smithers MCP server with an agent
+Global Options:
+  --filter-output <keys>              Filter output by key paths (e.g. foo,bar.baz,a[0,3])
+  --format <toon|json|yaml|md|jsonl>  Output format
+  --full-output                       Show full output envelope
+  --help                              Show help
+  --llms, --llms-full                 Print LLM-readable manifest
+  --schema                            Show JSON Schema for command
+  --token-count                       Print token count of output (instead of output)
+  --token-limit <n>                   Limit output to n tokens
+  --token-offset <n>                  Skip first n tokens of output

@@ -1,9 +1,15 @@
 ---
 title: "0.31.0"
 description: "Smithers 0.31.0 lets you mark task and tool side effects with revert handlers so rewind, fork, and replay compensate or block instead of silently re-firing real-world actions, and makes Claude Opus 5 the default implementer and orchestrator."
+pagefind: false
 ---
 
+:::note[Archived release]
+This page describes Smithers 0.31.0. Historical documentation links open the source at that release tag. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
+
 import Frame from "../../../components/Frame.astro"
+
 
 Smithers 0.31.0 makes time travel side-effect-safe. Rewind, fork, and
 replay have always restored run state and worktree files, but they knew
@@ -110,8 +116,8 @@ fixture workflows plus handwritten cases and a harness) and a
 marks and reverts its side effects.
 
 See the external side effects section of the
-[Task docs](/components/task) and the
-[time-travel quickstart](/guides/time-travel-quickstart).
+[Task docs](https://github.com/smithersai/smithers/blob/v0.31.0/docs/components/task.mdx) and the
+[time-travel quickstart](https://github.com/smithersai/smithers/blob/v0.31.0/docs/guides/time-travel-quickstart.mdx).
 
 ## Claude Opus 5 becomes the default implementer
 
@@ -128,10 +134,10 @@ bunx smthrs oneshot "make the flaky auth test deterministic"
 
 - Cost scoring prices `claude-opus-5` at $5 per million input tokens and
   $25 per million output tokens, the same as Opus 4.8.
-- [`smithers oneshot`](/guides/oneshot) falls back in a new order: Claude
+- [`smithers oneshot`](https://github.com/smithersai/smithers/blob/v0.31.0/docs/guides/oneshot.mdx) falls back in a new order: Claude
   Opus 5, then Codex Sol, then Kimi K3, then Claude Fable 5.
 
-See the [model selection guide](/guides/model-selection) for overriding
+See the [model selection guide](https://github.com/smithersai/smithers/blob/v0.31.0/docs/guides/model-selection.mdx) for overriding
 any seat.
 
 ## Point Opus 5 at your open issues
@@ -219,10 +225,10 @@ repo's own issue tracker. The most noticeable, with a security pin first:
 ## Docs for humans, docs for agents
 
 The docs site now separates its two audiences. The Product API tab is for
-you: a [Platform Capabilities](/guide/capabilities) catalog of what you
+you: a [Platform Capabilities](https://github.com/smithersai/smithers/blob/v0.31.0/docs/guide/capabilities.mdx) catalog of what you
 can ask for in plain English, setup pages for each harness (Claude Code,
 Codex, Cursor, Copilot, Pi, Hermes, OpenClaw), and a
-[Set Up Semantic Memory](/guide/setup/semantic-memory) page covering
+[Set Up Semantic Memory](https://github.com/smithersai/smithers/blob/v0.31.0/docs/guide/setup/semantic-memory.mdx) page covering
 Hindsight and `HINDSIGHT_URL`. The Technical API tab is the agent-facing
 reference, and its entry pages now say so.
 
@@ -242,8 +248,8 @@ reference, and its entry pages now say so.
 - **Postgres connections stay bounded.** Workflows sharing a Postgres store
   now draw from one bounded pool (default 16) that fails saturation loudly
   instead of exhausting the server.
-- **`jjhub-issue-fleet` pack workflow.** Fans each open GitHub issue into its
-  own jjhub sandbox VM with a Codex lane and returns PRs, with a live fleet
+- **`cloud-issue-fleet` pack workflow.** Fans each open GitHub issue into its
+  own Smithers Cloud sandbox VM with a Codex lane and returns PRs, with a live fleet
   UI.
 - **Every `@smthrs/ui` component has a browsable
   catalog:** 47 stories at

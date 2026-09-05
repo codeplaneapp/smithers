@@ -1,7 +1,12 @@
 ---
 title: "0.25.2"
 description: "SQLite-default pluggable backends with backend-aware reads, migration-marker authority, time-travel crash recovery and rewind safety, Gateway root routing, CLI self-healing skill installs, plus scheduler, sandbox, Pi, and security hardening."
+pagefind: false
 ---
+
+:::note[Archived release]
+This page describes Smithers 0.25.2. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
 
 Smithers 0.25.2 makes the pluggable storage backend safe to default. SQLite is the default backend again and every CLI read is backend-aware, so PGlite and Postgres runs are no longer invisible to `ps`, `inspect`, and `output`. The release also lands time-travel crash recovery, a batch of scheduler and sandbox correctness fixes, and several security hardening changes.
 

@@ -1,91 +1,108 @@
 ---
 title: "Plan, approve, and run a flow"
-description: "Walk a flow through admission by hand: render the approval payload, grant it a scope, launch it, and resume parked runs."
+description: "Inspect a flow's plan, approve its exact payload, launch it, and resume a run waiting for approval."
 sidebar:
   order: 4
 ---
 
-Every launch passes through admission: a plan, an approval decision bound to that plan's digest, and a run. `smthrs up` compresses the three steps into one command; this guide walks them by hand, for when a plan needs review before anything runs. [Flows, actions, and plans](/docs/concepts/flows-actions-plans/) explains the model behind the steps.
+import { Steps } from "@astrojs/starlight/components"
+
+Review a flow's plan before launching it. If you already trust the plan and want one command to plan, approve, and launch, use `smthrs flow start <flow>`.
 
 ## Before you start
 
-- A discovered flow: `smthrs ls` lists the ids.
-- A provider credential for the flow's seat. `smthrs doctor` lists the keys it reads.
+- Install the [CLI](/docs/installation/) and work from your project's root.
+- Run `smthrs flow list` to find a flow ID. The examples below use `deploy/status`; replace it with your flow's ID.
+- Configure any [model seat](/docs/guides/model-seats/) the flow needs.
+- Install `jq` if you want to save the approval payload with the shell command below.
 
-## 1. Plan the flow
+## Review and launch
 
-```bash
-smthrs plan deploy/status
-```
+<Steps>
 
-`smthrs plan` resolves the flow from the project registry, compiles its keyed plan, and prints the plan card: the node graph with each node's cache status, the plan digest, and the complete `approval` payload. It never starts a run, never approves anything, and never writes flow events; the payload it prints is inert until you submit it. Pass input as `key=value` pairs or one `--data <json>` document.
+1. **Inspect the plan.**
 
-To capture the payload for the next steps:
+   ```bash
+   smthrs flow plan deploy/status
+   ```
 
-```bash
-approval="$(smthrs --json plan deploy/status | jq -c '.approval')"
-```
+   Planning returns the node graph, cache decisions, plan digest, and `approval` payload. It does not execute the flow. Supply inputs as `key=value` arguments or a `--data` JSON object.
 
-## 2. Read the approval payload
+2. **Save the exact approval payload.**
 
-The payload carries `target`, `scope`, and `idempotencyKey`, and the digest inside it is what the grant binds to. Submit it unchanged: an edited payload is a different ask, not an approved one. The card's `nodes` list shows what the launch would do, one entry per keyed node with status `cached` or `run`, so read it before deciding.
+   ```bash
+   smthrs flow plan deploy/status --format json > plan.json
+   jq -e '.approval' plan.json > approval.json
+   ```
 
-## 3. Approve with a scope
+   Read `plan.json` before proceeding. Check the operations and declared effects. `approval.json` must contain the plan's approval object, including its target, scope, and idempotency key.
 
-```bash
-smthrs approve "$approval" --scope run
-```
+3. **Approve it.**
 
-`--scope` says how far the grant reaches:
+   ```bash
+   smthrs approvals approve @approval.json --scope run
+   ```
 
-| Scope | Reaches |
+   The decision binds to the submitted payload. It does not launch a run. Do not edit the payload between approval and execution; changed work needs a new plan and approval.
+
+4. **Execute the approved plan.**
+
+   ```bash
+   smthrs flow execute @approval.json
+   ```
+
+   A successful admission returns an `Accepted` receipt with the run ID. A local attached invocation stays with the run until it settles or parks. A remote invocation returns its control receipt; inspect the remote run separately.
+
+</Steps>
+
+## Choose an approval scope
+
+The explicit approval command defaults to `once`. The one-command `flow start` path grants `run` scope.
+
+| Scope | Use it for |
 | --- | --- |
-| `once` | This ask only. |
-| `run` | The whole run. The interactive default, matching what `smthrs up` grants. |
-| `remembered` | Every later run. |
+| `once` | This approval request only. |
+| `run` | A grant whose scope extends through the run. |
+| `remembered` | A grant that can apply to matching future requests. |
 
-The command prints the decision receipt; a plan-level decision answers `Accepted` with no `runId`. It never plans and never launches a run of its own.
+The payload and scope determine what a grant covers. `remembered` does not approve arbitrary future work.
 
-## 4. Run the approved payload
+## Resume a run waiting for approval
 
-```bash
-smthrs run "$approval"
-```
-
-`smthrs run` launches the flow the payload authorizes and prints the receipt: `Accepted` with the `runId`, or `Parked` when the plan lacks approval. Attached, the command stays until the run settles and exits with the run's terminal status: 0 for `completed`, 1 for `failed`, 130 for `cancelled`, 3 for parked at `waiting-approval`.
-
-If the executor declines the launch (no seat resolved, a capability not granted, or the flow belongs to another host), `run` prints the run's summary and exits 1. `smthrs status <run-id>` shows what such a run waits for.
-
-## 5. Resume a parked run
-
-A run parks at `waiting-approval` in two cases: the payload had no approval when you ran it (exit 3), or the flow asked for approval mid-flight and journaled a `control.approval.requested` event whose `payload` field is the exact argument for `smthrs approve`. The parked run's status card prints the ready-to-paste pair on its `Unblock` line:
+An in-run approval request can park the execution at `waiting-approval`. Inspect the run and pending requests:
 
 ```bash
-smthrs status <run-id>
+smthrs runs show <run-id>
+smthrs approvals list
 ```
 
-Approve the payload, then re-drive the parked execution:
+Replace `<run-id>` with the ID returned at launch. Save the exact request payload to `approval.json`, then approve it and resume that execution:
 
 ```bash
-smthrs approve '<payload>' --scope run
-smthrs run <run-id> --resume
+smthrs approvals approve @approval.json --scope run
+smthrs runs resume <run-id>
 ```
 
-`smthrs resume <run-id>` is an unlisted alias of `run --resume`; both spellings share one implementation.
+Starting the flow again is a new launch path; use `runs resume` for the existing parked execution. [Waiting for approval](/docs/troubleshooting/waiting-approval/) covers missing or mismatched requests.
 
-## 6. Or take the one-command path
+## Run without a separate review
 
-When a plan needs no human review, `smthrs up <flow>` plans, approves with scope `run`, and launches in one invocation. It never prompts and never resumes an existing run.
+To plan, approve with run scope, and launch in one command:
 
-For a launch that outlives the terminal, `smthrs up -d` spawns a detached child process and returns as soon as the child proves the run row is durable, printing the run id and its log file under `.flows/logs/`. [The up reference](/docs/reference/cli/up/) covers the admission handshake, its timeout, and the detached launch document.
+```bash
+smthrs flow start deploy/status
+```
 
-## Verify it worked
+To keep a local run alive after the terminal exits:
 
-- `smthrs ps` lists the run with its status.
-- `smthrs status <run-id>` prints the diagnosis card; the `Verdict` line reports how the run settled.
-- The launch command's exit code matches the terminal status: 0, 1, 3, or 130 as above.
+```bash
+smthrs flow start deploy/status --detached
+```
 
-## See also
+A detached launch returns the durable run ID and log path after the child acknowledges admission. It needs a local executor; `--detached` cannot launch through `--remote`.
 
-- [Inspect runs](/docs/guides/inspecting-runs/): read what admission produced.
-- [Flows, actions, and plans](/docs/concepts/flows-actions-plans/): the concepts behind the three steps.
+## Verify the outcome
+
+Use `smthrs runs show <run-id>` to read the current status and diagnosis. A local attached launch exits `0` for completion, `1` for failure, `3` for waiting on approval, or `130` for cancellation. A successful read command does not mean the run succeeded; read its `status` field.
+
+Continue with [Inspect runs](/docs/guides/inspecting-runs/) to read events and outputs, or [Run flows in CI](/docs/guides/ci/) to choose how a pipeline handles a parked run.

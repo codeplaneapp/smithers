@@ -12,12 +12,12 @@ A follower is a process that replicates journal entries over the read-only sync 
 ## Before you start
 
 - You have a source to follow: a control plane serving `/sync` (see [Operate the control plane](/docs/guides/control-plane/)), or an in-process `SyncServer` over the project's journal.
-- You have the packages: `pnpm add @smthrs/sync@next @smthrs/journal@next effect@4.0.0-rc.108`.
-- You have a run id to follow. `smthrs ps` lists the project's runs.
+- You have the packages: `pnpm add @smthrs/sync@next @smthrs/journal@next effect@4.0.0-rc.112`.
+- You have a run id to follow. `smthrs runs list` lists the project's runs.
 
 ## 1. Follow one run's journal
 
-This is the wiring from `examples/src/07-sync-follower.ts`: a real `SyncServer` over a real SQL journal, connected to a real `SyncClient` through the in-memory socket pair the package's own suites use. Swap the socket for a network transport and the follower code is unchanged.
+This excerpt demonstrates the client API with an in-memory transport. It needs the source journal and entries from [example 07](/docs/examples/07-sync-follower/) to produce results; it does not connect to `smthrs serve`. For a network client, provide an Effect RPC transport to `SyncClient.layer` and authenticate that transport as described below.
 
 ```ts
 import type { JournalEvent } from "@smthrs/journal"
@@ -72,12 +72,12 @@ const following = sync.subscribe({
 
 `upsertReadModel` stands for your projection: any effect that folds one entry into your own tables.
 
-Compaction is the one case where a cursor names history that no longer exists. When the server refuses a cursor below a run's compaction floor, the client moves that run's cursor to the checkpoint and restarts the subscription, and `onResync` runs before the cursor moves. There you load the prefix from `Journal.latestCheckpoint(runId)`, or discard the run's derived state, or refuse. The default hook logs the skipped range and continues, which is what a follower with no derived state wants.
+Compaction is the one case where a cursor names history that no longer exists. When the server refuses a cursor below a run's compaction floor, the client moves that run's cursor to the checkpoint and restarts the subscription, and `onResync` runs before the cursor moves. Use `onResync` to restore a snapshot of your projection, rebuild it from another source, or fail the subscription. The sync checkpoint identifies a position; it does not contain your application's projection. `Journal.latestCheckpoint(runId)` requires direct journal access and is not a remote snapshot API. The default hook logs the skipped range and continues, which is suitable only when losing the earlier entries is acceptable.
 
 ## Verify it worked
 
 - The subscription's first frames are the run's durable history. Example 07 commits `run.started` and `step.recorded` before the subscription opens and `run.completed` after; its summary reads `caughtUp: ["run.started", "step.recorded"]` and `followed: ["run.completed"]`.
-- Commit one more entry in the source process. The follower's stream yields it without resubscribing.
+- Commit one more entry in the source process. The follower's stream yields it without the caller opening a new stream; the client replenishes its subscription windows.
 - With an `apply` callback that fails on purpose, the next subscription from the client's cursors delivers the same entry again.
 
 ## See also

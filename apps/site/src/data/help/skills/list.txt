@@ -1,0 +1,4 @@
+smthrs skills list — List skills
+
+Usage: smthrs skills list
+Aliases: ls

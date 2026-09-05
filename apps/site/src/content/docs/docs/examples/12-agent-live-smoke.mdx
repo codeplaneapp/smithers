@@ -1,23 +1,28 @@
 ---
-title: "12 agent-live-smoke"
-description: "A live smoke test: the assembled production agent stack (the real cell loop, the real durable engine, the real AgentAction machinery) run against a real model over the network with a real API key."
+title: "Agent live smoke"
+description: "Run a model-backed action against a live OpenAI provider."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/12-agent-live-smoke.ts"
 sidebar:
   order: 12
 ---
 
 {/* Generated from examples/src/12-agent-live-smoke.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-A live smoke test: the assembled production agent stack (the real cell loop, the real durable engine, the real `AgentAction` machinery) run against a real model over the network with a real API key.
+Run a model-backed action against a live OpenAI provider.
 
-Every example before this one scripts its model deliberately, so CI runs with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says why this one exists anyway: "a smoke test that calls a provider is not a smoke test" if it doesn't. This is that smoke test, for the example composition rather than the harness's own hand-wired one.
+This exercises the agent loop, action adapter, and engine with a network request. `main` reads `OPENAI_API_KEY`; importing the module does not call the provider. The dedicated test requires both the key and `SMITHERS_LIVE_EXAMPLES=1`; a skipped result does not verify live execution. The ordinary example suite clears the key in its test environment. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`. The test allows 300 seconds for the model round trip.
 
-Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`. The test allows 300 seconds for the model round trip.
+## Run the test
 
-@since 0.1.0
+The complete program is [`examples/src/12-agent-live-smoke.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/12-agent-live-smoke.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-## Run it
+From the repository root, run this example's assertions:
 
-The program is [`examples/src/12-agent-live-smoke.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/12-agent-live-smoke.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/12-agent-live-smoke.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

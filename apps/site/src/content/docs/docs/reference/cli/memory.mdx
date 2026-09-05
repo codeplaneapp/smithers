@@ -1,54 +1,66 @@
 ---
 title: "smthrs memory"
-description: "Read and write namespaced facts in the control database"
+description: "Persistent facts, notes, recall, and conversation history in the control database."
 ---
 
-import { Code } from "@astrojs/starlight/components"
-import help from "../../../../../data/help/memory.txt?raw"
+`memory` reads and writes the same `.flows/control.db` store used by agent
+runs. It requires local access and refuses `--remote`.
 
-## Synopsis
+| Command | Purpose |
+| --- | --- |
+| `memory list [--prefix <prefix>]` | List facts in a namespace. |
+| `memory get <key>` | Read a fact including its value and metadata. |
+| `memory set <key> <value>` | Store JSON when the value parses, otherwise store the literal string. |
+| `memory rm <key>` | Delete one fact. |
+| `memory recall <query>` | Search facts and accepted, current notes. |
+| `memory notes list/get/add/status/supersede` | Inspect notes, append new ones, change review status, or supersede older notes. |
+| `memory threads list/create/show/rm` | Inspect and manage durable conversation threads. |
+| `memory messages list/add` | Page through ordered messages or append by an idempotent message ID. |
+| `memory compact <thread>` | Atomically replace selected messages with a supplied summary. |
 
-```text
-smthrs memory list [--namespace <kind:id>] [--prefix <prefix>]
-smthrs memory get <key> [--namespace <kind:id>]
-smthrs memory set <key> <value> [--namespace <kind:id>]
-smthrs memory rm <key> [--namespace <kind:id>]
+## Namespaces and facts
+
+The default namespace is `user:cli`. Select another with
+`--namespace flow:review`, `agent:<id>`, `user:<id>`, or `global:<id>`.
+`--namespace flow --id review` is also accepted. IDs must be nonempty and
+cannot contain control characters.
+
+`set` accepts `--ttl-ms` and repeatable `--tag`; `--value-json` requires valid
+JSON instead of falling back to a string. Tags use the memory API's declared
+prefixes, such as `source:cli` or `scope:project`. List commands accept
+`--limit` (default 100).
+
+## Recall and notes
+
+`recall` defaults to `--method keyword`. `--method fts` enables and queries
+SQLite FTS for the selected namespace kinds. Repeat `--bank` to query several
+banks, and use `--max-tokens` to bound results. Semantic recall remains a
+library binding requiring an explicitly configured embedding provider.
+
+`notes add <text>` accepts `--note-id`, `--status`, repeatable `--tag`, and
+repeatable `--supersedes`. Notes default to accepted. Use
+`notes status <note> pending|accepted|rejected` for the review gate, or
+`notes supersede <note> <replacement>` for an existing replacement. Recall
+excludes pending, rejected, and superseded notes.
+
+## Conversation history
+
+`threads create` accepts `--thread-id` and `--title`; `threads show <thread>`
+returns the thread and ordered messages. `messages add <thread> <text>`
+accepts `--message-id`, `--role`, and a Unix-millisecond `--at`. Reusing a
+message ID is idempotent. For pagination, supply both `--after-id` and
+`--after-at` to `messages list`.
+
+Compaction requires an explicit summary and cutoff:
+
+```sh
+smthrs memory compact review-thread --summary "Earlier discussion summary" --before 1700000000000 --keep 10 --dry-run
 ```
 
-## Description
+The cutoff is in Unix milliseconds. Remove `--dry-run` to insert the summary
+and delete eligible messages in one transaction; the newest `--keep`
+messages remain. `threads rm` deletes a thread and its messages.
 
-`memory` reads and writes namespaced facts in the project's control database, the same structured memory a flow uses across runs. Reach for it to inspect what a flow remembered, seed a fact before a run starts, or remove one afterwards. It has four subcommands: `list` lists facts in a namespace, `get` reads one fact, `set` writes one fact, and `rm` deletes one fact. It never reads or writes run history.
-
-## Arguments
-
-| Name | Type | Required | Description |
-| --- | --- | --- | --- |
-| `key` (`get`, `set`, `rm`) | string | yes | The fact's key within the namespace. |
-| `value` (`set`) | string | yes | The value to store. A value that parses as JSON is stored as JSON; anything else is stored as the string as typed. |
-
-## Flags
-
-| Flag | Type | Default | Description |
-| --- | --- | --- | --- |
-| `--namespace <kind:id>` | string | `user:cli` | The namespace to read or write: `flow:<id>`, `agent:<id>`, `user:<id>`, or `global:<id>`. Any other spelling, or an id containing control characters, exits 2. |
-| `--prefix <prefix>` (`list`) | string | none | Only facts whose key starts with this prefix. |
-
-## Output
-
-- `list` prints one entry per fact with `key`, `value`, and `updatedAtMs`.
-- `get` prints the fact's value: a string prints as typed, and a JSON value prints as JSON. A key the namespace does not hold exits 2.
-- `set` prints `{ "key": "...", "written": true }`. Writing an existing key replaces its value.
-- `rm` prints `{ "key": "...", "removed": ... }`, where `removed` reports whether the fact existed.
-
-`--json` prints the same data in compact JSON; for `get` the value is JSON-encoded, so a string prints quoted.
-
-## Help output
-
-The flag list above is curated. This is what the binary prints, captured by `apps/site/scripts/gen-cli-data.mjs`.
-
-<Code code={help} lang="text" title="smthrs memory --help" />
-
-## See also
-
-- [`smthrs gc`](/docs/reference/cli/gc/): delete old run history from the same state directory.
-- [Operate on memory](/docs/guides/memory-ops/): namespaces and fact workflows in practice.
+Use `--root` to select a project and `--json` for machine-readable results.
+Get commands return the full stored record, writes report their result, and
+missing records fail. Use the command's `--schema` for the exact contract.

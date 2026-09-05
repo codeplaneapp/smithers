@@ -121,8 +121,8 @@ shaped the pipeline.
   runtime with cwd at the workspace root, takes no `args`, declares its
   write-set in `changes`; `lint` maps `mode` to `check` (scratch-copy drift),
   `target <label> --write` applies.
-- `Markdown.CodeBlocks` extracts fenced blocks and runs `tsc --noEmit
-  --ignoreConfig --strict`. As found, it wrote the scratch files under the
+- `Markdown.CodeBlocks` extracts fenced blocks and runs explicit roots through
+  `tsc --noEmit --strict`. As found, it wrote the scratch files under the
   workspace cache directory, so a block importing `@smthrs/flow` failed with
   TS2307, and a resolved workspace source failed TS5097 on `.ts` imports.
   Fixed in `PackageExec.ts`: the scratch lives under

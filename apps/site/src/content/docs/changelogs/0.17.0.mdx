@@ -1,7 +1,12 @@
 ---
 title: "0.17.0"
 description: "0.17.0 ships Gateway v1: the Gateway's RPC schema, scope vocabulary,"
+pagefind: false
 ---
+
+:::note[Archived release]
+This page describes Smithers 0.17.0. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
 
 0.17.0 ships **Gateway v1**: the Gateway's RPC schema, scope vocabulary,
 error codes, and OpenAPI document are now a stable, separately published
@@ -96,7 +101,6 @@ import {
 import type { LaunchRunRequest } from "@smthrs/gateway/rpc";
 
 // Just the scope helpers (e.g. for an auth middleware).
-import {
   hasGatewayScope,
   type GatewayScope,
 } from "@smthrs/gateway/auth/scopes";
@@ -195,7 +199,6 @@ grants from 0.15 / 0.16 are still accepted (`admin` matches everything,
 so existing tokens keep working.
 
 ```ts
-import {
   hasGatewayScope,
   getRequiredScopeForGatewayMethod,
 } from "@smthrs/gateway";
@@ -316,7 +319,6 @@ A new workspace package backing per-provider credentials in
 `~/.smithers/accounts.json`:
 
 ```ts
-import {
   addAccount,
   listAccounts,
   getAccount,
@@ -359,7 +361,6 @@ accepts `apiKey` to opt into API billing instead of subscription auth.
 Two subscriptions can run concurrently in the same process:
 
 ```ts
-import { ClaudeCodeAgent } from "@smthrs/agents";
 
 // Subscription #1, pinned to ~/.smithers/configs/claude-work
 const claudeWork = new ClaudeCodeAgent({
@@ -482,7 +483,6 @@ interleaving, and OpenAPI execution / `$ref` cycles.
   ```ts
   import { syncZodTableSchema } from "@smthrs/db";
   import { Database } from "bun:sqlite";
-  import { z } from "zod";
 
   const Audit = z.object({
     id: z.string(),
@@ -581,13 +581,11 @@ caches:
 ```tsx
 /** @jsxImportSource smthrs */
 import { createSmithers } from "smthrs";
-import {
   ExtractPrompt,
   MarkdownPromptCache,
   rctfPromptSchema,
 } from "smthrs/components/extract-prompt";
 import { agents } from "./agents";
-import { z } from "zod";
 
 const cache = new MarkdownPromptCache();
 
@@ -676,9 +674,9 @@ log:
   define enforced ceilings such as the 10-minute per-PR wall time, 2-hour
   nightly soak wall time, reconnect latency, and RSS caps for live stream
   / subscriber fanout tests.
-- **Explicit blockers**: JJHub/runtime-dependent cases for auth persistence,
+- **Explicit blockers**: Smithers Cloud/runtime-dependent cases for auth persistence,
   browser automation, file/VCS pointer integrity, secret redaction, network
-  policy, plus the cron-driver and long-lived JJHub soak cases, are present
+  policy, plus the cron-driver and long-lived Smithers Cloud soak cases, are present
   as skipped tests with their unblockers documented in the file.
 
 Two GitHub Actions lanes run the suite:
@@ -773,7 +771,7 @@ Two GitHub Actions lanes run the suite:
 
 - **Kanban workflow ticket discovery** now walks `.smithers/tickets/`
   recursively up to depth 4, skipping hidden directories and `README.md`.
-  Subdirectories such as `smithers/`, `jjhub/`, and `gui/` surface as work
+  Subdirectories such as `smithers/`, `Smithers Cloud/`, and `gui/` surface as work
   items. Review filtering scopes match `nodeId.startsWith("${slug}:review:")`
   instead of a global `reviewer-*` field, eliminating cross-ticket review
   pollution.

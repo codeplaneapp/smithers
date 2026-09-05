@@ -1,9 +1,15 @@
 ---
 title: "0.34.0"
 description: "Smithers 0.34.0 adds live workflow supervision: steer a running agent, hijack its session, and watch the whole graph from a terminal cockpit. Plus one file-change contract across every CLI harness with live diffs in the run UI, per-run token usage, durable agent checkpoints, the Nanocodex backend, fallbackAgents subscription-pool failover, and a UI theme registry."
+pagefind: false
 ---
 
+:::note[Archived release]
+This page describes Smithers 0.34.0. Historical documentation links open the source at that release tag. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
+
 import Frame from "../../../components/Frame.astro"
+
 
 **Smithers 0.34.0 puts you in the cockpit of a running workflow.** Mirror a
 run into a [herdr](https://herdr.sh) terminal workspace and supervise it from
@@ -107,7 +113,7 @@ real unified diff. Codex, OpenCode, Cursor, and Amp report paths and kinds
 only. Each engine declares what it can do in
 `AgentCapabilityRegistry.fileChanges` (`supportsFileChanges` and
 `supportsUnifiedDiff`); the per-engine table is in the
-[agents reference](/reference/agents#file-change-parsing).
+[agents reference](https://github.com/smithersai/smithers/blob/v0.34.0/docs/reference/agents.mdx#file-change-parsing).
 
 In the node chat stream that means:
 
@@ -238,7 +244,7 @@ Entries accept per-task `agent`/`output`/`label` overrides over the
 component-level defaults, an allowlisted set of `Task` props passes through,
 and duplicate ids or a missing `agent`/`output`/`fork` fail at render time
 instead of mid-run. Details are in the
-[ForkFanOut reference](/components/fork-fan-out).
+[ForkFanOut reference](https://github.com/smithersai/smithers/blob/v0.34.0/docs/components/fork-fan-out.mdx).
 
 ## Resume and retry work again
 
@@ -394,7 +400,7 @@ inside a Bubblewrap sandbox. The v0.0.1 integration is deliberately fixed
 (one fresh `serve` worker and one stock Nanocodex turn per `generate()` call,
 no daemon or worker pool) and fails closed when the sandbox requirements are
 not met. Linux x64 only; see the
-[Nanocodex integration page](/integrations/nanocodex) for the requirements.
+[Nanocodex integration page](https://github.com/smithersai/smithers/blob/v0.34.0/docs/integrations/nanocodex.mdx) for the requirements.
 
 ## A theme registry for the UI kit
 

@@ -23,12 +23,14 @@ Nothing in the durable stores forgets on its own, so every bound on history is o
 
 ## 2. Back up the project
 
-To take a consistent copy by hand, stop the processes writing to the project, then copy both SQLite files in the same quiet window and the artifact store beside them:
+To take a consistent copy by hand, stop the processes writing to the project, then copy the entire state directory in the same quiet window. Include any SQLite WAL files; copying only the main database files can omit committed transactions:
 
 ```bash
-cp .flows/control.db .flows/engine.db /path/to/backup/
-cp -R .flows/objects /path/to/backup/objects
+mkdir -p /path/to/backup
+cp -R .flows /path/to/backup/flows-backup
 ```
+
+Keep the backup outside `.flows/`. Test a restore into a separate project before relying on it, with no other process writing to the restored state.
 
 The artifact tier has one cross-process hazard: a sweep deleting a blob the frozen database still references. `@smthrs/artifacts` fences it with `ArtifactBackupLease.withLease`, which holds a heartbeat-backed marker while a filesystem backup freezes its database and copies referenced blobs. Blobs may still be published during the backup; a sweep deletion runs under `ArtifactBackupLease.unlessActive`, which returns `None` while a live lease fences the deletion. A crashed lease becomes reclaimable once its heartbeat goes stale.
 
@@ -70,7 +72,7 @@ Run deletion does not touch the artifact tier. `@smthrs/engine-store`'s `Artifac
 ## Verify it worked
 
 - `smthrs gc --older-than 30d --dry-run` lists the runs a real pass would delete and reports empty `deleted` counts; the real pass then deletes them, oldest first, across both databases.
-- `smthrs ps` no longer lists the collected runs. Live runs, and terminal runs with a live run above or below them in the lineage, are still listed.
+- `smthrs runs list` no longer lists the collected runs. Live runs, and terminal runs with a live run above or below them in the lineage, are still listed.
 - `ArtifactGc.gc({ dryRun: true })` names the digests a real collection would sweep; with a live backup lease, `ArtifactSweep.remove` returns `false` for those digests instead of deleting them.
 
 ## See also

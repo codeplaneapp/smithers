@@ -1,23 +1,30 @@
 ---
-title: "34 poll"
-description: "Poll something until it is ready, and survive a restart in the middle of the wait."
+title: "Poll"
+description: "Resume a poll after stopping the engine during its durable timer."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/34-poll.ts"
 sidebar:
   order: 34
 ---
 
 {/* Generated from examples/src/34-poll.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Poll something until it is ready, and survive a restart in the middle of the wait.
+Resume a poll after stopping the engine during its durable timer.
 
-`Poll.make` declares a flow whose body is ONE attempt, so a poll is a lineage of durable rounds rather than a loop inside a step. That is what makes the waiting free: the round that is sleeping holds no process, and the round that wakes replays the attempt it already made instead of making it again.
+Each `Poll.make` round performs one check. The first drive parks between attempts; a fresh engine opens the same SQLite state after the deadline and continues.
 
-Each phase below builds its own engine over the same SQLite file, which is what a restart looks like from the database's point of view. Phase one runs the first attempt and parks on the durable timer between attempts. The engine is then dropped while the timer is still pending. Phase two attaches a fresh engine after the timer is due and drives the poll to a satisfied check.
+The returned check count verifies that the resumed run does not repeat the recorded first attempt.
 
-`checks` is the contract: one dispatch per attempt, across both phases. A poll that re-ran attempt one after the restart would show four.
+## Run the test
 
-## Run it
+The complete program is [`examples/src/34-poll.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/34-poll.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The program is [`examples/src/34-poll.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/34-poll.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/34-poll.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

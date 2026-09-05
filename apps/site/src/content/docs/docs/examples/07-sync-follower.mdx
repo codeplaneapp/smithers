@@ -1,6 +1,7 @@
 ---
-title: "07 sync-follower"
+title: "Sync follower"
 description: "Follow a run's journal from a second process's point of view."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/07-sync-follower.ts"
 sidebar:
   order: 7
 ---
@@ -13,9 +14,17 @@ The sync protocol is read-only. A follower opens a subscription against a scope 
 
 The wiring below is the same one the package's own suites use: a real `SyncServer` over a real SQL journal, connected to a real `SyncClient` through the in-memory socket pair from `@smthrs/sync/test/TestSocket`. Swap the socket for a network transport and the follower code is unchanged.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/07-sync-follower.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/07-sync-follower.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/07-sync-follower.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/07-sync-follower.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/07-sync-follower.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

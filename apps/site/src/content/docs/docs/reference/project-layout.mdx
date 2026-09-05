@@ -5,12 +5,15 @@ description: "The files of a Smithers project: flows/ sources, .flows/ run state
 
 import { FileTree } from "@astrojs/starlight/components"
 
-A Smithers project is its `flows/` sources plus the `.flows/` run state.
+A Smithers workspace holds target declarations and flow sources. Runtime state lives separately under `.flows/`.
 
 ## The tree
 
 <FileTree>
 
+- .smithers/
+  - WORKSPACE.ts
+- PACKAGE.ts
 - flows/
   - review/
     - flow.mdx
@@ -28,6 +31,12 @@ A Smithers project is its `flows/` sources plus the `.flows/` run state.
 
 </FileTree>
 
+## Target declarations
+
+`.smithers/WORKSPACE.ts` declares workspace-wide runtime, package-manager, and cache settings. A root `WORKSPACE.ts` is also supported. A `PACKAGE.ts` declares targets for its directory; exported target keys become labels such as `//apps/site:build`.
+
+These are source files to commit. Their presence does not make `.flows/` state part of the source tree. The [CLI reference](/docs/reference/cli/) distinguishes target execution from durable flow commands.
+
 ## flows/
 
 One directory per flow; discovery reads these rules.
@@ -36,20 +45,20 @@ One directory per flow; discovery reads these rules.
 - A flow directory holds one entry file: `flow.ts` (a module flow), `flow.mdx` (a markdown flow), or `SKILL.md`. When more than one is present, discovery uses the first in that order and warns.
 - An entry file directly under `flows/` is refused: path-named sources cannot contain a root-level entry.
 - `smthrs init <name>` scaffolds `flows/<name>/flow.mdx`; the name is one path segment of letters, digits, `-`, and `_`.
-- Ids that start with `system/` are reserved for the control plane: `smthrs plan` and `smthrs up` refuse them, and `smthrs ls` does not list them.
+- Ids that start with `system/` are reserved for the control plane: `smthrs flow plan` and `smthrs flow start` refuse them, and `smthrs flow list` does not list them.
 
 ## .flows/
 
-Everything the runtime writes lives here, and nowhere else.
+The default local runtime stores these files under `.flows/`. Workspace cache settings and flow implementations can declare other output locations.
 
 | Path | Written by | Contents |
 | --- | --- | --- |
 | `.flows/` | `smthrs init`, or the first local command | The project's state directory; its presence alone anchors root resolution. |
 | `.flows/control.db` | the control plane | The control database: runs, approvals, and memory facts. |
 | `.flows/engine.db` | the durable engine | The engine's execution database, kept separate from the control database. |
-| `.flows/logs/` | `smthrs up -d` | One log per detached run. |
+| `.flows/logs/` | `smthrs flow start --detached` | One log per detached run. |
 | `.flows/logs/<runId>.log` | a detached run | Everything the detached child wrote. The launcher opens it as `pending-<nonce>.log` and renames it onto the run id once the run row is durable. |
-| `.flows/logs/<runId>.superseded-<nonce>.log` | `smthrs up -d` | An earlier log moved aside when a relaunched run id took the canonical path. |
+| `.flows/logs/<runId>.superseded-<nonce>.log` | `smthrs flow start --detached` | An earlier log moved aside when a relaunched run id took the canonical path. |
 
 On POSIX, opening the Node control store restricts `.flows/` to `0700` and
 `control.db`, `control.db-wal`, and `control.db-shm` (when present) to `0600`,

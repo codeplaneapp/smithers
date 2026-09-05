@@ -1,21 +1,30 @@
 ---
-title: "03 crash-and-resume"
-description: "Suspend a run, drop the engine, and resume from durable state."
+title: "Crash and resume"
+description: "Suspend a run and resume it through a fresh engine over the same SQLite file."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/03-crash-and-resume.ts"
 sidebar:
   order: 3
 ---
 
 {/* Generated from examples/src/03-crash-and-resume.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Suspend a run, drop the engine, and resume from durable state.
+Suspend a run and resume it through a fresh engine over the same SQLite file.
 
-Each phase builds its own engine over the same SQLite file, which is what a process restart looks like from the database's point of view. Phase one runs until `DurableDeferred.await` finds no recorded completion, suspends, and releases ownership. Phase two attaches the same implementation, completes the deferred, and drives the run to a result.
+The first drive waits on a durable deferred and releases ownership. The second drive completes that deferred and finishes the execution.
 
-The flow is a body over one declared step, `Assess`. Its implementation is where the durable wait lives, which is what makes the counters below the replay contract: the step's implementation runs twice, and the sealed action in front of the suspension dispatches once.
+The counters identify what repeats: the `Assess` implementation enters twice, while the sealed read action before the wait executes once. This simulates an engine restart after a durable suspension; it does not kill a process mid-write.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/03-crash-and-resume.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/03-crash-and-resume.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/03-crash-and-resume.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/03-crash-and-resume.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/03-crash-and-resume.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

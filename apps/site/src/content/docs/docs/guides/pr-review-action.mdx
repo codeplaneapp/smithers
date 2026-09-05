@@ -15,7 +15,7 @@ Findings never fail the build. The review service reports; humans decide.
 
 This guide covers the review action and the separate `smithers-review` executable.
 The `review` subcommand was removed from the rc.0 CLI; see the
-[CLI migration reference](/docs/migration/1.0/#review).
+[CLI migration reference](/docs/reference/cli/).
 
 ## Before you start
 
@@ -89,7 +89,7 @@ To pay for the review's inference directly instead of using the service's metere
 
 ## 4. Run the same review from a terminal
 
-`review` is not a Smithers engine verb. The review package ships its own bin, `smithers-review`, which runs the same flow against any repository on your machine:
+The review package ships `smithers-review`, which runs its review flow against a repository. This is separate from `smthrs review`, which selects review-kind targets from `PACKAGE.ts`:
 
 ```bash
 # review the working tree of a repo, write .smithers-review/walkthrough.html

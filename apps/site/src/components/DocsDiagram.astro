@@ -1,0 +1,72 @@
+---
+/** Static, theme-aware diagrams with a text equivalent; no client runtime. */
+interface Props {
+  id: string
+  title: string
+  caption: string
+  rows: Array<Array<{ label: string; detail: string }>>
+}
+const { id, title, caption, rows } = Astro.props
+const width = 660
+const rowHeight = 112
+const height = rows.length * rowHeight - 20
+---
+
+<figure class="docs-diagram not-content">
+  <div class="diagram-scroll" tabindex="0" role="region" aria-label={title}>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby={`${id}-title ${id}-desc`}>
+      <title id={`${id}-title`}>{title}</title>
+      <desc id={`${id}-desc`}>{caption}</desc>
+      <defs>
+        <marker id={`${id}-arrow`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="currentColor" />
+        </marker>
+      </defs>
+      {rows.map((row, index) => (
+        <g>
+          {index > 0 && rows[index - 1].flatMap((_, previous) => row.map((_, next) => {
+            const from = width / rows[index - 1].length * (previous + .5)
+            const to = width / row.length * (next + .5)
+            const y = index * rowHeight
+            return <path d={`M${from},${y - 30} V${y - 18} H${to} V${y - 8}`} class="edge" marker-end={`url(#${id}-arrow)`} />
+          }))}
+          {row.map((node, column) => {
+            const cell = width / row.length
+            const x = column * cell + 8
+            return <g>
+              <rect x={x} y={index * rowHeight} width={cell - 16} height="82" rx="8" />
+              <text x={x + (cell - 16) / 2} y={index * rowHeight + 32} class="label">{node.label}</text>
+              <text x={x + (cell - 16) / 2} y={index * rowHeight + 57} class="detail">{node.detail}</text>
+            </g>
+          })}
+        </g>
+      ))}
+    </svg>
+    <ol class="mobile-steps">
+      {rows.map((row) => <li><div class="mobile-row">{row.map((node) => <div class="mobile-node"><strong>{node.label}</strong><span>{node.detail}</span></div>)}</div></li>)}
+    </ol>
+  </div>
+  <figcaption>{caption}</figcaption>
+</figure>
+
+<style>
+  .docs-diagram { margin: 1.5rem 0; }
+  .diagram-scroll { overflow-x: auto; border-radius: .5rem; }
+  .diagram-scroll:focus-visible { outline: 2px solid var(--sl-color-text-accent); outline-offset: 4px; }
+  svg { display: block; width: 100%; min-width: 520px; color: var(--sl-color-gray-2); }
+  rect { fill: var(--sl-color-bg-sidebar); stroke: var(--sl-color-gray-4); }
+  text { fill: var(--sl-color-text); text-anchor: middle; font-family: var(--sl-font); }
+  .label { font-size: 17px; font-weight: 600; }
+  .detail { font-size: 14px; fill: var(--sl-color-gray-2); }
+  .edge { fill: none; stroke: currentColor; stroke-width: 2; }
+  figcaption { color: var(--sl-color-gray-2); font-size: var(--sl-text-sm); margin-top: .75rem; }
+  .mobile-steps { display: none; }
+  @media (max-width: 40rem) {
+    svg { display: none; }
+    .mobile-steps { display: grid; gap: 1.25rem; list-style: none; padding: 0; margin: 0; }
+    .mobile-steps li + li::before { content: "↓"; display: block; text-align: center; margin: -.75rem 0 .5rem; color: var(--sl-color-gray-2); }
+    .mobile-row { display: grid; gap: .5rem; }
+    .mobile-node { display: grid; gap: .25rem; border: 1px solid var(--sl-color-gray-4); border-radius: .5rem; padding: .75rem; text-align: center; }
+    .mobile-node span { font-size: var(--sl-text-sm); color: var(--sl-color-gray-2); }
+  }
+</style>

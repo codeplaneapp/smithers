@@ -1,29 +1,30 @@
 ---
-title: "38 monitor-and-alert"
-description: "Watch a run you do not own, heal it, and page somebody when it stays wrong."
+title: "Monitor and alert"
+description: "Observe parked runs and test delayed alert delivery."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/38-monitor-and-alert.ts"
 sidebar:
   order: 38
 ---
 
 {/* Generated from examples/src/38-monitor-and-alert.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Watch a run you do not own, heal it, and page somebody when it stays wrong.
+Observe parked runs and test delayed alert delivery.
 
-This is the control plane's supervision loop end to end, over one SQLite file and one durable engine. Nothing here is a stand-in: the runs are real durable runs that really park, and everything the monitor and the alerter decide comes from the rows those runs wrote.
+One run receives its answer and finishes. Another remains parked while a monitor reads its state, records a diagnosis, and attempts opt-in recovery. The alert policy admits a notification after the unhealthy condition lasts long enough.
 
-A run parks by waiting. `WaitFor` is the system wait action: it annotates the park as `event` with a wake token, awaits a `DurableDeferred`, and the engine writes the waiting reason on the run row and releases the run. `execute` returns while the run stays parked, which is the whole point: the run outlives the process that started it.
+The example compares a positive alert delay with a zero-delay policy. A monitor cannot infer whether an unanswered wait will eventually receive a response, so automatic recovery remains an explicit choice.
 
-Two runs, because a park means two different things depending on whether the event ever comes:
+## Run the test
 
-1. `examples-answered` parks, its approval arrives, and it finishes. A park    is a wait, not a wedge. 2. `examples-supervised` parks and nobody answers it. `Control`, over the    same database, sees a run it does not own; `Monitor.run` beats over    `Control`, classifies the run from its journal, journals each beat as    `control.monitor.beat`, resumes it, and records `control.monitor.healed`    once the resume returned a receipt. `Alerts` then reads the same journal:    the unhealthy beat opens a condition, and a condition that outlives the    policy's delay is admitted to the notification queue as a coalesced    system event, sent to a sink, and recorded as delivered.
+The complete program is [`examples/src/38-monitor-and-alert.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/38-monitor-and-alert.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The monitor calls the second run `wedged-node` rather than `stalled`, and that is the honest reading: an attempt started and never settled. A monitor watching from outside cannot tell a wait that will end from one that will not, which is exactly why `autoHeal` is opt-in, why the stall takes several beats, and why the alert takes minutes in production.
+From the repository root, run this example's assertions:
 
-The alert delay is a parameter so this example can show both sides of it without waiting: a policy with a real delay stays quiet, and the same policy with a zero delay fires. A production policy uses minutes.
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/38-monitor-and-alert.test.ts
+```
 
-## Run it
-
-The program is [`examples/src/38-monitor-and-alert.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/38-monitor-and-alert.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

@@ -1,7 +1,12 @@
 ---
 title: "0.16.0"
 description: "0.16.0 is a rebase-the-whole-codebase release. The runtime has been migrated"
+pagefind: false
 ---
+
+:::note[Archived release]
+This page describes Smithers 0.16.0. Historical documentation links open the source at that release tag. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
 
 0.16.0 is a rebase-the-whole-codebase release. The runtime has been migrated
 from TypeScript to plain JavaScript with type-only `.ts` stubs, the package
@@ -32,7 +37,7 @@ lands alongside a derived `RunState` model for richer run observability.
     `bash`, `defineTool`, and `getDefinedToolMetadata`.
   - Python SDK, examples, and integration code: smithers is TypeScript/JS only
     now.
-  - `jjhub` workflows, the IDE / GitHub bot / Pi plugin integrations docs, and
+  - `cloud` workflows, the IDE / GitHub bot / Pi plugin integrations docs, and
     the Effect-ts integration doc page.
 
 - **Tool context is no longer supplied by a standalone tools package.** Custom
@@ -132,7 +137,7 @@ normalized state, block reasons, unhealthy reasons, and a heartbeat-staleness
 check (`RUN_STATE_HEARTBEAT_STALE_MS`). The Gateway, CLI, and DevTools all
 consume the same derived state, so a run looks the same from every surface.
 
-See [the RunState runtime doc](/runtime/run-state) for the full shape.
+See [the RunState runtime doc](https://github.com/smithersai/smithers/blob/v0.16.0/docs/runtime/run-state.mdx) for the full shape.
 
 ---
 
@@ -214,7 +219,7 @@ llms-full.txt has been reduced from 250k tokens to 66k tokens making it viable t
 - Aggressive trim across the integrations surface; the IDE, GitHub bot, Pi
   extension, Pi plugin, and Effect-ts integration pages are gone.
 - `bunx` invocation normalized across examples, design docs, and changelogs.
-- Tickets restructured into `gui`, `jjhub`, and `smithers` directories.
+- Tickets restructured into `gui`, `cloud`, and `smithers` directories.
 - DevTools live-run UI spec and tickets added under `docs/tickets`.
 - `docs.json` nav restructured; redirects added for merged pages.
 - `llms-*` artifacts regenerated against the new MDX surface.

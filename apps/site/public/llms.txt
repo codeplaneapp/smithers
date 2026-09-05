@@ -1,17 +1,18 @@
 # Smithers
 
 
-> Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history. The CLI binary is `smthrs` (npm `@smthrs/cli`, dist-tag `@next`). Node.js 22.19.0 or later.
+> Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
 
 
 ## Start here
 
+- [Smithers docs](https://smithers.sh/docs/): Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
 - [Installation](https://smithers.sh/docs/installation/): Install the Smithers CLI or library, keep Effect pinned, and verify the install.
-- [Quickstart](https://smithers.sh/docs/quickstart/): Install the Smithers CLI, let it suggest how it can help your project, and run what it writes.
-- [Smithers docs](https://smithers.sh/docs/): Smithers is a durable workflow framework for fast, practical agentic execution over TypeScript workflows.
+- [Quickstart](https://smithers.sh/docs/quickstart/): Install the CLI, scaffold a flow, choose its model, and run it in your project.
 
 ## Tutorials
 
+- [Run a target and hit the cache](https://smithers.sh/docs/tutorials/first-target/): Declare a file input and a test target, run it twice, then change the input to see the target execute again.
 - [Build your first durable flow](https://smithers.sh/docs/tutorials/first-flow/): Declare an action and a flow, attach an implementation, and run the flow in memory and durably over SQLite.
 - [Crash and resume a run](https://smithers.sh/docs/tutorials/crash-and-resume/): Suspend a durable run at a wait, drop the engine, and resume from durable state without re-executing recorded steps.
 - [Retry a flaky action](https://smithers.sh/docs/tutorials/retry-policy/): Declare a retry policy, inspect its backoff ladder, and retry an action that fails twice before it succeeds.
@@ -23,17 +24,20 @@
 
 ## How-to guides
 
-- [Write a markdown flow](https://smithers.sh/docs/guides/markdown-flows/): Scaffold a flow.mdx with smthrs init, write its frontmatter and prose instructions, and run it with smthrs up.
-- [Write a module flow](https://smithers.sh/docs/guides/module-flows/): Define a typed flow in TypeScript with Action.make and Flow.make, attach implementations as layers, and run it on the in-memory engine.
+- [Guides](https://smithers.sh/docs/guides/): Choose a task: author a flow, run it, connect an agent, or operate persistent runs.
+- [Run selected and affected targets](https://smithers.sh/docs/guides/build-targets/): Choose target kinds and labels, preview work, and run only the targets affected by a change.
+- [Write a markdown flow](https://smithers.sh/docs/guides/markdown-flows/): Scaffold a flow.mdx with smthrs init, write its frontmatter and prose instructions, and run it with smthrs flow start.
+- [Share target results between machines](https://smithers.sh/docs/guides/remote-cache/): Configure a remote target cache, separate read and write credentials, and verify reuse from a second checkout.
+- [Write a module flow](https://smithers.sh/docs/guides/module-flows/): Define typed actions and a flow in TypeScript, provide their implementations, and execute the program.
 - [Organize flows in a project](https://smithers.sh/docs/guides/flow-discovery/): Lay out flows/ sources and .flows/ state, control how flow ids are derived, and resolve which project root a command acts on.
-- [Plan, approve, and run a flow](https://smithers.sh/docs/guides/plan-approve-run/): Walk a flow through admission by hand: render the approval payload, grant it a scope, launch it, and resume parked runs.
+- [Plan, approve, and run a flow](https://smithers.sh/docs/guides/plan-approve-run/): Inspect a flow's plan, approve its exact payload, launch it, and resume a run waiting for approval.
 - [Cancel, signal, and steer a run](https://smithers.sh/docs/guides/steering/): Pick the right verb to intervene in a live run: cancel to stop it, signal to complete a named wait, steer to message the agent.
-- [Inspect runs](https://smithers.sh/docs/guides/inspecting-runs/): Read a run from listing to single node output with ps, status, logs, and output, and hand the same account to an agent.
+- [Inspect runs](https://smithers.sh/docs/guides/inspecting-runs/): Find a run, read its diagnosis, follow events, and retrieve recorded outputs with the runs commands.
 - [Configure model seats and providers](https://smithers.sh/docs/guides/model-seats/): Set the provider keys a flow's model seat resolves from, choose how OpenAI seats authenticate, and change the seat a flow runs on.
 - [Set quotas, budgets, and corrections for agents](https://smithers.sh/docs/guides/agent-policies/): Bound what an agent run spends, park runs through provider quota windows, and give schema-enforced steps a correction budget.
 - [Give a flow tools](https://smithers.sh/docs/guides/tools/): Call the std tool library from a module flow, attach external MCP servers with --mcp-config or SMITHERS_MCP_CONFIG, and grant the capabilities the tools declare.
-- [Drive Smithers from your agent](https://smithers.sh/docs/guides/mcp-setup/): Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, watch runs, and inspect approvals.
-- [Declare and grant capabilities](https://smithers.sh/docs/guides/capabilities/): Declare the host authority a flow needs in its frontmatter, grant it with smthrs approve --scope, and read the typed denial when a run exceeds its grant.
+- [Drive Smithers from your agent](https://smithers.sh/docs/guides/mcp-setup/): Connect an MCP client to Smithers, discover its tools, and verify access to the intended project.
+- [Declare and grant capabilities](https://smithers.sh/docs/guides/capabilities/): Declare the host authority a flow needs in its frontmatter, grant it with smthrs approvals approve --scope, and read the typed denial when a run exceeds its grant.
 - [Run work in a sandbox](https://smithers.sh/docs/guides/sandboxes/): Compose a sandbox provider to place one action's host services, or a whole child flow, on a provisioned machine.
 - [Wait durably: sleep, poll, deferreds, queues](https://smithers.sh/docs/guides/durable-waits/): Pick the durable wait primitive that matches what you are waiting for, and compose it so the wait survives a process restart.
 - [Compose child flows](https://smithers.sh/docs/guides/child-flows/): Split work across durable runs with .child, join the results, cancel a parent and reach its children, and detach children that outlive the parent.
@@ -44,22 +48,23 @@
 - [Export traces, logs, and metrics](https://smithers.sh/docs/guides/observability/): Attach the OTLP exporter to a durable run, forward logs into the journal, and read the same run three ways.
 - [Back up, gc, and retain run state](https://smithers.sh/docs/guides/retention/): Back up the .flows directory safely, delete terminal runs with smthrs gc, and sweep unreferenced artifacts.
 - [Operate the memory store](https://smithers.sh/docs/guides/memory-ops/): Inspect, seed, and prune namespaced facts with the smthrs memory command, and run memory maintenance.
-- [Run flows in CI](https://smithers.sh/docs/guides/ci/): Run Smithers flows from a CI pipeline with the --json output contract, the exit-code vocabulary, provider keys as secrets, and a GitHub Actions workflow.
+- [Run flows in CI](https://smithers.sh/docs/guides/ci/): Launch a flow from CI, handle its exit status, and keep evidence when the run fails or waits.
 - [Test your flows](https://smithers.sh/docs/guides/testing-flows/): Run flows on the in-memory engine under vitest, assert on recorded results and journal entries, and replay recorded model responses instead of calling a provider.
 - [Review pull requests with the Smithers action](https://smithers.sh/docs/guides/pr-review-action/): Add the Smithers review GitHub Action to a repository, trigger agent reviews with a PR comment, and run the same review from a terminal.
 
 ## Concepts
 
-- [Durable execution](https://smithers.sh/docs/concepts/durable-execution/): The journal is the one mechanism that lets a flow survive the process running it, and every engine feature is built on it.
-- [Flows, actions, and plans](https://smithers.sh/docs/concepts/flows-actions-plans/): Actions are the atoms, flows are the composites, and the plan is the keyed graph a body compiles to before anything runs.
-- [Content addressing](https://smithers.sh/docs/concepts/content-addressing/): Step keys combine canonical content with the declaration identity needed to prevent collisions, while caller-owned keys can opt into rename stability.
-- [Execution IDs and ownership](https://smithers.sh/docs/concepts/ownership/): The caller names the run, a fence follows its recorded owner, and a zombie owner stops itself at the write.
-- [Retries and interruption](https://smithers.sh/docs/concepts/retries/): A retry policy is a plain value over a persisted attempt count, cancellation propagates at once, and only infrastructure interrupts are retried.
+- [How target caching works](https://smithers.sh/docs/concepts/target-caching/): What target keys include, how output restoration works, and how to diagnose unexpected hits or misses.
+- [Durable execution](https://smithers.sh/docs/concepts/durable-execution/): What a run records, what resume reuses, and which work can execute again after a crash.
+- [Flows, actions, and plans](https://smithers.sh/docs/concepts/flows-actions-plans/): How action declarations, flow bodies, and approved plans fit together.
+- [Content addressing](https://smithers.sh/docs/concepts/content-addressing/): How declared inputs determine step keys, which changes invalidate results, and where the identity contract stops.
+- [Execution IDs and ownership](https://smithers.sh/docs/concepts/ownership/): Choose which invocations share a run, and understand how the engine prevents stale owners from writing it.
+- [Retries and interruption](https://smithers.sh/docs/concepts/retries/): Choose between retrying a typed action failure, recovering an infrastructure interruption, and cancelling a run.
 - [Capabilities and the host kernel](https://smithers.sh/docs/concepts/kernel/): A closed host surface, a closed capability vocabulary over it, and a grant check on every call, so no flow reaches the host ambiently.
 - [Time travel](https://smithers.sh/docs/concepts/time-travel/): Replay, fork, rewind, compensation, and recovery as protocols over the journal a run wrote.
-- [Sync and read-only followers](https://smithers.sh/docs/concepts/sync/): Read-only journal replication for followers that project, inspect, and build read models without ever holding authority.
+- [Sync and read-only followers](https://smithers.sh/docs/concepts/sync/): Replicate committed journal entries into a dashboard or audit view using durable cursors.
 - [The agent runtime](https://smithers.sh/docs/concepts/agent-runtime/): How @smthrs/agent runs a model-driven cell loop as durable work on the engine.
-- [Memory](https://smithers.sh/docs/concepts/memory/): Durable cross-run facts, history, and notes, with replaceable recall strategies and scheduled maintenance.
+- [Memory](https://smithers.sh/docs/concepts/memory/): Retain facts, conversation history, and reviewed notes across runs, then recall them under an explicit policy.
 - [Why Effect](https://smithers.sh/docs/concepts/why-effect/): Why flows are Effect programs, why implementations attach as layers, and why the Effect version is pinned.
 
 ## Reference
@@ -67,13 +72,19 @@
 - [Library API](https://smithers.sh/docs/reference/api/): One page per @smthrs package: what it exports, with the types and defaults stitched from the api.md colocated with its source.
 - [Targets](https://smithers.sh/docs/reference/targets/): One page per @smthrs/targets rule: attributes, verbs, cache behavior, and channels from Target.make.
 - [RC support matrix](https://smithers.sh/docs/reference/support-matrix/): Runtime, platform, storage, hosting, and evidence limits for Smithers 1.0.0-rc.0.
+- [smthrs flow](https://smithers.sh/docs/reference/cli/flow/): Discover flows, inspect plans, and launch durable executions.
+- [smthrs runs](https://smithers.sh/docs/reference/cli/runs/): Inspect, resume, cancel, and read historical frames of durable executions.
+- [smthrs approvals](https://smithers.sh/docs/reference/cli/approvals/): List in-run approval requests and submit decisions against exact payloads.
 - [@smthrs/flow](https://smithers.sh/docs/reference/api/flow/): What @smthrs/flow exports: the flow, action, runtime-port, and durable-primitive namespaces, with types and defaults from source.
-- [@smthrs/engine](https://smithers.sh/docs/reference/api/engine/): What @smthrs/engine exports: FlowEngine, FlowProxy, and FlowProxyServer, with types and defaults from source.
+- [Export reference](https://smithers.sh/docs/reference/api/engine/): Every export of @smthrs/engine one at a time: FlowEngine, FlowProxy, and FlowProxyServer, each with its full type, its defaults, and its field tables.
+- [Smithers API cheat sheet](https://smithers.sh/docs/reference/api/cheat-sheet/): The complete top-level Smithers API used in WORKSPACE.ts and PACKAGE.ts, shown through examples.
 - [@smthrs/targets](https://smithers.sh/docs/reference/api/targets/): What @smthrs/targets exports: the Smithers namespace of workspace declarations, catalog rules, macros, actions, and errors, with types from source.
 - [Agent.Diff](https://smithers.sh/docs/reference/targets/agent-diff/): Declares an agent that produces a bounded, gate-checked candidate diff inside a declared write-set, executed by the run verb.
 - [Filegroup](https://smithers.sh/docs/reference/targets/filegroup/): Names a set of files under one label so other targets depend on the set instead of repeating its globs.
 - [@smthrs/agent](https://smithers.sh/docs/reference/api/agent/): The Smithers agent: the production agent loop composed on the durable engine, plus the two adapters that run it, AgentSession for control-plane runs and AgentAction for typed workflow steps
 - [@smthrs/artifacts](https://smithers.sh/docs/reference/api/artifacts/): Effect service for the Smithers content-addressed artifact store, local and remote
+- [@smthrs/build](https://smithers.sh/docs/reference/api/build/): Bazel-style TypeScript workflow orchestration with explicit pnpm installation
+- [@smthrs/build-cli](https://smithers.sh/docs/reference/api/build-cli/): Executes PACKAGE.ts target graphs with content-addressed caching
 - [@smthrs/canonical](https://smithers.sh/docs/reference/api/canonical/): RFC 8785 canonical JSON as an Effect Schema
 - [@smthrs/capability](https://smithers.sh/docs/reference/api/capability/): Capability values and permission failures: the leaf vocabulary of the Smithers permission kernel
 - [@smthrs/chain](https://smithers.sh/docs/reference/api/chain/): The Agent Chain spine: an append-only journal, keyed replayable calls, and the trampoline that runs model-authored flow scripts
@@ -117,13 +128,13 @@
 - [@smthrs/testing](https://smithers.sh/docs/reference/api/testing/): Testing and conformance library for flows
 - [@smthrs/time-travel](https://smithers.sh/docs/reference/api/time-travel/): Durable replay, fork, and rewind primitives for flows
 - [@smthrs/triggers](https://smithers.sh/docs/reference/api/triggers/): Durable cron triggers and channel contracts for flows
-- [Environment variables](https://smithers.sh/docs/reference/environment-variables/): The closed set of environment variables the smthrs CLI reads, the two the engine sets, and the provider keys.
+- [Environment variables](https://smithers.sh/docs/reference/environment-variables/): Control-plane connection settings, target-cache credentials, presentation settings, and provider keys.
 - [Exit codes and error codes](https://smithers.sh/docs/reference/errors/): The process exit codes of the smthrs CLI and every stable structured refusal code the named packages raise.
 - [flow.mdx frontmatter](https://smithers.sh/docs/reference/flow-mdx/): The YAML frontmatter keys a markdown flow accepts, and how the body below them maps to agent instructions.
 - [Glossary](https://smithers.sh/docs/reference/glossary/): The Smithers vocabulary in one sentence per term, with a link to the concept page that develops each one.
 - [HTTP and RPC endpoints](https://smithers.sh/docs/reference/http-api/): The routes smthrs serve mounts, their protocols, their authentication rules, and the RPC groups each one serves.
 - [llms.txt](https://smithers.sh/docs/reference/llms-txt/): Agent-facing entry points: the curated llms.txt index and the full-prose llms-full.txt, regenerated from the docs tree.
-- [MCP tools](https://smithers.sh/docs/reference/mcp-tools/): The tools smthrs --mcp serves over stdio: eleven supported control tools, ten named-but-unsupported tools, and the raw CLI directory surface.
+- [MCP tools](https://smithers.sh/docs/reference/mcp-tools/): Discover and call the Smithers command tree through its stdio MCP server.
 - [Project layout](https://smithers.sh/docs/reference/project-layout/): The files of a Smithers project: flows/ sources, .flows/ run state, and the root resolution rules.
 - [smthrs approve](https://smithers.sh/docs/reference/cli/approve/): Approve the complete serialized approval payload
 - [smthrs bug](https://smithers.sh/docs/reference/cli/bug/): Report a bug with a run digest attached
@@ -133,31 +144,32 @@
 - [smthrs doctor](https://smithers.sh/docs/reference/cli/doctor/): Report registry, database, runtime, and provider readiness
 - [smthrs down](https://smithers.sh/docs/reference/cli/down/): Cancel every non-terminal run
 - [smthrs gc](https://smithers.sh/docs/reference/cli/gc/): Delete terminal runs older than a threshold, with the rows they own
-- [smthrs init](https://smithers.sh/docs/reference/cli/init/): Scaffold flows/<name>/flow.mdx and ignore .flows/
+- [smthrs init](https://smithers.sh/docs/reference/cli/init/): Initialize target declarations and a starter durable flow while preserving existing files.
 - [smthrs logs](https://smithers.sh/docs/reference/cli/logs/): Read run events; --follow streams future events
 - [smthrs ls](https://smithers.sh/docs/reference/cli/ls/): List the flows discovered under this project
-- [smthrs mcp](https://smithers.sh/docs/reference/cli/mcp/): Wire the Smithers MCP server into an agent
-- [smthrs memory](https://smithers.sh/docs/reference/cli/memory/): Read and write namespaced facts in the control database
+- [smthrs mcp](https://smithers.sh/docs/reference/cli/mcp/): Register the generated Smithers command surface with an MCP client.
+- [smthrs memory](https://smithers.sh/docs/reference/cli/memory/): Persistent facts, notes, recall, and conversation history in the control database.
 - [smthrs migrate](https://smithers.sh/docs/reference/cli/migrate/): Convert a Smithers 0.x project to the 1.0 authoring model
 - [smthrs output](https://smithers.sh/docs/reference/cli/output/): Print one registered node output
 - [smthrs plan](https://smithers.sh/docs/reference/cli/plan/): Render a flow plan and its complete approval payload
 - [smthrs ps](https://smithers.sh/docs/reference/cli/ps/): List durable runs
-- [smthrs run](https://smithers.sh/docs/reference/cli/run/): Run an approved plan payload, or resume a parked run
-- [smthrs serve](https://smithers.sh/docs/reference/cli/serve/): Host the control server for this project
+- [smthrs run](https://smithers.sh/docs/reference/cli/run/): Execute run-kind targets from the workspace graph.
+- [smthrs serve](https://smithers.sh/docs/reference/cli/serve/): Host the control server and durable trigger scheduler for this project.
 - [smthrs signal](https://smithers.sh/docs/reference/cli/signal/): Deliver a durable JSON signal to a run
 - [smthrs status](https://smithers.sh/docs/reference/cli/status/): Show the diagnosis card for one run, or the run listing
 - [smthrs steer](https://smithers.sh/docs/reference/cli/steer/): Send a durable, attributed steering message to a run
 - [smthrs suggest](https://smithers.sh/docs/reference/cli/suggest/): Read the project, stream the ways Smithers can help, and implement the one you pick
 - [smthrs up](https://smithers.sh/docs/reference/cli/up/): Plan, approve, and run one flow; -d launches it detached
 - [smthrs update](https://smithers.sh/docs/reference/cli/update/): Check npm for a newer @smthrs/cli
-- [The smthrs command](https://smithers.sh/docs/reference/cli/): Global flags, verbs, aliases, and exit codes of the smthrs command line.
+- [Subpackages](https://smithers.sh/docs/reference/subpackages/): Smithers ships as many small packages rather than one. What each one is, a minimal example of using it, and where its documentation lives.
+- [The smthrs command](https://smithers.sh/docs/reference/cli/): Target execution, durable flows, run control, and operator commands in one CLI.
 
 ## Troubleshooting
 
 - [Troubleshooting](https://smithers.sh/docs/troubleshooting/): Find your symptom verbatim; each entry names the cause, the fix, and how to verify the fix.
-- [A run is stuck](https://smithers.sh/docs/troubleshooting/stuck-run/): Diagnose a run that stops moving: a dead owner, or a park nobody understands.
-- [doctor reports a provider problem](https://smithers.sh/docs/troubleshooting/doctor-provider/): Fix provider credentials that the smthrs doctor providers check warns about.
-- [Exit code 3: waiting-approval](https://smithers.sh/docs/troubleshooting/waiting-approval/): A run parked on an approval exits 3 by design; approve the payload, then resume.
+- [A run is stuck](https://smithers.sh/docs/troubleshooting/stuck-run/): Distinguish a missing executor, a dead owner, and a durable wait before trying to resume a run.
+- [Exit code 3: waiting-approval](https://smithers.sh/docs/troubleshooting/waiting-approval/): Find the pending request, approve its exact payload, and resume the existing run.
+- [Fix provider readiness](https://smithers.sh/docs/troubleshooting/doctor-provider/): Resolve missing credentials and model-seat mismatches before starting an agent flow.
 - [unsupported_database](https://smithers.sh/docs/troubleshooting/unsupported-database/): The CLI refuses database backends other than local SQLite in 1.0.0-rc.0.
 
 ## Migration
@@ -167,43 +179,43 @@
 
 ## Optional
 
-- [01 define-and-run](https://smithers.sh/docs/examples/01-define-and-run/): Define a typed flow and run it on the in-memory engine.
-- [Examples](https://smithers.sh/docs/examples/): Tested, runnable programs in examples/src, numbered in reading order.
-- [02 run-durably](https://smithers.sh/docs/examples/02-run-durably/): Run a flow on the durable engine and read the journal it wrote.
-- [03 crash-and-resume](https://smithers.sh/docs/examples/03-crash-and-resume/): Suspend a run, drop the engine, and resume from durable state.
-- [04 retry-policy](https://smithers.sh/docs/examples/04-retry-policy/): Retry a flaky action, and read the policy that decides when to stop.
-- [05 time-travel-fork](https://smithers.sh/docs/examples/05-time-travel-fork/): Fork a finished run at a journal frame and drive the copy.
-- [06 time-travel-rewind](https://smithers.sh/docs/examples/06-time-travel-rewind/): Rewind an ordinary engine run to an earlier frame, and re-derive a view.
-- [07 sync-follower](https://smithers.sh/docs/examples/07-sync-follower/): Follow a run's journal from a second process's point of view.
-- [08 host-adapters](https://smithers.sh/docs/examples/08-host-adapters/): Run the same host program against two adapters.
-- [09 browser-use](https://smithers.sh/docs/examples/09-browser-use/): Use the library from a browser bundle.
-- [10 telemetry-export](https://smithers.sh/docs/examples/10-telemetry-export/): Add the one telemetry layer to a durable run and read the granular trace data back three ways.
-- [11 agent-step](https://smithers.sh/docs/examples/11-agent-step/): A model-backed step with a typed output schema, chained into another one.
-- [12 agent-live-smoke](https://smithers.sh/docs/examples/12-agent-live-smoke/): A live smoke test: the assembled production agent stack (the real cell loop, the real durable engine, the real AgentAction machinery) run against a real model over the network with a real API key.
-- [13 agent-live-smoke-local](https://smithers.sh/docs/examples/13-agent-live-smoke-local/): A live smoke test against a fully local model: the same assembled production agent stack as liveOpenAiSmoke (see 12-agent-live-smoke.ts), run against Ollama over Route.openaiChatCompatible instead of a paid provider.
-- [14 agent-live-smoke-gemini](https://smithers.sh/docs/examples/14-agent-live-smoke-gemini/): A live smoke test against Gemini's OpenAI-compatible endpoint: the same assembled production agent stack as liveLocalSmoke (see 13-agent-live-smoke-local.ts), run against a real hosted provider over Route.openaiChatCompatible instead of a fully local one.
-- [15 model-layer-smoke](https://smithers.sh/docs/examples/15-model-layer-smoke/): A live smoke test of packages/smithers/agent/model itself: Route → Model.stream, with no AgentAction/Interpreter cell-REPL convention layered on top.
-- [16 fan-out-fan-in](https://smithers.sh/docs/examples/16-fan-out-fan-in/): Fan out over a fixed set of checks, two at a time, urgent ones first, then join every verdict into one report.
-- [17 review-loop](https://smithers.sh/docs/examples/17-review-loop/): Draft, review, revise, and stop, either when the reviewer approves or when the round budget runs out.
-- [18 approval-and-signal](https://smithers.sh/docs/examples/18-approval-and-signal/): Three gates between asking for work and the work finishing: a plan approval, an in-run approval, and a signal that ends a durable wait.
-- [19 cancel-and-child-cleanup](https://smithers.sh/docs/examples/19-cancel-and-child-cleanup/): Cancel a run, and watch the cancellation reach everything the run was holding: its linked child, and the operating-system process its step started.
-- [20 child-flows](https://smithers.sh/docs/examples/20-child-flows/): Run two flows as real children of a third, join their results, and observe that a re-driven parent does not run them again.
-- [21 cache-and-compensation](https://smithers.sh/docs/examples/21-cache-and-compensation/): Declare how long a recorded result stays good, and what to undo when a step that already changed the world fails.
-- [22 mcp-server](https://smithers.sh/docs/examples/22-mcp-server/): The MCP server 22-mcp-tools.ts connects to.
-- [22 mcp-tools](https://smithers.sh/docs/examples/22-mcp-tools/): Give a model tools that live in somebody else's process.
-- [24 control-plane-and-gateway](https://smithers.sh/docs/examples/24-control-plane-and-gateway/): Drive a run over the wire: plan, approve, run, and watch a flow the host discovered on disk, through an HTTP and WebSocket control server on loopback.
-- [25 agent-tools-in-sandbox](https://smithers.sh/docs/examples/25-agent-tools-in-sandbox/): Give a model-backed step real tools, and run the code it writes inside a sandbox.
-- [26 memory-recall](https://smithers.sh/docs/examples/26-memory-recall/): Write facts one run learned, recall them in a later run, and let one policy decide which bank the whole flow tree reads and writes.
-- [30 failure-control](https://smithers.sh/docs/examples/30-failure-control/): Failure control: what runs, what unwinds, and what the plan shows first.
-- [31 bounded-loops](https://smithers.sh/docs/examples/31-bounded-loops/): Bounded loops: repair a config until it is clean, then tune a summary.
-- [32 intervene](https://smithers.sh/docs/examples/32-intervene/): Intervene on a real workspace: read a file, propose an edit, gate the write behind an approval, and report what happened.
-- [33 delegation-trellis](https://smithers.sh/docs/examples/33-delegation-trellis/): Run a plan a model authored, durably, one trampoline round per plan.
-- [34 human-task](https://smithers.sh/docs/examples/34-human-task/): Ask a person, refuse the answer, restart the process, and ask again.
-- [34 poll](https://smithers.sh/docs/examples/34-poll/): Poll something until it is ready, and survive a restart in the middle of the wait.
-- [35 remote-cache](https://smithers.sh/docs/examples/35-remote-cache/): Share step results between two engines through a real HTTP action cache.
-- [36 detached-children](https://smithers.sh/docs/examples/36-detached-children/): Spawn a child that outlives its parent, then collect it after a restart.
-- [37 host-containment](https://smithers.sh/docs/examples/37-host-containment/): Kill a host, and watch the next one clean up after it.
-- [38 monitor-and-alert](https://smithers.sh/docs/examples/38-monitor-and-alert/): Watch a run you do not own, heal it, and page somebody when it stays wrong.
-- [39 agent-policies](https://smithers.sh/docs/examples/39-agent-policies/): One model-backed step under the three agent-runtime policies.
-- [40 sandbox-placement](https://smithers.sh/docs/examples/40-sandbox-placement/): Keep the durable engine here, and place one action body somewhere else.
-- [41 sandboxed-flow](https://smithers.sh/docs/examples/41-sandboxed-flow/): Run a child flow's own code inside a provisioned machine, as one durable action of a parent flow.
+- [Define and run](https://smithers.sh/docs/examples/01-define-and-run/): Define a typed flow and run it on the in-memory engine.
+- [Examples](https://smithers.sh/docs/examples/): Tested, runnable programs in examples/src, grouped by task.
+- [Run durably](https://smithers.sh/docs/examples/02-run-durably/): Run a flow on the durable engine and read its journal.
+- [Crash and resume](https://smithers.sh/docs/examples/03-crash-and-resume/): Suspend a run and resume it through a fresh engine over the same SQLite file.
+- [Retry policy](https://smithers.sh/docs/examples/04-retry-policy/): Inspect a retry policy and retry an action that fails before succeeding.
+- [Time travel fork](https://smithers.sh/docs/examples/05-time-travel-fork/): Fork a finished run at a journal frame and drive the child.
+- [Time travel rewind](https://smithers.sh/docs/examples/06-time-travel-rewind/): Inspect a run at a frame, then rewind its persistent state.
+- [Sync follower](https://smithers.sh/docs/examples/07-sync-follower/): Follow a run's journal from a second process's point of view.
+- [Host adapters](https://smithers.sh/docs/examples/08-host-adapters/): Run the same host program against two adapters.
+- [Browser use](https://smithers.sh/docs/examples/09-browser-use/): Use the library from a browser bundle.
+- [Telemetry export](https://smithers.sh/docs/examples/10-telemetry-export/): Add the one telemetry layer to a durable run and read the granular trace data back three ways.
+- [Agent step](https://smithers.sh/docs/examples/11-agent-step/): Pass typed output from a research action into a writing action.
+- [Agent live smoke](https://smithers.sh/docs/examples/12-agent-live-smoke/): Run a model-backed action against a live OpenAI provider.
+- [Agent live smoke local](https://smithers.sh/docs/examples/13-agent-live-smoke-local/): Run a model-backed action against a local Ollama endpoint.
+- [Agent live smoke gemini](https://smithers.sh/docs/examples/14-agent-live-smoke-gemini/): Run a model-backed action against Gemini's OpenAI-compatible endpoint.
+- [Model layer smoke](https://smithers.sh/docs/examples/15-model-layer-smoke/): Stream a response directly through the model package.
+- [Fan out fan in](https://smithers.sh/docs/examples/16-fan-out-fan-in/): Run checks in batches of two and join their verdicts into a report.
+- [Review loop](https://smithers.sh/docs/examples/17-review-loop/): Draft, review, and revise until approval or the round limit.
+- [Approval and signal](https://smithers.sh/docs/examples/18-approval-and-signal/): Compare plan approval, an in-run approval, and a signal wait.
+- [Cancel and child cleanup](https://smithers.sh/docs/examples/19-cancel-and-child-cleanup/): Cancel a run and observe attached child and process cleanup.
+- [Child flows](https://smithers.sh/docs/examples/20-child-flows/): Run two child flows, join their results, and resume the parent without duplicating the children.
+- [Cache and compensation](https://smithers.sh/docs/examples/21-cache-and-compensation/): Apply a cache lifetime and restore workspace state before retrying a compensable action.
+- [Mcp server](https://smithers.sh/docs/examples/22-mcp-server/): The MCP server 22-mcp-tools.ts connects to.
+- [Mcp tools](https://smithers.sh/docs/examples/22-mcp-tools/): Give an agent tools supplied by a separate MCP server process.
+- [Control plane and gateway](https://smithers.sh/docs/examples/24-control-plane-and-gateway/): Plan, approve, launch, and watch a flow through a loopback control server.
+- [Agent tools in sandbox](https://smithers.sh/docs/examples/25-agent-tools-in-sandbox/): Run a scripted agent with filesystem tools inside a bounded QuickJS cell loop.
+- [Memory recall](https://smithers.sh/docs/examples/26-memory-recall/): Store facts in one run and recall them in a later execution.
+- [Failure control](https://smithers.sh/docs/examples/30-failure-control/): Failure control: what runs, what unwinds, and what the plan shows first.
+- [Bounded loops](https://smithers.sh/docs/examples/31-bounded-loops/): Repair a configuration and refine a summary with bounded loop patterns.
+- [Intervene](https://smithers.sh/docs/examples/32-intervene/): Intervene on a real workspace: read a file, propose an edit, gate the write behind an approval, and report what happened.
+- [Delegation trellis](https://smithers.sh/docs/examples/33-delegation-trellis/): Execute a model-authored plan across durable flow rounds.
+- [Human task](https://smithers.sh/docs/examples/34-human-task/): Reject an invalid human answer and ask again after an engine restart.
+- [Poll](https://smithers.sh/docs/examples/34-poll/): Resume a poll after stopping the engine during its durable timer.
+- [Remote cache](https://smithers.sh/docs/examples/35-remote-cache/): Share a sealed step result between engines with separate databases.
+- [Detached children](https://smithers.sh/docs/examples/36-detached-children/): Let a child outlive its parent and collect its output after a restart.
+- [Host containment](https://smithers.sh/docs/examples/37-host-containment/): Recover process cleanup after a host is killed with SIGKILL.
+- [Monitor and alert](https://smithers.sh/docs/examples/38-monitor-and-alert/): Observe parked runs and test delayed alert delivery.
+- [Agent policies](https://smithers.sh/docs/examples/39-agent-policies/): Resume a model-backed action after a rate limit and an invalid structured answer.
+- [Sandbox placement](https://smithers.sh/docs/examples/40-sandbox-placement/): Place an action's host operations in a provisioned session.
+- [Sandboxed flow](https://smithers.sh/docs/examples/41-sandboxed-flow/): Run a child flow's code inside a provisioned environment as one parent action.

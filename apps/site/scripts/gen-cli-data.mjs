@@ -6,9 +6,10 @@
  *
  * Outputs, all committed:
  *   apps/site/src/data/versions.json           cli, effect, and node versions from packages/smithers/package.json
- *   apps/site/src/data/removed-commands.json   every removed 0.x verb and flag
+ *   apps/site/src/data/cli-commands.json       canonical Incur command/schema manifest
+ *   apps/site/src/data/removed-commands.json   remaining historical 0.x verbs and flags
  *                                              with the anchor its CLI error links to
- *   apps/site/src/data/help/<verb>.txt         `smthrs <verb> --help`, verbatim
+ *   apps/site/src/data/help/<verb>.txt         `smthrs <verb> --help`, trailing alignment spaces removed
  *   apps/site/src/data/help/<verb>/<sub>.txt   the same for each subcommand
  *   apps/site/src/data/help/smthrs.txt       `smthrs --help`, verbatim
  *
@@ -21,7 +22,6 @@
  * JSON between two marker comments; this script rewrites that region too, so the
  * anchors on the page and the anchors in the binary cannot drift apart.
  */
-import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -34,11 +34,39 @@ const helpDir = join(dataDir, "help")
 const migrationPage = join(site, "src/content/docs/docs/migration/1.0.mdx")
 const check = process.argv.includes("--check")
 
+// Capture defaults from one known directory, then replace that machine-specific
+// path with <cwd> in the published help and manifest.
+process.chdir(root)
+
+// Load the same declaration identities as the executable, then build once.
+// Capturing every nested command in a fresh process makes a docs refresh pay
+// the complete control/build dependency graph's startup cost hundreds of times.
+const { installEffectResolution } = await import(join(root, "packages/smithers/build/build-cli/src/effect-resolution.js"))
+installEffectResolution()
+const { makeCli } = await import(join(root, "packages/smithers/src/Cli.ts"))
+const environment = { ...process.env, NO_COLOR: "1" }
+const commandTree = makeCli({ environment })
+const capture = async (args) => {
+  let output = ""
+  let status = 0
+  await commandTree.serve(args, {
+    env: environment,
+    stdout: (text) => { output += text },
+    exit: (code) => { status = code }
+  })
+  if (status !== 0) throw new Error(`smthrs ${args.join(" ")} exited ${status}\n${output}`)
+  return output.replaceAll(root, "<cwd>").split("\n").map((line) => line.trimEnd()).join("\n").trimEnd() + "\n"
+}
+const manifest = JSON.parse(await capture(["--llms-full", "--format", "json"]))
+if (!Array.isArray(manifest.commands) || manifest.commands.length === 0) {
+  throw new Error("The public CLI did not return a canonical command manifest")
+}
+const canonicalNames = new Set(manifest.commands.map((command) => command.name.split(" ")[0]))
 const unsupported = await import(join(root, "packages/smithers/src/Unsupported.ts"))
 
 // One entry per anchor. Verbs anchor on their own name; flags carry an
 // explicit anchor; reserved flow ids link to #flows.
-const verbs = unsupported.removedVerbs.map((verb) => ({
+const verbs = unsupported.removedVerbs.filter((verb) => !canonicalNames.has(verb.name)).map((verb) => ({
   kind: "verb",
   anchor: verb.name,
   name: verb.name,
@@ -84,21 +112,16 @@ const removed = {
   removedAnchors
 }
 
-const cli = join(root, "packages/smithers/bin/smithers.mjs")
-const help = (args) => {
-  const result = spawnSync("node", [cli, ...args, "--help"], { encoding: "utf8", env: { ...process.env, NO_COLOR: "1" } })
-  if (result.status !== 0) throw new Error(`smthrs ${args.join(" ")} --help exited ${result.status}\n${result.stderr}`)
-  return result.stdout.trimEnd() + "\n"
-}
-const topHelp = help([])
-const verbNames = [...topHelp.matchAll(/^  ([a-z][a-z-]*)(?:, [a-z-]+)*\s{2,}/gm)].map((m) => m[1])
+const help = (args) => capture([...args, "--help"])
+const topHelp = await help([])
 
 // Versions the prose quotes: the CLI's own, the Effect pin, and the Node floor.
 const cliManifest = JSON.parse(readFileSync(join(root, "packages/smithers/package.json"), "utf8"))
 const versions = {
   cli: cliManifest.version,
   effect: cliManifest.dependencies?.effect ?? cliManifest.peerDependencies?.effect,
-  node: (cliManifest.engines?.node ?? "").replace(/^[^0-9]*/, "")
+  node: (cliManifest.engines?.node ?? "").match(/\d+\.\d+\.\d+/)?.[0],
+  nodeRange: cliManifest.engines?.node
 }
 for (const [name, value] of Object.entries(versions)) {
   if (!value) throw new Error(`could not read the ${name} version from packages/smithers/package.json`)
@@ -106,18 +129,20 @@ for (const [name, value] of Object.entries(versions)) {
 
 const outputs = new Map()
 outputs.set(join(dataDir, "versions.json"), JSON.stringify(versions, null, 2) + "\n")
+outputs.set(join(dataDir, "cli-commands.json"), JSON.stringify(manifest, null, 2) + "\n")
 outputs.set(join(dataDir, "removed-commands.json"), JSON.stringify(removed, null, 2) + "\n")
 outputs.set(join(helpDir, "smthrs.txt"), topHelp)
-const subcommandsOf = (text) => {
-  const block = text.split(/^SUBCOMMANDS\n/m)[1]
-  if (block === undefined) return []
-  return [...block.split(/\n\n/)[0].matchAll(/^  ([a-z][a-z-]*)(?:, [a-z-]+)*\s{2,}/gm)].map((m) => m[1])
+const commandPaths = new Set([
+  "completions", "mcp", "mcp add", "mcp doctor", "skills", "skills add", "skills list"
+])
+for (const command of manifest.commands) {
+  const tokens = command.name.split(" ")
+  if (tokens.some((token) => !/^[a-z][a-z0-9-]*$/.test(token))) throw new Error(`Invalid command path ${command.name}`)
+  for (let length = 1; length <= tokens.length; length++) commandPaths.add(tokens.slice(0, length).join(" "))
 }
-for (const verb of verbNames) {
-  const text = help([verb])
-  outputs.set(join(helpDir, `${verb}.txt`), text)
-  // One level of subcommands: `smthrs memory get --help` lands at help/memory/get.txt.
-  for (const sub of subcommandsOf(text)) outputs.set(join(helpDir, verb, `${sub}.txt`), help([verb, sub]))
+for (const command of [...commandPaths].sort()) {
+  const tokens = command.split(" ")
+  outputs.set(join(helpDir, ...tokens.slice(0, -1), `${tokens.at(-1)}.txt`), await help(tokens))
 }
 
 // The generated region of the migration page: one `###` per anchor. Reason
@@ -190,26 +215,6 @@ if (existsSync(migrationPage)) {
     throw new Error(`the CLI links to anchors the migration page does not carry: ${absent.map((x) => "#" + x).join(", ")}`)
   }
   outputs.set(migrationPage, next)
-}
-
-// The compatibility page quotes the frozen policy wording. README.md is the
-// one place that wording lives, so the quoted paragraphs are copied from it.
-const compatibilityPage = join(site, "src/content/docs/docs/migration/compatibility.mdx")
-if (existsSync(compatibilityPage)) {
-  const readme = readFileSync(join(root, "README.md"), "utf8")
-  const block = readme.split(/^## Compatibility\s*$/m)[1]?.split(/^## /m)[0]
-  if (block === undefined) throw new Error("README.md has no ## Compatibility section")
-  const paragraphs = block.trim().split(/\n\n+/).map((p) => p.replace(/\n/g, " ").trim())
-  const policy = paragraphs.filter((p) => /^Smithers 1\.0\.0-rc\.0 is a source migration|^Storage in rc\.0/.test(p))
-  if (policy.length !== 2) throw new Error(`expected the two policy paragraphs in README.md, found ${policy.length}`)
-  const startC = "{/* generated:compatibility-policy start. Quoted from README.md by `bun apps/site/scripts/gen-cli-data.mjs`; do not edit. */}"
-  const endC = "{/* generated:compatibility-policy end */}"
-  const page = readFileSync(compatibilityPage, "utf8")
-  const a = page.indexOf(startC)
-  const b = page.indexOf(endC)
-  if (a === -1 || b === -1) throw new Error(`${compatibilityPage} has no generated region`)
-  const quoted = policy.map((p) => `> ${p}`).join("\n\n")
-  outputs.set(compatibilityPage, page.slice(0, a) + `${startC}\n\n${quoted}\n\n${endC}` + page.slice(b + endC.length))
 }
 
 let drift = 0

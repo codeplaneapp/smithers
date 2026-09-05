@@ -1,27 +1,30 @@
-DESCRIPTION
-  Preview a redacted bug report; post with --yes or TTY confirmation, or inspect with --dry-run
+smthrs bug — Submit a redacted bug report to the configured endpoint
 
-USAGE
-  smthrs bug [flags] <summary> [<summary...>]
+Usage: smthrs bug <summary...> [options]
 
-ARGUMENTS
-  summary string       
-  summary... string     (optional)
+Arguments:
+  summary
 
-FLAGS
-  --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
-  --json                 Print the machine-readable document instead of the human rendering
-  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Suppress banners and progress on stderr; stdout documents still print
-  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
-  --root string          Project root to act on, instead of walking up from the working directory
-  --run string           Include only this run and its event digest
-  --yes                  Post the previewed payload without an interactive confirmation
-  --dry-run              Print the exact redacted payload and endpoint without posting
+Options:
+  --root <string>        Project directory; defaults to the nearest Smithers project
+  --remote <string>      Remote control plane URL; defaults to SMITHERS_REMOTE
+  --credential <string>  Remote credential; defaults to SMITHERS_API_KEY
+  --mcp-config <string>  Path to the configured MCP servers
+  --quiet                Suppress progress messages
+  --run <string>
 
-GLOBAL FLAGS
-  --help, -h                                                          Show help information
-  --version, -v                                                       Show version information
-  --wizard                                                            Start wizard mode for a command
-  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
-  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+Custom Global Options:
+  --audience <auto|human|agent>  Presentation audience; auto detects agent harnesses, CI, and terminals (default: auto)
+  --silent                       Suppress progress; retain the result and actionable failures
+  --ui <auto|tty|stream|plain>   Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; auto shows live human progress; agent, --silent, pipe and dumb-terminal policies take precedence (default: auto)
+
+Global Options:
+  --filter-output <keys>              Filter output by key paths (e.g. foo,bar.baz,a[0,3])
+  --format <toon|json|yaml|md|jsonl>  Output format
+  --full-output                       Show full output envelope
+  --help                              Show help
+  --llms, --llms-full                 Print LLM-readable manifest
+  --schema                            Show JSON Schema for command
+  --token-count                       Print token count of output (instead of output)
+  --token-limit <n>                   Limit output to n tokens
+  --token-offset <n>                  Skip first n tokens of output

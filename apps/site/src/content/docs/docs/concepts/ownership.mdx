@@ -1,61 +1,63 @@
 ---
 title: "Execution IDs and ownership"
-description: "The caller names the run, a fence follows its recorded owner, and a zombie owner stops itself at the write."
+description: "Choose which invocations share a run, and understand how the engine prevents stale owners from writing it."
 sidebar:
   order: 4
 ---
 
-Two identity questions decide whether a durable run is safe: which run is this, and which process may mutate it. Smithers answers the first by letting the caller choose the execution id, and the second with a fence that follows the run's recorded owner. Effect's own workflow package answers the first by hashing the flow tag and payload, and Smithers refused that design.
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
 
-## The caller chooses the execution id
+An execution ID identifies a piece of work. Ownership identifies the process currently allowed to write that execution's state. The execution ID stays stable when a run resumes; ownership can move to a new process.
 
-Identity has three sources, consulted in a fixed order. First, the `executionId` the caller named on `execute`. Failing that, the `idempotencyKey` the flow declared, hashed together with the flow tag. Failing both, the ambient `CurrentExecutionIds` source. Its default dies with `ExecutionIdRequired`, so the host has to choose whether unnamed invocations should join.
+## How an execution gets its ID
 
-`layerExecutionIds(source)` replaces the third. Install `layerExecutionIds(derived)` when equal encoded payloads of one flow are one piece of work; install a custom source when a request, session, or workspace defines identity. Callers that name an `executionId` and flows that declare an `idempotencyKey` are unaffected, because both are decided before the source is consulted.
+Smithers selects an ID in this order:
 
-`ExecutionIdRequired` is a defect, not a typed failure. The default source raises it whenever neither the caller nor the declaration selected an id. The opt-in derived source also raises it when the payload has no canonical form: a non-finite number, a lone surrogate, or a cycle. `Flow.executionId(payload)` likewise dies when the payload fails the flow's own payload schema, where `Flow.execute` fails with a typed `SchemaError` instead. Precompute an id with `executionId` only for a payload you have already validated.
+| Priority | Source | When it applies |
+| --- | --- | --- |
+| 1 | `executionId` passed to `execute` | The caller supplies an explicit ID. |
+| 2 | The flow's `idempotencyKey`, combined with its tag | The declaration supplies an identity. |
+| 3 | `CurrentExecutionIds` | Neither explicit source is present. |
 
-## Why the hash-everything join was refused
+The default `CurrentExecutionIds` source derives an ID from the flow tag and encoded payload. Equal tags and payloads resolve to the same execution. This makes repeating an invocation useful for resuming work.
 
-Upstream derives a run's identity by hashing the flow tag and payload, so two unrelated runs with equal payloads silently join: the second caller's run is the first caller's run, and each reads the other's history as its own. A silent join is worse than a crash, because nothing reports it. In Smithers the caller chooses the id, derivation is opt-in, and a flow with neither an explicit id nor a declared key dies with a structured defect instead of guessing.
+When equal payloads represent independent requests, give each request its own `executionId`, or install a host-wide source with `layerExecutionIds`. For example, two users asking for the same report may need separate executions even though their input is identical.
 
-## Fenced ownership
+An explicit ID and a declared idempotency key take precedence over the host-wide source. Reuse the ID to resume the same work; choose a new ID to start unrelated work.
 
-Every running run has an owner, an `OwnerId` of host id, process id, and nonce. Every ownership mutation compares all three fields in the same SQL statement as the mutation, so a claim, a heartbeat, an attempt write, or a terminal transition lands only while `flows_runs` still records that owner.
+## What ownership protects
 
-The journal carries the same fence. Attempt lifecycle writes pass the owner and append only while the persisted ownership matches; otherwise they fail `fence_lost`. An owner that is missing or malformed fails `invalid_event` instead: that is a caller contract violation, and reporting it as `fence_lost` would send the caller hunting a race that never happened. `OwnerId` lives in the journal package rather than with the arbitration in `@smthrs/run-store`, because the journal is what it fences.
+An owner has a host ID, process ID, and nonce. State writes compare that complete identity with the owner recorded on the run. A successful claim therefore does not grant indefinite write access: every later write must still pass the check.
 
-## The claim protocol
+<DocsDiagram
+  id="ownership"
+  title="A replacement owner fences out the old process"
+  caption="Worker A holds a lease and sends heartbeats. After its lease becomes eligible for takeover, worker B claims the run. A later write from A fails because the stored owner is now B."
+  rows={[
+    [{ label: "Worker A owns the run", detail: "Heartbeats keep its lease current" }],
+    [{ label: "Lease checked; worker B takes over", detail: "The stored owner changes in one guarded write" }],
+    [{ label: "B can write; A is refused", detail: "A stale owner receives fence_lost" }]
+  ]}
+/>
 
-A run row begins pending. Claiming is two phase, `claim` then `activate`, or atomic, `claimAndOwn`. The compare-and-swap reads a complete snapshot: status, owner, and heartbeat together. Partial ownership snapshots are invalid by construction, so a running row always carries both an owner and a heartbeat and every other status carries neither. Terminal rows cannot be reopened.
+Attempt state and journal lifecycle writes use the same ownership check. A stale journal writer receives `fence_lost`; an absent or malformed owner instead produces `invalid_event`.
 
-Compare-and-swap competition is reported as tagged success values such as `FenceLost` and `SnapshotChanged`, separate from the typed error channel, so a caller retries contention without treating corruption as a race.
+These checks protect writes through the stores. They cannot prevent an old process from making an unrelated remote request. External services still need idempotency or fencing when duplicate effects matter.
 
-Attempts sit under the same discipline. An attempt row is addressed by `(runId, stepKeyDigest, attempt)`, and its writes, `put`, `heartbeat`, `finish`, and `patch`, are fenced against the owning running run. `transitionOwned` changes status and optional executable state under one owner fence, with its optional cancellation guard compiled into the same update, so a cancel request cannot land between a check and a terminal write.
+## Recovery after a process stops
 
-## The journal says which answer was used
+A hard kill can leave a run marked `running`. The durable driver's sweep checks stale runs and attempts recovery when the ownership evidence permits it. Takeover rechecks the stored status, owner, and heartbeat before changing the row.
 
-Arbitration is auditable because the decision is journaled. A refused takeover records `steal-refused-owner-alive` with the evidence that refused it, `lease-fresh` when the lease was still inside the window or `probe` when a supplied liveness check answered for the owner. A takeover records `stolen-and-activated` with its evidence kind. A refusal is journaled once per lease and evidence, not once per sweep tick, because first-writer admission collapses every repeat about an unchanged lease into the one record.
+A fresh lease or positive liveness probe prevents takeover. When a replacement succeeds, a paused old process cannot resume writing under its old identity. Its next fenced write fails and the driver interrupts it.
 
-A refusal also defers the run for two heartbeat ticks, doubling per consecutive refusal against the same lease, so the stale-run sweep keeps advancing past recently refused rows instead of re-probing them every tick.
+Recovery requires a running driver with access to the same persistent state. A deleted database or an unavailable host cannot recover itself.
 
-## Zombie owners interrupt themselves
+## Host and clock requirements
 
-A process killed with SIGKILL leaves its runs marked `running` under a dead owner. A fresh process reclaims them through the lease: the default liveness check counts an owner as alive while its persisted heartbeat is younger than the staleness cutoff, and a steal re-checks the evidence against the row inside the same write, so a claimant that lies about the lease loses the compare-and-swap. The driver's periodic sweep re-drives the stale-running rows a hard-killed owner leaves behind, so neither SIGKILL nor an out-of-memory kill can strand a run.
+A PID is meaningful only on its own host. Use a same-host PID probe for local processes; a deployment spanning hosts needs a liveness policy appropriate to that deployment.
 
-The reclaimed owner is the zombie, and the fence is what stops it. When the old process wakes and tries to append its next attempt event, the fence fails the write with `fence_lost` and the zombie self-interrupts instead of appending. Ownership is observed at the write, not assumed from the claim.
+Lease operations also check clock skew and preserve monotonic heartbeats. Keep the lease clock and lifecycle clock consistent in a custom host composition. The [run-store reference](/docs/reference/api/run-store/) documents the claim protocol, refusal results, and timing options.
 
-## Trade-offs and why
+If identity derivation cannot encode the payload, it raises `ExecutionIdRequired`. Validate inputs before precomputing an ID; `Flow.execute` reports payload schema failures through its typed error channel.
 
-Ownership is an arbitration protocol, not a lock manager. Evidence binds to one instant by exact equality, so a probe taken at T is refused by a call made at T+1. A deployment that knows more about liveness, a pid probe on the owner's host or an orchestrator's pod status, supplies its own `isAlive` check and refuses takeovers for longer; a pid names a process only in its own host's namespace, so cross-host recovery relies on the persisted lease.
-
-Clocks get the same distrust. Lease operations refuse a caller clock reading that runs ahead of the store's clock by more than the skew allowance, so a runaway clock can neither steal a fresh owner nor pin a lease past the cutoff. Heartbeats are monotonic: a pulse delayed past a newer one is acknowledged without moving the lease backwards. A run row carries stamps from two clock sources, the caller's `nowMs` on lease operations and the Effect `Clock` on lifecycle transitions, and a composition must give both sources the same reading.
-
-The fence is not a distributed lock. It arbitrates writes to one store, and it does nothing about a process that writes around the store. Ownership is not identity either: one caller may own many runs, and one run changes owners over its life as claims, steals, and recoveries accumulate.
-
-## Related
-
-- [Durable execution](/docs/concepts/durable-execution/)
-- [Inspecting runs guide](/docs/guides/inspecting-runs/)
-- [`@smthrs/run-store` reference](/docs/reference/api/run-store/)
-- [`@smthrs/journal` reference](/docs/reference/api/journal/)
+For the progress an owner resumes, see [Durable execution](/docs/concepts/durable-execution/). For current status, see [Inspect runs](/docs/guides/inspecting-runs/).

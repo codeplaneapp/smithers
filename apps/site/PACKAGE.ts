@@ -75,10 +75,11 @@ const supportDocs = Smithers.Generate({
   ]
 })
 
-/** The pages, docs content, components, layouts, styles, scripts, and the Astro config. */
+/** The pages, docs content, components, layouts, styles, scripts, public assets, and Astro config. */
 const sources = [
   Smithers.glob("//apps/site/src/**/*"),
   Smithers.glob("//apps/site/scripts/**/*"),
+  Smithers.glob("//apps/site/public/**/*"),
   Smithers.file("//apps/site/astro.config.mjs"),
   Smithers.file("//apps/site/package.json")
 ]
@@ -126,10 +127,9 @@ const referenceIngest = Smithers.Generate({
 // The CLI facts the docs quote instead of retyping: verbatim `--help` for
 // every verb and subcommand, the version pins, the removed-command anchor
 // contract (every `smithers.sh/migration/1.0#<anchor>` the binary links), and
-// the compatibility policy quoted from README.md. The script splices the
-// anchor entries and the policy into marker regions on the two migration
-// pages, so `smithers-build lint //apps/site:cliData` fails the moment a
-// removed verb, a help string, or the policy wording moves without the docs.
+// The script splices the anchor entries into the migration page, so
+// `smithers-build lint //apps/site:cliData` fails the moment a removed verb or
+// help string moves without the docs.
 const cliData = Smithers.Generate({
   summary:
     "Regenerate CLI help captures, version pins, and the removed-command anchor contract; check drift under lint.",
@@ -140,15 +140,14 @@ const cliData = Smithers.Generate({
   // another package yields no files and the edge is vacuous.
   data: [
     cliPackage.docsSources,
-    Smithers.file("//README.md"),
     Smithers.file("src/data/migration-paths.json")
   ],
   changes: [
     "src/data/versions.json",
+    "src/data/cli-commands.json",
     "src/data/removed-commands.json",
     "src/data/help/**",
-    "src/content/docs/docs/migration/1.0.mdx",
-    "src/content/docs/docs/migration/compatibility.mdx"
+    "src/content/docs/docs/migration/1.0.mdx"
   ]
 })
 // --- end CLI data ----------------------------------------------------------
@@ -234,13 +233,32 @@ const examplesPages = Smithers.Generate({
 })
 
 /**
- * `scripts/check-docs.mjs`: internal links resolve (fragments included), every
- * `SMITHERS_*` name exists in the source tree, stated version pins match
- * src/data/versions.json, and the authoring brief's hard rules hold (no
- * dashes in prose, no body H1, every fence names a language, every page has a
- * title and description). Reads the whole content tree and the repo's source
- * for the env-name census.
+ * The compact agent index and full plain-text documentation bundle. Both read
+ * the same project.json description as the rendered site and root README, so
+ * the machine-facing one-sentence explanation cannot drift either.
  */
+const llms = Smithers.Generate({
+  summary: "Generate the compact and full LLM documentation bundles; check drift under lint.",
+  script: Smithers.file("scripts/generate-llms.mjs"),
+  data: [
+    Smithers.glob("src/content/docs/**/*.mdx"),
+    Smithers.file("src/data/project.json"),
+    Smithers.file("src/data/versions.json"),
+    Smithers.glob("src/data/help/**/*.txt"),
+    Smithers.file("scripts/docs-text.mjs")
+  ],
+  changes: ["public/llms.txt", "public/llms-full.txt"]
+})
+
+/**
+ * Checks page metadata, prose rules, code-fence languages, internal links and
+ * anchors, package import subpaths, source links, and migration anchors.
+ */
+const docsTextTest = Smithers.Shell.Test({
+  shell: "node --test scripts/docs-text.test.mjs",
+  data: [Smithers.file("scripts/docs-text.mjs"), Smithers.file("scripts/docs-text.test.mjs")]
+})
+
 const docsLint = Smithers.Shell.Test({
   script: Smithers.file("scripts/check-docs.mjs"),
   data: [
@@ -292,8 +310,8 @@ export const Package = Smithers.Package({
     referenceIngest,
     cliData,
     apiDocs,
-    docsLint,
-    examplesPages,
+    docsLint, docsTextTest,
+    examplesPages, llms,
     ...tutorialCodeBlocks
   }
 })

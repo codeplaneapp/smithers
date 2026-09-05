@@ -13,7 +13,7 @@ Time: about 15 minutes. You need the project from the first tutorial.
 
 ## Before you begin
 
-- You have completed [Build your first durable flow](/docs/tutorials/first-flow/) or the [quickstart](/docs/quickstart/).
+- You have completed [Build your first durable flow](/docs/tutorials/first-flow/).
 - You have the first tutorial's project, including `durable-layer.ts` and its installed packages.
 - You have Node.js 22.19.0 or later.
 
@@ -41,10 +41,6 @@ export const Review = Flow.make("examples/Review", {
 })
 ```
 
-```text
-You should see: no output. Review is a plan over one node, exactly as in the
-first tutorial.
-```
 
 ## 2. Give the step a durable wait
 
@@ -88,10 +84,6 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
 The two counters are the replay contract made visible. `ReadDocument` is a sealed action, so its recorded result replays across drives and its dispatch counter moves once. The `assess` implementation is not sealed against replay, so its counter moves once per drive. `DurableDeferred.await(Approval)` is the durable wait: a completion recorded for it survives the process that was waiting. [Durable execution](/docs/concepts/durable-execution/) develops the replay contract in full.
 
-```text
-You should see: no output yet. The counters and the implementation become a
-run in the next part.
-```
 
 ## 3. Suspend the run and drop the engine
 
@@ -114,10 +106,6 @@ Build an engine layer per drive, then run the first drive. Each drive builds its
 
 `DurableDeferred.await` finds no recorded completion, so the engine suspends the run and releases its claim. With `discard: true`, `execute` returns once the suspension is durable rather than waiting out the wait. When the `Effect.scoped` block ends, the engine layer is released: that is the crash this tutorial simulates, one process boundary over one SQLite file.
 
-```text
-You should see: no output yet. After this drive the run exists only as
-durable state in the SQLite file, suspended at the deferred.
-```
 
 ## 4. Resume from durable state
 
@@ -141,10 +129,6 @@ To finish the run, a second drive completes the deferred and re-executes the flo
 
 `deferredDone` records the completion the first drive was waiting on. The second `execute` re-drives the run, and the re-drive replays the journal: the recorded `ReadDocument` result comes back without dispatching the action again. From the CLI, [`smthrs run <run-id> --resume`](/docs/reference/cli/run/) re-drives a parked run the same way.
 
-```text
-You should see: no output yet. The re-drive has finished the run; the next
-part reads the counters that prove what replayed.
-```
 
 ## 5. Confirm the recorded step ran once
 
@@ -170,14 +154,6 @@ in the first drive), and stepEntries 2 (the step implementation ran once
 per drive).
 ```
 
-## Summary
-
-You learned how to:
-
-- Declare a durable wait with `DurableDeferred.make` and await it in a step.
-- Suspend a run with `discard: true` and drop the engine by ending the scope.
-- Resume from durable state with `deferredDone` and a second `execute` under the same execution id.
-- Prove from the replay counters that a recorded sealed step was not re-executed.
 
 ## Next steps
 

@@ -33,7 +33,7 @@ const split = (source) => {
   const m = source.match(/^\/\*\*\n([\s\S]*?)\n \*\/\n/)
   if (m === null) return { paragraphs: [], code: source }
   const text = m[1].split("\n").map((line) => line.replace(/^ \* ?/, "")).join("\n")
-  const paragraphs = text.split(/\n\s*\n/).map((p) => p.replace(/\n/g, " ").trim()).filter(Boolean)
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.replace(/\n/g, " ").trim()).filter((p) => p && !p.startsWith("@since") && !p.startsWith("@category"))
   return { paragraphs, code: source.slice(m[0].length).replace(/^\n+/, "") }
 }
 
@@ -54,8 +54,9 @@ for (const name of primary) {
   const companion = `${stem}-host.ts`
   const lines = [
     "---",
-    `title: "${number} ${slug}"`,
+    `title: "${slug.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())}"`,
     `description: "${firstSentence(paragraphs[0] ?? `The ${stem} example.`)}"`,
+    `editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/${name}"`,
     "sidebar:",
     `  order: ${Number(number)}`,
     "---",
@@ -65,9 +66,19 @@ for (const name of primary) {
   ]
   for (const p of paragraphs) lines.push(p, "")
   lines.push(
-    "## Run it",
+    "## Run the test",
     "",
-    `The program is [\`examples/src/${name}\`](https://github.com/smithersai/smithers/blob/main/examples/src/${name}). \`pnpm run test:examples\` runs it with every other example against the real packages.`,
+    `The complete program is [\`examples/src/${name}\`](https://github.com/smithersai/smithers/blob/main/examples/src/${name}). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.`,
+    "",
+    ...(existsSync(join(root, "examples/test", `${stem}.test.ts`)) ? [
+      "From the repository root, run this example's assertions:",
+      "",
+      "```bash",
+      `pnpm --filter @smthrs/examples exec vitest run test/${stem}.test.ts`,
+      "```",
+      "",
+      "Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call."
+    ] : ["This program has no dedicated test file. Read its setup requirements before running it; importing an example alone may only define its exports."]),
     "",
     "## Related reference",
     "",

@@ -13,7 +13,7 @@ A seat is one `provider:model` string that decides which model serves a flow's a
 
 - The Smithers CLI: `npm install --global @smthrs/cli@next`.
 - A Smithers project. `smthrs init` scaffolds one.
-- An API key for Anthropic, OpenAI, or OpenRouter.
+- An API key for the selected provider, or a supported subscription session for an OpenAI seat.
 
 ## 1. Read the seat your flow declares
 
@@ -35,9 +35,13 @@ model: anthropic:claude-sonnet-4-5
 
 ```ts
 import * as AgentAction from "@smthrs/agent/AgentAction"
+import * as Schema from "effect/Schema"
 
 export const Reviewer = AgentAction.make("review/Reviewer", {
-  // payload, output, system, prompt
+  payload: { change: Schema.String },
+  output: Schema.Struct({ verdict: Schema.String }),
+  system: ["Review the supplied change."],
+  prompt: ({ change }) => change,
   seat: "anthropic:claude-sonnet-4-5"
 })
 ```
@@ -45,18 +49,21 @@ export const Reviewer = AgentAction.make("review/Reviewer", {
   </TabItem>
 </Tabs>
 
-The string holds no credential, endpoint, or client. At launch the CLI's seat resolver turns it into a live model, reading the provider half to pick a route and a key. Three providers have routes:
+The string holds no credential, endpoint, or client. At launch the CLI's seat resolver turns it into a live model, reading the provider half to pick a route and a key. The CLI resolver supports these routes:
 
 | Seat prefix | Credential the resolver reads | Route it builds |
 | --- | --- | --- |
 | `anthropic:` | `ANTHROPIC_API_KEY` | Anthropic Messages at `https://api.anthropic.com/v1/messages` |
 | `openai:` | `OPENAI_API_KEY`, or the ChatGPT session (step 3) | OpenAI Responses at `https://api.openai.com/v1/responses` |
-| `openrouter:` | `OPENROUTER_API_KEY` | The OpenAI Responses shape at the OpenRouter origin |
+| `openrouter:` | `OPENROUTER_API_KEY` | OpenRouter through its configured model route. |
+| `moonshot:` | `MOONSHOT_API_KEY` | OpenAI-compatible Chat Completions at Moonshot. |
+| `gemini:` | `GEMINI_API_KEY`, then `GOOGLE_API_KEY` | Gemini's OpenAI-compatible Chat Completions endpoint. |
+| `cerebras:` | `CEREBRAS_API_KEY` | OpenAI-compatible Chat Completions at Cerebras. |
 
 OpenRouter seats spell the model as `openrouter:vendor/model`, for example `openrouter:anthropic/claude-sonnet-4.5`. A seat with no `:` reads as a bare model id on the Anthropic route. Any other provider prefix declines the launch: the resolver reports that no route is configured for that provider.
 
 :::note
-`smthrs init` writes the scaffold's `model:` line from the first provider credential your environment sets, in the order `smthrs doctor` reports them: `ANTHROPIC_API_KEY` gives `anthropic:claude-sonnet-4-5`, `OPENAI_API_KEY` gives `openai:gpt-5.6-sol`, and `OPENROUTER_API_KEY` gives `openrouter:anthropic/claude-sonnet-4.5`.
+`smthrs init` writes the scaffold's `model:` line from the first provider credential your environment sets, in the order `smthrs doctor` reports them: `ANTHROPIC_API_KEY` gives `anthropic:claude-sonnet-4-5`, `OPENAI_API_KEY` gives `openai:gpt-5.6-sol`, and `OPENROUTER_API_KEY` gives `openrouter:anthropic/claude-sonnet-4.5`. Moonshot, Gemini, and Cerebras follow. See the [init reference](/docs/reference/cli/init/) for the full order.
 :::
 
 [Agent runtime](/docs/concepts/agent-runtime/) explains the two halves of a seat and what `SeatResolver` does with them.
@@ -80,21 +87,20 @@ export SMITHERS_OPENAI_AUTH=chatgpt
 codex login
 ```
 
-The seat string does not change: the journaled seat, its context window, and its committed price stay identical, and only the credential source moves to the codex session store (`$CODEX_HOME/auth.json`). The same seat then routes to the ChatGPT backend at `https://chatgpt.com/backend-api/codex/responses`. With the mode selected but no session on disk, the launch is declined with a message that names `codex login` and the credential file it looked for. For an `openai:` seat, a value other than `api-key` or `chatgpt` is refused: `SMITHERS_OPENAI_AUTH must be "api-key" or "chatgpt" to run the <seat> seat`.
+The seat string does not change: the declared seat remains the same while authentication uses the configured Codex session store. The same seat then routes to the ChatGPT backend at `https://chatgpt.com/backend-api/codex/responses`. With the mode selected but no session on disk, the launch is declined with a message that names `codex login` and the credential file it looked for. For an `openai:` seat, a value other than `api-key` or `chatgpt` is refused: `SMITHERS_OPENAI_AUTH must be "api-key" or "chatgpt" to run the <seat> seat`.
 
 ## 4. Change the seat
 
-To change the seat for every later run, edit the flow source: the `model:` line in `flow.mdx`, or the `seat:` option in the module. Discovery reads the source at launch, so the next `smthrs up` uses the edited seat.
+To change the seat for every later run, edit the flow source: the `model:` line in `flow.mdx`, or the `seat:` option in the module. Discovery reads the source at launch, so the next `smthrs flow start` uses the edited seat.
 
 To change how a seat authenticates for one invocation, prefix the command with the environment variable:
 
 ```bash
-SMITHERS_OPENAI_AUTH=chatgpt smthrs up reviewer
+SMITHERS_OPENAI_AUTH=chatgpt smthrs flow start reviewer
 ```
 
 The prefix scopes the change to this launch; the flow source keeps its `model:` line.
 
-{/* verify: the rc.0 CLI has no per-run --seat/--model flag on up or run, and `smthrs steer` sends text messages only; confirm no per-invocation seat override exists outside editing the flow source or the environment. */}
 
 ## Verify it worked
 
@@ -104,7 +110,7 @@ Run `smthrs doctor` and read the `providers` line:
 ok   providers: ANTHROPIC_API_KEY
 ```
 
-The line lists every key the resolver can see, notes any that are exported but empty, and appends `; openai seats use the ChatGPT session` when `SMITHERS_OPENAI_AUTH=chatgpt`. Then launch a flow and confirm which seat served it: `smthrs status <run-id>` shows the seat on its `Run` line.
+The line lists every key the resolver can see, notes any that are exported but empty, and appends `; openai seats use the ChatGPT session` when `SMITHERS_OPENAI_AUTH=chatgpt`. Then launch a flow and confirm which seat served it: `smthrs runs show <run-id>` returns the run and its diagnosis.
 
 ## See also
 

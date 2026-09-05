@@ -5,15 +5,15 @@ sidebar:
   order: 11
 ---
 
-Smithers is a durable-execution engine built on Effect. That is a load-bearing choice, not a style one: the journal, the retry model, the test story, and the package boundaries all come out of what Effect gives a flow program.
+Smithers is a durable-execution engine built on Effect. Effect supplies the runtime primitives: the journal, the retry model, testing support, and the package boundaries all come out of what Effect gives a flow program.
 
 ## Flows are Effect programs
 
-A flow body is a pure function that returns an Effect, and an action is an Effect with declared payload, success, and error schemas. The engine interprets the program, and every side effect the program performs is journaled as it happens, so a crashed process resumes from the record. Errors are typed: the failure channel of a step is a union the compiler checks, and a retry policy can branch on it instead of parsing messages.
+A flow body describes a graph of operations. Action implementations use Effect to execute work with typed failures and explicit dependencies. The engine records action outcomes at durable boundaries; arbitrary side effects outside those boundaries can run again after a restart. Errors are typed: the failure channel of a step is a union the compiler checks, and a retry policy can branch on it instead of parsing messages.
 
-## Layers, not hooks
+## Replace implementations with layers
 
-An implementation attaches to a declaration as a layer, and a composition is layers merged and provided. `Greet.toLayer` supplies an action's code, `Interpreter.layer` drives a flow's body, `FlowEngine.layerMemory` or the SQLite engine store supplies the runtime, and `Layer.mergeAll` with `Layer.provideMerge` wires the stack. There is no global registry and no hook list to mutate. Swapping the engine layer moves a flow, source unchanged, from an in-memory engine to a durable one.
+An implementation attaches to a declaration as a layer, and a composition is layers merged and provided. `Greet.toLayer` supplies an action's code, `Interpreter.layer` drives a flow's body, `FlowEngine.layerMemory` or the SQLite engine store supplies the runtime, and `Layer.mergeAll` with `Layer.provideMerge` wires the stack. Swapping the engine layer moves a flow, source unchanged, from an in-memory engine to a durable one.
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -44,7 +44,7 @@ const GreetingLayer = Layer.mergeAll(
 )
 ```
 
-Because behavior is context, a test provides a different context: the same flow runs against an in-memory engine, a scripted model, or a stubbed clock, with no edits to the flow source and no module mocking. That is what the feature list means by "Layers, not hooks."
+Because behavior is context, a test provides a different context: the same flow runs against an in-memory engine, a scripted model, or a stubbed clock, with no edits to the flow source and no module mocking. This lets tests control host behavior without changing the declarations under test.
 
 ## The FlowRuntime port
 
@@ -52,15 +52,15 @@ Because behavior is context, a test provides a different context: the same flow 
 
 ## The pinned version and what it buys
 
-Effect is pinned to exactly `4.0.0-rc.108`, and a project must resolve one Effect instance. Schema internals are not interoperable between two instances, so a project with two copies would decode the same journal payload two different ways. The pin buys one schema universe: a value encoded in one process decodes identically in every other process of the project, which is what a shared journal and a shared step cache require.
+Effect is pinned to exactly `4.0.0-rc.112`, and a project must resolve one Effect instance. Separate Effect instances are unsupported because their schema internals are not interoperable. The pin keeps packages on a compatible runtime; applications must still preserve their own payload and codec contracts when changing code.
 
-On top of the pin, the engine uses three Effect guarantees everywhere. Typed errors: a step's failure channel is declared and checked, so quarantine and retry decisions branch on structure. Testable layers: any credentialed or environmental piece is swapped at composition time. Structured concurrency: a run is a scope, cancellation propagates at once, and only an interrupt explicitly marked as infrastructure consumes a retry policy.
+On top of the pin, the engine uses three Effect guarantees everywhere. Typed errors: a step's failure channel is declared and checked, so quarantine and retry decisions branch on structure. Testable layers: any credentialed or environmental piece is swapped at composition time. Structured concurrency: a run is a scope, cancellation interrupts work when its driver observes the request, and only an interrupt explicitly marked as infrastructure consumes an infrastructure retry policy.
 
 Effect is not an interchangeable detail. The pin is a hard requirement of the project layout, not a recommendation. [Installation](/docs/installation/) explains how the platform package's peer dependencies keep the runtime on that pin.
 
 ## Where Smithers diverges from upstream
 
-Effect ships a workflow package of its own. Smithers vendors that surface rather than depending on it, then diverges by being stricter and more cacheable. Upstream derives a run's identity by hashing the flow tag and payload, so unrelated runs with equal payloads silently join; here the caller chooses the execution id and derivation is opt-in. Upstream derives a step's identity from its activity's name, so renaming an activity corrupts replay; here step keys are content-addressed over canonical JSON. Upstream retries any interruption ten times by default; here cancellation propagates at once.
+Smithers vendors Effect's workflow surface and extends it with explicit execution IDs, content-derived step keys, and a separate policy for infrastructure interruptions. By default, an invocation without an explicit ID derives one from its tag and payload. Supply an ID when equal inputs need independent executions. [Execution IDs and ownership](/docs/concepts/ownership/) and [Retries and interruption](/docs/concepts/retries/) describe these contracts.
 
 ## Related
 

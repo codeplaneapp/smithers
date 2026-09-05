@@ -1,9 +1,15 @@
 ---
 title: "0.30.0"
 description: "Smithers 0.30.0 ships an agentic UI component library, live chat and fleet widgets for custom run UIs, a triage-first Monitor, a hardened browser viewer, the smithers oneshot command, and Kimi K3 in the model registry."
+pagefind: false
 ---
 
+:::note[Archived release]
+This page describes Smithers 0.30.0. Historical documentation links open the source at that release tag. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
+
 import Frame from "../../../components/Frame.astro"
+
 
 **Smithers 0.30.0 makes one thing much better: watching and steering your
 agents.** There is a new component library for the web UIs your agents build
@@ -80,9 +86,9 @@ workflow's compliance loop is now hard-gated behind a deterministic scorer,
 and a new 44-case eval suite checks that agents pick the right deliverable
 shape (a report, a shipped component, or custom markup) instead of guessing.
 
-Full catalog: [UI component library reference](/reference/ui), starting at
-[UI Docs by Type](/reference/ui/overview). Building a custom UI:
-[Custom workflow UIs](/guides/custom-workflow-ui).
+Full catalog: [UI component library reference](https://github.com/smithersai/smithers/blob/v0.30.0/docs/reference/ui.mdx), starting at
+[UI Docs by Type](https://github.com/smithersai/smithers/blob/v0.30.0/docs/reference/ui/overview.mdx). Building a custom UI:
+[Custom workflow UIs](https://github.com/smithersai/smithers/blob/v0.30.0/docs/guides/custom-workflow-ui.mdx).
 
 ## Live widgets for custom run UIs
 
@@ -105,7 +111,7 @@ import { NodeChatStream, FleetTable, MonitorButton } from "smthrs/gateway-ui";
 <MonitorButton runId={runId} />
 ```
 
-See the [gateway-ui reference](/reference/gateway-ui).
+See the [gateway-ui reference](https://github.com/smithersai/smithers/blob/v0.30.0/docs/reference/gateway-ui.mdx).
 
 ## A triage-first Monitor
 
@@ -133,7 +139,7 @@ question you actually have: **what needs me right now?**
 Every inspector block (Details, Prompt, Tool calls, Transcript, Output, Diff)
 is now collapsible and unmounts when closed, so a collapsed Transcript stops
 polling in the background. There is also a new **Prompt panel** showing the
-task's initial prompt. See the [Monitor guide](/guides/monitor).
+task's initial prompt. See the [Monitor guide](https://github.com/smithersai/smithers/blob/v0.30.0/docs/guides/monitor.mdx).
 
 ## Charts and a workflow canvas
 
@@ -160,7 +166,7 @@ import { ChartContainer, chartConfig } from "smthrs/ui/adapters/chart";
 Charts ship from their own subpath so the base library stays light; the
 canvas anatomy (`WorkflowCanvas`, `WorkflowNode`, edge legends, controls) is
 what `gateway-ui`'s ReactFlow renderer composes. Details:
-[Chart](/reference/ui/chart).
+[Chart](https://github.com/smithersai/smithers/blob/v0.30.0/docs/reference/ui/chart.mdx).
 
 ## `smithers oneshot`
 
@@ -174,7 +180,7 @@ bunx smthrs oneshot "add a loading spinner to the login button"
 A **live status narrator** (a cheap agent watching the run) posts one-line
 "what is it doing" updates into a pulsing status card, so you never stare at
 a raw transcript wondering if it is stuck. The `kimi` seat now runs **Kimi
-K3** (1M-token context). See the [oneshot guide](/guides/oneshot).
+K3** (1M-token context). See the [oneshot guide](https://github.com/smithersai/smithers/blob/v0.30.0/docs/guides/oneshot.mdx).
 
 ## A hardened browser viewer
 
@@ -196,7 +202,7 @@ the Cloudflare AI Gateway.
 
 If you pin agents in your own `agents.ts`, nothing changes; if you use the
 shipped defaults, orchestration and gating now route to Claude. Details:
-[SOTA model registry](/reference/sota-models).
+[SOTA model registry](https://github.com/smithersai/smithers/blob/v0.30.0/docs/reference/sota-models.mdx).
 
 ## Community thanks
 

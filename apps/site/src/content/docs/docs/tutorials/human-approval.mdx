@@ -46,9 +46,6 @@ export const Release = Flow.make("examples/Release", {
 
 The `kind` sets what an answer may be: `ask` takes prose, `confirm` a boolean, `select` one of `options`, and `json` a value the declared `schema` accepts. `maxAttempts` is how many answers may be refused before the task fails with `HumanTaskFailed`.
 
-```text
-You should see: no output. Release is a plan over one human task node.
-```
 
 ## 2. Compute the answer token
 
@@ -64,10 +61,6 @@ export const tokenFor = (executionId: string, attempt: number): DurableDeferred.
 
 `HumanTask.answer({ token, value })` records an answer against the token. A re-driven run replays every answer it already has and parks on the first attempt that has none, so a restart between the park and the answer resumes on the same token.
 
-```text
-You should see: no output. tokenFor only computes the address an answer
-will be recorded against.
-```
 
 ## 3. Ask and watch the run park
 
@@ -115,14 +108,9 @@ export const main = (filename: string): Effect.Effect<Summary> =>
 
 With `discard: true`, `execute` returns once the park is durable, and the run waits at waiting-approval: its row reads parked with the `approval` waiting reason and the current attempt's token. A human task is the one wait that routinely outlives the process holding it; a reviewer answers tomorrow, and whatever asked them is long gone.
 
-From the CLI, a run that asks for approval mid-flight journals a `control.approval.requested` event whose `payload` field is the exact argument for [`smthrs approve`](/docs/reference/cli/approve/), and `smthrs run <run-id> --resume` re-drives the run after the decision. [Plan, approve, run](/docs/guides/plan-approve-run/) walks that gate end to end. This tutorial answers programmatically with `HumanTask.answer` so the whole lifecycle stays in one file.
+Two different waits answer to two different tools. A plan approval, or an in-run ask raised through the control plane, journals a `control.approval.requested` event whose `payload` field is the exact argument for [`smthrs approve`](/docs/reference/cli/approve/); [Plan, approve, run](/docs/guides/plan-approve-run/) walks that gate end to end. A `system/human-task` wait is different: the run parks with the `approval` waiting reason and the attempt's token, and the only thing that completes it is `HumanTask.answer` against that exact token (`packages/smithers/flows/flow/src/HumanTask.ts`). `smthrs approve` does not resolve a human-task token, which is why this tutorial answers programmatically and keeps the whole lifecycle in one file.
 
-{/* verify: does a HumanTask park journal a control.approval.requested event that smthrs approve accepts, or is HumanTask.answer the only answer path for system/human-task waits? */}
 
-```text
-You should see: no output yet. After this drive the run exists only as
-durable state, parked on attempt 1's token.
-```
 
 ## 4. Refuse an answer and re-ask
 
@@ -142,10 +130,6 @@ A `confirm` accepts only a boolean, so a prose answer is refused. The re-drive r
 
 The refusal is durable evidence, not a log line: it is recorded as a sealed step named `HumanTask/release#1/rejected`, carrying the task, the attempt, and the reason ("The answer must be a boolean."), so a reader of the journal sees why the answer was sent back. The attempt budget is what keeps this bounded: `maxAttempts: 3` buys one more re-ask after this refusal before the task fails with `HumanTaskFailed`, code `rejected`.
 
-```text
-You should see: no output yet. After this drive the question is open on
-attempt 2, and attempt 1's refusal is recorded in the journal.
-```
 
 ## 5. Answer the open attempt and complete
 
@@ -179,14 +163,6 @@ parked on attempt 2, and completed when attempt 2 was answered with a
 boolean.
 ```
 
-## Summary
-
-You learned how to:
-
-- Add a human task to a flow body with `HumanTask.action.call` and the kinds `ask`, `confirm`, `select`, and `json`.
-- Watch a run park at waiting-approval and read the open attempt back from the waiting row.
-- Answer an attempt with `HumanTask.answer` against a token computed from outside the run.
-- Refuse an answer and re-ask on the next attempt's wait point within `maxAttempts`.
 
 ## Next steps
 

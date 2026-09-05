@@ -12,11 +12,14 @@
 import { readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { join, dirname, relative } from "node:path"
 import { fileURLToPath } from "node:url"
+import { docsText } from "./docs-text.mjs"
 
 const siteRoot = join(dirname(fileURLToPath(import.meta.url)), "..")
 const docsRoot = join(siteRoot, "src/content/docs/docs")
 const checkMode = process.argv.includes("--check")
 const origin = "https://smithers.sh"
+const project = JSON.parse(readFileSync(join(siteRoot, "src/data/project.json"), "utf8"))
+const versions = JSON.parse(readFileSync(join(siteRoot, "src/data/versions.json"), "utf8"))
 
 function fm(text, key) {
   const m = text.match(new RegExp(`^${key}:\\s*"([^"]*)"\\s*$`, "m")) ?? text.match(new RegExp(`^${key}:\\s*([^\\n]+)$`, "m"))
@@ -39,11 +42,9 @@ function walk(dir) {
       const slug = fm(text, "slug")
       if (slug) route = "/" + slug.replace(/^docs\/?/, "").replace(/\/$/, "")
       route = "/docs" + (route === "/" ? "/" : route + "/")
-      const body = text
-        .replace(/^---\n[\s\S]*?\n---\n/, "")
-        .replace(/^\{?\/?\*?.*generated.*\*\/\}?\n/gim, "")
-        .replace(/^import\s+.*$/gm, "")
-        .trim()
+      const raw = Object.fromEntries([...text.matchAll(/^import (\w+) from ["']([^"']+)\?raw["']/gm)]
+        .map(([, name, file]) => [name, readFileSync(join(dirname(path), file), "utf8")]))
+      const body = docsText(text, { raw, versions })
       pages.push({
         rel,
         route,
@@ -69,14 +70,13 @@ const groupLabel = {
   examples: "Examples"
 }
 const byGroup = (g) => pages.filter((p) => p.group === g).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
-const root = pages.filter((p) => p.group === "").sort((a, b) => a.order - b.order || a.title.localeCompare(b.title))
+const startOrder = ["index.mdx", "installation.mdx", "quickstart.mdx"]
+const root = pages.filter((p) => p.group === "").sort((a, b) => startOrder.indexOf(a.rel) - startOrder.indexOf(b.rel))
 const link = (p) => `- [${p.title}](${origin}${p.route})${p.description ? `: ${p.description}` : ""}`
 
 const sections = []
 sections.push("# Smithers\n")
-sections.push(
-  "> Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history. The CLI binary is `smthrs` (npm `@smthrs/cli`, dist-tag `@next`). Node.js 22.19.0 or later.\n"
-)
+sections.push(`> ${project.description}\n`)
 sections.push("## Start here\n\n" + root.map(link).join("\n"))
 for (const g of groups) {
   if (g === "examples") continue

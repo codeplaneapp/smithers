@@ -28,7 +28,7 @@ The candidate publishes to the `next` dist-tag. `latest` still resolves the 0.x
 line, so an existing `npm install smthrs` is not pulled onto this release.
 
 Requires Node.js 22.19.0 or later. Every published package pins `effect` and
-the `@effect/*` packages to exactly `4.0.0-rc.108`; install that exact
+the `@effect/*` packages to exactly `4.0.0-rc.112`; install that exact
 version, because two Effect instances in one process are not interoperable.
 
 ## Read this before upgrading
@@ -55,7 +55,7 @@ This paragraph is frozen in the release contract, section 11. `check-docs`
 asserts it byte for byte in the README, the migration guide, and the
 compatibility policy, because an approximate promise is a different promise.
 
-> Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.108`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
+> Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.112`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
 
 ## Supported runtimes
 
@@ -67,7 +67,7 @@ SQLite only.
 
 | Item | Contract |
 | --- | --- |
-| Driver | `@effect/sql-sqlite-node` `4.0.0-rc.108` over Node.js `node:sqlite`; WAL on; `busy_timeout` 5 s; a `SQLITE_BUSY` open-retry ladder |
+| Driver | `@effect/sql-sqlite-node` `4.0.0-rc.112` over Node.js `node:sqlite`; WAL on; `busy_timeout` 5 s; a `SQLITE_BUSY` open-retry ladder |
 | Control-plane file | `<project>/.flows/control.db` |
 | Engine file | `<project>/.flows/engine.db` |
 | Artifacts | `<project>/.flows/objects/` |
@@ -195,7 +195,7 @@ known limitations.
 
 ### Effect
 
-> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.108`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
+> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.112`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
 
 ### Source migration
 

@@ -1,19 +1,28 @@
 ---
-title: "02 run-durably"
-description: "Run a flow on the durable engine and read the journal it wrote."
+title: "Run durably"
+description: "Run a flow on the durable engine and read its journal."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/02-run-durably.ts"
 sidebar:
   order: 2
 ---
 
 {/* Generated from examples/src/02-run-durably.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Run a flow on the durable engine and read the journal it wrote.
+Run a flow on the durable engine and read its journal.
 
-The authoring model is the one example 01 introduces: `Bundle` is the declared atom the flow's `body` names, and `Compile` is the sealed action that atom's implementation runs. What changes here is the engine underneath: `EngineStore` claims a run row, fences it with a heartbeat, persists every action attempt, and commits each lifecycle event in the same transaction as the state transition it describes.
+The flow calls `Bundle`, whose implementation executes a sealed `Compile` action. The durable engine claims the run, maintains its ownership heartbeat, and persists action attempts. It commits lifecycle events together with the state changes they describe.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/02-run-durably.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/02-run-durably.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/02-run-durably.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/02-run-durably.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/02-run-durably.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

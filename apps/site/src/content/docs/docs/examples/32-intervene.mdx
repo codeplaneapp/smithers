@@ -1,6 +1,7 @@
 ---
-title: "32 intervene"
+title: "Intervene"
 description: "Intervene on a real workspace: read a file, propose an edit, gate the write behind an approval, and report what happened."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/32-intervene.ts"
 sidebar:
   order: 32
 ---
@@ -13,9 +14,17 @@ The pattern has the two surfaces every `@smthrs/patterns` module has, and this e
 
 `dryRun` is a declaration-time decision, not a runtime flag the write step is trusted to honor: a dry-run plan has no apply call in it at all, so it cannot reach a writing step even if something later goes wrong.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/32-intervene.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/32-intervene.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/32-intervene.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/32-intervene.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/32-intervene.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

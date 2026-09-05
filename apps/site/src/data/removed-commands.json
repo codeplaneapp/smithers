@@ -7,7 +7,7 @@
       "anchor": "replay",
       "name": "replay",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs replay"
@@ -18,7 +18,7 @@
       "anchor": "rewind",
       "name": "rewind",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs rewind"
@@ -29,7 +29,7 @@
       "anchor": "fork",
       "name": "fork",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs fork"
@@ -40,7 +40,7 @@
       "anchor": "timetravel",
       "name": "timetravel",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs timetravel"
@@ -51,7 +51,7 @@
       "anchor": "snapshots",
       "name": "snapshots",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs snapshots"
@@ -62,7 +62,7 @@
       "anchor": "restore",
       "name": "restore",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs restore"
@@ -73,7 +73,7 @@
       "anchor": "snapshot-hook",
       "name": "snapshot-hook",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs snapshot-hook"
@@ -84,7 +84,7 @@
       "anchor": "revert",
       "name": "revert",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs revert"
@@ -95,7 +95,7 @@
       "anchor": "retry-task",
       "name": "retry-task",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs retry-task"
@@ -106,7 +106,7 @@
       "anchor": "tree",
       "name": "tree",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs tree"
@@ -114,21 +114,10 @@
     },
     {
       "kind": "verb",
-      "anchor": "graph",
-      "name": "graph",
-      "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
-      "subcommands": [],
-      "spellings": [
-        "smthrs graph"
-      ]
-    },
-    {
-      "kind": "verb",
       "anchor": "timeline",
       "name": "timeline",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs timeline"
@@ -139,7 +128,7 @@
       "anchor": "diff",
       "name": "diff",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [],
       "spellings": [
         "smthrs diff"
@@ -150,7 +139,7 @@
       "anchor": "worktrees",
       "name": "worktrees",
       "group": "Time travel and checkpoints",
-      "reason": "time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred",
+      "reason": "use `smthrs runs inspect|replay|fork|rewind` for current execution history",
       "subcommands": [
         "list",
         "prune"
@@ -265,21 +254,10 @@
     },
     {
       "kind": "verb",
-      "anchor": "eval",
-      "name": "eval",
-      "group": "Evaluation and optimization",
-      "reason": "not part of the engine release",
-      "subcommands": [],
-      "spellings": [
-        "smthrs eval"
-      ]
-    },
-    {
-      "kind": "verb",
       "anchor": "optimize",
       "name": "optimize",
       "group": "Evaluation and optimization",
-      "reason": "not part of the engine release",
+      "reason": "use `smthrs eval list|run|baseline|compare`; automatic optimization remains unavailable",
       "subcommands": [],
       "spellings": [
         "smthrs optimize"
@@ -290,7 +268,7 @@
       "anchor": "scores",
       "name": "scores",
       "group": "Evaluation and optimization",
-      "reason": "not part of the engine release",
+      "reason": "use `smthrs eval list|run|baseline|compare`; automatic optimization remains unavailable",
       "subcommands": [],
       "spellings": [
         "smthrs scores"
@@ -487,7 +465,7 @@
       "anchor": "cron",
       "name": "cron",
       "group": "Accounts and providers",
-      "reason": "moved to the plugins repository or deferred (cron returns on @smthrs/triggers)",
+      "reason": "use `smthrs triggers register|list|show|enable|disable|fire|serve`",
       "subcommands": [
         "start",
         "add",
@@ -666,17 +644,6 @@
     },
     {
       "kind": "verb",
-      "anchor": "review",
-      "name": "review",
-      "group": "Review and release",
-      "reason": "not an rc.0 verb",
-      "subcommands": [],
-      "spellings": [
-        "smthrs review"
-      ]
-    },
-    {
-      "kind": "verb",
       "anchor": "release",
       "name": "release",
       "group": "Review and release",
@@ -688,17 +655,6 @@
     },
     {
       "kind": "verb",
-      "anchor": "test",
-      "name": "test",
-      "group": "Review and release",
-      "reason": "not an rc.0 verb",
-      "subcommands": [],
-      "spellings": [
-        "smthrs test"
-      ]
-    },
-    {
-      "kind": "verb",
       "anchor": "list-runs",
       "name": "list-runs",
       "group": "Old aliases and did-you-mean keys",
@@ -706,17 +662,6 @@
       "subcommands": [],
       "spellings": [
         "smthrs list-runs"
-      ]
-    },
-    {
-      "kind": "verb",
-      "anchor": "runs",
-      "name": "runs",
-      "group": "Old aliases and did-you-mean keys",
-      "reason": "use `ps`",
-      "subcommands": [],
-      "spellings": [
-        "smthrs runs"
       ]
     },
     {
@@ -783,17 +728,6 @@
       "subcommands": [],
       "spellings": [
         "smthrs exec"
-      ]
-    },
-    {
-      "kind": "verb",
-      "anchor": "show",
-      "name": "show",
-      "group": "Old aliases and did-you-mean keys",
-      "reason": "use `status`",
-      "subcommands": [],
-      "spellings": [
-        "smthrs show"
       ]
     },
     {
@@ -1008,12 +942,10 @@
     "databases",
     "diff",
     "eject",
-    "eval",
     "exec",
     "flows",
     "fork",
     "gateway",
-    "graph",
     "gui",
     "help",
     "herdr",
@@ -1041,13 +973,10 @@
     "restore",
     "retry-task",
     "revert",
-    "review",
     "rewind",
     "run-data",
-    "runs",
     "scores",
     "share",
-    "show",
     "snapshot-hook",
     "snapshots",
     "start",
@@ -1057,7 +986,6 @@
     "supervision",
     "supervisor",
     "tail",
-    "test",
     "timeline",
     "timetravel",
     "token",
@@ -1082,7 +1010,6 @@
     "revert",
     "retry-task",
     "tree",
-    "graph",
     "timeline",
     "diff",
     "worktrees",
@@ -1095,7 +1022,6 @@
     "supervise",
     "supervisor",
     "top",
-    "eval",
     "optimize",
     "scores",
     "chat",
@@ -1126,18 +1052,14 @@
     "ask-human",
     "node",
     "tail",
-    "review",
     "release",
-    "test",
     "list-runs",
-    "runs",
     "list",
     "workflows",
     "stop",
     "kill",
     "start",
     "exec",
-    "show",
     "log",
     "help",
     "supervision",

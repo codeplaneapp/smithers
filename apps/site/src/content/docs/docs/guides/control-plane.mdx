@@ -63,18 +63,17 @@ Refusing to bind <host> without a bearer token: set SMITHERS_API_KEY (preferred)
 Verbs that act on runs accept the global `--remote` and `--credential` flags. To drive the served project from another terminal, export `SMITHERS_API_KEY` and pass `--remote`:
 
 ```bash
-smthrs ps --remote http://192.0.2.10:3000
+smthrs runs list --remote http://192.0.2.10:3000 --credential "$SMITHERS_API_KEY"
 ```
 
 `--remote` falls back to `SMITHERS_REMOTE`; `--credential` falls back to `SMITHERS_API_KEY`. To make every invocation in a shell act on the remote plane, export both:
 
 ```bash
 export SMITHERS_REMOTE=http://192.0.2.10:3000
-# SMITHERS_API_KEY was supplied by the secret manager or parent process.
-export SMITHERS_API_KEY
+export SMITHERS_API_KEY="<the bearer token>"
 ```
 
-Reads render the same over `--remote` as they do locally: `smthrs status` states this explicitly for its diagnosis card. The [environment variables reference](/docs/reference/environment-variables/) lists both variables.
+Reads render the same over `--remote` as they do locally: `smthrs runs show` states this explicitly for its diagnosis card. The [environment variables reference](/docs/reference/environment-variables/) lists both variables.
 
 ## 4. Store client credentials
 
@@ -96,7 +95,7 @@ Two adapters ship in the package:
 # Wait for this project's control plane to answer its health probe.
 base_url="${SMITHERS_REMOTE:-http://127.0.0.1:3000}"
 for attempt in $(seq 1 30); do
-  if curl --fail --silent "$base_url/health" > /dev/null; then
+  if curl --fail --silent --max-time 2 "$base_url/health" > /dev/null; then
     echo "control plane is answering at $base_url"
     exit 0
   fi
@@ -110,7 +109,7 @@ exit 1
 
 - The banner on stderr prints `smthrs serve listening on http://127.0.0.1:3000`, one line per mounted route with its URL and purpose, and an `auth` line reading `no bearer (loopback Host; loopback browser Origin)` or `bearer token`.
 - `curl --fail --silent http://127.0.0.1:3000/health` exits 0 and prints the workspace identity document.
-- From a second terminal, `smthrs ps --remote http://127.0.0.1:3000` prints the same run listing a local `smthrs ps` prints. A loopback server needs no credential.
+- From a second terminal, `smthrs runs list --remote http://127.0.0.1:3000` prints the same run listing a local `smthrs runs list` prints. A loopback server needs no credential.
 
 ## See also
 

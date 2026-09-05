@@ -1,25 +1,30 @@
 ---
-title: "19 cancel-and-child-cleanup"
-description: "Cancel a run, and watch the cancellation reach everything the run was holding: its linked child, and the operating-system process its step started."
+title: "Cancel and child cleanup"
+description: "Cancel a run and observe attached child and process cleanup."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/19-cancel-and-child-cleanup.ts"
 sidebar:
   order: 19
 ---
 
 {/* Generated from examples/src/19-cancel-and-child-cleanup.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Cancel a run, and watch the cancellation reach everything the run was holding: its linked child, and the operating-system process its step started.
+Cancel a run and observe attached child and process cleanup.
 
-Cancellation in this engine is durable, not a flag anybody polls. Interrupting a run writes its terminal transition and, in the SAME transaction, walks the `flows_run_parents` edge table and cancel-requests every linked descendant. A crash cannot therefore leave a cancelled parent over a live child, and a cancellation observed from durable state by a process that never spawned the children still reaches them.
+The parent's terminal transaction records cancellation requests for linked descendants under their recorded parent-exit policy. Each child's driver settles its own request under ownership fencing.
 
-Two things follow from that, and this example shows both.
+For operating-system processes, `NodeRuntime.layerHost` tracks process groups in a durable ledger and terminates the group when its action scope closes. The example checks both durable child state and process cleanup.
 
-**The parent writes a request, not the child's terminal row.** Ownership fencing forbids one run's driver writing state for a run another driver owns, so the child's own driver settles the request at its next boundary. What is atomic with the parent's exit is the REQUEST; the settlement is the child's.
+## Run the test
 
-**A process is not a fiber.** Interrupting a fiber does nothing to a subprocess it started, so containment is the host's job: `NodeRuntime.layerHost` gives every spawned process its own process group, records it in the durable `ProcessLedger`, and signals then kills the group when the action's scope closes. Cancelling the run closes that scope, which is what makes the group go away.
+The complete program is [`examples/src/19-cancel-and-child-cleanup.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/19-cancel-and-child-cleanup.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-## Run it
+From the repository root, run this example's assertions:
 
-The program is [`examples/src/19-cancel-and-child-cleanup.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/19-cancel-and-child-cleanup.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/19-cancel-and-child-cleanup.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

@@ -132,59 +132,55 @@ Every 0.x verb and flag that 1.0.0-rc.0 removed fails with exit 1 and a sentence
 
 ### replay
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs replay`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs replay`. **1.0 path:** `smthrs runs replay <run>` reads committed execution history without re-executing actions.
 
 ### rewind
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs rewind`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs rewind`. **1.0 path:** `smthrs runs rewind <run> --at <sequence> --preview`, then `--yes` to restore an eligible historical frame.
 
 ### fork
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs fork`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs fork`. **1.0 path:** `smthrs runs fork <run> --at <sequence>` creates a resumable child with an isolated workspace.
 
 ### timetravel
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs timetravel`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs timetravel`. **1.0 path:** `smthrs runs inspect|replay|fork|rewind`; see the [CLI reference](/docs/reference/cli/).
 
 ### snapshots
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs snapshots`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs snapshots`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### restore
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs restore`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs restore`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### snapshot-hook
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs snapshot-hook`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs snapshot-hook`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### revert
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs revert`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs revert`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### retry-task
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs retry-task`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs retry-task`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### tree
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs tree`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
-
-### graph
-
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs graph`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs tree`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### timeline
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs timeline`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs timeline`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### diff
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs diff`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs diff`. **1.0 path:** the `@smthrs/time-travel` library; see [Time travel](/docs/concepts/time-travel/).
 
 ### worktrees
 
-**Reason:** Time travel is a library API (@smthrs/time-travel) and worktree lanes are deferred. **Removed:** `smthrs worktrees list` and `smthrs worktrees prune`. **1.0 path:** the `@smthrs/time-travel` library, with worktree lanes deferred; see [Time travel](/docs/concepts/time-travel/).
+**Reason:** Use `smthrs runs inspect|replay|fork|rewind` for current execution history. **Removed:** `smthrs worktrees list` and `smthrs worktrees prune`. **1.0 path:** `smthrs runs fork` retains an isolated workspace under `.flows/forks/`; separate worktree list/prune commands are not exposed.
 
 **Hijack and pause.**
 
@@ -230,17 +226,13 @@ Every 0.x verb and flag that 1.0.0-rc.0 removed fails with exit 1 and a sentence
 
 **Evaluation and optimization.**
 
-### eval
-
-**Reason:** Not part of the engine release. **Removed:** `smthrs eval`. **1.0 path:** no replacement ships in rc.0.
-
 ### optimize
 
-**Reason:** Not part of the engine release. **Removed:** `smthrs optimize`. **1.0 path:** no replacement ships in rc.0.
+**Reason:** Use `smthrs eval list|run|baseline|compare`; automatic optimization remains unavailable. **Removed:** `smthrs optimize`. **1.0 path:** no replacement ships in rc.0.
 
 ### scores
 
-**Reason:** Not part of the engine release. **Removed:** `smthrs scores`. **1.0 path:** no replacement ships in rc.0.
+**Reason:** Use `smthrs eval list|run|baseline|compare`; automatic optimization remains unavailable. **Removed:** `smthrs scores`. **1.0 path:** use `smthrs eval run|compare` for fixed-suite scores and baseline regressions.
 
 **Chat and narration.**
 
@@ -304,7 +296,7 @@ Every 0.x verb and flag that 1.0.0-rc.0 removed fails with exit 1 and a sentence
 
 ### cron
 
-**Reason:** Moved to the plugins repository or deferred (cron returns on @smthrs/triggers). **Removed:** `smthrs cron start`, `smthrs cron add`, `smthrs cron list`, and `smthrs cron rm`. **1.0 path:** no replacement ships in rc.0; cron returns on `@smthrs/triggers`.
+**Reason:** Use `smthrs triggers register|list|show|enable|disable|fire|serve`. **Removed:** `smthrs cron start`, `smthrs cron add`, `smthrs cron list`, and `smthrs cron rm`. **1.0 path:** `smthrs triggers register|list|show|enable|disable|fire|serve`; schedules run while `smthrs serve` or `smthrs triggers serve` is active.
 
 **Packs and scaffolding.**
 
@@ -366,27 +358,15 @@ Every 0.x verb and flag that 1.0.0-rc.0 removed fails with exit 1 and a sentence
 
 **Review and release.**
 
-### review
-
-**Reason:** Not an rc.0 verb. **Removed:** `smthrs review`. **1.0 path:** no replacement ships in rc.0.
-
 ### release
 
 **Reason:** Not an rc.0 verb. **Removed:** `smthrs release`. **1.0 path:** no replacement ships in rc.0.
-
-### test
-
-**Reason:** Not an rc.0 verb. **Removed:** `smthrs test`. **1.0 path:** run the project's own test runner; for testing flows themselves, see [Testing flows](/docs/guides/testing-flows/).
 
 **Old aliases and did-you-mean keys.**
 
 ### list-runs
 
 **Reason:** Use `ps`. **Removed:** `smthrs list-runs`. **1.0 path:** `smthrs ps`; see [CLI reference](/docs/reference/cli/).
-
-### runs
-
-**Reason:** Use `ps`. **Removed:** `smthrs runs`. **1.0 path:** `smthrs ps`; see [CLI reference](/docs/reference/cli/).
 
 ### list
 
@@ -411,10 +391,6 @@ Every 0.x verb and flag that 1.0.0-rc.0 removed fails with exit 1 and a sentence
 ### exec
 
 **Reason:** Use `up`. **Removed:** `smthrs exec`. **1.0 path:** `smthrs up`; see [CLI reference](/docs/reference/cli/).
-
-### show
-
-**Reason:** Use `status`. **Removed:** `smthrs show`. **1.0 path:** `smthrs status`; see [CLI reference](/docs/reference/cli/).
 
 ### log
 

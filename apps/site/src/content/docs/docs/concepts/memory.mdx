@@ -1,26 +1,38 @@
 ---
 title: "Memory"
-description: "Durable cross-run facts, history, and notes, with replaceable recall strategies and scheduled maintenance."
+description: "Retain facts, conversation history, and reviewed notes across runs, then recall them under an explicit policy."
 sidebar:
   order: 10
 ---
 
-A run's journal records what the run did. It does not record what the agent learned, and a flow that runs twice starts knowing nothing unless something carries knowledge across runs. `@smthrs/memory` is that something: durable, cross-run storage for facts, conversation history, and notes, with a recall seam a host can rebind and maintenance effects a scheduler can run.
+A run's journal records execution history. Memory carries selected knowledge into later runs: facts, conversations, and reviewed notes. `@smthrs/memory` stores that material in SQL and supplies recall operations an agent can call.
 
-## What the store holds
+## Choose what to retain
 
-`MemoryStore` is the authoritative contract, backed by SQL. It holds three record families: facts (JSON values under keys, with provenance, tags, and optional time-to-live), threads and their messages (the history family), and notes (reviewable text with a status; `listNotes` shows accepted notes unless you ask for another status). Two callable flows sit on top. `Flows.remember` writes one record and declares the `irreversible` tier because it writes. `Flows.recall` reads advisory rows and declares `sealed`, so it nests inside a sealed or compensable envelope without widening its tier.
+The store separates three record families:
 
-## Namespaces and policies
+| Record | Use it for | Relevant behavior |
+| --- | --- | --- |
+| Fact | A JSON value under a key. | Supports provenance, tags, and optional expiry. |
+| Thread and messages | Conversation history. | Message identity is scoped to its thread. |
+| Note | Text that needs review. | A status controls whether normal recall includes it. |
 
-Every record lives in a namespace: a kind (`flow`, `agent`, `user`, or `global`) plus an id. The kind is a stable lifetime. A bank is the public spelling of a namespace: an unprefixed bank is flow-local, a prefix such as `flow-` or `global-` names an explicit lifetime, and `Bank.parse` rejects an empty or malformed bank with `invalid_namespace`. Because `bank` and `flow-bank` resolve to the same namespace, recall de-duplicates on the resolved namespace rather than on the bank string.
+`Flows.remember` writes records. `Flows.recall` retrieves advisory material within a budget. Remembering is an irreversible write; recall is a sealed read in the declared flow model.
 
-A delegated plan generates work its author never named, so memory settings attach to the flow tree instead of threading through every call. `WithMemory.withMemory(flow, policy)` returns a copy of the flow carrying one policy of `namespace`, `recall` (`"auto"` or `"none"`), `maxTokens`, and `retain` (`"on-complete"` or `"never"`), and gives the same policy to every flow that flow declares.
+The [memory tutorial](/docs/tutorials/memory/) stores facts in one execution and retrieves them in another.
+
+## Scope memory to its intended lifetime
+
+Every record belongs to a namespace with a kind and ID. Kinds include `flow`, `agent`, `user`, and `global`. A bank is the public string form of that namespace. An unprefixed bank is flow-local; an explicit prefix selects a lifetime.
+
+Choose the namespace according to who should share the material. A user-specific preference and a repository-wide convention should not accidentally resolve to the same bank.
+
+`WithMemory.withMemory` attaches policy to a flow and the flows it declares:
 
 ```ts
 import { Flows, WithMemory } from "@smthrs/memory"
 
-const scoped = WithMemory.withMemory(Flows.recall, {
+const scopedRecall = WithMemory.withMemory(Flows.recall, {
   namespace: { kind: "flow", id: "release-notes" },
   recall: "auto",
   maxTokens: 2048,
@@ -28,33 +40,26 @@ const scoped = WithMemory.withMemory(Flows.recall, {
 })
 ```
 
-A policy supplies defaults and never overrides: a caller that names its own banks or its own budget keeps them. Two values are refusals, not defaults. `recall: "none"` returns no rows and never reaches the recall service. `retain: "never"` drops the write while the caller still receives the key it asked for. The policy is an annotation: it takes no part in flow identity, so applying one never changes the graph a flow plans, node for node.
+Use the annotated declaration when binding handlers so the policy reaches the implementation. A caller's explicit bank or budget overrides defaults, while policy refusals still apply: `recall: "none"` returns no rows, and `retain: "never"` suppresses retention.
 
-`MemoryTrellis.make` is the delegation case. A model-authored plan fills its leaf slots at run time, so a leaf cannot be handed a namespace at declaration time; `MemoryTrellis.make` applies one policy to the plan author, to the leaf, and to the memory flows those declare, then annotates the trellis itself. The graph stays the plain trellis graph, node for node.
+:::note[The budget is measured in bytes]
+Despite its name, `maxTokens` is a UTF-8 byte ceiling on the serialized result array. It is not the selected model's tokenizer count. Choose the budget with that unit in mind.
+:::
 
-## Recall strategies and when each fits
+## Choose a recall strategy
 
-`Recall` is a replaceable seam, and the package ships three bindings.
+The store remains authoritative whichever recall implementation you provide:
 
-`RecallKeyword` has no host dependencies and normalizes both query and row text to NFKC before matching. It fits tests, browsers, and stores that have not opted into full text search. `RecallFts` is the SQLite FTS5 binding: a namespace kind must opt in through `enableFts`, a query against a kind that has not fails with `fts_not_enabled`, and it fits the durable SQL store once the volume makes row scans expensive. The two can disagree on compatibility-equivalent characters, because FTS5 does not normalize to NFKC. `RecallSemantic` is in-process vector recall with an opt-in, best-effort projection through `decorateStore`: the authoritative store writes no embedding vectors on its own, and recall only lists vectors written under the model it was asked for. It fits questions where paraphrase matters more than exact terms and an embedding provider is available.
+| Strategy | Suitable use | Requirement or limitation |
+| --- | --- | --- |
+| `RecallKeyword` | Tests, browser hosts, and smaller stores. | Scans normalized text without an external service. |
+| `RecallFts` | Indexed text search in SQLite. | Enable FTS for the namespace kind first; otherwise recall fails with `fts_not_enabled`. |
+| `RecallSemantic` | Queries where paraphrases matter. | Requires embeddings and an opt-in projection; vectors are filtered by model. |
 
-## Maintenance
+Keyword and FTS matching can differ because their Unicode normalization behavior differs. Semantic vectors are derived data; replacing an embedding model does not replace the stored facts.
 
-Maintenance is a set of finite effects meant for explicit schedules, not a background daemon. `Maintenance.ttlGc` removes an expired fact together with its full-text projection and its vector rows in one transaction. `Maintenance.limitHistory` bounds history against a token budget, and `Maintenance.compact` summarizes old material down.
+## Maintain retained material
 
-## Behaviors worth knowing
+Maintenance runs as explicit effects that a host can schedule. `ttlGc` removes expired facts and their search projections. `limitHistory` bounds conversation history, and `compact` summarizes older material.
 
-- Fact values are stored as JSON, serialized once at API entry: `NaN` and `Infinity` come back as `null`, and the stored JSON, the search text, the retained tags, and any vector projection all come from that one snapshot.
-- A message id is unique within its thread, not globally; a same-thread retry whose creation data differs fails `idempotency_conflict` with a path to the first differing field.
-- `appendMessage` creates a missing thread in the `global` namespace under the id `history`, so call `createThread` first when the thread belongs somewhere else.
-- A read `limit` bounds the rows you receive after every status, supersession, and tag-group filter, so a bounded read never under-fills while matching rows remain.
-
-## Boundaries
-
-Memory is not a cache. A cache is disposable and its loss is invisible; memory is authoritative state with provenance and namespaces, and losing it changes what later runs know. Memory is not a vector store you manage by hand: the semantic projection is derivative and opt-in, and the store of record stays facts, messages, and notes. Recall is advisory: it answers rows within a budget, and a policy refusal wins over what the caller asked for. `maxTokens` is a UTF-8 byte ceiling over the serialized result array, not a tokenizer's count, because bytes conservatively bound tokens without committing the package to one model's tokenizer.
-
-## Related
-
-- [Memory tutorial](/docs/tutorials/memory/): remember and recall across two runs.
-- [Memory operations](/docs/guides/memory-ops/): policies, maintenance schedules, and store care.
-- [The agent runtime](/docs/concepts/agent-runtime/): where memory plugs into the cell loop.
+Losing memory changes the knowledge available to future runs. Back up the authoritative store separately from disposable search indexes. [Memory operations](/docs/guides/memory-ops/) covers policies and maintenance; the [memory reference](/docs/reference/api/memory/) specifies record identity, filters, and serialization.

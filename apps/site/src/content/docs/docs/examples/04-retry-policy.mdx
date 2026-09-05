@@ -1,19 +1,28 @@
 ---
-title: "04 retry-policy"
-description: "Retry a flaky action, and read the policy that decides when to stop."
+title: "Retry policy"
+description: "Inspect a retry policy and retry an action that fails before succeeding."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/04-retry-policy.ts"
 sidebar:
   order: 4
 ---
 
 {/* Generated from examples/src/04-retry-policy.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Retry a flaky action, and read the policy that decides when to stop.
+Inspect a retry policy and retry an action that fails before succeeding.
 
-`RetryPolicy` is data. `nextDelay` and `decide` are pure functions over that data, so a deployment can inspect a backoff ladder without running anything. `Action.retry` is the runtime side: it re-dispatches the action and advances `Action.CurrentAttempt`, which is the attempt number the durable store addresses each attempt row by.
+`RetryPolicy.nextDelay` and `decide` inspect a policy as data. Separately, `Action.retry` wraps an effect with Effect retry options and advances `Action.CurrentAttempt` for durable dispatch. The policy inspection and executed retry loop are separate parts of this example.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/04-retry-policy.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/04-retry-policy.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/04-retry-policy.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/04-retry-policy.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/04-retry-policy.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

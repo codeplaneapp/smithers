@@ -1,27 +1,30 @@
 ---
-title: "25 agent-tools-in-sandbox"
-description: "Give a model-backed step real tools, and run the code it writes inside a sandbox."
+title: "Agent tools in sandbox"
+description: "Run a scripted agent with filesystem tools inside a bounded QuickJS cell loop."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/25-agent-tools-in-sandbox.ts"
 sidebar:
   order: 25
 ---
 
 {/* Generated from examples/src/25-agent-tools-in-sandbox.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Give a model-backed step real tools, and run the code it writes inside a sandbox.
+Run a scripted agent with filesystem tools inside a bounded QuickJS cell loop.
 
-Example 11 is one model call with no tools. This is the same shape with the one thing a working agent adds: a catalog. There is no `ctx.fs`, no `ctx.shell`, and no tool-call protocol. A capability is an ordinary flow declaration plus the code that runs it, bound through `@smthrs/harness/FlowBinding`, and the model reaches it the way it reaches anything else: it finds it in `ctx.flows` and calls it with `ctx.call`. `StandardFlows.filesystem` is that pairing for the seven standard file capabilities, over whatever `FileSystem` the host provides. Here that is the real Node one, pointed at a real directory.
+The cell reaches tools through registered flows. The host supplies a capability envelope, the sandbox limits cell evaluation, and durable call boundaries record tool outcomes for replay.
 
-The model does not run the code either. It answers with a fenced `cell` block, and the block is evaluated inside the QuickJS sandbox `Agent.layerDefaults` supplies: a separate WebAssembly realm with an explicit budget, no ambient host access, and exactly one way out, which is a call to a declared flow. A cell that loops forever spends its budget and stops; a cell that reaches for `require` finds nothing there.
+The standard filesystem flows operate on a scratch directory through the supplied host service. The scripted seat makes the test deterministic and requires no API key.
 
-Three boundaries therefore stack in one step, and each is visible below:
+## Run the test
 
-- the CAPABILITY envelope, which is the host's answer to "what may this run   touch at all". The standard flows declare real capabilities, and an empty   envelope refuses every one of them. - the SANDBOX budget, which bounds the code the model wrote. - the durable step boundary, which records each call as a keyed   `cell-call-started`/`cell-call-settled` pair, so a re-driven step replays   the calls instead of repeating them.
+The complete program is [`examples/src/25-agent-tools-in-sandbox.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/25-agent-tools-in-sandbox.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The seat resolves to a scripted model, so the example runs in CI with no API key. Point `SeatResolver` at a provider route and nothing above it changes.
+From the repository root, run this example's assertions:
 
-## Run it
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/25-agent-tools-in-sandbox.test.ts
+```
 
-The program is [`examples/src/25-agent-tools-in-sandbox.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/25-agent-tools-in-sandbox.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

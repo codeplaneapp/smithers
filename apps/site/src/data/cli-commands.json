@@ -1,0 +1,4707 @@
+{
+  "version": "incur.v1",
+  "commands": [
+    {
+      "name": "affected",
+      "description": "Execute targets affected by changed files, conservatively including ambient inputs",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "verb": {
+              "type": "string",
+              "enum": [
+                "build",
+                "test",
+                "lint",
+                "docs",
+                "review",
+                "run",
+                "ci"
+              ],
+              "description": "Target verb to execute"
+            },
+            "pattern": {
+              "default": "//...",
+              "description": "Target label or recursive pattern",
+              "type": "string"
+            }
+          },
+          "required": [
+            "verb",
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "base": {
+              "default": "HEAD",
+              "description": "Git base revision",
+              "type": "string"
+            },
+            "head": {
+              "description": "Git head revision; defaults to the working tree including untracked files",
+              "type": "string"
+            },
+            "files": {
+              "description": "Explicit changed paths instead of Git discovery",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "list": {
+              "default": false,
+              "description": "List selected roots and reasons without executing",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "base",
+            "list"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "approvals approve",
+      "description": "Approve the exact serialized payload or @file",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "approval": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approval"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "scope": {
+              "default": "once",
+              "type": "string",
+              "enum": [
+                "once",
+                "run",
+                "remembered"
+              ]
+            }
+          },
+          "required": [
+            "quiet",
+            "scope"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "approvals deny",
+      "description": "Deny the exact serialized payload or @file",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "approval": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approval"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "approvals list",
+      "description": "List pending in-run approvals with their exact authorization payloads",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "bug",
+      "description": "Submit a redacted bug report to the configured endpoint",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "build",
+      "description": "Execute the build targets selected by a pattern",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "cache clear",
+      "description": "Remove all local action results; durable runs and artifacts are preserved",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "dryRun": {
+              "default": false,
+              "type": "boolean"
+            },
+            "yes": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "dryRun",
+            "yes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "cache prune",
+      "description": "Remove local action results older than the retention window",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "olderThanDays": {
+              "default": 30,
+              "type": "number",
+              "minimum": 0
+            },
+            "dryRun": {
+              "default": false,
+              "type": "boolean"
+            },
+            "yes": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "olderThanDays",
+            "dryRun",
+            "yes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "cache status",
+      "description": "Report cache size and configured remote without exposing credentials",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "ci",
+      "description": "Execute build, test, lint, and documentation targets; wildcards omit exclusive tiers unless --include-exclusive is set",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "clean",
+      "description": "Execute only declared Clean targets selected by the pattern",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "default": "//...",
+              "description": "Target label or recursive pattern",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "create-app",
+      "description": "Scaffold a Smithers app from a @smthrs/create-app template",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "dir": {
+              "type": "string",
+              "description": "Directory to create; its name becomes the app name"
+            }
+          },
+          "required": [
+            "dir"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "template": {
+              "default": "default",
+              "description": "Template name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "template"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "credentials add",
+      "description": "Encrypt a credential using SMITHERS_CREDENTIAL_KEY",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "secretEnv": {
+              "description": "Environment variable containing the secret",
+              "type": "string"
+            },
+            "secretFile": {
+              "description": "File containing the secret; one trailing newline is removed",
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "credentials list",
+      "description": "List credential IDs and connection names",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "credentials revoke",
+      "description": "Remove a stored credential reference and its encrypted secret",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "credentials rotate",
+      "description": "Replace an encrypted credential secret using a compare-and-set write",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "secretEnv": {
+              "description": "Environment variable containing the secret",
+              "type": "string"
+            },
+            "secretFile": {
+              "description": "File containing the secret; one trailing newline is removed",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "docs",
+      "description": "Execute the documentation targets selected by a pattern: parity checks, freshness stamps, and Docs.Page writers",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "write": {
+              "default": false,
+              "description": "Refresh the Docs.Check stamps of the selected pages instead of checking them",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "write"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "Check project discovery, providers, tools, and durable-state compatibility",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "eval baseline",
+      "description": "Write a committed baseline from a saved evaluation run",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "description": "Evaluation run ID or saved run JSON file"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Smithers project directory",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Not supported: evaluations execute local modules",
+              "type": "string"
+            },
+            "output": {
+              "description": "Baseline file; defaults to evals/<suite>.baseline.json",
+              "type": "string"
+            },
+            "force": {
+              "default": false,
+              "description": "Replace an existing baseline",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "force"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "eval compare",
+      "description": "Compare a saved run with a baseline; exit 1 for regressions and 5 for inconclusive results",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "description": "Evaluation run ID or saved run JSON file"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Smithers project directory",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Not supported: evaluations execute local modules",
+              "type": "string"
+            },
+            "baseline": {
+              "description": "Committed baseline file",
+              "type": "string"
+            },
+            "mean": {
+              "description": "Required mean score",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "min": {
+              "description": "Required minimum score",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "output": {
+              "description": "Save the complete comparison JSON to a new file",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "eval list",
+      "description": "List evals/**/*.eval.ts modules without executing them",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Smithers project directory",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Not supported: evaluations execute local modules",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "eval run",
+      "description": "Execute a suite's CaseExecutor and bound scorers, then persist its results",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "suite": {
+              "type": "string",
+              "description": "Discovered suite name or module file"
+            }
+          },
+          "required": [
+            "suite"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Smithers project directory",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Not supported: evaluations execute local modules",
+              "type": "string"
+            },
+            "runId": {
+              "description": "Explicit run identity; defaults to a UUID",
+              "type": "string"
+            },
+            "at": {
+              "description": "Explicit observation timestamp for reproducible runs",
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            "output": {
+              "description": "Additional output JSON path; refuses overwriting existing files",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "explain",
+      "description": "Explain a target's actual planned cache key and local cache state",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verb": {
+              "type": "string",
+              "enum": [
+                "build",
+                "test",
+                "lint",
+                "docs",
+                "review",
+                "run"
+              ]
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "flow execute",
+      "description": "Execute a previously approved plan payload",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "approval": {
+              "type": "string",
+              "description": "Serialized payload or @file"
+            }
+          },
+          "required": [
+            "approval"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "flow list",
+      "description": "List project flows",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "flow plan",
+      "description": "Compile a flow plan and its approval payload without executing it",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "flow": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Discovered flow name"
+            },
+            "input": {
+              "default": [],
+              "description": "Input fields as key=value",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "flow",
+            "input"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "data": {
+              "description": "JSON input object",
+              "type": "string"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "flow show",
+      "description": "Show a discovered flow's identity and description",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "flow": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Discovered flow name"
+            }
+          },
+          "required": [
+            "flow"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "flow start",
+      "description": "Plan, approve, and start one flow; optionally detach after durable admission",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "flow": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Discovered flow name"
+            }
+          },
+          "required": [
+            "flow"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "data": {
+              "type": "string"
+            },
+            "detached": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet",
+            "detached"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "gc",
+      "description": "Collect old terminal runs and compact their journals; separate from target caches",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "olderThan": {
+              "default": "30d",
+              "type": "string"
+            },
+            "dryRun": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet",
+            "olderThan",
+            "dryRun"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "generate app",
+      "description": "Create an application from a bundled template",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "directory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "directory"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "template": {
+              "default": "default",
+              "type": "string"
+            }
+          },
+          "required": [
+            "template"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "generate ci",
+      "description": "Generate CI files using the workspace's declared GitHub workflow target",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "type": "string"
+            },
+            "target": {
+              "description": "Declared generator label; required when more than one matches",
+              "type": "string"
+            },
+            "plan": {
+              "default": false,
+              "description": "Show the generator plan without writing files",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "generate flow",
+      "description": "Create a durable Markdown flow without replacing an existing flow",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "generate package",
+      "description": "Run the workspace's declared package scaffold with its configured defaults",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "type": "string"
+            },
+            "target": {
+              "description": "Declared generator label; required when more than one matches",
+              "type": "string"
+            },
+            "plan": {
+              "default": false,
+              "description": "Show the generator plan without writing files",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "plan"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "git-hooks",
+      "description": "Check the WORKSPACE.ts gitHooks scripts against .git/hooks, or install them with --write",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "write": {
+              "default": false,
+              "description": "Install the rendered hook scripts into .git/hooks",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "write"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "graph",
+      "description": "Print the target graph without executing it",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "mermaid": {
+              "default": false,
+              "description": "Render Mermaid instead of a text tree",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "mermaid"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "info",
+      "description": "Report workspace and host configuration for diagnosis",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "init",
+      "description": "Initialize workspace and target declarations plus a starter flow, preserving existing files",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Directory to initialize; defaults to cwd",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "install",
+      "description": "Plan and execute the install Flow under the toolchain the workspace declares",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "integrations doctor",
+      "description": "Check configured credentials and probe provider authentication",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "config": {
+              "default": ".smithers/integrations.json",
+              "type": "string"
+            },
+            "offline": {
+              "default": false,
+              "type": "boolean"
+            },
+            "timeoutMs": {
+              "default": 10000,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "config",
+            "offline",
+            "timeoutMs"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "integrations list",
+      "description": "List configured integrations and credential references without making requests",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "config": {
+              "default": ".smithers/integrations.json",
+              "type": "string"
+            }
+          },
+          "required": [
+            "config"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "integrations reconcile",
+      "description": "Plan GitHub webhooks from .smithers/listeners.json; --apply writes owned hooks",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "config": {
+              "default": ".smithers/integrations.json",
+              "type": "string"
+            },
+            "apply": {
+              "default": false,
+              "type": "boolean"
+            },
+            "allowDelete": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "config",
+            "apply",
+            "allowDelete"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "lint",
+      "description": "Execute the lint targets selected by a pattern",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "fix": {
+              "default": false,
+              "description": "Apply agent lint fixes inside the declared fixes write-set",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "fix"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory compact",
+      "description": "Replace selected thread messages with a supplied summary atomically",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1
+            },
+            "before": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "keep": {
+              "default": 10,
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "dryRun": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "summary",
+            "before",
+            "keep",
+            "dryRun"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory get",
+      "description": "Read one fact",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory list",
+      "description": "List facts in a namespace",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            },
+            "prefix": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory messages add",
+      "description": "Append a message idempotently using its message ID",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "role": {
+              "default": "user",
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant",
+                "system",
+                "tool"
+              ]
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory messages list",
+      "description": "Read ordered messages with an optional exclusive cursor",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            },
+            "afterId": {
+              "type": "string"
+            },
+            "afterAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory notes add",
+      "description": "Append a note, optionally superseding older notes",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "noteId": {
+              "type": "string"
+            },
+            "status": {
+              "default": "accepted",
+              "type": "string",
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected"
+              ]
+            },
+            "tag": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "supersedes": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "namespace",
+            "status",
+            "tag",
+            "supersedes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory notes get",
+      "description": "Read one note by its globally unique ID",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory notes list",
+      "description": "List notes in a namespace",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            },
+            "status": {
+              "default": "any",
+              "type": "string",
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected",
+                "any"
+              ]
+            },
+            "includeSuperseded": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "namespace",
+            "limit",
+            "status",
+            "includeSuperseded"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory notes status",
+      "description": "Accept, reject, or return a note to pending review",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "accepted",
+                "rejected"
+              ]
+            }
+          },
+          "required": [
+            "note",
+            "status"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory notes supersede",
+      "description": "Mark an older note superseded by an existing note",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "note": {
+              "type": "string"
+            },
+            "replacement": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "note",
+            "replacement"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory recall",
+      "description": "Search authoritative facts and accepted notes using keyword or SQLite FTS recall",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "method": {
+              "default": "keyword",
+              "type": "string",
+              "enum": [
+                "keyword",
+                "fts"
+              ]
+            },
+            "bank": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "maxTokens": {
+              "default": 2048,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 65536
+            }
+          },
+          "required": [
+            "namespace",
+            "method",
+            "bank",
+            "maxTokens"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory rm",
+      "description": "Delete one fact",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory set",
+      "description": "Write JSON when valid, otherwise a string; --value-json requires valid JSON",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "valueJson": {
+              "default": false,
+              "type": "boolean"
+            },
+            "ttlMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tag": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "namespace",
+            "valueJson",
+            "tag"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory threads create",
+      "description": "Create a durable history thread",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory threads list",
+      "description": "List threads in a namespace",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            }
+          },
+          "required": [
+            "namespace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory threads rm",
+      "description": "Delete one thread and its messages",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "memory threads show",
+      "description": "Show a thread and its ordered messages",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "thread": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "thread"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "namespace": {
+              "default": "user:cli",
+              "description": "Memory namespace: user:cli, flow:<id>, agent:<id>, or global:<id>",
+              "type": "string"
+            },
+            "id": {
+              "description": "Namespace identifier when --namespace is a bare lifetime such as user",
+              "type": "string"
+            },
+            "limit": {
+              "default": 100,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "namespace",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "migrate",
+      "description": "Inventory, plan, or apply the 0.x-to-1.x source migration",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "scan": {
+              "default": false,
+              "type": "boolean"
+            },
+            "apply": {
+              "default": false,
+              "type": "boolean"
+            },
+            "seat": {
+              "type": "string"
+            },
+            "allowUnsafe": {
+              "type": "string"
+            },
+            "acknowledgeRunState": {
+              "default": false,
+              "type": "boolean"
+            },
+            "allowNoVcs": {
+              "default": false,
+              "type": "boolean"
+            },
+            "keepOldSources": {
+              "default": false,
+              "type": "boolean"
+            },
+            "unit": {
+              "type": "string"
+            },
+            "maxRepairRounds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "reportDir": {
+              "type": "string"
+            },
+            "flowsDir": {
+              "type": "string"
+            },
+            "verifyInstall": {
+              "type": "string"
+            },
+            "verifyFormat": {
+              "type": "string"
+            },
+            "verifyTypecheck": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "verifyTest": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "quiet",
+            "scan",
+            "apply",
+            "acknowledgeRunState",
+            "allowNoVcs",
+            "keepOldSources"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "owners",
+      "description": "Resolve owners, reasons, and the agent policy for paths, or for the paths a diff touches",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "paths": {
+              "description": "Workspace-relative paths; omit them and pass --diff instead",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "diff": {
+              "description": "Also resolve every path changed since this git base, like S.gitDiff(base)",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "query",
+      "description": "List labels or evaluate deps(label), rdeps(label), or owners(label)",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "expr": {
+              "type": "string",
+              "description": "Label, pattern, deps(label), rdeps(label), or owners(label)"
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "review",
+      "description": "Execute the model-review targets selected by a pattern (needs the engine CLI; skips where it is absent)",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "run",
+      "description": "Execute run targets selected by a pattern",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "name": {
+              "description": "Package name supplied to scaffold targets",
+              "type": "string"
+            },
+            "message": {
+              "description": "Commit message for a Git.Commit target; wins over the declared message",
+              "type": "string"
+            },
+            "sweep": {
+              "default": false,
+              "description": "Let a Git.Commit target with no declared path scope commit the whole working tree",
+              "type": "boolean"
+            },
+            "input": {
+              "description": "Payload input for agent targets as name=value; repeatable",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "sweep"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs cancel",
+      "description": "Cancel one durable run",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs cancel-all",
+      "description": "Cancel every nonterminal run in this project",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs fork",
+      "description": "Branch a parked run at a historical frame into a durable, isolated workspace",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Exact journal sequence to branch or rewind to"
+            },
+            "lineage": {
+              "description": "Lineage ID; defaults to the lineage recorded at the frame",
+              "type": "string"
+            },
+            "limit": {
+              "default": 10000,
+              "description": "Maximum journal entries to read",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "quiet",
+            "at",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs inspect",
+      "description": "Inspect the state and event counts recorded at one historical frame",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "at": {
+              "description": "Journal sequence to inspect; defaults to the latest frame",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lineage": {
+              "description": "Lineage ID; defaults to the lineage recorded at the frame",
+              "type": "string"
+            },
+            "limit": {
+              "default": 10000,
+              "description": "Maximum journal entries to read",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "quiet",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs list",
+      "description": "List durable runs filtered by flow or status",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "flow": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "accepted",
+                "running",
+                "parked",
+                "waiting-approval",
+                "cancelled",
+                "completed",
+                "failed"
+              ]
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs logs",
+      "description": "Read run events or follow new events as they commit",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "follow": {
+              "default": false,
+              "type": "boolean"
+            },
+            "after": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "limit": {
+              "description": "Maximum events; agent history pulls default to 100",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "quiet",
+            "follow"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs output",
+      "description": "Read recorded outputs for one node or all nodes",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            },
+            "node": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs replay",
+      "description": "Replay committed history and sealed results without re-executing any actions",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "at": {
+              "description": "Journal sequence to inspect; defaults to the latest frame",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "lineage": {
+              "description": "Lineage ID; defaults to the lineage recorded at the frame",
+              "type": "string"
+            },
+            "limit": {
+              "default": 10000,
+              "description": "Maximum journal entries to read",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "quiet",
+            "limit"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs resume",
+      "description": "Resume a parked durable run",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs rewind",
+      "description": "Preview or archive a run's suffix and restore an earlier frame; requires --yes to mutate",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "at": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Exact journal sequence to branch or rewind to"
+            },
+            "lineage": {
+              "description": "Lineage ID; defaults to the lineage recorded at the frame",
+              "type": "string"
+            },
+            "limit": {
+              "default": 10000,
+              "description": "Maximum journal entries to read",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "preview": {
+              "default": false,
+              "description": "Show the affected suffix and effects without changing anything",
+              "type": "boolean"
+            },
+            "yes": {
+              "default": false,
+              "description": "Confirm archiving the suffix and restoring the historical frame",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet",
+            "at",
+            "limit",
+            "preview",
+            "yes"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs show",
+      "description": "Show a run's current status and diagnosis",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs signal",
+      "description": "Deliver a durable JSON signal",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            },
+            "payload": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "run",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "runs steer",
+      "description": "Send an attributed operator message",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Durable run ID"
+            }
+          },
+          "required": [
+            "run"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "quiet",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "serve",
+      "description": "Host the control gateway and durable trigger scheduler",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            },
+            "host": {
+              "default": "127.0.0.1",
+              "type": "string"
+            },
+            "port": {
+              "default": 3000,
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "listen": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet",
+            "host",
+            "port",
+            "listen"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "show target",
+      "description": "Show a target's inputs, outputs, dependencies, owners and cache identity",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verb": {
+              "type": "string",
+              "enum": [
+                "build",
+                "test",
+                "lint",
+                "docs",
+                "review",
+                "run"
+              ]
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "show workspace",
+      "description": "Show the resolved workspace, toolchain, cache and sandbox configuration",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "suggest",
+      "description": "Discover ways Smithers can help; interactively choose one to implement",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "type": "string"
+            },
+            "seat": {
+              "type": "string"
+            },
+            "list": {
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "target",
+      "description": "Execute one PACKAGE.ts label with its flavor-implied verb (the bare-label form)",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "write": {
+              "default": false,
+              "description": "Apply Diff/Generate/CiGen targets instead of checking drift",
+              "type": "boolean"
+            },
+            "fix": {
+              "default": false,
+              "description": "Apply agent lint fixes inside the declared fixes write-set",
+              "type": "boolean"
+            },
+            "message": {
+              "description": "Commit message for a Git.Commit target; wins over the declared message",
+              "type": "string"
+            },
+            "sweep": {
+              "default": false,
+              "description": "Let a Git.Commit target with no declared path scope commit the whole working tree",
+              "type": "boolean"
+            },
+            "input": {
+              "description": "Payload input for agent targets as name=value; repeatable",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "write",
+            "fix",
+            "sweep"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "targets",
+      "description": "List available targets with their kinds and summaries",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "default": "//...",
+              "description": "Target label or recursive pattern",
+              "type": "string"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspace"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "test",
+      "description": "Execute test targets; wildcards omit exclusive tiers unless --include-exclusive is set",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "pattern": {
+              "type": "string",
+              "description": "Bazel label or recursive pattern"
+            }
+          },
+          "required": [
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers disable",
+      "description": "Disable future occurrences without cancelling an active run",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers enable",
+      "description": "Enable future occurrences without cancelling an active run",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers fire",
+      "description": "Queue one manual occurrence for triggers serve or smthrs serve; approvals remain required",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "occurrence": {
+              "description": "Unix milliseconds used as the retry identity; defaults to now",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 8640000000000000
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers list",
+      "description": "List all durable trigger registrations",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers register",
+      "description": "Register or update a validated cron trigger from flags or a JSON file",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "file": {
+              "description": "JSON trigger declaration relative to the project root",
+              "type": "string"
+            },
+            "flow": {
+              "type": "string"
+            },
+            "cron": {
+              "type": "string"
+            },
+            "input": {
+              "default": "{}",
+              "type": "string"
+            },
+            "timezone": {
+              "type": "string"
+            },
+            "overlap": {
+              "default": "skip",
+              "type": "string",
+              "enum": [
+                "skip",
+                "buffer-one",
+                "supersede"
+              ]
+            },
+            "catchUp": {
+              "default": "none",
+              "type": "string",
+              "enum": [
+                "none",
+                "one",
+                "all"
+              ]
+            },
+            "maxCatchUp": {
+              "default": 0,
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "enabled": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "input",
+            "overlap",
+            "catchUp",
+            "maxCatchUp",
+            "enabled"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers serve",
+      "description": "Run the durable scheduler until interrupted, preserving Control approvals",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            },
+            "pollIntervalMs": {
+              "default": 1000,
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "pollIntervalMs"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "triggers show",
+      "description": "Show a trigger, its active run and the exact approval payload awaiting a decision",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project root (defaults to the nearest Smithers project)",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control server; local operator commands refuse this option",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote control credential",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "update",
+      "description": "Check the registry for newer CLI versions; does not install them",
+      "schema": {
+        "options": {
+          "type": "object",
+          "properties": {
+            "root": {
+              "description": "Project directory; defaults to the nearest Smithers project",
+              "type": "string"
+            },
+            "remote": {
+              "description": "Remote control plane URL; defaults to SMITHERS_REMOTE",
+              "type": "string"
+            },
+            "credential": {
+              "description": "Remote credential; defaults to SMITHERS_API_KEY",
+              "type": "string"
+            },
+            "mcpConfig": {
+              "description": "Path to the configured MCP servers",
+              "type": "string"
+            },
+            "quiet": {
+              "default": false,
+              "description": "Suppress progress messages",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "quiet"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    {
+      "name": "watch",
+      "description": "Replan and rerun a target graph when workspace files change",
+      "schema": {
+        "args": {
+          "type": "object",
+          "properties": {
+            "verb": {
+              "type": "string",
+              "enum": [
+                "build",
+                "test",
+                "lint",
+                "docs",
+                "review",
+                "run",
+                "ci"
+              ],
+              "description": "Target verb to execute"
+            },
+            "pattern": {
+              "default": "//...",
+              "description": "Target label or recursive pattern",
+              "type": "string"
+            }
+          },
+          "required": [
+            "verb",
+            "pattern"
+          ],
+          "additionalProperties": false
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "default": "<cwd>",
+              "description": "Directory inside a workspace containing WORKSPACE.ts",
+              "type": "string"
+            },
+            "cacheDir": {
+              "description": "Workspace-relative cache directory; overrides the WORKSPACE.ts declaration",
+              "type": "string"
+            },
+            "verbose": {
+              "default": false,
+              "description": "Show plain progress for agent and pipe consumers",
+              "type": "boolean"
+            },
+            "plan": {
+              "default": false,
+              "description": "Print the inert plan instead of executing",
+              "type": "boolean"
+            },
+            "jobs": {
+              "description": "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "includeExclusive": {
+              "default": false,
+              "description": "Include exclusive targets in wildcard ci/test selections; explicit labels already include them",
+              "type": "boolean"
+            },
+            "cache": {
+              "default": true,
+              "description": "Consult the result cache before running; --no-cache bypasses reads",
+              "type": "boolean"
+            },
+            "debounceMs": {
+              "default": 200,
+              "type": "integer",
+              "minimum": 20,
+              "maximum": 9007199254740991
+            },
+            "once": {
+              "default": false,
+              "description": "Run one cycle and exit",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "workspace",
+            "verbose",
+            "plan",
+            "includeExclusive",
+            "cache",
+            "debounceMs",
+            "once"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "globals": {
+    "type": "object",
+    "properties": {
+      "audience": {
+        "default": "auto",
+        "description": "Presentation audience; auto detects agent harnesses, CI, and terminals",
+        "type": "string",
+        "enum": [
+          "auto",
+          "human",
+          "agent"
+        ]
+      },
+      "silent": {
+        "default": false,
+        "description": "Suppress progress; retain the result and actionable failures",
+        "type": "boolean"
+      },
+      "ui": {
+        "default": "auto",
+        "description": "Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; auto shows live human progress; agent, --silent, pipe and dumb-terminal policies take precedence",
+        "type": "string",
+        "enum": [
+          "auto",
+          "tty",
+          "stream",
+          "plain"
+        ]
+      }
+    },
+    "required": [
+      "audience",
+      "silent",
+      "ui"
+    ],
+    "additionalProperties": false
+  }
+}

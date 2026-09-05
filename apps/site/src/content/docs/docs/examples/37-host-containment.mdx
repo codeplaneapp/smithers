@@ -1,23 +1,30 @@
 ---
-title: "37 host-containment"
-description: "Kill a host, and watch the next one clean up after it."
+title: "Host containment"
+description: "Recover process cleanup after a host is killed with SIGKILL."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/37-host-containment.ts"
 sidebar:
   order: 37
 ---
 
 {/* Generated from examples/src/37-host-containment.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Kill a host, and watch the next one clean up after it.
+Recover process cleanup after a host is killed with SIGKILL.
 
-Cancelling a run interrupts fibers, and closing a scope signals the children that scope still holds a handle for. Neither of those happens when the host process is KILLED: no finalizer runs, and the agents it started keep running with nobody left to signal them.
+The host records each spawned process group in the durable `ProcessLedger`. A later incarnation of the same host ID inspects those records, reaps groups whose owner is gone, and journals the result.
 
-`NodeRuntime.layerHost` closes that hole with two pieces that only make sense together. Every child it spawns leads its own process group and is recorded in the durable `ProcessLedger` under the host's id; and every host, on the way up, reads the records earlier incarnations of the SAME host id left behind, kills the groups whose owner is gone, and journals `flows.host.process-reaped.v1` so a third incarnation does not try the same kill against a pid the operating system has since handed to somebody else.
+The companion host program runs in a separate process so the example can kill it without running its finalizers. This exercises recovery that a graceful shutdown would not test.
 
-The first phase is a real child process, killed with `SIGKILL`, because a host that shuts down politely proves the opposite of what this example is about.
+## Run the test
 
-## Run it
+The complete program is [`examples/src/37-host-containment.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/37-host-containment.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The program is [`examples/src/37-host-containment.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/37-host-containment.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/37-host-containment.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

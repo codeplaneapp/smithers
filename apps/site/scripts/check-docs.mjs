@@ -60,7 +60,7 @@ function load(path) {
   const noFences = body.replace(/```[\s\S]*?```/g, "")
   const ids = new Set()
   const counts = new Map()
-  for (const m of body.matchAll(/^#{2,6}\s+(.+)$/gm)) {
+  for (const m of noFences.matchAll(/^#{2,6}\s+(.+)$/gm)) {
     const base = slugger(m[1])
     const n = counts.get(base) ?? 0
     counts.set(base, n + 1)
@@ -75,13 +75,17 @@ const staticRoutes = new Set(["/", "/download/", "/demo/", "/migration/1.0", "/l
 
 // --- repo package roster (any @smthrs/* package that exists in the tree) ---
 const roster = new Set()
+const packagePaths = new Map()
 function scanPkgs(dir, depth) {
   if (depth > 4 || dir.includes("node_modules") || dir.includes("/dist")) return
   const pkgPath = join(dir, "package.json")
   if (existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf8"))
-      if (typeof pkg.name === "string" && pkg.name.startsWith("@smthrs/")) roster.add(pkg.name)
+      if (typeof pkg.name === "string" && pkg.name.startsWith("@smthrs/")) {
+        roster.add(pkg.name)
+        packagePaths.set(pkg.name, { directory: dir, exports: pkg.exports })
+      }
     } catch { /* keep walking */ }
   }
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -89,6 +93,31 @@ function scanPkgs(dir, depth) {
   }
 }
 scanPkgs(join(repoRoot, "packages"), 0)
+
+function sourceExport(value) {
+  if (typeof value === "string") return value
+  if (value && typeof value === "object") return sourceExport(value.import ?? value.default ?? value.types)
+}
+function resolvesSubpath(spec, root) {
+  const pkg = packagePaths.get(root)
+  if (!pkg?.exports) return true
+  const subpath = spec === root ? "." : "./" + spec.slice(root.length + 1)
+  let value = pkg.exports[subpath]
+  let wildcard
+  if (value === undefined) {
+    const key = Object.keys(pkg.exports).filter((key) => key.includes("*")).sort((a, b) => b.length - a.length).find((key) => {
+      const [prefix, suffix] = key.split("*")
+      return subpath.startsWith(prefix) && subpath.endsWith(suffix)
+    })
+    if (key) {
+      const [prefix, suffix] = key.split("*")
+      wildcard = subpath.slice(prefix.length, suffix ? -suffix.length : undefined)
+      value = pkg.exports[key]
+    }
+  }
+  const target = sourceExport(value)
+  return target !== undefined && existsSync(join(pkg.directory, wildcard === undefined ? target : target.replaceAll("*", wildcard)))
+}
 
 // --- rules -------------------------------------------------------------------
 for (const p of pages) {
@@ -100,13 +129,25 @@ for (const p of pages) {
   if (!fm(p.text, "description")) err(p.path, "missing frontmatter description")
   // 3. body H1
   if (/^#\s+\S/m.test(p.noFences)) err(p.path, "body H1 (frontmatter title owns the page heading)")
+  // Fences without a language lose highlighting and hide accidental prose/code boundaries.
+  let fenceOpen = false
+  for (const line of p.body.split("\n")) {
+    const match = /^\s*(`{3,}|~{3,})(.*)$/.exec(line)
+    if (!match) continue
+    if (!fenceOpen && match[2].trim() === "") err(p.path, "code fence has no language")
+    fenceOpen = !fenceOpen
+  }
   // 7. coming soon
   const soon = p.noFences.match(/coming soon/i)
   if (soon) err(p.path, `banned phrase: ${soon[0]}`)
   // 4/5. links and anchors
-  for (const m of p.text.matchAll(/\]\(([^)\s]+)\)/g)) {
+  const links = [
+    ...p.noFences.matchAll(/\]\(([^)\s]+)\)/g),
+    ...p.noFences.matchAll(/\bhref=["']([^"']+)["']/g)
+  ]
+  for (const m of links) {
     const target = m[1]
-    if (/^https?:\/\//.test(target)) continue
+    if (/^(?:https?:\/\/|mailto:)/.test(target)) continue
     if (target.startsWith("#")) {
       if (!p.headingIds.has(target.slice(1))) err(p.path, `anchor ${target} has no heading on this page`)
       continue
@@ -115,7 +156,10 @@ for (const p of pages) {
       err(p.path, `non-absolute link: ${target}`)
       continue
     }
-    if (/^\/(media|favicon|icon)/.test(target)) continue
+    if (/^\/(media|images|favicon|icon)/.test(target)) {
+      if (!existsSync(join(siteRoot, "public", target))) err(p.path, `missing asset: ${target}`)
+      continue
+    }
     const [path, anchor] = target.split("#")
     const norm = path === "/" ? "/" : path.endsWith("/") ? path : path + "/"
     if (!routes.has(norm) && !staticRoutes.has(path) && !staticRoutes.has(norm)) {
@@ -135,11 +179,12 @@ for (const p of pages) {
   }
   // 6. imports in ts fences: our own packages must exist (catches typos and
   // references to removed 0.x packages); third-party imports are allowed.
-  for (const fence of p.text.matchAll(/```(?:ts|tsx|js|jsx)\n([\s\S]*?)```/g)) {
+  for (const fence of p.text.matchAll(/```(?:ts|tsx|js|jsx)(?:[^\n]*)\n([\s\S]*?)```/g)) {
     for (const im of fence[1].matchAll(/from\s+"(@smthrs\/[^"]+)"/g)) {
       const spec = im[1]
       const root = spec.split("/").slice(0, 2).join("/")
       if (!roster.has(root)) err(p.path, `import does not resolve to a package in this repo: ${spec}`)
+      else if (!resolvesSubpath(spec, root)) err(p.path, `import subpath does not resolve: ${spec}`)
     }
   }
 }

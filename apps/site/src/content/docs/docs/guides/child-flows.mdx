@@ -5,11 +5,13 @@ sidebar:
   order: 14
 ---
 
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
+
 Run one flow from inside another as a separate durable run, join the results, and control what happens to children when the parent exits.
 
 ## Before you start
 
-- The packages: `pnpm add @smthrs/flow@next @smthrs/plan@next effect@4.0.0-rc.108`. The detached-children half also uses `@smthrs/agent@next`.
+- The packages: `pnpm add @smthrs/flow@next @smthrs/plan@next effect@4.0.0-rc.112`. The detached-children half also uses `@smthrs/agent@next`.
 - A durable engine composition. The examples below compose one over a local SQLite file.
 
 ## 1. Choose the boundary
@@ -23,9 +25,20 @@ Run one flow from inside another as a separate durable run, join the results, an
 
 With `.child`, the parent suspends while the child is unsettled and resumes when it settles, and the engine records the lineage edge in `flows_run_parents` so the relationship survives the process that created it. The interpreter derives the child's execution id from the parent's id and the node's address, so a re-driven parent lands on the child it already started. Children are ordinary flows; nothing marks a flow as a child.
 
+<DocsDiagram
+  id="child-join"
+  title="A parent joins two attached child runs"
+  caption="The parent starts Compile and Notarize as separate child runs, waits for both results, then passes them to Report. Each child has its own recorded execution state."
+  rows={[
+    [{ label: "Release", detail: "Parent run" }],
+    [{ label: "Compile", detail: "Bundle result" }, { label: "Notarize", detail: "Signature result" }],
+    [{ label: "Report", detail: "Use both child results" }]
+  ]}
+/>
+
 ## 2. Spawn two children and join their results
 
-`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. From example 20, where `Bundle`, `Sign`, and `Report` are the declared atoms:
+`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. From example 20, where `Bundle`, `Sign`, and `Report` are the declared actions:
 
 ```ts
 import { Action, Flow, Interpreter } from "@smthrs/flow"
@@ -64,11 +77,10 @@ Register each flow with its own `Interpreter.layer`. Re-executing the parent und
 
 ## 3. Cancel a parent and watch the cascade reach its children
 
-Interrupting a run is durable, not a flag anybody polls: the parent's terminal transition and a cancel request for every linked descendant commit in the same transaction, walking the `flows_run_parents` edge table. A crash cannot leave a cancelled parent over a live child. The flows from example 19, and the interrupt:
+Interrupting a parent records cancellation requests for attached descendants in the same transaction as the parent's terminal transition. Each child's driver must still process its request; a child may remain active until that happens. Example 19 defines a parent waiting on this child:
 
 ```ts
 import { Action, Flow, Interpreter, WaitFor } from "@smthrs/flow"
-import * as Schema from "effect/Schema"
 
 export const Watch = Flow.make("examples/Watch", {
   payload: { target: Schema.String },
@@ -92,7 +104,7 @@ yield* Deploy.interrupt(deployRunId)
 Two boundaries shape what you observe:
 
 - The parent writes a request, not the child's terminal row. Ownership fencing forbids one run's driver writing state for a run another driver owns, so the child's own driver settles the request at its next boundary.
-- The parent journals what it decided: the `flows.engine.interrupted` record names every run the cascade reached in its `cascadedTo` payload, written in the same transaction as the parent's terminal row, which is what makes "cancelled parent, live child" unrepresentable.
+- The parent journals what it decided: the `flows.engine.interrupted` record names every run the cascade reached in its `cascadedTo` payload, written in the same transaction as the parent's terminal row; recovery can find these requests after a crash.
 
 An attached child, one the parent is waiting on, records `onParentExit: "cancel"`. Cancellation also reaches the operating-system processes the run was holding: the Node host gives every spawned process its own process group, records it in the durable `ProcessLedger`, and signals then kills the group when the action's scope closes, which cancelling the run does.
 
@@ -116,7 +128,7 @@ const startDigest = ({ document }: { readonly document: string }) =>
   }).pipe(Effect.orDie)
 ```
 
-`spawn` discards the result and the engine records `onParentExit: "detach"` on the child's own row, so the parent may complete while the child keeps going. Before `onParentExit`, a terminal parent left every linked child exactly as it was, so a child that nobody waited for became an orphan.
+`spawn` returns a child handle without waiting for its result. The engine records `onParentExit: "detach"`, so the parent may complete while the child keeps going. Keep the handle to collect the result later.
 
 To collect, any engine over the same database awaits by child id. Example 36 proves the shape with two engines over one SQLite file, which is what a process restart looks like from the database's point of view: phase one spawns the child and lets the parent complete; phase two is a fresh engine that never spawned anything and answers out of durable state:
 

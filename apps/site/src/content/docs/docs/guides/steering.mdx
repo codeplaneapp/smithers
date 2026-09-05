@@ -5,38 +5,38 @@ sidebar:
   order: 5
 ---
 
-Three verbs intervene in a live run, and picking the right one is the whole task: `cancel` stops the run, `signal` delivers durable JSON the flow waits on, and `steer` sends the agent an attributed text message.
+Choose the command by the change you need: `cancel` stops the run, `signal` delivers durable JSON the flow waits on, and `steer` sends the agent an attributed text message.
 
 ## Before you start
 
-- The run id, from the launch receipt or `smthrs ps`.
-- What the run is doing: `smthrs status <run-id>` shows its status and what it waits for.
+- The run id, from the launch receipt or `smthrs runs list`.
+- What the run is doing: `smthrs runs show <run-id>` shows its status and what it waits for.
 
 ## 1. Choose the verb
 
 | To... | Use |
 | --- | --- |
-| End one run, including one parked at `waiting-approval` | [`smthrs cancel`](/docs/reference/cli/cancel/) |
-| Deliver a JSON value a named wait consumes | [`smthrs signal`](/docs/reference/cli/signal/) |
-| Redirect the agent mid-run with a text message | [`smthrs steer`](/docs/reference/cli/steer/) |
-| End every non-terminal run in the project | [`smthrs down`](/docs/reference/cli/down/) |
+| End one run, including one parked at `waiting-approval` | [`smthrs runs cancel`](/docs/reference/cli/cancel/) |
+| Deliver a JSON value a named wait consumes | [`smthrs runs signal`](/docs/reference/cli/signal/) |
+| Redirect the agent mid-run with a text message | [`smthrs runs steer`](/docs/reference/cli/steer/) |
+| End every non-terminal run in the project | [`smthrs runs cancel-all`](/docs/reference/cli/down/) |
 
 A signal and a steering message are not interchangeable. A signal completes a wait point the flow declared by name; a flow with no matching wait cannot take it. A steering message reaches the agent at its next turn boundary whether or not the run parked. [Durable waits](/docs/guides/durable-waits/) covers the wait-point model.
 
 ## 2. Signal a named wait
 
 ```bash
-smthrs signal <run-id> '{"name":"shipped","payload":{"approved":true}}'
+smthrs runs signal <run-id> '{"name":"shipped","payload":{"approved":true}}'
 ```
 
 The signal is one JSON argument with a string `name` and any JSON `payload`. Delivery is durable and idempotent: the delivery key combines the run id with a digest of the canonical payload, so re-sending the identical signal replays the original receipt (`AlreadyApplied`) rather than delivering twice.
 
-Match the flow's declared wait. A run parked on a differently named wait fails with exit 1 and a `no_matching_wait` error that points at `smthrs status`; a settled run answers with a `Terminal` receipt instead.
+Match the flow's declared wait. A run parked on a differently named wait fails with exit 1 and a `no_matching_wait` error that points at `smthrs runs show`; a settled run answers with a `Terminal` receipt instead.
 
 ## 3. Steer the agent
 
 ```bash
-smthrs steer <run-id> --message "Skip the benchmark suite; run the unit tests only."
+smthrs runs steer <run-id> --message "Skip the benchmark suite; run the unit tests only."
 ```
 
 The message is durable, attributed to the operator principal `cli` with a timestamp, and delivered to the run at its next turn boundary. Each invocation mints a fresh message id, so two invocations deliver two messages rather than one replayed receipt. Steering never takes a run over: `--takeover` was removed in 1.0 and exits 1 pointing at the migration guide.
@@ -44,24 +44,24 @@ The message is durable, attributed to the operator principal `cli` with a timest
 ## 4. Cancel a run
 
 ```bash
-smthrs cancel <run-id>
+smthrs runs cancel <run-id>
 ```
 
-Cancellation is durable on the run row and interrupts the run through the control plane. It reaches everything the run spawned: child flows and in-flight work settle as cancelled with it rather than orphaning. A run that already settled answers with its own `Terminal` receipt, so repeating a cancel is safe.
+Cancellation is durable on the run row and interrupts the run through the control plane. Attached child work follows the parent cancellation scope. Detached children have a separate lifetime; see [Child flows](/docs/guides/child-flows/) before assuming a parent cancellation stops them. A run that already settled answers with its own `Terminal` receipt, so repeating a cancel is safe.
 
 The exit code follows the run's terminal status, because a cancel is an interruption rather than a failure of the command: 130 when the run is `cancelled`, 0 when it had already completed, 1 when it had already failed. Cancelling never deletes the run row or its journal; [`smthrs gc`](/docs/reference/cli/gc/) does that.
 
 ## 5. Cancel everything non-terminal
 
 ```bash
-smthrs down
+smthrs runs cancel-all
 ```
 
-`smthrs down` cancels every run in the project that has not reached a terminal status: `accepted`, `running`, `parked`, and `waiting-approval` runs each get one cancel, while `completed`, `failed`, and `cancelled` runs are left as they are. It prints one `cancelled` entry per run it cancelled; a project with no non-terminal runs prints an empty list and exits 0.
+`smthrs runs cancel-all` cancels every run in the project that has not reached a terminal status: `accepted`, `running`, `parked`, and `waiting-approval` runs each get one cancel, while `completed`, `failed`, and `cancelled` runs are left as they are. It prints one `cancelled` entry per run it cancelled; a project with no non-terminal runs prints an empty list and exits 0.
 
 ## Verify it worked
 
-- `smthrs status <run-id>` shows the result: `cancelled` after a cancel, or the run moving again after a signal completed the wait it parked on.
+- `smthrs runs show <run-id>` shows the result: `cancelled` after a cancel, or the run moving again after a signal completed the wait it parked on.
 - The receipts say what happened: `Accepted` on first delivery, `AlreadyApplied` on an identical resend, `Terminal` once the run had settled.
 
 ## See also

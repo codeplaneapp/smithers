@@ -1,102 +1,146 @@
 ---
 title: "The smthrs command"
-description: "Global flags, verbs, aliases, and exit codes of the smthrs command line."
+description: "Target execution, durable flows, run control, and operator commands in one CLI."
+sidebar:
+  hidden: true
 ---
 
-`smthrs` is the command line of the Smithers control plane (`smithers` is an alias of the same executable): it plans, approves, and runs durable flows, and inspects what ran.
+`smthrs` executes `PACKAGE.ts` target graphs and operates durable agent flows.
+`smithers` is an alias of the same executable. A target is a declaration, a
+flow is a workflow, and a run is a persisted flow execution.
 
-## Global flags
+## Commands
 
-Every verb accepts these flags.
-
-| Flag | Value | Description |
-| --- | --- | --- |
-| `--credential` | token | Bearer token for the remote control plane; falls back to `SMITHERS_API_KEY`. |
-| `--json` | none | Print the machine-readable document instead of the human rendering. |
-| `--remote` | URL | http(s) URL of the control plane to act on; falls back to `SMITHERS_REMOTE`. |
-| `--quiet` | none | Suppress banners and progress on stderr; stdout documents still print. |
-| `--mcp-config` | path | Path to the JSON array of MCP servers the local executor projects into a run's flow catalog. |
-| `--root` | path | Project root to act on, instead of walking up from the working directory. |
-| `--backend` | name | Hidden. `sqlite` is the only supported value, so it is a no-op; any other value exits 1 with `unsupported_database`. |
-| `--version` | none | Print the installed version. |
-| `--help` | none | Print the help document. Neither this nor `--version` resolves a project or opens a database. |
-| `--completions` | shell | Print a shell completion script. |
-| `--wizard` | none | Collect a command’s arguments and flags interactively, then offer to run it. |
-| `--log-level` | level | Minimum diagnostic log level: `all`, `trace`, `debug`, `info`, `warn`, `warning`, `error`, `fatal`, or `none`. |
-
-## Required input
-
-When stdin is a terminal, omitting a required positional argument opens a
-clack prompt. `plan` and `up` show the discovered flow picker; other verbs ask
-for the missing value. Prompts use stderr, so stdout remains the document.
-Cancelling a prompt exits 130 without submitting the command. With piped stdin,
-a missing argument exits 2, names the argument, and points to `--wizard` for
-guided input. Optional arguments keep their documented defaults.
-
-A nonexistent or inaccessible `--root` exits 2 and names the path. A command
-group such as `memory`, `claude`, or `mcp` without a subcommand also exits 2
-and lists its subcommands; use `--help` to request help with exit 0.
-
-## Verbs
-
-Each verb has its own page with its arguments, output, and per-verb exit detail.
-
-| Verb | Purpose |
+| Command | Purpose |
 | --- | --- |
-| [`plan`](/docs/reference/cli/plan/) | Render a flow plan and its complete approval payload. |
-| [`run`](/docs/reference/cli/run/) | Run an approved plan payload, or resume a parked run. |
-| [`up`](/docs/reference/cli/up/) | Plan, approve, and run one flow; `-d` launches it detached. |
-| [`approve`](/docs/reference/cli/approve/) | Approve the complete serialized approval payload. |
-| [`deny`](/docs/reference/cli/deny/) | Deny the complete serialized approval payload. |
-| [`cancel`](/docs/reference/cli/cancel/) | Cancel a durable run. |
-| [`signal`](/docs/reference/cli/signal/) | Deliver a durable JSON signal to a run. |
-| [`steer`](/docs/reference/cli/steer/) | Send a durable, attributed steering message to a run. |
-| [`ls`](/docs/reference/cli/ls/) | List the flows discovered under this project. |
-| [`ps`](/docs/reference/cli/ps/) | List durable runs. |
-| [`status`](/docs/reference/cli/status/) | Show the diagnosis card for one run, or the run listing. |
-| [`logs`](/docs/reference/cli/logs/) | Read run events; `--follow` streams future events. |
-| [`output`](/docs/reference/cli/output/) | Print one registered node output. |
-| [`down`](/docs/reference/cli/down/) | Cancel every non-terminal run. |
-| [`serve`](/docs/reference/cli/serve/) | Host the control server for this project. |
-| [`init`](/docs/reference/cli/init/) | Scaffold `flows/<name>/flow.mdx` and ignore `.flows/`. |
-| [`suggest`](/docs/reference/cli/suggest/) | Read the project, stream how Smithers can help, and implement the one you pick. |
-| [`doctor`](/docs/reference/cli/doctor/) | Report registry, database, runtime, and provider readiness. |
-| [`migrate`](/docs/reference/cli/migrate/) | Convert a Smithers 0.x project to the 1.0 authoring model. |
-| [`gc`](/docs/reference/cli/gc/) | Delete terminal runs older than a threshold, with the rows they own. |
-| [`memory`](/docs/reference/cli/memory/) | Read and write namespaced facts in the control database. |
-| [`claude`](/docs/reference/cli/claude/) | Claude Code plugin mirror protocol. |
-| [`mcp`](/docs/reference/cli/mcp/) | Wire the Smithers MCP server into an agent. |
-| [`update`](/docs/reference/cli/update/) | Check npm for a newer `@smthrs/cli`. |
-| [`bug`](/docs/reference/cli/bug/) | Report a bug with a run digest attached. |
+| `build/test/lint/docs/review/ci/run <pattern>` | Execute selected target kinds; `ci` combines build, test, lint, and docs. |
+| `target <label>` or `//package:target` | Execute one exact target using its declared kind. |
+| `targets [pattern]` | Discover available targets and summaries. |
+| `show target <label>`, `show workspace`, `info` | Inspect target inputs, outputs, dependencies, and workspace configuration. |
+| `query <expression>`, `graph [pattern]`, `owners <paths...>` | Query the graph, render dependencies, and resolve ownership. |
+| `affected <verb> [pattern]` | Select changed work and dependents; `--list` previews the selection. |
+| `watch <verb> [pattern]` | Replan and rerun when files change. |
+| `explain <label>` | Show the planned key and local cache decision. |
+| `flow list/show/plan/start/execute` | Discover workflows, plan them, start them, or execute approved payloads. |
+| `runs list/show/logs/output` | Read durable run state, events, and outputs. |
+| `runs cancel/cancel-all/resume/signal/steer` | Operate existing durable runs. |
+| `runs inspect/replay/fork/rewind` | Inspect historical frames, branch a run, or restore an earlier frame. |
+| `approvals list/approve/deny` | Read pending approvals and submit the exact payload or `@file`. |
+| `init [name]`, `generate app/flow/package/ci` | Set up a workspace or scaffold a resource. |
+| `install`, `git-hooks [--write]` | Apply the workspace's declared installation and hook configuration. |
+| `cache status/prune/clear`, `clean`, `gc` | Maintain local action results, declared cleanup targets, and old runs. |
+| `memory`, `credentials`, `triggers`, `integrations`, `eval` | Operate persistent agent features. |
+| `serve`, `doctor`, `suggest`, `migrate`, `update`, `bug` | Host, diagnose, discover uses, migrate source, check versions, or report a bug. |
 
-## Aliases
+Target patterns include `//...`, `//package/...`, and `//package:target`.
+Use `--plan` to preview execution, `--jobs` to bound concurrency, and
+`--no-cache` to bypass result reuse. `affected` defaults to comparing `HEAD`
+against the working tree, including untracked files; `--base`, `--head`, and
+`--files` select other inputs. Ambient configuration changes conservatively
+select more work.
 
-Alternate spellings the parser accepts. They are hidden from `--help`, which lists the canonical surface.
+Top-level [`run`](/docs/reference/cli/run/) executes run-kind targets.
+`flow start` plans, approves, and starts a durable workflow; `flow execute`
+submits a previously approved plan. `runs resume` re-drives a parked run.
 
-| Alias | Canonical form | Notes |
-| --- | --- | --- |
-| `resume <run-id>` | `run --resume <run-id>` | |
-| `workflow list` | `ls` | Every other `workflow` subcommand was removed in 1.0. |
-| `inspect [run-id]` | `status [run-id]` | |
-| `why [run-id]` | `status [run-id]` | |
-| `events [run-id]` | `logs --json [run-id]` | |
-| `gateway` | `serve` | `gateway status` and `gateway stop` were removed in 1.0. |
+## Operator groups
 
-## Exit codes
-
-`smthrs` uses one status vocabulary, so a script can branch on it.
-
-| Code | Meaning |
+| Group | Available commands |
 | --- | --- |
-| `0` | The command did what it was asked. |
-| `1` | The command failed, or the run it reports settled `failed`. |
-| `2` | The invocation was wrong; the message names the flag or argument. |
-| `3` | The run is parked at `waiting-approval`; answer it with `smthrs approve` and resume. |
-| `130` | The run was cancelled or interrupted (SIGINT). |
-| `143` | The run was terminated (SIGTERM). |
+| [`memory`](/docs/reference/cli/memory/) | `list/get/set/rm`, `recall`, `notes list/get/add/status/supersede`, `threads list/create/show/rm`, `messages list/add`, `compact`. |
+| `credentials` | `list/add/rotate/revoke`; only references appear in output. |
+| `triggers` | `list/show/register/enable/disable/fire/serve`; `fire` queues an occurrence for a running scheduler. |
+| `integrations` | `list`, `doctor [--offline]`, and GitHub webhook `reconcile`. |
+| `eval` | `list/run/baseline/compare` for modules under `evals/**/*.eval.ts`. |
 
-Codes 3, 130, and 143 report a run outcome rather than a failure of the command, and are decided from the control receipt alone.
+Credentials use `SMITHERS_CREDENTIAL_KEY`, a base64-encoded 32-byte host key.
+Supply secrets through `--secret-env` or `--secret-file`; keep the host key
+outside the database. Integrations read `.smithers/integrations.json` or
+discover configured provider environment variables. Configuration entries name
+an `id`, `provider`, and optional `tokenEnv` or `credentialId`. GitHub webhook
+reconciliation reads `.smithers/listeners.json`, plans by default, writes with
+`--apply`, and requires `--allow-delete` to delete owned hooks.
 
-## Environment variables
+Both `serve` and `triggers serve` host the durable scheduler. Trigger dispatch
+preserves flow approval requirements; disabling a trigger does not cancel an
+active run. `triggers show <id>` exposes `activePlan.plan.approval`; submit that
+unchanged to `approvals approve '<payload>' --scope run`. Waiting plans survive
+restarts without timing out or changing their approval payload. `approvals list`
+lists in-run requests, not these pre-run plans.
 
-The environment variables `smthrs` reads are listed in [Environment variables](/docs/reference/environment-variables/).
+## Project selection and output
+
+For scripts, target commands and `generate ci/package` document `--workspace`
+in their schemas but the executable also accepts `--root` as an alias;
+flow and operator commands use `--root`.
+Flow control, normal run management, and approvals also accept `--remote`
+and `--credential`, with `SMITHERS_REMOTE` and `SMITHERS_API_KEY` as fallbacks.
+History, memory, triggers, credentials, integrations, evaluations, and local
+maintenance require the machine that owns the selected workspace.
+
+Incur parses the public CLI using Zod schemas; Effect supplies the execution
+runtime, and Clack supplies live human progress and interactive prompts. `--help` and `--schema`
+describe the installed command. Canonical commands use Incur's `--json` and
+`--format` output; `--format jsonl` is useful for event streams. Compatibility
+aliases retain their earlier output shapes.
+
+### Human and agent output
+
+Agent harness markers select concise Incur output even in a PTY; humans see
+task progress on standard error. CI and pipes use conservative machine output.
+Override with `--audience auto|human|agent` or `SMITHERS_AUDIENCE`.
+
+`--silent` suppresses progress, not results or failures. `--quiet` is retained
+where previously supported; use `--silent` across groups. Agents can use
+`--verbose` for plain progress or request
+stored logs with `smthrs runs logs <run-id> --follow --format jsonl`.
+`--json` preserves machine-readable standard output while human progress stays
+on standard error. MCP always remains machine-clean.
+
+Agent log pulls without `--follow` default to 100 events and incremental JSONL.
+Set `--limit 1..10000` to adjust the page size, then use the returned next command
+with `--after <sequence>`. `--follow` streams without the default 100-event cap;
+an explicit `--limit` still applies.
+
+The shared `Audience` utility centralizes detection and presentation policy;
+see the [verified harness registry](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/reference/agent-detection.md)
+for evidence and known gaps. Detection never changes permissions or approvals.
+
+## Storage and maintenance
+
+`.flows/control.db` holds control state, memory, credentials, and triggers;
+`.flows/engine.db` holds execution history. Historical `inspect` and `replay`
+read committed frames without calling models or re-executing actions.
+
+`runs fork <run> --at <sequence>` requires an eligible parked or terminal
+agent run, an approved plan, and `jj`; its isolated workspace is retained in
+`.flows/forks/`. Resume the returned child with `runs resume`. Rewind uses
+`--at <sequence> --preview` to inspect the affected suffix, then `--yes` to
+archive it and restore the frame of a pending or suspended engine run. Use
+`fork` for terminal history; active runs and unsafe effect boundaries are refused.
+
+Evaluation runs are saved in `.flows/evals/runs/`; baselines default to
+`evals/<encoded-suite>.baseline.json` and require `--force` to overwrite.
+Comparison exits 1 for a regression and 5 for inconclusive results.
+
+The target result cache normally lives in `.flows/cache/`, under the
+workspace's configured cache directory. `cache prune/clear --dry-run`
+previews individual local result files; deletion requires `--yes` and leaves
+run databases, remote entries, and artifact blobs alone. `clean` runs
+declared `Clean` targets. `gc --dry-run` previews old terminal-run retention.
+
+## Compatibility
+
+Flat commands such as `up`, `ls`, `ps`, `status`, `logs`, `output`, `plan`,
+`approve`, `deny`, `cancel`, `signal`, `steer`, and `down` remain hidden
+transition aliases. Approved JSON payloads passed to `run`, and `run --resume`,
+also retain their old handler. Use the canonical groups for new scripts.
+The Claude mirror protocol is hidden as `internal claude`.
+
+[`up`](/docs/reference/cli/up/) · [`ls`](/docs/reference/cli/ls/) · [`plan`](/docs/reference/cli/plan/) · [`ps`](/docs/reference/cli/ps/) · [`status`](/docs/reference/cli/status/) · [`logs`](/docs/reference/cli/logs/) · [`output`](/docs/reference/cli/output/) · [`cancel`](/docs/reference/cli/cancel/) · [`down`](/docs/reference/cli/down/) · [`signal`](/docs/reference/cli/signal/) · [`steer`](/docs/reference/cli/steer/) · [`approve`](/docs/reference/cli/approve/) · [`deny`](/docs/reference/cli/deny/).
+
+Ordinary success exits 0; failures and Incur argument errors exit 1. Legacy
+usage errors and explicit confirmation refusals use 2; flows awaiting
+approval use 3. Inconclusive evaluations exit 5. Interruption
+and termination use 130 and 143. See [environment variables](/docs/reference/environment-variables/)
+for the control-plane configuration.

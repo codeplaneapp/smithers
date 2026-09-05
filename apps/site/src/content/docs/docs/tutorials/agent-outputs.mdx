@@ -193,7 +193,7 @@ const Write = AgentAction.make("research/Write", {
 })
 ```
 
-Add a flow that chains the two steps; `Brief` stays as the single-step flow. Nothing executes at plan time: `Research.call` records one node, and `Node.andThen` feeds its planned result into `Write.call`:
+Add a flow that chains the two steps; `Brief` stays as the single-step flow. Nothing executes at plan time: `Research.call` records one node, and `Node.bindPlanned` feeds its planned result into `Write.call`:
 
 ```ts title="article.ts"
 import { Node } from "@smthrs/plan"
@@ -204,7 +204,7 @@ const Article = Flow.make("research/Article", {
   error: AgentAction.AgentFailure,
   body: ({ topic }) =>
     Research.call({ topic }).pipe(
-      Node.andThen((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
+      Node.bindPlanned((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
     )
 })
 ```
@@ -240,14 +240,11 @@ So far the runs lived in memory, and their outputs died with the process. To rea
 Add the durable engine composition as `engine.ts`:
 
 ```ts title="engine.ts"
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Jj } from "@smthrs/kernel"
 import { Ownership } from "@smthrs/run-store"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import { dirname } from "node:path"
 
 // A Jujutsu service that records nothing.
@@ -301,17 +298,12 @@ const main = Article.execute({ topic: "durable workflows" }, { executionId: "art
 NodeRuntime.runMain(main)
 ```
 
-Run it, then read what the run recorded. `smthrs output` prints what one step of a run produced, projected from the run's journaled events; node ids are `<flowName>#<ordinal>`, and the reserved id `result` names the run's final output:
+Run it. The article prints from the program itself, and that is the only place to read this run: `smthrs output` projects node outputs from the control plane's run list in `.flows/control.db`, so it lists only runs launched through `smthrs up` or `smthrs run`. A run driven on the engine directly, as this program does, is not in that list, and `smthrs output article-1` answers `Run not found` with exit 2 (`packages/smithers/src/Command.ts`, `missingRun`). To read a run's node outputs from the CLI, launch the flow through the control plane instead. The [smthrs output reference](/docs/reference/cli/output/) covers the listing, the single-node read, and `--json`.
 
 ```bash
 node article.ts
-smthrs output article-1
-smthrs output article-1 result
 ```
 
-The [smthrs output reference](/docs/reference/cli/output/) covers the listing, the single-node read, and `--json`.
-
-{/* verify: does smthrs output project runs a host program recorded on the project's durable engine (.flows/engine.db), or only runs the CLI's own control plane launched (smthrs up/run)? Command.ts reads the control plane's run list and event watch, which points at control.db and suggests host-program runs answer "Run not found" with exit 2. */}
 
 ```text
 You should see: the first command lists one entry per recorded node in the
@@ -319,14 +311,6 @@ order the calls started, plus result for the run's final output. The second
 prints the node's outcome line followed by its recorded value.
 ```
 
-## Summary
-
-You learned how to:
-
-- Declare an `output` schema on a model-backed step with `AgentAction.make`.
-- Chain one step's typed output into another with `Node.andThen`.
-- Drive a flow on the project's durable engine so the run's outputs are recorded.
-- Read recorded step outputs with `smthrs output <run-id> [node-id]`.
 
 ## Next steps
 

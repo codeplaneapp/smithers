@@ -1,56 +1,43 @@
 ---
 title: "A run is stuck"
-description: "Diagnose a run that stops moving: a dead owner, or a park nobody understands."
+description: "Distinguish a missing executor, a dead owner, and a durable wait before trying to resume a run."
 ---
 
-Two states look like stuck: a run whose driving process died, and a run parked on a wait. `smthrs status` tells them apart.
-
-## The run has no live owner
-
-```text
-$ smthrs status deploy-api-7
-Verdict   running
-Run       deploy-api-7 · examples/deploy · 42m 17s
-```
-
-The card says `running`, but the run has not moved in 42 minutes and `smthrs logs deploy-api-7` prints nothing new.
-
-**Cause.** The process driving the run died: a closed terminal, a killed host, a rebooted machine. The row keeps its last status because ownership is fenced: every ownership mutation compares the complete `OwnerId` (host, process id, and nonce) in the same SQL statement as its mutation, and a zombie owner interrupts itself rather than writing past its fence. Nothing is driving the run, and no other process may drive it without taking the claim.
-
-**Fix.** Re-drive the run from a live process:
+Start by reading the run's status and recent events. Replace `<run-id>` with the run ID from `smthrs runs list`:
 
 ```bash
-smthrs run deploy-api-7 --resume
+smthrs runs show <run-id> --format json
+smthrs runs logs <run-id> --limit 100 --format jsonl
 ```
 
-`smthrs resume <run-id>` is an unlisted alias of the same command; both spellings share one implementation and one idempotency key.
+Elapsed time alone does not prove the executor died. A model call, a durable timer, and a human approval can all leave a run quiet.
 
-**Verify.** `smthrs status <run-id>` shows a live verdict again, and `smthrs logs <run-id> --follow` prints new lines as events land.
+## The run is waiting for approval
 
-## The run is parked and nobody knows why
+Read the recorded request and use [Waiting for approval](/docs/troubleshooting/waiting-approval/) to submit its exact payload. Resuming without answering the request can leave the run waiting at the same point.
 
-```text
-$ smthrs status deploy-api-7
-Verdict   waiting-approval: asks: Apply the edit to src/routes.ts?
-Run       deploy-api-7 · examples/deploy · deploy · 2m 41s
-…
-Unblock   smthrs approve <approval> --scope run && smthrs run --resume deploy-api-7
-Next      smthrs logs deploy-api-7    # turn-by-turn transcript
-```
+## The run is parked on a signal or timer
 
-**Fix.** Read the diagnosis card, then watch the transcript:
+Check the waiting reason and the last recorded events. A signal wait needs the expected signal and payload; a timer needs its deadline to pass. Follow [Durable waits](/docs/guides/durable-waits/) for those contracts.
+
+## The driving process stopped
+
+If the host or process stopped, start a live driver against the same project state and resume the execution:
 
 ```bash
-smthrs status deploy-api-7
-smthrs logs deploy-api-7 --follow
+smthrs runs resume <run-id>
 ```
 
-The card is a read-only projection of the run's own journaled events. The `Verdict` line pairs the status with the reason that best explains it: the journaled failure cause, or the question a parked run is asking. A parked run's `Unblock` line is the exact `smthrs approve` and `smthrs run --resume` pair that releases it. With `--follow`, `smthrs logs` stays attached and prints one line per event as it lands.
+Ownership checks prevent the new process from taking work that another live owner still holds. A fresh lease or positive liveness probe can defer recovery. Do not edit owner rows to bypass those checks.
 
-A verdict of `pending: accepted, and no executor took the run; nothing is driving it` is a different wedge: the launch itself was declined, and the card's `Unblock` line offers `smthrs cancel` or driving the flow from the host program that registers it.
+**Verify:** the run advances and new events appear. If takeover is refused, inspect the ownership evidence and host liveness. [Execution IDs and ownership](/docs/concepts/ownership/) explains the lease and fencing behavior.
 
-**Verify.** The card's `Unblock` line names what releases the park; after you run it, the verdict moves past `waiting-approval`.
+## The run was accepted but has no executor
 
-## Still stuck?
+An admission receipt proves that the control plane accepted work. It does not prove that a host can execute the flow. Check the run's diagnosis for a missing seat, missing capabilities, or a flow registered on a different host.
 
-Run `smthrs bug` with the symptom as the summary. [smthrs bug](/docs/reference/cli/bug/) posts the report with your CLI version, platform, and Node version attached, and everything passes through the journal's shared redaction rules before it leaves the machine. With `--run <run-id>`, it also attaches that run's event digest.
+Run `smthrs doctor` on the execution host and check its flow catalog. Correct the host configuration before launching again. Cancel an abandoned run with `smthrs runs cancel <run-id>` when you no longer intend to execute it.
+
+## Collect a report
+
+Keep the run ID, CLI version, diagnosis, and relevant events. The [`smthrs bug` reference](/docs/reference/cli/bug/) explains how to submit a report and which diagnostic data it includes.

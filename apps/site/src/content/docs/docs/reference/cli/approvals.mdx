@@ -1,0 +1,31 @@
+---
+title: "smthrs approvals"
+description: "List in-run approval requests and submit decisions against exact payloads."
+sidebar:
+  order: 3
+---
+
+import { Code } from "@astrojs/starlight/components"
+import help from "../../../../../data/help/approvals/approve.txt?raw"
+
+`smthrs approvals` reads pending requests and submits decisions. An approval is bound to the exact request payload; a run ID alone is insufficient.
+
+## list
+
+`smthrs approvals list` lists pending in-run requests. It does not list pre-run plans such as a trigger's waiting plan. Obtain those payloads from the plan result or the trigger's `activePlan.plan.approval` field.
+
+## approve
+
+Accepts a serialized payload or `@file`. The default scope is `once`; `run` extends the grant through the run, and `remembered` can apply to matching future requests.
+
+<Code lang="text" code={help} />
+
+A plan-level approval records a decision without launching work. Execute the approved payload with `smthrs flow execute @approval.json`.
+
+## deny
+
+`smthrs approvals deny <approval>` refuses the exact request. The argument can be serialized JSON or `@file`, just as for `approve`.
+
+All three commands accept `--root`, `--remote`, and `--credential` to select the host. Use `--format json` for a structured decision receipt.
+
+For a parked execution, [Waiting for approval](/docs/troubleshooting/waiting-approval/) explains how to locate its request and resume after a decision.

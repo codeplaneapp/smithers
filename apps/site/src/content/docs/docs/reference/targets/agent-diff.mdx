@@ -52,8 +52,6 @@ The `DiffAttrs` schema declares eleven fields:
 | `approval`  | `"required"`                                    | `optional`                          | Declaring it refuses the invocation before any effect, because the build system has no durable approval store.                                 |
 | `maxRounds` | `number`                                        | `required`                          | Candidate and gate rounds, at least 1 and at most `maximumRounds`, which is 16.                                                                |
 
-{/* verify: DiffAttrs.maxRounds is Schema.Number while DiffPayload.maxRounds is Schema.Int; does a fractional maxRounds fail at the declaration or at payload decoding? */}
-
 The declaration passes no `Target.guard`, so no attr combination is refused at construction. Three preconditions settle at plan time instead: a payload input that is missing or undeclared refuses with the field to pass as `--input`, `approval: "required"` refuses, and a gate that is an outward or Run rule refuses its consumer.
 
 ## Behavior
@@ -63,8 +61,6 @@ The implementation plans one sealed `AgentDiff` action call. `diffPayload` proje
 Execution decodes the `--input` values against the payload spec, prechecks each declared MCP server, and expands the diff slice. A target that declares `Smithers.gitDiff` data whose expansion is empty settles green as `vacuous` with zero sessions. Otherwise the executor reads the prompt file, opens a session over the `claude` or `codex` CLI with the prompt on stdin and no tools, and renders the files the target's `data` closure names into that prompt. The verdict key covers the diff digest, the prompt and payload digest, the agent identity, the mode, and the gate identities; a green verdict replays from the store with zero spawns.
 
 Each round the session answers with complete-file candidate edits. They apply to an overlay mechanically confined to `changes`, and the gates run against that exact candidate tree, so a gate that is red on the pre-candidate tree is what the loop exists to turn green. When every gate reports green, the executor writes the accepted edits to the working tree and the success carries the round count, the rendered candidate, the edit set, and the gate report. A red report is fed back into the next round's prompt. Exhausting `maxRounds` fails with `AgentRoundsExhausted` and preserves the final candidate and gate report as files under the cache directory. The rule acts outward, so it never serves as another target's gate.
-
-{/* verify: do the declared secrets and sandbox reach the agent CLI spawn? PackageExec hands them to the Exec boundary, and AgentSession spawns the session with neither. */}
 
 ## Channels
 
@@ -131,16 +127,4 @@ smithers-build run //packages/wire:referenceDocs
 ## See also
 
 - [Filegroup](/docs/reference/targets/filegroup/), the file-set rule an agent target names in `data`
-- [The `@smthrs/targets` package](/docs/reference/api/targets/)
-
-## Sources
-
-- `packages/smithers/build/targets/src/AgentTarget.ts`
-- `packages/smithers/build/targets/src/Attr.ts`
-- `packages/smithers/build/targets/src/Reference.ts`
-- `packages/smithers/build/targets/src/Secret.ts`
-- `packages/smithers/build/targets/docs/rules.md`
-- `packages/smithers/build/targets/README.md`
-- `packages/smithers/build/build-cli/src/AgentSession.ts`
-- `packages/smithers/build/build-cli/src/PackageExec.ts`
-- `packages/smithers/build/build-cli/src/Cli.ts`
+- [The `@smthrs/targets` package](/docs/reference/targets/)

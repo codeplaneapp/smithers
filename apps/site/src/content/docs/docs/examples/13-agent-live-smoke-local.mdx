@@ -1,23 +1,32 @@
 ---
-title: "13 agent-live-smoke-local"
-description: "A live smoke test against a fully local model: the same assembled production agent stack as liveOpenAiSmoke (see 12-agent-live-smoke.ts), run against Ollama over Route.openaiChatCompatible instead of a paid provider."
+title: "Agent live smoke local"
+description: "Run a model-backed action against a local Ollama endpoint."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/13-agent-live-smoke-local.ts"
 sidebar:
   order: 13
 ---
 
 {/* Generated from examples/src/13-agent-live-smoke-local.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-A live smoke test against a fully local model: the same assembled production agent stack as `liveOpenAiSmoke` (see `12-agent-live-smoke.ts`), run against Ollama over `Route.openaiChatCompatible` instead of a paid provider.
+Run a model-backed action against a local Ollama endpoint.
 
-This needs no API key, no billing, and no external network access: only a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It exists because both real provider keys available in the authoring environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) were out of credit, and a "production ready candidate" has to be testable without asking anyone to go get a credit card out.
+The composition uses `Route.openaiChatCompatible` with a local model server. Start Ollama and download the model configured by the example before running it. `main` accepts the server base URL and defaults to `http://localhost:11434`.
+
+This example needs a running local model; it is not a deterministic substitute for the scripted-model tests.
 
 The test requires explicit opt-in even when Ollama is running. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/13-agent-live-smoke-local.test.ts`. It allows 300 seconds and skips with a reason if the daemon or model is missing.
 
-@since 0.1.0
+## Run the test
 
-## Run it
+The complete program is [`examples/src/13-agent-live-smoke-local.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/13-agent-live-smoke-local.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The program is [`examples/src/13-agent-live-smoke-local.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/13-agent-live-smoke-local.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/13-agent-live-smoke-local.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

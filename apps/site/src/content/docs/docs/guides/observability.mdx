@@ -82,7 +82,7 @@ const dispatches = yield* Metric.value(EngineStoreMetrics.dispatch.Success)
 
 The same run is legible through three independent read paths:
 
-1. The CLI. `smthrs status deploy-status-1` prints the diagnosis card: a `Verdict` line, a `Run` line, an `Activity` line, token totals, refusals, and a `Next` pointer at `smthrs logs`. See [`smthrs status`](/docs/reference/cli/status/).
+1. The CLI. `smthrs runs show deploy-status-1` prints the diagnosis card: a `Verdict` line, a `Run` line, an `Activity` line, token totals, refusals, and a `Next` pointer at `smthrs runs logs`. See [`smthrs runs show`](/docs/reference/cli/status/).
 2. The OTLP trace. Every span the packages open posts to `/v1/traces`: the flow lifecycle, the engine dispatch, run claims and heartbeats, journal writes, down to individual `sql.execute` statements. Filter your collector on `service.name` equal to the `serviceName` you passed.
 3. The journal projection. `Journal.entries` reads the run's lifecycle events in-process, no collector involved:
 
@@ -95,10 +95,10 @@ const eventTypes = page.entries.map((entry) => entry.eventType)
 
 - After the program's scope closes, the shutdown flush has posted and your collector holds the run's spans. Example 10 wraps `fetch` with a recorder for exactly this check: posts to `/v1/traces` carry the span set and posts to `/v1/metrics` carry the series.
 - If nothing arrives, check the endpoint first. An unusable one fails layer acquisition with `invalid_exporter_endpoint`; after acquisition, export failure is absorbed by design, so a dead collector never fails the run and looks exactly like a working one that delivers nothing.
-- `smthrs status <run-id>`, the trace, and the `Journal.entries` event types tell the same story of the same run.
+- `smthrs runs show <run-id>`, the trace, and the `Journal.entries` event types tell the same story of the same run.
 
 ## See also
 
 - [Inspect runs](/docs/guides/inspecting-runs/): the CLI read path across `ps`, `status`, and `logs`.
-- [`smthrs status`](/docs/reference/cli/status/): the diagnosis card reference.
+- [`smthrs runs show`](/docs/reference/cli/status/): the diagnosis card reference.
 - [Examples](/docs/examples/): `10-telemetry-export.ts` records exactly what the collector received.

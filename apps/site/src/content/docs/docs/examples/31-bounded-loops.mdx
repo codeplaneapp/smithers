@@ -1,21 +1,30 @@
 ---
-title: "31 bounded-loops"
-description: "Bounded loops: repair a config until it is clean, then tune a summary."
+title: "Bounded loops"
+description: "Repair a configuration and refine a summary with bounded loop patterns."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/31-bounded-loops.ts"
 sidebar:
   order: 31
 ---
 
 {/* Generated from examples/src/31-bounded-loops.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Bounded loops: repair a config until it is clean, then tune a summary.
+Repair a configuration and refine a summary with bounded loop patterns.
 
-Every pattern here has the same two halves. `make` declares the conservative topology, unrolling the bound so a plan states the worst case. `run` is the Effect that stops when the work is actually done. This program uses `run`, because the value the loop stops on is a runtime value; see `docs/pages/api/patterns-loops.md` for what the declarations look like.
+The example calls each pattern's runtime `run` operation, which stops when its value-dependent condition is met. The declaration-side `make` operation describes the conservative graph with its bound.
 
-The fixtures are deterministic, so the program answers the same way on every run and needs no model, no engine, and no network.
+The fixtures are deterministic and need no model, durable engine, or network. See the patterns API reference for the declaration forms.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/31-bounded-loops.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/31-bounded-loops.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/31-bounded-loops.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/31-bounded-loops.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/31-bounded-loops.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

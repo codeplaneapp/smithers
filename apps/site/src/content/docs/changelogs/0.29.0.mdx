@@ -1,9 +1,15 @@
 ---
 title: "0.29.0"
 description: "Smithers 0.29.0 introduces first-class memory alongside durable XState folds, a shared cross-app UI library, Microsandbox support, and broad security and durability hardening."
+pagefind: false
 ---
 
+:::note[Archived release]
+This page describes Smithers 0.29.0. Historical documentation links open the source at that release tag. For the current authoring model, read the [1.0 migration guide](/docs/migration/1.0/).
+:::
+
 import Frame from "../../../components/Frame.astro"
+
 
 **Smithers 0.29.0 is the first npm release since 0.28.0.** It combines the
 first-class `<Memory>` system with durable XState folds, a shared cross-app UI
@@ -96,8 +102,8 @@ export HINDSIGHT_URL="https://hindsight.example.com"
 export HINDSIGHT_API_KEY="…"   # optional
 ```
 
-See the [Memory component docs](/components/memory) and the
-[memory concept guide](/concepts/memory) for the full contract.
+See the [Memory component docs](https://github.com/smithersai/smithers/blob/v0.29.0/docs/components/memory.mdx) and the
+[memory concept guide](https://github.com/smithersai/smithers/blob/v0.29.0/docs/concepts/memory.mdx) for the full contract.
 
 ## XState as durable derived state
 
@@ -138,7 +144,7 @@ The integration deliberately stays inside Smithers' durability model:
 - `xstate` is an optional peer. Projects that never import the integration do
   not need it installed, and the main facade remains isolated from it.
 
-See the [XState integration guide](/integrations/xstate) for the event-source
+See the [XState integration guide](https://github.com/smithersai/smithers/blob/v0.29.0/docs/integrations/xstate.mdx) for the event-source
 contract, re-entry rules, time-travel semantics, and performance bounds.
 
 ## A shared UI component library
@@ -181,7 +187,7 @@ import { MarkdownEditor } from "smthrs/ui/adapters/markdown-editor";
 import { PierreDiffView } from "smthrs/ui/adapters/pierre-diff-view";
 ```
 
-See the [UI component library reference](/reference/ui) for the full
+See the [UI component library reference](https://github.com/smithersai/smithers/blob/v0.29.0/docs/reference/ui.mdx) for the full
 catalog.
 
 Alongside the new components, `smithers-ui` synced its design tokens to
@@ -235,7 +241,7 @@ The Freestyle example provider is retired in its favor. If you were using
 it, switch to Microsandbox or one of the other first-class providers
 (Vercel, AWS, GCP, Daytona).
 
-See the [Microsandbox provider docs](/integrations/microsandbox-sandbox-provider).
+See the [Microsandbox provider docs](https://github.com/smithersai/smithers/blob/v0.29.0/docs/integrations/microsandbox-sandbox-provider.mdx).
 
 ## Durable signal and output rows
 
@@ -350,7 +356,7 @@ per-run 64). Alongside those:
   boots read-only in that state.
 - The db package now probes output tables via `sqlite_master` on
   sqlite-dialect external backends, fixing a table-detection bug.
-- A new [Workflow testing framework guide](/guides/testing-workflows)
+- A new [Workflow testing framework guide](https://github.com/smithersai/smithers/blob/v0.29.0/docs/guides/testing-workflows.mdx)
   documents the expanded `@smthrs/testing` suites:
   cutpoint-conformance, replay-identity, and artifact-parity.
 - A new example workflow, "Daily CEO Intel" (branded in its own docs as "The

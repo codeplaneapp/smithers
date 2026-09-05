@@ -15,7 +15,21 @@ sidebar:
 
 ## Install
 
-`@smthrs/targets` is private and unpublished at version `0.1.0`: a `PACKAGE.ts` or `WORKSPACE.ts` file inside the workspace imports it directly, and no registry serves it.
+Install it with the build CLI; a `PACKAGE.ts` or `WORKSPACE.ts` file then
+imports it directly:
+
+```bash
+pnpm add -D @smthrs/build-cli@next @smthrs/targets@next
+```
+
+```json
+{
+  "devDependencies": {
+    "@smthrs/build-cli": "1.0.0-rc.0",
+    "@smthrs/targets": "1.0.0-rc.0"
+  }
+}
+```
 
 ## Entry points
 
@@ -27,7 +41,9 @@ The `exports` map publishes the index, every module under `src` through the `./*
 | `@smthrs/targets/Target`       | `src/Target.ts` | Node.js 22.19.0+ |
 | `@smthrs/targets/package.json` | `package.json`  | Node.js 22.19.0+ |
 
-The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. The subpaths `./internal/*` and `./index` map to `null`, so neither resolves. The package publishes TypeScript sources, not a built distribution, and `effect` is a peer dependency pinned to `4.0.0-rc.108`.
+The second row stands for every public module. The subpaths `./internal/*` and
+`./index` map to `null`, so neither resolves. Registry installs use the built
+ESM/CommonJS distribution, and `effect` is an exact peer at `4.0.0-rc.112`.
 
 ## Namespaces
 
@@ -36,8 +52,6 @@ The second row stands for every module under `src`: `./*` maps to `./src/*.ts`. 
 | Namespace  | Summary                                                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `Smithers` | Every declaration constructor, catalog rule, macro, action, and error a `PACKAGE.ts` or `WORKSPACE.ts` file reaches, under one name. |
-
-{/* verify: src/index.ts documents this namespace as "the whole legacy declaration authoring surface", while README.md and src/Smithers.ts call it the PACKAGE.ts authoring surface. Which wording is intended? */}
 
 ## Smithers
 
@@ -95,8 +109,6 @@ Constructs a Package value from an explicit target map. Each map key is the targ
 
 A generated-output target: check by default, `--write` applies. The attrs declare `emit`, `script`, `bin`, `command`, `args`, `env`, `secrets`, `sandbox`, `stdout`, `deps`, `data`, `changes`, and `mode`, and exactly one of `emit`, `script`, `bin`, or `command` is required along with a write set. `mode` defaults to `"write"`. The rule joins the `run` and `lint` verbs, is not cacheable, and fails with `ExecError`, `DriftError`, or `NotImplemented`.
 
-{/* verify: GenerateAttrs.mode carries a constructor default of "write" while the JSDoc summary says "check by default". Which is the declared default? */}
-
 ### `Smithers.Agents`
 
 - **Signature:** `Agents(agents: Readonly<Record<string, AgentTarget.AgentDeclaration>>): AgentTarget.AgentsDeclaration`
@@ -104,12 +116,6 @@ A generated-output target: check by default, `--write` applies. The attrs declar
 
 The workspace agent roster, and the reference surface a package names one agent through. Calling it validates the record: a key that is not a legal reference name raises `Error`, and a value that is not an agent declaration raises `TypeError`. Property access such as `Smithers.Agents.docsWriter` mints a fresh inert `Reference.AgentRef`, whose name is checked against the workspace declaration at index time, so an unknown agent name is a graph-load error rather than a silent miss.
 
-### `Smithers.StandardPackage`
-
-- **Signature:** `StandardPackage(options: StandardPackage.Options): StandardPackage.StandardTargets`
-- **Since:** `0.1.0`
-
-Expands one conventional package into the targets `lib`, `check`, `test`, `lint`, `fmt`, `docs`, `circular`, and `docsFiles`. Defaults follow the repository layout: sources at `src/**/*.ts`, tests at `test/**/*.test.ts`, `tsconfig.json` and `tsconfig.test.json`, `vitest.config.ts`, the package `eslint.config.js` plus the root `eslint.jsdoc.js`, `dprint.json`, the build program `scripts/build.mjs`, and the circular-dependency guard `scripts/circular.mjs`. `check` depends on `lib` because the test tsconfig resolves workspace dependencies through their built declarations. `lint` covers the source glob only. `docsFiles` is a `Filegroup` over the package documentation (`docs/**/*.md`, the README, and `package.json`); it joins no verb, and a generator in another package that reads those files lists it in `data`, since a glob declared in one package never expands into another. Every shared input is overridable through `options` without replacing the macro.
 
 ### `Smithers.Filegroup`
 
@@ -152,7 +158,7 @@ The cargo surface: `Cargo.Fetch`, `Cargo.Build`, `Cargo.Test`, `Cargo.Nextest`, 
 - **Type:** the `Shell` module
 - **Since:** `0.1.0`
 
-The shell target flavors: `Shell.Build`, `Shell.Test`, `Shell.Run`, `Shell.Serve`, and `Shell.Diff`. Each requires exactly one of `bin`, `bun`, `command`, or `script`, and `Shell.Build` also requires at least one `outDirs` or `outFiles` entry. `Shell.Run`, `Shell.Test`, `Shell.Build`, and `Shell.Diff` plan an exec through the shared `Exec` action; `Shell.Serve` runs under the package executor.
+The shell target flavors: `Shell.Build`, `Shell.Test`, `Shell.Run`, `Shell.Serve`, and `Shell.Diff`. Each requires exactly one of `bin`, `bun`, `shell`, or `script`, and `Shell.Build` also requires at least one `outDirs` or `outFiles` entry. `Shell.Run`, `Shell.Test`, `Shell.Build`, and `Shell.Diff` plan an exec through the shared `Exec` action; `Shell.Serve` runs under the package executor.
 
 `Host.bin(name)` resolves a declared host binary on PATH. Its resolved path
 and executable bytes enter the package executor's cache key, even when its
@@ -212,10 +218,6 @@ An agent whose accepted candidate becomes a pull request. The attrs match `Agent
 
 The git target flavors: `Git.Commit`, `Git.Pr`, `Git.Submodules`, and `Git.Submodule`. All four run under the package executor. `Git.Submodule` and `Git.Submodules` join the `build` verb and are cacheable; `Git.Commit` and `Git.Pr` join `run` and are not.
 
-{/* verify: the Smithers.ts JSDoc for Git names only `Git.Commit`, for Github only Setup, Workflow, CiGen, and Pr, and for Npm only NodeModules, while each module exports more. Should those summaries list every member? */}
-
-{/* verify: docs/rules.md routes `Git.Submodules` through the flow body, while its implementation is Target.catalogNotImplemented and @smthrs/build-cli's PackageExec has a case for it. Should that row read package executor? */}
-
 ### `Smithers.Github`
 
 - **Type:** the `GithubTarget` module
@@ -242,7 +244,7 @@ Markdown-derived target constructors. The namespace holds one member.
 - **Signature:** `Markdown.CodeBlocks(attrs: NodeArtifact.CodeBlocksAttrs): Target`
 - **Since:** `0.1.0`
 
-Extracts and validates fenced source blocks from one Markdown file. `file` is the declared Markdown input and `lang` is the array of fence languages to extract, both required. The rule joins the `build` and `test` verbs, is cacheable, and runs under the package executor: its Flow body is `Target.notImplemented`, so a bare Flow runtime fails it loudly.
+Extracts and validates fenced source blocks from one Markdown file. `file` is the declared Markdown input and `lang` is the array of fence languages to extract, both required. The rule joins the `build` and `test` verbs, is cacheable, and runs under the package executor: `Target.plan` lowers it to `Target.notImplemented`, so a bare Flow runtime fails it loudly.
 
 ### Remaining exports
 
@@ -284,10 +286,6 @@ Every other export of `Smithers.ts`, in source order:
 | `Smithers.ExecLive`               | layer              | Implements `Exec` with a `node:child_process` spawn.                                                                                                                              |
 | `Smithers.BunSuite`               | macro              | Re-runs one package's vitest suite under Bun.                                                                                                                                     |
 | `Smithers.FaultSuite`             | macro              | Runs one package's fault-injection cases, serially, without coverage.                                                                                                             |
-| `Smithers.DocsReferenceSync`      | macro              | Reviews changed public APIs against the prose that documents them.                                                                                                                |
-| `Smithers.DurableIdentityGuard`   | macro              | Reviews changed sources for identity strings, migrations, persisted schemas, and durable keys.                                                                                    |
-| `Smithers.JsdocTruthfulness`      | macro              | Reviews changed exports against the JSDoc that describes them.                                                                                                                    |
-| `Smithers.reviewPrompt`           | constant           | The framing every review rubric is prepended with.                                                                                                                                |
 | `Smithers.Fetch`                  | rule               | A remote file pinned by sha256 and written to `out`.                                                                                                                              |
 | `Smithers.ExpandFilegroup`        | action             | Reads the files one group names and returns them digested.                                                                                                                        |
 | `Smithers.ExpandFilegroupLive`    | layer              | Implements `ExpandFilegroup`, resolving payload paths against `workspaceRoot`.                                                                                                    |
@@ -409,35 +407,37 @@ Every tagged error and coded refusal the package defines, with the module each o
 
 ## Example
 
-One package declaration, its documentation inputs, and the agent that writes its reference page, the way a `PACKAGE.ts` file declares them:
+Declare a test and an AI review with the files and review instructions visible:
 
 ```ts
-import { Smithers } from "@smthrs/targets"
+import { Smithers as S } from "@smthrs/targets"
 
-const cwd = "packages/smithers/flows/plan"
-const standard = Smithers.StandardPackage({ cwd })
+const test = S.Vitest({
+  tests: [S.glob("test/**/*.test.ts")],
+  sources: [S.glob("src/**/*.ts")],
+  deps: [],
+  config: null,
+  environment: "node",
+  passWithNoTests: false,
+  cwd: "packages/core"
+})
+const reviewChangedFiles = S.LlmLint({
+  changes: S.gitDiff({ base: "origin/main" }),
+  include: [S.glob("//packages/core/src/**/*.ts")],
+  deps: [],
+  prompt: "Review the changed code for bugs.",
+  rubric: "Report bugs that could lose saved data. Explain how each bug occurs.",
+  engine: "codex",
+  model: "gpt-5.6-luna",
+  batchSize: 2,
+  failOn: "error"
+})
 
-const docsSources = Smithers.Filegroup({
-  srcs: [Smithers.glob("src/**/*.ts"), Smithers.file("README.md")],
-  cwd
-})
-const referenceCodeBlocks = Smithers.Markdown.CodeBlocks({
-  file: Smithers.file("docs/reference/plan.md"),
-  lang: ["ts"]
-})
-const referenceDocs = Smithers.Agent.Diff({
-  agent: Smithers.Agents.docsWriter,
-  prompt: Smithers.file("//apps/site/prompts/reference-package.md"),
-  data: [docsSources],
-  changes: ["docs/reference/plan.md"],
-  gates: [referenceCodeBlocks, standard.check],
-  maxRounds: 3
-})
-
-export const Package = Smithers.Package({
-  targets: { ...standard, docsSources, referenceCodeBlocks, referenceDocs }
-})
+export const Package = S.Package({ targets: { test, reviewChangedFiles } })
 ```
+
+Run `smthrs test //packages/core:test` for the tests and
+`smthrs review //packages/core:reviewChangedFiles` for the review.
 
 ## See also
 

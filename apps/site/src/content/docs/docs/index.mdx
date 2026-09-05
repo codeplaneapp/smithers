@@ -1,19 +1,49 @@
 ---
 title: "Smithers docs"
-description: "Smithers is a durable workflow framework for fast, practical agentic execution over TypeScript workflows."
+description: "Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably."
 ---
 
 import { LinkButton, CardGrid, LinkCard } from "@astrojs/starlight/components"
+import HeroStage from "../../../components/HeroStage.astro"
+
+{/* generated:project-description start. Edit apps/site/src/data/project.json; do not edit. */}
 
 Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
 
-Smithers is similar to monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
+{/* generated:project-description end */}
+
+Smithers is an evolution of monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
 
 Fast CI matters even more when agents are doing the work. But traditional monorepo tools largely stop at building and testing code. Smithers extends that model to agentic work, helping agents work on a codebase faster, cheaper, and more intelligently. When the process running a flow stops, Smithers [resumes from the last recorded step](/docs/concepts/durable-execution/) instead of starting the work again.
 
+{/* generated:project-animation start. Edit apps/site/src/data/project.json; do not edit. */}
+
+<img src="/images/how-smithers-works.gif" class="theme-only-dark hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
+<img src="/images/how-smithers-works-light.gif" class="theme-only-light hero-anim" alt="Monorepo tasks materialize into a planned dependency graph, then execute: each finished step caches its outputs. Agent 1 edits ui/src/button.tsx: only the ui build and test go stale and re-run, the rest comes back from cache. When a docs:api step joins the graph, fed by core/src/parse.ts, an edit to parse.ts re-runs build, test, and docs together. The wiki and AGENTS.md sit downstream of docs, and agent 2 sits downstream of the wiki, so every change regenerates the docs the next agent works from and they never drift. A CI scene shows an issue flowing through reproduction, fix, checks, and a human approval gate into a pull request. Finally, a remote cache serves every runner: CI reads and writes it, humans and agents read it." />
+
+{/* generated:project-animation end */}
+
+{/* generated:project-support start. Edit apps/site/src/data/project.json; do not edit. */}
+
+## Supported platforms
+
+The release candidate's required package platform is Linux with Node 22.19.0. macOS and Windows package checks are advisory and do not establish a support guarantee.
+
+Offline Chromium tests cover the included web UI. Packaged desktop and hosted deployments require separate acceptance evidence.
+
+{/* generated:project-support end */}
+
+## Explore a workspace
+
+Start with a workspace and the targets that live in each package. Select a file below to explore the workspace configuration or a package's test and agent review targets.
+
+<HeroStage />
+
 ## Get started
 
-Install the CLI, then scaffold and run your first workflow.
+{/* generated:project-quickstart start. Edit apps/site/src/data/project.json; do not edit. */}
+
+The 1.0 release candidate is not on npm yet. Follow the [source-checkout installation](/docs/installation/#use-the-source-checkout-before-publication), then scaffold and run your first workflow. The npm command below applies after publication.
 
 <LinkButton href="/docs/installation/" variant="primary">Install the CLI</LinkButton>
 <LinkButton href="/docs/quickstart/" variant="secondary">Read the quickstart</LinkButton>
@@ -22,7 +52,7 @@ Install the CLI, then scaffold and run your first workflow.
 npm install --global @smthrs/cli@next
 ```
 
-Then scaffold your first workflow and run it:
+From your project directory, scaffold a workflow, edit its instructions, and configure the credential its `model:` field requires before running it:
 
 ```bash
 smthrs init change
@@ -30,6 +60,8 @@ smthrs up change
 ```
 
 That creates `flows/change/flow.mdx`, a workflow that lives with your code, and runs it. The [quickstart](/docs/quickstart/) walks through the same steps with what to expect at each one.
+
+{/* generated:project-quickstart end */}
 
 ## Where to go next
 

@@ -1,6 +1,7 @@
 ---
-title: "09 browser-use"
+title: "Browser use"
 description: "Use the library from a browser bundle."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/09-browser-use.ts"
 sidebar:
   order: 9
 ---
@@ -13,9 +14,17 @@ Every import in this file comes from an entry point that the repository's browse
 
 The barrel `@smthrs/flows` and `@smthrs/engine-store` bundle for the browser as well, and this file still imports the per-package roots: the barrel pulls every engine package into the bundle, and the Node-only composition is the `@smthrs/flows/NodeRuntime` subpath, which opens SQLite through `node:sqlite`. The test for this example bundles the file itself for the browser and fails if a Node-only import ever sneaks in.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/09-browser-use.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/09-browser-use.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/09-browser-use.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/09-browser-use.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/09-browser-use.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

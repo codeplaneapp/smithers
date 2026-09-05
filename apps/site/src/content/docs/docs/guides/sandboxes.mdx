@@ -5,11 +5,13 @@ sidebar:
   order: 12
 ---
 
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
+
 Place an action body, or a whole child flow, on a provisioned machine while the engine and journal stay on the local SQLite composition.
 
 ## Before you start
 
-- The library packages: `pnpm add @smthrs/sandbox@next @smthrs/flow@next effect@4.0.0-rc.108`.
+- The library packages: `pnpm add @smthrs/sandbox@next @smthrs/flow@next effect@4.0.0-rc.112`.
 - A durable engine composition to provide the sandbox layers into. The examples below compose one over a local SQLite file.
 - Node.js 22.19.0 or later.
 
@@ -32,6 +34,17 @@ A provider is the value that turns a session key into a machine. Nine ship in `@
 When a flow or agent names no provider, `Sandbox.selectProvider(registry, name?)` picks one. The default is `"microsandbox"`, and every other provider stays selectable by name (`"directory"`, `"container"`, `"kubernetes"`, `"just-bash"`, `"vercel"`, `"daytona"`, `"aws"`, `"cloudflare"`). A name the registry does not hold fails with `ProviderError.code === "unavailable"` listing what is registered; nothing falls back to a weaker sandbox silently.
 
 Every bundled provider derives the machine's name from the session key the same way: the key's leading name-safe characters plus a 64-bit digest of the whole key. The digest keeps `a/b` and `a-b` on separate machines, and the stable name is what lets a provider reattach a machine a crashed process left behind.
+
+<DocsDiagram
+  id="sandbox-placement"
+  title="Place an action on a sandbox host"
+  caption="The local engine dispatches an action to a host backed by a sandbox session. File and process operations share that session; the engine records the returned result in local durable state."
+  rows={[
+    [{ label: "Local engine", detail: "Plan and dispatch the action" }],
+    [{ label: "Sandbox session", detail: "Provide files and processes to the action" }],
+    [{ label: "Local journal", detail: "Record the action result" }]
+  ]}
+/>
 
 ## 2. Place one action body somewhere else
 
@@ -116,7 +129,7 @@ From the parent's point of view the whole sandboxed execution is one action with
 
 ## 4. Read the conformance caveats
 
-The providers share one session contract, but their honest limits differ:
+The providers share one session contract, but their limits differ:
 
 - Standard input is bounded at 16 MiB and refused above it, counted as the bytes arrive. A command's output is collected whole, in memory.
 - Command output is byte-exact through `DirectorySandbox`, `ContainerSandbox`, `KubernetesSandbox`, `MicrosandboxSandbox`, and `JustBashSandbox`. It is not through `VercelSandbox`, `DaytonaSandbox`, or `CloudflareSandbox`, whose vendor APIs report output as a string re-encoded as UTF-8, so a command writing a tarball or a compiled binary to stdout comes back changed. `AwsSandbox` reframes output through a pseudo-terminal, which normalizes line endings and interleaves standard error.

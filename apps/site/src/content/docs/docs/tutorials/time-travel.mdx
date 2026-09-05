@@ -10,7 +10,7 @@ import versions from "../../../../data/versions.json"
 
 In this tutorial you'll build a small release flow, finish a run, fork it at a journal frame so a copy can publish to a different channel, and then rewind a second run to an earlier frame and re-derive a view from what remains. It takes about 30 minutes.
 
-Fork copies a run's history up to one frame so the copy can diverge from its parent, rewind trims the run's own history back to a frame, and compensation is the per-effect undo a rewind performs on what the trimmed suffix did. [Time travel](/docs/concepts/time-travel/) explains all three. In 1.0 the service is a library API: no CLI verb reaches it, so this tutorial drives it from a TypeScript program. The full operation and error tables live in the [time-travel API reference](/docs/reference/api/time-travel/).
+Fork copies a run's history up to one frame so the copy can diverge from its parent, rewind trims the run's own history back to a frame, and compensation is the per-effect undo a rewind performs on what the trimmed suffix did. [Time travel](/docs/concepts/time-travel/) explains all three. This tutorial uses the library API to show the operation directly. For existing CLI runs, use `smthrs runs inspect/replay/fork/rewind` as described in [time travel](/docs/concepts/time-travel/). The full operation and error tables live in the [time-travel API reference](/docs/reference/api/time-travel/).
 
 
 **Fork replay limitation:** copied attempt rows retain their parent digests.
@@ -124,7 +124,7 @@ export const Publish = Action.make("release/Publish", {
 export const Ship = Flow.make("release/Ship", {
   payload: {},
   success: Schema.String,
-  body: () => Tag.call({}).pipe(Node.andThen((tag) => Publish.call({ tag })))
+  body: () => Tag.call({}).pipe(Node.bindPlanned((tag) => Publish.call({ tag })))
 })
 ```
 
@@ -132,8 +132,6 @@ export const Ship = Flow.make("release/Ship", {
 import { NodeRuntime } from "@effect/platform-node"
 import { Action, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 import { engineLayer } from "./engine.ts"
 import { Publish, Ship, Tag } from "./release.ts"
 
@@ -191,15 +189,8 @@ ship-1 is finished, and its journal is the history the next part forks.
 A position is a run id plus a frame `{ lineageId, seq }`. A lineage id is an opaque versioned encoding the engine mints for the run, so build it with the `FlowEngine.Lineage.root` constructor rather than spelling one out. The frame below is the committed entry right before the publish step's attempt-started record, so the fork inherits the tag and not the publish. A fork refuses a live parent; this parent is finished.
 
 ```ts title="fork.ts"
-import { NodeRuntime } from "@effect/platform-node"
 import { FlowEngine } from "@smthrs/engine"
-import { Action, Interpreter } from "@smthrs/flow"
-import { Journal, type JournalEvent } from "@smthrs/journal"
 import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import { engineLayer } from "./engine.ts"
-import { Publish, Ship, Tag } from "./release.ts"
 
 let tagDispatches = 0
 
@@ -285,14 +276,7 @@ step ran in the copy under its own implementation.
 Rewind is the mutating half of the service, and it refuses a live run. The run below parks at a durable deferred, which releases ownership and leaves it suspended: the state a rewind can claim. The `inspect` call folds committed journal entries up to a frame through a pure reducer; it reads and never executes, so you can derive the same view before and after the trim.
 
 ```ts title="rewind.ts"
-import { NodeRuntime } from "@effect/platform-node"
-import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
-import { Journal, type JournalEvent } from "@smthrs/journal"
-import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { durableEngine } from "./engine.ts"
 
@@ -409,14 +393,6 @@ re-derived count matches the count taken before the rewind, and the summary
 prints the audit row's status for the rewind.
 ```
 
-## Summary
-
-You learned how to:
-
-- Finish a run and read its journal back through the same engine composition.
-- Fork a finished run at a frame `{ lineageId, seq }` and drive the copy under its own implementations.
-- Park a run at a durable deferred so a rewind can claim it.
-- Fold a journal prefix with `inspect`, and trim a run's suffix with `rewind`.
 
 ## Next steps
 

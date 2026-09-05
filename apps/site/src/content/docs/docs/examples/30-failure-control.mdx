@@ -1,6 +1,7 @@
 ---
-title: "30 failure-control"
+title: "Failure control"
 description: "Failure control: what runs, what unwinds, and what the plan shows first."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/30-failure-control.ts"
 sidebar:
   order: 30
 ---
@@ -13,9 +14,17 @@ Failure control: what runs, what unwinds, and what the plan shows first.
 
 This example releases a build: bounded checks, a quarantined flake, an escalating fixer, a saga that unwinds a half-finished deploy, and a lock the finalizer always releases.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/30-failure-control.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/30-failure-control.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/30-failure-control.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/30-failure-control.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/30-failure-control.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

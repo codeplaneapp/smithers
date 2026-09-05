@@ -1,11 +1,11 @@
 ---
 title: "Examples"
-description: "Tested, runnable programs in examples/src, numbered in reading order."
+description: "Tested, runnable programs in examples/src, grouped by task."
 sidebar:
   order: 1
 ---
 
-Every example is a tested program in `examples/src`, numbered in reading order. `pnpm run test:examples` runs them all against the real packages: the durable examples open real SQLite files, the host example spawns a real process, and the browser example is bundled by a real bundler.
+The examples live in `examples/src`, grouped below by task. Their pages include the complete source and a command for the dedicated test where one exists. `pnpm run test:examples` runs the example test suite; live-provider tests require credentials and can be skipped. The suite covers real package behavior: the durable examples open real SQLite files, the host example spawns a real process, and the browser example is bundled by a real bundler.
 
 ## Basics
 

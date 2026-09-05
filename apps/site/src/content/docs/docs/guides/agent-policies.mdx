@@ -27,7 +27,7 @@ budget:
 ---
 ```
 
-`tokens` caps the model tokens the whole run may spend; `milliseconds` caps its latency window. Either key may stand alone. The CLI turns the declaration into the run's approved envelope and enforces it at the model boundary, so every model call counts toward it, whichever step made the call. Enforcement projects the cost of the coming call from the largest call the run has made, and the first call is never refused. A flow that declares no budget runs unbounded.
+`tokens` sets the token budget; `milliseconds` sets the elapsed-time budget. Either key may stand alone. The CLI turns the declaration into the run's approved envelope and enforces it at the model boundary, so every model call counts toward it, whichever step made the call. Enforcement projects the cost of the coming call from the largest call the run has made, and the first call is never refused. A call can exceed its estimate, and a call already in progress can outlast the latency budget. These checks do not guarantee an exact spending ceiling. A flow that declares no budget runs unbounded.
 
 A malformed budget is ignored rather than tightened: discovery records an `invalid_budget` warning and the flow runs unbounded, because a mistyped ceiling read as zero would refuse the run's first call. `smthrs doctor` prints the warning as a `registry <path>` line.
 
@@ -58,13 +58,13 @@ The park is durable. The decision is a recorded step, so a replay waits out the 
 While parked, the run waits with reason `quota`:
 
 ```bash
-smthrs ps --status parked
+smthrs runs list --status parked
 ```
 
 When the executor that owns the run has stopped, re-drive it and the replay waits out the recorded deadline:
 
 ```bash
-smthrs run --resume <run-id>
+smthrs runs resume <run-id>
 ```
 
 To fail fast on capacity refusals instead of parking, a composition opts out in writing with `QuotaPolicy.layerUnclassified()`.
@@ -101,19 +101,17 @@ Every rejection is journaled with the action, the attempt, the budget, and diges
 Run the flow and read its trail back:
 
 ```bash
-smthrs up reviewer
-smthrs logs <run-id>
+smthrs flow start reviewer
+smthrs runs logs <run-id>
 ```
 
-- A quota park shows as a run with waiting reason `quota` in `smthrs ps --status parked`, and the transcript shows the run waiting for its wake time. The provider is not re-called for the wait: a replayed park replays the recorded decision.
+- A quota park shows as a run with waiting reason `quota` in `smthrs runs list --status parked`, and the transcript shows the run waiting for its wake time. The provider is not re-called for the wait: a replayed park replays the recorded decision.
 - A spent correction shows in the transcript as a re-prompt after the schema miss, and the settled answer still decodes against the declared schema.
 - A budget in `warn` mode leaves budget-warning records in the journal and the run keeps going; in `fail` mode the step that would cross the ceiling fails.
 
-[Example 39](/docs/examples/39-agent-policies/) drives one step through all three policies on the durable engine across a process kill: the provider refuses with HTTP 429 and `retry-after`, the run parks, a second engine over the same file waits out the recorded deadline, spends a correction, and finishes. Its pinned counters are the contract: three provider calls in all, one before the restart, one park decision, one correction.
+[Example 39](/docs/examples/39-agent-policies/) drives one step through all three policies on the durable engine across a process kill: the provider refuses with HTTP 429 and `retry-after`, the run parks, a second engine over the same file waits out the recorded deadline, spends a correction, and finishes. The assertions check three provider calls in all, one before the restart, one park decision, one correction.
 
 ## See also
 
 - [Agent runtime](/docs/concepts/agent-runtime/): budgets, parks, and the correction ladder in the runtime's own terms.
-- [`smthrs run`](/docs/reference/cli/run/): resume a parked run with `--resume`.
-- [`smthrs ps`](/docs/reference/cli/ps/): list runs by status, including `parked`.
-- [`smthrs logs`](/docs/reference/cli/logs/): the transcript these records appear in.
+- [`smthrs runs`](/docs/reference/cli/runs/): inspect and resume a parked run.

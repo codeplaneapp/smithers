@@ -1,23 +1,30 @@
 ---
-title: "41 sandboxed-flow"
-description: "Run a child flow's own code inside a provisioned machine, as one durable action of a parent flow."
+title: "Sandboxed flow"
+description: "Run a child flow's code inside a provisioned environment as one parent action."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/41-sandboxed-flow.ts"
 sidebar:
   order: 41
 ---
 
 {/* Generated from examples/src/41-sandboxed-flow.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Run a child flow's own code inside a provisioned machine, as one durable action of a parent flow.
+Run a child flow's code inside a provisioned environment as one parent action.
 
-Example 40 placed an action's SIDE EFFECTS on a machine: the body kept running in the engine host and only its file and process operations went to the session. This example is the tier above it. `sandboxed-child.ts` declares a flow and the implementation of its action, `SandboxedFlow` bundles that module with the guest runner, writes the bundle and a request into the session workspace, starts `node` on it inside the machine, and validates the result the guest wrote against the child's own success schema. The child's TypeScript never runs in this process.
+`SandboxedFlow` bundles the child module and guest runner, starts Node inside the session, and validates the guest's result against the child schema. The parent records this as one durable action.
 
-From the parent's point of view the whole sandboxed execution is ONE action. `SandboxedFlow.action(Greet)` declares it over the child's payload schema, the parent's body calls it like any other action, and `SandboxedFlow.toLayer` implements it with a session key derived from the parent execution. The durable engine journals one attempt for it, which is why a second `main` over the same SQLite file answers the recorded result without acquiring a machine at all: `acquisitions` counts what the provider was asked for, and the second run asks for nothing.
+A second drive over the same SQLite state reuses the recorded result without acquiring another session. `collectDiff` returns the guest-written file as data; applying that change elsewhere remains the caller's decision.
 
-`DirectorySandbox` makes the provisioned machine a real scratch directory for this runnable example. The guest image requirement still holds in miniature: the guest runtime is this host's `node`, started by the shell in the session workdir. `collectDiff` brings `greeting.txt`, a file only the guest wrote, back as data; applying it anywhere is the caller's decision.
+## Run the test
 
-## Run it
+The complete program is [`examples/src/41-sandboxed-flow.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/41-sandboxed-flow.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The program is [`examples/src/41-sandboxed-flow.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/41-sandboxed-flow.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/41-sandboxed-flow.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

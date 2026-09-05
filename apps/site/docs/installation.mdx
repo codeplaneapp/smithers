@@ -8,7 +8,7 @@ import versions from "../../../data/versions.json"
 
 ## Requirements
 
-- Node.js {versions.node} or later. The durable engine runs on Node only.
+- Node.js 22.19+ within Node 22, or Node.js 24.11+. The CLI declares the supported range as <code>{versions.nodeRange}</code>. The durable engine runs on Node only.
 - No database server. Storage is local SQLite, and run state lives in the project's `.flows/` directory.
 
 See the [RC support matrix](/docs/reference/support-matrix/) for exact engine ranges, tested versions, advisory platforms, and hosting limits.
@@ -17,17 +17,35 @@ See the [RC support matrix](/docs/reference/support-matrix/) for exact engine ra
 
 The CLI installs the `smthrs` command, with `smithers` as an alias of the same executable.
 
-To install from npm:
+### Use the source checkout before publication
+
+These pages describe `1.0.0-rc.0`. As checked on September 4, 2026, it is not yet on npm: `@smthrs/cli` has only `latest` at `0.35.0`, and no `next` dist-tag. Use the checkout to try the version documented here.
+
+With pnpm 11.25.0 installed:
+
+```bash
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
+pnpm exec smthrs --version
+export PATH="$PWD/node_modules/.bin:$PATH"
+```
+
+The PATH setting makes this checkout's CLI available in the current shell. Change to your own project directory before running `smthrs init`. The source launcher uses Node's TypeScript support, so it needs no CLI build step. See [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) for repository checks.
+
+### Install from npm after publication
+
+Once the release candidate is published:
 
 ```bash
 npm install --global @smthrs/cli@next
 ```
 
-The `@next` suffix is required while 1.0 is a release candidate: release candidates publish to the `next` dist-tag, and `latest` still resolves the Smithers 0.x line.
-
-To build from source, clone [the repository](https://github.com/smithersai/smithers) and follow `CONTRIBUTING.md`, which covers the build system, the target graph, and the gates.
+Release candidates publish to `next`, rather than `latest`. Check `smthrs --version` before following 1.0 instructions.
 
 ## Install the library
+
+The npm command below applies after publication. Until then, use the packages through the checkout workspace, as the programs under `examples/` do.
 
 A Node flow program depends on the engine packages, the Node host, and one pinned Effect:
 
@@ -36,7 +54,7 @@ A Node flow program depends on the engine packages, the Node host, and one pinne
 :::caution[Effect must stay at exactly the pinned version]
 A project with two Effect instances is unsupported, because schema internals are not interoperable between them.
 
-Every published Smithers package that uses Effect declares it as an exact `4.0.0-rc.108` peer. Packages using the Effect Node platform also declare `@effect/platform-node` and `@effect/platform-node-shared` as exact peers at that version. npm, Bun, and pnpm therefore install one compatible runtime without requiring an application to pin transitive implementation packages.
+Published Smithers libraries declare `effect` as an exact `4.0.0-rc.112` peer. Node host packages, including `@smthrs/platform-node`, also declare `@effect/platform-node` and `@effect/platform-node-shared` as exact peers at that version. Executable packages own their exact runtime dependencies. npm, Bun, and pnpm therefore install one compatible runtime without requiring an application to pin transitive implementation packages.
 :::
 
 ## Verify the install
@@ -49,7 +67,8 @@ smthrs doctor
 
 - registry: the flows discovered under the project's `flows/` directory.
 - state and databases: the `.flows/` state directory and the migrations applied to `control.db` and `engine.db` (both report "not created yet" before the first command that needs them).
-- runtime: the Node.js version against the 22.19.0 floor the durable engine requires.
+- runtime: the Node.js version against the CLI's supported range.
+- jj: whether the configured Jujutsu executable is available.
 - providers: which provider credentials are set, and which are exported but empty.
 
 The command exits 1 when any check reports a failure.
@@ -60,7 +79,7 @@ The command exits 1 when any check reports a failure.
 smthrs update
 ```
 
-`update` reads npm's dist-tags for `@smthrs/cli` and reports whether the installed version is current. It never installs anything. It checks the `next` tag first and `latest` second, and only offers versions newer than the installed version. When a later version exists, the command prints it with the install command to run:
+`update` reads npm's dist-tags for `@smthrs/cli` and reports whether the installed version is current. It never installs anything. A release candidate is compared against the `next` tag first, so it is never told to downgrade to a 0.x `latest`. When a later version exists, the command prints it with the install command to run:
 
 ```text
 npm install -g @smthrs/cli@<version>

@@ -12,7 +12,7 @@ A step's large outputs belong in the content-addressed artifact store, and a sea
 - The library packages:
 
 ```bash
-pnpm add @smthrs/artifacts@next @smthrs/step-cache@next @smthrs/engine-store@next @smthrs/flow@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+pnpm add @smthrs/artifacts@next @smthrs/step-cache@next @smthrs/engine-store@next @smthrs/flow@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 - You know what a content address buys: [Content addressing](/docs/concepts/content-addressing/) covers key derivation, and this page only composes stores.
@@ -51,10 +51,8 @@ A valid address with no bytes behind it fails with `ArtifactMissing`; bytes that
 `CombinedArtifacts` composes the two tiers. It reads the local tier first and falls back to the remote tier only for `ArtifactMissing` or `ArtifactCorruption`; a local host refusal does not silently fall through. `put` publishes locally first and returns the local digest, and the remote upload is opportunistic, so a remote refusal or timeout does not fail the operation that produced the bytes:
 
 ```ts
-import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import * as CombinedArtifacts from "@smthrs/artifacts/CombinedArtifacts"
 import * as RemoteArtifacts from "@smthrs/artifacts/RemoteArtifacts"
-import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 
 const combined = Effect.gen(function*() {
@@ -79,7 +77,6 @@ A sealed step becomes shareable with two declarations, and a step missing either
 
 ```ts
 import { Action } from "@smthrs/flow"
-import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 export const Compile = Action.make({
@@ -93,7 +90,7 @@ export const Compile = Action.make({
 ```
 
 - `idempotencyKey` gives the step an identity another machine can derive. Without one the engine falls back to a run-local invocation key.
-- `metadata` declares a HARD file boundary. Only a hermetic step is cacheable across runs, and an empty read set with an empty write set is the honest declaration for a body that touches no files.
+- `metadata` declares a HARD file boundary. Only a hermetic step is cacheable across runs, and an empty read set with an empty write set is the declaration for a body that touches no files.
 
 Cache admission (the boundary checks every entry passes before a statement or request is issued: the key grammar, size and shape bounds, and a frozen copy of the value) and the `CurrentCacheEnvironment` a composition declares are what make a result addressable beyond its own run; [Content addressing](/docs/concepts/content-addressing/) explains the key derivation both plug into.
 
@@ -103,12 +100,9 @@ The step cache's remote tier is `RemoteCacheStore`: the same service spoken over
 
 ```ts
 import { CacheSync } from "@smthrs/engine-store"
-import { Action } from "@smthrs/flow"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
 import * as CombinedCacheStore from "@smthrs/step-cache/CombinedCacheStore"
 import * as RemoteCacheStore from "@smthrs/step-cache/RemoteCacheStore"
-import * as Effect from "effect/Effect"
-import * as Layer from "effect/Layer"
 
 const remote = RemoteCacheStore.make({ endpoint: "https://ac.example.com" })
 

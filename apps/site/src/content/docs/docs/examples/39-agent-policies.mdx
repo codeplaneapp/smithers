@@ -1,29 +1,30 @@
 ---
-title: "39 agent-policies"
-description: "One model-backed step under the three agent-runtime policies."
+title: "Agent policies"
+description: "Resume a model-backed action after a rate limit and an invalid structured answer."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/39-agent-policies.ts"
 sidebar:
   order: 39
 ---
 
 {/* Generated from examples/src/39-agent-policies.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-One model-backed step under the three agent-runtime policies.
+Resume a model-backed action after a rate limit and an invalid structured answer.
 
-A production agent step does not just call a provider and decode the answer. It has to survive three things the provider does routinely: refuse because a quota window is closed, answer with something that does not fit the declared schema, and spend tokens somebody approved a budget for. This example runs one `AgentAction` through all three, on the durable engine, across a restart.
+The scripted provider first returns HTTP 429 with a retry delay, then an answer outside the schema, then valid JSON after correction. A second engine continues from the parked state in the same SQLite file.
 
-The scripted provider does this, in order:
+The summary checks provider call counts, the recorded park decision, and the structured-output rejection. No provider credentials are needed.
 
-1. refuses with HTTP 429 and `retry-after`, which is a WAIT, not a defect; 2. after the wake, answers with text that is not the declared schema; 3. answers the correction with the schema-shaped JSON.
+## Run the test
 
-Phase one builds an engine, runs until the park is durable, and is then killed: fiber interrupted, engine scope closed, SQLite connection dropped. Phase two opens a second engine over the same file and finishes the run. The counters the summary reports are the contract:
+The complete program is [`examples/src/39-agent-policies.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/39-agent-policies.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-- the provider is called three times in all, once before the restart, so the   refusal is never re-issued; - one park decision exists, because the decision is a recorded step rather   than a classification the body repeats on every resume; - one structured-output rejection is recorded, naming the correction that   was spent.
+From the repository root, run this example's assertions:
 
-Point `SeatResolver` at a real provider route and nothing above it changes.
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/39-agent-policies.test.ts
+```
 
-## Run it
-
-The program is [`examples/src/39-agent-policies.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/39-agent-policies.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

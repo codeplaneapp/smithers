@@ -1,61 +1,77 @@
 ---
 title: "Flows, actions, and plans"
-description: "Actions are the atoms, flows are the composites, and the plan is the keyed graph a body compiles to before anything runs."
+description: "How action declarations, flow bodies, and approved plans fit together."
 sidebar:
   order: 2
 ---
 
-Everything you author in Smithers is one of three things. An action is the atom that does work. A flow is the composite that names atoms. A plan is the keyed action graph a flow body compiles to, known in full before the first action runs. The admission model for running work is plan, approve, run: the graph exists first, a person or a policy accepts its digest, and only then does a node execute.
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
 
-## Actions are atoms
+An **action** declares one operation and its input and output types. A **flow** composes operations into a graph. A **plan** records that graph and the keys used to identify its work.
 
-An action is schemas and a tag. `Action.make(tag, options)` is pure data: payload fields, success and error schemas, a tier, idempotency identity, an optional retry policy. The implementation attaches later and separately, as a layer:
+The control plane admits work in three stages: build a plan, approve its digest, then launch a run. Separating these stages lets a person or policy review the work before it executes.
+
+<DocsDiagram
+  id="plan"
+  title="From declarations to execution"
+  caption="A flow body describes action calls. Planning records the graph and its digest. Approval binds to that digest, and an engine executes the approved work using registered implementations."
+  rows={[
+    [{ label: "Flow body + action declarations", detail: "Describe operations, dependencies, and effects" }],
+    [{ label: "Plan → approval", detail: "Review the graph and approve its digest" }],
+    [{ label: "Run", detail: "Execute with registered action implementations" }]
+  ]}
+/>
+
+## Declare work separately from its implementation
+
+The declared form of `Action.make` carries schemas and a tag. `toLayer` attaches its implementation:
 
 ```ts
-const Compile = Action.make("example/Compile", {
-  payload: { target: Schema.String },
+import { Action, Flow } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+
+const Greet = Action.make("example/Greet", {
+  payload: { name: Schema.String },
   success: Schema.String,
   tier: "sealed"
 })
 
-const compileLayer = Compile.toLayer(({ target }) =>
-  Effect.succeed(`${target}.js`)
+const greetLayer = Greet.toLayer(({ name }) =>
+  Effect.succeed(`Hello, ${name}.`)
 )
+
+const Greeting = Flow.make("example/Greeting", {
+  payload: { name: Schema.String },
+  success: Schema.String,
+  body: (payload) => Greet.call(payload)
+})
 ```
 
-Because the declaration carries no code, a plan can name an action whose implementation is wired up somewhere else entirely, and the interpreter reports `unresolved_action` when nothing was wired. Identity comes from what the action declares, not from where the implementation happened to be defined. `Action.makeSystem` is the declared form that mints no requirement, which is how the engine's own steps, `Sleep`, `WaitFor`, `HumanTask`, and `Poll`, ship implementations with the engine instead of pushing a layer obligation onto their callers.
+This code defines work; it does not run it. `Greet.call(payload)` places an action call in the graph. The greeting string is produced later, when an engine executes the call with `greetLayer` installed.
 
-## Flows are composites
+The [first flow tutorial](/docs/tutorials/first-flow/) adds the interpreter and engine needed to run this pattern. The [flow reference](/docs/reference/api/flow/) also documents the executable action form and built-in system actions.
 
-A flow is payload and success schemas plus a required pure `body`. There is no `toLayer` on a flow: a flow carries a body and never a handler, and `Interpreter.layer(flow)` is what registers it with a runtime. A flow with nothing to plan is an action. `Flow.make` also accepts a `maxRounds` bound for trampoline lineages, which must be a positive safe integer.
+## Plan a round before running it
 
-The body names atoms instead of calling them. `Compile.call(payload)` inside a body does not run the compile; it records a node that stands for the compile. When a drive cannot proceed, `InterpreterError` says why with a stable code: `unresolved_action` for an action with no implementation wired up, `duplicate_node_id` for two nodes answering to one dispatch address, `incomplete_graph` for topology the build reported.
+`Graph.build` evaluates the flow body symbolically. It records dependencies and branch structure before executing actions. A planned value represents a future result; ordinary JavaScript arithmetic or string conversion cannot read that result during planning.
 
-## The plan is known before the first action runs
+Keep I/O in action implementations. A flow body describes how results connect. It does not read files or call models to discover the next node.
 
-`Graph.build` turns a body into the plan-time graph the interpreter drives, and building is a pure function of the declarations and the payload. The whole shape of a round is known before its first action runs. Branch arms are evaluated once, symbolically, so the exit condition and the handoff site are visible topology before anything executes. A graph the build reported diagnostics for is inspectable but deliberately not compilable, so an incomplete topology is reported rather than half-driven.
+The complete graph is known for each round. A flow can settle with a handoff or another bounded round, so this does not mean every node of a long-running, dynamically elaborated workflow exists at its initial launch.
 
-The persisted plan in `@smthrs/plan` is the keyed form of that graph. Each node's key is a function of what the node consumes, and the plan digest covers node identity, every computed key, the edge set, and the declared effects. A plan grows by append and is never rewritten. `baseDigest` is the digest at generation 0, what a human approved and what a running run pins, while `digest` advances with each appended elaboration.
+## Keys and approval digests
 
-Planning performs no I/O. Declared effects carry read and write paths, never digests, because measuring a path is run-time work. The plan says what may touch what; the host says what is actually there.
+A node key depends on its declared material and material dependencies. The plan digest covers the graph's identities, keys, edges, and effects. [Content addressing](/docs/concepts/content-addressing/) explains which changes affect those keys.
 
-## What the build refuses
+The persisted plan grows by appending work. Its `baseDigest` identifies generation zero, the plan initially approved. Its current `digest` advances as elaborations append to the plan. Recorded nodes and edges are not edited in place.
 
-Planning fails rather than guess. Building refuses a nesting depth past its bound and refuses a duplicate node id, because a node id is durable dispatch identity and two nodes answering to one address would let a later settlement overwrite an earlier one. `Plan.compile` refuses a cycle in the material dependencies, a reference to a node that is neither in the drafts nor already in the plan, and a write-set overlap under a `fail` verdict. The refusal codes are a closed set, so a new refusal is a deliberate addition, not a new free-form string.
+The control-plane guide shows how to [review and submit the exact approval payload](/docs/guides/plan-approve-run/).
 
-## Plans are append-only
+## Invalid plans fail before execution
 
-Recording is first-writer-wins: an identical re-record is not an error, and a different plan under the same id is a `Conflict` carrying the stored digest, never a silent overwrite. Append-only is enforced in SQL, not by convention: triggers raise on any update or delete of the node and edge rows and on any backward move of a plan row. Re-ordering after a reconciliation happens by re-keying future steps, never by rewriting recorded ones.
+Planning rejects ambiguous or incomplete graphs instead of executing their valid-looking parts. Common causes include duplicate node IDs, missing dependencies, dependency cycles, and conflicting declared write sets under a failing conflict policy.
 
-## Why bodies are planned, not executed inline
+At execution time, `unresolved_action` means an action has no registered implementation. `duplicate_node_id` identifies a dispatch-address collision, and `incomplete_graph` identifies topology the graph builder could not complete.
 
-Static topology is what makes approval meaningful: there is a complete artifact to approve. It is what makes replay cheap: a re-driven body rebuilds the same graph and serves its recorded nodes from the journal. And it is what keeps the walk honest: the interpreter walks demand-driven from the root, because executing a branch arm to discover it was not taken is exactly what static topology exists to avoid.
-
-The cost is a discipline on the author. A planned value may never be computed on: the type is branded, and the proxy traps throw rather than let a plan be built around `NaN` or `"[object Object]"`. A payload is stored as its inert JSON mirror. And a plan is always a DAG: there is no loop node, and repetition lives one level up, in what a flow settles with.
-
-## Related
-
-- [Plan, approve, run guide](/docs/guides/plan-approve-run/)
-- [Module flows guide](/docs/guides/module-flows/)
-- [`@smthrs/flow` reference](/docs/reference/api/flow/)
-- [`@smthrs/plan` reference](/docs/reference/api/plan/)
+Use the [plan reference](/docs/reference/api/plan/) for compiler refusal codes and the [module flow guide](/docs/guides/module-flows/) for authoring patterns.

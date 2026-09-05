@@ -12,24 +12,27 @@ A Smithers project is `flows/**` sources plus `.flows/` run state. This guide or
 - Install the CLI with `npm install --global @smthrs/cli@next`.
 - Scaffold once with [`smthrs init`](/docs/reference/cli/init/), which writes the first flow and ignores `.flows/`.
 
+import { FileTree } from "@astrojs/starlight/components"
+
 ## 1. Lay out the project
 
-```text
-.
-├── flows/
-│   ├── review/
-│   │   └── flow.mdx
-│   └── deploy/
-│       └── status/
-│           └── flow.ts
-├── .flows/
-│   ├── control.db
-│   ├── engine.db
-│   └── logs/
-└── .gitignore
-```
+<FileTree>
 
-`flows/` holds the sources, one flow per directory. `.flows/` holds run state: the `control.db` and `engine.db` SQLite databases, and the `logs/` directory a detached run writes to. Keep `.flows/` out of version control; `smthrs init` appends the ignore rule once and skips the edit outside a git or jj repository. There is no `smithers.config.ts` and no `.smithers/` directory in 1.0; both are 0.x.
+- flows/
+  - review/
+    - flow.mdx
+  - deploy/
+    - status/
+      - flow.ts
+- .flows/
+  - control.db
+  - engine.db
+  - logs/
+- .gitignore
+
+</FileTree>
+
+`flows/` holds the sources, one flow per directory. `.flows/` holds run state: the `control.db` and `engine.db` SQLite databases, and the `logs/` directory a detached run writes to. Keep `.flows/` out of version control; `smthrs init` appends the ignore rule once and skips the edit outside a git or jj repository. Build workspaces also use `.smithers/WORKSPACE.ts` and `PACKAGE.ts` declarations. Keep those source files in version control; they are separate from `.flows/` runtime state.
 
 ## 2. Name flows by directory path
 
@@ -43,9 +46,9 @@ Three rules decide what counts:
 
 ## 3. Read what discovery found
 
-`smthrs ls` prints one item per discovered flow with its `flowId` and `description`. The listing never includes the reserved `system/*` ids, and it never reports discovery problems.
+`smthrs flow list` prints one item per discovered flow with its `flowId` and `description`. The listing never includes the reserved `system/*` ids, and it never reports discovery problems.
 
-`smthrs doctor` owns the warnings. Its registry check reports how many flows were discovered and how many directories were skipped with no flow body, then prints one line per discovery warning as `code: message`. When a flow you expect is missing from `smthrs ls`, run `smthrs doctor` before editing anything.
+`smthrs doctor` owns the warnings. Its registry check reports how many flows were discovered and how many directories were skipped with no flow body, then prints one line per discovery warning as `code: message`. When a flow you expect is missing from `smthrs flow list`, run `smthrs doctor` before editing anything.
 
 ## 4. Resolve the project root
 
@@ -58,22 +61,20 @@ Every command that touches durable state resolves the same root the same way:
 The upward walk stops at the repository boundary (`.git` or `.jj`), so a command run deep in a checkout never climbs past the repository root. To act on a project from anywhere, pass `--root`:
 
 ```bash
-smthrs --root /path/to/project ps
+smthrs runs list --root /path/to/project
 ```
 
 ## 5. Stay clear of reserved ids
 
 Flow ids starting with `system/` are reserved for the control plane and carry no body in 1.0. Verbs that take a flow id refuse them with exit 1:
 
-```text
-smthrs plan system/replay: system/replay is a reserved system flow id and carries no body in 1.0.0-rc.0, so a launch would park with nothing to run. Name a flow from `smthrs ls`. See https://smithers.sh/migration/1.0#flows
-```
+Choose a flow ID from `smthrs flow list`; planning a reserved ID returns a refusal before execution.
 
 A `system` directory under `flows/` produces ids the verbs refuse, so name project directories anything else.
 
 ## Verify it worked
 
-- `smthrs ls` lists every flow under its directory-derived id.
+- `smthrs flow list` lists every flow under its directory-derived id.
 - `smthrs doctor` prints `ok` for the registry check with the count of flows discovered, or names the skipped directories and warnings to fix.
 
 ## See also

@@ -1,103 +1,80 @@
 ---
 title: "Drive Smithers from your agent"
-description: "Register the Smithers MCP server with Claude Code or Codex, scope the tool surface it exposes, and let the agent list flows, watch runs, and inspect approvals."
+description: "Connect an MCP client to Smithers, discover its tools, and verify access to the intended project."
 sidebar:
   order: 10
 ---
 
-`smthrs --mcp` serves the control plane as a Model Context Protocol server over stdio, and `smthrs mcp add` writes that server into your agent's own configuration, so the agent can list this project's flows, watch runs, and inspect their approvals through the MCP tool surface.
+Connect your agent to `smthrs --mcp` to let it discover targets, plan flows, inspect runs, and submit approvals through the same command handlers as the CLI.
+
+This is the server direction: an external agent calls Smithers. To give a Smithers flow access to external MCP servers, use [Give a flow tools](/docs/guides/tools/).
 
 ## Before you start
 
-- The Smithers CLI: `npm install --global @smthrs/cli@next`.
-- A Smithers project with at least one flow. `smthrs ls` lists what the agent will see.
-- Claude Code or Codex. This release knows those two agents.
+- Install the [Smithers CLI](/docs/installation/).
+- Choose the project the agent should operate. Verify it with `smthrs flow list --root <project>`.
+- Use an agent client that supports stdio MCP servers.
 
-## 1. Register the server
+## Register the launch command
 
-```bash
-smthrs mcp add --agent claude
-```
-
-`--agent` selects the configuration to write: `claude` is `~/.claude.json`, `codex` is `~/.codex/mcp.json`, and omitting the flag wires every known agent. Any other id exits 2 and names the known ones.
-
-The command adds one `smithers` entry to the file's `mcpServers` map, with a launch command that is the running CLI itself plus `--mcp`, so an installed CLI registers its own installed path and the agent's client starts the server itself. Writing is additive and idempotent: your other servers stay in place, an entry that is already correct is left alone, and a file that cannot be parsed is reported rather than replaced. It never removes entries and never edits any other part of the configuration.
-
-The output prints one entry per target agent with `agent`, the configuration `path` it wrote or kept, the `status` (`written`, `unchanged`, or `failed`), and a `reason` when the write failed. When every target fails, the manual registration instructions print to stderr instead and the command exits 1.
-
-## 2. Read what the agent can do
-
-The server speaks newline-delimited JSON-RPC 2.0 over stdio (MCP protocol revision 2025-06-18) until standard input closes. On the default surface the agent holds eleven control tools. It can:
-
-- List the flows discovered under the project with `list_flows`.
-- Follow the run with `list_runs`, `get_run`, `watch_run`, `get_run_events`, `explain_run`, `get_node_detail`, and `get_chat_transcript`.
-- Inspect parked runs with `list_pending_approvals` and pass the approval payload to an operator.
-
-Every MCP mutation carries an `agent` principal. Approval and denial are operator-only:
-`resolve_approval` returns `UNAUTHORIZED` for `once`, `run`, and `remembered` scopes.
-`run_flow` returns `UNAUTHORIZED` when it tries to approve the plan and launches
-no run. Operators use `smthrs up`, `smthrs approve`, and `smthrs deny`.
-
-Every tool answers the `{ ok, data?, error? }` envelope, serialized into the text content block and repeated as structured content. Ten 0.x tool names remain on the surface and answer `{ ok: false, error: { code: "unsupported" } }` with the reason, so the agent learns that time travel, checkpoints, and human questions are features this release does not have instead of hitting an unknown tool. [MCP tools](/docs/reference/mcp-tools/) lists every tool with its parameters and error codes.
-
-## 3. Choose the surface
-
-The `--surface` flag on the `smthrs --mcp` launch command chooses which tool families a session exposes:
-
-| Surface | What the session exposes |
-| --- | --- |
-| `semantic` (the default) | The named control tools. |
-| `raw` | One `cli_<verb>` directory tool per shipped CLI verb, each answering a pointer to run `smthrs <verb>` from a shell. A raw tool executes nothing. |
-| `both` | The union of the two. |
-
-Any other spelling falls back to `semantic`. `mcp add` registers the plain server, so to run another surface, edit the `args` array of the entry it wrote, keeping the paths your installation registered:
+In your client's MCP settings, add a stdio server with executable `smthrs` and argument `--mcp`. For clients that use a JSON `mcpServers` map, the entry is:
 
 ```json
 {
   "mcpServers": {
     "smithers": {
-      "command": "/usr/local/bin/node",
-      "args": ["/usr/local/bin/smithers", "--mcp", "--surface", "both"]
+      "command": "smthrs",
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-:::note
-Re-running `smthrs mcp add` restores the plain launch command: the command is idempotent against the unflagged entry, so a hand-edited `args` array reads as not yet correct and is rewritten. Reapply your flags after any re-registration.
-:::
+Merge the entry into your existing configuration using your client's documented format. If the client cannot find global npm executables, use the absolute path returned by `command -v smthrs`.
 
-## 4. Run least privilege
+The client starts and owns the server process. A manual `smthrs --mcp` launch waits for protocol input; it does not open an interactive prompt. Keep stdout available for protocol messages.
 
-Two flags shrink a session further:
+## Select the project explicitly
 
-- `--read-only` exposes only the read-only tools, dropping `run_flow` and `resolve_approval`: the agent can list, watch, and explain, but cannot launch or decide.
-- `--allowed-tools list_flows,list_runs,get_run` exposes only the named tools, comma-separated.
+An MCP client may launch servers outside the repository you are viewing. Pass the absolute project path as the `root` argument on flow and run tools. Target commands expose their workspace selector in their own schemas.
 
-A call to a tool the session does not expose answers `{ ok: false, error: { code: "unknown_tool" } }`. Both `--flag value` and `--flag=value` spellings work. An agent that only reports on runs needs nothing more than the read-only surface.
+For remote control, inspect the tool's `remote` and `credential` fields. [Run a control plane](/docs/guides/control-plane/) explains which host executes the work and retains its state.
 
-## 5. Follow runs in Claude Code with the mirror protocol
+## Discover and inspect tools
 
-Claude Code has a second integration beside MCP: the plugin's `/workflows` mirror speaks the `smthrs claude` wire protocol. The plugin runs the subcommands and relays the JSON, so it never reads a database and never talks to the control plane itself. Day to day the plugin calls them for you; reach for them when you debug the mirror or script against it:
+Ask the agent to search for flow tools, inspect `flow_list`, and call it for your project. The server exposes four discovery entry points:
 
-- `smthrs claude tick <run-id>` prints one mirror frame for the run (status, per-node phases, settled outputs of the nodes that moved, any parked approval) and re-asserts this session's subscription to it.
-- `smthrs claude node-wait <run-id> <node-id>` polls every 250 ms until the node settles, the run settles, or the `--timeout-ms` budget (default 30000) lapses.
-- `smthrs claude monitor` prints notable run transitions as NDJSON, one object per line; without `--all-runs` it reports only the runs this session follows.
-- `smthrs claude subscribe <run-id>` and `smthrs claude unsubscribe <run-id>` manage the follow list and print the live subscription count.
+1. `search_tools` finds commands by capability.
+2. `get_tool_details` returns a selected command's schema.
+3. `call_read_tool` calls a tool explicitly marked read-only.
+4. `call_write_tool` calls a writable or unclassified tool.
 
-None of them changes run state: the only writes are this session's subscription entries in `.flows/claude-mirror-subscriptions.json`, and an entry expires 24 hours after its last re-assertion. The session id comes from `--session`, then the `CLAUDE_CODE_SESSION_ID` environment variable, then the literal `unknown`. [`smthrs claude`](/docs/reference/cli/claude/) pins the full frame schema.
+A command's annotations determine which call wrapper it accepts. For example, `flow_list` currently uses `call_write_tool` because it is unclassified; that classification does not cause the listing to launch a run.
 
-## Verify it worked
+The [MCP reference](/docs/reference/mcp-tools/) gives concrete request objects and command names.
 
-Start the agent in the project root and ask it to list this project's flows. It answers through `list_flows` with the same flow ids `smthrs ls` prints. Launch a flow as an operator with `smthrs up`, then ask the agent to inspect its run id and compare it with:
+## Plan before launching
+
+Have the agent call `flow_plan` and show you the work and approval payload. Submit that exact payload through `approvals_approve`, then execute it with `flow_execute` when the work is authorized.
+
+`flow_start` combines planning, run-scope approval, and launch. Calling it is authorization to start the flow, so use the separate plan path when review needs to happen first.
+
+Apply tool approval policies in the agent client. The old `--surface` and `--read-only` examples belong to the earlier semantic MCP server and do not configure the current default entry point.
+
+## Verify the connection
+
+The agent's `flow_list` result should contain the same IDs as:
 
 ```bash
-smthrs status <run-id>
+smthrs flow list --root <project>
 ```
 
-The diagnosis card describes the run the operator launched. A call to `run_flow` on the default registration answers `UNAUTHORIZED`. To confirm a scoped session, call `run_flow` on a `--read-only` registration: the answer is `unknown_tool`, and no run appears in `smthrs ps`.
+If the catalog is empty, check the absolute project path and [flow discovery](/docs/guides/flow-discovery/). If the server fails to start, check the executable path and the client's server logs. If a call fails validation, inspect the tool schema again before retrying.
 
-## See also
+After an authorized launch, confirm its run ID outside the agent:
 
-- [Give a flow tools](/docs/guides/tools/): the reverse direction, projecting external MCP servers into a run's catalog.
-- [Configure model seats](/docs/guides/model-seats/): the seat a run launched by the agent resolves.
+```bash
+smthrs runs show <run-id> --root <project>
+```
+
+The result should identify the flow you selected. Continue with [Inspect runs](/docs/guides/inspecting-runs/) for logs and outputs.

@@ -1,61 +1,73 @@
 ---
 title: "Durable execution"
-description: "The journal is the one mechanism that lets a flow survive the process running it, and every engine feature is built on it."
+description: "What a run records, what resume reuses, and which work can execute again after a crash."
 sidebar:
   order: 1
 ---
 
-A coding agent runs for hours, calls models, edits files, and waits on people. The process running it will eventually stop: a deploy, a kernel kill, a laptop lid. Durable execution is the property that none of this matters to the flow. Smithers gets that property from one mechanism, the journal, and every other feature in the engine is a way of writing to it or reading from it.
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
 
-## The journal is the one mechanism
+A durable run keeps its progress after the process running it stops. When you resume the same execution, Smithers reuses recorded action outcomes and continues the unfinished work. The run's SQLite state must still be available.
 
-A flow is a typed program whose side effects are recorded in a journal as they happen. When the process dies, the next process reads the journal and continues where the record stops. Agents, approvals, retries, and time travel are not separate systems. Each is built on that record.
+The useful boundary is a **recorded action outcome**. Code outside that boundary can run again, including the surrounding implementation that calls the action.
 
-The journal is a logical write-ahead log over SQLite. Every lifecycle write takes the durable channel, `emitDurable`, which allocates its sequence and commits inside the write transaction before returning. A saturated telemetry queue may drop an event; a lifecycle event is never on that queue.
+<DocsDiagram
+  id="resume"
+  title="Resume reuses committed outcomes"
+  caption="The first process records action A, then stops during B. A fresh process opens the same run state, reuses A's outcome, and executes unfinished B."
+  rows={[
+    [{ label: "First process", detail: "A commits → B starts → process stops" }],
+    [{ label: "SQLite state", detail: "A's outcome survives; B has no committed outcome" }],
+    [{ label: "Resumed process", detail: "Reuse A → execute B → continue the flow" }]
+  ]}
+/>
 
-## One transaction per step
+## What survives a restart
 
-Committing a journal entry makes the entry durable, but a run's executable state lives in stores beside the journal: run rows, attempt rows, the step cache. `Journal.transact` closes that seam. The state projection and its `emitDurable` calls run in one transaction as savepoints, so the row and the lifecycle entry describing it either both commit or both roll back. That is what makes the journal an account of record rather than a best-effort echo, and it is what one transaction per step means.
+Smithers stores run state, action attempts, and lifecycle events in SQLite. The journal orders events within a run. The run and attempt stores hold the state the engine needs to continue execution.
 
-Publication follows COMMIT. A subscriber never sees an entry that later rolls back, and a rolled-back producer identity stays re-emittable instead of deduplicating against a sequence that does not exist.
+When an action settles, `Journal.transact` commits its state change and lifecycle event together. Both commit or both roll back. Subscribers receive the event after the transaction commits.
 
-The transaction is held for its whole body, so only storage work belongs inside it: no flow bodies, no host calls, and no `flush`, which waits on the lossy writer and would deadlock against the open transaction. Nesting is a savepoint: an inner `transact` defers its settlements to the outermost commit.
+This prevents a history entry from claiming that a step completed when its outcome was never stored. It also prevents a stored completion from losing the event that explains it.
 
-## Two channels, two guarantees
+## What runs again
 
-The journal runs two channels with different promises. `emitLossy` is a bounded, non-blocking queue for telemetry and may answer `Dropped` under pressure. `emitDurable` is the lifecycle channel: it opens its own transaction inline, allocates the sequence inside it, and returns only after the row is committed, so the returned sequence is already durable. The two channels fail independently, and neither failure is permanent.
+On resume, the engine starts from the flow definition and looks up recorded outcomes as it reaches action boundaries. A completed action returns its stored outcome. A recorded failure returns its stored failure. Unfinished work can execute again.
 
-Readers choose the same trade-off. `changes` is a bounded sliding buffer, so a slow subscriber loses entries with no error and no gap signal. `stream` is the lossless follower: durable history first, then committed changes.
+For example, suppose an implementation increments a local counter, calls a recorded `ReadDocument` action, and then waits for approval. After resuming:
 
-## Replay, defined precisely
+- The implementation enters again, so the local counter increments again.
+- `ReadDocument` returns its recorded result without reading the document again.
+- The wait reads the recorded approval and continues.
 
-Replay is deterministic re-derivation from the record. `Seq` is the canonical per-run replay order and replay reads `ORDER BY seq`. When a process re-drives a run, every step the journal already holds is served from its recorded outcome instead of re-executing, and the first step with no record is where real work resumes. Producer identity `(runId, sourceId, sourceSeq)` is unique in the database, so an exact retry of a recorded emission collapses to a `Duplicate` receipt rather than a second entry.
+The [crash and resume tutorial](/docs/tutorials/crash-and-resume/) makes these boundaries visible with counters.
 
-Because replay reads the record, the features that look like separate machinery are readers of it. Time travel replays the rows to fork a run at a frame or rewind it, and a read-only sync follower receives the same rows verbatim.
+:::caution[External effects can happen twice]
+A remote service can accept a request before Smithers records the response. If the process stops between those events, resuming can repeat the request. Use the remote service's idempotency mechanism for effects such as payments or publishing. A local transaction cannot make a remote request atomic.
+:::
 
-Replay is also idempotent at the write. Two emissions under one producer identity are the same event when their event type and their canonically encoded, redacted payload and meta match; a reused producer sequence carrying different content fails `idempotency_conflict`. A retried write cannot double the record, and a changed one cannot hide inside it.
+## Resume, replay, and cache reuse
 
-## What durable execution is not
+These operations use stored data for different purposes:
 
-Durable execution is not a message queue. The journal records one run's own history in order; it does not route work between producers and consumers.
+| Operation | Purpose | Can execute action code? |
+| --- | --- | --- |
+| Resume | Continue an existing execution from its recorded state. | Yes, for unfinished work. |
+| Time-travel replay | Read a committed prefix of history and derive a view. | No. |
+| Step-cache lookup | Reuse an eligible sealed result by its key. | A miss can lead to execution. |
 
-Durable execution is not a cache. The step cache is a separate store with its own admission rules, and a cache miss costs a re-execution, never a lost run.
+Use [time travel](/docs/concepts/time-travel/) to inspect history. Use [artifacts and the step cache](/docs/guides/artifacts-cache/) to share eligible results between runs.
 
-Durable execution is not a backup. The journal rows are the primary state of the run, replayed verbatim to every consumer; nothing is restored from a secondary copy.
+## Lifecycle events and telemetry
 
-## Trade-offs and why
+Lifecycle events take the durable journal channel. Telemetry uses a bounded queue and can be dropped under pressure. The distinction lets the engine keep execution records without allowing diagnostic traffic to grow without a bound.
 
-A crash before COMMIT loses the whole unit. Work that already ran, an action body for instance, re-executes on the next drive. Durability bounds the loss at the transaction boundary; it does not erase it.
+Journal readers also choose a contract. `changes` provides bounded live notifications; a slow subscriber can miss entries. `stream` reads durable history and follows committed changes. Use the durable stream when every event matters.
 
-No local transaction makes a remote effect atomic. A step that charged a card before the crash runs again on resume unless the integration carries an idempotency key, a fencing token, or a compensation.
+The [journal reference](/docs/reference/api/journal/) describes transactions, producer identities, and duplicate-write handling.
 
-Journal rows are permanent and replayed verbatim to sync followers and time-travel consumers, so redaction is enforced on write, the one point where it can still be enforced. Executable state in the run and attempt stores is deliberately not redacted: rewriting a field because its name resembles a credential would corrupt the resume data.
+## Keep the state that makes resume possible
 
-Smithers vendors Effect's workflow surface rather than depending on it, and diverges to be stricter and more cacheable: the caller chooses the execution id, step keys are content-addressed, and only infrastructure interrupts consume a retry policy. The pages on [execution IDs and ownership](/docs/concepts/ownership/), [content addressing](/docs/concepts/content-addressing/), and [retries and interruption](/docs/concepts/retries/) take each divergence in turn.
+The CLI stores run state under `.flows/`. A new checkout without that directory has no local history to resume. Put long-running work on a persistent host, and back up its state using the [retention guide](/docs/guides/retention/).
 
-## Related
-
-- [Crash and resume tutorial](/docs/tutorials/crash-and-resume/)
-- [Time travel](/docs/concepts/time-travel/)
-- [`@smthrs/journal` reference](/docs/reference/api/journal/)
-- [`@smthrs/engine-store` reference](/docs/reference/api/engine-store/)
+Keep execution identity stable when resuming and use a new identity for unrelated work. [Execution IDs and ownership](/docs/concepts/ownership/) explains how the engine distinguishes runs and prevents two owners from writing the same run.

@@ -7,7 +7,7 @@ One sentence per term, using the same names the prose uses.
 
 | Term | Definition |
 | --- | --- |
-| [action](/docs/concepts/flows-actions-plans/) | The atom that does work: schemas and a tag, with its implementation attached separately as a layer. |
+| [action](/docs/concepts/flows-actions-plans/) | A unit of work with a tag and schemas; its implementation is supplied by a layer. |
 | approval | The recorded decision that accepts a plan digest or answers a parked run's ask. |
 | approval payload | The complete serialized value a decision binds to: the `approval` field of a plan card, or the `payload` of a parked run's `control.approval.requested` event. |
 | [attempt](/docs/concepts/retries/) | One numbered try of a step, persisted so the retry budget survives restarts; `CurrentAttempt` exposes the one-based count. |
@@ -15,16 +15,16 @@ One sentence per term, using the same names the prose uses.
 | [capability](/docs/concepts/kernel/) | One member of the closed `Capability.Action` vocabulary (such as `fs:read`, `net:get`, or `model:call`), carrying the exact resource a grant authorizes. |
 | [cell](/docs/concepts/agent-runtime/) | The JavaScript program the model emits for one frame, evaluated in a persistent QuickJS realm whose only authority is `ctx.call`. |
 | [compensation](/docs/concepts/time-travel/) | The undo of an effect inside its declared boundary, performed by registered handlers when a rewind crosses the record. |
-| [content addressing](/docs/concepts/content-addressing/) | Keying a step from canonical content plus declaration identity. Names scope ordinal and string-keyed actions; an object-form sealed key is the explicit rename-stable form. |
+| [content addressing](/docs/concepts/content-addressing/) | Deriving identifiers from canonical content; action tags and other declared key material can affect identity. |
 | control plane | The `Control` service and everything serving it: `plan`, `run`, `approve`, `deny`, `steer`, `signal`, `cancel`, `resume`, `list`, and `watch` over durable runs. |
 | deferred | A durable wait point (`DurableDeferred`) that parks a run until another process completes it by token, first writer wins. |
-| detached run | A run launched with `smthrs up -d` in a child process that outlives the launcher, reported admitted once its run row is durable. |
-| diagnosis card | The read-only card `smthrs status <run-id>` prints: verdict, run, activity, tokens, refusals, and the next command, computed from the run's journaled events. |
-| [durable execution](/docs/concepts/durable-execution/) | The property that a flow survives the process running it: every side effect is journaled, and the next process continues where the record stops. |
+| detached run | A run launched with `smthrs flow start -d` in a child process that outlives the launcher, reported admitted once its run row is durable. |
+| diagnosis card | The read-only card `smthrs runs show <run-id>` prints: verdict, run, activity, tokens, refusals, and the next command, computed from the run's journaled events. |
+| [durable execution](/docs/concepts/durable-execution/) | Recording action outcomes and execution state so a later process can reuse completed work and resume pending work. |
 | [engine store](/docs/concepts/durable-execution/) | The durable engine (`@smthrs/engine-store`): the store that claims, fences, and persists runs over the journal in SQLite. |
 | [execution ID](/docs/concepts/ownership/) | The identity of a run, chosen by the caller on `execute`, else derived from the flow's `idempotencyKey`, else from the ambient source. |
 | [fence](/docs/concepts/ownership/) | The ownership check that lets a write land only while the store still records the writer as the run's owner, failing `fence_lost` otherwise. |
-| [flow](/docs/concepts/flows-actions-plans/) | The composite: payload and success schemas plus a required pure `body` that names actions instead of calling them. |
+| [flow](/docs/concepts/flows-actions-plans/) | A declaration with payload and result schemas and a body that composes actions and child flows. |
 | [follower](/docs/concepts/sync/) | A read-only sync client that receives journal rows verbatim and holds no authority: no lease, no fence, no dispatcher. |
 | [frame](/docs/concepts/time-travel/) | In time travel, a `{ lineageId, seq }` address naming the committed prefix of one journal lineage; in the agent runtime, one cycle of the cell loop (model, cell, evaluation, durable calls, transition). |
 | [grant](/docs/concepts/kernel/) | A recorded permission decision (`once`, `run`, `remembered`, or `deny`), persisted before it activates. |
@@ -36,19 +36,19 @@ One sentence per term, using the same names the prose uses.
 | [node](/docs/concepts/flows-actions-plans/) | One keyed member of a plan graph standing for a dispatch; a node id is durable dispatch identity. |
 | parked | Stopped at a durable wait: the run row records a waiting reason and the run re-drives when the matching event lands. |
 | [payload](/docs/concepts/flows-actions-plans/) | The schema-typed input of a flow or action, stored as its inert JSON mirror. |
-| [plan](/docs/concepts/flows-actions-plans/) | The keyed action graph a flow body compiles to, known in full before the first action runs and approved by digest. |
+| [plan](/docs/concepts/flows-actions-plans/) | The action graph for a planning round, identified by digest; later rounds can depend on earlier results. |
 | projection | A read model folded from a run's ordered events, served as snapshots and subscriptions; subscribing never claims a run and never writes. |
 | receipt | The value every control mutation answers (`Accepted`, `AlreadyApplied`, `Conflict`, `Parked`, or `Terminal`); `plan` answers a `PlanCard` instead. |
-| registry | The project's flow discovery service: the descriptor catalog `smthrs ls` lists and flow ids come from. |
-| [replay](/docs/concepts/durable-execution/) | Deterministic re-derivation from the journal: recorded steps are served from their outcomes, and real work resumes at the first step with no record. |
-| [resume](/docs/concepts/durable-execution/) | Re-driving a parked or reclaimed run from its durable state, the same operation a restart and `smthrs run --resume` perform. |
+| registry | The project's flow discovery service: the descriptor catalog `smthrs flow list` lists and flow ids come from. |
+| [replay](/docs/concepts/durable-execution/) | Reading recorded history without repeating work; during execution recovery, recorded outcomes also allow the driver to skip completed actions. |
+| [resume](/docs/concepts/durable-execution/) | Re-driving a parked or reclaimed run from its durable state, the same operation a restart and `smthrs runs resume` perform. |
 | [retry policy](/docs/concepts/retries/) | A frozen plain value whose next delay derives from a persisted attempt count, with `maxAttempts` and `expirationMs` bounding it. |
 | [run](/docs/concepts/durable-execution/) | One durable execution of a flow, addressed by its run id, with its own journal partition, an owner, and a status. |
 | [sandbox](/docs/concepts/agent-runtime/) | The isolated evaluator a cell runs in (a persistent QuickJS realm per run, bounded by `Sandbox.Limits`); `@smthrs/sandbox` is also the package of provisioned machines for remote process execution. |
 | [seat](/docs/concepts/agent-runtime/) | A model assignment in two halves: the declared string (such as `anthropic:claude-sonnet-4-5`) and the resolved credentialed model a `SeatResolver` returns. |
-| signal | A durable JSON delivery to a run's named wait point, made with `smthrs signal` or `Control.signal`. |
-| [step](/docs/concepts/durable-execution/) | One journaled unit of work in a run, committed in a single transaction together with the state it describes. |
-| [step key](/docs/concepts/content-addressing/) | The `key1_`-prefixed SHA-256 identity of a step. Its canonical material includes an action name for ordinal and string-keyed actions, but not for caller-owned object-keyed sealed actions. |
+| signal | A durable JSON delivery to a run's named wait point, made with `smthrs runs signal` or `Control.signal`. |
+| [step](/docs/concepts/durable-execution/) | A unit of work whose outcome is recorded for a run; external side effects are not made atomic with that record. |
+| [step key](/docs/concepts/content-addressing/) | A `key1_`-prefixed SHA-256 derived from canonical key material, including the action identity and inputs. |
 | steering | A durable, attributed message to a live run (a body, a seat, a thinking level, or a tool set) that the next turn picks up. |
 | suspended | The result a flow settles with when it parks on a durable wait and will be re-driven. |
 | [sync](/docs/concepts/sync/) | Read-only journal replication: `Sync.Read` pages entries and `Sync.Subscribe` streams them to followers under a credit bound. |

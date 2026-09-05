@@ -1,47 +1,68 @@
-DESCRIPTION
-  Plan, approve, and run durable flows
+smthrs@1.0.0-rc.0 — Build workspace targets and operate durable agent workflows
 
-USAGE
-  smthrs <subcommand> [flags]
+Usage: smthrs <command>
 
-FLAGS
-  --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
-  --json                 Print the machine-readable document instead of the human rendering
-  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Suppress banners and progress on stderr; stdout documents still print
-  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
-  --root string          Project root to act on, instead of walking up from the working directory
+Commands:
+  affected      Execute targets affected by changed files, conservatively including ambient inputs
+  approvals     Find and resolve pending approval requests
+  bug           Submit a redacted bug report to the configured endpoint
+  build         Execute the build targets selected by a pattern
+  cache         Inspect and maintain local action-result caches
+  ci            Execute build, test, lint, and documentation targets; wildcards omit exclusive tiers unless --include-exclusive is set
+  clean         Execute only declared Clean targets selected by the pattern
+  create-app    Scaffold a Smithers app from a @smthrs/create-app template
+  credentials   Manage encrypted local credentials without printing secret values
+  docs          Execute the documentation targets selected by a pattern: parity checks, freshness stamps, and Docs.Page writers
+  doctor        Check project discovery, providers, tools, and durable-state compatibility
+  eval          Run fixed evaluation suites and compare committed score baselines
+  explain       Explain a target's actual planned cache key and local cache state
+  flow          Discover, plan, and start durable workflows
+  gc            Collect old terminal runs and compact their journals; separate from target caches
+  generate      Scaffold apps, flows, packages, and CI configuration
+  git-hooks     Check the WORKSPACE.ts gitHooks scripts against .git/hooks, or install them with --write
+  graph         Print the target graph without executing it
+  info          Report workspace and host configuration for diagnosis
+  init          Initialize workspace and target declarations plus a starter flow, preserving existing files
+  install       Plan and execute the install Flow under the toolchain the workspace declares
+  integrations  Inspect configured provider adapters and reconcile declared GitHub webhooks
+  lint          Execute the lint targets selected by a pattern
+  memory        Durable facts, notes, recall, and conversation history
+  migrate       Inventory, plan, or apply the 0.x-to-1.x source migration
+  owners        Resolve owners, reasons, and the agent policy for paths, or for the paths a diff touches
+  query         List labels or evaluate deps(label), rdeps(label), or owners(label)
+  review        Execute the model-review targets selected by a pattern (needs the engine CLI; skips where it is absent)
+  run           Execute run targets selected by a pattern
+  runs          Inspect and control durable execution records
+  serve         Host the control gateway and durable trigger scheduler
+  show          Inspect targets and workspace configuration
+  suggest       Discover ways Smithers can help; interactively choose one to implement
+  target        Execute one PACKAGE.ts label with its flavor-implied verb (the bare-label form)
+  targets       List available targets with their kinds and summaries
+  test          Execute test targets; wildcards omit exclusive tiers unless --include-exclusive is set
+  triggers      Manage durable schedules and manually queued occurrences
+  update        Check the registry for newer CLI versions; does not install them
+  watch         Replan and rerun a target graph when workspace files change
 
-GLOBAL FLAGS
-  --help, -h                                                          Show help information
-  --version, -v                                                       Show version information
-  --wizard                                                            Start wizard mode for a command
-  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
-  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+Integrations:
+  completions  Generate shell completion script
+  mcp          Register as MCP server (add, doctor)
+  skills       Sync skill files to agents (add, list)
 
-SUBCOMMANDS
-  plan               Render a flow plan and its complete approval payload
-  run                Run an approved plan payload, or resume a parked run
-  up                 Plan, approve, and run one flow; -d launches it detached
-  approve            Approve the complete serialized approval payload
-  deny               Deny the complete serialized approval payload
-  cancel             Cancel a durable run
-  signal             Deliver a durable JSON signal to a run
-  steer              Send a durable, attributed steering message to a run
-  ls                 List the flows discovered under this project
-  ps                 List durable runs
-  status, inspect    Show the diagnosis card for one run, or the run listing
-  logs               Read run events; --follow streams future events
-  output             Print one registered node output
-  down               Cancel every non-terminal run
-  serve              Host the control server for this project
-  init               Scaffold flows/<name>/flow.mdx and ignore .flows/
-  suggest            Read the project, stream how Smithers can help, and implement the one you pick
-  doctor             Report registry, database, runtime, and provider readiness
-  gc                 Delete terminal runs older than a threshold, with the rows they own
-  migrate            Convert a Smithers 0.x project to the 1.0 authoring model
-  memory             Read and write namespaced facts in the control database
-  claude             Claude Code plugin mirror protocol
-  mcp                Wire the Smithers MCP server into an agent
-  update             Check npm for a newer @smthrs/cli
-  bug                Preview a redacted bug report; post with --yes or TTY confirmation, or inspect with --dry-run
+Custom Global Options:
+  --audience <auto|human|agent>  Presentation audience; auto detects agent harnesses, CI, and terminals (default: auto)
+  --silent                       Suppress progress; retain the result and actionable failures
+  --ui <auto|tty|stream|plain>   Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; auto shows live human progress; agent, --silent, pipe and dumb-terminal policies take precedence (default: auto)
+
+Global Options:
+  --filter-output <keys>              Filter output by key paths (e.g. foo,bar.baz,a[0,3])
+  --format <toon|json|yaml|md|jsonl>  Output format
+  --full-output                       Show full output envelope
+  --help                              Show help
+  --llms, --llms-full                 Print LLM-readable manifest
+  --mcp                               Start as MCP stdio server
+  --schema                            Show JSON Schema for command
+  --token-count                       Print token count of output (instead of output)
+  --token-limit <n>                   Limit output to n tokens
+  --token-offset <n>                  Skip first n tokens of output
+  --update                            Update to latest version
+  --version                           Show version

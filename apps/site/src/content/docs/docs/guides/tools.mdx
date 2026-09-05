@@ -14,7 +14,7 @@ A tool in Smithers is an ordinary flow: a declaration carrying a name, schemas, 
 - For step 1, the library packages:
 
 ```bash
-pnpm add @smthrs/std@next @smthrs/flow@next effect@4.0.0-rc.108 @effect/platform-node@4.0.0-rc.108
+pnpm add @smthrs/std@next @smthrs/flow@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 ## 1. Call the std tools from a module flow
@@ -28,13 +28,13 @@ import * as StdError from "@smthrs/std/StdError"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-export const FirstLine = Action.make("docs/FirstLine", {
+export const ReadFile = Action.make("docs/ReadFile", {
   payload: { path: Schema.String },
   success: Schema.String,
   error: StdError.StdError
 })
 
-export const firstLine = FirstLine.toLayer(({ path }) =>
+export const readFile = ReadFile.toLayer(({ path }) =>
   Read.run({ path }).pipe(Effect.map((page) => page.content))
 )
 ```
@@ -88,22 +88,22 @@ An external MCP server's tools project into a run's flow catalog, one flow per t
 ]
 ```
 
-The pinned shape is `{server, command, args, cwd?, env?, handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}`: `server` and `command` are strings, `args` is an array of strings, `cwd` is an optional string, and `env` is an optional object of string values that merges into the inherited child environment, so a spawned server still receives `PATH` and `HOME`. The four numeric options are positive integers defaulting to a 10-second handshake, a 120-second call deadline, 64 queued outbound frames, and a 1 MiB inbound frame.
+The configuration shape is `{server, command, args, cwd?, env?, handshakeTimeoutMs?, requestTimeoutMs?, queueCapacity?, maxFrameBytes?}`: `server` and `command` are strings, `args` is an array of strings, `cwd` is an optional string, and `env` is an optional object of string values that merges into the inherited child environment, so a spawned server still receives `PATH` and `HOME`. The four numeric options are positive integers defaulting to a 10-second handshake, a 120-second call deadline, 64 queued outbound frames, and a 1 MiB inbound frame.
 
-Then pass the file with the global `--mcp-config` flag, which every verb accepts:
+Pass the file when starting the flow:
 
 ```bash
-smthrs up reviewer --mcp-config mcp-servers.json
+smthrs flow start reviewer --mcp-config mcp-servers.json
 ```
 
 Or set the environment form, which the flag overrides:
 
 ```bash
 export SMITHERS_MCP_CONFIG="$PWD/mcp-servers.json"
-smthrs up reviewer
+smthrs flow start reviewer
 ```
 
-Omitting both configures no MCP servers. A named path that is missing, unreadable, not valid JSON, or not an array of entries is a usage error (exit 2) that names the flag, for example `--mcp-config mcp-servers.json: file not found`. A detached run (`up -d`) forwards the flag to its child process as an absolute path, so the child reads the same file the parent parsed.
+Omitting both configures no MCP servers. A named path that is missing, unreadable, not valid JSON, or not an array of entries is a usage error (exit 2) that names the flag, for example `--mcp-config mcp-servers.json: file not found`. A detached run (`flow start -d`) forwards the flag to its child process as an absolute path, so the child reads the same file the parent parsed.
 
 Each named server connects when the executor starts, and one that fails to spawn stops the executor loudly rather than running silently short of the tools it was configured to have.
 
@@ -126,42 +126,28 @@ The projection narrows with three options: `include` (exact tool names to keep),
 
 An `include` that names a tool the server does not offer fails the connection with `tool_not_found`; an empty `namePrefix` fails with `protocol_error`.
 
+A connection requires an installed MCP server and any credentials it needs. Keep the agent execution inside the connection scope; a source returned from a closed scope cannot call the server.
+
 A host composing its own catalog in code gets the same projection from `@smthrs/mcp`: `McpFlows.connected` returns a `FlowBinding.Source` to pass to `FlowBinding.catalog` alongside `StandardFlows.filesystem(...)`, `StandardFlows.shell(...)`, and the host's other sources. The connection lives as long as its scope, and closing the scope tears down the spawned server:
 
-```ts
-import { NodeServices } from "@effect/platform-node"
-import * as McpFlows from "@smthrs/mcp/McpFlows"
-import { Effect } from "effect"
-
-const program = Effect.scoped(Effect.gen(function*() {
-  const source = yield* McpFlows.connected({
-    server: "github",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-github"],
-    env: { GITHUB_TOKEN: "..." }
-  })
-  return source
-}))
-
-await Effect.runPromise(Effect.provide(program, NodeServices.layer))
-```
+See [the MCP tools example](/docs/examples/22-mcp-tools/) for a complete connection, catalog, and tool call. It keeps the connection open for the call and closes it when the scoped program finishes.
 
 ## 4. Grant the capabilities the tools declare
 
 The std tools declare the narrow authorities the table in step 1 lists. A projected MCP tool is opaque code the adapter does not control, so its declaration is the honest one: every action in the capability vocabulary at resource `**`, and an effect envelope reading and writing `**` at tier `irreversible`. The declaration lists one exact `namespace:operation:resource` string per action rather than a wildcard, because the cell boundary parses exactly three colon-separated components and treats anything else as unauthorized.
 
-Authority reaches a run through its approval: the plan's envelope carries the capabilities you are asked to grant, and `smthrs approve` records the decision with a scope. A call that exceeds the grant parks the run at `waiting-approval` on an attended surface. [Declare and grant capabilities](/docs/guides/capabilities/) walks the mechanics, and [Capabilities and the host kernel](/docs/concepts/kernel/) defines the vocabulary.
+Authority reaches a run through its approval: the plan's envelope carries the capabilities you are asked to grant, and `smthrs approvals approve` records the decision with a scope. A call that exceeds the grant parks the run at `waiting-approval` on an attended surface. [Declare and grant capabilities](/docs/guides/capabilities/) walks the mechanics, and [Capabilities and the host kernel](/docs/concepts/kernel/) defines the vocabulary.
 
 ## Verify it worked
 
 Launch a flow whose agent will call the attached tool, then list the run's recorded calls:
 
 ```bash
-smthrs up reviewer --mcp-config mcp-servers.json
-smthrs output <run-id>
+smthrs flow start reviewer --mcp-config mcp-servers.json
+smthrs runs output <run-id>
 ```
 
-`smthrs output` prints one node per call, named `<flowName>#<ordinal>`. A call to the attached server appears under its projected name, for example `mcp/github/create_issue#1`, and `smthrs output <run-id> "mcp/github/create_issue#1"` prints what the tool returned. Std tool calls in the same run list as `read#1`, `bash#2`, and the like.
+`smthrs runs output` prints one node per call, named `<flowName>#<ordinal>`. A call to the attached server appears under its projected name, for example `mcp/github/create_issue#1`, and `smthrs runs output <run-id> "mcp/github/create_issue#1"` prints what the tool returned. Std tool calls in the same run list as `read#1`, `bash#2`, and the like.
 
 Two failure shapes are distinguishable at this point: a server that failed to spawn failed the launch itself (step 2), and a call the grant refuses parked the run, which [unstick a run waiting on approval](/docs/troubleshooting/waiting-approval/) covers.
 

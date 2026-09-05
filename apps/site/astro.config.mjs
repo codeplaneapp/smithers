@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from "astro/config"
 import starlight from "@astrojs/starlight"
+import project from "./src/data/project.json" with { type: "json" }
 
 /**
  * smithers.sh: the landing page at `/` (src/pages/index.astro), the downloads
@@ -19,9 +20,9 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "Smithers",
+      routeMiddleware: "../docs/shared/release-notice.mjs",
       disable404Route: true,
-      description:
-        "Smithers is an Effect-based durable-execution engine: typed flows that replay from a journal, content-addressed action results, capability-checked host access, read-only sync, and time travel over run history.",
+      description: project.description,
       logo: { src: "./src/docs-assets/logo.png", alt: "Smithers" },
       favicon: "/favicon.png",
       customCss: ["./src/styles/starlight.css"],
@@ -62,31 +63,32 @@ export default defineConfig({
             { slug: "docs/quickstart" }
           ]
         },
-        { label: "Tutorials", autogenerate: { directory: "docs/tutorials" } },
-        { label: "Guides", autogenerate: { directory: "docs/guides" } },
-        { label: "Concepts", autogenerate: { directory: "docs/concepts" } },
-        { label: "Examples", autogenerate: { directory: "docs/examples" }, collapsed: true },
+        { label: "Tutorials", items: [{ autogenerate: { directory: "docs/tutorials" } }] },
+        { label: "Guides", items: [{ autogenerate: { directory: "docs/guides" } }], collapsed: true },
+        { label: "Concepts", items: [{ autogenerate: { directory: "docs/concepts" } }], collapsed: true },
+        { label: "Examples", items: [{ autogenerate: { directory: "docs/examples" } }], collapsed: true },
         {
           label: "Reference",
           collapsed: true,
           items: [
             { slug: "docs/reference/support-matrix" },
             { slug: "docs/reference/cli", label: "CLI overview" },
-            { label: "CLI verbs", autogenerate: { directory: "docs/reference/cli" }, collapsed: true },
+            { label: "CLI verbs", items: [{ autogenerate: { directory: "docs/reference/cli" } }], collapsed: true },
             { slug: "docs/reference/flow-mdx" },
             { slug: "docs/reference/project-layout" },
             { slug: "docs/reference/environment-variables" },
             { slug: "docs/reference/errors" },
             { slug: "docs/reference/mcp-tools" },
             { slug: "docs/reference/http-api" },
-            { label: "Packages", autogenerate: { directory: "docs/reference/api" }, collapsed: true },
-            { label: "Build rules", autogenerate: { directory: "docs/reference/targets" }, collapsed: true },
-            { slug: "docs/reference/glossary" }
+            { label: "Packages", items: [{ autogenerate: { directory: "docs/reference/api" } }], collapsed: true },
+            { label: "Build rules", items: [{ autogenerate: { directory: "docs/reference/targets" } }], collapsed: true },
+            { slug: "docs/reference/glossary" },
+            { slug: "docs/reference/subpackages" }
           ]
         },
-        { label: "Troubleshooting", autogenerate: { directory: "docs/troubleshooting" }, collapsed: true },
-        { label: "Migration", autogenerate: { directory: "docs/migration" }, collapsed: true },
-        { label: "Changelogs", autogenerate: { directory: "changelogs" }, collapsed: true }
+        { label: "Troubleshooting", items: [{ autogenerate: { directory: "docs/troubleshooting" } }], collapsed: true },
+        { label: "Migration", items: [{ autogenerate: { directory: "docs/migration" } }], collapsed: true },
+        { label: "Changelogs", items: [{ autogenerate: { directory: "changelogs" } }], collapsed: true }
       ]
     })
   ]

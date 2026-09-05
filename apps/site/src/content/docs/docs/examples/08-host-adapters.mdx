@@ -1,6 +1,7 @@
 ---
-title: "08 host-adapters"
+title: "Host adapters"
 description: "Run the same host program against two adapters."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/08-host-adapters.ts"
 sidebar:
   order: 8
 ---
@@ -19,18 +20,26 @@ This example runs one program twice:
 
 Browser and Bun bundles implement the same tags and live at `@smthrs/platform-browser`'s `BrowserHost` and `@smthrs/platform-bun`'s `BunHost`.
 
-## Run it
+## Run the test
 
-The program is [`examples/src/08-host-adapters.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/08-host-adapters.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+The complete program is [`examples/src/08-host-adapters.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/08-host-adapters.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
+
+From the repository root, run this example's assertions:
+
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/08-host-adapters.test.ts
+```
+
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 
-[`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/)
+[`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/testing`](/docs/reference/api/testing/)
 
 ## Source
 
 ```ts title="examples/src/08-host-adapters.ts"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"

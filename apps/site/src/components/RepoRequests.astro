@@ -1,0 +1,183 @@
+---
+const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithers.sh/api/repo-requests"
+---
+
+<section class="requests wrap" aria-labelledby="request-title" data-repo-requests data-endpoint={endpoint}>
+  <div class="request-card">
+    <div class="intro">
+      <span class="eyebrow">Open source, meet Smithers</span>
+      <h2 id="request-title">What should we smither next?</h2>
+      <p>Share an open source repo you want to see in Smithers. We’ll get it supported in the app, so everyone can open it and explore.</p>
+      <div class="steps" aria-label="How it works">
+        <span><b>1</b> Share a repo</span><span><b>2</b> Smithering</span><span><b>3</b> Open in Smithers</span>
+      </div>
+    </div>
+    <form data-request-form>
+      <label for="repo-url">GitHub repository</label>
+      <input id="repo-url" name="repo" type="text" placeholder="https://github.com/owner/repo" required maxlength="250" autocapitalize="none" spellcheck="false" aria-describedby="repo-help" />
+      <p class="hint" id="repo-help">A public repo with an open-source license. It doesn’t have to be yours.</p>
+      <label for="repo-email">Email <span class="optional">(optional)</span></label>
+      <input id="repo-email" name="email" type="email" placeholder="you@example.com" maxlength="254" autocomplete="email" aria-describedby="email-help" />
+      <p class="hint" id="email-help">One email when it’s ready. Your email stays private.</p>
+      <button class="btn primary" type="submit">Smither this repo <span aria-hidden="true">↗</span></button>
+      <p class="feedback" data-feedback role="status" aria-live="polite"></p>
+    </form>
+  </div>
+  <section class="community" aria-labelledby="community-title">
+    <div class="list-heading"><h3 id="community-title">Repos we’re smithering</h3><span>Requested by the community. Open to everyone.</span></div>
+    <p class="hint" data-list-status role="status">Loading repositories…</p>
+    <ul data-repo-list aria-label="Community repositories"></ul>
+    <button class="btn" type="button" data-more hidden>Load more</button>
+    <button class="btn" type="button" data-retry hidden>Try again</button>
+  </section>
+  <noscript>Enable JavaScript to submit a repo and see its progress.</noscript>
+</section>
+
+<style>
+  .requests { max-width: 1040px; margin-top: 1.6rem; margin-bottom: 4rem; }
+  .request-card { display: grid; grid-template-columns: 1fr 1fr; gap: 3rem; padding: clamp(1.5rem, 4vw, 3rem); border: 1px solid var(--border-strong); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-2); }
+  .eyebrow { display: block; color: var(--brand); font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .09em; margin-bottom: 1rem; }
+  h2 { margin: 0 0 1rem; font-size: clamp(1.8rem, 3vw, 2.6rem); line-height: 1.1; letter-spacing: -.035em; }
+  .intro p { color: var(--text-muted); line-height: 1.65; margin: 0; }
+  .steps { display: flex; flex-direction: column; gap: .9rem; margin-top: 1.8rem; font-size: .88rem; color: var(--text-muted); }
+  .steps span { display: flex; align-items: center; gap: .7rem; }
+  .steps b { display: grid; place-items: center; width: 24px; height: 24px; border: 1px solid var(--border-strong); border-radius: 50%; color: var(--brand); font-size: .72rem; }
+  form { display: flex; flex-direction: column; align-self: center; }
+  label { font-size: .86rem; font-weight: 600; margin-bottom: .5rem; }
+  .optional { font-weight: 400; color: var(--text-faint); }
+  input { width: 100%; box-sizing: border-box; padding: .85rem 1rem; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg); color: var(--text); font: inherit; font-size: .9rem; }
+  input:focus { outline: 2px solid var(--brand); outline-offset: 2px; }
+  input::placeholder { color: var(--text-faint); }
+  .hint { color: var(--text-muted); font-size: .77rem; line-height: 1.5; margin: .5rem 0 1.25rem; }
+  button { font-family: inherit; cursor: pointer; justify-content: center; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .feedback { font-size: .85rem; line-height: 1.5; margin: .8rem 0 0; }
+  .feedback[data-error="true"] { color: var(--warning); }
+  .community { margin-top: 2.4rem; }
+  .list-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .5rem; margin-bottom: 1rem; }
+  h3 { font-size: 1rem; margin: 0; }
+  .list-heading > span { font-size: .78rem; color: var(--text-muted); }
+  ul { list-style: none; padding: 0; margin: 0 0 1rem; }
+  [hidden] { display: none !important; }
+  ul :global(li) { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border); }
+  ul :global(.repo-name) { font-family: var(--font-mono); font-size: .86rem; overflow-wrap: anywhere; flex: 1 1 220px; }
+  ul :global(a:hover) { text-decoration: underline; }
+  ul :global(.badge) { font-size: .75rem; border-radius: 999px; padding: .3rem .65rem; background: color-mix(in srgb, var(--brand) 10%, transparent); color: var(--brand); }
+  ul :global(.badge.ready) { color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+  ul :global(.open-repo) { font-size: .82rem; font-weight: 600; color: var(--brand); }
+  ul :global(.notify-repo) { font: inherit; font-size: .8rem; color: var(--text-muted); background: none; border: 0; padding: .3rem 0; text-decoration: underline; text-underline-offset: 3px; }
+  @media (max-width: 720px) { .request-card { grid-template-columns: 1fr; gap: 2rem; } .steps { flex-direction: row; flex-wrap: wrap; gap: .8rem; font-size: .75rem; } }
+</style>
+
+<script>
+  type Repo = { name: string; url: string; status: "smithering" | "ready"; appUrl: string | null }
+  const root = document.querySelector<HTMLElement>("[data-repo-requests]")!
+  const endpoint = root.dataset.endpoint!
+  const form = root.querySelector<HTMLFormElement>("[data-request-form]")!
+  const repoInput = form.elements.namedItem("repo") as HTMLInputElement
+  const emailInput = form.elements.namedItem("email") as HTMLInputElement
+  const submit = form.querySelector<HTMLButtonElement>("button")!
+  const feedback = root.querySelector<HTMLElement>("[data-feedback]")!
+  const list = root.querySelector<HTMLUListElement>("[data-repo-list]")!
+  const listStatus = root.querySelector<HTMLElement>("[data-list-status]")!
+  const more = root.querySelector<HTMLButtonElement>("[data-more]")!
+  const retry = root.querySelector<HTMLButtonElement>("[data-retry]")!
+  const repos = new Map<string, Repo>()
+  let cursor: string | null = null
+  let loading = false
+  let pageCount = 1
+  function render() {
+    list.replaceChildren()
+    const sorted = [...repos.values()].sort((a, b) => Number(b.status === "ready") - Number(a.status === "ready") || a.name.localeCompare(b.name))
+    for (const repo of sorted) {
+      const row = document.createElement("li")
+      const source = document.createElement("a")
+      source.className = "repo-name"
+      source.textContent = repo.name
+      source.href = repo.url
+      const badge = document.createElement("span")
+      badge.className = `badge ${repo.status}`
+      badge.textContent = repo.status === "ready" ? "Smithered" : "Smithering"
+      row.append(source, badge)
+      if (repo.status === "ready" && repo.appUrl) {
+        const open = document.createElement("a")
+        open.className = "open-repo"
+        open.href = repo.appUrl
+        open.textContent = "Open in Smithers ↗"
+        row.append(open)
+      } else {
+        const notify = document.createElement("button")
+        notify.type = "button"
+        notify.className = "notify-repo"
+        notify.textContent = "Notify me"
+        notify.setAttribute("aria-label", `Notify me when ${repo.name} is ready`)
+        notify.addEventListener("click", () => { repoInput.value = repo.url; emailInput.focus(); })
+        row.append(notify)
+      }
+      list.append(row)
+    }
+  }
+  async function load(append = false) {
+    if (loading) return
+    loading = true
+    more.disabled = true
+    retry.hidden = true
+    try {
+      let nextCursor = append ? cursor : null
+      const incoming: Repo[] = []
+      for (let page = 0; page < (append ? 1 : pageCount); page++) {
+        const url = new URL(endpoint, location.href)
+        if (nextCursor) url.searchParams.set("cursor", nextCursor)
+        const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+        if (!response.ok) throw new Error()
+        const data = await response.json() as { repos: Repo[]; cursor: string | null }
+        incoming.push(...data.repos)
+        nextCursor = data.cursor
+        if (!nextCursor) break
+      }
+      for (const repo of incoming) {
+        // A stale KV read must not turn an already-ready row back to smithering.
+        if (repos.get(repo.name)?.status !== "ready" || repo.status === "ready") repos.set(repo.name, repo)
+      }
+      cursor = nextCursor
+      if (append) pageCount++
+      render()
+      listStatus.textContent = repos.size ? "" : "Be the first to share a repo you’d like to see smithered."
+      more.hidden = !cursor
+    } catch {
+      listStatus.textContent = "We couldn’t refresh the repo list. Please try again."
+      retry.hidden = false
+    } finally { loading = false; more.disabled = false }
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    if (!form.reportValidity()) return
+    submit.disabled = true
+    submit.textContent = "Submitting…"
+    feedback.textContent = ""
+    feedback.dataset.error = "false"
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repo: repoInput.value.trim(), email: emailInput.value.trim() }),
+        signal: AbortSignal.timeout(20_000),
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || "We couldn’t submit that repo. Please try again.")
+      repos.set(data.repo.name, data.repo)
+      render()
+      listStatus.textContent = ""
+      feedback.textContent = data.repo.status === "ready"
+        ? `${data.repo.name} is already supported. Open it in Smithers below.`
+        : `${data.repo.name} is now being smithered.${data.subscribed ? " We’ll email you when it’s ready." : " Check back here to follow its progress."}`
+      emailInput.value = ""
+    } catch (error) {
+      feedback.dataset.error = "true"
+      feedback.textContent = error instanceof Error && error.name === "Error" ? error.message : "We couldn’t submit that repo. Please try again."
+    } finally { submit.disabled = false; submit.textContent = "Smither this repo ↗" }
+  })
+  more.addEventListener("click", () => void load(true))
+  retry.addEventListener("click", () => void load())
+  void load()
+  setInterval(() => { if (!document.hidden) void load() }, 30_000)
+</script>

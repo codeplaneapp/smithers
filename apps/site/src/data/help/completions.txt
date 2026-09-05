@@ -1,0 +1,12 @@
+smthrs completions — Generate shell completion script
+
+Usage: smthrs completions <bash|fish|nushell|zsh>
+
+Arguments:
+  shell  Shell to generate completions for
+
+Setup:
+  bash     eval "$(smthrs completions bash)"  # add to ~/.bashrc
+  fish     smthrs completions fish | source   # add to ~/.config/fish/config.fish
+  nushell  see `smthrs completions nushell`   # add to config.nu
+  zsh      eval "$(smthrs completions zsh)"   # add to ~/.zshrc

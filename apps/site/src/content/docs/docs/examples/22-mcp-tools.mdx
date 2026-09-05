@@ -1,27 +1,30 @@
 ---
-title: "22 mcp-tools"
-description: "Give a model tools that live in somebody else's process."
+title: "Mcp tools"
+description: "Give an agent tools supplied by a separate MCP server process."
+editUrl: "https://github.com/smithersai/smithers/edit/main/examples/src/22-mcp-tools.ts"
 sidebar:
   order: 22
 ---
 
 {/* Generated from examples/src/22-mcp-tools.ts by `node apps/site/scripts/gen-examples.mjs`; edit the example, not this page. */}
 
-Give a model tools that live in somebody else's process.
+Give an agent tools supplied by a separate MCP server process.
 
-An MCP server is a subprocess speaking newline-delimited JSON-RPC over stdio, and its tools are code this repository does not own. None of that reaches the cell. `McpFlows.mcp(client)` projects a connected session's catalog as an ordinary `FlowBinding.Source`, one flow per tool, and a cell that calls an MCP tool runs the identical two lines as a cell that reads a file: find it in `ctx.flows`, invoke it with `ctx.call`. Compare `25-agent-tools-in-sandbox.ts`: the composition below differs by one source and one capability.
+`McpFlows.mcp` projects the server's catalog into callable flow bindings. The cell discovers and calls them through the same flow interface as other tools.
 
-Two details are the adapter's honesty rather than its convenience.
+The example distinguishes a transport failure from a tool-reported `isError` result. The host explicitly grants the authority of the connected server; the adapter cannot infer the safety of opaque tool code. The companion `22-mcp-server.ts` implements the stdio protocol without importing Smithers.
 
-A tool-level failure is DATA. MCP distinguishes "the call failed" from "the tool ran and reported a problem", and the second one comes back as `{ isError: true }` on a successful call, which is what the `explode` tool below demonstrates. A transport failure is the other channel entirely and fails the step.
+## Run the test
 
-The declared authority is the conservative wildcard. An MCP tool is opaque code, so `"*"` is the truthful declaration and a narrower guess would be a claim nobody can back. It is also not a decision the ADAPTER can make: what a given server may do depends on which server you connected and why. So the host makes it, in `granting` below, and the run's envelope names that grant rather than `*:*`. Connecting a server you trust and saying what you trust it with are one decision, taken in one place.
+The complete program is [`examples/src/22-mcp-tools.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-tools.ts). Clone the repository and follow [CONTRIBUTING.md](https://github.com/smithersai/smithers/blob/main/CONTRIBUTING.md) to install and build its packages.
 
-The server is `22-mcp-server.ts`, a dependency-free Node program in this directory. It imports nothing from this repository, which is the point: the process on the other end of an MCP session need not be ours.
+From the repository root, run this example's assertions:
 
-## Run it
+```bash
+pnpm --filter @smthrs/examples exec vitest run test/22-mcp-tools.test.ts
+```
 
-The program is [`examples/src/22-mcp-tools.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/22-mcp-tools.ts). `pnpm run test:examples` runs it with every other example against the real packages.
+Vitest reports the assertions that passed, failed, or were skipped. Examples that call live providers need the credentials described below; a skipped test does not verify a provider call.
 
 ## Related reference
 

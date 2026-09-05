@@ -5,7 +5,29 @@ sidebar:
   order: 7
 ---
 
-A finished run leaves a complete, ordered record of everything it did: every step, every attempt, every model call, keyed and sequenced. Because that record is complete, later programs can read it for answers and derive further work from it. `@smthrs/time-travel` is the package of protocols that do both. It exposes one service, `TimeTravel`, with four operations, each addressed by a `Position`: a run id plus a frame.
+import DocsDiagram from "../../../../components/DocsDiagram.astro"
+
+Time travel reads an earlier point in a run or derives work from it. Choose the operation by the result you want:
+
+| Operation | Result | Changes persistent state? |
+| --- | --- | --- |
+| Inspect or replay | A view of a committed history prefix. | No. |
+| Fork | A child run with its own workspace and copied history prefix. | Yes, creates child state. |
+| Rewind | The same run restored to an earlier frame, with its suffix archived. | Yes, changes run and workspace state. |
+
+<DocsDiagram
+  id="fork"
+  title="Fork preserves the parent and creates a child"
+  caption="Forking at a recorded frame copies the committed prefix into a child run. The parent retains its history; the child gets a separate workspace and can be resumed independently."
+  rows={[
+    [{ label: "Recorded frame", detail: "Select a committed prefix of the parent" }],
+    [{ label: "Parent", detail: "Existing history remains" }, { label: "Child", detail: "Copied prefix; separate workspace" }]
+  ]}
+/>
+
+## Address a frame
+
+The library addresses a position with a run ID and a frame containing a lineage ID and sequence number. For example, this program describes an inspection through sequence 17; it needs a `TimeTravel` service and a run containing that position to execute:
 
 ```ts
 import { Engine } from "@smthrs/flows"
@@ -52,7 +74,26 @@ Recovery is not an operation. Building `TimeTravel.layer` finishes or rolls back
 
 ## Boundaries
 
-Time travel is not editing history. Nothing rewrites a committed entry in place: a rewind moves the suffix after the frame into an archive and records an audit row for the whole operation, so the evidence of what the run did survives its truncation. Replay is not a resume: nothing re-executes, and a coordinate the journal does not hold is a `not_found`, not a re-run. Compensation is not a general undo: it covers exactly the effects your handlers declare, within the boundaries the journal recorded. In 1.0.0-rc.0 time travel is a library API only: there is no CLI verb, and the matching MCP tools answer with the `unsupported` envelope.
+Time travel is not editing history. Nothing rewrites a committed entry in place: a rewind moves the suffix after the frame into an archive and records an audit row for the whole operation, so the evidence of what the run did survives its truncation. Replay is not a resume: nothing re-executes, and a coordinate the journal does not hold is a `not_found`, not a re-run. Compensation is not a general undo: it covers exactly the effects your handlers declare, within the boundaries the journal recorded. The CLI exposes these operations under `smthrs runs`; the unified MCP server exposes the corresponding command tools.
+
+## Use the CLI
+
+Inspect a local run at a sequence from its history:
+
+```bash
+smthrs runs inspect <run-id> --at 17
+smthrs runs replay <run-id> --at 17
+```
+
+Replace `<run-id>` and `17` with the run and sequence you want to inspect. These commands read recorded state without executing actions. History commands operate on local state; they do not use a remote control-plane connection.
+
+Forking requires an eligible parked or terminal agent run, its approved plan, and `jj`. Rewind requires an exact frame. Preview its effects before applying it:
+
+```bash
+smthrs runs rewind <run-id> --at 17 --preview
+```
+
+Only add `--yes` when you intend to archive the suffix and restore the frame. [The CLI reference](/docs/reference/cli/) describes the retained fork workspace and resuming a child.
 
 ## Failure answers
 

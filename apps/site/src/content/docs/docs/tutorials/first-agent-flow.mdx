@@ -25,7 +25,7 @@ Scaffold the flow from the repository root:
 smthrs init reviewer
 ```
 
-The scaffold is one flow file, `flows/reviewer/flow.mdx`, plus the run state directory `.flows/`. Rewrite the flow file to this review:
+The scaffold creates `flows/reviewer/flow.mdx`, the `.flows/` state directory, and workspace declarations when absent. To add only a flow to an existing workspace, use `smthrs generate flow reviewer`. Rewrite the flow file to this review:
 
 ```md
 ---
@@ -57,13 +57,13 @@ Finish with one line, `approve` or `request-changes`, followed by at most five
 findings. Each finding names the file, the line, and the fix in one sentence.
 ```
 
-Keep the `model:` line `smthrs init` wrote for you: it chose the seat from the first provider credential in your environment, so with `OPENAI_API_KEY` the line reads `openai:gpt-5.6-sol`. Every heading below the frontmatter is a step the agent performs in order, and the text under it is the instruction for that step. [Markdown flows](/docs/guides/markdown-flows/) covers every field the frontmatter accepts.
+Keep the `model:` line `smthrs init` wrote for you: it chose the seat from the first provider credential in your environment, so with `OPENAI_API_KEY` the line reads `openai:gpt-5.6-sol`. The body is one prompt. Headings organize the instructions; they do not create durable action boundaries or enforce execution order. [Markdown flows](/docs/guides/markdown-flows/) covers every field the frontmatter accepts.
 
 ```text
 You should see: init reports the flow file it created, the project's state
 directory, and the seat it wrote. After your edit, the flow declares the
-review's name, description, capabilities, and model, and each heading is one
-step of the review.
+review's name, description, capabilities, and model, with its instructions
+organized under headings.
 ```
 
 ## 2. Run the flow with smthrs up
@@ -282,14 +282,6 @@ target path, and bytesWritten 2, and sandbox-work/line-count.txt now holds
 through the write tool, and every call ran inside the sandbox budget.
 ```
 
-## Summary
-
-You learned how to:
-
-- Author a markdown flow with `name`, `description`, `capabilities`, and `model` frontmatter and prose steps, and run it with `smthrs up`.
-- Read a run's final output with `smthrs output <run-id> result`.
-- Declare a model-backed step in a module flow with `AgentAction.make`.
-- Bind the standard file tools into a step's catalog and let the code the model writes run in the QuickJS sandbox.
 
 ## Next steps
 

@@ -1,24 +1,35 @@
-DESCRIPTION
-  Run an approved plan payload, or resume a parked run
+smthrs run — Execute run targets selected by a pattern
 
-USAGE
-  smthrs run [flags] <plan-payload>
+Usage: smthrs run <pattern> [options]
 
-ARGUMENTS
-  plan-payload string    
+Arguments:
+  pattern  Bazel label or recursive pattern
 
-FLAGS
-  --credential string    Bearer token for the remote control plane; prefer SMITHERS_API_KEY to avoid exposing argv
-  --json                 Print the machine-readable document instead of the human rendering
-  --remote string        http(s) URL of the control plane to act on; falls back to SMITHERS_REMOTE
-  --quiet                Suppress banners and progress on stderr; stdout documents still print
-  --mcp-config string    Path to the JSON array of MCP servers the local executor projects into a run's flow catalog
-  --root string          Project root to act on, instead of walking up from the working directory
-  --resume               Resume the parked run named by the positional argument
+Options:
+  --workspace, -w <string>  Directory inside a workspace containing WORKSPACE.ts (default: <cwd>)
+  --cache-dir <string>      Workspace-relative cache directory; overrides the WORKSPACE.ts declaration
+  --verbose                 Show plain progress for agent and pipe consumers
+  --plan                    Print the inert plan instead of executing
+  --jobs, -j <number>       Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work
+  --include-exclusive       Include exclusive targets in wildcard ci/test selections; explicit labels already include them
+  --cache                   Consult the result cache before running; --no-cache bypasses reads (default: true)
+  --name, -n <string>       Package name supplied to scaffold targets
+  --message, -m <string>    Commit message for a Git.Commit target; wins over the declared message
+  --sweep                   Let a Git.Commit target with no declared path scope commit the whole working tree
+  --input, -i <array>       Payload input for agent targets as name=value; repeatable
 
-GLOBAL FLAGS
-  --help, -h                                                          Show help information
-  --version, -v                                                       Show version information
-  --wizard                                                            Start wizard mode for a command
-  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
-  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+Custom Global Options:
+  --audience <auto|human|agent>  Presentation audience; auto detects agent harnesses, CI, and terminals (default: auto)
+  --silent                       Suppress progress; retain the result and actionable failures
+  --ui <auto|tty|stream|plain>   Terminal renderer: tty draws in place, stream colours without cursor motion, plain prints bare lines; auto shows live human progress; agent, --silent, pipe and dumb-terminal policies take precedence (default: auto)
+
+Global Options:
+  --filter-output <keys>              Filter output by key paths (e.g. foo,bar.baz,a[0,3])
+  --format <toon|json|yaml|md|jsonl>  Output format
+  --full-output                       Show full output envelope
+  --help                              Show help
+  --llms, --llms-full                 Print LLM-readable manifest
+  --schema                            Show JSON Schema for command
+  --token-count                       Print token count of output (instead of output)
+  --token-limit <n>                   Limit output to n tokens
+  --token-offset <n>                  Skip first n tokens of output

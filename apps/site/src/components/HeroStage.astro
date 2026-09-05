@@ -1,10 +1,9 @@
 ---
 /*
  * The hero: one editor frame showing the file-based authoring model. The
- * tree is this repository's own layout, and both panes are copies of files
- * that actually run here: `.smithers/WORKSPACE.ts` and
- * `packages/smithers/flows/engine-store/PACKAGE.ts`, each minus its comments and blank
- * lines. Every identifier a pane names is declared in that pane, and every
+ * tree follows this repository's layout. The panes show a reduced workspace
+ * declaration and example test and review targets for the engine-store package.
+ * Every identifier a pane names is declared in that pane, and every
  * import it makes is used. Clicking a file swaps the pane; directories fold
  * and unfold.
  */
@@ -44,15 +43,10 @@ export const Workspace = S.Workspace("smithers", {
   sandboxes: S.Sandboxes({ default: S.Sandbox.None() })
 })`
 
-// `packages/smithers/flows/engine-store/PACKAGE.ts`, minus the comments and blank lines. The
-// standard targets come from one `StandardPackage` call; `durableIdentityGuard`
-// is the agentic review lint, a reusable rule pointed at this package.
+// Example targets for `packages/smithers/flows/engine-store/PACKAGE.ts`.
+// Show the backup test and agentic review directly so readers can see
+// what each target does without first learning a package macro.
 const packageSource = `import { Smithers } from "@smthrs/targets"
-
-const { check, circular, docs, fmt, lib, lint, test } = Smithers.StandardPackage({
-  deps: [],
-  cwd: "packages/smithers/flows/engine-store"
-})
 
 const disasterRecovery = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//packages/smithers/flows/engine-store/scripts/flows-backup.test.mjs")]),
@@ -63,11 +57,20 @@ const disasterRecovery = Smithers.NodeTest({
   deps: [],
   cwd: "packages/smithers/flows/engine-store"
 })
-
-const durableIdentityGuard = Smithers.DurableIdentityGuard({ cwd: "packages/smithers/flows/engine-store" })
+const reviewChangedFiles = Smithers.LlmLint({
+  changes: Smithers.gitDiff({ base: "origin/main" }),
+  include: [Smithers.glob("//packages/smithers/flows/engine-store/src/**/*.ts")],
+  deps: [],
+  prompt: "Review the changed code for bugs.",
+  rubric: "Report bugs that could lose saved data. Explain how each bug occurs.",
+  engine: "codex",
+  model: "gpt-5.6-luna",
+  batchSize: 2,
+  failOn: "error"
+})
 
 export const Package = Smithers.Package({
-  targets: { check, circular, disasterRecovery, docs, durableIdentityGuard, fmt, lib, lint, test }
+  targets: { disasterRecovery, reviewChangedFiles }
 })`
 
 const panes = [
@@ -132,7 +135,13 @@ const tree = [
 </section>
 
 <style>
-  .stage { position: relative; margin: 2.4rem auto 0; width: min(1120px, calc(100% - 1.5rem)); --base: 500ms; }
+  .stage { position: relative; margin: 2.4rem auto; width: min(1120px, 100%); --base: 500ms;
+    --surface: var(--sl-color-gray-6, #0b253a); --surface-2: var(--sl-color-gray-5, #1d3b53);
+    --border: var(--sl-color-gray-5, #1d3b53); --border-strong: var(--sl-color-gray-4, #5f7f97);
+    --text-faint: var(--sl-color-gray-3, #8badc1); --font-mono: var(--sl-font-mono, monospace);
+    --ease: cubic-bezier(0.22, 0.61, 0.21, 1);
+  }
+  .stage :global(*) { margin-top: 0; }
   .frame {
     display: block; position: relative; width: 100%;
     aspect-ratio: 16 / 10; border-radius: 16px; background: var(--surface);
@@ -148,7 +157,7 @@ const tree = [
 
   .editor { display: grid; grid-template-columns: 200px 1fr; height: calc(100% - 34px); min-height: 0; background: #011627; color: #d6deeb; font-family: var(--font-mono); font-size: 0.8rem; }
   .tree { list-style: none; margin: 0; padding: 12px 0; border-right: 1px solid rgb(214 222 235 / 8%); overflow: hidden; }
-  .tree li { padding: 0; }
+  .tree li { padding: 0; margin: 0; }
   .node {
     all: unset; box-sizing: border-box; cursor: default; width: 100%;
     padding: 4px 12px 4px calc(12px + var(--d) * 14px); white-space: nowrap;
@@ -168,10 +177,10 @@ const tree = [
   .node.muted { color: #6f8aa0; } .node.muted i { background: #1d3b53; }
   .node.active { background: rgb(199 146 234 / 14%); color: #fff; }
 
-  .code { position: relative; overflow: hidden; padding: 6px 0 0; min-height: 0; }
+  .code { position: relative; overflow: auto; padding: 6px 0 0; min-height: 0; }
   .pane { display: none; }
   .pane.current { display: block; }
-  .code :global(pre) { margin: 0; padding: 8px 18px 60px; background: transparent !important; font-size: 0.8rem; line-height: 1.55; overflow: hidden; }
+  .code :global(pre) { margin: 0; padding: 8px 18px 60px; background: transparent !important; border: 0; border-radius: 0; font-size: 0.8rem; line-height: 1.55; overflow: visible; }
   /* inline-block, not block: the newline after each span already breaks the line, and a block span would double the spacing. */
   .code :global(.line) { display: inline-block; opacity: 0; transform: translateX(6px); }
   .pane.current :global(.line) { animation: typed 240ms var(--ease) forwards; animation-delay: calc(var(--base) + var(--n, 0) * 45ms); }
