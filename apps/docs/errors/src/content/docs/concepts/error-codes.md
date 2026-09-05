@@ -50,7 +50,7 @@ Smithers 0.x carried a registry of 180 codes for an orchestrator engine that no
 longer exists. Under the 1.0 release policy the registry was trimmed to the
 codes the `@smthrs/integrations` trees actually raise, which is five.
 
-The rest of the workspace does not use codes at all. A Smithers package states
+The rest of Smithers does not use codes at all. A Smithers package states
 each failure it can produce as a `Schema.TaggedError` class on the effect that
 can fail, so the failure channel of an `Effect` is itself the list of things
 that can go wrong, checked by the compiler and encodable for the journal. A

@@ -5,8 +5,8 @@
 `SmithersError` and the five error codes the Smithers integration adapters
 raise.
 
-This is a private workspace package. It is not published to npm at
-`1.0.0-rc.0`: `@smthrs/integrations` is its only consumer, and every other
+At `1.0.0-rc.0` this package is not on npm. It ships inside the Smithers
+repository, where `@smthrs/integrations` is its only consumer; every other
 package states its failures as `Schema.TaggedError` classes of its own.
 
 ## What it is for
@@ -28,9 +28,8 @@ credentials before constructing it.
   before attaching the record.
 - `cause` is stored verbatim and is not redacted. Callers must redact provider
   text, including bot tokens in URLs and API keys in messages, before attaching
-  it. `packages/smithers/agent/integrations/src/telegram/TelegramClient.ts`
-  exports `redactBotToken` and runs it over provider text before constructing
-  the error.
+  it. `@smthrs/integrations` exports `redactBotToken` and runs it over Telegram
+  provider text before constructing the error.
 - `docsUrl` points at the reference page for the code.
 
 ```ts
@@ -44,12 +43,10 @@ isSmithersError(error) // true
 
 ## Codes
 
-`smithersErrorDefinitions` in `src/ErrorCode.ts` is the runtime source of
-truth. `SmithersErrorCode` is derived from its keys, so the set of codes is
-closed. Adding a code means adding a row to `smithersErrorDefinitions` and
-updating the tests and the reference page in the same change. Smithers 0.x
-carried 180 codes for an engine that no longer exists; 1.0 keeps the five the
-integration trees raise.
+`SmithersErrorCode` is derived from the keys of the exported runtime table
+`smithersErrorDefinitions`, so the set is closed and an exhaustive `switch`
+over `error.code` stays exhaustive. Smithers 0.x carried 180 codes for an
+engine that no longer exists; 1.0 keeps the five the integration trees raise.
 
 | Code                         | Raised when                                                                                                                                                                                         | `details`                                                                        |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
@@ -64,32 +61,8 @@ https://errors.smithers.sh/reference/error-codes/.
 
 ## Documentation
 
-The site at https://errors.smithers.sh is built from `docs/` in this package.
-
-| Page                            | What it covers                                                          |
-| ------------------------------- | ----------------------------------------------------------------------- |
-| `docs/README.md`                | The landing page: what the package is and where to go.                  |
-| `docs/installation.md`          | The workspace dependency and the import forms.                          |
-| `docs/quickstart.md`            | Raise, catch, classify, and log one failure.                            |
-| `docs/concepts/error-codes.md`  | Why the vocabulary is closed at five codes.                             |
-| `docs/concepts/error-shape.md`  | The guarantee behind each field, and the redaction contract.            |
-| `docs/guides/`                  | Handling a failure, raising one, cross-copy refinements, adding a code. |
-| `docs/reference/error-codes.md` | Every code, every raise site, every fix.                                |
-| `docs/api.md`                   | Every public export with its signature.                                 |
-| `docs/troubleshooting.md`       | Symptom, cause, and fix for the failures people hit.                    |
-
-After editing `docs/`, re-stitch the site copy and check it:
-
-```sh
-pnpm --filter @smithers/docs-errors sync:docs
-pnpm --filter @smithers/docs-errors build
-pnpm --filter @smithers/docs-errors check:docs
-```
-
-## Commands
-
-```sh
-pnpm --filter @smthrs/errors test
-pnpm --filter @smthrs/errors check
-pnpm --filter @smthrs/errors lint
-```
+https://errors.smithers.sh covers the error shape and its redaction contract,
+handling a failure from the caller's side, raising one from an adapter,
+detecting one across module copies, every code with every raise site, and the
+API. The procedure for adding a sixth code is at
+https://errors.smithers.sh/guides/add-an-error-code/.

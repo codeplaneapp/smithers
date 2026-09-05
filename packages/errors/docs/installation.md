@@ -1,19 +1,23 @@
 ---
 title: "Installation"
-description: "Add @smthrs/errors as a workspace dependency, import it from the root entry point or a module subpath, and know why it is not on npm at 1.0.0-rc.0."
+description: "Install @smthrs/errors and import it from the root entry point or a module subpath."
 ---
 
-`@smthrs/errors` is a private workspace package. At `1.0.0-rc.0` it is not
-published to npm, because `@smthrs/integrations` is its only consumer.
+`@smthrs/errors` publishes with the rest of the release candidate on the
+`next` dist-tag. It is Effect-independent and adds no runtime dependencies.
 
 ## Add the dependency
 
-Inside this workspace, depend on it by protocol:
+A package installs the current RC directly:
+
+```bash
+pnpm add @smthrs/errors@next
+```
 
 ```json
 {
   "dependencies": {
-    "@smthrs/errors": "workspace:*"
+    "@smthrs/errors": "1.0.0-rc.0"
   }
 }
 ```
@@ -54,21 +58,24 @@ import { hasSmithersErrorShape, SmithersError } from "@smthrs/errors/SmithersErr
 a deep import fails at resolution rather than compiling against a private path.
 
 The published build ships ESM at `dist/esm` and CommonJS at `dist/cjs`, so a
-`require` and an `import` both resolve. Inside the workspace, the `exports` map
-points at `src/*.ts` and TypeScript reads the sources directly.
+`require` and an `import` both resolve to the same class.
 
 ## Choose this package or a tagged error
 
 Reach for `SmithersError` only when you are writing an integration adapter that
-talks to a third-party API. Everywhere else in this workspace, state a failure
-as a `Schema.TaggedError` class on the effect that can fail. There is no single
+talks to a third-party API. Everywhere else in Smithers, state a failure as a
+`Schema.TaggedError` class on the effect that can fail. There is no single
 error registry, and [The closed code vocabulary](./concepts/error-codes.md)
 explains the reasoning.
 
 ## Verify the install
 
-```bash
-pnpm --filter @smthrs/errors test
-pnpm --filter @smthrs/errors check
-pnpm --filter @smthrs/errors lint
+Import the code table and print it. The five codes and their order are fixed,
+so this output is the same on every install:
+
+```ts
+import { smithersErrorCodes } from "@smthrs/errors"
+
+console.log(smithersErrorCodes)
+// [ "INVALID_INPUT", "INTEGRATION_ERROR", "TELEGRAM_API_ERROR", "TELEGRAM_INIT_DATA_INVALID", "UNSUPPORTED" ]
 ```

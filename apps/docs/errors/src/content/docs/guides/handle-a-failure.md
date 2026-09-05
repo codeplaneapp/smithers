@@ -128,7 +128,7 @@ logger.warn("integration call failed", {
 Log `summary` rather than `message`: the documentation URL is a constant, and
 repeating it on every line costs bytes and tells an operator nothing new.
 
-`details` from an adapter in this workspace is provider-safe by construction.
+`details` from a Smithers integration adapter is provider-safe by construction.
 The clients redact tokens, API keys, and webhook secrets before the record
 reaches the constructor. `details` on an error you built yourself is only as
 safe as you made it, because the class stores what you pass verbatim. See

@@ -117,7 +117,7 @@ An adapter must remove credentials before it constructs the error:
   match.` and nothing about which bytes differed, because a more specific
   message is a verification oracle.
 
-The consequence for a caller: `details` from an adapter in this workspace is
+The consequence for a caller: `details` from a Smithers integration adapter is
 already provider-safe and can go straight into a log. `details` on an error you
 constructed yourself is only as safe as you made it.
 

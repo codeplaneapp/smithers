@@ -1,72 +1,136 @@
 ---
 title: "@smthrs/errors"
-description: "SmithersError and the five error codes the Smithers integration adapters raise: one class, a closed code vocabulary, and refinements that survive a duplicate copy of the package."
+description: "One error class and five closed codes for the Smithers integration adapters: classify a failure by code, show a person a summary, and log context that carries no credential."
 ---
 
-`@smthrs/errors` is one error class, `SmithersError`, and the closed set of
-five codes that the Smithers integration adapters raise.
+`@smthrs/errors` is a single error class, `SmithersError`, and a closed
+vocabulary of five codes. Smithers is a durable-execution engine for agent
+workflows, and its integration adapters are the packages that call GitHub,
+Linear, and Telegram on a workflow's behalf. They raise `SmithersError` when
+one of those calls fails, and a caller decides what to do by reading
+`error.code` rather than by matching on message text.
 
-An integration talks to somebody else's API, so its failures cross three
-boundaries at once. A person reads the message, a caller branches on the
-classification, and an operator finds the whole thing in a log. `SmithersError`
-gives those three readers stable fields: a machine-readable `code`, a `summary`
-free of decoration, and a `details` record the class copies and freezes at
-construction.
+## Why you would reach for it
 
-## The smallest example
+One integration failure has three readers, and each needs something different
+from it:
+
+- A person needs a sentence naming what to fix.
+- Code needs a stable value to branch on, one that survives a reworded message.
+- A log needs a record that is safe to keep.
+
+`SmithersError` carries all three at once. `code` is a string literal from a
+closed union, so a `switch` over it is exhaustive and adding a code turns every
+unhandled branch into a type error. `summary` is the message without the
+documentation URL the constructor appends, which is what you put in a chat
+reply or a form field. `details` is the context the raise site attached, copied
+and frozen at construction so it cannot change under you. Only those fields
+serialize: `name` and `stack` stay out of `JSON.stringify`.
+
+The class never redacts. It stores `details` and `cause` exactly as it received
+them, so the code that constructs the error removes bot tokens, API keys, and
+webhook secrets first.
+[The shape of a SmithersError](./concepts/error-shape.md) states that contract
+in full.
+
+Reach for this package when you are wrapping somebody else's API and its
+failures cross into an HTTP handler, a webhook route, and a log line. For a
+failure inside your own code, an Effect `Schema.TaggedError` on the effect that
+can fail is the better tool, and
+[The closed code vocabulary](./concepts/error-codes.md) explains where Smithers
+draws that line.
+
+## Install
+
+At `1.0.0-rc.0` this package is not on npm. It ships inside the Smithers
+repository, where `@smthrs/integrations` is its only consumer. Handling a
+`SmithersError` you caught needs no install: every field, code, and raise site
+is on this site, and the source is
+[on GitHub](https://github.com/smithersai/smithers/tree/main/packages/errors).
+[Installation](./installation.md) has the dependency declaration, the root
+entry point, the two module subpaths, and the paths the exports map refuses.
+The package has no runtime dependencies and needs Node.js 22.19.0 or later.
+
+## The shortest real example
+
+A helper refuses an argument, and the caller classifies the refusal without
+reading a word of prose:
 
 ```ts
 import { isSmithersError, SmithersError } from "@smthrs/errors"
 
-const error = new SmithersError("INVALID_INPUT", "no bot token configured")
+const MAX_MESSAGE_LENGTH = 4096
 
-error.code // "INVALID_INPUT"
-error.summary // "no bot token configured"
-error.message // "no bot token configured See https://smithers.sh/docs/reference/errors"
-isSmithersError(error) // true
+const requireChunkLength = (maxLength: number): number => {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || maxLength > MAX_MESSAGE_LENGTH) {
+    throw new SmithersError(
+      "INVALID_INPUT",
+      `Telegram chunk maxLength must be an integer between 1 and ${MAX_MESSAGE_LENGTH}.`,
+      { maxLength }
+    )
+  }
+  return maxLength
+}
+
+try {
+  requireChunkLength(0)
+} catch (error) {
+  if (!isSmithersError(error)) throw error
+  error.code // "INVALID_INPUT"
+  error.summary // "Telegram chunk maxLength must be an integer between 1 and 4096."
+  error.details // { maxLength: 0 }
+  Object.keys(error) // ["code", "summary", "docsUrl", "details"]
+}
 ```
 
-Every field is readonly, `code` is one of five string literals, and the
-documentation URL is appended once no matter how many times the summary
-already ends with it.
+`error.code` narrows to the five documented literals, so the `switch` you write
+next is exhaustive. [Quickstart](./quickstart.md) runs the same failure the
+whole way through, from the raise site to a log line.
 
 ## The five codes
 
-| Code                         | Raised when                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------- |
-| `INVALID_INPUT`              | An integration helper receives an argument it cannot use.                                      |
-| `INTEGRATION_ERROR`          | An integration client, webhook source, or listener reconciliation fails.                       |
-| `TELEGRAM_API_ERROR`         | The Telegram Bot API answers a call with `ok: false`, a non-JSON body, or a transport failure. |
-| `TELEGRAM_INIT_DATA_INVALID` | Telegram Mini App `initData` fails parsing, freshness, or signature verification.              |
-| `UNSUPPORTED`                | The runtime lacks a primitive an integration needs.                                            |
+`smithersErrorDefinitions` is the runtime table every code is derived from, and
+nothing widens it at runtime:
 
-For the raise site, the `details` shape, and the fix for each code, read the
-[Error code reference](./reference/error-codes.md).
+- `INVALID_INPUT`: the call is wrong, and no retry makes it right.
+- `INTEGRATION_ERROR`: a provider call, a webhook read, or a listener
+  reconciliation failed. `details.reason` says which, and whether to retry.
+- `TELEGRAM_API_ERROR`: one Telegram Bot API call failed, with the bot token
+  redacted from the message and the details.
+- `TELEGRAM_INIT_DATA_INVALID`: Telegram Mini App `initData` did not
+  authenticate.
+- `UNSUPPORTED`: the runtime lacks a primitive the call needs, such as Web
+  Crypto.
 
-## What the class does not do
+[Error code reference](./reference/error-codes.md) names every raise site, the
+`details` each one attaches, and the caller's move.
 
-`SmithersError` stores `details` and `cause` verbatim. It never redacts,
-truncates, or inspects them. The adapter that constructs the error owns that
-obligation, and
-[`@smthrs/integrations`](/api/integrations) upholds it: the Telegram client
-runs `redactBotToken` over every string of provider text before it reaches a
-constructor. For the full contract, read
-[The shape of a SmithersError](./concepts/error-shape.md).
+## Where this sits in Smithers
 
-`SmithersError` is also not a registry for the rest of the workspace. Every
-other Smithers package states its failures as `Schema.TaggedError` classes of
-its own, so a new code belongs here only when an integration adapter raises it.
-[The closed code vocabulary](./concepts/error-codes.md) explains why.
+`@smthrs/errors` is the bottom of its own dependency tree. It imports nothing
+from Smithers and nothing from npm, so it is a root you can read on its own.
+The packages built on top of it are how you get from here into the rest of the
+system:
+
+- [`@smthrs/integrations`](/api/integrations) is the only package that depends
+  on this one. It raises all five codes and ships the two subclasses,
+  `Core.IntegrationError` with its eight-value `reason`, and
+  `Telegram.TelegramClient.TelegramApiError` with the Bot API envelope.
+- Those adapters answer webhooks through the Smithers control plane,
+  [`@smthrs/control`](/api/control), and expose their provider calls as durable
+  actions built with [`@smthrs/flow`](/api/flow). A durable action is the
+  boundary where an error class has to become a schema the journal can store.
+- [`@smthrs/cli`](/api/cli) is the `smithers` command line at the top of that
+  tree, and the entry point most people meet Smithers through.
 
 ## Where to go next
 
-- [Installation](./installation.md): the workspace dependency and the import
-  forms.
-- [Quickstart](./quickstart.md): raise, catch, and classify one failure end to
-  end.
-- [Handle a failed integration call](./guides/handle-a-failure.md): the caller's
-  side, including what to log.
+- [Quickstart](./quickstart.md): raise, catch, classify, and log one failure.
+- [Handle a failed integration call](./guides/handle-a-failure.md): the
+  caller's side, including retries and transport statuses.
 - [Raise a SmithersError from an adapter](./guides/raise-an-error.md): the
-  adapter author's side, including how to subclass.
-- [Error code reference](./reference/error-codes.md) and
-  [API reference](./api.md).
+  raising side, including subclasses and redaction.
+- [Detect an error across module copies](./guides/detect-an-error-across-module-copies.md):
+  when `instanceof` is not enough.
+- [API reference](./api.md): every export with its signature.
+- [Troubleshooting](./troubleshooting.md): symptom, cause, and fix.

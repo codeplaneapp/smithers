@@ -24,7 +24,7 @@ what the caller must do, not by where the failure happened:
 The two Telegram codes belong to their adapters and are not general purpose.
 If none of the five fits your failure, you are probably not writing an
 integration adapter. State the failure as a `Schema.TaggedError` on the effect
-that can fail, which is what every other package in this workspace does. See
+that can fail, which is what every other Smithers package does. See
 [The closed code vocabulary](/concepts/error-codes/).
 
 ## Construct it

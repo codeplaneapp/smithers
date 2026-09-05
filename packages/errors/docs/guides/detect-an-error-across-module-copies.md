@@ -30,7 +30,7 @@ isSmithersError(forged) // false
 
 Use it when the error was raised by code that resolves the same copy of
 `@smthrs/errors` you did, which is the normal case inside one application or
-one workspace build.
+one build.
 
 ## Use hasSmithersErrorShape across a boundary
 

@@ -9,9 +9,9 @@ Five codes exist, and every one of them is raised by
 [`@smthrs/integrations`](/api/integrations). This page lists each raise site in
 that package, the `details` it attaches, and the caller's move.
 
-The summary table is the runtime table, `smithersErrorDefinitions` in
-`packages/errors/src/ErrorCode.ts`. The sections below expand it against the
-raise sites.
+The summary table is the runtime table
+[`smithersErrorDefinitions`](../api.md#smitherserrordefinitions), the rows the
+package exports. The sections below expand it against the raise sites.
 
 ## Summary
 
@@ -187,8 +187,8 @@ argument is validated before the import is attempted, so a mistyped key raises
 `INVALID_INPUT` instead of sending an operator to look at Node versions.
 
 **What to do.** Change the runtime, not the call. Web Crypto and Ed25519 are
-both available on Node.js 22.19.0 and later, which is the version this
-workspace requires. Seeing `UNSUPPORTED` means the code is running somewhere
+both available on Node.js 22.19.0 and later, which is the version this package
+requires. Seeing `UNSUPPORTED` means the code is running somewhere
 else: an old Node.js, a restricted edge runtime, or an insecure browser context
 where `crypto.subtle` is not exposed.
 
