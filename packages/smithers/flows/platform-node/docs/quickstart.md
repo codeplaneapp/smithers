@@ -14,11 +14,9 @@ which layer is responsible for each.
 
 - Node.js 22.19.0 or later, on a POSIX host.
 - CPython 3 at `/usr/bin/python3`. Check with `/usr/bin/python3 --version`.
-- A package with the dependencies installed:
-
-```bash
-pnpm add @smthrs/platform-node @smthrs/kernel @effect/platform-node @effect/platform-node-shared effect
-```
+- `@smthrs/platform-node`, [`@smthrs/kernel`](/api/kernel), and their `effect`
+  peers resolvable from the file you are about to write.
+  [Installation](./installation.md) has the workspace form.
 
 ## Run a command through the raw host
 

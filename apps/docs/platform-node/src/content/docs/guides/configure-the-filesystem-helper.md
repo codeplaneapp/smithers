@@ -46,15 +46,25 @@ guarded filesystem call with `PermissionDenied`.
 
 `limits` accepts a partial `Limits`; the fields you omit keep their defaults.
 
-| Field      | Default | What it bounds                                                                           |
-| ---------- | ------- | ---------------------------------------------------------------------------------------- |
-| `content`  | 16 MiB  | the bytes one `readFile` or `writeFile` may carry                                        |
-| `request`  | 24 MiB  | the framed request, refused before an interpreter is even started                        |
-| `response` | 24 MiB  | the framed response, which is what a directory listing is charged against as it is built |
-| `stderr`   | 64 KiB  | the diagnostic text retained from a failing helper                                       |
+| Field        | Default | What it bounds                                                                           |
+| ------------ | ------- | ---------------------------------------------------------------------------------------- |
+| `content`    | 16 MiB  | the bytes one `readFile` or `writeFile` may carry                                        |
+| `request`    | 24 MiB  | the framed request, refused before an interpreter is even started                        |
+| `response`   | 24 MiB  | the framed response, which is what a directory listing is charged against as it is built |
+| `stderr`     | 64 KiB  | the diagnostic text retained from a failing helper                                       |
+| `batchEntry` | 24 MiB  | one batch member's encoded result envelope, in UTF-8 JSON bytes                          |
+| `batchSize`  | 128     | the number of operations in one batch; inclusive, maximum 128                            |
 
 `request` and `response` are larger than `content` because base64 expands
 16 MiB to 22369624 bytes, which has to fit.
+
+`request` and `response` count UTF-8 JSON payload bytes; each frame also has a
+separately bounded header. A batch shares those same ceilings. `content`
+continues to apply separately to every file, including digest-only reads, so
+hashing in the helper does not bypass the existing read quota. `batchEntry`
+includes the member's success or failure envelope. If even a failure cannot fit,
+the whole call refuses. Aggregate response exhaustion likewise refuses the
+call instead of returning an incomplete result list.
 
 Every one of these is a contract rather than a tuning knob: without them a
 large file, a large directory tree, or a malfunctioning helper makes the host
@@ -76,7 +86,7 @@ byte ceilings.
 | `concurrency` | `os.availableParallelism()` | how many helper interpreters may run at once    |
 | `timeoutMs`   | 300000                      | how long one helper may run before it is killed |
 
-Every operation is one CPython fork, roughly 130 ms. Without a process ceiling,
+Each ordinary call or bounded batch starts one CPython helper. Without a process ceiling,
 an `Effect.forEach(files, read, { concurrency: "unbounded" })` over fifty paths
 would start fifty interpreters at once.
 
@@ -104,7 +114,7 @@ not have to restate them:
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 
 AtomicFileSystem.defaultExecutable // "/usr/bin/python3"
-AtomicFileSystem.defaultLimits // { content, request, response, stderr }
+AtomicFileSystem.defaultLimits // { content, request, response, stderr, batchSize, batchEntry }
 AtomicFileSystem.defaultConcurrency // os.availableParallelism()
 AtomicFileSystem.defaultTimeoutMs // 300000
 ```

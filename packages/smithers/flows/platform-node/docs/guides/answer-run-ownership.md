@@ -78,6 +78,5 @@ There is one more difference. `HostLiveness.isAlive` returns a one-argument
 function, which is structurally accepted as an `Ownership.LivenessCheck` and
 silently discards the `context` argument the sibling reads.
 
-Reconciling the two is open work, tracked as B-09 in the release support
-matrix. Until then, pick the probe deliberately rather than inheriting whichever
-one your entry point defaults to.
+The two are not reconciled at 1.0.0-rc.0. Pick the probe deliberately rather
+than inheriting whichever one your entry point defaults to.

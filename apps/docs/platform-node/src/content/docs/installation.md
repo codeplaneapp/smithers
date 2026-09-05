@@ -6,16 +6,44 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-node/docs/installation.md"
 ---
 
-## Install the package
+## Get the package
+
+`@smthrs/platform-node` is not on npm at 1.0.0-rc.0. It ships as a member of
+the [smithers repository](https://github.com/smithersai/smithers) workspace, so
+using it today means working from a checkout:
 
 ```bash
-pnpm add @smthrs/platform-node @effect/platform-node @effect/platform-node-shared effect
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
 ```
 
-The three Effect packages are peer dependencies, so your project pins their
-versions. `@smthrs/platform-node` declares `4.0.0-rc.108` for all three. Its
-own runtime dependencies, [`@smthrs/jj`](https://jj.smithers.sh/reference/api/) and
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/), install with it.
+Code that consumes it lives in that workspace too, either an existing package
+or one you add, and depends on it with a workspace specifier:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/platform-node": "workspace:*"
+  }
+}
+```
+
+## Peers
+
+`@effect/platform-node` and `effect` are peer
+dependencies, so your project pins their versions rather than inheriting a
+second copy. `@smthrs/platform-node` declares `4.0.0-rc.112` for both:
+
+```bash
+pnpm add @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112
+```
+
+The Effect Node adapter owns its `@effect/platform-node-shared` implementation
+dependency; consumers do not need to declare that package separately.
+
+Its own runtime dependencies, [`@smthrs/jj`](https://jj.smithers.sh/reference/api/) and
+[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/), resolve from the same workspace.
 
 The package ships ESM, CommonJS, and TypeScript declarations.
 
@@ -23,7 +51,7 @@ The package ships ESM, CommonJS, and TypeScript declarations.
 
 | Requirement                                        | Why it is needed                                                                                          |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Node.js 22.19.0 or later                           | the runtime the release policy supports                                                                   |
+| Node.js 22.19.0 or later                           | the minimum this package's `engines` field declares                                                       |
 | a POSIX host                                       | Windows has none of the primitives below and is unsupported                                               |
 | CPython 3 at `/usr/bin/python3`                    | `AtomicFileSystem` runs every filesystem syscall through it                                               |
 | that interpreter's `os` module supporting `dir_fd` | with `O_NOFOLLOW` and `O_DIRECTORY`, for `open`, `mkdir`, `readlink`, `rename`, `rmdir`, `stat`, `unlink` |
@@ -95,19 +123,16 @@ Two subpath shapes are blocked in the export map:
 | `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       |
 
 Every entry point is Node-only by construction: the bundle resolves
-`node:child_process` and friends, and a repository script pins that. For a
+`node:child_process` and its siblings, and a build check keeps it that way. For a
 browser host, use [`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/); for Bun,
 [`@smthrs/platform-bun`](https://platform-bun.smithers.sh/reference/api/).
 
 ## What a real composition adds
 
 This package provides raw host services. A composition that enforces
-capabilities wraps them in the kernel's decorators, which need a workspace root
-and a grant store:
-
-```bash
-pnpm add @smthrs/kernel
-```
+capabilities wraps them in [`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)'s decorators, which
+need a workspace root and a grant store. Add that package to your own
+dependencies with the same workspace specifier, then compose:
 
 ```ts
 import * as GrantStore from "@smthrs/kernel/GrantStore"

@@ -41,13 +41,13 @@ fails fast instead of buffering without bound.
 
 ## Every filesystem call fails on Windows
 
-**Cause.** This is intended. Windows is outside the 1.0.0-rc.0 support
-contract, and `AtomicFileSystem` fails every filesystem call closed there
-rather than half-working.
+**Cause.** This is intended. Windows is an unsupported platform, and
+`AtomicFileSystem` fails every filesystem call closed there rather than
+half-working.
 
-**Fix.** Run the durable engine on a supported platform. A partially working
-Windows path would be the "excluded feature that appears to work partially"
-the release policy forbids, so there is no flag to enable it.
+**Fix.** Run the durable engine on a supported platform. There is no flag to
+enable a partial Windows path: a filesystem that confines some operations and
+not others is worse than one that says it confines none.
 
 ## A run's owner reads as alive when the process is gone
 

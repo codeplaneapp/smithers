@@ -28,9 +28,9 @@
  * {@link defaultLimits}, so neither a large file nor a malfunctioning helper
  * can make the host allocate without limit.
  *
- * **Cost.** Every operation is one CPython fork, roughly 130 ms on a current
- * host. That is the price of descriptor-relative confinement on a runtime with
- * no `openat`, and it is why {@link Options.concurrency} exists: without a
+ * **Cost.** Each ordinary operation or bounded read batch starts one CPython
+ * helper. Batches amortize interpreter startup over up to 128 operations on
+ * one pinned root. {@link Options.concurrency} exists because without a
  * ceiling an `Effect.forEach(..., { concurrency: "unbounded" })` over fifty
  * paths starts fifty interpreters at once. Batch a wide fan-out, and prefer one
  * recursive `readDirectory` (one fork for the whole tree) to a read per entry.
@@ -40,14 +40,14 @@
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
-import { Effect, FileSystem, Layer, Option, PlatformError, Semaphore } from "effect"
+import { Effect, FileSystem, Layer, Option, PlatformError, Result, Semaphore } from "effect"
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process"
 import { accessSync, constants, realpathSync, statSync } from "node:fs"
 import { availableParallelism } from "node:os"
 import { isAbsolute, relative } from "node:path"
 
 const helper = String.raw`
-import base64, errno, json, os, stat, sys
+import base64, errno, hashlib, json, os, stat, sys
 
 PROTOCOL = "flows-atomic/1"
 # The header is read one byte at a time, so it is capped before anything is
@@ -65,6 +65,7 @@ REMOVE_DEPTH_CAP = 512
 # and the number of alternatives it produces are capped before any walking.
 BRACE_CAP = 64
 PATTERN_CAP = 4096
+BATCH_CAP = 128
 
 # Glob segment token kinds, and the marker for a "**" segment.
 STAR = 0
@@ -81,7 +82,7 @@ GLOBSTAR = object()
 # failure is attributed to the same call Node would attribute it to, which
 # depends on which of an operation's several syscalls raised.
 SYSCALLS = {
-    "readFile": "open", "readFileString": "open",
+    "readFile": "open", "readFileString": "open", "digest": "open",
     "writeFile": "open", "writeFileString": "open",
     "exists": "access", "stat": "stat", "readLink": "readlink",
     "realPath": "realpath", "makeDirectory": "mkdir",
@@ -208,7 +209,15 @@ def open_file(root, path, flags, mode=0o666):
         raise
     return fd
 
-def list_dir(root, path, recursive, budget, with_kind=False, prune=None):
+def fingerprint(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+def unchanged(before, after, path):
+    if fingerprint(before) != fingerprint(after):
+        raise OSError(errno.EBUSY, "entry changed during measurement", path)
+
+def list_dir(root, path, recursive, budget, with_kind=False, prune=None, stable=False):
     if not parts(path):
         fd = os.dup(root)
     else:
@@ -225,6 +234,7 @@ def list_dir(root, path, recursive, budget, with_kind=False, prune=None):
     total = [32]
     entries = [0]
     def walk(current, prefix=""):
+        before = os.fstat(current) if stable else None
         # Listing NAMES a directory entry; it never resolves one. A symlink is
         # reported by name and never descended into, so a listing cannot leave
         # the pinned root and cannot be made to by planting a link. Refusing
@@ -268,8 +278,12 @@ def list_dir(root, path, recursive, budget, with_kind=False, prune=None):
                 child = os.open(entry, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=current)
                 try:
                     result.extend(walk(child, relative))
+                    if stable:
+                        unchanged(os.fstat(child), os.stat(entry, dir_fd=current, follow_symlinks=False), relative)
                 finally:
                     os.close(child)
+        if stable:
+            unchanged(before, os.fstat(current), prefix)
         return result
     try:
         found = walk(fd)
@@ -736,7 +750,41 @@ def remove_tree(directory, name):
         for _, _, fd, _ in stack:
             os.close(fd)
 
-def main(request, content_limit, response_limit):
+def rejection(error):
+    number = getattr(error, "errno", None)
+    return {"ok": False,
+            "code": errno.errorcode.get(number) if isinstance(number, int) else None,
+            "syscall": SYSCALL[0], "badArgument": isinstance(error, BadArgument),
+            "message": str(error)[:MESSAGE_CAP]}
+
+def open_boundary(path):
+    base = os.open(os.sep, os.O_RDONLY | DIRECTORY | NOFOLLOW)
+    try:
+        if not parts(path): return os.dup(base)
+        directory, name = parent(base, path)
+        try: return os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW, dir_fd=directory)
+        finally: os.close(directory)
+    finally: os.close(base)
+
+def root_identity(info):
+    return "%d:%d" % (info.st_dev, info.st_ino)
+
+def open_batch_boundary(path):
+    try: return open_boundary(path)
+    except FileNotFoundError as error:
+        raise OSError(errno.EBUSY, "batch root unavailable: " + str(error)) from error
+
+def check_root(root, request):
+    identity = root_identity(os.fstat(root))
+    if identity != request["rootIdentity"]:
+        raise OSError(errno.EBUSY, "batch root no longer names the authorized descriptor")
+    current = open_batch_boundary(request["boundaryRoot"])
+    try:
+        if root_identity(os.fstat(current)) != identity:
+            raise OSError(errno.EBUSY, "batch root changed during measurement")
+    finally: os.close(current)
+
+def main(request, content_limit, response_limit, pinned_root=None):
     operation = request["operation"]
     # Set before anything runs, so a failure inside the walk to the target is
     # still attributed to the syscall the OPERATION names. remove_at narrows it
@@ -752,8 +800,84 @@ def main(request, content_limit, response_limit):
         # Every operation below decides for itself what that means, and
         # parent() refuses it, which keeps the destructive ones refused.
         return os.sep if relative == "." else os.sep + relative
-    root = os.open(request["boundaryRoot"], os.O_RDONLY | DIRECTORY | NOFOLLOW)
+    root = (os.dup(pinned_root) if pinned_root is not None else
+            open_batch_boundary(request["boundaryRoot"]) if operation == "batch" else
+            os.open(request["boundaryRoot"], os.O_RDONLY | DIRECTORY | NOFOLLOW))
     try:
+        if operation == "batch":
+            requests = request["requests"]
+            batch_limit = request["batchSize"]
+            entry_limit = request["batchEntry"]
+            if (not isinstance(requests, list) or not 0 < batch_limit <= BATCH_CAP
+                    or not 0 < len(requests) <= batch_limit or not 0 < entry_limit <= HARD_CAP):
+                raise BadArgument("atomic batch limits are out of range")
+            check_root(root, request)
+            entries = []
+            # The exact final envelope is charged incrementally. No path may
+            # consume the response budget reserved for later failure entries.
+            total = len(json.dumps({"ok": True, "value": {"rootIdentity": request["rootIdentity"], "entries": []}},
+                                  separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+            for index, member in enumerate(requests):
+                path = member["path"]
+                SYSCALL[0] = SYSCALLS.get(member["operation"])
+                try:
+                    if member["operation"] not in ("stat", "readDirectory", "glob", "digest"):
+                        raise BadArgument("unsupported atomic batch operation")
+                    check_root(root, request)
+                    target = confined(member["root"] if member["operation"] == "glob" else path)
+                    before = entry_stat(root, target) if parts(target) else os.fstat(root)
+                    sub = dict(member, boundaryRoot=request["boundaryRoot"], logicalRoot=logical_root)
+                    if member["operation"] == "glob": sub["pattern"] = path
+                    try:
+                        value = main(sub, content_limit, min(entry_limit, response_limit), root)
+                        after = entry_stat(root, target) if parts(target) else os.fstat(root)
+                    except FileNotFoundError as error:
+                        # Initial absence above remains NotFound. Losing an
+                        # entry after measurement began is concurrent mutation.
+                        raise OSError(errno.EBUSY, "entry disappeared during measurement", path) from error
+                    unchanged(before, after, path)
+                    check_root(root, request)
+                    result = {"ok": True, "value": value}
+                    if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > entry_limit:
+                        raise OSError(errno.EFBIG, "batch entry exceeds the response limit", path)
+                except Exception as error:
+                    result = rejection(error)
+                if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > entry_limit:
+                    raise OSError(errno.EFBIG, "batch failure exceeds the entry response limit")
+                entry = {"index": index, "path": path, "result": result}
+                total += len(json.dumps(entry, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) + (1 if index else 0)
+                if total > response_limit:
+                    raise OSError(errno.EFBIG, "batch response exceeds the response limit")
+                entries.append(entry)
+            check_root(root, request)
+            # JavaScript orders UTF-16 code units, which differs from Python's
+            # code-point ordering for astral names. Persisted identities use JS.
+            entries.sort(key=lambda entry: (entry["path"].encode("utf-16-be"), entry["index"]))
+            return {"rootIdentity": request["rootIdentity"], "entries": entries}
+        if operation == "digest":
+            path = confined(request["path"])
+            if not parts(path):
+                raise OSError(errno.EISDIR, "the workspace root is a directory", request["path"])
+            fd = open_file(root, path, os.O_RDONLY)
+            try:
+                before = os.fstat(fd)
+                digest = hashlib.sha256()
+                total = 0
+                chunks = []
+                while True:
+                    chunk = os.read(fd, CHUNK)
+                    if not chunk: break
+                    total += len(chunk)
+                    if total > content_limit:
+                        raise OSError(errno.EFBIG, "file exceeds the atomic read limit", request["path"])
+                    digest.update(chunk)
+                    if request.get("content"): chunks.append(chunk)
+                unchanged(before, os.fstat(fd), request["path"])
+                unchanged(before, entry_stat(root, path), request["path"])
+                result = {"digest": digest.hexdigest(), "sizeBytes": total}
+                if request.get("content"): result["base64"] = base64.b64encode(b"".join(chunks)).decode("ascii")
+                return result
+            finally: os.close(fd)
         if operation in ("readFile", "readFileString"):
             path = confined(request["path"])
             if not parts(path):
@@ -867,7 +991,8 @@ def main(request, content_limit, response_limit):
             finally: os.close(directory)
             return None
         if operation == "readDirectory":
-            return list_dir(root, confined(request["path"]), bool(options.get("recursive")), response_limit)
+            return list_dir(root, confined(request["path"]), bool(options.get("recursive")), response_limit,
+                            stable=pinned_root is not None)
         if operation == "remove":
             force = bool(options.get("force"))
             # Resolving the parent is INSIDE the force-aware handling, not
@@ -950,7 +1075,8 @@ def main(request, content_limit, response_limit):
             def prunes(name, is_dir):
                 segments = name.split("/")
                 return any(pattern.matches(segments, is_dir) for pattern in excluded)
-            entries = list_dir(root, confined(root_path), True, response_limit, True, prunes)
+            entries = list_dir(root, confined(root_path), True, response_limit, True, prunes,
+                               stable=pinned_root is not None)
             matches = []
             total = 32
             # The pinned root is a candidate in its own right: "**" and "**/"
@@ -1071,8 +1197,10 @@ export const defaultExecutable = "/usr/bin/python3"
  *   ceiling small enough to cut one off degrades that operation's typed reason
  *   to the fail-closed one.
  * - `stderr` bounds the diagnostic text retained from a failing helper.
+ * - `batchEntry` bounds one batch member's encoded success or failure envelope.
+ * - `batchSize` bounds the number of operations in one batch, at most 128.
  *
- * These four are byte ceilings. The two ceilings that decide whether the host
+ * All except `batchSize` count bytes. The two ceilings that decide whether the host
  * survives a wide fan-out are {@link Options.concurrency}, which bounds how
  * many interpreters run at once, and {@link Options.timeoutMs}, which bounds
  * how long any one of them may take.
@@ -1085,6 +1213,10 @@ export interface Limits {
   readonly request: number
   readonly response: number
   readonly stderr: number
+  /** Maximum operations in one helper invocation, at most 128. */
+  readonly batchSize: number
+  /** Maximum encoded result bytes for one batch member. */
+  readonly batchEntry: number
 }
 
 /**
@@ -1099,7 +1231,9 @@ export const defaultLimits: Limits = {
   content: 16 * 1024 * 1024,
   request: 24 * 1024 * 1024,
   response: 24 * 1024 * 1024,
-  stderr: 64 * 1024
+  stderr: 64 * 1024,
+  batchSize: KernelFileSystem.maxBatchSize,
+  batchEntry: 24 * 1024 * 1024
 }
 
 /**
@@ -1141,8 +1275,8 @@ export interface Options {
    * How many helper processes may run at once. Default
    * {@link defaultConcurrency}.
    *
-   * Every operation is one CPython fork, which costs roughly 130 ms on a
-   * current host, so an unbounded `Effect.forEach` over a directory would start
+   * Each ordinary operation or batch starts one helper, so an unbounded
+   * `Effect.forEach` over a directory would start
    * one interpreter per entry. This ceiling is what keeps a wide fan-out from
    * pinning every core; it is a contract, not a tuning knob.
    */
@@ -1178,6 +1312,17 @@ interface HelperResult {
 }
 
 const moduleName = "AtomicFileSystem"
+let startedHelpers = 0
+
+/**
+ * Process-local helper starts, for cost counters and local measurements.
+ * Includes helpers later cancelled or refused; rejected preflight starts none.
+ *
+ * @since 1.0.0
+ * @category metrics
+ */
+export const helperSpawns = (): number => startedHelpers
+
 const protocol = "flows-atomic/1"
 /** Room for `flows-atomic/1 <digits>\n` above the payload ceiling. */
 const frameHeaderBytes = 64
@@ -1295,7 +1440,9 @@ const resolveLimits = (overrides: Partial<Limits> | undefined): Limits => {
     content: overrides?.content ?? defaultLimits.content,
     request: overrides?.request ?? defaultLimits.request,
     response: overrides?.response ?? defaultLimits.response,
-    stderr: overrides?.stderr ?? defaultLimits.stderr
+    stderr: overrides?.stderr ?? defaultLimits.stderr,
+    batchSize: overrides?.batchSize ?? defaultLimits.batchSize,
+    batchEntry: overrides?.batchEntry ?? defaultLimits.batchEntry
   }
   for (const [name, value] of Object.entries(limits)) {
     if (!Number.isSafeInteger(value) || value <= 0 || value > hardLimitBytes) {
@@ -1303,6 +1450,9 @@ const resolveLimits = (overrides: Partial<Limits> | undefined): Limits => {
         `atomic helper ${name} limit must be a positive integer no greater than ${hardLimitBytes}`
       )
     }
+  }
+  if (limits.batchSize > KernelFileSystem.maxBatchSize) {
+    throw new Error(`atomic helper batchSize limit must be no greater than ${KernelFileSystem.maxBatchSize}`)
   }
   return limits
 }
@@ -1356,7 +1506,11 @@ const decode = (frame: Buffer, limits: Limits): HelperResult => {
   }
   // Decoded from the complete frame, so a multi-byte character split across
   // two stdout chunks is never mangled on the way in.
-  const value = JSON.parse(fatalUtf8.decode(body)) as HelperResult
+  return resultEnvelope(JSON.parse(fatalUtf8.decode(body)))
+}
+
+const resultEnvelope = (input: unknown): HelperResult => {
+  const value = input as HelperResult
   if (value === null || typeof value !== "object" || typeof value.ok !== "boolean") {
     throw new Error("atomic helper response is not a result envelope")
   }
@@ -1492,6 +1646,74 @@ const convert = <A>(
   value: unknown,
   limits: Limits
 ): Effect.Effect<A, PlatformError.PlatformError> => {
+  if (request.operation === "batch") {
+    const response = record(value, "batch")
+    const requests = request.requests!
+    if (
+      response.rootIdentity !== request.rootIdentity || !Array.isArray(response.entries) ||
+      response.entries.length !== requests.length
+    ) {
+      throw new Error("atomic helper returned a foreign or incomplete batch")
+    }
+    const seen = new Set<number>()
+    let previous = ""
+    let previousIndex = -1
+    const pending = response.entries.map((raw) => {
+      const entry = record(raw, "batch entry")
+      const index = integer(entry.index, "batch index")
+      const member = requests[index]
+      if (
+        member === undefined || seen.has(index) || entry.path !== member.path ||
+        member.path < previous || (member.path === previous && index <= previousIndex)
+      ) {
+        throw new Error("atomic helper returned an invalid batch member identity or order")
+      }
+      seen.add(index)
+      previous = member.path
+      previousIndex = index
+      if (Buffer.byteLength(JSON.stringify(entry.result), "utf8") > limits.batchEntry) {
+        throw new Error("atomic helper returned an oversized batch entry")
+      }
+      const envelope = resultEnvelope(entry.result)
+      const identity = { index, path: member.path }
+      if (!envelope.ok) {
+        return Effect.succeed({
+          ...identity,
+          result: Result.fail(failure(member, new Error(envelope.message ?? "atomic batch member failed"), envelope))
+        })
+      }
+      if (member.operation === "digest") {
+        const measured = record(envelope.value, "digest")
+        if (typeof measured.digest !== "string" || !/^[a-f0-9]{64}$/.test(measured.digest)) {
+          throw new Error("atomic helper returned an invalid SHA-256 digest")
+        }
+        const sizeBytes = integer(measured.sizeBytes, "digest size")
+        if (sizeBytes > limits.content) throw new Error("atomic helper returned an oversized digest measurement")
+        const bytes = member.content === true ? toBytes(measured, limits.content) : undefined
+        if (bytes !== undefined && bytes.length !== sizeBytes) {
+          throw new Error("atomic helper returned a mismatched digest size")
+        }
+        return Effect.succeed({
+          ...identity,
+          result: Result.succeed<KernelFileSystem.BatchValue>({
+            operation: "digest",
+            digest: measured.digest,
+            sizeBytes,
+            ...(bytes === undefined ? {} : { bytes })
+          })
+        })
+      }
+      return Effect.map(convert(member, envelope.value, limits), (converted) => ({
+        ...identity,
+        result: Result.succeed<KernelFileSystem.BatchValue>(
+          member.operation === "stat"
+            ? { operation: "stat", info: converted as FileSystem.File.Info }
+            : { operation: member.operation, paths: (converted as Array<string>).sort() }
+        )
+      }))
+    })
+    return Effect.map(Effect.all(pending), (entries) => ({ rootIdentity: response.rootIdentity, entries }) as A)
+  }
   if (request.operation === "readFile" || request.operation === "readFileString") {
     // An empty file encodes to an empty string, so the payload is read by
     // shape: truthiness would return the raw envelope for it instead.
@@ -1584,6 +1806,7 @@ const spawnHelper = <A>(
         env: {},
         stdio: ["pipe", "pipe", "pipe"]
       })
+      startedHelpers++
     } catch (cause) {
       // libuv reports some exec failures — `ENOEXEC` for a file that is
       // neither a script nor a binary — by throwing rather than by emitting an
@@ -1727,9 +1950,23 @@ const execute = (options: Options, resolved: Settings | { readonly invalid: unkn
       }))
     }
     const limits = resolved.limits
+    if (
+      request.operation === "batch" &&
+      (!Array.isArray(request.requests) || request.requests.length === 0 || request.requests.length > limits.batchSize)
+    ) {
+      return Effect.fail(PlatformError.badArgument({
+        module: moduleName,
+        method: "batch",
+        description: `atomic batch must contain 1 to ${limits.batchSize} operations`
+      }))
+    }
     let body: Buffer
     try {
-      const serialized = JSON.stringify(request)
+      const serialized = JSON.stringify(
+        request.operation === "batch"
+          ? { ...request, batchSize: limits.batchSize, batchEntry: limits.batchEntry }
+          : request
+      )
       if (serialized === undefined) {
         throw new Error("atomic request is not serializable")
       }
@@ -1793,7 +2030,14 @@ export const layerWith = (options: Options): Layer.Layer<FileSystem.FileSystem> 
     FileSystem.FileSystem,
     Effect.map(
       FileSystem.FileSystem,
-      (fileSystem) => KernelFileSystem.withAtomicFileSystem(fileSystem, { execute: execute(options, settings) })
+      (fileSystem) =>
+        KernelFileSystem.withAtomicFileSystem(fileSystem, {
+          execute: execute(options, settings),
+          batchLimits: {
+            size: "invalid" in settings ? defaultLimits.batchSize : settings.limits.batchSize,
+            response: "invalid" in settings ? defaultLimits.response : settings.limits.response
+          }
+        })
     )
   ).pipe(Layer.provide(NodeFileSystem.layer))
 }

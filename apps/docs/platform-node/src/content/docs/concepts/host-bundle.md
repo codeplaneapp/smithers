@@ -82,9 +82,9 @@ Each of these is a decision with a consequence, not a gap.
 **There is no shell service.** Running a command is Effect's `ChildProcess` and
 `ChildProcessSpawner`. That means a wall-clock budget is `Effect.timeout`
 around the effect rather than an option on a command record, and cancellation
-is fiber interruption rather than an `AbortSignal`. The old `Shell` wrapper was
-deleted: it was a second way to express what Effect already expresses, and the
-kernel would then have had two spawn paths to check instead of one.
+is fiber interruption rather than an `AbortSignal`. A Smithers shell service
+would be a second way to express what Effect already expresses, and the kernel
+would then have two spawn paths to check instead of one.
 
 **There is no HTTP service.** An outgoing request is Effect's `HttpClient`, and
 `@effect/platform-node` already ships the Undici-backed implementation. Undici

@@ -105,16 +105,49 @@ for the ceilings and how to change them.
 
 ## What it costs
 
-Every operation is one CPython fork, roughly 130 ms on a current host. That is
-the price of descriptor-relative confinement on a runtime with no `openat`, and
-it shapes how you should call it:
+An ordinary operation starts one CPython helper. The guarded filesystem also
+offers `FileSystem.batch(fs)` from `@smthrs/kernel/FileSystem`: one helper
+serves up to 128 read requests against the same root descriptor. Requests may
+stat, list directories, expand host globs, or collect SHA-256 digests, optionally
+with file bytes. The helper exits after that request. There is no persistent
+process.
 
 - Prefer one recursive `readDirectory` (one fork for the whole tree) to a read
   per entry.
-- Batch a wide fan-out. Without a ceiling, an
+- Use bounded batches for a wide fan-out. Without a ceiling, an
   `Effect.forEach(files, read, { concurrency: "unbounded" })` over fifty paths
   would start fifty interpreters at once, which is why the adapter carries a
   process ceiling at all.
+
+Each batch member keeps its own canonical resource and grant check. Denied
+members never enter the helper. Results retain their request index and sort by
+normalized path using JavaScript's UTF-16 order, including Unicode names and
+duplicate requests. Directory and glob results also sort deterministically.
+
+The guard captures the root's device/inode at composition. The helper walks to
+that root without following any component symlink and verifies its identity
+before and after measurement. Root loss is a boundary failure, not a collection
+of absent files. Digest reads compare descriptor metadata before and after the
+read, then compare the pathname against that descriptor. Directory walks check
+their opened directories for observed mutations. These checks detect changes
+during a measurement; they do not freeze a workspace or claim a simultaneous
+snapshot of unrelated paths.
+
+A workspace symlink is allowed when composed, but the kernel rechecks its
+logical path before and after grants. Retargeting it refuses the batch even
+while the old canonical root remains available to the helper.
+
+An entry absent before measurement reports `NotFound`. An entry or ancestor
+that disappears after measurement begins reports `Busy`, so an interrupted
+read cannot become evidence that the file was initially absent.
+
+The digest is SHA-256 of the original bytes. No JSON, encoding, or pathname is
+added to its input. Boundary tree and read-set identities remain the engine's
+existing canonical constructions.
+
+`AtomicFileSystem.helperSpawns()` exposes a process-local count for diagnostics.
+Elapsed timings from `scripts/observation-bench.ts` are local measurements and
+do not establish a production speed claim.
 
 ## Errors
 

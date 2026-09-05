@@ -1,38 +1,55 @@
 ---
 title: "@smthrs/platform-node"
-description: "The Node.js Host bundle for Smithers: Effect's Node platform services composed into the closed five-tag Host surface, plus the descriptor-relative filesystem, the process reaper, and the liveness probe Node needs and Effect does not ship."
+description: "The Node.js host bundle for Smithers flows: Effect's Node platform services plus a filesystem a symlink cannot redirect, child processes a crashed host does not abandon, and a run-owner liveness probe."
 ---
 
-`@smthrs/platform-node` is the Node implementation of the Smithers Host: one
-layer that provides every host capability a durable flow can reach.
+`@smthrs/platform-node` provides the five services a program on Node.js runs
+its side effects through: a filesystem, a path helper, a child-process spawner,
+a [Jujutsu](https://jj-vcs.github.io/jj/) adapter, and an HTTP client. One
+layer, `NodeHost.layer`, provides all five.
 
-The Host surface is a closed set of five service tags. Three of them are
-Effect's own, and two are Smithers':
+That set is the host surface of [Smithers](https://smithers.sh/docs/), a durable
+engine for long-running agent work whose packages carry the `@smthrs` scope.
+This package is the Node.js machine a Smithers flow runs on, and it is usable
+on its own by any Effect program that wants the same guarantees.
 
-| Tag                   | Where the tag lives                           | What provides it here                   |
-| --------------------- | --------------------------------------------- | --------------------------------------- |
-| `FileSystem`          | `effect/FileSystem`                           | `AtomicFileSystem`, this package        |
-| `Path`                | `effect/Path`                                 | Effect's `Path.layer`                   |
-| `ChildProcessSpawner` | `effect/unstable/process/ChildProcessSpawner` | `@effect/platform-node`'s Node spawner  |
-| `Jj`                  | [`@smthrs/jj`](/api/jj)                       | that package's `NodeJj`                 |
-| `HttpClient`          | `effect/unstable/http/HttpClient`             | `@effect/platform-node`'s Undici client |
+## Availability
 
-A program written against those tags runs on any bundle that provides them.
-[`@smthrs/platform-bun`](/api/platform-bun) and
-[`@smthrs/platform-browser`](/api/platform-browser) are the sibling bundles,
-and [`@smthrs/kernel`](/api/kernel) owns the tag list and decorates every one
-of them with a capability check.
+`@smthrs/platform-node` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](./installation.md) covers how to depend on it from a checkout
+and which `effect` version it pins.
 
-## Install
+## What it solves
 
-```bash
-pnpm add @smthrs/platform-node @effect/platform-node effect
-```
+Effect already ships Node implementations of most of those services, and this
+package uses them where they fit. Three guarantees are not ones a
+general-purpose adapter makes, so this package implements them itself.
 
-The bundle needs a POSIX host with CPython 3 at `/usr/bin/python3`. For why,
-and for what a host without it does, see [Installation](./installation.md).
+**A filesystem a symlink cannot redirect.** A permission check names a path,
+and a path-based operation resolves that path again when it runs. Anything with
+write access to the directory can swap a component for a symlink in between, so
+the operation authorized for one file performs on another. `AtomicFileSystem`
+closes that window: it opens the workspace root once, walks each component with
+`O_NOFOLLOW`, and performs the final syscall relative to a pinned directory
+descriptor, which names an inode rather than a name.
 
-## The smallest real program
+**Child processes a crashed host does not leave behind.** A host killed
+outright runs no finalizer, so the agents and builds it started keep running
+with nobody left to signal them. `NodeHost.layerContained` gives every child a
+`SIGTERM`-then-`SIGKILL` deadline and a durable ledger record, and sweeps the
+records a previous incarnation abandoned while the layer is built.
+
+**An honest answer about whether a run's owner is still alive.**
+`HostLiveness.isAlive` is the probe a durable engine consults before it takes a
+run some other process recorded itself as owning. Both ways of being wrong cost
+something, so the rule resolves ambiguity toward alive: stranding a run is
+cheaper than running it twice.
+
+## Run something through the host
+
+Provide `NodeHost.layer` to any program that asks for a host service. This one
+asks for the spawner:
 
 ```ts
 import { NodeHost } from "@smthrs/platform-node"
@@ -42,74 +59,67 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 
 const program = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner
-  return yield* spawner.string(ChildProcess.make("printf", ["hello"]))
+  return yield* spawner.string(ChildProcess.make("git", ["status", "--short"]))
 })
 
-await Effect.runPromise(Effect.provide(program, NodeHost.layer))
+console.log(await Effect.runPromise(Effect.provide(program, NodeHost.layer)))
 ```
 
-## What this package composes, and what it implements
+`ChildProcess` and `ChildProcessSpawner` are Effect's own tags. There is no
+Smithers wrapper around either: a wall-clock budget is `Effect.timeout` around
+the effect, and cancelling a command is fiber interruption. The same layer also
+provided the `FileSystem`, `Path`, `Jj`, and `HttpClient` that program did not
+ask for, and the filesystem in it is the confined one described earlier. The
+[quickstart](./quickstart.md) runs a program that reads a file through it and
+watches a symlink escape get refused.
 
-Most of the bundle is composition. `@effect/platform-node` already ships a
-filesystem, a child-process spawner, and an Undici-backed `HttpClient`;
-`NodeHost.layer` merges them with Effect's `Path` and the Node `Jj` adapter
-from [`@smthrs/jj`](/api/jj).
+Running this bundle needs a POSIX host with Node.js 22.19.0 or later and
+CPython 3, which `AtomicFileSystem` uses to reach the `dir_fd` syscalls Node
+does not expose. [Installation](./installation.md) covers the requirement,
+where it fails when it is missing, how to point at a different interpreter, and
+the Effect peers your project pins.
 
-Three modules are implementation, because the guarantees Smithers makes about
-a host are not ones Effect's adapters make on their own:
+## How this relates to @smthrs/flows
 
-| Module             | What it is                                                                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AtomicFileSystem` | The filesystem slot. Every operation runs relative to a pinned directory descriptor, so a symlink swapped in after authorization cannot redirect it. |
-| `ProcessReaper`    | The sweep that kills process groups a crashed incarnation of this host abandoned.                                                                    |
-| `HostLiveness`     | Whether a recorded run owner is still running here, which is what the engine steals runs on.                                                         |
+[`@smthrs/flows`](/api/flows) is the single dependency that carries the whole
+Smithers durable flow engine: flows, actions, the journal, and the runtime that
+replays a crashed run from where it stopped. It deliberately does not
+re-export any `@smthrs/platform-*` package, for the same reason `effect`'s own
+index does not re-export `@effect/platform-node`: the program that runs picks
+its platform, not the library it depends on. So a Node program installs
+`@smthrs/flows` for the engine and this package for the machine underneath it.
 
-`NodeHost` is the fourth module: the aggregate that puts the five tags in one
-layer, in four variants.
+Once both are installed, `@smthrs/flows`' `NodeRuntime` module builds the whole
+durable composition from one options object, and what it composes from here is
+`NodeHost.layerContainedAt` plus `HostLiveness.isAlive`. Read this site when
+you want to know what those layers guarantee, configure the filesystem helper,
+or diagnose a refusal. Reach for this package on its own when you want the host
+services without the engine.
 
-| Layer                                       | `Jj` bound to                | Process containment |
-| ------------------------------------------- | ---------------------------- | ------------------- |
-| `NodeHost.layer`                            | the process directory        | no                  |
-| `NodeHost.layerAt(root)`                    | one absolute repository root | no                  |
-| `NodeHost.layerContained(options?)`         | the process directory        | yes                 |
-| `NodeHost.layerContainedAt(root, options?)` | one absolute repository root | yes                 |
-
-## What this bundle refuses
-
-The refusals are the design, not gaps to fill later:
-
-- **No shell service.** Running a command is Effect's `ChildProcess` and
-  `ChildProcessSpawner`. A wall-clock budget is `Effect.timeout` around the
-  effect, and cancellation is fiber interruption, never an `AbortSignal`.
-- **No HTTP wrapper.** An outgoing request is Effect's `HttpClient`, provided
-  as `NodeHttpClient.layerUndici`. Undici installs no redirect interceptor, so
-  every hop stays a separate request the kernel can check.
-- **No Windows.** `AtomicFileSystem` has none of the POSIX primitives it needs
-  there and fails every operation closed. Reaping on Windows is unsupported
-  best-effort.
-- **No path-based fallback.** A host with no usable CPython 3 fails every
-  guarded filesystem call with `PermissionDenied` rather than reverting to a
-  check-then-path operation.
-- **No filesystem operation that cannot be one descriptor-relative request.**
-  `open`, `stream`, `sink`, `watch`, `copy`, `link`, `symlink`, `chmod`, and
-  the `makeTemp*` family fail closed under the kernel decorator.
+Above both sits the `smithers` command-line tool,
+[`@smthrs/cli`](/api/cli), which runs flows without you composing anything.
+For a different runtime, the sibling bundles are
+[`@smthrs/platform-bun`](/api/platform-bun) and
+[`@smthrs/platform-browser`](/api/platform-browser).
+[`@smthrs/kernel`](/api/kernel) owns the closed list of five host tags and
+wraps each one with the capability check that makes the confinement above
+enforceable.
 
 ## Where to go next
 
-- [Installation](./installation.md): requirements, peer dependencies, entry
-  points, and the packages a real composition adds.
-- [Quickstart](./quickstart.md): stand up a host, run a command, and watch the
-  confinement refuse a symlink escape.
-- Concepts: [the host bundle](./concepts/host-bundle.md),
-  [the descriptor-relative filesystem](./concepts/descriptor-relative-filesystem.md),
-  and [process containment](./concepts/process-containment.md).
-- Guides: [contain child processes](./guides/contain-child-processes.md),
-  [configure the filesystem helper](./guides/configure-the-filesystem-helper.md),
-  [match files with a glob pattern](./guides/match-files-with-glob.md), and
-  [answer whether a run owner is alive](./guides/answer-run-ownership.md).
-- [API reference](./api.md): every export, with signatures and defaults.
-- [Troubleshooting](./troubleshooting.md): the failures this bundle reports,
-  what causes them, and what to change.
+- [Installation](./installation.md): peers, host prerequisites, import forms,
+  and what a capability-checked composition adds.
+- [Quickstart](./quickstart.md): run a command, then read a file through the
+  guarded host and watch an escape refused.
+- [The host bundle](./concepts/host-bundle.md): the five tags, the four layers,
+  and what this package deliberately does not provide.
+- [The descriptor-relative filesystem](./concepts/descriptor-relative-filesystem.md):
+  how the confinement works and what each call costs.
+- [Process containment](./concepts/process-containment.md): incarnations, the
+  ledger, and every guard checked before a reap.
+- [API reference](./api.md): every export, layer, and option.
+- [Troubleshooting](./troubleshooting.md): the refusals this bundle reports and
+  which of them are the safe answer.
 
 The host exports `implementationIds` for its five service slots. Its rooted
 factories reject invalid roots before constructing a layer, using the host's

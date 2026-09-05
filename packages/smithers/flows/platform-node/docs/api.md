@@ -1,3 +1,11 @@
+---
+title: "API reference"
+description: "Every export of @smthrs/platform-node: the NodeHost layers, the AtomicFileSystem adapter and its glob grammar, HostLiveness, and ProcessReaper's refusals."
+---
+
+`@smthrs/platform-node` composes the closed five-tag Host surface for Node.
+`NodeHost.layer` provides all of it:
+
 ```ts
 import { NodeHost } from "@smthrs/platform-node"
 import * as Effect from "effect/Effect"
@@ -11,8 +19,10 @@ const program = Effect.gen(function*() {
 ```
 
 :::warning
-This entry point is Node-only by construction: it resolves
-`node:child_process`. `scripts/browser-check.mjs` pins that.
+Every entry point here is Node-only by construction: the bundle resolves
+`node:child_process` and its siblings, and a build check keeps it that way. For
+a browser host use [@smthrs/platform-browser](/api/platform-browser); for Bun,
+[@smthrs/platform-bun](/api/platform-bun).
 :::
 
 There is no shell service. Running a command is Effect's `ChildProcess` /
@@ -20,8 +30,7 @@ There is no shell service. Running a command is Effect's `ChildProcess` /
 effect, and cancellation is fiber interruption, never an `AbortSignal`. There is
 no HTTP service either: an outgoing request is Effect's `HttpClient`, provided
 here as `NodeHttpClient.layerUndici`, which installs no redirect interceptor and
-so leaves every hop visible to [@smthrs/kernel](/api/kernel). The old `Shell`
-and `HttpTransport` wrappers were deleted for the same reason.
+so leaves every hop visible to [@smthrs/kernel](/api/kernel).
 
 The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
 layer with one version probe; construction can fail with `JjError`, including
@@ -32,7 +41,7 @@ through their process spawner and retire its ledger entry when it exits.
 
 | Requirement                                        | Why                                                                                                       |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Node.js >=22.19.0                                  | the durable runtime the release policy supports                                                           |
+| Node.js >=22.19.0                                  | the minimum this package's `engines` field declares                                                       |
 | CPython 3 at `/usr/bin/python3`                    | `AtomicFileSystem` runs every filesystem syscall through it                                               |
 | that interpreter's `os` module supporting `dir_fd` | with `O_NOFOLLOW` and `O_DIRECTORY`, for `open`, `mkdir`, `readlink`, `rename`, `rmdir`, `stat`, `unlink` |
 | a POSIX host                                       | Windows has none of those primitives and is unsupported                                                   |
@@ -48,7 +57,7 @@ flow body fails `PermissionDenied`. Install `python3`, or point the adapter at
 the interpreter you do have:
 
 ```ts
-import { AtomicFileSystem } from "@smthrs/platform-node/AtomicFileSystem"
+import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
 
 const filesystem = AtomicFileSystem.layerWith({ executable: "/usr/local/bin/python3" })
 ```
@@ -126,7 +135,7 @@ file rather than performing raw effects.
 | `AtomicFileSystem.defaultLimits`      | 16 MiB content, 24 MiB request, 24 MiB response, 64 KiB helper stderr |
 | `AtomicFileSystem.defaultConcurrency` | `os.availableParallelism()`                                           |
 | `AtomicFileSystem.defaultTimeoutMs`   | 300000                                                                |
-| `AtomicFileSystem.program`            | the helper source, exported so its own protocol guards can be driven  |
+| `AtomicFileSystem.program`            | the source text of the POSIX helper the adapter runs                  |
 
 **Cost.** Every operation is one CPython fork, roughly 130 ms on a current host.
 That is the price of descriptor-relative confinement on a runtime with no
@@ -218,8 +227,8 @@ for a path whose ancestors do not exist, exactly as `fs.rm` does.
 
 ## Liveness and reaping
 
-`HostLiveness.isAlive({ hostId })` is the probe `EngineStore` consults before it
-takes a run whose recorded owner it is not: an owner on a different host reads
+`HostLiveness.isAlive({ hostId })` is the probe a durable engine consults before
+it takes a run whose recorded owner it is not: an owner on a different host reads
 as alive, and an owner on this host reads as alive exactly while its pid is
 signalable. `@smthrs/run-store`'s `Ownership.sameHostPidProbe` answers the same
 question differently for a foreign host, and the two are not interchangeable;
@@ -252,19 +261,19 @@ a later incarnation cannot answer differently is final.
 | `identity-mismatch`   | yes     |
 | `kill-failed`         | no      |
 
-Windows reaping is unsupported best-effort. The release policy lists Windows
-as unsupported and `AtomicFileSystem` fails every operation closed there, but
-`systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather
-than retiring every record unsignalled, because an excluded feature that appears
-to work partially is worse than one that says what it does.
+Windows reaping is unsupported best-effort. Windows is an unsupported platform
+and `AtomicFileSystem` fails every operation closed there, but
+`systemFor("win32")` still reaches `taskkill /T /F` through the sweep rather than
+retiring every record unsignalled, because a feature that appears to work
+partially is worse than one that says what it does.
 
 ## Conformance
 
 The package runs the shared suite from
 [`@smthrs/kernel/test/contract`](/api/kernel) twice: once with explicit
-expectations, and once (`NodeHostDefaults`) taking every default the suite
-offers, against a loopback HTTP server so the `HttpClient` success path is
-actually asserted rather than only its refusal. On top of that, the atomic
+expectations, and once taking every default the suite offers, against a loopback
+HTTP server so the `HttpClient` success path is actually asserted rather than
+only its refusal. On top of that, the atomic
 filesystem is compared against `@effect/platform-node`'s own adapter: open
 flags, errno classification, `stat` fields, and the glob grammar are asserted
 row by row against the native implementation rather than against a hand-written
