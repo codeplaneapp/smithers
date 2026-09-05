@@ -13,10 +13,10 @@ fails loudly on a value with no canonical form.
 ## Prerequisites
 
 - Node.js 22.19.0 or later.
-- The package installed:
+- The package and its `effect` peer dependency:
 
 ```bash
-pnpm add @smthrs/canonical
+pnpm add @smthrs/canonical@next effect@4.0.0-rc.112
 ```
 
 ## Canonicalize a value
@@ -26,7 +26,7 @@ Create `quickstart.ts`:
 ```ts
 import { canonicalize } from "@smthrs/canonical"
 
-const work = { flowId: "build", input: { target: "//app:lib", clean: false } }
+const work = { flowId: "build", input: { target: "web-app", clean: false } }
 
 console.log(canonicalize(work))
 ```
@@ -34,7 +34,7 @@ console.log(canonicalize(work))
 Run it with your TypeScript runner:
 
 ```text
-{"flowId":"build","input":{"clean":false,"target":"//app:lib"}}
+{"flowId":"build","input":{"clean":false,"target":"web-app"}}
 ```
 
 Two things already happened. The members came out sorted by UTF-16 code unit,
@@ -53,15 +53,15 @@ import { createHash } from "node:crypto"
 
 const contentKey = (value: unknown): string => createHash("sha256").update(canonicalize(value), "utf8").digest("hex")
 
-const built = { flowId: "build", input: { target: "//app:lib", clean: false } }
-const submitted = { input: { clean: false, target: "//app:lib" }, flowId: "build" }
+const built = { flowId: "build", input: { target: "web-app", clean: false } }
+const submitted = { input: { clean: false, target: "web-app" }, flowId: "build" }
 
 console.log(contentKey(built))
 console.log(contentKey(submitted) === contentKey(built))
 ```
 
 ```text
-4f7e7e1d7513a015aa950947dcce6642ed51e98d6166bcc2493fb6d47c1c7289
+1a5d898ee183f17cd1f3c89eacf8c9dc036bc5614e76264456316d1831415ec4
 true
 ```
 
@@ -128,9 +128,8 @@ cannot be handed an arbitrary string. See
 ## What just happened
 
 One serialization decided one digest. Change the serialization and every key
-derived from it changes with it, which is why the rules are written down in
-[The serialization contract](./serialization.md) and pinned by the package's
-own property tests.
+derived from it changes with it, which is why every rule that fixes the bytes
+is written down in [The serialization contract](./serialization.md).
 
 ## Next steps
 
@@ -139,5 +138,5 @@ own property tests.
   `JSON.stringify`.
 - [Why digests need canonical JSON](./concepts/digest-determinism.md): what the
   bytes are load bearing for.
-- [`@smthrs/keys`](/api/keys): the repository's own key derivation, which is
-  this quickstart's two steps behind a typed failure.
+- [`@smthrs/keys`](/api/keys): Smithers' own key derivation, which is this
+  quickstart's two steps behind a typed failure.

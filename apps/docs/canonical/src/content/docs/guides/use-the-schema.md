@@ -11,6 +11,11 @@ puts the failure in an Effect error channel instead, as a `SchemaError` whose
 message carries the same code and path. Use the schema when the surrounding
 code is Effect, and the function when it is not.
 
+Every example here is Effect 4. The package declares `effect@4.0.0-rc.112` as a
+peer dependency, and modules such as `effect/SchemaGetter` and
+`effect/SchemaIssue` exist only in that line. See
+[Installation](/installation/).
+
 ## Decode a value
 
 ```ts

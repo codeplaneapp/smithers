@@ -319,7 +319,7 @@ describe("depth", () => {
   it("serializes through 10,000 levels and rejects the next level deterministically", () => {
     let within: unknown = null
     for (let index = 0; index < 10_000; index++) within = [within]
-    expect(canonicalize(within)?.startsWith("[[[[")).toBe(true)
+    expect(canonicalize(within)).toBe("[".repeat(10_000) + "null" + "]".repeat(10_000))
 
     let beyond: unknown = null
     for (let index = 0; index < 10_001; index++) beyond = [beyond]

@@ -4,9 +4,9 @@ description: "Every rule that fixes the bytes @smthrs/canonical emits: member or
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/canonical/docs/serialization.md"
 ---
 
-This page is the contract. Everything on it is pinned by the package's example
-and property tests, and a change to any of it is a change to every digest
-derived from this serializer.
+This page is the contract. Every rule on it fixes the bytes the serializer
+emits, and a change to any of them is a change to every digest derived from
+it.
 
 The input domain is wider than JSON. `canonicalize` accepts any JavaScript
 value, applies `JSON.stringify` semantics to reduce it to JSON data, and emits
@@ -188,6 +188,5 @@ documents:
   A diff on that string is the earliest warning that persisted digests are
   about to stop matching.
 - **Order independence.** Assert that a value and a reordered copy of it
-  produce the same document. The package proves this over generated objects,
-  and repeating it over your own shapes catches a member you accidentally made
-  order dependent, such as an array you meant to be a set.
+  produce the same document. Over your own shapes that catches a member you
+  accidentally made order dependent, such as an array you meant to be a set.

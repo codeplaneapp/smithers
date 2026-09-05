@@ -1,26 +1,36 @@
 **Documentation:** https://canonical.smithers.sh
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 <!-- Deep reviewed and polished by a human. -->
 
 # `@smthrs/canonical`
 
-Two objects with the same entries in different key order, `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`, serialize to the same string, so their digests and keys match.
+**Documentation:** https://canonical.smithers.sh
 
-This package provides a direct `canonicalize` serializer and an Effect `Canonical` schema, following the [RFC 8785 JSON Canonicalization Scheme](https://www.rfc-editor.org/rfc/rfc8785.html).
+RFC 8785 canonical JSON for TypeScript, as a plain function and as an Effect `Schema` codec. Two objects with the same entries in different key order, `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`, serialize to the same string, so their digests and their cache keys match.
+
+## Install
+
+```bash
+pnpm add @smthrs/canonical@next effect@4.0.0-rc.112
+```
+
+`effect` is a peer dependency at that exact version, and the package publishes on the `next` dist-tag while 1.0 is a release candidate. Node.js 22.19.0 or later. Ships as ESM and CommonJS with TypeScript declarations.
+
+## Use it
 
 ```typescript
 import { Canonical, canonicalize } from "@smthrs/canonical"
 import { Schema } from "effect"
 
-const document = Schema.decodeUnknownSync(Canonical)({ b: 2, a: 1 })
-// '{"a":1,"b":2}'
-
 canonicalize({ b: 2, a: 1 })
 // '{"a":1,"b":2}'
+
+Schema.decodeUnknownSync(Canonical)({ b: 2, a: 1 })
+// '{"a":1,"b":2}', branded so a plain string cannot pass for a canonical document
 ```
 
 `canonicalize` follows `JSON.stringify` for JSON data, `toJSON(key)`, boxed primitives, and sparse arrays, then sorts keys by UTF-16 code units. It rejects non-finite numbers, BigInt, lone surrogates, cycles, digest-unsafe non-plain built-ins, and nesting beyond 10,000 levels. Failures are `CanonicalError` values with stable `code` and `path` fields.
@@ -28,3 +38,5 @@ canonicalize({ b: 2, a: 1 })
 Canonical output is digest-critical: changing its bytes changes every downstream digest.
 
 `isRecord` is the shared array-excluding object guard, available from the package root and `@smthrs/canonical/Record`. It checks shape without reading members; it is not a plain-object or JSON validator.
+
+The serialization contract, every failure code, and the guide to converting a value the serializer refuses are at https://canonical.smithers.sh.

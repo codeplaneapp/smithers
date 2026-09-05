@@ -9,18 +9,23 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/canonical
+pnpm add @smthrs/canonical@next effect@4.0.0-rc.112
 ```
 
-The package requires Node.js 22.19.0 or later and ships as both ESM and
-CommonJS with TypeScript declarations. It has one runtime dependency,
-[`effect`](https://effect.website), which supplies the `Schema` module the
-`Canonical` codec is built on.
+While 1.0 is a release candidate the package publishes on the `next` dist-tag,
+so the `@next` suffix is part of the install command.
 
-The serializer itself is written in this package. It has no native bindings,
+[`effect`](https://effect.website) is a peer dependency, declared at exactly
+`4.0.0-rc.112`. Install it yourself at that version: it supplies the `Schema`
+module the `Canonical` codec is built on, the examples in these pages import
+`effect/Schema` and `effect/Effect` directly, and two copies of `effect` in one
+program are two sets of service tags. Effect 3 does not satisfy that peer
+dependency, and the schema APIs these pages use exist only in Effect 4.
+
+The package requires Node.js 22.19.0 or later and ships as both ESM and
+CommonJS with TypeScript declarations. The serializer has no native bindings,
 no platform layer, and no filesystem or network access, so it runs unchanged in
-Node.js, in Bun, and in a browser bundle. The package's own suite runs under
-both Node.js and Bun.
+Node.js, in Bun, and in a browser bundle.
 
 ## Import forms
 
@@ -54,8 +59,17 @@ documented as 10,000 levels in
 
 ## Use it with the rest of Smithers
 
-Most Smithers packages reach canonical JSON through a package that already
-depends on it, so you rarely add this one directly:
+If you already depend on [`@smthrs/flows`](https://flows.smithers.sh/reference/api/), the barrel for the
+whole durable flow engine, this package is its `Canonical` namespace and needs
+no separate install:
+
+```ts
+import { Canonical } from "@smthrs/flows"
+
+Canonical.canonicalize({ b: 2, a: 1 })
+```
+
+Several engine packages also wrap it behind a narrower surface:
 
 - [`@smthrs/keys`](https://keys.smithers.sh/reference/api/) derives a `key1_` flow key by canonicalizing key
   material and hashing it.
@@ -65,7 +79,7 @@ depends on it, so you rarely add this one directly:
   derivations hash with.
 
 Add `@smthrs/canonical` directly when you are computing your own digest and
-none of those fits.
+none of those fits, or when canonical JSON is all you want from Smithers.
 
 ## Next step
 

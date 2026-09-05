@@ -39,8 +39,8 @@ canonical form. The error names the failure with a stable
 [code](#canonicalerrorcode) and the JSON-style path of the offending value.
 
 ```ts
-canonicalize({ flowId: "build", input: { target: "//app:lib", clean: false } })
-// => '{"flowId":"build","input":{"clean":false,"target":"//app:lib"}}'
+canonicalize({ flowId: "build", input: { target: "web-app", clean: false } })
+// => '{"flowId":"build","input":{"clean":false,"target":"web-app"}}'
 ```
 
 ## Canonical
@@ -54,7 +54,9 @@ const Canonical: Schema.decodeTo<
 >
 ```
 
-The same serialization as an [`effect/Schema`](https://effect.website) codec.
+The same serialization as an [`effect/Schema`](https://effect.website) codec,
+built against Effect 4: the package declares `effect@4.0.0-rc.112` as a peer
+dependency.
 
 **Decoding** takes any value, canonicalizes it, verifies that the emitted
 document parses as JSON, and returns it branded. A value with no canonical form

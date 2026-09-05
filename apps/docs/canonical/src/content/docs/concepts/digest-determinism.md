@@ -32,7 +32,7 @@ Node.js host and a browser tab.
 
 ## What Smithers identifies this way
 
-Every content-addressed identity in the repository is a hash of a canonical
+Every content-addressed identity in Smithers is a hash of a canonical
 document:
 
 - **Flow keys.** [`@smthrs/keys`](https://keys.smithers.sh/reference/api/) canonicalizes key material and
@@ -46,10 +46,11 @@ document:
   [`@smthrs/control`](https://control.smithers.sh/reference/api/) digests plan cards so an approval binds to
   a plan, and compares capability envelopes by canonical bytes rather than by
   reference or member order.
-- **Authenticated metadata.** The control plane's credential cipher encodes
-  credential metadata as a canonical document and uses it as associated data.
-  Canonical JSON names and escapes each field, so two different metadata tuples
-  cannot authenticate as the same bytes by hiding a delimiter inside a value.
+- **Authenticated metadata.** The credential cipher in
+  [`@smthrs/control`](https://control.smithers.sh/reference/api/) encodes credential metadata as a canonical
+  document and passes it to AES-GCM as associated data. Canonical JSON names
+  and escapes each field, so two different metadata tuples cannot authenticate
+  as the same bytes by hiding a delimiter inside a value.
 
 Because those identities are persisted, the serialization is not an
 implementation detail. It is the format they were written in.
@@ -64,7 +65,7 @@ only works if canonicalizing a canonical document returns it unchanged:
 canonicalize(JSON.parse(canonicalize(value))) === canonicalize(value)
 ```
 
-The package proves this over generated values, including values built from
+That holds for every value the serializer accepts, including values built from
 hostile strings. It is the property that lets a consumer hash the document it
 received rather than the value it decoded.
 

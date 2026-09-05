@@ -20,9 +20,11 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Canonical": "./src/Canonical.ts",
+    "./index": "./src/index.ts",
+    "./Record": "./src/Record.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -41,13 +43,23 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Canonical": {
+        "types": "./dist/esm/Canonical.d.ts",
+        "import": "./dist/esm/Canonical.js",
+        "require": "./dist/cjs/Canonical.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./Record": {
+        "types": "./dist/esm/Record.d.ts",
+        "import": "./dist/esm/Record.js",
+        "require": "./dist/cjs/Record.js"
+      }
     }
   },
   "scripts": {
@@ -61,25 +73,25 @@
     "test:dist": "pnpm run build && node --test test/dist-smoke.mjs",
     "coverage": "vitest --coverage"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

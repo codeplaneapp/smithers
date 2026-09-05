@@ -248,6 +248,26 @@ describe("prototype-pollution property names", () => {
 })
 
 describe("recursion depth", () => {
+  it.each(["array", "object", "mixed"])(
+    "preserves all 10,000 levels of %s nesting through the public schema",
+    (kind) => {
+      let input: unknown = null
+      const opening: Array<string> = []
+      const closing: Array<string> = []
+      for (let index = 0; index < 10_000; index++) {
+        const array = kind === "array" || (kind === "mixed" && index % 2 === 0)
+        input = array ? [input] : { child: input }
+        opening.push(array ? "[" : "{\"child\":")
+        closing.push(array ? "]" : "}")
+      }
+      const expected = opening.reverse().join("") + "null" + closing.join("")
+      const document = serialize(input)
+      expect(document).toBe(expected)
+      // Exercise encoding and decoding again without a recursive test matcher.
+      expect(serialize(Schema.encodeUnknownSync(Canonical)(document))).toBe(expected)
+    }
+  )
+
   it("reports the deterministic 10,000-level bound", () => {
     // Restated 2026-08-31: the old host RangeError pin was nondeterministic.
     let input: unknown = "leaf"
