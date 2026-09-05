@@ -580,16 +580,12 @@ export class CallResult extends Schema.Class<CallResult>("flows/harness/Cell/Cal
      * does not classify it.
      */
     code: Schema.optional(CallFailureCode)
-  }).check(Schema.makeFilter(
-    (result) => result.outcome !== "success" || result.code === undefined,
-    {
-      // Sealed action keys persist the result schema. Opaque checks need a
-      // stable identity as well as their runtime predicate.
-      representation: { id: "flows/harness/Cell/CallResult/success-without-failure-code/v1", payload: null }
-    }
-  ))
+  })
 ) {
   constructor(props: CallResultVariant, options?: Schema.MakeOptions) {
+    // The encoded schema is the durable wire contract used in sealed keys.
+    // Refining its AST would re-key valid recorded results. Admission checks
+    // belong here and in decodeCallResult, which also revalidates instances.
     super(CallResultVariant.make(props), options)
   }
 }

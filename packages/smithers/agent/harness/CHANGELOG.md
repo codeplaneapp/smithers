@@ -11,6 +11,13 @@
   new run; rc.0 does not promise journal compatibility. Historical transcript
   display remains available and renders summaries as user messages.
 
+### Fixed
+
+- Keep `Cell.CallResult`'s historical encoded schema identity while validating
+  success/failure invariants in the constructor and boundary decoder. Adding
+  the redundant schema filter had changed every agent sealed cell-call key.
+  Valid recorded results retain their keys; malformed records still fail.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 The first published release of this package. `0.1.0` was never published; the

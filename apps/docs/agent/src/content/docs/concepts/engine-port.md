@@ -48,6 +48,31 @@ tree is folded into the key too: "the same command against the tree this run
 opened on" is a different question from "the same command against the tree as
 it stands".
 
+## Persisted cell-call identity
+
+The sealed cell-call wire contract retains its existing identity: SHA-256
+`key1_` keys for both the inner content key and the engine action key, and the
+`flows/agent/composition/v1` composition token. The action has no separate
+`implementationVersion` field in this historical contract. Adding one is a
+version cutover, not an implicit upgrade of a persisted run.
+
+`Cell.CallResult` keeps the encoded result schema that these keys originally
+hashed. Its constructor and `Cell.decodeCallResult` validate success/failure
+invariants without adding admission predicates to that wire schema's identity.
+The port validates host results before persisting them, including class
+instances mutated after construction, and reports a typed cause on rejection.
+This preserves valid settled results while refusing malformed records. The
+agent tests pin the full canonical material and reopen a SQLite execution
+written with the historical schema, then resume it without repeating the call.
+
+A semantic change to valid results, action behavior, or key material requires
+an explicit version and a newly planned run. Keep old executions on a compatible
+writer and retain their recorded keys and approvals. No decoder re-keys stored
+history. Builds containing the intermediate
+`success-without-failure-code/v1` schema filter derived different keys; finish
+any executions written by those builds with the same build before upgrading.
+There is no translation from those intermediate keys.
+
 ## Composition identity
 
 `Options.layers` is the resolved layer stack and plugin list the host actually

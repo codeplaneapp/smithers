@@ -4,6 +4,14 @@
 
 ### Changed
 
+- Preserve the sealed cell-call key and encoded result schema from before A2
+  admission hardening. Success/failure validation remains at construction and
+  decoding, and the port validates host results before persistence with typed
+  causes. The pre-A2 golden `key1_8ab29627...` is unchanged, with canonical
+  material and SQLite reopen/resume regressions. Intermediate builds with the
+  result-schema filter require finishing their runs on that build; no stored
+  key or approval is rewritten.
+
 - Approval asks now read the explicit durable `Approved` or `Denied` token
   instead of inferring a decision from grants. Pending or unreadable decisions
   fail closed; denial still returns `approved: false` to the caller.

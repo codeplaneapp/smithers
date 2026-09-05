@@ -1,0 +1,408 @@
+{
+  "boundary": {
+    "boundaryMode": "hard",
+    "readSet": [],
+    "writeSet": []
+  },
+  "environment": {
+    "capabilities": {},
+    "layers": [
+      "golden-host-layer",
+      "flows/agent/composition/v1:5a7cbf057443ad66106249bebe80895969e4a5b2c4aa0a46fbbb77b8f80983b8"
+    ]
+  },
+  "form": "declared",
+  "input": {
+    "action": "harness/cell-call/fs/write",
+    "declaration": {
+      "error": {
+        "references": {
+          "/harness/HarnessErrorEncoded": {
+            "_tag": "Objects",
+            "annotations": {
+              "~identifier": "/harness/HarnessError"
+            },
+            "checks": [],
+            "indexSignatures": [],
+            "propertySignatures": [
+              {
+                "isMutable": false,
+                "isOptional": false,
+                "name": {
+                  "type": "string",
+                  "value": "_tag"
+                },
+                "type": {
+                  "_tag": "Literal",
+                  "checks": [],
+                  "literal": {
+                    "type": "string",
+                    "value": "/harness/HarnessError"
+                  }
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": false,
+                "name": {
+                  "type": "string",
+                  "value": "code"
+                },
+                "type": {
+                  "_tag": "Union",
+                  "checks": [],
+                  "mode": "anyOf",
+                  "types": [
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "assembly_failed"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "incompatible_journal"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "render_failed"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "projection_failed"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "model_failed"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "engine_failed"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "read_only_cap"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "aborted"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "suspended"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": false,
+                "name": {
+                  "type": "string",
+                  "value": "message"
+                },
+                "type": {
+                  "_tag": "String",
+                  "checks": []
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": true,
+                "name": {
+                  "type": "string",
+                  "value": "cause"
+                },
+                "type": {
+                  "_tag": "Union",
+                  "checks": [],
+                  "mode": "anyOf",
+                  "types": [
+                    {
+                      "_tag": "Declaration",
+                      "annotations": {
+                        "expected": "JSON value"
+                      },
+                      "checks": [],
+                      "representation": {
+                        "id": "effect/schema/Json",
+                        "payload": null
+                      },
+                      "typeParameters": []
+                    },
+                    {
+                      "_tag": "Undefined",
+                      "checks": []
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "representation": {
+          "$ref": "/harness/HarnessErrorEncoded",
+          "_tag": "Reference"
+        }
+      },
+      "success": {
+        "references": {
+          "flows/harness/Cell/CallResultEncoded": {
+            "_tag": "Objects",
+            "annotations": {
+              "~identifier": "flows/harness/Cell/CallResult"
+            },
+            "checks": [],
+            "indexSignatures": [],
+            "propertySignatures": [
+              {
+                "isMutable": false,
+                "isOptional": false,
+                "name": {
+                  "type": "string",
+                  "value": "outcome"
+                },
+                "type": {
+                  "_tag": "Union",
+                  "checks": [],
+                  "mode": "anyOf",
+                  "types": [
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "success"
+                      }
+                    },
+                    {
+                      "_tag": "Literal",
+                      "checks": [],
+                      "literal": {
+                        "type": "string",
+                        "value": "failure"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": false,
+                "name": {
+                  "type": "string",
+                  "value": "value"
+                },
+                "type": {
+                  "_tag": "Declaration",
+                  "annotations": {
+                    "expected": "JSON value"
+                  },
+                  "checks": [],
+                  "representation": {
+                    "id": "effect/schema/Json",
+                    "payload": null
+                  },
+                  "typeParameters": []
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": true,
+                "name": {
+                  "type": "string",
+                  "value": "message"
+                },
+                "type": {
+                  "_tag": "Union",
+                  "checks": [],
+                  "mode": "anyOf",
+                  "types": [
+                    {
+                      "_tag": "String",
+                      "checks": []
+                    },
+                    {
+                      "_tag": "Undefined",
+                      "checks": []
+                    }
+                  ]
+                }
+              },
+              {
+                "isMutable": false,
+                "isOptional": true,
+                "name": {
+                  "type": "string",
+                  "value": "code"
+                },
+                "type": {
+                  "_tag": "Union",
+                  "checks": [],
+                  "mode": "anyOf",
+                  "types": [
+                    {
+                      "_tag": "Union",
+                      "checks": [],
+                      "mode": "anyOf",
+                      "types": [
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "unknown_flow"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "capability_refused"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "truncated_write"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "declaration_changed"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "invalid_input"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "unimplemented"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "timeout"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "run_completed"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "checkpoint_unavailable"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "checkpoint_exhausted"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "checkpoint_readonly"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "checkpoint_unsupported"
+                          }
+                        },
+                        {
+                          "_tag": "Literal",
+                          "checks": [],
+                          "literal": {
+                            "type": "string",
+                            "value": "flow_failed"
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "_tag": "Undefined",
+                      "checks": []
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "representation": {
+          "$ref": "flows/harness/Cell/CallResultEncoded",
+          "_tag": "Reference"
+        }
+      }
+    },
+    "idempotencyKey": "key1_6896594bad61200c4959230649a359bbf2e575421091d7fb01a65641f5993cc0"
+  },
+  "kind": "cache"
+}

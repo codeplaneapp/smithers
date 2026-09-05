@@ -944,7 +944,10 @@ export const make = (
           tier: decoded.effects.tier,
           idempotencyKey: key,
           metadata: callBoundary(decoded),
-          execute: calls.run(decoded)
+          // Admission is separate from the schema whose representation is
+          // durable key material. Validate before persistence, including
+          // instances a host mutated after construction, with a typed cause.
+          execute: calls.run(decoded).pipe(Effect.tap(Cell.decodeCallResult))
         })
       }).pipe(Effect.provide(context))
 

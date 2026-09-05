@@ -452,13 +452,19 @@ Valid current records retain their JSON representation, including failures
 whose code is absent. `CellValidation.Validation` likewise separates compiled
 source from rejection so the two cannot be supplied together.
 
-Value compatibility does not establish identical schema-derived step keys.
-The stricter result schema has a versioned representation identity. A host
-that includes result schemas in sealed keys must version its key contract and
-drain old writers before adopting it. Existing approvals and recorded keys
-remain bound to their original bytes; no decoder translates those identities.
-The current-record fixtures prove value decoding, not an in-place upgrade of
-every host's running execution.
+`Cell.CallResult` retains its historical encoded schema representation because
+the agent hashes that representation into sealed keys. The constructor and
+boundary decoder enforce the success/failure invariants; admission hardening
+does not re-key valid results. The agent pins the complete key material and
+tests a historical result through SQLite close, reopen and resume.
+
+Changing the valid wire contract still requires a version cutover and a newly
+planned run. Existing approvals and recorded keys remain bound to their
+original bytes; no decoder translates identities. Intermediate builds that
+added the `success-without-failure-code/v1` filter to the encoded schema derived
+different keys. Finish their executions on the same build before upgrading.
+See the agent's [persisted cell-call identity](https://agent.smithers.sh/concepts/engine-port/#persisted-cell-call-identity)
+for the retained algorithm and composition versions.
 
 **Checkpoints.** `Cell.baseCheckpoint` is `"base"`, the id naming the tree a
 run opened on, pinned for free and always present. `Cell.checkpoint(id)`
