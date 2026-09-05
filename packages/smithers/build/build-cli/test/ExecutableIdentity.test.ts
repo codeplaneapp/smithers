@@ -1,0 +1,379 @@
+/**
+ * Executable identity at the real workspace, process, and cache seams.
+ *
+ * @since 0.1.0
+ */
+import * as ChildProcess from "node:child_process"
+import * as Fs from "node:fs/promises"
+import * as Os from "node:os"
+import * as Path from "node:path"
+import { afterEach, describe, expect, it } from "vitest"
+import { makeCli, normalizeArgv } from "../src/Cli.ts"
+import * as PackageDiscovery from "../src/PackageDiscovery.ts"
+import * as PackageExec from "../src/PackageExec.ts"
+import { PackageIndex } from "../src/PackageIndex.ts"
+import * as PackageLoader from "../src/PackageLoader.ts"
+
+const temporary: Array<string> = []
+const originalPath = process.env["PATH"]
+afterEach(async () => {
+  process.env["PATH"] = originalPath
+  await Promise.all(temporary.splice(0).map((root) => Fs.rm(root, { recursive: true, force: true })))
+})
+const directory = async (): Promise<string> => {
+  const root = await Fs.realpath(await Fs.mkdtemp(Path.join(Os.tmpdir(), "smthrs-identity-")))
+  temporary.push(root)
+  return root
+}
+const write = async (root: string, path: string, text: string): Promise<void> => {
+  const file = Path.join(root, path)
+  await Fs.mkdir(Path.dirname(file), { recursive: true })
+  await Fs.writeFile(file, text, { mode: 0o755 })
+}
+const fixture = async (target: string, extra = ""): Promise<{ root: string; tools: string }> => {
+  const root = await directory()
+  const tools = await directory()
+  process.env["PATH"] = `${tools}${Path.delimiter}${originalPath ?? ""}`
+  await write(
+    root,
+    "WORKSPACE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+const packageJson = S.file("//package.json")
+export const Workspace = S.Workspace("identity", {
+  repository: "git+https://example.invalid/identity.git",
+  cache: S.Cache({ directory: ".flows" }),
+  runtime: S.Runtime.Node({ version: "24" }),
+  packageManager: S.PackageManager.Yarn({ manifest: packageJson, lockfile: S.file("//yarn.lock") }),
+  nodeModules: S.Npm.NodeModules({ packageJson }),
+  host: S.Host({ bins: ["identity-compiler"] }),
+  ${extra}
+})`
+  )
+  await write(
+    root,
+    "PACKAGE.ts",
+    `import { Smithers as S } from "@smthrs/targets"
+export const Package = S.Package({ targets: { dist: ${target} } })`
+  )
+  for (
+    const args of [["init", "-q"], ["add", "-A"], [
+      "-c",
+      "user.email=t@t.t",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-qm",
+      "fixture"
+    ]]
+  ) {
+    ChildProcess.execFileSync("git", ["-C", root, ...args])
+  }
+  return { root, tools }
+}
+const serve = async (root: string) => {
+  let exitCode = 0, output = "", logs = ""
+  const previous = process.stderr.write
+  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
+    logs += String(chunk)
+    return true
+  }) as typeof process.stderr.write
+  try {
+    await makeCli({}).serve([...normalizeArgv(["//:dist"]), "--workspace", root], {
+      exit: (code) => {
+        exitCode = code
+      },
+      stdout: (text) => {
+        output += text
+      }
+    })
+  } finally {
+    process.stderr.write = previous
+  }
+  expect(exitCode, logs + output).toBe(0)
+  return logs
+}
+const compiler = (tools: string, value: string): string =>
+  `#!/bin/sh
+if [ "$1" = --version ] || [ "$2" = --version ]; then echo 1.0.0; exit 0; fi
+printf 'dispatch\\n' >> '${tools}/dispatches'
+mkdir -p dist
+printf '${value}' > dist/value
+`
+const assertReplacement = async (root: string, tools: string, replace: () => Promise<void>) => {
+  expect(await serve(root)).toContain("//:dist  ran")
+  expect(await Fs.readFile(Path.join(root, "dist/value"), "utf8")).toBe("first")
+  expect(await serve(root)).toContain("//:dist  hit")
+  await replace()
+  expect(await serve(root)).toContain("//:dist  ran")
+  expect(await Fs.readFile(Path.join(tools, "dispatches"), "utf8")).toBe("dispatch\ndispatch\n")
+  expect(await Fs.readFile(Path.join(root, "dist/value"), "utf8")).toBe("second")
+}
+
+describe("executable cache identity", () => {
+  it("misses after replacing a declared host executable at the same path and version", async () => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+    )
+    await write(tools, "identity-compiler", compiler(tools, "first"))
+    await assertReplacement(root, tools, () => write(tools, "identity-compiler", compiler(tools, "second")))
+  })
+
+  it.each(["direct", "env", "env-split"])(
+    "misses after replacing the %s shebang interpreter behind a symlink",
+    async (kind) => {
+      const { root, tools } = await fixture(
+        "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+      )
+      const interpreter = kind === "direct"
+        ? `${tools}/identity-interpreter`
+        : `/usr/bin/env ${kind === "env-split" ? "-S " : ""}identity-interpreter`
+      await write(tools, "identity-compiler", `#!${interpreter}\n# The interpreter supplies the compiler behavior.\n`)
+      const install = async (value: string): Promise<void> => {
+        if (kind !== "direct") return write(tools, "interpreter", compiler(tools, value))
+        // macOS does not accept a script as the direct shebang interpreter.
+        // Compile a real executable so this fixture exercises the kernel seam.
+        await write(
+          tools,
+          "interpreter.c",
+          `#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+int main(int argc, char **argv) {
+  for (int i = 1; i < argc; i++) if (strcmp(argv[i], "--version") == 0) { puts("1.0.0"); return 0; }
+  FILE *calls = fopen(${JSON.stringify(Path.join(tools, "dispatches"))}, "a");
+  fputs("dispatch\\n", calls); fclose(calls);
+  mkdir("dist", 0755);
+  FILE *out = fopen("dist/value", "w"); fputs(${JSON.stringify(value)}, out); fclose(out);
+  return 0;
+}`
+        )
+        ChildProcess.execFileSync("cc", [Path.join(tools, "interpreter.c"), "-o", Path.join(tools, "interpreter")], {
+          timeout: 60_000
+        })
+      }
+      await install("first")
+      await Fs.symlink("interpreter", Path.join(tools, "identity-interpreter"))
+      await assertReplacement(root, tools, () => install("second"))
+    }
+  )
+
+  it.each(["Nextest", "Deny"])("misses after replacing the Cargo.%s plugin at the same version", async (rule) => {
+    const name = `cargo-${rule.toLowerCase()}`
+    const { root, tools } = await fixture(
+      `S.Cargo.${rule}({ ${
+        rule === "Nextest" ? "workspace: true," : "config: S.file(\"//deny.toml\"),"
+      } sandbox: "none" })`,
+      "toolchains: [S.Rust.Toolchain({ workspace: S.file(\"//Cargo.toml\"), cargo: \"cargo\", channel: \"stable\" })],"
+    )
+    await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
+    await write(root, "deny.toml", "")
+    await write(
+      tools,
+      "cargo",
+      `#!/bin/sh\nif [ "$1" = --version ]; then echo cargo-1; exit 0; fi\nexec ${name} "$@"\n`
+    )
+    await write(tools, name, compiler(tools, "first"))
+    await assertReplacement(root, tools, () => write(tools, name, compiler(tools, "second")))
+  })
+  it("misses after replacing the Go toolchain selected by a stable launcher", async () => {
+    const { root, tools } = await fixture("S.Shell.Build({ bin: S.Go.bin, outDirs: [\"dist\"], sandbox: \"none\" })")
+    await write(
+      tools,
+      "go",
+      `#!/bin/sh
+if [ "$1" = version ]; then echo go1.26.0; exit 0; fi
+if [ "$1" = env ]; then printf '{"GOROOT":"${tools}/sdk","GOTOOLDIR":"${tools}/sdk/pkg/tool"}'; exit 0; fi
+exec '${tools}/sdk/bin/go' "$@"
+`
+    )
+    await write(tools, "sdk/bin/go", compiler(tools, "first"))
+    await Fs.mkdir(Path.join(tools, "sdk/pkg/tool"), { recursive: true })
+    await assertReplacement(root, tools, () => write(tools, "sdk/bin/go", compiler(tools, "second")))
+  })
+
+  it("misses after replacing the rustup-selected cargo behind an unchanged proxy", async () => {
+    const { root, tools } = await fixture(
+      "S.Cargo.Test({ workspace: true, sandbox: \"none\" })",
+      "toolchains: [S.Rust.Toolchain({ workspace: S.file(\"//Cargo.toml\"), channel: \"stable\" })],"
+    )
+    await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
+    await write(root, "deny.toml", "")
+    await write(
+      tools,
+      "rustup",
+      `#!/bin/sh
+if [ "$1" = which ]; then printf '%s/sdk/%s' '${tools}' "$4"; exit 0; fi
+if [ "$1" = --version ]; then echo cargo-1; exit 0; fi
+exec '${tools}/sdk/cargo' "$@"
+`
+    )
+    await Fs.symlink("rustup", Path.join(tools, "cargo"))
+    await write(tools, "sdk/cargo", compiler(tools, "first"))
+    await write(tools, "sdk/rustc", "#!/bin/sh\nexit 0\n")
+    await assertReplacement(root, tools, () => write(tools, "sdk/cargo", compiler(tools, "second")))
+  })
+
+  it("follows a host executable symlink and rehashes its target on every run", async () => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+    )
+    await write(tools, "implementation", compiler(tools, "first"))
+    await Fs.symlink("implementation", Path.join(tools, "identity-compiler"))
+    await assertReplacement(root, tools, () => write(tools, "implementation", compiler(tools, "second")))
+  })
+
+  it("keys the installed NodeModule.Bin entry bytes even when the manifest and lockfile stay fixed", async () => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ bin: S.NodeModule.Bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+    )
+    await write(
+      root,
+      "node_modules/identity-compiler/package.json",
+      JSON.stringify({ name: "identity-compiler", version: "1.0.0", bin: "cli" })
+    )
+    await write(root, "node_modules/identity-compiler/cli", compiler(tools, "first"))
+    await Fs.mkdir(Path.join(root, "node_modules/.bin"), { recursive: true })
+    await Fs.symlink("../identity-compiler/cli", Path.join(root, "node_modules/.bin/identity-compiler"))
+    await assertReplacement(
+      root,
+      tools,
+      () => write(root, "node_modules/identity-compiler/cli", compiler(tools, "second"))
+    )
+  })
+
+  it.each(["shell", "generate"])("keys the %s TargetBin after its producer executes", async (kind) => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ command: \"true\", outDirs: [\"dist\"], sandbox: \"none\" })",
+      "toolchains: [S.Rust.Toolchain({ workspace: S.file(\"//Cargo.toml\"), cargo: \"cargo\", channel: \"stable\" })],"
+    )
+    await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
+    await write(
+      tools,
+      "cargo",
+      `#!/bin/sh
+if [ "$1" = --version ]; then echo 1.0.0; exit 0; fi
+mkdir -p target/debug
+cp '${tools}/compiled' target/debug/compiler
+chmod +x target/debug/compiler
+`
+    )
+    await write(tools, "compiled", compiler(tools, "first"))
+    const target = kind === "shell"
+      ? "S.Shell.Build({ bin: producer, outDirs: [\"dist\"], sandbox: \"none\" })"
+      : "S.Generate({ bin: producer, changes: [\"dist/value\"], sandbox: \"none\" })"
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+const producer = S.Cargo.Build({ workspace: true, bins: ["compiler"], sandbox: "none" })
+export const Package = S.Package({ targets: { producer, dist: ${target} } })`
+    )
+    if (kind === "shell") {
+      await assertReplacement(root, tools, () => write(tools, "compiled", compiler(tools, "second")))
+    } else {
+      // Check mode records a verdict. The initial generator is a no-op; the
+      // replacement must run and detect drift even though its producer key is unchanged.
+      await write(tools, "compiled", "#!/bin/sh\nexit 0\n")
+      expect(await serve(root)).toContain("//:dist  ran")
+      expect(await serve(root)).toContain("//:dist  hit")
+      await write(tools, "compiled", "#!/bin/sh\nexit 7\n")
+      const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+      const options = {
+        index: PackageIndex.make(loaded),
+        pattern: "//:dist",
+        cacheDirectory: ".flows",
+        verb: "auto" as const
+      }
+      const result = await PackageExec.run(options)
+      expect("ok" in result && result.ok).toBe(false)
+    }
+  })
+
+  it.each(["cold", "warm"])("refuses a host tool replaced after planning before a %s cache lookup", async (cache) => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+    )
+    await write(tools, "identity-compiler", compiler(tools, "first"))
+    if (cache === "warm") await serve(root)
+    const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+    const options = {
+      index: PackageIndex.make(loaded),
+      pattern: "//:dist",
+      cacheDirectory: ".flows",
+      verb: "auto" as const
+    }
+    const planned = await PackageExec.plan(options)
+    await write(tools, "identity-compiler", compiler(tools, "second"))
+    const result = await PackageExec.execute(planned, options)
+    expect(result.ok).toBe(false)
+    expect(JSON.stringify(result)).toContain("executable changed since planning")
+    expect(await serve(root)).toContain("//:dist  ran")
+    expect(await Fs.readFile(Path.join(root, "dist/value"), "utf8")).toBe("second")
+  })
+
+  it("does not cache a self-replacement during execution", async () => {
+    const { root, tools } = await fixture(
+      "S.Shell.Build({ bin: S.Host.bin(\"identity-compiler\"), outDirs: [\"dist\"], sandbox: \"none\" })"
+    )
+    const script = compiler(tools, "first") + `cp '${tools}/replacement' '${tools}/identity-compiler'\n`
+    await write(tools, "replacement", compiler(tools, "second"))
+    await write(tools, "identity-compiler", script)
+    const loaded = await PackageLoader.load(await PackageDiscovery.discover(root))
+    const options = {
+      index: PackageIndex.make(loaded),
+      pattern: "//:dist",
+      cacheDirectory: ".flows",
+      verb: "auto" as const
+    }
+    const result = await PackageExec.run(options)
+    expect("ok" in result && result.ok).toBe(false)
+    expect(JSON.stringify(result)).toContain("executable changed since planning")
+    // Restoring the original bytes must not find a result published by the
+    // run that replaced them. Both attempts execute and refuse publication.
+    await write(tools, "identity-compiler", script)
+    const repeated = await PackageExec.run(options)
+    expect("ok" in repeated && repeated.ok).toBe(false)
+    expect(await Fs.readFile(Path.join(tools, "dispatches"), "utf8")).toBe("dispatch\ndispatch\n")
+  })
+  it.each(["go", "rust"])("keys the %s toolchain selected by the target environment", async (kind) => {
+    const { root, tools } = await fixture(
+      kind === "go"
+        ? "S.Shell.Build({ bin: S.Go.bin, env: { GOTOOLCHAIN: \"alternate\" }, outDirs: [\"dist\"], sandbox: \"none\" })"
+        : "S.Cargo.Test({ workspace: true, env: { RUSTUP_TOOLCHAIN: \"alternate\" }, sandbox: \"none\" })",
+      kind === "go"
+        ? ""
+        : "toolchains: [S.Rust.Toolchain({ workspace: S.file(\"//Cargo.toml\"), channel: \"stable\" })],"
+    )
+    await write(root, "Cargo.toml", "[workspace]\nmembers = []\n")
+    const executable = kind === "go" ? "bin/go" : "cargo"
+    for (const sdk of ["stable", "alternate"]) {
+      await write(tools, `${sdk}/${executable}`, compiler(tools, "first"))
+      await write(tools, `${sdk}/rustc`, "#!/bin/sh\nexit 0\n")
+      await Fs.mkdir(Path.join(tools, sdk, "pkg/tool"), { recursive: true })
+    }
+    if (kind === "go") {
+      await write(
+        tools,
+        "go",
+        `#!/bin/sh
+sdk='${tools}/'\${GOTOOLCHAIN:-stable}
+if [ "$1" = version ]; then echo 1.0.0; exit 0; fi
+if [ "$1" = env ]; then printf '{"GOROOT":"%s","GOTOOLDIR":"%s/pkg/tool"}' "$sdk" "$sdk"; exit 0; fi
+exec "$sdk/bin/go" "$@"
+`
+      )
+    } else {
+      await write(
+        tools,
+        "rustup",
+        `#!/bin/sh
+if [ "$1" = which ]; then printf '%s/%s/%s' '${tools}' "$3" "$4"; exit 0; fi
+if [ "$1" = --version ]; then echo 1.0.0; exit 0; fi
+exec '${tools}/'\${RUSTUP_TOOLCHAIN:-stable}/cargo "$@"
+`
+      )
+      await Fs.symlink("rustup", Path.join(tools, "cargo"))
+    }
+    await assertReplacement(root, tools, () => write(tools, `alternate/${executable}`, compiler(tools, "second")))
+  })
+})

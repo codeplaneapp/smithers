@@ -389,6 +389,8 @@ export interface PackageNode extends Planner.PlannedTarget {
   readonly sandbox: "none" | { readonly network?: boolean | "loopback" | undefined } | undefined
   readonly secrets: ReadonlyArray<Secret.HttpCredential>
   readonly argv: ReadonlyArray<string> | undefined
+  /** Tool outputs are identified after their producers settle, before cache lookup. */
+  readonly targetExecutablePaths?: ReadonlyArray<string>
   /** Shell.Test fan-out count; each shard owns a distinct key and execution. */
   readonly shards: number
   /** Declaration-specific process timeout, already reduced to milliseconds. */
@@ -658,6 +660,7 @@ interface PlanContext {
    */
   readonly workspaceToolchain: WorkspaceToolchain.WorkspaceToolchain
   readonly tools: Map<string, ToolOutcome>
+  /** One plan's byte reads only; every invocation allocates a fresh map. */
   readonly toolBytes: Map<string, Promise<string>>
   readonly probes: Map<string, PackageTree.Probe>
   readonly nodes: Map<string, PackageNode>
@@ -853,8 +856,13 @@ const probeOnce = async (context: PlanContext, path: string): Promise<PackageTre
   return probe
 }
 
-const binaryIdentity = async (context: PlanContext, path: string): Promise<unknown> => {
+const binaryIdentity = async (
+  context: Pick<PlanContext, "root" | "toolBytes" | "environment">,
+  path: string,
+  ancestors: ReadonlySet<string> = new Set()
+): Promise<unknown> => {
   const resolved = await Fs.realpath(path)
+  if (ancestors.has(resolved)) throw new Error(`cyclic executable interpreter: ${path}`)
   let digest = context.toolBytes.get(resolved)
   if (digest === undefined) {
     digest = PackageTree.digestFileBytes(resolved)
@@ -862,12 +870,55 @@ const binaryIdentity = async (context: PlanContext, path: string): Promise<unkno
   }
   // Workspace installations stay relocatable; a host path selects a specific
   // installation, whose bytes can change without its version string changing.
-  const relative = Path.containedRelative(context.root, resolved)
+  const portable = (file: string): string => {
+    const relative = Path.containedRelative(context.root, file)
+    return relative === undefined ? file : `${workspaceRootToken}/${posix(relative)}`
+  }
+  const interpreters: Array<unknown> = []
+  // The kernel follows the shebang, and env then resolves its command on
+  // PATH. Hashing only the script misses both executable dependencies.
+  const handle = await Fs.open(resolved, "r")
+  let header: string
+  try {
+    const buffer = Buffer.alloc(4096)
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+    header = buffer.subarray(0, bytesRead).toString("utf8").split("\n", 1)[0]!
+  } finally {
+    await handle.close()
+  }
+  const shebang = /^#!\s*(\S+)(?:\s+(.*))?$/.exec(header)
+  if (shebang !== null) {
+    const interpreter = shebang[1]!
+    const next = new Set([...ancestors, resolved])
+    interpreters.push(await binaryIdentity(context, interpreter, next))
+    if (NodePath.basename(interpreter) === "env") {
+      const args = (shebang[2] ?? "").trim().replace(/^(?:-S\s+|--split-string=)/, "")
+      const command = /^([A-Za-z0-9_./+-]+)(?:\s|$)/.exec(args)?.[1]
+      if (command === undefined || command.startsWith("-") || command.includes("=")) {
+        throw new Error(`cannot identify env shebang interpreter: ${path}`)
+      }
+      const selected = NodePath.isAbsolute(command) ? command : PackageTree.findOnPath(command, context.environment)
+      if (selected === undefined) throw new Error(`shebang interpreter ${JSON.stringify(command)} is not on PATH`)
+      interpreters.push(await binaryIdentity(context, selected, next))
+    }
+  }
   return {
-    path: relative === undefined ? resolved : `${workspaceRootToken}/${posix(relative)}`,
-    digest: await digest
+    _tag: "Executable",
+    source: portable(path),
+    path: portable(resolved),
+    digest: await digest,
+    interpreters
   }
 }
+
+/** Both explicit Go references and Go rules identify the selected SDK, not just its launcher. */
+const goIdentity = async (
+  context: PlanContext,
+  resolved: Extract<Awaited<ReturnType<typeof GoExec.resolveGo>>, { readonly ok: true }>
+): Promise<unknown> => ({
+  resolution: resolved.identity,
+  executables: await Promise.all(resolved.executables.map((path) => binaryIdentity(context, path)))
+})
 
 const moduleVersion = async (root: string, packageName: string): Promise<string | null> => {
   try {
@@ -1153,13 +1204,21 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
     }
   } else if (tag === "GoBin" || tag === "GoRun") {
-    const resolved = await GoExec.resolveGo({ root: context.root, packagePath: "", workspace: context.index.workspace })
+    const resolved = await GoExec.resolveGo({
+      root: context.root,
+      packagePath: "",
+      workspace: context.index.workspace,
+      environment: context.environment
+    })
     outcome = resolved.ok
       ? {
         _tag: "resolved",
         tool: {
           path: resolved.path,
-          identity: { ...resolved.identity as object, ...(tag === "GoRun" ? { spec: reference["spec"] } : {}) }
+          identity: {
+            ...await goIdentity(context, resolved) as object,
+            ...(tag === "GoRun" ? { spec: reference["spec"] } : {})
+          }
         }
       }
       : { _tag: "refused", tool: { refusal: resolved.refusal, identity: resolved.identity } }
@@ -1204,6 +1263,33 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
         }
       } else {
         const probe = await probeOnce(context, path)
+        const rustup = NodePath.isAbsolute(layer.rustup)
+          ? layer.rustup
+          : PackageTree.findOnPath(layer.rustup, context.environment)
+        const components: Array<unknown> = []
+        if (rustup !== undefined) {
+          components.push(await binaryIdentity(context, rustup))
+          // Cargo is commonly a hard link to the rustup proxy. The proxy's
+          // bytes and version do not identify the selected compiler tools.
+          const channel = context.environment["RUSTUP_TOOLCHAIN"] ?? layer.channel
+          for (const name of ["cargo", "rustc", "cargo-clippy", "clippy-driver", "cargo-fmt", "rustfmt"]) {
+            const selected = await PackageTree.probeVersion(rustup, {
+              cwd: context.root,
+              args: ["which", ...(channel === undefined ? [] : ["--toolchain", channel]), name],
+              environment: context.environment
+            })
+            const selectedPath = selected.output.trim()
+            if (selected.exitCode === 0 && NodePath.isAbsolute(selectedPath) && NodeFs.existsSync(selectedPath)) {
+              components.push({ name, binary: await binaryIdentity(context, selectedPath) })
+            } else {
+              // Optional components may be uninstalled. Their absence is key
+              // material; Cargo reports a missing required component on use.
+              components.push({ name, absent: true })
+            }
+          }
+        }
+        // Without rustup this is a standalone Cargo installation. Its own
+        // executable is hashed below; no rustup-selected SDK exists to key.
         outcome = {
           _tag: "resolved",
           tool: {
@@ -1211,6 +1297,7 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
             identity: {
               tag: "CargoBin",
               toolchain: RustToolchain.toolchainIdentity(layer),
+              components,
               path,
               probe: { exitCode: probe.exitCode, output: probe.output }
             }
@@ -1565,7 +1652,19 @@ const visit = async (
 
   // Tool resolution. Everything resolved here is key material; an invalid
   // declaration is recorded on the node and fails execution with its reason.
+  // A target can select another SDK or shebang interpreter through env.
+  // Keep those resolutions separate while sharing this plan's byte memo.
+  const declaredToolEnvironment = attrMember(attrs, "env")
+  const toolContext = typeof declaredToolEnvironment === "object" && declaredToolEnvironment !== null
+    ? {
+      ...context,
+      environment: { ...context.environment, ...declaredToolEnvironment as Record<string, string> },
+      tools: new Map<string, ToolOutcome>(),
+      probes: new Map<string, PackageTree.Probe>()
+    }
+    : context
   const toolchain: Array<unknown> = []
+  const targetExecutablePaths: Array<string> = []
   let refusal: string | undefined
   const noteRefusal = (message: string): void => {
     refusal ??= message
@@ -1643,7 +1742,7 @@ const visit = async (
   const resolveToken = async (entry: string): Promise<string> => {
     if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
       const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
-      const outcome = await resolveTool(context, reference)
+      const outcome = await resolveTool(toolContext, reference)
       toolchain.push(outcome.tool.identity)
       if (outcome._tag === "refused") {
         noteRefusal(outcome.tool.refusal)
@@ -1674,7 +1773,7 @@ const visit = async (
       return resolved
     }
     if (entry === Shell.bunToken) {
-      const outcome = await resolveBun(context)
+      const outcome = await resolveBun(toolContext)
       toolchain.push(outcome.tool.identity)
       if (outcome._tag === "refused") {
         noteRefusal(outcome.tool.refusal)
@@ -1800,7 +1899,7 @@ const visit = async (
       if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
         const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
         if (reference["_tag"] === "GoRun") {
-          const outcome = await resolveTool(context, reference)
+          const outcome = await resolveTool(toolContext, reference)
           toolchain.push(outcome.tool.identity)
           if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
           else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
@@ -1810,10 +1909,10 @@ const visit = async (
       resolved.push(await resolveToken(entry))
     }
     if (shellAttrs.bun !== undefined) {
-      const bun = await resolveBun(context)
+      const bun = await resolveBun(toolContext)
       const consts: Record<string, string> = {}
       for (const [name, reference] of Object.entries(shellAttrs.using ?? {})) {
-        const outcome = await resolveTool(context, reference as Record<string, unknown>)
+        const outcome = await resolveTool(toolContext, reference as Record<string, unknown>)
         toolchain.push({ slot: `using:${name}`, identity: outcome.tool.identity })
         if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
         else consts[name] = outcome.tool.path
@@ -1846,6 +1945,9 @@ const visit = async (
       if ("problem" in executable) noteRefusal(executable.problem)
       else {
         toolchain.push({ tag: "TargetBin", label: labelOf(context, shellAttrs.bin), path: executable.path })
+        // The producer key alone cannot identify an uncacheable Cargo.Build
+        // output. Hash the produced executable after that dependency settles.
+        targetExecutablePaths.push(executable.path)
         for (const [index, entry] of resolved.entries()) {
           if (entry === Shell.targetBinToken) resolved[index] = `${workspaceRootToken}/${executable.path}`
         }
@@ -1958,7 +2060,7 @@ const visit = async (
           if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
             const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
             if (reference["_tag"] === "GoRun") {
-              const outcome = await resolveTool(context, reference)
+              const outcome = await resolveTool(toolContext, reference)
               toolchain.push(outcome.tool.identity)
               if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
               else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
@@ -1972,6 +2074,7 @@ const visit = async (
           if ("problem" in executable) noteRefusal(executable.problem)
           else {
             toolchain.push({ tag: "TargetBin", label: labelOf(context, bin), path: executable.path })
+            targetExecutablePaths.push(executable.path)
             for (const [index, entry] of resolved.entries()) {
               if (entry === Shell.targetBinToken) resolved[index] = `${workspaceRootToken}/${executable.path}`
             }
@@ -1990,8 +2093,13 @@ const visit = async (
   }
 
   if (rule.startsWith("Go.") && refusal === undefined) {
-    const go = await GoExec.resolveGo({ root: context.root, packagePath, workspace: context.index.workspace })
-    toolchain.push(go.identity)
+    const go = await GoExec.resolveGo({
+      root: context.root,
+      packagePath,
+      workspace: context.index.workspace,
+      environment: toolContext.environment
+    })
+    toolchain.push(go.ok ? await goIdentity(toolContext, go) : go.identity)
     if (!go.ok) noteRefusal(go.refusal)
     else {
       // `go generate` runs the directives' commands off PATH, so a declared
@@ -2002,7 +2110,7 @@ const visit = async (
       const generatorPath: Array<string> = []
       if (Array.isArray(generatorTools)) {
         for (const reference of generatorTools) {
-          const outcome = await resolveTool(context, reference as Record<string, unknown>)
+          const outcome = await resolveTool(toolContext, reference as Record<string, unknown>)
           toolchain.push({ slot: "tool", identity: outcome.tool.identity })
           if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
           else generatorPath.push(NodePath.dirname(outcome.tool.path))
@@ -2092,12 +2200,17 @@ const visit = async (
     }
     const cargoPlugin = rule === "Cargo.Nextest" ? "cargo-nextest" : rule === "Cargo.Deny" ? "cargo-deny" : undefined
     if (cargoPlugin !== undefined) {
-      const pluginPath = PackageTree.findOnPath(cargoPlugin)
+      const pluginPath = PackageTree.findOnPath(cargoPlugin, toolContext.environment)
       if (pluginPath === undefined) {
         noteRefusal(`host binary ${JSON.stringify(cargoPlugin)} is not present on PATH; ${rule} cannot run`)
       } else {
-        const probe = await PackageTree.probeVersion(pluginPath)
-        toolchain.push({ tag: cargoPlugin, version: probe.output, exitCode: probe.exitCode })
+        const probe = await PackageTree.probeVersion(pluginPath, { environment: toolContext.environment })
+        toolchain.push({
+          tag: cargoPlugin,
+          version: probe.output,
+          exitCode: probe.exitCode,
+          binary: await binaryIdentity(toolContext, pluginPath)
+        })
       }
     }
     let selections: ReadonlyArray<Cargo.CrateSelection> | undefined
@@ -2697,7 +2810,11 @@ const visit = async (
     }
   }
 
-  // NodeModule dependency references key the installed package version.
+  // NodeModule is an installation dependency, not an executable reference.
+  // ambient.lockfile below hashes the FULL lockfile (not a package slice),
+  // including integrity and patch records. That fixes installed bytes under
+  // the immutable-install contract; arbitrary local edits to module contents
+  // need file/closure inputs. NodeModuleBin additionally hashes its entry file.
   const moduleRefs: Array<Record<string, unknown>> = []
   collectTagged(attrs, "NodeModule", moduleRefs, new Set())
   for (const reference of moduleRefs) {
@@ -2850,7 +2967,9 @@ const visit = async (
     const path = NodePath.isAbsolute(command)
       ? command
       : PackageTree.findOnPath(command, spawnEnvironment)
-    if (path !== undefined && NodeFs.existsSync(path)) executable.push(await binaryIdentity(context, path))
+    if (path !== undefined && NodeFs.existsSync(path)) {
+      executable.push(await binaryIdentity({ ...context, environment: spawnEnvironment }, path))
+    }
   }
 
   const keyMaterial: Planner.KeyMaterial = {
@@ -2936,6 +3055,7 @@ const visit = async (
     wouldRun: true,
     keyMaterial: previewMaterial,
     keyPreview: Planner.keyOf(previewMaterial),
+    ...(targetExecutablePaths.length === 0 ? {} : { targetExecutablePaths }),
     ...(context.nixEnvironment === undefined ? {} : {
       nixEnvironment: {
         storePath: context.nixEnvironment.storePath,
@@ -3495,6 +3615,28 @@ export const execute = async (
   /** Label → the key a node actually executed and cached under, when it differs from the preview. */
   const effectiveKeys = new Map<string, string>()
   const keyFor = (node: PackageNode): string => effectiveKeys.get(node.label) ?? node.keyPreview
+  const executablePath = (path: string): string => path.replace(workspaceRootToken, root)
+  const verifyExecutables = async (node: PackageNode): Promise<void> => {
+    const identities: Array<Record<string, unknown>> = []
+    collectTagged(node.keyMaterial.inputs, "Executable", identities, new Set())
+    const checked = new Set<string>()
+    for (const identity of identities) {
+      const source = executablePath(String(identity["source"]))
+      const expected = executablePath(String(identity["path"]))
+      const key = JSON.stringify([source, expected, identity["digest"]])
+      if (checked.has(key)) continue
+      checked.add(key)
+      // Re-read bytes, not stat metadata or the plan's memo: a tool can be
+      // overwritten in place or a symlink retargeted while dependencies run.
+      const resolved = await Fs.realpath(source).catch(() => undefined)
+      const digest = resolved === expected
+        ? await PackageTree.digestFileBytes(expected).catch(() => undefined)
+        : undefined
+      if (digest !== identity["digest"]) {
+        throw new Error(`executable changed since planning: ${source}; run the command again`)
+      }
+    }
+  }
   const resolverOptions: Resolver.LiveOptions = { workspaceRoot: root, cacheDirectory, cache: store }
   const runnerOptions: RspackRunner.RunnerOptions = {
     workspaceRoot: root,
@@ -3678,6 +3820,9 @@ export const execute = async (
 
   const cachePut = async (node: PackageNode, output: unknown, key: string = node.keyPreview): Promise<void> => {
     if (!node.cacheable) return
+    // A tool that replaces itself while running must not publish a result
+    // under the identity observed before it ran.
+    await verifyExecutables(node)
     await store.put(key, {
       key,
       target: node.rule,
@@ -4780,6 +4925,41 @@ export const execute = async (
       )
     }
     try {
+      await verifyExecutables(node)
+      const settledDependencies = node.dependencies.flatMap((label) => {
+        const dependency = byLabel.get(label)
+        const key = effectiveKeys.get(label)
+        return dependency !== undefined && key !== undefined && key !== dependency.keyPreview ? [{ label, key }] : []
+      })
+      if ((node.targetExecutablePaths?.length ?? 0) > 0 || settledDependencies.length > 0) {
+        const binaries: Array<unknown> = []
+        const environment = Exec.toolEnvironment(
+          node.env,
+          credentialNames,
+          {},
+          node.nixEnvironment === undefined
+            ? undefined
+            : { path: node.nixEnvironment.path.join(NodePath.delimiter), variables: node.nixEnvironment.variables }
+        )
+        for (const path of node.targetExecutablePaths ?? []) {
+          binaries.push(await binaryIdentity({ root, environment, toolBytes: new Map() }, NodePath.join(root, path)))
+        }
+        // Preview keys cannot read products that do not exist yet. Once
+        // producers settle, consumers and their dependents use these bytes.
+        const inputs = { ...node.keyMaterial.inputs as object, targetExecutables: binaries, settledDependencies }
+        const keyMaterial = { ...node.keyMaterial, inputs }
+        const key = Planner.keyOf(keyMaterial)
+        node = {
+          ...node,
+          keyMaterial,
+          keyPreview: key,
+          keyTemplate: node.keyTemplate === undefined ? undefined : {
+            ...node.keyTemplate,
+            inputs: { ...node.keyTemplate.inputs as object, targetExecutables: binaries, settledDependencies }
+          }
+        }
+        effectiveKeys.set(node.label, key)
+      }
       switch (node.rule) {
         case "Filegroup":
         // A crate set is a value, not a run: it names manifests and produces
@@ -4928,7 +5108,9 @@ export const execute = async (
         }
         case "Shell.Build":
         case "Foundry.Build": {
-          return runBuild(node, signal)
+          // Keep a failed executable recheck inside this dispatch's refusal
+          // boundary instead of rejecting the entire scheduler promise.
+          return await runBuild(node, signal)
         }
         case "Fetch": {
           if (node.outFiles.length !== 1) return fail("Fetch planned no single output file")

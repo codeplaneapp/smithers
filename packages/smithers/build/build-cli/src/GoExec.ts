@@ -27,6 +27,8 @@ export interface Context {
   readonly root: string
   readonly packagePath: string
   readonly workspace: WorkspaceDeclaration.WorkspaceDeclaration
+  /** The target environment used to select the executable and switched SDK. */
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
   /** The workspace's resolved Nix environment, when it declares one. */
   readonly nix?: NixExec.ResolvedEnvironment | undefined
 }
@@ -109,10 +111,15 @@ const execFile = (
  * @since 0.1.0
  */
 export const resolveGo = async (context: Context): Promise<
-  | { readonly ok: true; readonly path: string; readonly identity: unknown }
+  | {
+    readonly ok: true
+    readonly path: string
+    readonly identity: unknown
+    readonly executables: ReadonlyArray<string>
+  }
   | { readonly ok: false; readonly refusal: string; readonly identity: unknown }
 > => {
-  const path = PackageTree.findOnPath("go")
+  const path = PackageTree.findOnPath("go", context.environment)
   if (path === undefined) {
     return { ok: false, refusal: "host binary \"go\" is not present on PATH", identity: { tag: "GoBin", absent: true } }
   }
@@ -120,7 +127,36 @@ export const resolveGo = async (context: Context): Promise<
   // `go --version` is a usage error; `go version` is the subcommand that
   // reports the toolchain GOTOOLCHAIN actually switched to for this module,
   // which is the resolved version the key must record.
-  const probe = await PackageTree.probeVersion(path, { cwd, args: ["version"] })
+  const env = { ...process.env, ...toolchainEnvironment(context), ...context.environment }
+  const probe = await PackageTree.probeVersion(path, { cwd, args: ["version"], environment: env })
+  // GOTOOLCHAIN can dispatch through an unchanged launcher to a different
+  // SDK. Its version string does not identify compiler or linker bytes.
+  const selected = await PackageTree.probeVersion(path, {
+    cwd,
+    args: ["env", "-json", "GOROOT", "GOTOOLDIR"],
+    environment: env
+  })
+  let sdk: { readonly GOROOT?: unknown; readonly GOTOOLDIR?: unknown }
+  try {
+    sdk = JSON.parse(selected.output)
+    if (selected.exitCode !== 0 || typeof sdk.GOROOT !== "string" || typeof sdk.GOTOOLDIR !== "string") {
+      throw new Error("go env did not identify its SDK")
+    }
+  } catch {
+    return {
+      ok: false,
+      refusal: "go env could not identify GOROOT and GOTOOLDIR",
+      identity: { tag: "GoBin", path, probe, selected }
+    }
+  }
+  const executables = [path]
+  for (const directory of [NodePath.join(String(sdk.GOROOT), "bin"), String(sdk.GOTOOLDIR)]) {
+    for (
+      const entry of (await Fs.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))
+    ) {
+      if (entry.isFile() || entry.isSymbolicLink()) executables.push(NodePath.join(directory, entry.name))
+    }
+  }
   const declaration = toolchain(context.workspace)
   const authorities: Array<unknown> = []
   if (declaration !== undefined) {
@@ -148,6 +184,7 @@ export const resolveGo = async (context: Context): Promise<
   return {
     ok: true,
     path,
+    executables,
     identity: { tag: "GoBin", path, cwd: NodePath.relative(context.root, cwd), probe, authorities }
   }
 }
