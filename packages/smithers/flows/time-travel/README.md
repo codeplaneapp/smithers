@@ -1,18 +1,28 @@
 # @smthrs/time-travel
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://time-travel.smithers.sh
 
-One injectable `TimeTravel` service, with replay, inspect, fork, and rewind,
-over the journal and engine-store contracts. It owns both in-memory and SQL
-state stores and records effect-boundary evidence used to make time-travel
-decisions.
+Read a durable run's past, branch it, or take it back. One injectable Effect
+service, `TimeTravel`, carries the four verbs that do it: `replay` and `inspect`
+read, `fork` branches, and `rewind` truncates. Each acts at a _frame_, a point
+in the run's committed journal, and none of them re-executes anything.
+
+The service folds the journal a run already wrote, so a replay costs nothing
+and cannot change the run. It ships in-memory and SQLite state stores, and it
+reads the effect-boundary evidence that decides whether a rewind is safe.
+
+## Install
+
+`1.0.0-rc.0` has not reached npm yet. The release candidate publishes under the
+`next` tag, which is what this command selects; the plain package name still
+resolves to the older `0.x` line, a different API.
 
 ```sh
-pnpm add @smthrs/time-travel
+pnpm add @smthrs/time-travel@next
 ```
 
 **Fork replay limitation:** copied attempt rows retain their parent digests.
@@ -21,6 +31,9 @@ compensable and irreversible actions. An explicitly shared cache environment
 can reuse eligible sealed results, but copied attempts alone do not make the
 prefix replayable. Make repeated external effects idempotent before driving a
 fork.
+Node.js 22.19.0 or later. The package ships ESM and CommonJS with TypeScript
+declarations, and its root entry point bundles for the browser with no `node:`
+built-in.
 
 ## Public API
 
@@ -30,24 +43,24 @@ with.
 Every module is also reachable at the matching `@smthrs/time-travel/*` subpath;
 `@smthrs/time-travel/internal/*` is blocked at the `exports` map.
 
-| Export                  | Public surface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `TimeTravel`            | The service key. Operations `replay(position, projection, options?)`, `inspect(position, projection)`, `fork(position, options?)`, and `rewind(position, options?)`, where a `Position` is `{ runId, frame }`. Beside it: `Service`, `Projection`, `ReplayOptions`, `ForkOptions`, `RewindOptions`, `ForkResult`, `RewindResult`, `Options` (`isAlive`, `maxHistoryEntries`), `defaultMaxHistoryEntries`, `make`, `makeWith`, `layer`, and `layerWith`, all from the `@smthrs/time-travel/TimeTravel` subpath; the barrel exports the service class alone, with its `layer` and `layerWith` statics. A fork's jj workspace is named after the child run it mints, under `ForkOptions.workspaceRoot`, and pinned at the frame's recorded pointer. |
-| `Frame`                 | `Frame` schema/type, `LineageEdgeKind` schema/type, `LineageEdge`, plus `forkCreatedEventType` and the `ForkCreated` payload a forked run records on its own journal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `TimeTravelError`       | `TimeTravelErrorCode` schema/type, `TimeTravelError`, and `error(code, message, cause?)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `TimeTravelStore`       | Models `Snapshot`, `AttemptRef`, `Descendants`, `Audit`, `AuditPatch`, `Receipt`, `ArchiveResult`, `Fork`, and `ForkIntent`; `Service` operations `snapshotAt`, `recordSnapshot`, `stateAt`, `attemptsAt`, `descendants`, `writeAudit`, `updateAudit`, `pendingAudits`, `archiveAndTruncate`, `archivedAt`, `nextForkId`, `abandonForkIntents`, `createFork`, and `recordReceipt`; `make`, `makeNoop`, and `layerNoop`.                                                                                                                                                                                                                                                                                                                          |
-| `MemoryTimeTravelStore` | `JournalRecord`, `MemoryState`, and `Options`; deterministic `make(options?)` and `layer(options?)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `SqlTimeTravelStore`    | Database-backed `migrate`, `make`, and `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `EffectBoundary`        | The producer side: `EffectTier`, `EffectStatus`, `EffectRecord`, and `Description`; `eventType`; `guard`, `decodeEntry`, `fromEntry`, and `fromEntries`. Prefer `decodeEntry`: `fromEntry` returns `undefined` for a corrupt payload instead of failing closed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `CompensationHandlers`  | The contribution door: the `Handler` shape (`kind`, `tier`, `requiresIdempotencyKey`, `compensation`, `residue`, `assess`, `revert`, `rollback`), the `Classification` and `Assessment` schemas a custom `assess` is decoded against, the optional service, `layer(handlers)`, and `layerNoop`.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `Migrations`            | The same DDL as a rung on the shared migration ladder at id block `5000`: `set`, `sets`, `run`, and `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Export                  | Public surface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TimeTravel`            | The service key. Operations `replay(position, projection, options?)`, `inspect(position, projection)`, `fork(position, options?)`, and `rewind(position, options?)`, where a `Position` is `{ runId, frame }`. Beside it: `Service`, `Projection`, `ReplayOptions`, `ForkOptions`, `RewindOptions`, `ForkResult`, `RewindResult`, `Options` (`isAlive`, `maxHistoryEntries`), `defaultMaxHistoryEntries`, `make`, `makeWith`, `layer`, and `layerWith`. A fork's jj workspace is named after the child run it mints, under `ForkOptions.workspaceRoot`, and pinned at the frame's recorded pointer. |
+| `Frame`                 | `Frame` schema/type, `LineageEdgeKind` schema/type, `LineageEdge`, plus `forkCreatedEventType` and the `ForkCreated` payload a forked run records on its own journal.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `TimeTravelError`       | `TimeTravelErrorCode` schema/type, `TimeTravelError`, and `error(code, message, cause?)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `TimeTravelStore`       | Models `Snapshot`, `AttemptRef`, `Descendants`, `Audit`, `AuditPatch`, `Receipt`, `ArchiveResult`, `Fork`, and `ForkIntent`; `Service` operations `snapshotAt`, `recordSnapshot`, `stateAt`, `attemptsAt`, `descendants`, `writeAudit`, `updateAudit`, `pendingAudits`, `archiveAndTruncate`, `archivedAt`, `nextForkId`, `abandonForkIntents`, `createFork`, and `recordReceipt`; `make`, `makeNoop`, and `layerNoop`.                                                                                                                                                                             |
+| `MemoryTimeTravelStore` | `JournalRecord`, `MemoryState`, and `Options`; deterministic `make(options?)` and `layer(options?)`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `SqlTimeTravelStore`    | Database-backed `migrate`, `make`, and `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `EffectBoundary`        | The producer side: `EffectTier`, `EffectStatus`, `EffectRecord`, and `Description`; `eventType`; `guard`, `decodeEntry`, `fromEntry`, and `fromEntries`. Prefer `decodeEntry`: `fromEntry` returns `undefined` for a corrupt payload instead of failing closed.                                                                                                                                                                                                                                                                                                                                     |
+| `CompensationHandlers`  | The contribution door: the `Handler` shape (`kind`, `tier`, `requiresIdempotencyKey`, `compensation`, `residue`, `assess`, `revert`, `rollback`), the `Classification` and `Assessment` schemas a custom `assess` is decoded against, the optional service, `layer(handlers)`, and `layerNoop`.                                                                                                                                                                                                                                                                                                     |
+| `Migrations`            | The same DDL as a rung on the shared migration ladder at id block `5000`: `set`, `sets`, `run`, and `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 `Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`,
-`SnapshotProjector`, `HistoryLimit`, and `EffectHandlerRegistry` are internal
-machinery under `src/internal/`. Recovery is never a call: building
-`TimeTravel.layer` finishes or rolls back any rewind a crash interrupted, and
-forgets the jj lane of any fork that reserved an id and died before it
-committed.
+`SnapshotProjector`, `HistoryLimit`, and `EffectHandlerRegistry` are machinery
+a caller never names, and `@smthrs/time-travel/internal/*` is not importable.
+Recovery is never a call: building `TimeTravel.layer` finishes or rolls back any
+rewind a crash interrupted, and forgets the jj lane of any fork that reserved an
+id and died before it committed.
 
 `replay` and `inspect` are one fold. `replay` takes the read knobs
 (`pageSize`, `maxHistoryEntries`); `inspect` is the same fold under the
@@ -76,8 +89,8 @@ const rewound = Effect.gen(function*() {
 ## Failure behaviour
 
 Every operation fails as a `TimeTravelError` discriminated by a closed `code`.
-The [API reference](https://time-travel.smithers.sh/reference/api/) carries the full table,
-generated from `TimeTravelErrorCode` itself; in short:
+The [API reference](https://time-travel.smithers.sh/reference/api/) carries the
+full table; in short:
 
 `busy` (another owner holds the run), `live_parent` / `live_child` (the run or a
 descendant is still executing), `not_found` (the run or frame addresses
@@ -111,13 +124,19 @@ discarded future cannot answer them.
   handed out again, so the retry lands under a fresh lane name.
 - `Projection.reduce` receives store entries by reference. Treat them as
   read-only.
-- Time travel is a library API in 1.0.0-rc.0: no CLI verb, no MCP tool, and it
-  is not composed into `NodeControl`.
+- Time travel is a library API in 1.0.0-rc.0. You reach the verbs by injecting
+  the service from your own program; the `smithers` command-line tool has no
+  time-travel verb yet.
 
 ## Documentation
 
-Every page of https://time-travel.smithers.sh is written in [`docs/`](./docs)
-and stitched into the site from there. Start with
-[the quickstart](https://time-travel.smithers.sh/quickstart/), then
-[the API reference](https://time-travel.smithers.sh/reference/api/) and
-[the rewind protocol](https://time-travel.smithers.sh/concepts/rewind-protocol/).
+- [Quickstart](https://time-travel.smithers.sh/quickstart/): execute a durable
+  run, then fold its journal into a number.
+- [Installation](https://time-travel.smithers.sh/installation/): the five
+  services `TimeTravel.layer` requires.
+- [API reference](https://time-travel.smithers.sh/reference/api/): every public
+  export and the closed list of failure codes.
+- [Troubleshooting](https://time-travel.smithers.sh/troubleshooting/): each
+  refusal, and what to change.
+
+Licensed MIT.

@@ -1,6 +1,6 @@
 ---
 title: "Derived state"
-description: "Why time travel folds the journal instead of storing snapshots, what a projection may read, and the two tier-2 facts a fold cannot derive."
+description: "Why time travel folds the journal instead of storing snapshots, what a projection may read, and the two facts a fold cannot derive."
 sidebar:
   order: 2
 ---
@@ -69,6 +69,31 @@ result into an older frame.
 Entries reach `reduce` by reference. Treat them as read-only: mutating one
 rewrites the evidence the fold is reading.
 
+## Versioned engine admission
+
+When replay encounters versioned `flows.engine.v2.*` history, pass `engineEvents` in the replay
+options. This is an `EngineEvent.Consumer` from `@smthrs/journal/EngineEvent`:
+the expected run, lineage id, root run, round, parent and allowed journal
+sources, plus an explicit unknown-namespace policy. It must match the replay's
+run and frame. Missing scope, malformed known payloads and foreign identity
+fail `invalid` before that record reaches the projection, retaining the typed
+decoder error as the cause. Semantic lineage comes from the versioned payload;
+diagnostic metadata cannot override it.
+
+Unsupported engine versions, such as `flows.engine.v3.*`, fail before folding.
+
+Fixtures exercise attempt lifecycle, execution lifecycle, deferred completion
+and clock scheduling through real SQLite journal rows. Current unversioned
+history retains its metadata lineage convention. Its attempt enumeration now
+refuses malformed started markers in both SQL and memory stores rather than
+silently producing an incomplete healthy list.
+
+The versioned constructors are additive. Engine recovery, fork copying and
+anchor projection still use the current authoritative stores and current
+writer families. The v2 replay decoder does not claim a whole-engine recovery
+cutover or manufacture missing lineage roots and completion values in old
+records. See the journal's [authority contract](/pkg/journal/concepts/state-event-authority).
+
 ## Every read is bounded
 
 A fold with no bound lets a long or hostile run decide how much memory a verb
@@ -97,7 +122,7 @@ exactly the two a fork or a rewind needs to put the world back:
 - **The Jujutsu pointer** that was current when the sequence was journaled.
 - **The plan digest** in force at that point.
 
-They are recorded as a tier-2 anchor, one row per frame:
+They are recorded as an anchor, one row per frame:
 
 ```ts
 import type { TimeTravelStore } from "@smthrs/time-travel"

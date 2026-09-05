@@ -48,7 +48,7 @@
  * @category services
  * @since 0.1.0
  */
-export { TimeTravel } from "./TimeTravel.ts"
+export { ReadOnlyTimeTravel, TimeTravel } from "./TimeTravel.ts"
 
 /**
  * @category models

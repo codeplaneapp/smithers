@@ -9,7 +9,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Frame from "../src/Frame.ts"
@@ -861,7 +861,7 @@ describe("SqlTimeTravelStore.recordReceipt", () => {
 })
 
 describe("SqlTimeTravelStore derived reads", () => {
-  it.effect("reads back the plan digest an anchor recorded, and skips an attempt record it cannot decode", () =>
+  it.effect("reads back the plan digest an anchor recorded, and refuses an attempt record it cannot decode", () =>
     Effect.gen(function*() {
       const result = yield* run((store, sql) =>
         Effect.gen(function*() {
@@ -882,7 +882,7 @@ describe("SqlTimeTravelStore derived reads", () => {
         `
           return {
             anchor: yield* store.snapshotAt("derived", { lineageId: "derived/root", seq: 2 }),
-            attempts: yield* store.attemptsAt("derived", { lineageId: "derived/root", seq: 2 }),
+            attempts: yield* Effect.flip(store.attemptsAt("derived", { lineageId: "derived/root", seq: 2 })),
             absent: yield* store.stateAt("derived", { lineageId: "derived/root", seq: 2 })
           }
         })
@@ -894,8 +894,9 @@ describe("SqlTimeTravelStore derived reads", () => {
         changeId: "change-1",
         planDigest: "plan-a"
       })
-      // The malformed record is skipped, not guessed at.
-      expect(result.attempts).toEqual([{ stepKeyDigest: "a", attempt: 1 }])
+      // Corrupt known history cannot become a shorter, apparently healthy state.
+      expect(result.attempts.code).toBe("invalid")
+      expect(result.attempts.cause).toBeDefined()
       expect(result.absent).toBeUndefined()
     }))
 })
@@ -1216,9 +1217,36 @@ describe("SqlTimeTravelStore.createFork", () => {
       expect(error).toMatchObject({ code: "live_parent", message: "ancestor run grandparent is live" })
     }))
 
+  it.effect("rejects malformed JSON as a restartable parent state", () =>
+    Effect.gen(function*() {
+      const directory = yield* Effect.promise(() => mkdtemp(join(tmpdir(), "time-travel-corrupt-state-")))
+      const filename = join(directory, "state.db")
+      const encoded = JSON.stringify({ version: 1, flowName: "CorruptStateFixtureA2", payload: {} })
+      yield* Effect.gen(function*() {
+        yield* fileHandle(filename, (_store, sql) => insertRun(sql, "parent", { stateJson: encoded }))
+        // Generated JSON columns correctly refuse malformed writes even with
+        // CHECK constraints disabled. Model actual disk corruption after the
+        // writer closes, without changing the production schema or indexes.
+        yield* Effect.promise(async () => {
+          const bytes = await readFile(filename)
+          const needle = Buffer.from(encoded)
+          const offset = bytes.indexOf(needle)
+          expect(offset).toBeGreaterThanOrEqual(0)
+          expect(bytes.lastIndexOf(needle)).toBe(offset)
+          bytes[offset] = "!".charCodeAt(0)
+          await writeFile(filename, bytes)
+        })
+        const failure = yield* fileHandle(filename, (store) =>
+          Effect.flip(store.createFork("parent", { lineageId: "main", seq: 0 })))
+        expect(failure).toMatchObject({ code: "unknown", message: "could not materialize executable fork state" })
+        expect(failure.cause).toBeDefined()
+      }).pipe(Effect.ensuring(Effect.promise(() =>
+        rm(directory, { recursive: true, force: true })
+      )))
+    }))
+
   for (
     const [name, stateJson] of [
-      ["malformed JSON", "{"],
       ["null", JSON.stringify(null)],
       ["an array", JSON.stringify([])],
       ["a missing version", JSON.stringify({ flowName: "Demo", payload: {} })],

@@ -21,7 +21,7 @@ in a run's past.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/time-travel @smthrs/engine @smthrs/engine-store @smthrs/flows @smthrs/flow @smthrs/journal @smthrs/kernel @smthrs/run-store @effect/platform-node
+pnpm add @smthrs/time-travel@next @smthrs/engine@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/flow@next @smthrs/journal@next @smthrs/kernel@next @smthrs/run-store@next @effect/platform-node
 ```
 
 ## Declare a run worth replaying

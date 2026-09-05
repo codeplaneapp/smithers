@@ -284,13 +284,28 @@ describe("the memory store's derived reads", () => {
 
   it.effect("collects the attempts admitted at a frame, deduplicated and lineage-filtered", () =>
     Effect.gen(function*() {
-      expect(yield* (store.attemptsAt("run", { lineageId, seq: 4 }))).toEqual([
+      const valid = MemoryTimeTravelStore.make({
+        records: store.state().records.filter((record) => record.eventId !== "e3").concat({
+          runId: "run",
+          seq: 2,
+          eventId: "duplicate",
+          lineageId,
+          eventType: "flows.engine.attempt-started",
+          payload: { stepKeyDigest: "a", attempt: 1 }
+        })
+      })
+      expect(yield* valid.attemptsAt("run", { lineageId, seq: 4 })).toEqual([
         { stepKeyDigest: "a", attempt: 1 }
       ])
-      expect(yield* (store.attemptsAt("run", { lineageId, seq: 5 }))).toEqual([
+      expect(yield* valid.attemptsAt("run", { lineageId, seq: 5 })).toEqual([
         { stepKeyDigest: "a", attempt: 1 },
         { stepKeyDigest: "b", attempt: 1 }
       ])
+      expect(yield* (store.attemptsAt("run", { lineageId, seq: 1 }))).toEqual([
+        { stepKeyDigest: "a", attempt: 1 }
+      ])
+      expect((yield* Effect.flip(store.attemptsAt("run", { lineageId, seq: 4 }))).code).toBe("invalid")
+      expect((yield* Effect.flip(store.attemptsAt("run", { lineageId, seq: 5 }))).code).toBe("invalid")
     }))
 
   it.effect("upserts an anchor and rolls the write back on an injected failure", () =>

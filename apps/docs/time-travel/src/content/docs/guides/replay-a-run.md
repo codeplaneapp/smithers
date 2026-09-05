@@ -120,7 +120,7 @@ lineage id was assembled by hand instead of minted by
 - **Anything that needs re-execution.** There is no dispatcher behind the fold.
   A model call or a child flow can only appear as a cache read, which is the
   property that makes a replay safe to run against a production run.
-- **The two tier-2 facts.** The Jujutsu pointer and the plan digest at a frame
+- **The two recorded facts.** The Jujutsu pointer and the plan digest at a frame
   are recorded as anchors rather than derived; a fold cannot reach them. They
   are what `fork` and `rewind` read.
 

@@ -19,6 +19,7 @@
  *
  * @since 0.1.0
  */
+import * as EngineEvent from "@smthrs/journal/EngineEvent"
 import * as Journal from "@smthrs/journal/Journal"
 import type { Entry, RunId, Seq } from "@smthrs/journal/JournalEvent"
 import * as CacheStore from "@smthrs/step-cache/CacheStore"
@@ -51,6 +52,8 @@ export interface Projection<S> {
  */
 export interface ReplayOptions {
   readonly runId: string
+  /** Required when replay encounters v2 engine events; supplied by the history owner. */
+  readonly engineEvents?: EngineEvent.Consumer | undefined
   readonly pageSize?: number
   /**
    * The most entries the fold may read at or below the frame before it stops
@@ -139,9 +142,21 @@ export const rederive = <S>(
           if (folded > maxEntries) {
             return yield* Effect.fail(HistoryLimit.exceeded("replay", options.runId, maxEntries))
           }
-          const lineageId = Option.getOrUndefined(
-            Schema.decodeUnknownOption(LineageMetadata)(entry.meta)
-          )?.lineageId
+          let lineageId: string | undefined
+          if (/^flows\.engine\.v[0-9]+(?:\.|$)/.test(entry.eventType)) {
+            const consumer = options.engineEvents
+            if (consumer === undefined || consumer.runId !== options.runId || consumer.lineageId !== frame.lineageId) {
+              return yield* Effect.fail(
+                error("invalid", "versioned engine replay requires the matching lineage and source contract", entry)
+              )
+            }
+            yield* EngineEvent.decodeEntry(entry, consumer).pipe(
+              Effect.mapError((cause) => error("invalid", "invalid versioned engine history", cause))
+            )
+            lineageId = consumer.lineageId
+          } else {
+            lineageId = Option.getOrUndefined(Schema.decodeUnknownOption(LineageMetadata)(entry.meta))?.lineageId
+          }
           if (lineageId !== undefined && lineageId !== frame.lineageId) continue
           if (lineageId === frame.lineageId) foundLineage = true
           state = yield* fold(entry, state)

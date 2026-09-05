@@ -75,6 +75,7 @@ describe("public time-travel modules", () => {
       "Frame",
       "Migrations",
       "MemoryTimeTravelStore",
+      "ReadOnlyTimeTravel",
       "SqlTimeTravelStore",
       "TimeTravel",
       "TimeTravelError",
@@ -137,6 +138,35 @@ describe("public time-travel modules", () => {
 })
 
 describe("Fork.fork", () => {
+  it.effect("retains an explicitly requested workspace after the service scope closes", () =>
+    Effect.gen(function*() {
+      const calls: Array<"add" | "forget"> = []
+      const store = MemoryTimeTravelStore.make({
+        records: [{ runId: "parent", seq: 0, eventId: "e0", lineageId: "parent/root", payload: {} }]
+      })
+      const result = yield* Effect.scoped(
+        Fork.fork({
+          parentRunId: "parent",
+          frame,
+          workspaceRoot: "/tmp/lanes",
+          retainWorkspace: true
+        }).pipe(
+          Effect.provide(Layer.succeed(RunStore.RunStore, RunStore.makeNoop({ get: () => Effect.succeed(row()) }))),
+          Effect.provide(Layer.succeed(TimeTravelStore, store)),
+          Effect.provide(Layer.succeed(
+            Jj.Jj,
+            Jj.makeNoop({
+              workspaceAdd: () => Effect.sync(() => calls.push("add")),
+              workspaceForget: () => Effect.sync(() => calls.push("forget"))
+            })
+          )),
+          Effect.provide(forkDeps)
+        )
+      )
+      expect(result.edge).toMatchObject({ parentRunId: "parent", parentSeq: 0, kind: "fork" })
+      expect(calls).toEqual(["add"])
+    }))
+
   it.effect("fails a repeated suffix page instead of spinning", () =>
     Effect.gen(function*() {
       const repeated = {

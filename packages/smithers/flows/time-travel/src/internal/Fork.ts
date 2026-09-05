@@ -47,6 +47,8 @@ export interface ForkOptions {
    * lane and the run it holds carry one identity.
    */
   readonly workspaceRoot: string
+  /** A CLI-created branch outlives the process that created it. */
+  readonly retainWorkspace?: boolean | undefined
   /** Journal page size for the suffix scan; defaults to the store's own. */
   readonly pageSize?: number | undefined
   /**
@@ -349,7 +351,9 @@ export const fork = (
         Effect.andThen(store.createFork(options.parentRunId, options.frame, childRunId)),
         Effect.onError(() => forgetLane(jj, workspaceName, "after a refused commit"))
       )
-      yield* Effect.addFinalizer(() => forgetLane(jj, workspaceName, "when the service scope closed"))
+      if (options.retainWorkspace !== true) {
+        yield* Effect.addFinalizer(() => forgetLane(jj, workspaceName, "when the service scope closed"))
+      }
       /**
        * THE CHILD'S WORKTREE IS PINNED AT THE FRAME'S POINTER.
        *

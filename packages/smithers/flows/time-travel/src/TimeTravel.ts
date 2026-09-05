@@ -25,6 +25,7 @@
  * @since 0.1.0
  */
 import { Jj } from "@smthrs/jj"
+import type * as EngineEvent from "@smthrs/journal/EngineEvent"
 import type * as Journal from "@smthrs/journal/Journal"
 import * as Ownership from "@smthrs/run-store/Ownership"
 import type { OwnerId } from "@smthrs/run-store/Ownership"
@@ -96,6 +97,8 @@ export type Projection<S> = Replay.Projection<S>
 export interface ReplayOptions {
   readonly pageSize?: number | undefined
   readonly maxHistoryEntries?: number | undefined
+  /** Expected lineage coordinates and source allowlist for engine v2 history. */
+  readonly engineEvents?: EngineEvent.Consumer | undefined
 }
 
 /**
@@ -139,7 +142,16 @@ export type RewindResult = Rewind.Result
 export interface ForkOptions {
   readonly workspaceRoot?: string | undefined
   readonly maxHistoryEntries?: number | undefined
+  /** Keep the child workspace registered after this service scope closes. */
+  readonly retainWorkspace?: boolean | undefined
 }
+
+/**
+ * Stable workspace name derived from a fork's durable child identity.
+ * @since 1.0.0
+ * @category constructors
+ */
+export const forkWorkspaceName = ForkOperation.workspaceNameFor
 
 /**
  * How a rewind treats what it crosses, and how much of it it may cross.
@@ -189,6 +201,51 @@ export interface Service {
     options?: RewindOptions
   ) => Effect.Effect<RewindResult, TimeTravelError>
 }
+
+/**
+ * History reads that cannot recover, fork, rewind, or otherwise write a run.
+ *
+ * @since 1.0.0
+ * @category services
+ */
+export class ReadOnlyTimeTravel extends Context.Service<ReadOnlyTimeTravel, Pick<Service, "replay" | "inspect">>()(
+  "@smthrs/time-travel/ReadOnlyTimeTravel"
+) {}
+
+/**
+ * Composes history reads without startup recovery or mutation dependencies.
+ * A viewer can provide a read-only database connection underneath this layer.
+ *
+ * @since 1.0.0
+ * @category layers
+ */
+export const readOnly: Layer.Layer<
+  ReadOnlyTimeTravel,
+  never,
+  Journal.Journal | CacheStore.CacheStore
+> = Layer.effect(ReadOnlyTimeTravel)(Effect.gen(function*() {
+  const services = yield* Effect.context<Journal.Journal | CacheStore.CacheStore>()
+  const replay = <S>(position: Position, projection: Projection<S>, options?: ReplayOptions) =>
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknownEffect(Position)(position).pipe(
+        Effect.mapError((cause) => error("invalid", "invalid history position", cause))
+      )
+      const pageSize = options?.pageSize
+      if (pageSize !== undefined && (!Number.isSafeInteger(pageSize) || pageSize < 1)) {
+        return yield* Effect.fail(
+          error("invalid", `replay pageSize must be a positive integer, not ${String(pageSize)}`)
+        )
+      }
+      const maxEntries = yield* HistoryLimit.resolve(options?.maxHistoryEntries, defaultMaxHistoryEntries)
+      return yield* Replay.rederive(decoded.frame, projection, {
+        runId: decoded.runId,
+        engineEvents: options?.engineEvents,
+        ...(pageSize === undefined ? {} : { pageSize }),
+        maxEntries
+      })
+    }).pipe(Effect.provideContext(services))
+  return { replay, inspect: <S>(position: Position, projection: Projection<S>) => replay(position, projection) }
+}))
 
 /**
  * The injectable contracts the three operations read and write through.
@@ -441,6 +498,7 @@ export const makeWith = (
         return yield* provided(
           Replay.rederive(position.frame, projection, {
             runId: position.runId,
+            engineEvents: options?.engineEvents,
             ...(pageSize === undefined ? {} : { pageSize }),
             maxEntries
           })
@@ -468,6 +526,7 @@ export const makeWith = (
               parentRunId: position.runId,
               frame: position.frame,
               workspaceRoot: options?.workspaceRoot ?? workspaceRoot,
+              retainWorkspace: options?.retainWorkspace,
               maxEntries
             })))
           )
@@ -562,6 +621,8 @@ export const make: Effect.Effect<Service, TimeTravelError, Requirements | Scope.
 export class TimeTravel extends Context.Service<TimeTravel, Service>()(
   "@smthrs/time-travel/TimeTravel"
 ) {
+  /** History reads without constructing recovery or mutation services. */
+  static readonly readOnly = readOnly
   /**
    * Wires the machinery over the injectable contracts and recovers on build.
    *

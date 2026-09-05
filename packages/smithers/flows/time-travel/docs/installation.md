@@ -7,8 +7,13 @@ sidebar:
 
 ## Install the package
 
+`@smthrs/time-travel` is at `1.0.0-rc.0` and has not reached npm yet. When it
+does, the release candidate publishes under the `next` tag, which is what this
+command selects; the plain package name still resolves to the older `0.x` line,
+a different API.
+
 ```bash
-pnpm add @smthrs/time-travel
+pnpm add @smthrs/time-travel@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
@@ -86,13 +91,13 @@ Time travel reads a journal the engine wrote, so a composition that produces
 history adds the engine and the storage under it:
 
 ```bash
-pnpm add @smthrs/engine @smthrs/engine-store @smthrs/flow @smthrs/database @effect/platform-node
+pnpm add @smthrs/engine@next @smthrs/engine-store@next @smthrs/flow@next @smthrs/database@next @effect/platform-node
 ```
 
 - [`@smthrs/engine`](/api/engine) is the durable engine a run executes on, and
   the home of `FlowEngine.Lineage`.
 - [`@smthrs/engine-store`](/api/engine-store) is the producer of everything the
-  service reads. It stamps `meta.lineageId` on every record, journals a tier-2
+  service reads. It stamps `meta.lineageId` on every record, journals an
   anchor per attempt, and writes effect-boundary records around an irreversible
   dispatch and a child spawn.
 - [`@smthrs/flow`](/api/flow) is the flow and action authoring model.

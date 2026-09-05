@@ -146,7 +146,7 @@ const SealedParked = Flow.make("time-travel/e2e/sealed-parked", {
   success: Schema.String,
   body: (payload) =>
     SealedStep.call(payload).pipe(
-      Node.andThen(() => Flow.park({ reason: "approval", token: "time-travel-e2e-sealed" }))
+      Node.bindPlanned(() => Flow.park({ reason: "approval", token: "time-travel-e2e-sealed" }))
     )
 })
 
@@ -155,7 +155,7 @@ const CompensableParked = Flow.make("time-travel/e2e/compensable-parked", {
   success: Schema.String,
   body: (payload) =>
     CompensableStep.call(payload).pipe(
-      Node.andThen(() => Flow.park({ reason: "approval", token: "time-travel-e2e-compensable" }))
+      Node.bindPlanned(() => Flow.park({ reason: "approval", token: "time-travel-e2e-compensable" }))
     )
 })
 

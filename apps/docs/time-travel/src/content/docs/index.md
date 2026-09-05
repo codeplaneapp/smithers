@@ -1,141 +1,106 @@
 ---
 title: "@smthrs/time-travel"
-description: "Replay, inspect, fork, and rewind a Smithers run from its journal: one injectable service over durable evidence, with a fenced rewind protocol and crash recovery on layer build."
+description: "Replay, fork, and rewind a durable run from the journal it already wrote: one injectable Effect service, addressed by a frame, with no re-execution."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/time-travel/docs/README.md"
 ---
 
-`@smthrs/time-travel` reads a run's past out of its journal and lets you act on
-it. A run that already happened can be replayed into any view you can write as
-a fold, branched into a second run that inherits its history, or truncated back
-to an earlier point with its side effects compensated on the way.
+`@smthrs/time-travel` lets you read a durable run's past, branch it, or take it
+back. One injectable Effect service, `TimeTravel`, carries the four verbs that
+do it: `replay` and `inspect` read, `fork` branches, and `rewind` truncates.
+Each one acts at a _frame_, which is a point in the run's committed journal.
 
-All four operations hang off one injectable service:
+## What it solves
 
-```ts
-import { TimeTravel } from "@smthrs/time-travel"
-import * as Effect from "effect/Effect"
+A long agent run, build, or approval pipeline records what it did as it goes.
+Once it has finished or parked, that history is the only honest account of what
+happened, and the questions you want to ask it are awkward without a library:
+what did this run look like after step 17, what if it had branched there
+instead, and can I take it back to there and try again.
 
-const program = Effect.gen(function*() {
-  const timeTravel = yield* TimeTravel
-  return yield* timeTravel.inspect(position, projection)
-})
-```
-
-`replay` and `inspect` fold committed journal entries up to a frame. `fork`
-branches a child run off that frame. `rewind` removes everything after it.
-
-## What makes this possible
-
-Nothing here stores "the state at step 17". A frame is an address, not a
-snapshot: the pair `(lineageId, seq)` naming a position in the journal that
-[`@smthrs/journal`](https://journal.smithers.sh/reference/api/) already keeps. Every answer is derived by
-folding the evidence below that address, so the past cannot drift from what was
-recorded, and a replay has no dispatcher and can never re-execute a model call
-or a child flow.
-
-Two facts a fold cannot derive are recorded as tier-2 anchors: the Jujutsu
-pointer that was current when the sequence was journaled, and the plan digest
-in force. They are what lets a fork check out the tree the parent had at the
-frame, and a rewind put the tree back.
-
-## Who uses this package
-
-Host and control-plane authors provide the store and call the verbs: an
-inspector that renders a run at an earlier frame, a branch-and-retry flow, an
-operator undo. Adapter authors record effect boundaries with `EffectBoundary`
-and contribute the compensations a rewind needs through `CompensationHandlers`.
-
-If you are writing a flow, you reach time travel through the host that wired
-it, not from inside the flow body.
+Answering those by re-executing the run is wrong twice. It costs money, and it
+repeats effects that already left the system. This package answers them by
+folding the journal instead. A replay reads committed records and derives an
+answer; it never dispatches a model call or spawns a child flow, so replaying is
+free and cannot change the run. A fork copies history up to a frame into a new
+child run and leaves the parent untouched. A rewind is the one destructive verb:
+it removes everything above a frame, and it refuses rather than silently
+stranding an effect that already crossed into the outside world.
 
 ## Install
 
+The `1.0.0-rc.0` release candidate has not reached npm yet; when it does it
+publishes under the `next` tag, which is what this command selects.
+
 ```bash
-pnpm add @smthrs/time-travel
+pnpm add @smthrs/time-travel@next
 ```
 
-For the services `TimeTravel.layer` requires and the packages a runnable
-composition adds, see [Installation](/installation/).
+Node.js 22.19.0 or later. The package ships ESM and CommonJS with TypeScript
+declarations, and its root entry point bundles for the browser with no `node:`
+built-in.
 
-## The smallest real example
+## Read a run's past
 
-Fold a run's journal at a frame and count the attempts it had admitted:
+`inspect` folds the run's journal up to a frame through a projection you write.
+A frame pairs a lineage id with a journal sequence, and the lineage id is minted
+by `FlowEngine.Lineage` rather than spelled by hand:
 
 ```ts
-import { FlowEngine } from "@smthrs/engine"
+import { Engine } from "@smthrs/flows"
 import { TimeTravel } from "@smthrs/time-travel"
 import * as Effect from "effect/Effect"
 
-const attemptsAt = (runId: string, seq: number) =>
-  Effect.gen(function*() {
-    const timeTravel = yield* TimeTravel
-    return yield* timeTravel.inspect(
-      { runId, frame: { lineageId: FlowEngine.Lineage.root(runId), seq } },
-      {
-        initial: 0,
-        reduce: (count: number, entry) => entry.eventType === "flows.engine.attempt-started" ? count + 1 : count
-      }
-    )
-  })
+const attemptsAtFrame = Effect.gen(function*() {
+  const timeTravel = yield* TimeTravel
+  return yield* timeTravel.inspect(
+    {
+      runId: "build-42",
+      frame: { lineageId: Engine.FlowEngine.Lineage.root("build-42"), seq: 17 }
+    },
+    {
+      initial: 0,
+      reduce: (count: number, entry) => entry.eventType === "flows.engine.attempt-started" ? count + 1 : count
+    }
+  )
+})
 ```
 
-A lineage id is minted, never spelled. `FlowEngine.Lineage` is the one
-constructor for it, and the engine stamps its result on every record a run
-writes. For the whole path, from an executing flow to a folded answer, see the
-[Quickstart](/quickstart/).
+The same `{ runId, frame }` value is what the other verbs take.
+`timeTravel.fork(position)` branches a child run that inherits the history under
+the frame. `timeTravel.rewind(position)` removes everything above it and
+compensates what it crosses.
 
-## The package at a glance
+## How this fits with @smthrs/flows
 
-The root entry point exports the service key flat and everything else as a
-namespace. Each namespace is also importable from
-`@smthrs/time-travel/<Module>`.
+Time travel reads history it does not write. The producer is the Smithers
+durable flow engine, which stamps a lineage id on every record a run commits and
+journals the evidence a rewind reasons about. [`@smthrs/flows`](https://flows.smithers.sh/reference/api/) is
+that engine packaged as one dependency: it declares flows and actions, stands a
+durable host up over local SQLite, and resumes a run after a crash. Install it
+if you need runs to travel back through; install this package if you already
+have such runs and want to look at, branch, or truncate them.
 
-| Export                  | What it is                                                                                                  |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `TimeTravel`            | The service key and its layers. `replay`, `inspect`, `fork`, and `rewind`, plus the options each one takes. |
-| `Frame`                 | The coordinate system: a frame, a lineage edge, and the record a forked run writes about its own origin.    |
-| `TimeTravelError`       | The single failure type, discriminated by a closed `code`.                                                  |
-| `TimeTravelStore`       | The persistence contract the verbs read and mutate history through.                                         |
-| `MemoryTimeTravelStore` | The store held in JavaScript objects: deterministic, browser-safe, and the one every test runs against.     |
-| `SqlTimeTravelStore`    | The durable store, SQLite dialect only.                                                                     |
-| `EffectBoundary`        | The producer side: journal an effect so a rewind can assess it, and decode that evidence back.              |
-| `CompensationHandlers`  | The contribution door: the compensations an adapter owns for the effects it performs.                       |
-| `Migrations`            | The same schema as a rung on the shared migration ladder, for a composition that owns migration itself.     |
+The two compose without ceremony. `TimeTravel.layer` asks for five injectable
+contracts, four of which an engine composition already provides, so it merges
+straight onto one. `@smthrs/flows` also re-exports the `TimeTravel` service key,
+so a program that already depends on the barrel reaches the service through it
+with no second dependency, and reaches `FlowEngine.Lineage` the same way.
 
-`Replay`, `Fork`, `Rewind`, `Retry`, `Recovery`, `Compensation`,
-`SnapshotProjector`, `HistoryLimit`, and `EffectHandlerRegistry` are machinery
-under `src/internal/`, blocked at the package's `exports` map. Recovery is
-never a call: building `TimeTravel.layer` finishes or rolls back any rewind a
-crash interrupted before the service accepts new work.
+Above both sits the `smithers` command-line tool, which runs and supervises
+flows without a program of your own. Its verbs are documented at
+[the CLI reference](https://cli.smithers.sh/reference/api/).
 
 ## Where to go next
 
-- [Installation](/installation/): the services the layer requires, the
-  import forms, and what a runnable composition adds.
-- [Quickstart](/quickstart/): execute a durable run and replay it, end to
-  end.
-- Guides: [replay a run](/guides/replay-a-run/),
-  [fork a run](/guides/fork-a-run/), [rewind a run](/guides/rewind-a-run/),
-  [provide a store](/guides/provide-a-store/),
-  [journal an effect boundary](/guides/journal-an-effect/),
-  [compensate an irreversible effect](/guides/compensate-an-effect/), and
-  [test against history](/guides/testing/).
-- Concepts: [frames and lineage](/concepts/frames-and-lineage/),
-  [derived state](/concepts/derived-state/),
-  [effect tiers](/concepts/effect-tiers/), and
-  [the rewind protocol](/concepts/rewind-protocol/).
-- [Troubleshooting](/troubleshooting/): every refusal this package raises,
-  what causes it, and what to change.
-- [API reference](/reference/api/): every public export with its signature.
-
-## What this release ships
-
-Time travel is a library API in 1.0.0-rc.0, and only a library API. A program
-that wants it provides `TimeTravelStore` and calls the service itself.
-
-| Surface     | 1.0.0-rc.0                                                                                                                                                     |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The service | `replay`, `inspect`, `fork`, and `rewind` from `@smthrs/time-travel`.                                                                                          |
-| CLI verbs   | None. The Smithers 0.x time-travel verbs exit 1 with a migration message; [migrating from 0.x](https://smithers.sh/docs/migration/1.0/#removed-commands) lists them.                    |
-| MCP tools   | None. `replay_run`, `fork_run`, `rewind_run`, `restore_checkpoint`, `list_snapshots`, `get_timeline`, and `time_travel` answer with an `unsupported` envelope. |
-| Composition | Not composed into `NodeControl`, and the CLI does not install migration block 5000.                                                                            |
+- [Installation](/installation/): the services `TimeTravel.layer` requires,
+  the import forms, and the packages a runnable composition adds.
+- [Quickstart](/quickstart/): execute a durable run, then fold its journal
+  into a number.
+- [Frames and lineage](/concepts/frames-and-lineage/): why an address carries
+  a lineage rather than a run, and what goes wrong when it does not.
+- [Replay a run into a view](/guides/replay-a-run/),
+  [Fork a run at a frame](/guides/fork-a-run/), and
+  [Rewind a run to a frame](/guides/rewind-a-run/): one guide per verb.
+- [API reference](/reference/api/): every public export, and the closed list of failure
+  codes.
+- [Troubleshooting](/troubleshooting/): each refusal, and what to change.

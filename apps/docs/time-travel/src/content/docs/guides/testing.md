@@ -38,7 +38,7 @@ The other seeds describe the rest of the world the operation reads:
 | ------------- | --------------------------------------------------------------------------------------------- |
 | `records`     | Journal records the run has already written, oldest first.                                    |
 | `edges`       | Pre-existing lineage edges, for a run that already has descendants.                           |
-| `snapshots`   | Tier-2 anchors the snapshot projector would have recorded.                                    |
+| `snapshots`   | Anchors the snapshot projector would have recorded.                                           |
 | `liveRuns`    | Runs to treat as still executing, so a frame in one is refused `live_parent` or `live_child`. |
 | `runOwners`   | The owner each run records, which is what `archiveAndTruncate` fences on.                     |
 | `runStatuses` | The status each seeded run row records. An absent run id models a missing row.                |
@@ -179,10 +179,6 @@ const layer = TimeTravel.layer.pipe(
 `meta.lineageId` is what a fold filters on, so a seeded record has to carry it.
 A record without it is kept in every lineage, which is a different test than
 the one you probably meant to write.
-
-The package's own suites are the worked examples. `Replay.test.ts` and
-`Rewind.test.ts` drive the internals directly, and `TimeTravel.test.ts` drives
-the same service a caller uses.
 
 ## Where to go next
 

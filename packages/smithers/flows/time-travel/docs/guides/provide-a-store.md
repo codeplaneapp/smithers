@@ -36,14 +36,14 @@ Building the layer runs `SqlTimeTravelStore.migrate` first, so a fresh database
 is usable with no separate setup step. It creates six tables and the index
 under them:
 
-| Table                            | What it holds                                                           |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| `flows_time_travel_snapshots`    | The tier-2 anchors at a frame: the Jujutsu pointer and the plan digest. |
-| `flows_time_travel_edges`        | The fork edges of the lineage tree.                                     |
-| `flows_time_travel_audits`       | One row per rewind, so a crash leaves something recovery can find.      |
-| `flows_time_travel_receipts`     | Proof that a side effect was compensated.                               |
-| `flows_time_travel_archive`      | The records a truncation moved aside rather than deleted.               |
-| `flows_time_travel_fork_intents` | A minted fork id, reserved before its workspace is provisioned.         |
+| Table                            | What it holds                                                      |
+| -------------------------------- | ------------------------------------------------------------------ |
+| `flows_time_travel_snapshots`    | The anchors at a frame: the Jujutsu pointer and the plan digest.   |
+| `flows_time_travel_edges`        | The fork edges of the lineage tree.                                |
+| `flows_time_travel_audits`       | One row per rewind, so a crash leaves something recovery can find. |
+| `flows_time_travel_receipts`     | Proof that a side effect was compensated.                          |
+| `flows_time_travel_archive`      | The records a truncation moved aside rather than deleted.          |
+| `flows_time_travel_fork_intents` | A minted fork id, reserved before its workspace is provisioned.    |
 
 It also indexes `meta_json.lineageId` on the journal's own
 `flows_journal_events`, so a lineage-filtered read is not a full run scan.
@@ -73,13 +73,12 @@ is the complete durable schema for an engine with time travel: everything
 `Migrations.run` applies them in order, and `Migrations.layer` installs them
 before exposing the database.
 
-The block number is not arbitrary. Migration ids are spaced by 1,000 and a
-migrator refuses any migration whose id sits below the high-water mark the
-database already applied, because it runs from a single mark and would
-otherwise skip it silently. The journal's reserved block is `0` to `999` and
-the plan's is `4000`, so the journal index this set adds has to ship in the
-highest block rather than as a second journal migration. The table stays the
-journal's; only the index does not.
+The block number is not arbitrary. Migration ids are spaced by 1,000, and a
+migrator runs from a single high-water mark: it refuses any migration whose id
+sits below the mark the database already applied rather than skipping it
+silently. This set therefore ships above every set an engine composition
+already applies, which is what lets it add an index to a table the journal
+owns. The table stays the journal's; only the index does not.
 
 ## The in-memory store
 

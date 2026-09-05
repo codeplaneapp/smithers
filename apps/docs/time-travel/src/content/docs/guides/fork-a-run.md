@@ -47,7 +47,7 @@ interface ForkResult {
 
 ## What the child inherits
 
-The fork copies the journal prefix at or below the frame, the frame's tier-2
+The fork copies the journal prefix at or below the frame, the frame's
 anchors, and only the attempts that prefix can explain. An attempt that started
 after the frame is not part of the history the child inherits, which is what
 makes the child's past a real prefix of the parent's rather than a snapshot of
@@ -77,8 +77,11 @@ in. It defaults to `.flows/forks`:
 yield * timeTravel.fork(position, { workspaceRoot: ".worktrees/forks" })
 ```
 
-The lane is forgotten when the time-travel service's scope is released, not
-when the call returns. If the frame has no recorded anchor, the fork still
+By default, the lane is forgotten when the time-travel service's scope is released,
+not when the call returns. Set `retainWorkspace: true` to keep the lane registered
+for a later process; the caller then owns its cleanup. `forkWorkspaceName(childRunId)`
+from `@smthrs/time-travel/TimeTravel` returns the derived workspace name.
+If the frame has no recorded anchor, the fork still
 succeeds and reports a warning naming the workspace it could not restore.
 
 ## Warnings are disclosure, not refusal
@@ -121,9 +124,9 @@ const driven = Effect.gen(function*() {
 })
 ```
 
-The runnable original of this walkthrough is
-[`examples/src/05-time-travel-fork.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/05-time-travel-fork.ts)
-in the repository.
+A runnable version of this walkthrough is
+[`05-time-travel-fork.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/05-time-travel-fork.ts)
+in the Smithers examples on GitHub.
 
 ## Bound what the fork reads
 

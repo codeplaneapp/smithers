@@ -18,6 +18,7 @@
  *
  * @since 0.1.0
  */
+import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import type { OwnerId } from "@smthrs/journal/OwnerId"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -62,8 +63,8 @@ export type Snapshot = typeof Snapshot.Type
  * @category models
  */
 export const AttemptRef = Schema.Struct({
-  stepKeyDigest: Schema.NonEmptyString,
-  attempt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+  stepKeyDigest: JournalEvent.Identifier,
+  attempt: JournalEvent.NonNegativeQuantity
 })
 /**
  * The value form of {@link AttemptRef}.

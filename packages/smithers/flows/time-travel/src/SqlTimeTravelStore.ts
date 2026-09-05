@@ -322,11 +322,7 @@ const DecisionPayload = Schema.Struct({ state: Schema.Unknown })
 const decisionState = Schema.decodeUnknownOption(DecisionPayload)
 
 /** @private */
-const AttemptPayload = Schema.Struct({
-  stepKeyDigest: Schema.NonEmptyString,
-  attempt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-})
-const attemptRef = Schema.decodeUnknownOption(AttemptPayload)
+const attemptRef = Schema.decodeUnknownEffect(TimeTravelStore.AttemptRef)
 
 /**
  * Builds the SQL-backed store, running {@link migrate} first so a fresh
@@ -479,9 +475,10 @@ export const make: Effect.Effect<TimeTravelStore.Service, never, DurableWriter |
             const refs = new Map<string, TimeTravelStore.AttemptRef>()
             for (const row of rows) {
               const payload = yield* decodeJson(row.payload_json)
-              const decoded = attemptRef(payload)
-              if (decoded._tag === "None") continue
-              refs.set(`${decoded.value.stepKeyDigest}:${decoded.value.attempt}`, decoded.value)
+              const decoded = yield* attemptRef(payload).pipe(
+                Effect.mapError((cause) => error("invalid", `attempt-started at seq ${row.seq} is malformed`, cause))
+              )
+              refs.set(`${decoded.stepKeyDigest}:${decoded.attempt}`, decoded)
             }
             return [...refs.values()]
           })

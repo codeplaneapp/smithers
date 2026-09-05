@@ -19,6 +19,7 @@ import { isTerminalRunStatus, type RunStatus } from "@smthrs/run-store/RunStore"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import { forkCreatedEventType, type Frame, type LineageEdge } from "./Frame.ts"
 import { error, TimeTravelError } from "./TimeTravelError.ts"
 import * as TimeTravelStore from "./TimeTravelStore.ts"
@@ -324,13 +325,12 @@ export const make = (options: Options = {}): TimeTravelStore.Service & { readonl
     ),
     attemptsAt: Effect.fn("TimeTravelStore.attemptsAt")((runId, frame) =>
       Effect.annotateCurrentSpan({ runId, lineageId: frame.lineageId, seq: frame.seq }).pipe(Effect.andThen(
-        Effect.sync(() => {
+        Effect.gen(function*() {
           const refs = new Map<string, TimeTravelStore.AttemptRef>()
           for (const record of framed(runId, frame, "flows.engine.attempt-started")) {
-            const payload = record.payload as
-              | { readonly stepKeyDigest?: unknown; readonly attempt?: unknown }
-              | null
-            if (typeof payload?.stepKeyDigest !== "string" || typeof payload.attempt !== "number") continue
+            const payload = yield* Schema.decodeUnknownEffect(TimeTravelStore.AttemptRef)(record.payload).pipe(
+              Effect.mapError((cause) => error("invalid", `attempt-started at seq ${record.seq} is malformed`, cause))
+            )
             refs.set(`${payload.stepKeyDigest}:${payload.attempt}`, {
               stepKeyDigest: payload.stepKeyDigest,
               attempt: payload.attempt
