@@ -12,6 +12,9 @@
  * Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its
  * test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary
  * `pnpm run test:examples` suite clears the key in its test environment.
+ * From `examples/`, run
+ * `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`.
+ * The test allows 300 seconds for the model round trip.
  *
  * @since 0.1.0
  */

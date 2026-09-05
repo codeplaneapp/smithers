@@ -40765,7 +40765,7 @@ A live smoke test: the assembled production agent stack (the real cell loop, the
 
 Every example before this one scripts its model deliberately, so CI runs with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says why this one exists anyway: "a smoke test that calls a provider is not a smoke test" if it doesn't. This is that smoke test, for the example composition rather than the harness's own hand-wired one.
 
-Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment.
+Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`. The test allows 300 seconds for the model round trip.
 
 @since 0.1.0
 
@@ -40926,6 +40926,8 @@ https://smithers.sh/docs/examples/13-agent-live-smoke-local/
 A live smoke test against a fully local model: the same assembled production agent stack as `liveOpenAiSmoke` (see `12-agent-live-smoke.ts`), run against Ollama over `Route.openaiChatCompatible` instead of a paid provider.
 
 This needs no API key, no billing, and no external network access: only a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It exists because both real provider keys available in the authoring environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) were out of credit, and a "production ready candidate" has to be testable without asking anyone to go get a credit card out.
+
+The test requires explicit opt-in even when Ollama is running. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/13-agent-live-smoke-local.test.ts`. It allows 300 seconds and skips with a reason if the daemon or model is missing.
 
 @since 0.1.0
 

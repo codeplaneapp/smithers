@@ -11,7 +11,7 @@ A live smoke test: the assembled production agent stack (the real cell loop, the
 
 Every example before this one scripts its model deliberately, so CI runs with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says why this one exists anyway: "a smoke test that calls a provider is not a smoke test" if it doesn't. This is that smoke test, for the example composition rather than the harness's own hand-wired one.
 
-Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment.
+Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary `pnpm run test:examples` suite clears the key in its test environment. From `examples/`, run `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`. The test allows 300 seconds for the model round trip.
 
 @since 0.1.0
 

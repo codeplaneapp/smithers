@@ -1,11 +1,17 @@
+/**
+ * Runs the live OpenAI example only when explicitly requested.
+ *
+ * @since 0.1.0
+ */
 import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import { main } from "../src/12-agent-live-smoke.ts"
 
 const hasKey = process.env.OPENAI_API_KEY !== undefined && process.env.OPENAI_API_KEY !== ""
+const liveEnabled = process.env.SMITHERS_LIVE_EXAMPLES === "1"
 
-it.effect.skipIf(!hasKey)(
-  "runs the assembled agent stack against a real OpenAI seat",
+it.effect.skipIf(!liveEnabled || !hasKey)(
+  "runs the real OpenAI stack (requires SMITHERS_LIVE_EXAMPLES=1 and OPENAI_API_KEY)",
   () =>
     Effect.gen(function*() {
       const result = yield* main("What is 2+2? Reply with just the digit.")
@@ -13,5 +19,5 @@ it.effect.skipIf(!hasKey)(
       console.log("LIVE MODEL ANSWER:", JSON.stringify(result))
       expect(result.answer.length).toBeGreaterThan(0)
     }),
-  120_000
+  300_000
 )

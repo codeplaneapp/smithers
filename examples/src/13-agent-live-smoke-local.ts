@@ -10,6 +10,11 @@
  * and a "production ready candidate" has to be testable without asking
  * anyone to go get a credit card out.
  *
+ * The test requires explicit opt-in even when Ollama is running. From
+ * `examples/`, run
+ * `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/13-agent-live-smoke-local.test.ts`.
+ * It allows 300 seconds and skips with a reason if the daemon or model is missing.
+ *
  * @since 0.1.0
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
