@@ -75,7 +75,7 @@ const builtCjs = fileURLToPath(url("../dist/cjs/index.js"))
 // The published entries are built artifacts, not `src/index.ts`, so this suite
 // needs a build to have happened. `//packages/smthrs-deprecation:test` declares
 // `//packages/smthrs-deprecation:lib` as a dependency
-// (`packages/smithers/build/targets/src/StandardPackage.ts`), so a build-graph run always
+// (`packages/repo-targets/src/BuildAndCheckTypeScriptPackage.ts`), so a build-graph run always
 // arrives here with a complete `dist/` and nothing else writes to that
 // directory while the suite runs. The two runners that reach vitest directly do
 // not: a fresh checkout running `pnpm test` has no `dist/` at all, and

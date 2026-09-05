@@ -16,7 +16,7 @@ to rewrite against, not a symbol to swap in.
 | `smthrs/jsx-runtime`, `smthrs/jsx-dev-runtime`, `jsxImportSource: "smthrs"` | No JSX authoring API. Author a flow in TypeScript with `Flow` and `Action` from [`@smthrs/flow`](/api/flow), or in Markdown as `flows/<name>/flow.mdx`.                         |
 | `Workflow` and `Task` components                                            | `Flow.make(tag, { payload, success, error, body })` and `Action.make` ([`@smthrs/flow`](/api/flow)). A model-backed step is `AgentAction.make` ([`@smthrs/agent`](/api/agent)). |
 | `Sequence`, `Parallel`, `Branch` components                                 | `Node.andThen`, `Node.all`, and `Node.branch` ([`@smthrs/plan`](/api/plan)).                                                                                                    |
-| `Loop`, `Ralph`, `ReviewLoop` components                                    | `ReviewLoop.run`, or `Recursion.recurse` with an explicit fuel, depth, and fanout envelope ([`@smthrs/patterns`](/api/patterns)).                                               |
+| `Loop`, `Ralph`, `ReviewLoop` components                                    | `ReviewLoop.run`, or `Recursion.recurse` with an explicit fuel, depth, and fanout envelope ([`@smthrs/patterns`](/api/smithers-patterns)).                                      |
 | `SmithersRenderer`, `createSmithers`, `runWorkflow`, the React reconciler   | `FlowEngine` and `FlowProxy` ([`@smthrs/engine`](/api/engine)), composed through `@smthrs/flows/NodeRuntime`.                                                                   |
 | `Approval`, `HumanTask`, `Wait`, `Signal` components                        | `DurableDeferred`, `HumanTask`, `WaitFor`, and `Sleep` ([`@smthrs/flow`](/api/flow)), with approvals and steering on the control plane ([`@smthrs/control`](/api/control)).     |
 | Output accessors and workflow context hooks                                 | Journal projections and the run store ([`@smthrs/journal`](/api/journal), [`@smthrs/run-store`](/api/run-store)).                                                               |
@@ -44,4 +44,4 @@ Finish, archive, or discard every unfinished 0.x run with the 0.x CLI
 (`bunx smthrs@0.35.0 ps`) before you upgrade; `smthrs migrate` refuses a
 project whose `smithers.db` still holds runs that have not finished, and no
 flag releases that refusal. The policy is frozen on the
-[compatibility policy](/docs/migration/compatibility) page.
+[compatibility policy](/migration/compatibility) page.

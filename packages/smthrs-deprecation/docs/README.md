@@ -1,10 +1,14 @@
 ---
 title: "smthrs"
-description: "The unscoped smthrs package at 1.0.0-rc.0 is a migration notice, not a runtime: importing it throws, and the message names the @smthrs/* packages that replace it."
+description: "The unscoped smthrs package on npm. At 1.0 it publishes a migration notice instead of a runtime: importing it throws and names the @smthrs/* packages that replaced the 0.x umbrella."
 ---
 
-`smthrs@1.0.0-rc.0` publishes no runtime. Importing it throws, and the error is
-the entire package:
+`smthrs` is the npm name that Smithers 0.x published as one umbrella package:
+the JSX authoring API, the renderer, and fourteen `@smthrs/*` packages behind
+a single dependency. Smithers 1.0 removed that architecture. The name keeps
+its place on the registry, and what it publishes at `1.0.0-rc.0` is a
+migration notice rather than code. The module declares no exports, and
+importing it throws:
 
 ```text
 smthrs 1.0 is a migration notice, not a runtime.
@@ -13,68 +17,103 @@ and @smthrs/cli (the `smthrs` command), then run `smthrs migrate` in a 0.x proje
 Migration guide: https://smithers.sh/migration/1.0
 ```
 
-Smithers 0.x published `smthrs` as an umbrella facade over the JSX authoring
-API, the renderer, and fourteen `@smthrs/*` packages. Smithers 1.0 removes that
-architecture. The name keeps its place on the registry so that an upgrading
-project is told where the code went, rather than resolving to a silently
-different API. There is no umbrella package at 1.0, no JSX runtime, and no
-compatibility shim.
+## Why a package that only throws
 
-## Pick your path
+Nobody adds this package to a project on purpose. You reach it one of two
+ways: an upgrade pulled `smthrs@next` into a 0.x project, or you searched npm
+for Smithers, found the shortest name, and installed it.
 
-Two different readers reach this notice, and the right next command is not the
-same for both.
+Throwing is the point. Smithers 1.0 shares no source-compatible API with 0.x,
+so a package that resolved to an empty module would fail later and somewhere
+else, as an undefined value with no explanation attached. The error arrives at
+the import that caused it and carries the four lines that say where the code
+went.
 
-### You are upgrading a Smithers 0.x project
+`npm install smthrs` does not reach the notice. `smthrs@0.35.0` holds the
+`latest` dist-tag until Smithers 1.0.0 is final, so an unattended install
+still gets 0.x. Release candidates publish under `next`, which makes
+`smthrs@next` and `smthrs@1.0.0-rc.0` the two specifiers that reach this
+package.
 
-Run the migration and let it rewrite the manifest. Install the 1.0 command
-line, then plan the migration from the project directory:
+## Upgrade a 0.x project
+
+Install the 1.0 command line and plan the migration from the project
+directory:
 
 ```bash
 npm install --global @smthrs/cli@next
 smthrs migrate
 ```
 
-`smthrs migrate` with no flags plans only. It writes
+With no flags, `smthrs migrate` plans only. It writes
 `.smithers-migrate/report.json` and `.smithers-migrate/report.md` and changes
-nothing else. Read the report, then convert the source with
-`smthrs migrate --apply --seat provider:model`.
+nothing else. Read the report, then convert the source:
+
+```bash
+smthrs migrate --apply --seat provider:model
+```
 
 Leave `smthrs` in `package.json` while you do. An apply run migrates the
-project one unit at a time: the first unit adds the `@smthrs/*` packages at
-1.0.0-rc.0 beside the old ones, and the final unit removes the 0.x packages,
-the JSX settings, and the old CLI scripts once nothing depends on them.
+project one unit at a time: the first unit adds the `@smthrs/*` packages
+beside the old ones, and the final unit removes the 0.x dependency, the JSX
+settings, and the old CLI scripts once nothing depends on them.
 
-Reaching this notice means `smthrs@1.0.0-rc.0` is installed where 0.x used to
-be. Reinstall `smthrs@0.35.0` first if the project's `.tsx` sources still have
-to compile: 1.0.0-rc.0 publishes no `jsx-runtime`, so nothing that resolves
-through `jsxImportSource: "smthrs"` resolves at all.
+If the project's `.tsx` sources still have to compile while you work,
+reinstall `smthrs@0.35.0` first. Version 1.0.0-rc.0 publishes no
+`jsx-runtime`, so nothing that resolves through `jsxImportSource: "smthrs"`
+resolves at all.
 
-The whole procedure, its two gates, and every flag are in the
-[1.0 migration guide](/migration/1.0) and the [`smthrs migrate`](/cli/migrate)
-reference.
+## Start on 1.0 instead
 
-### You wanted the 1.0 runtime and installed this name
-
-Depend on the `@smthrs/*` packages directly:
+If you wanted the runtime and installed this name, depend on the `@smthrs/*`
+packages directly:
 
 ```bash
 npm remove smthrs
 npm install @smthrs/flows@next @smthrs/cli@next
 ```
 
-[`@smthrs/flows`](/pkg/flows) is the curated aggregate: the authoring
-primitives, the durable engine, and the stores behind one dependency.
-[`@smthrs/cli`](/pkg/cli) owns the `smthrs` command and its `smithers` alias.
-Import the package you need. Nothing at 1.0 re-exports everything.
+## Where the code went
 
-## Where to go next
+Smithers 1.0 has no umbrella package. The runtime is a set of `@smthrs/*`
+packages, each with its own documentation site. Two of them are the entry
+points a project starts from:
 
-- [Why importing throws](./notice.md): what the notice says, why the package
-  throws instead of resolving to an empty module, and how it is published.
-- [What replaced the 0.x umbrella](./replacements.md): each construct the
-  facade exported and the 1.0 concept to rewrite it against.
-- [Troubleshooting](./troubleshooting.md): the errors a 0.x project hits
-  first, including the ones that never print the notice.
-- The [1.0 migration guide](/migration/1.0): the full upgrade procedure, and
-  every removed command and flag.
+- [`@smthrs/cli`](/api/cli) publishes the `smthrs` executable, with `smithers`
+  as an alias of the same binary. It owns `smthrs migrate`.
+- [`@smthrs/flows`](/api/flows) is the curated aggregate: the authoring
+  primitives, the durable engine, and the stores behind one dependency.
+
+Underneath those sit the packages you import by name once you know which part
+you need:
+
+- [`@smthrs/flow`](/api/flow): flows, actions, durable waits, and retry
+  policy, the authoring model that replaced `Workflow` and `Task`.
+- [`@smthrs/plan`](/api/plan): the keyed action graph that replaced
+  `Sequence`, `Parallel`, and `Branch`.
+- [`@smthrs/engine`](/api/engine): the runtime that executes a flow, in place
+  of the React reconciler and `SmithersRenderer`.
+- [`@smthrs/agent`](/api/agent): the agent loop, and `AgentAction` for a
+  model-backed step.
+- [`@smthrs/patterns`](/api/smithers-patterns): review loops and bounded recursion, in
+  place of the `Loop`, `Ralph`, and `ReviewLoop` components.
+- [`@smthrs/control`](/api/control): approvals and steering on the control
+  plane.
+- [`@smthrs/journal`](/api/journal) and [`@smthrs/run-store`](/api/run-store):
+  run history and run state, in place of the 0.x output accessors.
+- [`@smthrs/database`](/api/database): the SQL contract behind those stores.
+- [`@smthrs/registry`](/api/registry): flow descriptor discovery, in place of
+  the JSX workflow loaders.
+- [`@smthrs/migrate`](/api/migrate): the library behind `smthrs migrate`.
+
+## Read next
+
+- [Why importing smthrs throws](./notice.md) reads the notice line by line and
+  explains the publication decisions that carry it to a person rather than to
+  a log.
+- [What replaced the 0.x umbrella](./replacements.md) maps every construct the
+  facade exported to the 1.0 package and concept to rewrite it against.
+- [Troubleshooting](./troubleshooting.md) covers the failures that never print
+  the notice, including the subpath error most 0.x projects hit first.
+- The [1.0 migration guide](/migration/1.0) is the full procedure and the
+  complete removal list.
