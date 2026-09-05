@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1426 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1435 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -281,6 +281,10 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **build-cli:** key selected executable contents ([c56ef91613](https://github.com/smithersai/smithers/commit/c56ef91613f1e0f8d8bdfd5c7c43581076f15ad9))
+- **build:** give fault suites an exclusive execution tier ([3c47b3057d](https://github.com/smithersai/smithers/commit/3c47b3057d6251dd876b084781b3dcf4c94f6dba))
+- **examples:** require explicit opt-in for live provider tests ([ce128e886f](https://github.com/smithersai/smithers/commit/ce128e886fae7c62e9cba8e5aa5eec5114748df2))
+- **targets:** resolve workspace-rooted eslint sources from cwd ([fef3186a73](https://github.com/smithersai/smithers/commit/fef3186a73578979a22f691c448d0e4d3b1feb0c))
 - **jj:** allow host startup before the repository directory exists ([147498180a](https://github.com/smithersai/smithers/commit/147498180a7c373bf4d2962e9930bd488dff1ca2))
 - **cli:** restore required bug summary parsing ([0a7ba7b893](https://github.com/smithersai/smithers/commit/0a7ba7b8938eed284135dc57aca3b73e425f81f6))
 - **cli:** distinguish the Effect console in buffered output ([1ae55ef1ae](https://github.com/smithersai/smithers/commit/1ae55ef1ae1b6c3a5d2052c31dfee1651ec1a227))
@@ -979,6 +983,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **targets:** define executable cache identity guarantees ([bbba6b9cc8](https://github.com/smithersai/smithers/commit/bbba6b9cc850792865fb636dfcfb92e295a3364a))
+- **support:** publish RC runtime and evidence boundaries ([74d5b6f78a](https://github.com/smithersai/smithers/commit/74d5b6f78abb4acd8a50e44cb388610f84f334fb))
 - **site:** regenerate the API pages, examples, and llms bundles after the fix lanes ([0000ded0ac](https://github.com/smithersai/smithers/commit/0000ded0ac3e9ac5c098fcf0e24e6ddbd6610354))
 - **site:** refresh generated reference captures ([969cc409a1](https://github.com/smithersai/smithers/commit/969cc409a1a527d9d8057e286d9fe1f476a70ae9))
 - **runtime:** align safety comments with their implementations ([ac9ef71ec4](https://github.com/smithersai/smithers/commit/ac9ef71ec4cee8934a6a489c409bb16b1fe5e171))
@@ -1314,6 +1320,9 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(fs):** cover optional nullable command schemas ([8c54b65b24](https://github.com/smithersai/smithers/commit/8c54b65b24e61e05611f93b0daa21915b7d103a4))
+- **test(ui):** pin the dark shimmer palette tokens ([1ac3dec862](https://github.com/smithersai/smithers/commit/1ac3dec862e5c1e890055a03ed11efc69b0476bf))
+- **test(targets):** observe descendant termination after exec timeout ([4904b238c1](https://github.com/smithersai/smithers/commit/4904b238c1ad78db631784cc282e31ae9006d527))
 - **test(cli):** preserve quiet-mode documents in credential checks ([ec309c2f14](https://github.com/smithersai/smithers/commit/ec309c2f149926db10bea6d534506d491f97a72f))
 - **test(flows):** pin the deliberate tree-wide JSDoc gate ([add7fd69e8](https://github.com/smithersai/smithers/commit/add7fd69e8b3e1ea055d57bcc1a06aeb0100b21c))
 - **test(jj):** cover override hints on host spawn failure ([f141120fce](https://github.com/smithersai/smithers/commit/f141120fce2e3dda06b08d7ab67a0d1658b2c1ee))
