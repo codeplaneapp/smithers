@@ -307,6 +307,7 @@ describe("the order the cancellation transaction writes in", () => {
             })
         }
         const store = RunStore.makeNoop({
+          lineage: () => Effect.succeed([]),
           requestCancel: (runId, nowMs) =>
             Effect.sync(() => {
               observed.push(`request:${runId}`)
@@ -344,6 +345,7 @@ describe("the order the cancellation transaction writes in", () => {
         }
         const observed: Array<string> = []
         const store = RunStore.makeNoop({
+          lineage: () => Effect.succeed([]),
           requestCancel: (runId, nowMs) =>
             Effect.sync(() => {
               observed.push(runId)
@@ -440,6 +442,14 @@ describe("a terminally cancelled parent whose request timestamp was cleared", ()
 
         const compacted: RunStore.Service = {
           ...store,
+          lineage: (runId) =>
+            store.lineage(runId).pipe(Effect.map((rows) =>
+              rows.map((row) =>
+                row.runId === "compacted-parent"
+                  ? { ...row, status: "cancelled" as const, cancelRequestedAtMs: null }
+                  : row
+              )
+            )),
           get: (runId) =>
             store.get(runId).pipe(
               Effect.map((row) =>

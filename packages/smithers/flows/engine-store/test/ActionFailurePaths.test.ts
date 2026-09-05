@@ -24,6 +24,7 @@ import * as ActionPersistence from "../src/internal/ActionPersistence.ts"
 import * as StepBoundary from "../src/StepBoundary.ts"
 import * as StepSandbox from "../src/StepSandbox.ts"
 import * as TestStores from "../src/test/TestStores.ts"
+import * as WorkspaceSandbox from "../src/WorkspaceSandbox.ts"
 import * as Clocks from "./Clocks.ts"
 import { sha256, withCrypto } from "./Sha256.ts"
 
@@ -783,6 +784,34 @@ describe("action executor failure paths", () => {
       expect(Option.getOrThrow(result.row).state).toBe("running")
       expect(result.events.map((event) => event.eventType)).not.toContain("flows.engine.attempt-finished")
     }))
+
+  it.effect("preserves materialization conflict classification through durable failure replay", () =>
+    run(Effect.gen(function*() {
+      yield* activate("conflict-replay", ownerA)
+      let calls = 0
+      const execute = executor({
+        runId: "conflict-replay",
+        execute: () =>
+          Effect.suspend(() => {
+            calls++
+            return Effect.fail(
+              new WorkspaceSandbox.MaterializationConflict({ paths: ["shared.out"], message: "a competing landing" })
+            )
+          })
+      })
+      const first = yield* execute(input("conflict/replay")).pipe(Effect.exit)
+      const replay = yield* executor({ runId: "conflict-replay", execute: () => Effect.die("must not run") })(
+        input("conflict/replay")
+      )
+        .pipe(Effect.exit)
+      for (const exit of [first, replay]) {
+        expect(Exit.isFailure(exit)).toBe(true)
+        const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+        expect(WorkspaceSandbox.isMaterializationConflict(error)).toBe(true)
+        expect(error).toMatchObject({ paths: ["shared.out"], message: "a competing landing" })
+      }
+      expect(calls).toBe(1)
+    })))
 
   it.effect("persists the failing cause as explicit tagged-reason JSON, independent of the store's serializer", () =>
     Effect.gen(function*() {

@@ -25,6 +25,8 @@ import * as Layer from "effect/Layer"
 import * as DurableEngineState from "../DurableEngineState.ts"
 import * as Migrations from "../Migrations.ts"
 import * as OwnerIdentity from "../OwnerIdentity.ts"
+import * as PlanInputStore from "../PlanInputStore.ts"
+import * as PlanMergeStore from "../PlanMergeStore.ts"
 
 /**
  * Options for the deterministic store bundle.
@@ -70,7 +72,9 @@ export const layer = (options?: TestStoresOptions) =>
     RunStore.layer,
     AttemptStore.layer,
     CacheStore.layer,
-    PlanStore.layer
+    PlanStore.layer,
+    PlanInputStore.layer,
+    PlanMergeStore.layer
   ).pipe(Layer.provide(database), Layer.merge(OwnerIdentity.layer))
 
 /**
@@ -119,5 +123,7 @@ export const layerAt = (filename: string, options?: TestStoresOptions) =>
     AttemptStore.layer,
     CacheStore.layer,
     PlanStore.layer,
+    PlanInputStore.layer,
+    PlanMergeStore.layer,
     DurableEngineState.layer
   ).pipe(Layer.provideMerge(databaseAt(filename)), Layer.merge(OwnerIdentity.layer))

@@ -9,23 +9,31 @@ sidebar:
 against its own manifest, restores one into a fresh directory, and invalidates
 the ownership fences the restored file still carries.
 
+Back up the authoritative stores even when using the additive
+[typed event contracts](https://journal.smithers.sh/concepts/state-event-authority/).
+The demonstrated attempt projection rebuilds disclosed history, including from
+a retained snapshot and suffix. It does not recover arbitrary private results,
+all execution state, or live ownership fences. Current writers and retained
+history keep their existing bytes until an explicit writer cutover and migration.
+
 ## Start from the reference script
 
-[`scripts/flows-backup.mjs`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/scripts/flows-backup.mjs)
-in the repository is the operator entry point these three operations were
-designed against. It parses arguments and composes the Node host layers, and
-nothing else:
+A reference command-line entry point,
+[`flows-backup.mjs`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/scripts/flows-backup.mjs),
+is the operator front end these three operations were designed against. It is
+not part of the published package, because the host layers are yours to choose:
+copy it into your own project, or read the sections that follow and compose the
+operations directly. It parses arguments and composes the Node host layers, and
+nothing else. Once copied, it takes three commands:
 
 ```bash
-node scripts/flows-backup.mjs backup <database-file> <backup-directory> [objects-directory]
-node scripts/flows-backup.mjs verify <backup-directory>
-node scripts/flows-backup.mjs restore <backup-directory> <target-directory>
+node flows-backup.mjs backup <database-file> <backup-directory> [objects-directory]
+node flows-backup.mjs verify <backup-directory>
+node flows-backup.mjs restore <backup-directory> <target-directory>
 ```
 
-It is not part of the published package, because the host layers are yours to
-choose. Copy it, or read the sections below and compose the operations
-directly. `restore` there runs `restoreAndFence`, so the restored file is
-fenced before the command returns.
+Its `restore` command calls `restoreAndFence`, so the restored file is fenced
+before the command returns.
 
 ## Take a backup
 

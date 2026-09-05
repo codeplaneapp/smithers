@@ -397,7 +397,9 @@ describe("cache convergence from a succeeded attempt row", () => {
                 meta: {
                   tier: "sealed",
                   boundary: {
-                    declaredOutputs: {},
+                    // The abstract boundary records its declared paths. Keep
+                    // this fixture admissible so it exercises timestamp convergence.
+                    declaredOutputs: { paths: ["output.txt"] },
                     diffIdentity: "identity",
                     wholeTreeWritesVerified: true,
                     // Convergence fails closed on BOTH proofs, exactly like the

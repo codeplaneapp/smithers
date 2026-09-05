@@ -8,6 +8,7 @@ import * as ArtifactStore from "@smthrs/artifacts/ArtifactStore"
 import { Sha256 } from "@smthrs/crypto"
 import { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { FileInput } from "@smthrs/flow/FileInput"
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import { DerivedKey } from "@smthrs/keys"
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Context from "effect/Context"
@@ -493,6 +494,12 @@ interface MeasuredDigest {
   readonly bytes: Uint8Array
 }
 
+interface BatchedDigest {
+  readonly digest: ArtifactStore.Digest
+  readonly sizeBytes: number
+  readonly bytes?: Uint8Array
+}
+
 type MaterializedOutput = typeof DigestReferencedOutput.Type
 
 /**
@@ -547,13 +554,57 @@ export const makeFileSystem = (
     return { digest, bytes } satisfies MeasuredDigest
   })
   const digestOf = readDigest
+  const batch = KernelFileSystem.batch(fs)
+  const measurements = Effect.fn("StepBoundary.measurements")(
+    function*(paths: ReadonlyArray<string>, content: boolean) {
+      if (batch === undefined) {
+        return yield* Effect.forEach(paths, (path) =>
+          readDigest(path).pipe(
+            Effect.map((value): BatchedDigest => ({
+              digest: value.digest,
+              sizeBytes: value.bytes.length,
+              ...(content ? { bytes: value.bytes } : {})
+            })),
+            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
+            Effect.mapError(hostFailure)
+          ), { concurrency: KernelFileSystem.fallbackConcurrency })
+      }
+      const values: Array<BatchedDigest | undefined> = []
+      for (let offset = 0; offset < paths.length; offset += batch.maxSize) {
+        const response = yield* batch.execute(
+          paths.slice(offset, offset + batch.maxSize).map((path) => ({
+            operation: "digest",
+            path,
+            content
+          }))
+        ).pipe(Effect.mapError(hostFailure))
+        for (const entry of [...response.entries].sort((a, b) => a.index - b.index)) {
+          const measured = yield* Effect.fromResult(entry.result).pipe(
+            Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
+            Effect.mapError(hostFailure)
+          )
+          if (measured === undefined) values.push(undefined)
+          else if (measured.operation !== "digest") {
+            return yield* Effect.fail(hostFailure(new Error("host returned a non-digest batch result")))
+          } else values.push({ ...measured, digest: measured.digest as ArtifactStore.Digest })
+        }
+      }
+      return values
+    }
+  )
+  /**
+   * One host call, never two. An `exists` probe ahead of the read asked
+   * exactly what the read itself answers — a path that is not there refuses
+   * with `NotFound` — and every declared read was therefore measured twice.
+   * On the confined host that is two CPython forks per path
+   * (`@smthrs/platform-node/AtomicFileSystem` spawns one interpreter per
+   * operation, ~130 ms each), so the probe doubled the cost of every
+   * `prepare`, every post-body change check, and every materialization.
+   */
   const measure = (path: string): Effect.Effect<string, UnsupportedBoundary, Crypto.Crypto> =>
-    fs.exists(path).pipe(
-      Effect.flatMap((present) =>
-        present
-          ? Effect.map(digestOf(path), (measured) => measured.digest)
-          : Effect.succeed(absentDigest)
-      ),
+    digestOf(path).pipe(
+      Effect.map((measured) => measured.digest),
+      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(absentDigest)),
       Effect.mapError(hostFailure)
     )
   // Both expansions enumerate through `FileEnumeration`, never the host
@@ -567,44 +618,49 @@ export const makeFileSystem = (
   const treeEntries = Effect.fn("StepBoundary.treeEntries")(function*(path: string) {
     return yield* FileEnumeration.entriesUnder(fs, path).pipe(Effect.mapError(hostFailure))
   })
-  const capture = Effect.fn("StepBoundary.capture")(function*(path: string, inlineBudget: number) {
-    yield* Effect.annotateCurrentSpan({ path })
-    const present = yield* fs.exists(path).pipe(Effect.mapError(hostFailure))
-    if (!present) return { output: { path, digest: null } satisfies MaterializedOutput, inlinedBytes: 0 }
-    const measured = yield* digestOf(path).pipe(Effect.mapError(hostFailure))
-    const bytes = measured.bytes
-    const digest = measured.digest
-    // Inline only while both bounds hold (issue #122): the per-output bound
-    // and the settle-wide aggregate budget the caller threads through.
-    if (bytes.length <= maxInlineBytes && bytes.length <= inlineBudget) {
-      return {
-        output: {
-          path,
-          digest,
-          sizeBytes: bytes.length,
-          content: Encoding.encodeBase64(bytes)
-        } satisfies MaterializedOutput,
-        inlinedBytes: bytes.length
+  const capture = Effect.fn("StepBoundary.capture")(
+    function*(path: string, inlineBudget: number, measured: BatchedDigest | undefined) {
+      yield* Effect.annotateCurrentSpan({ path })
+      // As in `measure`: the read reports absence itself, so the output is
+      // captured in one host call rather than an `exists` probe plus a read.
+      if (measured === undefined) {
+        return { output: { path, digest: null } satisfies MaterializedOutput, inlinedBytes: 0 }
       }
+      const bytes = measured.bytes
+      if (bytes === undefined) return yield* Effect.fail(hostFailure(new Error("host omitted requested batch content")))
+      const digest = measured.digest
+      // Inline only while both bounds hold (issue #122): the per-output bound
+      // and the settle-wide aggregate budget the caller threads through.
+      if (bytes.length <= maxInlineBytes && bytes.length <= inlineBudget) {
+        return {
+          output: {
+            path,
+            digest,
+            sizeBytes: bytes.length,
+            content: Encoding.encodeBase64(bytes)
+          } satisfies MaterializedOutput,
+          inlinedBytes: bytes.length
+        }
+      }
+      // Over the inline bound: the payload goes to the content-addressed
+      // artifact store and the persisted row carries only the reference. Every
+      // property that used to live here — atomic publication, verify-once
+      // dedupe, healing rewrite of a corrupt address — is now the store's, and
+      // is tested there (`@smthrs/artifacts`).
+      const stored = yield* artifacts.put(bytes).pipe(Effect.mapError(artifactFailure))
+      if (stored !== digest) {
+        return yield* Effect.fail(
+          new BoundaryCorruption({
+            code: "boundary_corruption",
+            path,
+            recordedDigest: `${stored}`,
+            measuredDigest: digest
+          })
+        )
+      }
+      return { output: { path, digest, sizeBytes: bytes.length } satisfies MaterializedOutput, inlinedBytes: 0 }
     }
-    // Over the inline bound: the payload goes to the content-addressed
-    // artifact store and the persisted row carries only the reference. Every
-    // property that used to live here — atomic publication, verify-once
-    // dedupe, healing rewrite of a corrupt address — is now the store's, and
-    // is tested there (`@smthrs/artifacts`).
-    const stored = yield* artifacts.put(bytes).pipe(Effect.mapError(artifactFailure))
-    if (stored !== digest) {
-      return yield* Effect.fail(
-        new BoundaryCorruption({
-          code: "boundary_corruption",
-          path,
-          recordedDigest: `${stored}`,
-          measuredDigest: digest
-        })
-      )
-    }
-    return { output: { path, digest, sizeBytes: bytes.length } satisfies MaterializedOutput, inlinedBytes: 0 }
-  })
+  )
   const materialize = Effect.fn("StepBoundary.materialize")(function*(output: MaterializedOutput) {
     yield* Effect.annotateCurrentSpan({ path: output.path })
     // The filesystem is the cheapest source of truth for a warm workspace.
@@ -691,10 +747,15 @@ export const makeFileSystem = (
       // compare the declaration against itself and pass unconditionally
       // (issue #104).
       const readSnapshot: Array<FileInput> = []
+      const paths: Array<string> = []
       for (const entry of boundary.readSet) {
         if (FileSet.isGlob(entry)) {
-          for (const path of yield* expandGlob(entry)) readSnapshot.push({ path, digest: yield* measure(path) })
-        } else readSnapshot.push({ path: entry.path, digest: yield* measure(entry.path) })
+          paths.push(...yield* expandGlob(entry))
+        } else paths.push(entry.path)
+      }
+      const measured = yield* measurements(paths, false)
+      for (const [index, path] of paths.entries()) {
+        readSnapshot.push({ path, digest: measured[index]?.digest ?? absentDigest })
       }
       readSnapshot.sort((left, right) => compareText(left.path, right.path))
       return Object.freeze({
@@ -724,9 +785,10 @@ export const makeFileSystem = (
             : FileSet.matchesGlob(entry, path)
         )
       const undeclared: Array<string> = []
-      for (const entry of prepared.readSnapshot) {
-        if (declaredCovers(entry.path)) continue
-        if ((yield* measure(entry.path)) !== entry.digest) undeclared.push(entry.path)
+      const checkedReads = prepared.readSnapshot.filter((entry) => !declaredCovers(entry.path))
+      const currentReads = yield* measurements(checkedReads.map((entry) => entry.path), false)
+      for (const [index, entry] of checkedReads.entries()) {
+        if ((currentReads[index]?.digest ?? absentDigest) !== entry.digest) undeclared.push(entry.path)
       }
       const outputs: Array<MaterializedOutput> = []
       // Declared removals are captured on the same path and under the same
@@ -736,40 +798,77 @@ export const makeFileSystem = (
       const surviving: Array<string> = []
       let inlinedBytes = 0
       const outputPaths: Array<string> = []
-      const trees: Array<{ readonly path: string; readonly identity: string }> = []
+      const treeMembers: Array<{ readonly path: string; readonly files: ReadonlyArray<string> }> = []
       for (const entry of prepared.descriptor.writeSet) {
         if (typeof entry === "string") outputPaths.push(entry)
         else if (entry._tag === "Glob") outputPaths.push(...yield* expandGlob(entry))
         else {
           const files = (yield* treeEntries(entry.path)).files
           outputPaths.push(...files)
-          const pairs: Array<readonly [string, string]> = []
-          for (const path of files) pairs.push([path.slice(entry.path.length + 1), yield* measure(path)])
-          trees.push({
-            path: entry.path,
-            identity: yield* Schema.decodeUnknownEffect(DerivedKey)({ kind: "tree-artifact", files: pairs }).pipe(
-              Effect.orDie
-            )
-          })
+          treeMembers.push({ path: entry.path, files })
         }
       }
       outputPaths.push(...removes)
-      for (const path of [...new Set(outputPaths)].sort(compareText)) {
-        const captured = yield* capture(path, maxTotalInlineBytes - inlinedBytes)
-        // `capture` reports the bytes it actually inlined (zero for a
-        // digest-only reference), so the aggregate budget never has to
-        // re-derive them from the row it just built.
-        inlinedBytes += captured.inlinedBytes
-        outputs.push(captured.output)
-        if (
-          captured.output.digest === null &&
-          !removes.includes(path) &&
-          prepared.descriptor.writeSet.some((entry) => typeof entry === "string" && entry === path)
-        ) missing.push(path)
-        // The dual check: a removal promised the path absent, and it is still
-        // here — possibly rewritten. Settling it would cache the surviving
-        // bytes under a declaration that disclaimed them.
-        if (captured.output.digest !== null && removes.includes(path)) surviving.push(path)
+      const captured = new Map<string, MaterializedOutput>()
+      const sortedPaths = [...new Set(outputPaths)].sort(compareText)
+      // Digest-only preflight bounds content batches by bytes as well as path
+      // count. Both measurements share the guarded host's pinned root identity;
+      // a rewrite between them is a refusal, never mismatched cached content.
+      const sizes = batch === undefined ? undefined : yield* measurements(sortedPaths, false)
+      for (let offset = 0; offset < sortedPaths.length;) {
+        let end = offset
+        let responseBytes = 256
+        const size = batch?.maxSize ?? KernelFileSystem.fallbackConcurrency
+        while (end < sortedPaths.length && end - offset < size) {
+          const estimate = 4096 + new TextEncoder().encode(sortedPaths[end]).length * 6 +
+            Math.ceil((sizes?.[end]?.sizeBytes ?? 0) / 3) * 4
+          if (end > offset && batch !== undefined && responseBytes + estimate > batch.maxResponseBytes) break
+          responseBytes += estimate
+          end++
+        }
+        const group = sortedPaths.slice(offset, end)
+        const contents = yield* measurements(group, true)
+        for (const [index, path] of group.entries()) {
+          const measured = contents[index]
+          if (sizes !== undefined && measured?.digest !== sizes[offset + index]?.digest) {
+            return yield* Effect.fail(hostFailure(new Error(`output changed during measurement: ${path}`)))
+          }
+          const output = yield* capture(path, maxTotalInlineBytes - inlinedBytes, measured)
+          // `capture` reports the bytes it actually inlined (zero for a
+          // digest-only reference), so the aggregate budget never has to
+          // re-derive them from the row it just built.
+          inlinedBytes += output.inlinedBytes
+          outputs.push(output.output)
+          captured.set(path, output.output)
+          if (
+            output.output.digest === null &&
+            !removes.includes(path) &&
+            prepared.descriptor.writeSet.some((entry) => typeof entry === "string" && entry === path)
+          ) missing.push(path)
+          // The dual check: a removal promised the path absent, and it is still
+          // here — possibly rewritten. Settling it would cache the surviving
+          // bytes under a declaration that disclaimed them.
+          if (output.output.digest !== null && removes.includes(path)) surviving.push(path)
+        }
+        offset = end
+      }
+      // A tree member is already one of the captured outputs, so its identity
+      // is folded from the digest that capture measured rather than from a
+      // second read of the same bytes. `capture` spells an absent member
+      // `null` where `measure` spells it `absentDigest`; the identity keeps
+      // the `measure` spelling, so a tree recorded before this and one
+      // recorded after hash identically.
+      const trees: Array<{ readonly path: string; readonly identity: string }> = []
+      for (const tree of treeMembers) {
+        const pairs = tree.files.map((path) =>
+          [path.slice(tree.path.length + 1), captured.get(path)!.digest ?? absentDigest] as const
+        )
+        trees.push({
+          path: tree.path,
+          identity: yield* Schema.decodeUnknownEffect(DerivedKey)({ kind: "tree-artifact", files: pairs }).pipe(
+            Effect.orDie
+          )
+        })
       }
       // Through `DerivedKey` — the repo's one hashing chokepoint — so the identity is
       // a digest of the RFC 8785 canonical form rather than of whatever
@@ -867,8 +966,11 @@ export const makeFileSystem = (
       }
       for (const output of decoded.success.outputs) {
         if (output.digest === null) {
-          const present = yield* fs.exists(output.path).pipe(Effect.mapError(hostFailure))
-          if (present) yield* fs.remove(output.path).pipe(Effect.mapError(hostFailure))
+          // `force` IS the probe: the evidence says this path must not exist,
+          // and a removal that finds it already gone has done its job. The
+          // `exists` call that used to precede it was a second host call — a
+          // second process on the confined host — for the same answer.
+          yield* fs.remove(output.path, { force: true }).pipe(Effect.mapError(hostFailure))
         } else {
           yield* materialize(output)
         }

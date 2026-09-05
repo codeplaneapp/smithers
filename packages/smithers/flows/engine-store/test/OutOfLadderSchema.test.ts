@@ -55,11 +55,8 @@ describe("out-of-ladder engine-store schema (issue #92)", () => {
       expect(statement.dialects.length).toBeGreaterThan(0)
       expect(statement.dialects).toContain("sqlite")
     }
-    // The GC trigger's inline BEGIN...END body is SQLite-exclusive; the
-    // inventory must say so, because that is the statement a pg backend
-    // dies on first.
-    const trigger = EngineStateSchema.statements.find((statement) => statement.name === "flows_run_parents_gc")
-    expect(trigger?.dialects).toEqual(["sqlite"])
+    // Spawn edges and their SQLite GC trigger are now owned by migration 0006.
+    expect(EngineStateSchema.statements.map((statement) => statement.name)).toEqual(["flows_runs_stale_running_idx"])
   })
 
   it.effect("is idempotent: a second construction over the same database adds nothing", () =>

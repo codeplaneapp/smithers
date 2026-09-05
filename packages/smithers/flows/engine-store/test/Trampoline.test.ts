@@ -94,7 +94,7 @@ const LegOne = Flow.make("trampoline/leg-one", {
   success: Schema.Number,
   body: ({ value }) =>
     Increment.call({ value }).pipe(
-      Node.andThen((next) => LegTwo.to({ value: next }))
+      Node.bindPlanned((next) => LegTwo.to({ value: next }))
     )
 })
 
@@ -127,7 +127,7 @@ const Opening = Flow.make("trampoline/opening", {
   success: Schema.Number,
   body: ({ value }) =>
     Increment.call({ value }).pipe(
-      Node.andThen((next) => Gate.to({ value: next }))
+      Node.bindPlanned((next) => Gate.to({ value: next }))
     )
 })
 

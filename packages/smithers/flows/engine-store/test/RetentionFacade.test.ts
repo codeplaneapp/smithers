@@ -14,6 +14,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlError from "effect/unstable/sql/SqlError"
 import * as RetentionOps from "../src/internal/RetentionOps.ts"
 import * as Migrations from "../src/Migrations.ts"
 import * as Retention from "../src/Retention.ts"
@@ -52,9 +53,10 @@ const insertEdge = (childId: string, parentId: string) =>
     yield* sql`CREATE TABLE IF NOT EXISTS flows_run_parents (
       child_id TEXT NOT NULL,
       parent_id TEXT NOT NULL,
+      seq BIGINT NOT NULL,
       PRIMARY KEY (child_id, parent_id)
     )`
-    yield* sql`INSERT INTO flows_run_parents ${sql.insert({ child_id: childId, parent_id: parentId })}`
+    yield* sql`INSERT INTO flows_run_parents ${sql.insert({ child_id: childId, parent_id: parentId, seq: 0 })}`
   })
 
 const insertAttempt = (runId: string) =>
@@ -128,6 +130,124 @@ const receiptIds = Effect.gen(function*() {
 })
 
 describe("Retention.collect", () => {
+  for (const dryRun of [false, true]) {
+    it.effect(`scans lineage inside the transaction (dryRun=${dryRun})`, () =>
+      migrated(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        yield* insertRun("old-result", "completed", 100)
+        yield* insertRun("live-parent", "suspended", null)
+        yield* insertAttempt("old-result")
+        yield* insertEvent("old-result", 0)
+        let opened = false
+        const wrapped = new Proxy(sql, {
+          get(target, property) {
+            if (property !== "withTransaction") return Reflect.get(target, property)
+            return <A, E, R>(body: Effect.Effect<A, E, R>) =>
+              Effect.gen(function*() {
+                if (!opened) {
+                  opened = true
+                  // Another writer attaches the result immediately before BEGIN.
+                  // The eligibility SELECT must not have happened yet.
+                  yield* insertEdge("old-result", "live-parent")
+                }
+                return yield* sql.withTransaction(body)
+              })
+          }
+        })
+        const report = yield* Retention.collect({ olderThanMs: 500, dryRun }).pipe(
+          Effect.provideService(SqlClient.SqlClient, wrapped)
+        )
+        expect(opened).toBe(true)
+        expect(report.runs).toEqual([])
+        expect(yield* count("flows_runs")).toBe(2)
+        expect(yield* count("flows_attempts")).toBe(1)
+        expect(yield* count("flows_journal_events")).toBe(1)
+        expect(yield* count("flows_run_parents")).toBe(1)
+      })))
+  }
+
+  it.live("recomputes eligibility after a busy transaction rolls back", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old-result", "completed", 100)
+      yield* insertRun("live-parent", "pending", null)
+      yield* insertAttempt("old-result")
+      yield* insertEvent("old-result", 0)
+      let attempts = 0
+      const wrapped = new Proxy(sql, {
+        get(target, property) {
+          if (property !== "withTransaction") return Reflect.get(target, property)
+          return <A, E, R>(body: Effect.Effect<A, E, R>) =>
+            Effect.gen(function*() {
+              attempts++
+              if (attempts === 2) yield* insertEdge("old-result", "live-parent")
+              return yield* sql.withTransaction(body.pipe(Effect.tap(() =>
+                attempts === 1
+                  ? Effect.fail(
+                    new SqlError.SqlError({
+                      reason: SqlError.classifySqliteError(Object.assign(new Error("busy"), { code: "SQLITE_BUSY" }))
+                    })
+                  )
+                  : Effect.void
+              )))
+            })
+        }
+      })
+      const report = yield* Retention.collect({ olderThanMs: 500 }).pipe(
+        Effect.provideService(SqlClient.SqlClient, wrapped)
+      )
+      expect(attempts).toBe(2)
+      expect(report.runs).toEqual([])
+      expect(yield* count("flows_runs")).toBe(2)
+      expect(yield* count("flows_attempts")).toBe(1)
+      expect(yield* count("flows_journal_events")).toBe(1)
+    })))
+
+  it.effect("reports a transaction failure without deleting history", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old-result", "completed", 100)
+      const wrapped = new Proxy(sql, {
+        get(target, property) {
+          if (property !== "withTransaction") return Reflect.get(target, property)
+          return () =>
+            Effect.fail(
+              new SqlError.SqlError({
+                reason: SqlError.classifySqliteError(Object.assign(new Error("I/O failure"), { code: "SQLITE_IOERR" }))
+              })
+            )
+        }
+      })
+      const failure = yield* Retention.collect({ olderThanMs: 500 }).pipe(
+        Effect.provideService(SqlClient.SqlClient, wrapped),
+        Effect.flip
+      )
+      expect(failure).toMatchObject({
+        _tag: "@smthrs/engine-store/RetentionError",
+        code: "delete_failed",
+        cause: { code: "io" }
+      })
+      expect(yield* count("flows_runs")).toBe(1)
+    })))
+
+  it.effect("leaves the schema and SQL change count untouched in a dry run", () =>
+    migrated(Effect.gen(function*() {
+      const sql = yield* SqlClient.SqlClient
+      yield* insertRun("old-result", "completed", 100)
+      // The driver's BEGIN IMMEDIATE reserves a write lock even for reads, so
+      // PRAGMA query_only would reject the transaction before the pass runs.
+      // Check persisted changes and both schemas, not the lock mode it uses.
+      const changes = yield* sql`SELECT total_changes() AS total`
+      const schema = yield* sql`SELECT name, sql FROM sqlite_master UNION ALL SELECT name, sql FROM sqlite_temp_master`
+      const report = yield* Retention.collect({ olderThanMs: 500, dryRun: true })
+      expect(report.runs).toEqual(["old-result"])
+      expect(report.deleted).toEqual({})
+      expect(yield* count("flows_runs")).toBe(1)
+      expect(yield* sql`SELECT total_changes() AS total`).toEqual(changes)
+      expect(yield* sql`SELECT name, sql FROM sqlite_master UNION ALL SELECT name, sql FROM sqlite_temp_master`)
+        .toEqual(schema)
+    })))
+
   it.effect("counts and deletes receipts through doomed audits while preserving live receipts", () =>
     migrated(Effect.gen(function*() {
       const sql = yield* SqlClient.SqlClient

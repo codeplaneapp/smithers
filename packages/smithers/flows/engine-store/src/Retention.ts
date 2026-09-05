@@ -30,6 +30,7 @@
  *
  * @since 1.0.0
  */
+import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
@@ -165,6 +166,9 @@ export const eligible = (
  * eligible run were already gone. `assumeLadder: false` because this pass also
  * runs against the control plane's database, which composed fewer stores.
  *
+ * Eligibility and deletion share one retryable transaction: another writer
+ * cannot attach a live parent between the lineage scan and deletion. A busy
+ * retry recomputes eligibility rather than replaying an old candidate list.
  * One transaction, for the reason `retain` opens one: a pass that removed a
  * run's history and then refused on its row would have destroyed what it could
  * not put back, and a workspace whose next pass refuses the same way can never
@@ -183,13 +187,26 @@ export const collect = (
   Effect.gen(function*() {
     const sql = yield* SqlClient.SqlClient
     const limit = options.limit ?? RetentionOps.defaultLimit
-    const candidates = yield* eligibleCandidates(
-      options.olderThanMs,
-      Number.isSafeInteger(limit) && limit >= 0 ? limit : 0
-    )
     const dryRun = options.dryRun === true
-    const removed = yield* sql.withTransaction(
-      RetentionOps.deleteRuns(sql, candidates, { dryRun, assumeLadder: false })
+    const pass = Effect.gen(function*() {
+      const candidates = yield* eligibleCandidates(
+        options.olderThanMs,
+        Number.isSafeInteger(limit) && limit >= 0 ? limit : 0
+      )
+      return yield* RetentionOps.deleteRuns(sql, candidates, { dryRun, assumeLadder: false })
+    })
+    const removed = yield* (dryRun ? sql.withTransaction(pass) : DurableWriter.make(sql).write(pass)).pipe(
+      Effect.catchIf(
+        (cause): cause is DurableWriter.DatabaseError => cause instanceof DurableWriter.DatabaseError,
+        (cause) =>
+          Effect.fail(
+            new RetentionOps.RetentionError({
+              code: "delete_failed",
+              message: "retention transaction failed; no history was deleted",
+              cause
+            })
+          )
+      )
     )
     return {
       database: options.database ?? "",

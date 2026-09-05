@@ -41,8 +41,10 @@ const provideJournal = <A, E, R>(
   effect: Effect.Effect<A, E, R | Journal.Journal | RunStore.RunStore>
 ) =>
   effect.pipe(
-    Effect.provide(TestStores.layer()),
-    Effect.provide(DurableEngineState.layerMemory),
+    // All transaction participants must share one database. Mixing the map
+    // state's mutex with SQL stores permits a map -> SQL / SQL -> map lock
+    // inversion when a completed child's parent wakes during a second spawn.
+    Effect.provide(TestStores.layerAt(":memory:")),
     Effect.provide(TestClock.layer()),
     Effect.scoped
   ) as Effect.Effect<

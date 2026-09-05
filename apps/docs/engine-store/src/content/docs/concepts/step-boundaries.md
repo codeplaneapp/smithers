@@ -59,6 +59,32 @@ A deviation of any variant bars the evidence from the shared cache, so an
 unexplained absence never reaches another host either way. Deviations go to
 [`Reconciliation`](/guides/drive-a-plan/), which answers with a verdict.
 
+## Bounded host measurement
+
+`prepare` and `settle` use the kernel's optional guarded batch capability when
+the host provides it. Enumeration batches directory and stat requests while
+retaining the plan's glob matcher, dotfile behavior, pruning, sorted output,
+and entry budget. Hosts without batching use the existing operations with at
+most four in flight.
+
+Read digests are SHA-256 of the original file bytes. Tree-artifact and diff
+identities still use the same canonical key inputs and absence sentinels, so
+batching introduces no persisted key or evidence migration. The declaration
+snapshot stays immutable, and all measurements use the same guarded filesystem
+whose root descriptor identity is pinned at composition.
+
+Settlement first obtains digest/size measurements, then groups content reads
+by both path count and the host's response-byte budget. A change between the
+two measurements refuses settlement. Inline decisions and artifact spills
+remain in sorted path order, preserving the aggregate inline budget and the
+resulting manifest. Helper errors retain their original cause through
+`UnsupportedBoundary`. Losing the workspace root fails the boundary instead
+of turning every file into an absence.
+
+Batching does not freeze the workspace, attest whole-tree writes, or change
+cache admission. Each helper measures through checked descriptors; later
+verification still has to consume fresh measurements through that boundary.
+
 ## Inline, or spilled by digest
 
 Outputs are recorded by content digest, never inlined without bound. Two limits
@@ -91,7 +117,7 @@ sandbox keeps the honest outcome: run-local results only.
 The whole-tree proof comes from running the body somewhere else. That is
 [`WorkspaceSandbox`](/concepts/workspace-transactions/): the transaction is the tree,
 so a write outside the declared set is a map comparison rather than an
-inference, and `ActionPersistence` sets the flag structurally.
+inference, and the engine sets the flag structurally.
 
 `StepBoundary.layerTest(options)` is deterministic and supports
 explicit `failure` or `deviation` fixtures, replay, and `readSnapshot` assertions, but it does not

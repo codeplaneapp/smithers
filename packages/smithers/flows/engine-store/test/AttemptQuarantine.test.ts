@@ -93,7 +93,7 @@ describe("succeeded-row corruption quarantines its evidence and heals on resume 
           prepare: (descriptor) => Effect.succeed({ descriptor, readSnapshot: StepBoundary.exactReads(descriptor) }),
           settle: () =>
             Effect.succeed({
-              declaredOutputs: { outputs: [] },
+              declaredOutputs: { paths: ["dist/manifest.json"] },
               diffIdentity: "quarantine-diff",
               wholeTreeWritesVerified: true
             }),
@@ -189,7 +189,9 @@ describe("succeeded-row corruption quarantines its evidence and heals on resume 
             meta: {
               tier: "sealed",
               boundary: {
-                declaredOutputs: { outputs: [] },
+                // Match the abstract boundary's declared output before testing
+                // corruption during its replay.
+                declaredOutputs: { paths: ["dist/manifest.json"] },
                 diffIdentity: "quarantine-diff",
                 wholeTreeWritesVerified: true
               },

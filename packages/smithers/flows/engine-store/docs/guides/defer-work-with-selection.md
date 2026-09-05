@@ -101,8 +101,8 @@ means `validFromMs <= pinnedAtMs`. A matching edge supplies the likelihood, a
 sink can defer only when a live edge names it, and a `Candidate.stats` failure
 ratio raises the likelihood so flaky sinks stay inline. Stats alone never defer.
 
-`Selection.layer(service)` installs your own. A model-backed layer is out of
-scope here, because `engine-store` must not depend on a model.
+`Selection.layer(service)` installs your own. A model-backed layer belongs
+elsewhere, because `@smthrs/engine-store` carries no model dependency.
 
 A selector returns one `Selected` per candidate carrying a `Verdict`:
 

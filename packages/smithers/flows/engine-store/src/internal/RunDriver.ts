@@ -30,6 +30,7 @@ import * as EffectRecords from "./EffectRecords.ts"
 import * as ExitEncoding from "./ExitEncoding.ts"
 import * as JournalRecords from "./JournalRecords.ts"
 import * as RunCoordinator from "./RunCoordinator.ts"
+import * as RunLifecycle from "./RunLifecycle.ts"
 
 const RunStateJson = Schema.fromJsonString(RunState)
 
@@ -76,6 +77,7 @@ export interface Dependencies {
    * composition that supplies nothing still reclaims hard-killed runs.
    */
   readonly isAlive?: Ownership.LivenessCheck | undefined
+  readonly canExecute?: ((row: RunStore.RunRow) => Effect.Effect<boolean>) | undefined
   readonly engine: Effect.Effect<FlowRuntime.FlowRuntime["Service"]>
   /**
    * In-process wake bus announced to whenever a durable write makes a run
@@ -271,6 +273,7 @@ export const make = (
     const journal = yield* Journal.Journal
     const store = yield* RunStore.RunStore
     const engineState = yield* DurableEngineState.DurableEngineState
+    const lifecycle = RunLifecycle.make(store, engineState)
     const wakeBus = dependencies.wakeBus ?? WakeBus.makeNoop()
     /**
      * The deployment's own liveness answer, if it gave one.
@@ -626,6 +629,7 @@ export const make = (
     )(function*(row: RunStore.RunRow) {
       return yield* Effect.gen(function*() {
         yield* Effect.annotateCurrentSpan({ runId: row.runId, status: row.status })
+        if (dependencies.canExecute !== undefined && !(yield* dependencies.canExecute(row))) return false
         if (row.status === "completed" || row.status === "failed" || row.status === "cancelled") {
           yield* Effect.annotateCurrentSpan({ outcome: "terminal" })
           yield* Metric.update(EngineStoreMetrics.claim.Terminal, 1)
@@ -762,10 +766,9 @@ export const make = (
     })
 
     /**
-     * Collects the transitive descendants of a run over the DURABLE
-     * parent-edge table, nearest first.
+     * Collects other rounds and transitive descendants of the logical run.
      *
-     * The edge table is the only representation of the subflow DAG that every
+     * Round membership and the edge table represent the logical job that every
      * owner process and every restart can see (issues #40/#41), which is
      * exactly why the cascade reads it instead of an in-process instance map:
      * a cross-process cancellation is observed by a driver that never spawned
@@ -777,25 +780,7 @@ export const make = (
      * no arbitrary fan-out cap, because truncating a wide generation would
      * leave linked children uncancelled forever.
      */
-    const descendantsOf = (runId: string): Effect.Effect<ReadonlyArray<string>> =>
-      Effect.gen(function*() {
-        const seen = new Set<string>([runId])
-        const ordered: Array<string> = []
-        let frontier: ReadonlyArray<string> = [runId]
-        while (frontier.length > 0) {
-          const next: Array<string> = []
-          for (const parentId of frontier) {
-            for (const edge of yield* engineState.runChildren(parentId)) {
-              if (seen.has(edge.childId)) continue
-              seen.add(edge.childId)
-              ordered.push(edge.childId)
-              next.push(edge.childId)
-            }
-          }
-          frontier = next
-        }
-        return ordered
-      })
+    const descendantsOf = lifecycle.descendants
 
     /**
      * Records a durable cancellation request against every linked descendant
@@ -835,24 +820,6 @@ export const make = (
         )
         return descendants
       })
-
-    /**
-     * Reads a run row, answering `undefined` for a row that is not there.
-     *
-     * An edge whose child row is gone is not a defect: the schema's
-     * `flows_run_parents_gc` trigger drops edges with the run they belong to,
-     * but a lane that clears rows in a different order (retention, archival)
-     * can leave the edge behind for a moment, and the walks below must not die
-     * on one.
-     */
-    const rowOf = (runId: string): Effect.Effect<RunStore.RunRow | undefined> =>
-      store.get(runId).pipe(
-        Effect.catch((error) =>
-          error.code === "not_found_row"
-            ? Effect.succeed(undefined)
-            : Effect.die(error)
-        )
-      )
 
     /** The exit policy a child recorded for itself when it was spawned. */
     const exitPolicyOf = (row: RunStore.RunRow): Effect.Effect<OnParentExit> =>
@@ -901,27 +868,37 @@ export const make = (
       RunStore.RunStoreError
     > =>
       Effect.gen(function*() {
-        const seen = new Set<string>([runId])
+        const roots = (yield* lifecycle.rounds(runId)).map((row) => row.runId)
+        const seen = new Set<string>(roots)
         const cancelled: Array<string> = []
         const detached: Array<string> = []
-        let frontier: ReadonlyArray<string> = [runId]
+        let frontier: ReadonlyArray<string> = roots
         while (frontier.length > 0) {
           const next: Array<string> = []
           for (const parentId of frontier) {
             for (const edge of yield* engineState.runChildren(parentId)) {
               if (seen.has(edge.childId)) continue
+              const rounds = yield* lifecycle.rounds(edge.childId)
+              for (const round of rounds) seen.add(round.runId)
               seen.add(edge.childId)
-              const row = yield* rowOf(edge.childId)
+              const row = rounds.find((round) =>
+                round.status !== "completed" && round.status !== "failed" && round.status !== "cancelled"
+              )
               if (row === undefined) continue
-              if (row.status === "completed" || row.status === "failed" || row.status === "cancelled") {
-                continue
-              }
-              if ((yield* exitPolicyOf(row)) === "detach") {
+              // The edge belongs to the creating round. Its ownership policy
+              // survives the child's handoffs; do not infer it from a later
+              // round written by a version that omitted onParentExit.
+              // A nonempty lineage read includes its requested member.
+              if ((yield* exitPolicyOf(rounds.find((round) => round.runId === edge.childId)!)) === "detach") {
                 detached.push(edge.childId)
                 continue
               }
-              cancelled.push(edge.childId)
-              next.push(edge.childId)
+              for (const round of rounds) {
+                if (round.status !== "completed" && round.status !== "failed" && round.status !== "cancelled") {
+                  cancelled.push(round.runId)
+                }
+                next.push(round.runId)
+              }
             }
           }
           frontier = next
@@ -1007,12 +984,13 @@ export const make = (
       onParentExit: OnParentExit
     ): Effect.Effect<void> =>
       Effect.gen(function*() {
-        const parent = yield* rowOf(parentId)
-        if (parent === undefined) return
-        if (parent.cancelRequestedAtMs !== null || parent.status === "cancelled") {
+        const rounds = yield* lifecycle.rounds(parentId).pipe(Effect.orDie)
+        if (rounds.length === 0) return
+        const cancelled = rounds.find((round) => round.cancelRequestedAtMs !== null || round.status === "cancelled")
+        if (cancelled !== undefined) {
           // The parent's own request timestamp, so the inherited request reads
           // as the same operator intent rather than as a later, independent one.
-          const nowMs = parent.cancelRequestedAtMs ?? (yield* Clock.currentTimeMillis)
+          const nowMs = cancelled.cancelRequestedAtMs ?? (yield* Clock.currentTimeMillis)
           yield* store.requestCancel(childId, nowMs).pipe(Effect.orDie)
           return
         }
@@ -1023,7 +1001,7 @@ export const make = (
         // its own recorded policy here instead, in the transaction that made
         // it a child, so an attached child admitted a moment too late cannot
         // run on under a parent that is already gone.
-        if (parent.status !== "completed" && parent.status !== "failed") return
+        if (rounds.some((round) => round.status !== "completed" && round.status !== "failed")) return
         // The policy comes from the caller rather than from a re-read: this
         // runs inside the transaction that just wrote the child's row, so the
         // state on disk is the state the caller is holding.
@@ -1044,6 +1022,7 @@ export const make = (
         let cascaded: ReadonlyArray<string> = []
         yield* journal.transact(
           Effect.gen(function*() {
+            yield* store.acknowledgeCancel(runId, dependencies.owner, interruptedAtMs).pipe(Effect.orDie)
             const transitioned = yield* store.transitionOwned(
               runId,
               dependencies.owner,
@@ -1377,7 +1356,14 @@ export const make = (
             Effect.map((row) => row.cancelRequestedAtMs !== null),
             Effect.catch(() => Effect.succeed(false))
           )
-          if (requested) return cancelRequested
+          if (requested) {
+            yield* store.acknowledgeCancel(
+              executionId,
+              dependencies.owner,
+              yield* Clock.currentTimeMillis
+            ).pipe(Effect.orDie)
+            return cancelRequested
+          }
           yield* Effect.sleep(Ownership.heartbeatInterval)
         }
       })
@@ -1440,6 +1426,7 @@ export const make = (
           ...(seam.state.parentExecutionId === undefined
             ? {}
             : { parentExecutionId: seam.state.parentExecutionId }),
+          ...(seam.state.onParentExit === undefined ? {} : { onParentExit: seam.state.onParentExit }),
           ...(seam.state.maxRounds === undefined ? {} : { maxRounds: seam.state.maxRounds })
         })
         const settledStateJson = yield* encodeState({
@@ -2229,7 +2216,7 @@ export const make = (
         }))
       })
 
-    const poll: Service["poll"] = Effect.fn("FlowEngine.poll")((flow, executionId) =>
+    const readResult = (flow: Flow.Any, executionId: string) =>
       Effect.annotateCurrentSpan({ executionId, flow: flow._tag }).pipe(
         Effect.andThen(store.get(executionId)),
         Effect.catch((error) =>
@@ -2265,10 +2252,14 @@ export const make = (
                 Effect.orDie,
                 Effect.map(Option.some)
               ) as Effect.Effect<Option.Option<Flow.Result<unknown, unknown>>>)
-            })
+            }),
+            Effect.map((result) => ({ result, status: row.status }))
           )
         })
       )
+
+    const poll: Service["poll"] = Effect.fn("FlowEngine.poll")((flow, executionId) =>
+      Effect.map(readResult(flow, executionId), (observed) => observed.result)
     )
 
     const execute: Service["execute"] = Effect.fn("FlowEngine.execute")(
@@ -2303,9 +2294,9 @@ export const make = (
         if (options.discard) return undefined as Discard extends true ? void : never
         // `ensureRun` created the row above, so a not-found here is a broken
         // store invariant, not a caller-recoverable state.
-        const result = yield* Effect.orDie(poll(flow, options.executionId))
-        if (Option.isSome(result)) {
-          return result.value as Discard extends true ? void : Flow.Result<unknown, unknown>
+        const observed = yield* Effect.orDie(readResult(flow, options.executionId))
+        if (Option.isSome(observed.result)) {
+          return observed.result.value as Discard extends true ? void : Flow.Result<unknown, unknown>
         }
         // A cancelled run has no `Flow.Result` on its row — cancellation is
         // recorded as `cancellation`, not as a settlement — so answering the
@@ -2317,8 +2308,8 @@ export const make = (
         // (`layerMemory.ts` `interrupt` settles the round `Complete` with an
         // interrupt cause) and what a cancellation means: the work the caller
         // asked for is not going to happen.
-        const settled = yield* rowOf(options.executionId)
-        return (settled?.status === "cancelled"
+        // Result and cancellation status come from the same row snapshot.
+        return (observed.status === "cancelled"
           ? new Flow.Complete({ exit: Exit.failCause(Cause.interrupt()) })
           : new Flow.Suspended({})) as Discard extends true ? void
             : Flow.Result<unknown, unknown>
@@ -2347,7 +2338,7 @@ export const make = (
         const requested = yield* Effect.result(journal.transact(
           Effect.gen(function*() {
             yield* store.requestCancel(executionId, nowMs)
-            yield* requestCancelDescendants(executionId, nowMs)
+            return [executionId, ...yield* requestCancelDescendants(executionId, nowMs)]
           })
         ))
         if (Result.isFailure(requested)) {
@@ -2363,15 +2354,21 @@ export const make = (
         // this instance was interrupted or stop its drive fiber. If the write
         // failed, changing either would make a typed failure observably mutate
         // the run (and could spuriously trigger the in-process child path).
-        const instance = liveInstances.get(executionId)
-        if (instance !== undefined) instance.interrupted = true
         // The transaction above records the parent and every durable
         // descendant together. A run this process does not drive — parked
         // here, owned elsewhere, or already settled — therefore receives the
         // same child-flow handling without a partial-cascade state if any
         // request write fails. `requestCancel` is first-writer-wins, so the
         // owning driver's own cascade later writes nothing.
-        yield* coordinator.interrupt(executionId)
+        yield* journal.whenCommitted(Effect.gen(function*() {
+          for (const targetId of requested.success) {
+            const instance = liveInstances.get(targetId)
+            if (instance !== undefined) instance.interrupted = true
+            // Publication only sends the request. Awaiting user finalizers
+            // here would make an outer commit uninterruptibly wait on them.
+            yield* coordinator.requestInterrupt(targetId)
+          }
+        }))
       })
     )
 

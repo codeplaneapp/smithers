@@ -57,8 +57,16 @@ describe("durable engine migrations", () => {
         "flows_journal_events",
         "flows_migrations",
         "flows_plan_edges",
+        "flows_plan_input_generations",
+        "flows_plan_input_heads",
+        "flows_plan_input_legacy_runs",
+        "flows_plan_merge_completions",
+        "flows_plan_merge_intents",
         "flows_plan_nodes",
         "flows_plans",
+        "flows_run_changes",
+        "flows_run_parents",
+        "flows_run_source",
         "flows_runs",
         "flows_selection_suspected_edges",
         "flows_step_cache",
@@ -115,13 +123,18 @@ describe("durable engine migrations", () => {
           "source_seq"
         ],
         flows_migrations: ["created_at", "migration_id", "name"],
+        flows_run_changes: ["deleted", "revision", "run_id"],
+        flows_run_parents: ["child_id", "parent_id", "seq"],
+        flows_run_source: ["revision", "singleton", "source"],
         flows_runs: [
+          "cancel_acknowledgement_json",
           "cancel_requested_at_ms",
           "claim_host_id",
           "claim_nonce",
           "claim_pid",
           "claimed_at_ms",
           "created_at_ms",
+          "execution_parent_id",
           "finished_at_ms",
           "heartbeat_at_ms",
           "lineage_id",
@@ -162,6 +175,25 @@ describe("durable engine migrations", () => {
           "result_json"
         ],
         flows_plans: ["base_digest", "created_at_ms", "digest", "flow", "generation", "plan_id"],
+        flows_plan_input_generations: ["checksum", "generation", "plan_id", "run_id", "snapshot_json"],
+        flows_plan_input_heads: [
+          "base_digest",
+          "environment_digest",
+          "generation",
+          "merge_state_version",
+          "plan_id",
+          "run_id"
+        ],
+        flows_plan_merge_intents: ["checksum", "intent_json", "run_id", "stopped_node_id"],
+        flows_plan_merge_completions: [
+          "checksum",
+          "completion_json",
+          "generation",
+          "merge_node_id",
+          "run_id",
+          "stopped_node_id"
+        ],
+        flows_plan_input_legacy_runs: ["run_id"],
         flows_plan_nodes: ["generation", "key_digest", "kind", "node_id", "node_json", "ordinal", "plan_id"],
         flows_plan_edges: ["from_node", "plan_id", "to_node"]
       })

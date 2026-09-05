@@ -12,11 +12,43 @@
  *
  * @since 0.1.0
  */
+import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as FileSet from "@smthrs/plan/FileSet"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+
+/** Bounded metadata reads, preserving the input order and typed failures. */
+const metadata = <A>(
+  fs: FileSystem.FileSystem,
+  paths: ReadonlyArray<string>,
+  operation: "stat" | "readDirectory",
+  fallback: (path: string) => Effect.Effect<A, PlatformError.PlatformError>
+): Effect.Effect<ReadonlyArray<A>, PlatformError.PlatformError> =>
+  Effect.gen(function*() {
+    const batch = KernelFileSystem.batch(fs)
+    if (batch === undefined) {
+      return yield* Effect.forEach(paths, (path) => fallback(path), {
+        concurrency: KernelFileSystem.fallbackConcurrency
+      })
+    }
+    const values: Array<A> = []
+    for (let offset = 0; offset < paths.length; offset += batch.maxSize) {
+      const response = yield* batch.execute(
+        paths.slice(offset, offset + batch.maxSize).map((path) => ({ operation, path }))
+      )
+      for (const entry of [...response.entries].sort((a, b) => a.index - b.index)) {
+        const value = yield* Effect.fromResult(entry.result)
+        values.push(
+          (value.operation === "stat"
+            ? value.info
+            : (value as Extract<KernelFileSystem.BatchValue, { readonly paths: unknown }>).paths) as A
+        )
+      }
+    }
+    return values
+  })
 
 /**
  * The default maximum number of directory entries visited by one expansion.
@@ -137,24 +169,44 @@ const enumerateUnder = (
   explicit: ReadonlySet<string> = new Set()
 ): Effect.Effect<EnumeratedEntries, PlatformError.PlatformError | FileEnumerationError> =>
   Effect.gen(function*() {
-    // The workspace root itself always exists; a host may not even answer
-    // `exists` for its own spelling of it, so only subtrees are probed.
-    const present = dir === "" || (yield* fs.exists(resolve(dir)))
-    if (!present) return { files: [], directories: [] }
+    // A directory that is not there enumerates to nothing, and its own
+    // listing reports that with `NotFound` — so no `exists` probe precedes
+    // it. The probe asked the question the very next call answers anyway, and
+    // on a confined host every host call is one CPython fork
+    // (`@smthrs/platform-node/AtomicFileSystem`), so it doubled the cost of
+    // reaching the walk root. Only the root is probed this way; a subtree
+    // discovered by `stat` inside the walk is read without a net, exactly as
+    // before, so a listing that refuses there still fails the expansion.
+    const root = yield* metadata(fs, [resolve(dir)], "readDirectory", fs.readDirectory).pipe(
+      Effect.map((values) => values[0]!),
+      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined))
+    )
+    // The absent root is the one case that reports no directories at all: a
+    // tree replay must not be told to prune scaffolding that never existed.
+    if (root === undefined) return { files: [], directories: [] }
 
     const files: Array<string> = []
     const directories: Array<string> = [dir]
-    const pending: Array<string> = [dir]
+    const pending = [{ path: dir, entries: [...root].sort(), index: 0 }]
+    const size = KernelFileSystem.batch(fs)?.maxSize ?? KernelFileSystem.fallbackConcurrency
     while (pending.length > 0) {
-      const current = pending.pop()!
-      const entries = [...yield* fs.readDirectory(resolve(current))].sort()
-      for (const entry of entries) {
+      const paths: Array<string> = []
+      // Fill one batch from all queued listings. A tree with one file in each
+      // of many sibling directories must not start one helper per leaf.
+      while (paths.length < size && pending.length > 0) {
+        const current = pending[pending.length - 1]!
+        if (current.index === current.entries.length) {
+          pending.pop()
+          continue
+        }
         yield* visit(budget)
-        const relative = entry.replaceAll("\\", "/")
-        const path = current === "" ? relative : `${current}/${relative}`
-        // Effect 4.0.0-rc.108 readDirectory returns names without entry types,
-        // so this implementation must stat each visited entry.
-        const info = yield* fs.stat(resolve(path))
+        const relative = current.entries[current.index++]!.replaceAll("\\", "/")
+        paths.push(current.path === "" ? relative : `${current.path}/${relative}`)
+      }
+      const infos = yield* metadata(fs, paths.map(resolve), "stat", fs.stat)
+      const children: Array<string> = []
+      for (const [index, path] of paths.entries()) {
+        const info = infos[index]!
         if (info.type === "File") {
           files.push(path)
           continue
@@ -163,7 +215,11 @@ const enumerateUnder = (
         const name = path.slice(path.lastIndexOf("/") + 1)
         if (pruneIgnoredDirectories && ignoredDirectoryNames.has(name) && !explicit.has(name)) continue
         directories.push(path)
-        pending.push(path)
+        children.push(path)
+      }
+      const listings = yield* metadata(fs, children.map(resolve), "readDirectory", fs.readDirectory)
+      for (const [index, path] of children.entries()) {
+        pending.push({ path, entries: [...listings[index]!].sort(), index: 0 })
       }
     }
     return { files: files.sort(), directories: directories.sort() }

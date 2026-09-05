@@ -18,14 +18,23 @@ The engine admits a cache record only when all of the following hold:
 
 - The action is `sealed`.
 - The boundary is `hard`.
+- All declared reads are exact inputs, not unresolved globs.
 - No deviation occurred.
 - The evidence explicitly carries `wholeTreeWritesVerified: true`.
+- The evidence explicitly carries `hermeticReadsVerified: true`.
+- The completed attempt carries `readSetVerified: true`: its measured inputs
+  matched the declaration when the body executed.
+
+Fresh results and recovered durable completions use the same internal
+publication decision. Refusal keeps a completed action's run-local outcome;
+it does not require the body to execute again. Known-corrupt evidence cannot
+be published merely because the inconsistency policy tolerates that outcome.
 
 Older evidence, and boundaries that observe declared paths only, are
 conservatively refused. Under the production composition the proof comes from
 [`WorkspaceSandbox`](/concepts/workspace-transactions/): the body ran in an isolated
 workspace, so a write outside the declared set is a map comparison rather than
-an inference, and `ActionPersistence` sets the flag itself. When the whole-tree
+an inference, and the engine sets the flag itself. When the whole-tree
 diff shows a deviation the declared-read scan would have missed, it records that
 deviation and withholds the entry instead.
 
@@ -39,7 +48,7 @@ A matching key is not sufficient. Before serving, the store calls
 `StepBoundary.prepare` and compares the descriptor's declared `readSet` against
 the `readSnapshot` the host measured:
 
-- Every declared read still matching means reuse.
+- Every declared read still matching permits output replay verification.
 - A declared path that is missing, or whose digest differs, refuses the hit,
   journals a `cache-provenance` record with `action: "stale_read_set"`, and
   falls through to a real execution.
@@ -50,11 +59,102 @@ This is Skyframe's dirty-check invariant. The key alone detects a changed
 declaration, never a stale one.
 
 A verified hit then calls `replayOutputs` before returning the stored result.
+Unlike completion publication, candidate admission does not require the old
+`readSetVerified` flag: current inputs are freshly measured here. Missing
+whole-tree or hermetic-read evidence still refuses the candidate. An unavailable
+measurement does not prove staleness and does not justify evicting the row.
+
 When that refuses with `MissingArtifact`, the normal first answer for a row
 recorded on a machine whose artifacts this one has never seen, the dispatch
 hydrates from the shared tier and retries the replay exactly once before
 falling through to a real execution. A second failure means the tier cannot
 serve it either, and executing is strictly better than looping.
+
+## Current output authority and legacy flags
+
+Before measuring a candidate or replaying a durable outcome, the engine checks
+the entire recorded output manifest against the current boundary descriptor.
+Each write must be covered by the current write set, each deletion must be an
+explicit removal, and every exact output and removal must be present. Tree
+pruning requires the same declared tree root; a glob or a narrower subtree
+cannot authorize pruning a broader recorded tree. A tree root must remain a
+directory; a manifest cannot replay a file at that path. Duplicate and noncanonical
+recorded paths are refused. The existing abstract `{ paths: [...] }` boundary
+format requires an identical current write set and no removals. An unknown
+output format is refused as `unsupported-output-evidence`. Malformed production
+evidence cannot use the abstract path-list fallback.
+
+A descriptor mismatch is `output-boundary-mismatch`, recorded in the existing
+`cache-provenance` family with `action: "replay_failed"`. It permits no replay
+call, hydration, pruning, or age-based eviction of that candidate. This is a
+preflight guarantee for policy refusal, not atomic rollback of filesystem work
+if an admitted replay subsequently encounters host failure or corruption.
+A succeeded attempt retains its original outcome and metadata, returns that
+outcome without executing its body again, and withholds cache publication when
+its output evidence is refused.
+
+Stored `boundaryQuarantined: true` always forbids shared reuse and publication.
+Quarantine together with boundary evidence or `readSetVerified: true` is
+`contradictory-evidence`; verified reads with no boundary evidence have the same
+refusal. Neither a historical verification flag nor a tolerant inconsistency
+policy overrides quarantine. These legacy rows remain unchanged and their
+run-local durable outcomes remain authoritative. A candidate without the old
+read-verification flag can still be admitted by fresh current-read measurement.
+Proof flags retain their existing true-or-omitted schema. Stored false values
+or strings fail metadata decoding as `invalid-meta` for shared reuse, while
+the run-local durable outcome remains authoritative.
+
+## Empty output sets
+
+An action with no declared writes or removals can publish and converge a cache
+entry. For replay and convergence, its evidence must explicitly encode the empty
+set as `{ outputs: [] }` (with no tree roots) or the abstract `{ paths: [] }`
+format. All ordinary boundary, whole-tree, hermetic-read and execution-time read
+proofs still apply.
+An empty set does not establish those proofs by itself. A durable completion
+without a finish timestamp uses the current clock when it converges the entry.
+
+Empty outputs do not bypass replay verification. If the boundary reports
+`BoundaryCorruption` in admitted evidence, the succeeded attempt's evidence is
+quarantined, its boundary and read-verification proof are cleared, and strict
+policy parks the run once. A subsequent explicit resume returns the durable
+outcome without rechecking that evidence, repeating the body, or publishing it.
+
+An opaque `{}` is unsupported evidence, not an encoded empty set. An empty
+manifest that omits a declared exact output, removal, or tree root is a boundary
+mismatch. These preflight refusals preserve the succeeded outcome and original
+metadata, withhold convergence, and never call the boundary, so they do not
+trigger corruption quarantine. Undecodable metadata likewise supplies no
+reusable proof; it does not manufacture a corruption verdict.
+
+## Age decisions, policy removal, and forked history
+
+The first age verdict for a cache provenance is durable: age equal to `ttlMs`
+is admitted, and age one millisecond greater is expired. Replaying that verdict
+uses its original answer when the clock moves in either direction. An exact
+duplicate of the opposite measured verdict proves a clock change; an arbitrary
+journal conflict never does.
+
+Removing `ttlMs` after any recorded age verdict for this cache address within
+the run is refused with `JournalError.code: "idempotency_conflict"`. This holds
+even if the head has since been evicted or replaced. Restore the original
+policy or use a new action identity. Before a verdict exists, the policy can
+still change. Scope continues to narrow the cache address without changing the
+durable attempt identity.
+
+A fork may reuse a copied parent's age verdict only after a paged history
+lookup validates the complete producer identity, event type, payload including
+TTL and recorded provenance, sequence, timestamp, and lineage metadata against
+the retained ancestor record. Each ancestry edge also requires the recorded
+fork marker, its producer, exact cutoff, and cutoff lineage. Forks of forks
+must validate every intervening copied prefix. Missing ancestry, contradictory
+fields, and unrelated foreign lineage retain the typed `idempotency_conflict`
+with its cause. A journal read failure, including a compacted cursor, preserves
+the journal's original typed error. An identity refusal also records
+`action: "replay_failed", reason: "incompatible-age-history"` in the existing
+cache provenance family. No new event family, persisted schema, key, or producer
+identity is introduced; transparent reuse of unvalidated foreign history is
+unsupported.
 
 ## Publication order across two tiers
 
@@ -89,6 +189,13 @@ A refusal withholds the shared copy, never the local row, and journals a
 `cache-provenance` record with `action: "unpublished"` carrying the stage
 (`artifacts` or `entry`) and the reason. A missing shared entry is therefore
 explainable from the journal rather than inferred from its absence.
+
+Local cache lookup and publication failures are also accelerator failures. A
+typed store refusal is journaled and a succeeded durable attempt remains
+usable. A failed cache transaction leaves neither its row nor its provenance
+record; reopening can publish from the terminal attempt without repeating the
+body. A crash after the local cache row commits may leave the optional remote
+entry absent: a subsequent local hit does not retry remote publication.
 
 ## Download policy on the read side
 
@@ -127,6 +234,12 @@ hermeticity violation, and it goes to the `Inconsistency` receiver:
 
 The record goes through the journal's durable channel, so a `tolerate` verdict
 that silently dropped its only record cannot wire the detector to nothing.
+
+An explicitly nondeterministic declaration instead keeps the first local writer
+and records `conflict_first_writer`; it never calls the deterministic
+inconsistency receiver. The optional remote publisher also retains its existing
+first-writer policy. Neither policy turns a local deterministic conflict into
+an availability failure.
 
 ## Related
 

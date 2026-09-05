@@ -12,15 +12,17 @@ import { Digest, Effects, Flow as CoreFlow, Graph as CoreGraph, Node as CoreNode
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import * as CacheEnvironment from "@smthrs/flow/CacheEnvironment"
-import { Journal, SqlJournal } from "@smthrs/journal"
+import { Journal, JournalEvent, SqlJournal } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import * as WithCache from "@smthrs/patterns/WithCache"
 import { Node } from "@smthrs/plan"
 import { AttemptStore, type Ownership, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -281,6 +283,198 @@ describe("declared time to live", () => {
 })
 
 describe("the journalled admission verdict", () => {
+  for (const scenario of ["larger TTL", "smaller TTL", "copied lineage"] as const) {
+    it.effect(`refuses incompatible recorded decisions for ${scenario} without changing durable state`, () =>
+      withCrypto(
+        Effect.gen(function*() {
+          const journal = yield* Journal.Journal
+          const cache = yield* CacheStore.CacheStore
+          const attempts = yield* AttemptStore.AttemptStore
+          const boundary = yield* StepBoundary.StepBoundary
+          const key = "verdict/policy-conflict"
+          const digest = sha256(key)
+          let executions = 0
+          let replays = 0
+          let evictions = 0
+          const body = () => Effect.sync(() => (executions++, "recorded"))
+          // Exercise the public Action annotation. TTL changes do not change
+          // the engine's action key, so this dispatch retains its identity.
+          const action = Action.make({
+            name: "CacheTtl/PolicyConflict",
+            success: Schema.String,
+            tier: "sealed",
+            idempotencyKey: "same-input",
+            metadata: declared,
+            execute: body()
+          })
+          const execute = (runId: string, ttlMs: number) =>
+            ActionPersistence.make({ runId, owner, sourceId: "policy-conflict", execute: body })({
+              action: CacheEnvironment.withCache(action, { ttlMs }),
+              attempt: 1,
+              key,
+              tier: "sealed",
+              metadata: declared
+            })
+          yield* activate("policy-producer")
+          yield* execute("policy-producer", 1000)
+          yield* TestClock.adjust("500 millis")
+          yield* activate("policy-consumer")
+          expect(yield* execute("policy-consumer", 1000)).toBe("recorded")
+          const runId = JournalEvent.RunId.make(scenario === "copied lineage" ? "policy-child" : "policy-consumer")
+          if (scenario === "copied lineage") {
+            yield* journal.flush
+            const parent = yield* journal.entries({ runId: JournalEvent.RunId.make("policy-consumer"), limit: 50 })
+            const ttl = parent.entries.find((entry) =>
+              entry.eventType === "flows.engine.cache-provenance" &&
+              (entry.payload as { readonly action?: string }).action === "ttl"
+            )!
+            yield* activate(runId)
+            // Time-travel copies retain producer identity, payload and parent
+            // lineage metadata. An exact verdict with different meta conflicts.
+            yield* journal.emitDurable({
+              runId,
+              sourceId: ttl.sourceId,
+              sourceSeq: ttl.sourceSeq,
+              eventType: ttl.eventType,
+              payload: ttl.payload,
+              meta: ttl.meta
+            }, owner)
+          }
+          yield* journal.flush
+          const beforeJournal = yield* journal.entries({ runId, limit: 50 })
+          const beforeCache = yield* cache.get(digest)
+          const producerId = { runId: "policy-producer", stepKeyDigest: digest, attempt: 1 }
+          const consumerId = { runId, stepKeyDigest: digest, attempt: 1 }
+          const beforeProducer = yield* attempts.get(producerId)
+          expect(Option.isSome(beforeProducer)).toBe(true)
+          expect(Option.isNone(yield* attempts.get(consumerId))).toBe(true)
+          const ttlMs = scenario === "larger TTL" ? 2000 : scenario === "smaller TTL" ? 100 : 1000
+          const result = yield* execute(runId, ttlMs).pipe(
+            Effect.provideService(StepBoundary.StepBoundary, {
+              ...boundary,
+              replayOutputs: (output) =>
+                Effect.sync(() => replays++).pipe(Effect.andThen(boundary.replayOutputs(output)))
+            }),
+            Effect.provideService(CacheStore.CacheStore, {
+              ...cache,
+              evict: (cacheKey, options) =>
+                Effect.sync(() => evictions++).pipe(Effect.andThen(cache.evict(cacheKey, options)))
+            }),
+            Effect.result
+          )
+          expect(Result.isFailure(result)).toBe(true)
+          if (Result.isFailure(result)) {
+            expect(result.failure).toBeInstanceOf(Journal.JournalError)
+            expect(result.failure).toMatchObject({
+              code: "idempotency_conflict",
+              message: expect.stringContaining("incompatible recorded cache-age decision"),
+              cause: expect.anything()
+            })
+          }
+          expect(executions).toBe(1)
+          expect(replays).toBe(0)
+          expect(evictions).toBe(0)
+          expect(yield* cache.get(digest)).toEqual(beforeCache)
+          expect(yield* attempts.get(producerId)).toEqual(beforeProducer)
+          expect(Option.isNone(yield* attempts.get(consumerId))).toBe(true)
+          yield* journal.flush
+          const afterJournal = yield* journal.entries({ runId, limit: 50 })
+          expect(afterJournal.entries.slice(0, beforeJournal.entries.length)).toEqual(beforeJournal.entries)
+          expect(afterJournal.entries.slice(beforeJournal.entries.length).map((entry) => entry.payload)).toEqual([{
+            keyDigest: digest,
+            action: "replay_failed",
+            reason: "incompatible-age-history",
+            recordedRunId: "policy-producer",
+            recordedEventSeq: Option.getOrThrow(beforeCache).recordedEventSeq
+          }])
+          if (scenario !== "copied lineage") {
+            expect(yield* execute(runId, 1000)).toBe("recorded")
+            expect(executions).toBe(1)
+          }
+        }).pipe(Effect.provide(layers), Effect.provide(TestClock.layer()), Effect.scoped)
+      ))
+  }
+
+  for (const response of ["sink_failed", "fence_lost", "Accepted"] as const) {
+    it.effect(`requires historical proof of the opposite verdict when the journal returns ${response}`, () =>
+      withCrypto(
+        Effect.gen(function*() {
+          const journal = yield* Journal.Journal
+          const cache = yield* CacheStore.CacheStore
+          const attempts = yield* AttemptStore.AttemptStore
+          const boundary = yield* StepBoundary.StepBoundary
+          const key = "verdict/opposite-proof"
+          const digest = sha256(key)
+          let executions = 0
+          let replays = 0
+          let oppositeProbes = 0
+          const body = () => Effect.sync(() => (executions++, "recorded"))
+          yield* activate("proof-producer")
+          yield* dispatch("proof-producer", key, body, { ttlMs: 1000 })
+          yield* activate("proof-consumer")
+          yield* dispatch("proof-consumer", key, body, { ttlMs: 1000 })
+          const beforeCache = yield* cache.get(digest)
+          yield* journal.flush
+          const beforeJournal = yield* journal.entries({ runId: JournalEvent.RunId.make("proof-consumer"), limit: 50 })
+          const ttl = beforeJournal.entries.find((entry) =>
+            entry.eventType === "flows.engine.cache-provenance" &&
+            (entry.payload as { readonly action?: string }).action === "ttl"
+          )!
+          const sinkError = new Journal.JournalError({ code: "sink_failed", message: "opposite probe unavailable" })
+          const failing: Journal.Service = {
+            ...journal,
+            emitDurable: (record, emitOwner) => {
+              const payload = record.payload as { readonly action?: string; readonly verdict?: string }
+              if (
+                record.eventType === "flows.engine.cache-provenance" && payload.action === "ttl" &&
+                payload.verdict === "admitted"
+              ) {
+                oppositeProbes++
+                return response === "Accepted"
+                  ? Effect.succeed({ _tag: "Accepted", seq: ttl.seq, sourceSeq: ttl.sourceSeq })
+                  : Effect.fail(
+                    response === "sink_failed"
+                      ? sinkError
+                      : new Journal.JournalError({ code: "fence_lost", message: "owner changed during probe" })
+                  )
+              }
+              return journal.emitDurable(record, emitOwner)
+            }
+          }
+          yield* TestClock.adjust("1001 millis")
+          const result = yield* dispatch("proof-consumer", key, body, { ttlMs: 1000 }).pipe(
+            Effect.provideService(Journal.Journal, failing),
+            Effect.provideService(StepBoundary.StepBoundary, {
+              ...boundary,
+              replayOutputs: (output) =>
+                Effect.sync(() => replays++).pipe(Effect.andThen(boundary.replayOutputs(output)))
+            }),
+            Effect.result,
+            Effect.exit
+          )
+          expect(oppositeProbes).toBe(1)
+          if (response === "fence_lost") {
+            expect(Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)).toBe(true)
+          } else {
+            expect(Exit.isSuccess(result) && Result.isFailure(result.value)).toBe(true)
+            if (Exit.isSuccess(result) && Result.isFailure(result.value)) {
+              if (response === "sink_failed") expect(result.value.failure).toBe(sinkError)
+              else expect(result.value.failure).toMatchObject({ code: "idempotency_conflict" })
+            }
+          }
+          expect(executions).toBe(1)
+          expect(replays).toBe(0)
+          expect(yield* cache.get(digest)).toEqual(beforeCache)
+          expect(Option.isNone(yield* attempts.get({ runId: "proof-consumer", stepKeyDigest: digest, attempt: 1 })))
+            .toBe(true)
+          yield* journal.flush
+          expect(yield* journal.entries({ runId: JournalEvent.RunId.make("proof-consumer"), limit: 50 })).toEqual(
+            beforeJournal
+          )
+        }).pipe(Effect.provide(layers), Effect.provide(TestClock.layer()), Effect.scoped)
+      ))
+  }
+
   it.effect("keeps serving a row it already admitted after the clock crosses the bound", () =>
     withCrypto(
       Effect.gen(function*() {

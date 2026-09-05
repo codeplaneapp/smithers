@@ -4,6 +4,7 @@ import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
+import * as PlatformError from "effect/PlatformError"
 import * as FileEnumeration from "../src/internal/FileEnumeration.ts"
 
 const fixture = () => {
@@ -25,6 +26,7 @@ const fixture = () => {
   ])
   const reads: Array<string> = []
   const stats: Array<string> = []
+  const probes: Array<string> = []
   const descendants = (directory: string): ReadonlyArray<string> => {
     const prefix = directory === "." ? "" : `${directory}/`
     return [...directories.keys(), ...files]
@@ -32,11 +34,30 @@ const fixture = () => {
       .map((path) => path.slice(prefix.length))
   }
   const fs = FileSystem.makeNoop({
-    exists: ((path: string) => Effect.succeed(path === "." || directories.has(path) || files.has(path))) as never,
-    readDirectory: ((path: string, options?: { readonly recursive?: boolean }) =>
+    exists: ((path: string) =>
       Effect.sync(() => {
+        probes.push(path)
+        return path === "." || directories.has(path) || files.has(path)
+      })) as never,
+    // A real host refuses to list a path that is not there rather than
+    // answering with an empty listing, which is what lets an enumeration skip
+    // the `exists` probe it used to pay for ahead of every walk.
+    readDirectory: ((path: string, options?: { readonly recursive?: boolean }) =>
+      Effect.suspend(() => {
         reads.push(path)
-        return options?.recursive === true ? descendants(path) : [...directories.get(path) ?? []]
+        const listing = directories.get(path)
+        if (listing === undefined) {
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "FileSystem",
+              method: "readDirectory",
+              pathOrDescriptor: path,
+              description: "no such directory"
+            })
+          )
+        }
+        return Effect.succeed(options?.recursive === true ? descendants(path) : [...listing])
       })) as never,
     stat: ((path: string) =>
       Effect.sync(() => {
@@ -44,7 +65,7 @@ const fixture = () => {
         return { type: path === "src/link" ? "SymbolicLink" : files.has(path) ? "File" : "Directory", size: 0n }
       })) as never
   })
-  return { fs, reads, stats }
+  return { fs, probes, reads, stats }
 }
 
 describe("FileEnumeration", () => {
@@ -125,11 +146,46 @@ describe("FileEnumeration", () => {
         directories: ["src", "src/node_modules"]
       })
       expect(yield* FileEnumeration.filesUnder(host.fs, "missing")).toEqual([])
+      // An absent walk root reports NO directories, not the root it was asked
+      // about: a tree replay reads this list as the scaffolding it may prune.
+      expect(yield* FileEnumeration.entriesUnder(host.fs, "missing")).toEqual({ files: [], directories: [] })
 
       const glob: FileSet.Glob = {
         _tag: "Glob",
         include: ["src/*.json", "src/**/*.json"]
       }
       expect(yield* FileEnumeration.expandGlob(host.fs, glob)).toEqual(["src/visible.json"])
+    }))
+
+  it.effect("reaches a directory in one host call, never a probe and then a listing", () =>
+    Effect.gen(function*() {
+      const host = fixture()
+      const glob: FileSet.Glob = { _tag: "Glob", include: ["src/**/*.json"] }
+
+      yield* FileEnumeration.expandGlob(host.fs, glob)
+      yield* FileEnumeration.filesUnder(host.fs, "src")
+      yield* FileEnumeration.entriesUnder(host.fs, "src")
+      yield* FileEnumeration.filesUnder(host.fs, "missing")
+
+      // Every walk asks the listing itself whether the directory is there.
+      // The `exists` probe this used to pay first answered nothing the
+      // listing does not, and on a confined host each probe is a second
+      // process (`@smthrs/platform-node/AtomicFileSystem` spawns one CPython
+      // interpreter per operation), so a walk of D directories bought D forks
+      // of nothing.
+      expect(host.probes).toEqual([])
+      // One listing per directory reached, and the absent root is one listing
+      // rather than a probe plus a listing.
+      expect(host.reads).toEqual([
+        // the glob walk, which prunes `src/node_modules`
+        "src",
+        // the two declared-tree walks, which do not
+        "src",
+        "src/node_modules",
+        "src",
+        "src/node_modules",
+        // and the absent root
+        "missing"
+      ])
     }))
 })

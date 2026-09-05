@@ -30,16 +30,21 @@ Every namespace below is also importable from `@smthrs/engine-store/<Module>`.
 `@smthrs/engine-store/internal/*`, `@smthrs/engine-store/migrations/*`, and
 `@smthrs/engine-store/*/index` are blocked in the export map.
 
+Shared versioned event schemas are public at `@smthrs/journal/EngineEvent`; see
+[state and event authority](https://journal.smithers.sh/concepts/state-event-authority/).
+Engine adapters `TypedEvents`, `AttemptLifecycle`, and `ResultEnvelope` remain
+internal. They are additive contracts: current writers retain their bytes, and
+the disclosed attempt projection does not replace executable recovery stores.
+
 ### Bundling is not running
 
-This entry point is a browser entry point, and the repository's browser gate
-treats it as one: `pnpm run browser` bundles it and fails the build if that
-regresses. The two host reads it once made directly, `process.pid` and
-`randomUUID` from `node:crypto`, moved behind the injectable
-[`OwnerIdentity`](#owneridentity) service, and everything it composes,
-`@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`, `@smthrs/run-store`,
-`@smthrs/step-cache`, `@smthrs/database`, `@smthrs/kernel`, and
-`@smthrs/engine`, is browser-bundleable too.
+This entry point bundles for a browser. The two host reads it once made
+directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the
+injectable [`OwnerIdentity`](#owneridentity) service, and everything it
+composes, `@smthrs/crypto`, `@smthrs/flow`, `@smthrs/journal`,
+`@smthrs/run-store`, `@smthrs/step-cache`, `@smthrs/database`,
+`@smthrs/kernel`, and `@smthrs/engine`, is browser-bundleable too. A release
+that broke the bundle would fail the build before it shipped.
 
 The only `DurableWriter` backing shipped here is `node:sqlite`, so a browser
 composition can import the types and the in-memory helpers but cannot execute
@@ -50,6 +55,20 @@ durable flows. See [platform support](https://smithers.sh/docs/reference/api/#pl
 [src/EngineStore.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/EngineStore.ts)
 
 The production durable composition.
+
+Cancellation is logical-run scoped: `Flow.interrupt(id)` accepts any round ID
+and records intent across its trampoline lineage and linked child lineages in
+one transaction. Children attached to an earlier parent round remain included;
+time-travel fork ancestry alone is not child ownership. Handoff admission checks
+cancellation in that same transaction domain, so a successor cannot escape a
+request by racing its creation.
+
+The request commits before local interrupt delivery. Returning from `interrupt`
+acknowledges intent, not finished user cleanup or a remote owner's settlement.
+Owners on other connections observe durable intent through their cancellation
+polls. Completed predecessor history remains unchanged. On normal parent exit,
+`onParentExit` belongs to the child's creating round and is retained through its
+handoffs; explicit cancellation still cascades to linked children.
 
 | Export                  | Signature                                                                                                           | Meaning                                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -86,6 +105,18 @@ The engine stores a versioned state envelope in each run row, fences run and
 attempt ownership, replays encoded exits, and writes engine decisions to the
 journal. Cache addresses are the injected `Sha256` transformation of the step
 key, not the raw `key1_...` value.
+
+An action's `CachePolicy.ttlMs` records one age-admission decision per run,
+step key, and cached provenance. Resuming that decision preserves its verdict
+even when the clock crosses the bound in either direction. A conflicting
+journal record proves the opposite verdict only when an exact retry of that
+opposite record returns `Duplicate`. An incompatible TTL or copied history
+with different lineage metadata instead fails with `JournalError` code
+`idempotency_conflict`, before output replay, cache eviction, or body dispatch.
+Restore the original policy and history identity, or choose a new action
+identity. No persisted keys or journal producer identities are rewritten.
+Changing TTL before a decision exists remains allowed; removing `ttlMs`
+retains the existing unbounded path and is not covered by this conflict check.
 
 Durable cancellation is observed, not just recorded: while a run executes, the
 driver polls `cancel_requested_at_ms` on the heartbeat cadence and cancels the
@@ -201,8 +232,9 @@ directly, having no crash windows to close.
 | `RecordRunParentOutcome`  | `Recorded` or `Existing`                                                                             |
 | `RunParentCycleError`     | tagged error carrying `path`, the execution ids from the child back to itself                        |
 
-Both implementations are pinned by one shared contract suite,
-[test/contract/DurableEngineStateContract.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/test/contract/DurableEngineStateContract.ts).
+Both implementations answer one behavior contract, so a test written against
+the memory twin holds for the SQL one. See
+[Test against a durable store](/guides/testing/).
 
 Full model: [Durable waits](/concepts/durable-waits/).
 
@@ -373,83 +405,204 @@ Full model: [Workspace transactions](/concepts/workspace-transactions/).
 
 ## PlanScheduler
 
+Every declared effect tier is schedulable. Sealed dispatches retain their
+content-derived keys and cache-admission requirements. Compensable and
+irreversible dispatches use run-local plan/node/declaration scopes, retain
+their tier in attempt metadata, and never publish shared-cache results. A
+`clean` settlement means no executor ran: it includes both same-run durable
+replay and eligible shared-cache hits. Compensable retries restore the supplied
+snapshot; the generic executor has no irreversible idempotency contract and
+therefore refuses uncertain recovery or retry of those effects. Irreversible
+conflicts fail without automatic rebase or merge elaboration.
+
 [src/PlanScheduler.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/PlanScheduler.ts)
 
 Drives a persisted [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) plan to completion.
 
 ```ts
 interface Service {
-  readonly record: (plan: Plan) => Effect<PlanStore.RecordResult, SchedulerError, PlanStore | Journal>
-  readonly append: (plan: Plan) => Effect<void, SchedulerError, PlanStore | Journal>
+  readonly record: (plan: Plan) => Effect<PlanStore.RecordResult, SchedulerError, PlanStore | Journal | Crypto>
+  readonly append: (plan: Plan) => Effect<void, SchedulerError, PlanStore | Journal | Crypto>
   readonly run: (plan: Plan) => Effect<Report, SchedulerError, Requirements>
 }
 ```
 
-| Export          | Signature                                                                    | Meaning                                                                                                                       |
-| --------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `PlanScheduler` | `Context.Service<Service>`                                                   | Service tag.                                                                                                                  |
-| `make`          | `(options: Options) => Service`                                              | Builds a scheduler bound to one run.                                                                                          |
-| `layer`         | `(options: Options) => Layer<PlanScheduler>`                                 | Provides it.                                                                                                                  |
-| `NodeExecutor`  | `Context.Service<Executor>`                                                  | The DI seam that turns a node into work.                                                                                      |
-| `layerExecutor` | `(executor: Executor) => Layer<NodeExecutor>`                                | Provides one.                                                                                                                 |
-| `recertify`     | `(input: { plan, deferringRunId, options }) => Effect<RecertifyResult, ...>` | Re-drives a plan guess-free under a fresh run, then reports remaining debt.                                                   |
-| `Requirements`  | type                                                                         | `AttemptStore`, `CacheStore`, `Crypto`, `Jj`, `Journal`, `NodeExecutor`, `PlanStore`, `RunStore`, and `StepBoundary.Service`. |
+| Export          | Signature                                                                    | Meaning                                                                                                                                                           |
+| --------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlanScheduler` | `Context.Service<Service>`                                                   | Service tag.                                                                                                                                                      |
+| `make`          | `(options: Options) => Service`                                              | Builds a scheduler bound to one run.                                                                                                                              |
+| `layer`         | `(options: Options) => Layer<PlanScheduler>`                                 | Provides it.                                                                                                                                                      |
+| `NodeExecutor`  | `Context.Service<Executor>`                                                  | The DI seam that turns a node into work.                                                                                                                          |
+| `layerExecutor` | `(executor: Executor) => Layer<NodeExecutor>`                                | Provides one.                                                                                                                                                     |
+| `recertify`     | `(input: { plan, deferringRunId, options }) => Effect<RecertifyResult, ...>` | Re-drives a plan guess-free under a fresh run, then reports remaining debt.                                                                                       |
+| `Requirements`  | type                                                                         | `AttemptStore`, `CacheStore`, `Crypto`, `Jj`, `Journal`, `NodeExecutor`, `PlanStore`, `PlanInputStore`, `PlanMergeStore`, `RunStore`, and `StepBoundary.Service`. |
 
 ### Options
 
-| Field                | Meaning                                                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `runId`              | The run this scheduler drives.                                                                                                |
-| `owner`              | The `OwnerId` its writes are fenced with.                                                                                     |
-| `sourceId`           | The journal source id.                                                                                                        |
-| `environment`        | The engine-resolved execution environment each dispatch is keyed under. Omitting it preserves the existing dispatch identity. |
-| `concurrency.steps`  | Caps leaf execution. Defaults to unbounded, floors at one.                                                                    |
-| `concurrency.agents` | Caps the agent subset within it. Same defaults.                                                                               |
-| `rebaseLimit`        | How many times a `delay-rebase` node may re-measure and re-key before reconciliation is asked.                                |
-| `selection.changed`  | Changed paths the belief edges are matched against.                                                                           |
-| `selection.beliefs`  | The `BeliefSnapshot` pinned before planning.                                                                                  |
-| `selection.policy`   | Deferral policy; `deferBelow` defaults to zero, which defers nothing.                                                         |
-| `selection.full`     | Treat every verdict as `Admit`, journaled.                                                                                    |
+| Field                | Meaning                                                                                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runId`              | The run this scheduler drives.                                                                                                                                                   |
+| `owner`              | The `OwnerId` its writes are fenced with.                                                                                                                                        |
+| `sourceId`           | The journal source id.                                                                                                                                                           |
+| `environment`        | Runtime identity copied at construction and bound durably before dispatch; changing it requires a new run. Omission preserves action keys but is a distinct environment binding. |
+| `concurrency.steps`  | Caps leaf execution. Defaults to unbounded; zero is refused.                                                                                                                     |
+| `concurrency.agents` | Caps the agent subset within it. Same defaults.                                                                                                                                  |
+| `rebaseLimit`        | How many times a `delay-rebase` node may re-measure and re-key before reconciliation is asked.                                                                                   |
+| `selection.changed`  | Changed paths the belief edges are matched against.                                                                                                                              |
+| `selection.beliefs`  | The `BeliefSnapshot` pinned before planning.                                                                                                                                     |
+| `selection.policy`   | Deferral policy; `deferBelow` defaults to zero, which defers nothing.                                                                                                            |
+| `selection.full`     | Treat every verdict as `Admit`, journaled.                                                                                                                                       |
 
 Both concurrency caps must be positive safe integers and `rebaseLimit` a
 non-negative one; invalid bounds are rejected at construction.
 
 ### Models
 
-| Export            | Shape                                                                                         |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `Outcome`         | `built`, `clean`, `failed`, `skipped`, or `deferred`                                          |
-| `ResolvedInput`   | `{ from, path, value }`, the settled output of `from` projected along `path`                  |
-| `NodeInput`       | `{ node, attempt, boundary, inputs }`                                                         |
-| `Executor`        | `{ execute: (input: NodeInput) => Effect<unknown, unknown> }`                                 |
-| `Settlement`      | `{ nodeId, planKey, dispatchKey, outcome, attempts, rebases }`                                |
-| `Report`          | `{ planId, digest, settlements, results, verdicts, appended }`                                |
-| `RecertifyResult` | `{ runId, report, remaining }`                                                                |
-| `SchedulerError`  | `code` of `boundary_unavailable`, `key_uncomputable`, `elaboration_failed`, or `store_failed` |
+| Export            | Shape                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `Outcome`         | `built`, `clean`, `failed`, `skipped`, or `deferred`                                                          |
+| `ResolvedInput`   | `{ from, path, value }`, the settled output of `from` projected along `path`                                  |
+| `NodeInput`       | `{ node, attempt, boundary, inputs }`                                                                         |
+| `Executor`        | `{ execute: (input: NodeInput) => Effect<unknown, unknown> }`                                                 |
+| `Settlement`      | `{ nodeId, planKey, dispatchKey, outcome, attempts, rebases }`                                                |
+| `Report`          | `{ planId, digest, settlements, results, verdicts, appended }`                                                |
+| `RecertifyResult` | `{ runId, report, remaining }`                                                                                |
+| `SchedulerError`  | `code` of `invalid_plan`, `boundary_unavailable`, `key_uncomputable`, `elaboration_failed`, or `store_failed` |
 
-Ready nodes dispatch through the same `internal/ActionPersistence` seam every
-action uses, so the shared step cache,
+Ready nodes dispatch through the same persistence path every action uses, so
+the shared step cache,
 [`WorkspaceSandbox`](#workspacesandbox)'s execute-then-materialize transaction,
-attempt rows, and the fenced journal all apply unchanged. The dispatch key folds
-the plan-time node key together with the boundary the host measured immediately
-before dispatch, because two runs whose input files differ can declare the same
-graph.
+attempt rows, and the fenced journal all apply unchanged. A sealed dispatch key
+folds the node's own declaration, measured file digests and projected material
+inputs. It does not fold upstream plan keys, so unchanged consumed content can
+reuse a result even when an upstream declaration changed.
 
-Skyframe's `AbstractParallelEvaluator` is the prior art, with two deliberate
-deviations. There is no reverse-dependency index and no invalidating node
-visitor, because a node is dirty exactly when the key it would dispatch under
-moved and the dispatch-time recheck already computes that. And dependency
-discovery is a wavefront rather than restart-based discovery, because the plan
-declares its edges before anything runs.
+Skyframe's `AbstractParallelEvaluator` is the prior art. A private, rebuildable
+`RuntimeGraph` maintains forward/reverse adjacency, dependency counts and ready
+frontiers. Reverse indexes propagate settled outcomes and readiness only;
+content addressing still governs reuse, with no cache-invalidation visitor.
+The coordinator reconciles each completion before admitting dependents, while
+unrelated work can remain in flight. Retry/rebase attempts are not additional
+node settlements. Appended indexes become visible after durable admission.
 
-Source paths, read by the plan and written by nothing in it, are measured once
-before the first dispatch and pinned for the whole run; produced paths are
-measured after their producer settles. That is the torn-run rule: a rebase
-re-observes our own outputs, never the world. Ready work is ordered by declared
+The existing scheduling policy ranks the current ready frontier by priority
+plus capacity-constrained admission passes waited, with exact arithmetic and
+compiled plan order for ties. It retains independent step and agent caps.
+Readiness no longer scans the entire plan after each settlement; admission
+still considers and re-ranks all ready candidates to preserve aging.
+
+Read versions are relative to each reader's predecessors. A path with no
+preceding writer is a source input, even when that reader or a later node writes
+it. Source paths and source-glob membership are pinned before the first dispatch
+(new generations are observed at append time); preceding producers' outputs are
+measured after settlement. Later writers do not widen a read glob's membership.
+A rebase re-observes preceding outputs, not source inputs.
+
+`PlanInputStore` records those observations before dispatch and restores them on
+reopen, without re-enumerating source globs or measuring source files again.
+Each run binds one plan ID and approved base digest; a different approved
+graph or plan ID needs a new run. New runs observe the current world independently and may
+reuse eligible shared-cache results. These rules do not freeze external state
+or replace boundary enforcement when an unfinished action actually executes.
+
+`Options.environment` is copied at scheduler construction and bound durably
+before source observation or dispatch. Recovery requires the same normalized
+identity for all compiled effect tiers. Layer order and duplicates matter;
+capability-pattern order and duplicates do not. Omission, declared-empty, and
+undeclared/run-scoped identities are distinct. A changed environment returns
+`store_failed` with a typed input/merge-store cause of `incompatible_state`, without
+executing or replacing the old binding. Recover with the original environment,
+or explicitly reconcile unfinished effects before starting a new run. This
+checks supplied identities, not undeclared changes in implementation behavior.
+
+Ready work is ordered by declared
 `priority` plus one point per round waited, so priority changes latency without
 permitting starvation.
 
 Full guide: [Drive a plan to completion](/guides/drive-a-plan/).
+
+`stop-merge` records its stopped-attempt decision in `PlanMergeStore`. Recovery
+preserves `skipped` without repeating that attempt, and commits each generated
+merge with its plan extension, source observations, and durable append event.
+Generated IDs avoid occupied user names. `skipped` does not mean no executor
+ever ran: stopped attempts retain their attempt count. `Report.appended` lists
+new appends by this invocation, not merges recovered from prior invocations.
+
+## PlanMergeStore
+
+Authoritative scheduler decisions, separate from action failure evidence and
+redacted journal projections. Compose `layer` over the same `SqlClient` and
+`DurableWriter` as `PlanInputStore`, `PlanStore`, and `Journal`, with `Crypto`;
+run migrations first. `TestStores.layer` and `layerAt` include it.
+
+| Export                                          | Contract                                                                                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `Identity`                                      | `{ runId, planId, baseDigest, environmentDigest }`.                                                                              |
+| `Intent`                                        | Version 1; stopped node/key, dispatch key, attempts/rebases, and exact eligible peers.                                           |
+| `Completion`                                    | Version 1; appended generation, parent/result digests, merge ID/key, and winning peers.                                          |
+| `Decision`                                      | Intent and optional committed completion.                                                                                        |
+| `list(identity, owner)`                         | Committed decisions; refuses enclosing SQL transactions.                                                                         |
+| `intend(identity, intent, owner)`               | First writer wins; joins an outer transaction when provided. Await its commit before exposing the stopped decision.              |
+| `complete(identity, nodeId, completion, owner)` | Requires the caller's plan/input append transaction. Repeated identical completion converges; a different completion is refused. |
+| `make`, `layer`, `PlanMergeStore`               | SQL constructor, layer, and service tag.                                                                                         |
+| `maximumDecisionCharacters`                     | 16 Mi JavaScript string code units per encoded decision.                                                                         |
+
+All operations check current ownership, cancellation, and the admitted plan and
+environment. Rows are versioned, checksummed, immutable, and retained until run
+collection; checksums detect corruption, not malicious database writes. The
+scheduler additionally reconstructs approved generation digests and validates
+stopped-node policy before dispatch. It can recover recorded merge-only
+extensions from the original base, but requires supplied approved intervening
+manual generations rather than inventing missing work.
+
+`PlanMergeError.code` distinguishes `invalid_input`, `corrupt_state`,
+`incompatible_state`, `fence_lost`, `transaction_open`, `transaction_required`,
+and `persistence_failed`. The scheduler interrupts on fence loss and otherwise
+reports `SchedulerError` with `store_failed` and the typed cause. Migration
+`3005` leaves existing observation heads' merge-state version unknown and
+refuses recovery under this runtime. Finish on the prior runtime or reconcile
+unfinished effects before starting a new run; never infer authority from
+merge-like names/bodies or backfill an unknown version by guessing.
+
+## PlanInputStore
+
+Authoritative, append-only source observations for compiled plan execution.
+Compose `PlanInputStore.layer` over the **same** `SqlClient` and `DurableWriter`
+as the run, attempt, plan, and journal stores, with `Crypto`. The layer does not
+run migrations. `TestStores.layer` and `layerAt` include it.
+
+| Export                             | Contract                                                                                                                                                         |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Address`                          | `{ runId, planId, baseDigest, environmentDigest, generation }`; derive the environment digest with `StepKey.environmentIdentity(environment)`.                   |
+| `Snapshot`                         | Version 1; generation; node IDs/keys and each read declaration's frozen source paths; newly pinned `{ path, digest }` entries.                                   |
+| `get(address, owner)`              | Returns the recorded snapshot or `None` for the next generation. Refuses enclosing SQL transactions so execution cannot consume speculative state.               |
+| `record(address, snapshot, owner)` | First-writer-wins; returns the winning snapshot. Consecutive generations only. Can join a transaction, whose outer commit the caller must await before dispatch. |
+| `make`, `layer`, `PlanInputStore`  | SQL constructor, layer, and service tag. No memory/cache fallback.                                                                                               |
+| `maximumSnapshotCharacters`        | 16 Mi JavaScript string code units per encoded generation, checked before persisted JSON is decoded.                                                             |
+
+Reads and writes validate ownership and absent cancellation within the owning
+write transaction. Snapshot rows are checksummed, versioned, schema-validated,
+and immutable; the scheduler additionally checks node declarations, file-version
+selection, and pin consistency before using them. Checksums detect corruption,
+not unauthorized database modification. Rows are retained until their owning
+run is collected; they are not subject to cache eviction or journal redaction.
+
+`PlanInputError.code` distinguishes `invalid_input`, `corrupt_state`,
+`incompatible_state`, `fence_lost`, `transaction_open`, and `persistence_failed`.
+The scheduler self-interrupts on fence loss and otherwise exposes the typed
+cause through `SchedulerError` with `store_failed`.
+
+Migration `engine-store/0003_plan_inputs` marks runs that already had attempts
+before durable observations existed. Such runs cannot safely enter the new
+compiled scheduler: their original sources may have been overwritten. Finish
+them on the previous runtime before upgrading, or make an explicit operator
+recovery decision and start new work under a new run ID. Do not delete the
+legacy marker or retry an uncertain irreversible effect blindly.
+
+Migration `engine-store/0004_plan_environment` adds the environment binding.
+Existing observation heads keep an unknown (`NULL`) environment and are refused;
+the migration never guesses from the current process. New heads require a
+non-empty, immutable fingerprint. Earlier snapshots and attempts remain intact.
 
 ## Reconciliation
 
@@ -534,7 +687,7 @@ inline. Stats alone never defer. A model-backed layer is out of scope, because
 
 `risk` returns `high` at confidence at or above 0.7, `medium` at or above 0.4,
 otherwise `low`, with each reason named `<scope> -> <affects> (<confidence>)`.
-`card` row strings are test-pinned: `clean` renders as `cached` and `built` as
+`card` row strings are stable: `clean` renders as `cached` and `built` as
 `run`.
 
 Out of scope here: CLI verbs, approval routing, auto-appending proposals, and
@@ -585,8 +738,8 @@ into.
 | `ArtifactPublicationFailed` | `code: "artifact_publication_failed"`, fields `digests`, `message`, optional `cause`                    |                                                                                          |
 
 `publish(digests)` runs `findMissing` on the shared tier, uploads what is
-missing, and re-probes to confirm. `ActionPersistence` calls it immediately
-before the transaction that records the cache entry, and never inside it: this
+missing, and re-probes to confirm. The engine calls it immediately before the
+transaction that records the cache entry, and never inside it: this
 is Bazel's REAPI ordering constraint, because a result accessed before its blobs
 are present cannot be validated. A publication that cannot make the artifacts
 durable fails and the shared entry is withheld.
@@ -632,8 +785,8 @@ run after the transaction that made the local row durable.
 | `layer`      | `(remote: Effect<CacheStore.Service, E, R>) => Layer<CacheSync, E, R>`                           | Provides it.                                                        |
 
 It is a separate seam from the `CacheStore` tag because of where the local row
-is written. `ActionPersistence` commits the cache row and the journal record
-explaining it in one `DurableWriter` transaction, and nothing that is not
+is written. The engine commits the cache row and the journal record explaining
+it in one `DurableWriter` transaction, and nothing that is not
 storage work may be held across one: a `CacheStore` whose `put` also wrote a
 shared HTTP tier would put a network round trip inside that transaction,
 blocking every other writer for its duration and rolling the local row back
@@ -721,25 +874,72 @@ for a database that does not carry it, such as the control plane's.
 
 Full guide: [Delete old run history](/guides/delete-old-run-history/).
 
+## ExecutionSnapshot
+
+The engine-owned read port, exported from the root and
+`@smthrs/engine-store/ExecutionSnapshot`. Its `make()` and `layer` require
+`SqlClient` with the engine migrations applied.
+
+| Export                                   | Contract                                                                                          |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ExecutionSnapshot`, `Service`           | Service tag and its `read` and `related` operations.                                              |
+| `Service.read(runIds)`                   | Coherent `Batch` for up to `maximumBatchSize` (200) IDs, preserving request order and duplicates. |
+| `Service.related(options)`               | Bounded `RelatedPage` of direct durable children or lineage rounds, with the requested anchor.    |
+| `Position`                               | Durable database `source` and monotonic `revision`.                                               |
+| `Snapshot`, `Observed`, `Missing`        | Explicit observed execution or absence, including deletion evidence.                              |
+| `Waiting`                                | Timer, signal, approval, quota, human, or other reason, preserving wake time and token.           |
+| `Batch`, `RelatedOptions`, `RelatedPage` | Source watermark, scoped results, relation selector, and optional continuation.                   |
+| `isNewer(incoming, stored)`              | True only for the same source with a greater revision.                                            |
+
+The requested run's lifecycle remains round scoped. Intent and the first owner's
+cancellation acknowledgement are separate fields. Failures use `RunStoreError`
+with causes preserved; interruption releases the read transaction.
+
+## RunChangeFeed
+
+Exported from the root and `@smthrs/engine-store/RunChangeFeed`. `make()` and
+`layer` require a migrated `SqlClient`; `RunChangeFeed` is the service tag.
+
+`Service.current` reads a `Position`.
+`Service.changesSince({ source, revision, limit })` returns a `Page` containing
+`Change` entries, the observed source watermark, `nextRevision`, and `hasMore`.
+The allowed limit is 1 through `maximumPageSize` (1,000). Changes are coalesced
+per run ID and ordered by revision. Tombstones persist indefinitely, including
+after ordinary run retention, so an offline consumer can resume its checkpoint.
+Source replacement or an ahead-of-source checkpoint fails with `invalid_run`.
+
 ## RunCatalogRead
 
 [src/RunCatalogRead.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/src/RunCatalogRead.ts)
 
-The workspace's run set, for a [`@smthrs/sync`](https://sync.smithers.sh/reference/api/) `RunCatalog`.
+Bounded execution pages and the preserved polling run set for a
+[`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/) `RunCatalog`.
 
-| Export            | Signature                                                                                   | Meaning                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `RunCatalogRead`  | `Context.Service<Service>`                                                                  | Service tag.                                                    |
-| `Service`         | `{ listRunIds: (options?: ListOptions) => Effect<ReadonlyArray<string>, RunCatalogError> }` | Every run the workspace has, oldest first, bounded by the read. |
-| `make`            | `() => Effect<Service, never, SqlClient>`                                                   | Builds it over `flows_runs`.                                    |
-| `layer`           | `Layer<RunCatalogRead, never, SqlClient>`                                                   | Provides it.                                                    |
-| `ListOptions`     | `{ limit? }`                                                                                | Defaults to `defaultLimit`.                                     |
-| `defaultLimit`    | `10000`                                                                                     |                                                                 |
-| `RunCatalogError` | `code` of `invalid_options` or `list_failed`                                                |                                                                 |
+| Export                       | Signature                                                                                                       | Meaning                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `RunCatalogRead`             | `Context.Service<Service>`                                                                                      | Service tag.                                       |
+| `Service`                    | `listRunIds(options?)`, `listRuns(options?)`                                                                    | Polling IDs or a coherent filtered execution page. |
+| `make`                       | `() => Effect<Service, never, SqlClient>`                                                                       | Builds it over `flows_runs`.                       |
+| `layer`                      | `Layer<RunCatalogRead, never, SqlClient>`                                                                       | Provides it.                                       |
+| `ListOptions`                | `{ limit? }`                                                                                                    | Defaults to `defaultLimit`.                        |
+| `defaultLimit`               | `10000`                                                                                                         |                                                    |
+| `Filters`                    | Schema and type for status, flow, effective parent, lineage/root, waiting reason, and inclusive creation range. | All predicates run in SQL before pagination.       |
+| `ListRunsOptions`, `RunPage` | `{ filters?, cursor?, limit? }`, page results and source watermark                                              | Versioned source-bound keyset continuation.        |
+| `maximumPageSize`            | `200`                                                                                                           | `listRuns` defaults to 100, without a total count. |
+| `RunCatalogError`            | `invalid_options`, `invalid_cursor`, `source_changed`, `list_failed`                                            | Typed failures preserve causes.                    |
 
-It reads a set rather than a cursor tail, so retention of a run removes it from
+`listRunIds` reads a set rather than a cursor tail, so retention of a run removes it from
 a follower's view. Rows come back newest first by rowid and are returned oldest
 first. Nothing here polls: the interval belongs to `RunCatalog.makePolling`.
+
+`listRuns` orders by immutable creation time plus run ID. It decodes only the
+selected page plus one lookahead, with indexed ancillary reads scoped to those
+rows. Numeric offsets are rejected. Successive pages use live keyset semantics;
+each response is coherent at its own engine revision. Control-only admissions
+and the control projection are a separate integration.
+
+Full observation, listing, lag, retention, and cursor contract:
+[Observe executions and page runs](/guides/observe-executions/).
 
 ## DisasterRecovery
 
@@ -914,12 +1114,12 @@ Full guide: [Observe engine metrics](/guides/observe-engine-metrics/).
 | `run`   | the migration effect          |                                                                                                                            |
 | `layer` | `Layer`                       | Installs the complete schema before exposing the database to any durable service.                                          |
 
-`@smthrs/engine-store` owns `flows_deferred_completions` and
-`flows_clock_deadlines`: the persisted `DurableDeferred` and `DurableClock`
-state `internal/DeferredPersistence` operates and no other package reads. The
-plan set comes last because its id block (`4000`) is the highest, and the
-migrator decides what to run from a single high-water mark, so a set whose ids
-sit below an already-applied one would be assumed done and skipped. See
+This package's own set creates deferred/clock state, selection beliefs, and the
+`flows_plan_input_heads`, `flows_plan_input_generations`, and
+`flows_plan_input_legacy_runs` recovery tables. The plan set's block (`4000`)
+comes last. The database loader supports forward additions to an already
+installed lower block, so migrations `3003` and `3004` also run on existing installations
+whose global cursor reached `4003`; earlier holes remain refusals. See
 [`@smthrs/database`](https://database.smithers.sh/reference/api/) for how namespaced sets compose without
 colliding.
 
@@ -946,20 +1146,19 @@ two parents must answer the question once.
 
 The stable error contract. Every `code` literal here is public API: consumers
 may switch on `code` or `_tag`, and the strings will not change without a major
-version. The classes are declared next to the logic that raises them; this
-module is the barrel so `internal/` is never imported by a consumer.
+version.
 
-| Export                                    | `code`                                                       | Fields                                                             |
-| ----------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `AttemptSuspended`                        | `attempt_suspended`                                          | `runId`, `keyDigest`, `attempt`                                    |
-| `AttemptAdmissionRejected`                | `attempt_admission_rejected`                                 | `keyDigest`, `outcome`                                             |
-| `AttemptEvidenceQuarantined`              | `attempt_evidence_quarantined`                               | `keyDigest`, `attempt`, `path`, `recordedDigest`, `measuredDigest` |
-| `CacheConflictDetected`                   | `cache_conflict_detected`                                    | `keyDigest`, `recordedRunId`                                       |
-| `CacheCorruptionDetected`                 | `cache_corruption_detected`                                  | `keyDigest`, `path`, `recordedDigest`, `measuredDigest`            |
-| `RetentionError`, `RetentionErrorCode`    | `scan_failed`, `delete_failed`                               |                                                                    |
-| `RunCatalogError`, `RunCatalogErrorCode`  | `invalid_options`, `list_failed`                             |                                                                    |
-| `IrreversibleRetryRequiresIdempotencyKey` | re-exported from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)'s `Action`      |                                                                    |
-| `FlowCycleDetected`                       | re-exported from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)'s `FlowRuntime` |                                                                    |
+| Export                                    | `code`                                                               | Fields                                                             |
+| ----------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `AttemptSuspended`                        | `attempt_suspended`                                                  | `runId`, `keyDigest`, `attempt`                                    |
+| `AttemptAdmissionRejected`                | `attempt_admission_rejected`                                         | `keyDigest`, `outcome`                                             |
+| `AttemptEvidenceQuarantined`              | `attempt_evidence_quarantined`                                       | `keyDigest`, `attempt`, `path`, `recordedDigest`, `measuredDigest` |
+| `CacheConflictDetected`                   | `cache_conflict_detected`                                            | `keyDigest`, `recordedRunId`                                       |
+| `CacheCorruptionDetected`                 | `cache_corruption_detected`                                          | `keyDigest`, `path`, `recordedDigest`, `measuredDigest`            |
+| `RetentionError`, `RetentionErrorCode`    | `scan_failed`, `delete_failed`                                       |                                                                    |
+| `RunCatalogError`, `RunCatalogErrorCode`  | `invalid_options`, `invalid_cursor`, `source_changed`, `list_failed` | `cause` when a decode or store operation failed.                   |
+| `IrreversibleRetryRequiresIdempotencyKey` | re-exported from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)'s `Action`              |                                                                    |
+| `FlowCycleDetected`                       | re-exported from [`@smthrs/flow`](https://flow.smithers.sh/reference/api/)'s `FlowRuntime`         |                                                                    |
 
 Each failure, with its cause and its fix, is in
 [Troubleshooting](/troubleshooting/).
@@ -970,13 +1169,13 @@ Each failure, with its cause and its fix, is in
 
 Every durable engine service over one database, migrated.
 
-| Export              | Signature                                                       | Meaning                                                                                                                                |
-| ------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `layer`             | `(options?: TestStoresOptions) => Layer<...>`                   | The private in-memory bundle: journal, run, attempt, cache, and plan stores plus `OwnerIdentity.layer`, keeping `SqlClient` to itself. |
-| `layerAt`           | `(filename: string, options?: TestStoresOptions) => Layer<...>` | The same over a named database, with the connection and `DurableEngineState` re-exported.                                              |
-| `database`          | `Layer`                                                         | The migrated in-memory database alone, as `SqlClient` and `DurableWriter`.                                                             |
-| `databaseAt`        | `(filename: string) => Layer`                                   | The same over a named file.                                                                                                            |
-| `TestStoresOptions` | `{ capacity?, overflow?, batchSize? }`                          | Forwarded to the journal.                                                                                                              |
+| Export              | Signature                                                       | Meaning                                                                                                                                            |
+| ------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layer`             | `(options?: TestStoresOptions) => Layer<...>`                   | The private in-memory bundle: journal, run, attempt, cache, plan, and plan-input stores plus `OwnerIdentity.layer`, keeping `SqlClient` to itself. |
+| `layerAt`           | `(filename: string, options?: TestStoresOptions) => Layer<...>` | The same over a named database, with the connection and `DurableEngineState` re-exported.                                                          |
+| `database`          | `Layer`                                                         | The migrated in-memory database alone, as `SqlClient` and `DurableWriter`.                                                                         |
+| `databaseAt`        | `(filename: string) => Layer`                                   | The same over a named file.                                                                                                                        |
+| `TestStoresOptions` | `{ capacity?, overflow?, batchSize? }`                          | Forwarded to the journal.                                                                                                                          |
 
 Use `layerAt` with a real file to point two independently constructed bundles at
 one database: two connections, two engines, no shared object graph, which is
@@ -1023,12 +1222,3 @@ surviving attempt row when a retention job pruned attempt 1.
 Full model: [Cache admission](/concepts/cache-admission/). See also
 [Run durably over SQLite](https://smithers.sh/docs/tutorials/first-flow/#6-run-durably-over-sqlite)
 and [Content addressing](https://smithers.sh/docs/concepts/content-addressing/).
-
-## Internal scheduling
-
-`internal/RunCoordinator` lives in this package rather than in a storage package
-because it is in-memory scheduling, not persistence: `make({ drain })`
-deduplicates in-process work by key and exposes `active`, `run`, `wake`, and
-`interrupt` around scoped fibers. `RunDriver` is its only consumer. It is not
-distributed ownership; that is
-[`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/)'s `RunStore`.

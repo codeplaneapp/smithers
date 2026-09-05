@@ -53,7 +53,7 @@ row, not from the bus.
 
 ## Let a follower learn of another engine's runs
 
-[`@smthrs/sync`](https://sync.smithers.sh/reference/api/) serves a workspace subscription over a
+[`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/) serves a workspace subscription over a
 `RunCatalog`, and its own implementations are static or in-process, so a
 follower composed against one sees the runs that existed when it started and
 never learns of another. `RunCatalogRead` is the durable read that fixes that:
@@ -79,7 +79,7 @@ a follower that only ever appended what appeared after a cursor would keep every
 collected run in its view forever and hold a journal stream open for each one.
 
 Nothing here polls. The interval belongs to `RunCatalog.makePolling` in
-[`@smthrs/sync`](https://sync.smithers.sh/reference/api/), so the durable side has no policy and no fiber of
+[`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/), so the durable side has no policy and no fiber of
 its own. `RunCatalogError` carries `invalid_options` (the limit was not a
 non-negative safe integer) or `list_failed`; on a failure the caller keeps
 whatever view it had, and the next read converges.

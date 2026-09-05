@@ -46,8 +46,8 @@ not run in a browser. Bazel uses the same copy-in strategy for the same reason.
 
 Copy-back is a compare-and-set on every `FileChange.beforeDigest`. If the base
 moved, the whole bundle is refused with `MaterializationConflict` and nothing
-lands. `internal/ActionPersistence` answers that by retrying the attempt from a
-fresh base a bounded number of times.
+lands. The engine answers that by retrying the attempt from a fresh base a bounded
+number of times.
 
 `beforeDigest` describes what is really on the host, not what was in the seed.
 The `Host.baseline` seam is what supplies it, because "absent from the seed" is
@@ -105,8 +105,7 @@ A body that reaches the host through a service the transaction does not seed is
 outside the transaction. Denying that ambient access is the VM and
 `SandboxProvider` story in [`@smthrs/sandbox`](/api/sandbox). The transaction's
 `FileSystem` surface is also deliberately partial, and a settled bundle is
-applied without a human diff-review gate, which is a known limitation of this
-release.
+applied without a human diff-review gate, which is a known limitation.
 
 ## StepSandbox is the scope-safe front door
 

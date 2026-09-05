@@ -93,6 +93,39 @@ const provideJournal = <A, E, R>(
   >
 
 describe("RunDriver ownership", () => {
+  it.effect("refuses a workspace-routed run before taking any ownership", () =>
+    Effect.gen(function*() {
+      let executions = 0
+      let admissions = 0
+      const row = yield* withCrypto(provideJournal(Effect.gen(function*() {
+        const store = yield* RunStore.RunStore
+        yield* store.create("foreign-workspace", persistedState)
+        const driver = yield* RunDriver.make({
+          owner: ownerA,
+          journalSource: "workspace-routing",
+          engine: Effect.succeed(fakeEngine),
+          canExecute: (candidate) =>
+            Effect.sync(() => {
+              admissions++
+              expect(candidate.runId).toBe("foreign-workspace")
+              return false
+            })
+        })
+        yield* driver.register(TestFlow, () =>
+          Effect.sync(() => {
+            executions++
+            return "wrong workspace"
+          }))
+        yield* driver.resume(TestFlow, "foreign-workspace")
+        return yield* store.get("foreign-workspace")
+      })))
+      expect(admissions).toBeGreaterThan(0)
+      expect(executions).toBe(0)
+      expect(row.status).toBe("pending")
+      expect(row.owner).toBeNull()
+      expect(row.claim).toBeNull()
+    }))
+
   it.effect("allows one concurrent claimant to drive an execution", () =>
     Effect.gen(function*() {
       let executions = 0

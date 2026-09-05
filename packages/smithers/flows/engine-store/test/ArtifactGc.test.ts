@@ -118,9 +118,9 @@ type Host = ReturnType<typeof memoryFs>
 
 /**
  * The production stores over one in-memory database, the sweep surface over
- * the host double, and the collector wired across both. The store layers and
- * the collector share the single `durable` layer value, so both see the same
- * database.
+ * the host double, and the collector wired across both. Providing the durable
+ * bundle once to the collector and caller keeps every store on the migrated
+ * connection, including the caller's directly exposed SQL client.
  */
 const harness = (host: Host, options?: {
   readonly pageSize?: number | undefined
@@ -138,18 +138,17 @@ const harness = (host: Host, options?: {
     ? Layer.empty
     : ArtifactGc.layerPolicy(options.policy)
   const collector = ArtifactGc.layer(options?.pageSize === undefined ? {} : { pageSize: options.pageSize }).pipe(
-    Layer.provide(Layer.mergeAll(durable, sweep, policy))
+    Layer.provide(Layer.mergeAll(sweep, policy))
   )
   return Layer.mergeAll(
     collector,
-    durable,
     Layer.succeed(ArtifactStore.ArtifactStore)(
       ArtifactStore.makeFileSystem(host.fs, {
         durability: "best-effort",
         coordination: "process"
       })
     )
-  )
+  ).pipe(Layer.provideMerge(durable))
 }
 
 const owner: Ownership.OwnerId = { hostId: "gc-host", pid: 7, nonce: "gc-nonce" }

@@ -115,6 +115,12 @@ Note the difference in units: `Service.retain` takes a duration, while
 removed, `deleted` row counts per table (empty under a dry run), and the
 `dryRun` flag.
 
+`collect` reads eligibility and deletes inside one retryable write transaction.
+A concurrent attachment to a live parent cannot slip between that scan and
+deletion. If contention causes a retry, the pass recomputes its candidates.
+Dry runs read the same guard inside a transaction without modifying history
+or schema; their report is a snapshot, not a reservation for a later sweep.
+
 `collect` runs the same deletion and the same lineage guard as `retain`, so
 neither can hold a shorter table list than the other. It handles a database
 that composed fewer stores: the control plane's file migrates the run store and

@@ -30,6 +30,7 @@ import { withCrypto } from "./Sha256.ts"
 const OriginFlow = Flow.make("RetryOrigin/Flow", {
   payload: {},
   success: Schema.String,
+  error: Schema.String,
   body: opaqueHandlerBody
 })
 
@@ -131,7 +132,7 @@ describe("durable schedule-to-close origin", () => {
       // would have granted another full 100 seconds of retries.
       expect(result.dispatchesAfterRestart).toBe(result.dispatchesBeforeRestart)
       expect(result.row.status).toBe("failed")
-      expect(result.row.stateJson).toContain("RetryPolicyExpired")
+      expect(JSON.parse(result.row.stateJson).result.exit.cause).toContainEqual({ _tag: "Fail", error: "boom" })
     }))
 
   it.effect("falls back to the earliest surviving attempt row when attempt 1 was pruned (issue #69)", () =>
@@ -234,6 +235,6 @@ describe("durable schedule-to-close origin", () => {
       // would have granted another full 100 seconds of retries.
       expect(result.dispatchesAfterRestart).toBe(result.dispatchesBeforeRestart)
       expect(result.row.status).toBe("failed")
-      expect(result.row.stateJson).toContain("RetryPolicyExpired")
+      expect(JSON.parse(result.row.stateJson).result.exit.cause).toContainEqual({ _tag: "Fail", error: "boom" })
     }))
 })

@@ -97,7 +97,7 @@ const failingReplay = (error: StepBoundary.UnsupportedBoundary | StepBoundary.Bo
       prepare: (descriptor) => Effect.succeed({ descriptor, readSnapshot: StepBoundary.exactReads(descriptor) }),
       settle: () =>
         Effect.succeed({
-          declaredOutputs: { outputs: [] },
+          declaredOutputs: { outputs: [{ path: "dist/manifest.json", digest: sha256("recorded") }] },
           diffIdentity: "corruption-diff",
           wholeTreeWritesVerified: true,
           hermeticReadsVerified: true
@@ -464,7 +464,7 @@ describe("replay-failed classification (issue #150)", () => {
           prepare: (descriptor) => Effect.succeed({ descriptor, readSnapshot: StepBoundary.exactReads(descriptor) }),
           settle: () =>
             Effect.succeed({
-              declaredOutputs: { outputs: [] },
+              declaredOutputs: { outputs: [{ path: "dist/manifest.json", digest: sha256("recorded") }] },
               diffIdentity: "corruption-diff",
               wholeTreeWritesVerified: true,
               hermeticReadsVerified: true

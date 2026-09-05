@@ -65,6 +65,8 @@ export interface Options {
    * `process.kill(pid, 0)` probe applies before reading `owner.pid`.
    */
   readonly isAlive?: Ownership.LivenessCheck | undefined
+  /** Host routing, checked before claiming a run (including automatic wakes). */
+  readonly canExecute?: ((row: RunStore.RunRow) => Effect.Effect<boolean>) | undefined
   /**
    * Redispatch policy for a durable clock whose fire failed. Defaults to
    * {@link DeferredPersistence.defaultFireRetryPolicy} — exponential from
@@ -156,6 +158,7 @@ const makeWithEngineJj = (
       owner,
       journalSource: options.journalSource,
       isAlive: options.isAlive,
+      canExecute: options.canExecute,
       engine: Deferred.await(engine),
       wakeBus
     })

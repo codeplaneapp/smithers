@@ -42,8 +42,8 @@ replay.
 
 ## Admission is exclusive per key
 
-`internal/AttemptAdmission` holds one mutex per store incarnation, shared by
-every dispatch that engine drives. Two fibers that reach the same key at the
+Attempt admission holds one mutex per store incarnation, shared by every
+dispatch that engine drives. Two fibers that reach the same key at the
 same time do not both open an attempt row: one is admitted and the other is
 refused with `AttemptAdmissionRejected`, whose `outcome` field names which
 check refused it, a superseded fence, a live same-key attempt, or an
@@ -99,6 +99,19 @@ records, and the `Inconsistency` cache-conflict record all go through the
 journal's `emitDurable` channel. A saturated lossy queue can never drop one.
 Attempt lifecycle writes additionally pass the owner, so a reclaimed owner
 fails with `fence_lost` and self-interrupts instead of appending.
+
+## Typed history and execution authority
+
+The shared [state and event authority contract](https://journal.smithers.sh/concepts/state-event-authority/)
+defines additive versioned event families. Current attempt writers retain their
+existing bytes. The engine's internal attempt lifecycle and projection adapters
+do not change that writer contract or expose new public entrypoints.
+
+Full history and retained snapshot plus suffix rebuild the disclosed attempt
+projection. Redacted history does not prove recovery of arbitrary private
+results or executable engine state. Keep the authoritative attempt and run
+stores; a writer cutover requires complete lineage and encoded results in the
+same state transaction, with an explicit migration for retained history.
 
 ## Related
 

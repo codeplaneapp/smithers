@@ -50,6 +50,8 @@ export interface RunCoordinator<Key, E> {
    * @category operations
    */
   readonly interrupt: (key: Key) => Effect.Effect<void>
+  /** Sends interruption without awaiting cleanup; safe for a short commit publication. */
+  readonly requestInterrupt: (key: Key) => Effect.Effect<void>
 }
 
 type Entry<E> = {
@@ -150,10 +152,22 @@ export const make = <Key, E, R>(options: {
         return Fiber.interrupt(entry.owner)
       })
 
+    const requestInterrupt = (key: Key): Effect.Effect<void> =>
+      Effect.withFiber((fiber) =>
+        Effect.sync(() => {
+          const entry = active.get(key)
+          if (entry?.owner === undefined) return
+          entry.stopping = true
+          entry.pendingWake = false
+          entry.owner.interruptUnsafe(fiber.id)
+        })
+      )
+
     return {
       active: Effect.fn("RunCoordinator.active")(() => Effect.sync(() => new Set(active.keys())))(),
       run: Effect.fn("RunCoordinator.run")(run),
       wake: Effect.fn("RunCoordinator.wake")(wake),
-      interrupt: Effect.fn("RunCoordinator.interrupt")(interrupt)
+      interrupt: Effect.fn("RunCoordinator.interrupt")(interrupt),
+      requestInterrupt: Effect.fn("RunCoordinator.requestInterrupt")(requestInterrupt)
     }
   })

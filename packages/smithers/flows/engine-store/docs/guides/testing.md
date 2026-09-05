@@ -69,11 +69,12 @@ and `DurableWriter`.
 | `CacheSync`          | `layerLocal`               | A recorded entry is already everywhere it will be.                                                                                  |
 | `OwnerIdentity`      | `layerConstant(owner)`     | Pins the whole owner token.                                                                                                         |
 
-Both `DurableEngineState` implementations are pinned by one shared contract
-suite,
-[`test/contract/DurableEngineStateContract.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/test/contract/DurableEngineStateContract.ts),
-so the memory twin cannot drift from the SQL one. Run that suite against any
-third implementation you write.
+Both `DurableEngineState` implementations answer one behavior contract, so the
+memory twin cannot drift from the SQL one and a test written against the twin
+holds for the SQL store. The suite that pins them,
+[`DurableEngineStateContract.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/test/contract/DurableEngineStateContract.ts),
+is not part of the published package. Copy it into your own project to run it
+against a third implementation you write.
 
 ## What not to stub
 

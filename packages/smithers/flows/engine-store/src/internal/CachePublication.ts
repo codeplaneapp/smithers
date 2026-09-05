@@ -1,8 +1,8 @@
 /**
  * The two-tier step-cache protocol, extracted out of `ActionPersistence`.
  *
- * `ActionPersistence` owns *when* a result may be shared — sealed tier, hard
- * boundary, no deviation, verified read set. This module owns *how* it becomes
+ * `CacheAdmission` classifies the evidence that permits publication;
+ * `ActionPersistence` supplies the measured facts and durable ordering. This module owns *how* it becomes
  * shareable and how a shared hit is made replayable, which is the half a
  * two-tier composition has to be able to inject into:
  *

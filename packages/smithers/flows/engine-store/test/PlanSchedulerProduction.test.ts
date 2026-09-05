@@ -25,7 +25,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as EffectPath from "effect/Path"
-import { mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as JournalRecords from "../src/internal/JournalRecords.ts"
@@ -231,7 +231,20 @@ const draft = (id: string, options: DraftOptions = {}): Plan.NodeDraft => ({
   ...(options.runtimeStrategy === undefined ? {} : { runtimeStrategy: options.runtimeStrategy })
 })
 
-describe("a persisted plan driven end to end under the production composition", () => {
+/**
+ * Every case here drives a plan through the PRODUCTION host filesystem: the
+ * capability kernel's guarded `FileSystem` over
+ * `@smthrs/platform-node/AtomicFileSystem`. Node has no `openat(2)`, so that
+ * adapter spends one CPython process per filesystem operation — about 130 ms
+ * on an idle machine, and several times that on a host running the whole
+ * package graph. A two-node plan settles in roughly forty of them, so these
+ * cases are bounded by process spawns rather than by the work they describe,
+ * and Vitest's 60 s wall is one load multiplier away from firing on a
+ * perfectly correct run. One case already carried this budget; it belongs to
+ * the suite, because every case here pays the same per-operation price. It
+ * stays FINITE so a genuine hang still fails the run.
+ */
+describe("a persisted plan driven end to end under the production composition", { timeout: 120_000 }, () => {
   it.effect(
     "re-runs only the cone below an edited input; every unchanged branch is a cache hit",
     () =>
@@ -300,8 +313,7 @@ describe("a persisted plan driven end to end under the production composition", 
             (entry.payload as { action?: string }).action === undefined
           )
         ).toBe(true)
-      }),
-    { timeout: 120_000 }
+      })
   )
 
   it.effect("pins a source-glob expansion once per run and re-keys when a new file matches", () =>
@@ -420,6 +432,275 @@ describe("a persisted plan driven end to end under the production composition", 
       // An unproduced arrival was not part of the run-start expansion and never
       // enters a later boundary.
       expect(second.some((entry) => entry.path === "src/arrival.ts")).toBe(false)
+    }))
+
+  it.effect("pins exact and glob inputs before a declared future writer or remover", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "flows-plan-future-writer-"))
+      const plan = yield* withCrypto(Plan.compile({
+        planId: "future-writer-plan",
+        flow: "example/FutureWriter",
+        nodes: [
+          draft("move-world"),
+          draft("reader", {
+            reads: ["src/config.ts", { _tag: "Glob", include: ["src/**"] }],
+            inputs: [{ _tag: "Pending", from: "move-world" }]
+          }),
+          draft("future-writer", {
+            writes: ["src/config.ts", { _tag: "TreeArtifact", path: "src/generated" }],
+            removes: ["src/obsolete.ts"],
+            inputs: [{ _tag: "Ref", from: "reader", path: [] }]
+          })
+        ]
+      }))
+      let observed: FileBoundary | undefined
+      const executor: PlanScheduler.Executor = {
+        execute: ({ boundary, node }) =>
+          Effect.gen(function*() {
+            if (node.id === "move-world") {
+              yield* write(join(root, "src/config.ts"), "changed-after-start")
+              yield* write(join(root, "src/generated/arrival.ts"), "arrived-after-start")
+            }
+            if (node.id === "reader") observed = boundary
+            if (node.id === "future-writer") {
+              yield* write(join(root, "src/config.ts"), "produced-later")
+              const fs = yield* FileSystem.FileSystem
+              yield* fs.remove("src/obsolete.ts")
+            } else {
+              yield* write(join(root, `out/${node.id}.txt`), node.id)
+            }
+            return node.id
+          }) as unknown as Effect.Effect<unknown, unknown>
+      }
+      const report = yield* withCrypto(
+        Effect.gen(function*() {
+          yield* write(join(root, "src/config.ts"), "initial-config")
+          yield* write(join(root, "src/obsolete.ts"), "initial-obsolete")
+          yield* activate("prod-future-writer")
+          return yield* Effect.provide(
+            PlanScheduler.make({ runId: "prod-future-writer", owner, sourceId: "versions/future" }).run(plan),
+            Layer.merge(boundaryOnly(root), PlanScheduler.layerExecutor(executor))
+          )
+        }).pipe(Effect.provide(TestStores.layer()))
+      )
+      expect(outcomes(report)).toEqual({ "move-world": "built", reader: "built", "future-writer": "built" })
+      expect(StepBoundary.exactReads(observed!)).toEqual([
+        { path: "src/config.ts", digest: sha256("initial-config") },
+        { path: "src/obsolete.ts", digest: sha256("initial-obsolete") }
+      ])
+    }))
+
+  it.effect("executes a read-write-read-write-read sequence against each intended file version", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "flows-plan-file-versions-"))
+      const plan = yield* withCrypto(Plan.compile({
+        planId: "file-versions-plan",
+        flow: "example/FileVersions",
+        nodes: [
+          draft("before", { reads: ["src/config.ts"] }),
+          draft("first", { writes: ["src/config.ts"], inputs: [{ _tag: "Pending", from: "before" }] }),
+          draft("between", {
+            reads: [{ _tag: "Glob", include: ["src/**"] }],
+            inputs: [{ _tag: "Pending", from: "first" }]
+          }),
+          draft("last", { writes: ["src/config.ts"], inputs: [{ _tag: "Pending", from: "between" }] }),
+          draft("after", { reads: ["src/config.ts"], inputs: [{ _tag: "Pending", from: "last" }] })
+        ]
+      }))
+      const seen = new Map<string, string>()
+      const executor: PlanScheduler.Executor = {
+        execute: ({ node }) =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            if (node.id === "first" || node.id === "last") {
+              yield* fs.writeFileString("src/config.ts", node.id)
+            } else {
+              const value = yield* fs.readFileString("src/config.ts")
+              seen.set(node.id, value)
+              yield* fs.makeDirectory("out", { recursive: true })
+              yield* fs.writeFileString(`out/${node.id}.txt`, value)
+            }
+            return node.id
+          }) as unknown as Effect.Effect<unknown, unknown>
+      }
+      const report = yield* withCrypto(
+        Effect.gen(function*() {
+          yield* write(join(root, "src/config.ts"), "initial")
+          yield* activate("prod-file-versions")
+          return yield* Effect.provide(
+            PlanScheduler.make({ runId: "prod-file-versions", owner, sourceId: "versions/sequence" }).run(plan),
+            Layer.merge(production(root), PlanScheduler.layerExecutor(executor))
+          )
+        }).pipe(Effect.provide(TestStores.layer()))
+      )
+      expect(outcomes(report)).toEqual({
+        before: "built",
+        first: "built",
+        between: "built",
+        last: "built",
+        after: "built"
+      })
+      expect(Object.fromEntries(seen)).toEqual({ before: "initial", between: "first", after: "last" })
+    }))
+
+  it.effect("replays a self-updating source after independently reopening the database", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "flows-plan-source-reopen-"))
+      mkdirSync(join(root, ".flows"))
+      const database = join(root, ".flows/state.sqlite")
+      const plan = yield* withCrypto(Plan.compile({
+        planId: "source-reopen-plan",
+        flow: "example/SourceReopen",
+        nodes: [draft("update", {
+          reads: ["config.txt", { _tag: "Glob", include: ["*.txt"] }],
+          writes: ["config.txt"]
+        })]
+      }))
+      let bodies = 0
+      const executor: PlanScheduler.Executor = {
+        execute: () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const input = yield* fs.readFileString("config.txt")
+            yield* fs.writeFileString("config.txt", `${input}!`)
+            bodies++
+            return input
+          }) as unknown as Effect.Effect<unknown, unknown>
+      }
+      const drive = () =>
+        PlanScheduler.make({ runId: "source-reopen", owner, sourceId: "source/reopen" }).run(plan).pipe(
+          Effect.provide(Layer.merge(production(root), PlanScheduler.layerExecutor(executor)))
+        )
+      yield* write(join(root, "config.txt"), "initial")
+      yield* write(join(root, "context.txt"), "initial-context")
+      const first = yield* withCrypto(
+        activate("source-reopen").pipe(
+          Effect.andThen(drive()),
+          Effect.provide(TestStores.layerAt(database))
+        )
+      )
+      yield* write(join(root, "context.txt"), "changed-context")
+      yield* write(join(root, "arrival.txt"), "arrived-after-observation")
+      const replay = yield* withCrypto(drive().pipe(Effect.provide(TestStores.layerAt(database))))
+      expect(outcomes(first)).toEqual({ update: "built" })
+      expect(outcomes(replay)).toEqual({ update: "clean" })
+      expect(replay.settlements[0]!.dispatchKey).toBe(first.settlements[0]!.dispatchKey)
+      expect(replay.results).toEqual(first.results)
+      expect(bodies).toBe(1)
+      expect(yield* read(join(root, "config.txt"))).toBe("initial!")
+      const next = yield* withCrypto(
+        activate("source-new-run").pipe(
+          Effect.andThen(
+            PlanScheduler.make({ runId: "source-new-run", owner, sourceId: "source/new" }).run(plan).pipe(
+              Effect.provide(Layer.merge(production(root), PlanScheduler.layerExecutor(executor)))
+            )
+          ),
+          Effect.provide(TestStores.layerAt(database))
+        )
+      )
+      expect(outcomes(next)).toEqual({ update: "built" })
+      expect(bodies).toBe(2)
+      expect(yield* read(join(root, "config.txt"))).toBe("initial!!")
+    }))
+
+  it.effect("refuses an environment change on reopen before repeating a completed file update", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "flows-plan-environment-reopen-"))
+      mkdirSync(join(root, ".flows"))
+      const database = join(root, ".flows/state.sqlite")
+      const plan = yield* withCrypto(Plan.compile({
+        planId: "environment-plan",
+        flow: "test/EnvironmentRecovery",
+        nodes: [{
+          id: "update",
+          material: {
+            version: KeyMaterial.version,
+            kind: "sealed",
+            body: { action: "update" },
+            inputs: [],
+            layers: [],
+            capabilities: []
+          },
+          effects: { reads: ["config.txt"], writes: ["config.txt"], boundaryMode: "hard" }
+        }]
+      }))
+      let bodies = 0
+      const executor: PlanScheduler.Executor = {
+        execute: () =>
+          Effect.gen(function*() {
+            const fs = yield* FileSystem.FileSystem
+            const before = yield* fs.readFileString("config.txt")
+            yield* fs.writeFileString("config.txt", `${before}!`)
+            bodies++
+            return before
+          }) as unknown as Effect.Effect<unknown, unknown>
+      }
+      const drive = (version: string) =>
+        PlanScheduler.make({
+          runId: "environment-reopen",
+          owner,
+          sourceId: "environment/reopen",
+          environment: { declared: true, layers: [version], capabilities: {} }
+        }).run(plan).pipe(Effect.provide(Layer.merge(production(root), PlanScheduler.layerExecutor(executor))))
+      yield* write(join(root, "config.txt"), "initial")
+      yield* withCrypto(
+        activate("environment-reopen").pipe(
+          Effect.andThen(drive("runtime-v1")),
+          Effect.provide(TestStores.layerAt(database))
+        )
+      )
+      const failure = yield* withCrypto(
+        Effect.flip(drive("runtime-v2")).pipe(Effect.provide(TestStores.layerAt(database)))
+      )
+      expect(failure).toMatchObject({ code: "store_failed", cause: { code: "incompatible_state" } })
+      expect(bodies).toBe(1)
+      expect(yield* read(join(root, "config.txt"))).toBe("initial!")
+      const replay = yield* withCrypto(drive("runtime-v1").pipe(Effect.provide(TestStores.layerAt(database))))
+      expect(outcomes(replay)).toEqual({ update: "clean" })
+      expect(bodies).toBe(1)
+    }))
+
+  it.effect("recovers prior pins and appended-generation glob membership across independent database openings", () =>
+    Effect.gen(function*() {
+      const root = mkdtempSync(join(tmpdir(), "flows-plan-generation-reopen-"))
+      mkdirSync(join(root, ".flows"))
+      const database = join(root, ".flows/state.sqlite")
+      const base = yield* withCrypto(Plan.compile({
+        planId: "generation-reopen-plan",
+        flow: "example/GenerationReopen",
+        nodes: [draft("base", { reads: ["src/original.txt"] })]
+      }))
+      const grown = yield* withCrypto(Plan.append(base, [draft("next", {
+        reads: [{ _tag: "Glob", include: ["extra/*.txt"] }],
+        inputs: [{ _tag: "Pending", from: "base" }]
+      })]))
+      const ran: Array<string> = []
+      const drive = (plan: Plan.Plan) =>
+        PlanScheduler.make({
+          runId: "generation-reopen",
+          owner,
+          sourceId: "generation/reopen"
+        }).run(plan).pipe(Effect.provide(Layer.merge(production(root), PlanScheduler.layerExecutor(renderer(ran)))))
+      yield* write(join(root, "src/original.txt"), "original")
+      yield* withCrypto(
+        activate("generation-reopen").pipe(
+          Effect.andThen(drive(base)),
+          Effect.provide(TestStores.layerAt(database))
+        )
+      )
+      yield* write(join(root, "extra/one.txt"), "seen-on-growth")
+      const elaborated = yield* withCrypto(drive(grown).pipe(Effect.provide(TestStores.layerAt(database))))
+      expect(outcomes(elaborated)).toEqual({ base: "clean", next: "built" })
+      yield* write(join(root, "src/original.txt"), "changed-original")
+      yield* write(join(root, "extra/one.txt"), "changed-extra")
+      yield* write(join(root, "extra/arrival.txt"), "new-member")
+      const replay = yield* withCrypto(drive(grown).pipe(Effect.provide(TestStores.layerAt(database))))
+      expect(outcomes(replay)).toEqual({ base: "clean", next: "clean" })
+      expect(replay.settlements.map((node) => node.dispatchKey)).toEqual(
+        elaborated.settlements.map((node) => node.dispatchKey)
+      )
+      expect(ran).toEqual(["base", "next"])
+      expect(yield* read(join(root, "out/next.txt"))).toBe("next(seen-on-growth)")
     }))
 
   it.effect("enumerates producer candidates only inside exact, glob, and tree writer scopes", () =>

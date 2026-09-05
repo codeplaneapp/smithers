@@ -25,8 +25,9 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as RunListing from "./RunListing.ts"
+import { RunCatalogError } from "./RunListingError.ts"
 
 /**
  * Stable error codes returned by the catalog read.
@@ -34,15 +35,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient"
  * @category models
  * @since 0.1.0
  */
-export const RunCatalogErrorCode = Schema.Literals(["invalid_options", "list_failed"])
-
-/**
- * Stable error codes returned by the catalog read.
- *
- * @category models
- * @since 0.1.0
- */
-export type RunCatalogErrorCode = typeof RunCatalogErrorCode.Type
+export { RunCatalogErrorCode } from "./RunListingError.ts"
 
 /**
  * A catalog read that could not complete.
@@ -54,14 +47,7 @@ export type RunCatalogErrorCode = typeof RunCatalogErrorCode.Type
  * @category errors
  * @since 0.1.0
  */
-export class RunCatalogError extends Schema.TaggedError<RunCatalogError>()(
-  "@smthrs/engine-store/RunCatalogError",
-  {
-    code: RunCatalogErrorCode,
-    message: Schema.String,
-    cause: Schema.optional(Schema.Unknown)
-  }
-) {}
+export { RunCatalogError } from "./RunListingError.ts"
 
 /**
  * Options for one catalog read.
@@ -86,6 +72,8 @@ export interface ListOptions {
  * @since 0.1.0
  */
 export interface Service {
+  /** Revision-consistent, filtered keyset page of execution rows. */
+  readonly listRuns: RunListing.Service["listRuns"]
   /**
    * Every run the workspace has, oldest first, bounded by the read. "Oldest"
    * is the run table's own row order, which is the order `RunStore.create`
@@ -129,6 +117,7 @@ export const defaultLimit = 10_000
 export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient> =>
   Effect.gen(function*() {
     const sql = yield* Effect.service(SqlClient.SqlClient)
+    const listing = yield* RunListing.make()
 
     // Newest first by `rowid`, then reversed. `rowid` is the order the
     // workspace gained its runs, and reading it backwards walks the table's
@@ -172,7 +161,7 @@ export const make = (): Effect.Effect<Service, never, SqlClient.SqlClient> =>
       })
     )
 
-    return { listRunIds }
+    return { listRunIds, ...listing }
   })
 
 /**

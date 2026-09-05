@@ -3,7 +3,8 @@
  * migration, and the inventory of what porting them to another
  * dialect costs.
  *
- * The canonical `flows_*` migrations live in `@smthrs/journal`; these
+ * Each durable package owns its migration ladder. Spawn edges and their GC
+ * trigger moved into engine-store migration 0006. The remaining
  * statements are engine-store-owned storage created idempotently at
  * construction instead (issues #40/#41/#79/#81). That is a deliberate lane
  * boundary, not an oversight — but it left the statements invisible to the
@@ -56,50 +57,6 @@ export interface Statement {
  * @category constants
  */
 export const statements: ReadonlyArray<Statement> = [
-  {
-    name: "flows_run_parents",
-    reason:
-      "Durable run-parent edges for the run DAG (issues #40/#41). `seq` is a store-global insertion order used only to list a run's parents oldest first; cycle rejection happens atomically inside `recordRunParent`'s transaction, so no UNIQUE(seq) is needed (issues #54/#66). PRIMARY KEY (child_id, parent_id) is the edge uniqueness constraint. There is deliberately no FK to `flows_runs`: the tables live in different migration lanes.",
-    dialects: ["sqlite", "postgres"],
-    ddl: `
-      CREATE TABLE IF NOT EXISTS flows_run_parents (
-        child_id TEXT NOT NULL CHECK (length(child_id) > 0),
-        parent_id TEXT NOT NULL CHECK (length(parent_id) > 0),
-        seq BIGINT NOT NULL CHECK (
-          typeof(seq) = 'integer' AND seq >= 0 AND seq <= 9007199254740991
-        ),
-        PRIMARY KEY (child_id, parent_id)
-      )
-    `
-  },
-  {
-    name: "flows_run_parents_parent_idx",
-    reason:
-      "Serves reverse-direction cleanup (`removeRunParentsForRun`, for lanes that clear edges without deleting run rows); the cycle walk itself reads by `child_id` via the primary key.",
-    dialects: ["sqlite", "postgres"],
-    ddl: `
-      CREATE INDEX IF NOT EXISTS flows_run_parents_parent_idx
-      ON flows_run_parents (parent_id)
-    `
-  },
-  {
-    name: "flows_run_parents_gc",
-    reason:
-      "Database-level GC enforcement (issue #81): any lane that deletes a run row — retention, time-travel archival, a future prune job — drops that run's parent edges in the same transaction, whether or not it knows to call `removeRunParentsForRun`, so ghost edges can never accumulate into future cycle walks.",
-    // SQLite-exclusive: the inline BEGIN...END body and the implicit
-    // per-row firing have no Postgres equivalent — porting means a
-    // `CREATE FUNCTION ... RETURNS trigger` plus
-    // `CREATE TRIGGER ... FOR EACH ROW EXECUTE FUNCTION`.
-    dialects: ["sqlite"],
-    ddl: `
-      CREATE TRIGGER IF NOT EXISTS flows_run_parents_gc
-      AFTER DELETE ON flows_runs
-      BEGIN
-        DELETE FROM flows_run_parents
-        WHERE child_id = OLD.run_id OR parent_id = OLD.run_id;
-      END
-    `
-  },
   {
     name: "flows_runs_stale_running_idx",
     reason:

@@ -15,11 +15,10 @@
  * REBUILDING → DONE`) and `EvaluationProgressReceiver` for the outcome
  * vocabulary. Two deliberate deviations:
  *
- * 1. **No reverse-dependency index, no invalidating node visitor.** Content
- *    addressing subsumes them. A node is "dirty" iff the key it would
- *    dispatch under differs from the one it dispatched under, and the
- *    dispatch-time recheck already computes that. There is no dirty bit to
- *    propagate, so there is nothing for a visitor to walk.
+ * 1. **No cache-invalidating node visitor.** Content addressing governs
+ *    reuse. Private reverse indexes propagate settled outcomes and readiness,
+ *    never dirty bits. Dispatch-time content measurement still decides
+ *    whether a recorded result can serve the node.
  * 2. **Completion-driven, without Skyframe restarts.** Skyframe atomically
  *    signals reverse dependencies when one node settles. Our dependencies are
  *    declared in the plan before anything runs, so one coordinator can make
@@ -52,10 +51,11 @@
  * ## Observing the world exactly once
  *
  * `docs/pages/release/support-matrix.md` records the torn-run rule: never re-observe the
- * world mid-run. Paths the plan reads but no node writes are **source** paths;
- * they are measured once, before the first dispatch, and pinned for the rest
- * of the run. Paths a node in the plan produces are measured after their
- * producer settles — observing our own output, not the world.
+ * world mid-run. Reads with no preceding writer are **source** inputs; their
+ * digests and glob membership are durably recorded before dispatch and restored
+ * on reopening. Preceding producers' outputs are measured after settlement —
+ * observing our own output, not the world. Later and self-writes are not source
+ * producers. New generations retain prior pins and record new observations.
  *
  * @since 0.1.0
  */
@@ -64,9 +64,9 @@ import { FlowEngine } from "@smthrs/engine"
 import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import type { Jj } from "@smthrs/kernel"
-import { Plan, PlanStore, StepKey } from "@smthrs/plan"
+import { Plan, PlanStore, Scheduling, StepKey } from "@smthrs/plan"
 import * as FileSet from "@smthrs/plan/FileSet"
-import type { AttemptStore, Ownership, RunStore } from "@smthrs/run-store"
+import { AttemptStore, type Ownership, type RunStore } from "@smthrs/run-store"
 import type { CacheStore } from "@smthrs/step-cache"
 import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
@@ -80,12 +80,18 @@ import * as Metric from "effect/Metric"
 import * as Option from "effect/Option"
 import * as Queue from "effect/Queue"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as EngineStoreMetrics from "./EngineStoreMetrics.ts"
 import * as ActionPersistence from "./internal/ActionPersistence.ts"
 import * as FileEnumeration from "./internal/FileEnumeration.ts"
 import * as JournalRecords from "./internal/JournalRecords.ts"
 import { compareText } from "./internal/Ordering.ts"
+import * as PlanInputs from "./internal/PlanInputs.ts"
+import * as PlanMerges from "./internal/PlanMerges.ts"
+import * as RuntimeGraph from "./internal/RuntimeGraph.ts"
+import * as PlanInputStore from "./PlanInputStore.ts"
+import * as PlanMergeStore from "./PlanMergeStore.ts"
 import * as Reconciliation from "./Reconciliation.ts"
 import * as Selection from "./Selection.ts"
 import * as StepBoundary from "./StepBoundary.ts"
@@ -96,12 +102,14 @@ import * as WorkspaceSandbox from "./WorkspaceSandbox.ts"
  * content-addressed store, plus the selection debt.
  *
  * - `built` — the node executed (`SUCCESS_VERSION_CHANGED`).
- * - `clean` — the shared cache served it and nothing ran
- *   (`SUCCESS_VERSION_UNCHANGED`). This is the outcome the whole design is
- *   for: an unchanged branch costs nothing.
+ * - `clean` — a recorded result served it and no executor ran. This includes
+ *   same-run durable attempt replay for every tier, and shared-cache hits for
+ *   eligible sealed work (`SUCCESS_VERSION_UNCHANGED`). It does not assert
+ *   cross-run cache eligibility.
  * - `failed` — the node executed and failed, or reconciliation failed it.
- * - `skipped` — the node never dispatched, because its cone failed or because
- *   a `stop-merge` strategy stopped it in favour of a merge node. Skyframe
+ * - `skipped` — its cone prevented dispatch, or `stop-merge` stopped a
+ *   conflicted attempt in favour of a merge node. The latter has nonzero
+ *   attempts; skipped does not imply that its executor never ran. Skyframe
  *   splits failure by version instead; a content-addressed store never serves
  *   a failure from cache, so that split has no meaning here and this one does.
  * - `deferred`: a selection guess postponed this sink
@@ -117,7 +125,7 @@ export type Outcome = "built" | "clean" | "failed" | "skipped" | "deferred"
 
 /**
  * One material `Ref` input, resolved: the settled output of `from` projected
- * along `path` — exactly the value whose digest the dispatch key folds.
+ * along `path` — for sealed work, the value whose digest the dispatch key folds.
  *
  * @since 0.1.0
  * @category models
@@ -137,14 +145,14 @@ export interface ResolvedInput {
 export interface NodeInput {
   readonly node: Plan.PlanNode
   readonly attempt: number
-  /** The measured boundary this dispatch was keyed under. */
+  /** The measured boundary; folded into sealed keys, diagnostic context for other tiers. */
   readonly boundary: FileBoundary
   /**
    * The node's material `Ref` inputs, resolved through the same projection the
-   * dispatch key digests. Ordering (`Pending`) dependencies and unprojected
-   * sibling fields are deliberately absent: an executor may only see data the
-   * key folds, or a cached settlement could be served for an execution that
-   * consumed something else.
+   * dispatch key digests for sealed work. Ordering (`Pending`) dependencies
+   * and unprojected sibling fields are deliberately absent. This preserves
+   * the consumed-data contract for every tier and prevents a sealed cache hit
+   * from serving an execution that consumed different data.
    */
   readonly inputs: ReadonlyArray<ResolvedInput>
 }
@@ -193,7 +201,7 @@ export interface Settlement {
   readonly nodeId: string
   /** The plan-time key: a pure function of declarations. */
   readonly planKey: string
-  /** The key dispatched under: the node's own material, the content of its consumed inputs, and the measured boundary — never the transitive plan key. */
+  /** The execution key: content-derived for sealed work; run/plan/node/declaration-scoped for other tiers. */
   readonly dispatchKey: string
   readonly outcome: Outcome
   readonly attempts: number
@@ -227,20 +235,18 @@ export interface Options {
   readonly owner: Ownership.OwnerId
   readonly sourceId: string
   /**
-   * The engine-resolved execution environment each dispatch is keyed under.
-   * Omitting it preserves the existing dispatch identity.
+   * Engine-resolved identity, copied at scheduler construction and durably
+   * bound before dispatch. A changed identity cannot resume the same run.
+   * Omitting it preserves existing action keys but is itself a distinct binding.
    */
   readonly environment?: StepKey.EnvironmentIdentity | undefined
   /**
    * The admission caps. Both default to unbounded, because a cap the caller
    * did not declare is not the scheduler's to invent — `aspects.ts` owns the
-   * policy and narrows it. Both floor at one: a cap of zero admits nothing,
-   * and a scheduler with no permits can never make progress.
+   * policy and narrows it. Explicit caps must be positive safe integers;
+   * zero is refused rather than silently clamped or allowed to deadlock.
    */
-  readonly concurrency?: {
-    readonly steps?: number | undefined
-    readonly agents?: number | undefined
-  } | undefined
+  readonly concurrency?: Scheduling.Concurrency | undefined
   /**
    * How many times a `delay-rebase` node may re-measure and re-key against a
    * newly recorded base before reconciliation is asked. Bounded on purpose: an
@@ -274,6 +280,7 @@ export interface Options {
  * @category models
  */
 export type Requirements =
+  | PlanMergeStore.PlanMergeStore
   | AttemptStore.AttemptStore
   | CacheStore.CacheStore
   | Crypto.Crypto
@@ -281,6 +288,7 @@ export type Requirements =
   | Journal.Journal
   | NodeExecutor
   | PlanStore.PlanStore
+  | PlanInputStore.PlanInputStore
   | RunStore.RunStore
   | StepBoundary.Service
 
@@ -292,9 +300,17 @@ export type Requirements =
  * @category errors
  */
 export class SchedulerError extends Schema.TaggedError<SchedulerError>()("@smthrs/engine-store/SchedulerError", {
-  code: Schema.Literals(["boundary_unavailable", "key_uncomputable", "elaboration_failed", "store_failed"]),
+  code: Schema.Literals([
+    "invalid_plan",
+    "boundary_unavailable",
+    "key_uncomputable",
+    "elaboration_failed",
+    "store_failed"
+  ]),
   message: Schema.String,
-  cause: Schema.optional(Schema.Unknown)
+  cause: Schema.optional(Schema.Unknown),
+  /** Failures while settling siblings after the primary scheduler failure. */
+  cleanupErrors: Schema.optional(Schema.Array(Schema.Unknown))
 }) {}
 
 /**
@@ -307,9 +323,11 @@ export interface Service {
   /** Persists generation 0 and journals `plan-recorded`. */
   readonly record: (
     plan: Plan.Plan
-  ) => Effect.Effect<PlanStore.RecordResult, SchedulerError, PlanStore.PlanStore | Journal.Journal>
+  ) => Effect.Effect<PlanStore.RecordResult, SchedulerError, PlanStore.PlanStore | Journal.Journal | Crypto.Crypto>
   /** Persists the newest generation and journals `subgraph-appended`. */
-  readonly append: (plan: Plan.Plan) => Effect.Effect<void, SchedulerError, PlanStore.PlanStore | Journal.Journal>
+  readonly append: (
+    plan: Plan.Plan
+  ) => Effect.Effect<void, SchedulerError, PlanStore.PlanStore | Journal.Journal | Crypto.Crypto>
   /** Drives the plan to completion and reports every node's outcome. */
   readonly run: (plan: Plan.Plan) => Effect.Effect<Report, SchedulerError, Requirements>
 }
@@ -347,16 +365,6 @@ const DeviationPayload = Schema.Struct({
 const decodeDeviation = Schema.decodeUnknownOption(DeviationPayload)
 
 const digestOf = Schema.decodeUnknownEffect(Sha256)
-
-/** @private */
-interface NodeState {
-  status: "pending" | "running" | "settled"
-  outcome: Outcome
-  attempts: number
-  rebases: number
-  waited: number
-  dispatchKey: string
-}
 
 /** @private */
 interface DispatchStart {
@@ -417,13 +425,6 @@ type CoordinatorEvent =
 const storeFailure = (message: string) => (cause: unknown) =>
   new SchedulerError({ code: "store_failed", message, cause })
 
-const positiveSafeInteger = (name: string, value: number): number => {
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new RangeError(`${name} must be a positive safe integer`)
-  }
-  return value
-}
-
 const nonNegativeSafeInteger = (name: string, value: number): number => {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new RangeError(`${name} must be a non-negative safe integer`)
@@ -439,8 +440,15 @@ const nonNegativeSafeInteger = (name: string, value: number): number => {
  */
 export const make = (options: Options): Service => {
   const rebaseLimit = nonNegativeSafeInteger("rebaseLimit", options.rebaseLimit ?? 3)
-  const stepCap = positiveSafeInteger("concurrency.steps", options.concurrency?.steps ?? Number.MAX_SAFE_INTEGER)
-  const agentCap = positiveSafeInteger("concurrency.agents", options.concurrency?.agents ?? Number.MAX_SAFE_INTEGER)
+  const scheduling = Scheduling.make(options.concurrency)
+  // Capture before the first async boundary. Callers can retain and mutate
+  // their options, but cannot change this scheduler's identity after admission.
+  const capturedEnvironment = Result.try(() =>
+    Schema.decodeUnknownSync(Schema.UndefinedOr(StepKey.EnvironmentIdentity))(
+      options.environment,
+      { onExcessProperty: "error" }
+    )
+  )
 
   // Every scheduler record addresses the run's root lineage, so a frame can
   // reach it (`docs/pages/concepts/time-travel.md`).
@@ -468,8 +476,16 @@ export const make = (options: Options): Service => {
       Effect.mapError((error) => error instanceof SchedulerError ? error : storeFailure(message)(error))
     )
 
-  const record: Service["record"] = Effect.fn("PlanScheduler.record")((plan) =>
+  const verifyPlan = (candidate: Plan.Plan) =>
+    Plan.verify(candidate).pipe(
+      Effect.mapError((cause) =>
+        new SchedulerError({ code: "invalid_plan", message: "the scheduler requires a verified plan", cause })
+      )
+    )
+
+  const record: Service["record"] = Effect.fn("PlanScheduler.record")((candidate) =>
     Effect.gen(function*() {
+      const plan = yield* verifyPlan(candidate)
       yield* Effect.annotateCurrentSpan({
         runId: options.runId,
         planId: plan.planId,
@@ -501,8 +517,9 @@ export const make = (options: Options): Service => {
     })
   )
 
-  const append: Service["append"] = Effect.fn("PlanScheduler.append")((plan) =>
+  const append: Service["append"] = Effect.fn("PlanScheduler.append")((candidate) =>
     Effect.gen(function*() {
+      const plan = yield* verifyPlan(candidate)
       yield* Effect.annotateCurrentSpan({
         runId: options.runId,
         planId: plan.planId,
@@ -527,8 +544,21 @@ export const make = (options: Options): Service => {
     })
   )
 
-  const run: Service["run"] = Effect.fn("PlanScheduler.run")((initial) =>
+  const run: Service["run"] = Effect.fn("PlanScheduler.run")((candidate) =>
     Effect.gen(function*() {
+      if (Result.isFailure(capturedEnvironment)) {
+        return yield* Effect.fail(
+          new SchedulerError({
+            code: "key_uncomputable",
+            message: "the scheduler requires a valid execution environment identity"
+          })
+        )
+      }
+      const environment = capturedEnvironment.success
+      const environmentDigest = yield* StepKey.environmentIdentity(environment).pipe(Effect.mapError((cause) =>
+        new SchedulerError({ code: "key_uncomputable", message: "could not bind the execution environment", cause })
+      ))
+      const initial = yield* verifyPlan(candidate)
       yield* Effect.annotateCurrentSpan({
         runId: options.runId,
         planId: initial.planId,
@@ -539,6 +569,19 @@ export const make = (options: Options): Service => {
       const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem)
       const executor = yield* NodeExecutor
       const journal = yield* Journal.Journal
+      const inputStore = yield* PlanInputStore.PlanInputStore
+      const mergeStore = yield* PlanMergeStore.PlanMergeStore
+      const mergeIdentity = {
+        runId: options.runId,
+        planId: initial.planId,
+        baseDigest: initial.baseDigest,
+        environmentDigest
+      }
+      const mergeFailure = (cause: PlanMergeStore.PlanMergeError) =>
+        cause.code === "fence_lost"
+          ? Effect.interrupt :
+          Effect.fail(storeFailure("could not recover or persist the plan's merge decisions")(cause))
+      const recoveredMerges = yield* mergeStore.list(mergeIdentity, options.owner).pipe(Effect.catch(mergeFailure))
       const reconciler = Option.getOrElse(
         yield* Effect.serviceOption(Reconciliation.Reconciliation),
         Reconciliation.makeDefault
@@ -552,57 +595,60 @@ export const make = (options: Options): Service => {
         nodes: initial.nodes.length
       })
 
-      let plan = initial
-      const states = new Map<string, NodeState>()
+      // Only a coordinator failure makes interrupted siblings terminal here.
+      // Parking, external cancellation and fence loss retain their established
+      // recovery semantics. The flag is set before the child scope closes.
+      let abortedForFailure = false
+      const cleanupErrors: Array<unknown> = []
+      let plan = yield* PlanMerges.recover(initial, recoveredMerges).pipe(Effect.catch(mergeFailure))
+      const graph = RuntimeGraph.make(plan.nodes)
+      const states = graph.states
       const results = new Map<string, unknown>()
       const digestMemo = StepKey.makeDigestMemo()
       const verdicts: Array<{ nodeId: string; verdict: Reconciliation.Verdict }> = []
       const appended: Array<string> = []
-      /** Ordering edges reconciliation discovered; live for this run only. */
-      const discovered = new Map<string, Array<string>>()
       const digestToNode = new Map<string, Array<string>>()
       const deviationSignatures = new Map<string, string>()
       const writers = new Map<string, string>()
       const writerEntries: Array<{ readonly entry: FileSet.Entry; readonly nodeId: string }> = []
+      const nodesById = new Map<string, Plan.PlanNode>()
       let cursor: number | undefined = undefined
       const events = yield* Queue.unbounded<CoordinatorEvent>()
 
-      const stateOf = (node: Plan.PlanNode): NodeState => {
-        const existing = states.get(node.id)
-        if (existing !== undefined) return existing
-        const fresh: NodeState = {
-          status: "pending",
-          outcome: "skipped",
-          attempts: 0,
-          rebases: 0,
-          waited: 0,
-          dispatchKey: ""
-        }
-        states.set(node.id, fresh)
-        return fresh
-      }
+      const stateOf = (node: Plan.PlanNode): RuntimeGraph.NodeState =>
+        states.get(node.id)!
 
       /**
-       * Which node produces each path. First declaration wins, matching the
-       * plan compiler's declaration-order conflict resolution. A declared
-       * removal counts: the plan produces that path's post-state, so pinning
-       * it as an unproduced source input would measure the world at a moment
-       * the plan is about to move.
+       * Reconciliation's first declared owner of each path. Read version
+       * selection is different: only a reader's predecessors produce its
+       * inputs, never the reader itself or an explicitly later writer.
        */
-      const indexWriters = () => {
-        writerEntries.length = 0
-        writers.clear()
-        for (const node of plan.nodes) {
+      const indexWriters = (nodes: ReadonlyArray<Plan.PlanNode>) => {
+        for (const node of nodes) {
+          nodesById.set(node.id, node)
           for (const entry of [...FileSet.expand(node.effects.writes), ...node.effects.removes ?? []]) {
             writerEntries.push({ entry, nodeId: node.id })
-            if (typeof entry === "string" && !writers.has(entry)) writers.set(entry, node.id)
+            if (typeof entry === "string" && !writers.has(entry)) {
+              writers.set(entry, node.id)
+            }
           }
         }
       }
-      indexWriters()
+      indexWriters(plan.nodes)
 
       const writerFor = (path: string): string | undefined =>
         writers.get(path) ?? writerEntries.find(({ entry }) => FileSet.overlaps(entry, path))?.nodeId
+
+      // One bounded traversal per observation/dispatch, not an eager matrix
+      // of every node's transitive ancestors. Shared ancestors are visited
+      // once, and the temporary set is released after this reader's work.
+      const writerScopesBefore = (node: Plan.PlanNode): ReadonlyArray<FileSet.Entry> => {
+        const scopes: Array<FileSet.Entry> = []
+        graph.visitAncestors(node, (predecessor) => {
+          scopes.push(...FileSet.expand(predecessor.effects.writes), ...predecessor.effects.removes ?? [])
+        })
+        return scopes
+      }
 
       const expandReads = (entries: ReadonlyArray<FileSet.ReadEntry>, what: string) =>
         Effect.gen(function*() {
@@ -624,7 +670,6 @@ export const make = (options: Options): Service => {
             // are absolute under the kernel FileSystem and skip dotfiles, so
             // a workspace-relative pattern silently expanded to nothing.
             const matches = yield* FileEnumeration.expandGlob(fileSystem.value, entry).pipe(
-              /* v8 ignore next 6 -- host refusal translation is the same typed boundary-unavailable path exercised by prepare failures */
               Effect.mapError((cause) =>
                 new SchedulerError({
                   code: "boundary_unavailable",
@@ -653,9 +698,14 @@ export const make = (options: Options): Service => {
           )
         )
 
-      const expandProducedMatches = (glob: FileSet.Glob, what: string) =>
+      const expandProducedMatches = (
+        glob: FileSet.Glob,
+        writerScopes: ReadonlyArray<FileSet.Entry>,
+        what: string
+      ) =>
         Effect.gen(function*() {
-          /* v8 ignore next 8 -- a producer-covered glob reaches here only after `observeReads` expanded the same glob, and that expansion already failed the run when no FileSystem was composed */
+          const scopes = writerScopes.filter((entry) => FileSet.overlaps(glob, entry))
+          if (scopes.length === 0) return []
           if (Option.isNone(fileSystem)) {
             return yield* Effect.fail(
               new SchedulerError({
@@ -665,22 +715,15 @@ export const make = (options: Options): Service => {
             )
           }
           const paths = new Set<string>()
-          for (const { entry } of writerEntries) {
-            if (!FileSet.overlaps(glob, entry)) continue
+          for (const entry of scopes) {
             if (typeof entry === "string") {
-              const present = yield* fileSystem.value.exists(entry).pipe(
-                /* v8 ignore next 7 -- host refusal translation is the same typed boundary-unavailable path exercised by prepare failures */
-                Effect.mapError((cause) =>
-                  new SchedulerError({
-                    code: "boundary_unavailable",
-                    message: `the host could not expand ${what}`,
-                    cause
-                  })
-                )
-              )
-              if (!present) continue
+              // One host call: `stat` reports both whether the producer's
+              // output is there yet and what kind of thing it is, so the
+              // `exists` probe that used to precede it only doubled the cost.
+              // On the confined host each call is one CPython fork
+              // (`@smthrs/platform-node/AtomicFileSystem`).
               const info = yield* fileSystem.value.stat(entry).pipe(
-                /* v8 ignore next 7 -- host refusal translation is the same typed boundary-unavailable path exercised by prepare failures */
+                Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
                 Effect.mapError((cause) =>
                   new SchedulerError({
                     code: "boundary_unavailable",
@@ -690,13 +733,13 @@ export const make = (options: Options): Service => {
                 )
               )
               // Exact writer declarations name files; directory outputs use
-              // `TreeArtifact`, and only files are members of a read glob.
-              if (info.type === "File") paths.add(entry)
+              // `TreeArtifact`, and only files are members of a read glob. A
+              // producer that has not written yet is simply not a candidate.
+              if (info?.type === "File") paths.add(entry)
               continue
             }
             const matches = FileSet.isGlob(entry)
               ? yield* FileEnumeration.expandGlob(fileSystem.value, entry).pipe(
-                /* v8 ignore next 7 -- host refusal translation is the same typed boundary-unavailable path exercised by prepare failures */
                 Effect.mapError((cause) =>
                   new SchedulerError({
                     code: "boundary_unavailable",
@@ -706,7 +749,6 @@ export const make = (options: Options): Service => {
                 )
               )
               : yield* FileEnumeration.filesUnder(fileSystem.value, entry.path).pipe(
-                /* v8 ignore next 7 -- host refusal translation is the same typed boundary-unavailable path exercised by prepare failures */
                 Effect.mapError((cause) =>
                   new SchedulerError({
                     code: "boundary_unavailable",
@@ -719,7 +761,7 @@ export const make = (options: Options): Service => {
               if (FileSet.matchesGlob(glob, path)) paths.add(path)
             }
           }
-          return [...paths].filter((path) => writerFor(path) !== undefined).sort()
+          return [...paths].sort()
         })
 
       // A read declaration is observed only when its node enters this run:
@@ -729,38 +771,99 @@ export const make = (options: Options): Service => {
       // which is its first observation in this run.
       const pinned = new Map<string, string>()
       const observedReads = new Map<string, ReadonlyArray<ObservedRead>>()
-      const observeReads = (nodes: ReadonlyArray<Plan.PlanNode>, what: string) =>
+      const inputFailure = (cause: PlanInputStore.PlanInputError) =>
+        cause.code === "fence_lost"
+          ? Effect.interrupt
+          : Effect.fail(storeFailure("could not recover or persist the plan's source observations")(cause))
+      const observeReads = (
+        nodes: ReadonlyArray<Plan.PlanNode>,
+        generation: number,
+        what: string,
+        commit?: (
+          snapshot: PlanInputStore.Snapshot
+        ) => Effect.Effect<
+          PlanInputStore.Snapshot,
+          SchedulerError,
+          PlanStore.PlanStore | Journal.Journal | Crypto.Crypto
+        >
+      ) =>
         Effect.gen(function*() {
-          const unpinned = new Set<string>()
-          for (const node of nodes) {
-            const observed: Array<ObservedRead> = []
-            for (const { entry, paths } of yield* expandReads(FileSet.expandReads(node.effects.reads), what)) {
-              // Coverage is tested against each concrete path, never against
-              // the declaration that happened to discover it. This is what
-              // keeps a mixed source/producer glob from becoming all producer.
-              const sourcePaths = paths.filter((path) => writerFor(path) === undefined)
-              for (const path of sourcePaths) {
-                if (!pinned.has(path)) unpinned.add(path)
-              }
-              observed.push({ entry, sourcePaths })
-            }
-            observedReads.set(node.id, observed)
+          const address = {
+            runId: options.runId,
+            planId: initial.planId,
+            baseDigest: initial.baseDigest,
+            environmentDigest,
+            generation
           }
-          if (unpinned.size === 0) return
-          const prepared = yield* prepare([...unpinned], what)
-          for (const entry of prepared.readSnapshot) pinned.set(entry.path, entry.digest)
+          const stored = yield* inputStore.get(address, options.owner).pipe(Effect.catch(inputFailure))
+          let snapshot: PlanInputStore.Snapshot
+          if (Option.isSome(stored)) {
+            snapshot = stored.value
+          } else {
+            const unpinned = new Set<string>()
+            const observedNodes: Array<PlanInputStore.Snapshot["nodes"][number]> = []
+            for (const node of nodes) {
+              const observed: Array<ObservedRead> = []
+              const reads = FileSet.expandReads(node.effects.reads)
+              const writerScopes = reads.length === 0 ? [] : writerScopesBefore(node)
+              for (const { entry, paths } of yield* expandReads(reads, what)) {
+                const sourcePaths = paths.filter((path) => !writerScopes.some((scope) => FileSet.overlaps(scope, path)))
+                for (const path of sourcePaths) {
+                  if (!pinned.has(path)) unpinned.add(path)
+                }
+                observed.push({ entry, sourcePaths })
+              }
+              observedNodes.push({ id: node.id, key: node.key, reads: observed })
+            }
+            const pins = unpinned.size === 0 ? [] : (yield* prepare([...unpinned], what)).readSnapshot
+            const measured: PlanInputStore.Snapshot = {
+              version: 1,
+              generation,
+              nodes: observedNodes,
+              pins
+            }
+            yield* PlanInputs.validate(measured, nodes, pinned, writerScopesBefore).pipe(Effect.catch(inputFailure))
+            snapshot = commit === undefined
+              ? yield* inputStore.record(address, measured, options.owner).pipe(Effect.catch(inputFailure))
+              : measured
+          }
+          if (commit !== undefined) snapshot = yield* commit(snapshot)
+          // Do not publish speculative measurements. A competing observation
+          // wins durably, and every recovered declaration must still describe
+          // this verified plan before it can influence an execution key.
+          const nextPins = yield* PlanInputs.validate(snapshot, nodes, pinned, writerScopesBefore).pipe(
+            Effect.catch(inputFailure)
+          )
+          for (const node of snapshot.nodes) observedReads.set(node.id, node.reads)
+          for (const [path, digest] of nextPins) pinned.set(path, digest)
         })
 
-      // The world, observed once: expand every generation-zero read exactly
-      // once, then pin every concrete path that no declared writer covers.
-      // Source and producer membership are disjoint by construction.
-      yield* observeReads(plan.nodes, "the plan's source inputs")
+      // Recover each generation before any dispatch. Existing observations
+      // never enumerate or measure the host again, even after process restart.
+      for (let generation = 0; generation <= plan.generation; generation++) {
+        yield* observeReads(
+          plan.nodes.filter((node) => node.generation === generation),
+          generation,
+          "the plan's source inputs"
+        )
+      }
+      // A merge intent is authoritative scheduler state, not a failed-action
+      // cache entry or a convention inferred from an arbitrary node's body.
+      for (const { intent } of recoveredMerges) {
+        const state = stateOf(nodesById.get(intent.nodeId)!)
+        graph.stage(intent.nodeId, "skipped")
+        state.dispatchKey = intent.dispatchKey
+        state.attempts = intent.attempts
+        state.rebases = intent.rebases
+      }
+      graph.reconcile()
 
       const measure = (node: Plan.PlanNode) =>
         Effect.gen(function*() {
           const measured = new Map<string, string>()
           const produced = new Set<string>()
           const observed = observedReads.get(node.id)!
+          const writerScopes = observed.length === 0 ? [] : writerScopesBefore(node)
           for (const read of observed) {
             if (typeof read.entry === "string") {
               if (read.sourcePaths.length === 0) produced.add(read.entry)
@@ -769,9 +872,9 @@ export const make = (options: Options): Service => {
             }
             for (const path of read.sourcePaths) measured.set(path, pinned.get(path)!)
             // A glob's source membership is frozen above. Dispatch may only
-            // add paths derived from declared writer scopes: a mid-run file
-            // that no writer covers is outside this run's observed world.
-            for (const path of yield* expandProducedMatches(read.entry, `the inputs of ${node.id}`)) {
+            // add paths derived from preceding writer scopes. Neither an
+            // unproduced arrival nor a future writer widens the source world.
+            for (const path of yield* expandProducedMatches(read.entry, writerScopes, `the inputs of ${node.id}`)) {
               produced.add(path)
             }
           }
@@ -795,6 +898,10 @@ export const make = (options: Options): Service => {
         })
 
       /**
+       * Non-sealed work uses a stable run-local structural scope: it replays
+       * durable attempts but never reuses an effect from another invocation.
+       * For sealed work:
+       *
        * The key a dispatch is recorded under: the node's own declaration
        * folded with the CONTENT of everything it consumes — the digests the
        * host just measured for its files, and the digest of each upstream
@@ -815,38 +922,40 @@ export const make = (options: Options): Service => {
         boundary: FileBoundary,
         settledResults: ReadonlyMap<string, unknown>
       ) =>
-        StepKey.dispatchIdentity({
-          material: node.material,
-          results: Object.fromEntries(
-            node.material.inputs.flatMap((input) =>
-              input._tag === "Ref" ? [[input.from, settledResults.get(input.from)] as const] : []
+        (node.material.kind === "sealed" ?
+          StepKey.dispatchIdentity({
+            material: node.material,
+            results: Object.fromEntries(
+              node.material.inputs.flatMap((input) =>
+                input._tag === "Ref" ? [[input.from, settledResults.get(input.from)] as const] : []
+              )
+            ),
+            digestMemo,
+            environment,
+            hermetic: {
+              ...boundary,
+              readSet: StepBoundary.exactReads(boundary)
+            }
+          }) :
+          StepKey.ordinal({
+            runId: options.runId,
+            // Stable structural scope, never admission order. The declaration
+            // fingerprint prevents a changed plan from reusing an old attempt.
+            parentScope: JSON.stringify(["plan-node/v1", initial.planId, node.id, node.key]),
+            ordinal: 0,
+            tier: node.material.kind
+          })).pipe(
+            /* v8 ignore next 3 -- verified plans have serializable material, admission resolves every dependency, and successful upstream values already crossed durable serialization; key derivation still exposes its honest failure channel */
+            Effect.mapError((cause) =>
+              new SchedulerError({ code: "key_uncomputable", message: `could not key ${node.id}`, cause })
             )
-          ),
-          digestMemo,
-          environment: options.environment,
-          hermetic: {
-            ...boundary,
-            readSet: StepBoundary.exactReads(boundary)
-          }
-        }).pipe(
-          /* v8 ignore next 3 -- every plan node is sealed (`Plan.annotate` refuses otherwise), a dependent of unsettled work never dispatches, and settled outputs are already durably serialized, so none of the three failures is reachable from here; the branch exists because the derivation is honest about its error channel */
-          Effect.mapError((cause) =>
-            new SchedulerError({ code: "key_uncomputable", message: `could not key ${node.id}`, cause })
           )
-        )
-
-      const dependenciesOf = (node: Plan.PlanNode): ReadonlyArray<string> => [
-        ...node.dependsOn,
-        ...discovered.get(node.id) ?? []
-      ]
 
       const runtimeStrategyOf = (node: Plan.PlanNode): Plan.RuntimeStrategy =>
         node.conflicts.some((conflict) => conflict.runtime === "stop-merge") ? "stop-merge" : node.runtime
 
       const markSettled = (node: Plan.PlanNode, outcome: Outcome): void => {
-        const state = stateOf(node)
-        state.status = "settled"
-        state.outcome = outcome
+        graph.stage(node.id, outcome)
       }
 
       const emitSettlement = (node: Plan.PlanNode) =>
@@ -866,6 +975,7 @@ export const make = (options: Options): Service => {
 
       const settle = (node: Plan.PlanNode, outcome: Outcome) => {
         markSettled(node, outcome)
+        graph.reconcile()
         return emitSettlement(node)
       }
 
@@ -881,9 +991,7 @@ export const make = (options: Options): Service => {
           if (verdict._tag === "Fail") {
             // The scheduler chooses the node it asks about, so a verdict always
             // names one it is tracking.
-            const state = states.get(nodeId)!
-            state.status = "settled"
-            state.outcome = "failed"
+            graph.stage(nodeId, "failed")
             results.delete(nodeId)
             return
           }
@@ -893,10 +1001,7 @@ export const make = (options: Options): Service => {
             // ran, and rewriting history is what append-only forbids.
             // Persisting the edge is the caller's next elaboration; the
             // verdict is journaled so it can be.
-            for (const owner of verdict.dependsOn) {
-              if (states.get(owner)?.status !== "pending") continue
-              discovered.set(owner, [...new Set([...discovered.get(owner) ?? [], nodeId])])
-            }
+            graph.reorder(nodeId, verdict.dependsOn)
           }
           // `FactorOut` needs no graph surgery: two identical extracted steps
           // collapse to one key by themselves, so the second is a `clean`.
@@ -963,10 +1068,41 @@ export const make = (options: Options): Service => {
               action: {},
               attempt: attempts,
               key: dispatchKey,
-              tier: "sealed",
+              tier: node.material.kind,
               nondeterministic: node.material.nondeterministic,
               metadata: boundary
             }).pipe(
+              Effect.onInterrupt(() =>
+                abortedForFailure
+                  ? atomically(
+                    "could not settle a sibling aborted by scheduler failure",
+                    Effect.gen(function*() {
+                      const store = yield* AttemptStore.AttemptStore
+                      const finishedAtMs = yield* Clock.currentTimeMillis
+                      const identity = { runId: options.runId, stepKeyDigest: dispatchDigest, attempt: attempts }
+                      const finished = yield* store.finish({
+                        ...identity,
+                        state: "failed",
+                        finishedAtMs,
+                        error: { code: "scheduler_aborted", message: "A scheduler failure interrupted this attempt" }
+                      }, options.owner)
+                      // A terminal attempt or a replacement owner already decides
+                      // the row. Never overwrite it or emit a contradictory fact.
+                      if (finished._tag === "Finished") {
+                        yield* emit(JournalRecords.attemptFinished(source(`node/${node.id}/${attempts}/aborted`), {
+                          ...identity,
+                          state: "failed",
+                          reason: "scheduler_aborted"
+                        }))
+                      }
+                    })
+                  ).pipe(Effect.catch((cause) =>
+                    Effect.sync(() => {
+                      cleanupErrors.push(cause)
+                    })
+                  ))
+                  : Effect.void
+              ),
               Effect.exit
             )
             if (Exit.isSuccess(exit)) {
@@ -982,7 +1118,13 @@ export const make = (options: Options): Service => {
             // interrupted dispatch is the run losing ownership, never a node
             // failure that the scheduler may report and continue past.
             if (Cause.hasInterrupts(exit.cause)) return yield* Effect.interrupt
-            if (!isConflict(exit.cause)) return { outcome: "failed", dispatchKey, attempts, rebases } as const
+            // The generic executor supplies no irreversible idempotency or
+            // reconciliation contract. A conflict is not proof the effect
+            // never happened; neither a retry nor a freshly keyed merge may
+            // blindly execute more work after that uncertain result.
+            if (!isConflict(exit.cause) || node.material.kind === "irreversible") {
+              return { outcome: "failed", dispatchKey, attempts, rebases } as const
+            }
             const strategy = runtimeStrategyOf(node)
             if (strategy === "delay-rebase" && rebases < rebaseLimit) {
               // Hold the dependents — they are not ready while this node is in
@@ -1008,24 +1150,13 @@ export const make = (options: Options): Service => {
        * worktree-lane surface is documented in
        * `docs/pages/release/known-limitations.md`.
        */
-      const appendMerge = (node: Plan.PlanNode) =>
+      const appendMerge = (intent: PlanMergeStore.Intent) =>
         Effect.gen(function*() {
-          const winners = node.conflicts.map((conflict) => conflict.with).filter((id) => results.has(id))
-          const mergeId = `${node.id}+merge`
-          const grown = yield* Plan.append(plan, [{
-            id: mergeId,
-            kind: "merge",
-            material: {
-              version: "flows/key-material/v2",
-              kind: "sealed",
-              body: { merge: { stopped: node.id, winners } },
-              inputs: winners.map((id) => ({ _tag: "Pending" as const, from: id })),
-              layers: [],
-              capabilities: []
-            },
-            effects: node.effects
-          }]).pipe(
-            /* v8 ignore next 7 -- the merge id derives from a node id that appears once, its only dependencies are nodes that already produced results, and its write set is ordered behind them, so none of `Plan.append`'s four refusals is reachable */
+          const node = yield* PlanMerges.validateIntent(plan, intent).pipe(Effect.catch(mergeFailure))
+          const winners = intent.peers.filter((id) => results.has(id))
+          const mergeId = PlanMerges.allocateId(plan, node.id)
+          const parentDigest = plan.digest
+          const grown = yield* Plan.append(plan, [PlanMerges.draft(node, mergeId, winners)]).pipe(
             Effect.mapError((cause) =>
               new SchedulerError({
                 code: "elaboration_failed",
@@ -1034,17 +1165,47 @@ export const make = (options: Options): Service => {
               })
             )
           )
-          plan = grown
           // `appendMerge` copies the stopped node's effects byte-for-byte, so
           // re-indexing adds no new writer coverage and cannot turn an
           // already-pinned source path into a producer. The new generation's
           // read declarations have not themselves been observed, however:
           // expand them once now and pin only source paths this run has never
           // measured. Existing pins are always reused.
-          indexWriters()
-          yield* observeReads(Plan.generationNodes(grown), `generation ${grown.generation}'s source inputs`)
+          yield* observeReads(
+            Plan.generationNodes(grown),
+            grown.generation,
+            `generation ${grown.generation}'s source inputs`,
+            (snapshot) =>
+              atomically(
+                "could not atomically commit the merge extension",
+                Effect.gen(function*() {
+                  const recorded = yield* inputStore.record(
+                    { ...mergeIdentity, generation: grown.generation },
+                    snapshot,
+                    options.owner
+                  )
+                    .pipe(Effect.catch(inputFailure))
+                  yield* append(grown)
+                  yield* mergeStore.complete(mergeIdentity, intent.nodeId, {
+                    version: 1,
+                    generation: grown.generation,
+                    parentDigest,
+                    planDigest: grown.digest,
+                    mergeId,
+                    mergeKey: Plan.generationNodes(grown)[0]!.key,
+                    winners
+                  }, options.owner).pipe(Effect.catch(mergeFailure))
+                  return recorded
+                })
+              )
+          )
+          // No asynchronous boundary may expose only part of this admission.
+          // Frozen generations preserve the indexed prefix and its state.
+          const suffix = Plan.generationNodes(grown)
+          graph.append(suffix)
+          plan = grown
+          indexWriters(suffix)
           appended.push(mergeId)
-          yield* append(grown)
         })
 
       const pendingSettlements: Array<DispatchSettlementEvent> = []
@@ -1242,26 +1403,9 @@ export const make = (options: Options): Service => {
         }
       }
 
-      // Fail closed: a dependent never dispatches against an upstream with
-      // any of these outcomes. `deferred` is listed defensively — only sinks
-      // are deferrable today, so no dependent can observe it — to keep a
-      // future non-sink deferral from reaching dispatch with a missing
-      // upstream result.
-      const blockingOutcomes = new Set(["failed", "skipped", "deferred"])
       const passiveSettlements = Effect.gen(function*() {
         while (true) {
-          const pending = plan.nodes.filter((node) => stateOf(node).status === "pending")
-          const blocked: Array<Plan.PlanNode> = []
-          const ready: Array<Plan.PlanNode> = []
-          for (const node of pending) {
-            const dependencies = dependenciesOf(node).map((id) => states.get(id))
-            if (dependencies.some((state) => state === undefined || state.status !== "settled")) continue
-            if (dependencies.some((state) => blockingOutcomes.has(state!.outcome))) {
-              blocked.push(node)
-              continue
-            }
-            ready.push(node)
-          }
+          const blocked = graph.blocked()
           // Halt, not continue-on-failure: a dependent of failed work never
           // dispatches. Repeating this pass makes the skip cascade settle in
           // dependency order before any newly exposed work is admitted.
@@ -1273,6 +1417,7 @@ export const make = (options: Options): Service => {
           // could not have run is not a debt. The debt record precedes the
           // settlement so `Selection.debt` reads them in cause-then-effect
           // order.
+          const ready = graph.ready()
           const postponed = ready.filter((node) => deferrals.has(node.id))
           for (const node of postponed) {
             const debt = deferrals.get(node.id)!
@@ -1314,153 +1459,192 @@ export const make = (options: Options): Service => {
       }
 
       let admissions = 0
-      yield* Effect.scoped(Effect.gen(function*() {
-        let inFlightSteps = 0
-        let inFlightAgents = 0
-        const pendingMerges: Array<{
-          readonly node: Plan.PlanNode
-          readonly peers: ReadonlyArray<string>
-        }> = []
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          let inFlightSteps = 0
+          let inFlightAgents = 0
+          const pendingMerges: Array<PlanMergeStore.Intent> = recoveredMerges
+            .filter((decision) => decision.completion === undefined).map((decision) => decision.intent)
 
-        const appendReadyMerges = Effect.gen(function*() {
-          for (let index = 0; index < pendingMerges.length;) {
-            const pending = pendingMerges[index]!
-            if (pending.peers.some((peer) => states.get(peer)?.status === "running")) {
-              index = index + 1
-              continue
-            }
-            yield* appendMerge(pending.node)
-            pendingMerges.splice(index, 1)
-          }
-        })
-
-        const admit = (ready: ReadonlyArray<Plan.PlanNode>) =>
-          Effect.gen(function*() {
-            const order = new Map(plan.nodes.map((node, index) => [node.id, index]))
-            const admitted: Array<Plan.PlanNode> = []
-            let admittedAgents = 0
-            const contenders = [...ready].sort((left, right) => {
-              const delta = (right.priority + stateOf(right).waited) - (left.priority + stateOf(left).waited)
-              return delta === 0 ? order.get(left.id)! - order.get(right.id)! : delta
-            })
-            for (const node of contenders) {
-              const isAgent = node.kind === "agent"
-              if (
-                inFlightSteps + admitted.length >= stepCap ||
-                (isAgent && inFlightAgents + admittedAgents >= agentCap)
-              ) continue
-              if (isAgent) admittedAgents = admittedAgents + 1
-              admitted.push(node)
-            }
-            // Event-driven aging: this admission pass considered every ready
-            // node, and only capacity can leave one behind.
-            for (const node of ready) {
-              if (!admitted.includes(node)) stateOf(node).waited = stateOf(node).waited + 1
-            }
-            if (admitted.length > 0) {
-              admissions = admissions + 1
-              yield* Effect.annotateCurrentSpan({ admissions })
-              yield* Metric.update(EngineStoreMetrics.schedulerAdmissions, 1)
-              yield* Effect.logDebug("scheduler admission launched", {
-                admission: admissions,
-                ready: ready.length,
-                admitted: admitted.length,
-                agents: admittedAgents,
-                inFlightSteps,
-                inFlightAgents
-              })
-            }
-            const launches = admitted.map((node) => {
-              const state = stateOf(node)
-              const start = dispatchStart(node)
-              state.status = "running"
-              inFlightSteps = inFlightSteps + 1
-              if (node.kind === "agent") inFlightAgents = inFlightAgents + 1
-              return { node, start }
-            })
-            for (const { node, start } of launches) {
-              yield* dispatch(node, start).pipe(
-                Effect.trackDuration(EngineStoreMetrics.schedulerDispatchDuration),
-                Effect.exit,
-                Effect.flatMap((exit) => Queue.offer(events, { _tag: "DispatchSettled", node, exit })),
-                Effect.asVoid,
-                Effect.forkScoped({ startImmediately: true })
-              )
+          const appendReadyMerges = Effect.gen(function*() {
+            for (let index = 0; index < pendingMerges.length;) {
+              const pending = pendingMerges[index]!
+              if (pending.peers.some((peer) => states.get(peer)?.status !== "settled")) {
+                index = index + 1
+                continue
+              }
+              yield* appendMerge(pending)
+              pendingMerges.splice(index, 1)
             }
           })
 
-        yield* Effect.flatMap(passiveSettlements, admit)
-        while (plan.nodes.some((node) => stateOf(node).status !== "settled")) {
-          /* v8 ignore next -- compiled plans are acyclic, inferred edges refuse cycle closure, and discovered edges point only from undispatched nodes to the already-settled node whose verdict added them; pending work with no in-flight producer therefore cannot have an empty ready set */
-          if (inFlightSteps === 0) break
-          const event = yield* nextSettlement
-          if (Exit.isFailure(event.exit)) return yield* Effect.failCause(event.exit.cause)
+          // Passive failure/selection propagation can settle the last peer of
+          // a recovered intent without a dispatch event. Recheck merges until
+          // neither propagation nor an append exposes more scheduling work.
+          const advance = Effect.gen(function*() {
+            while (true) {
+              const ready = yield* passiveSettlements
+              const before = plan.generation
+              yield* appendReadyMerges
+              if (plan.generation === before) return ready
+            }
+          })
 
-          const node = event.node
-          const result = event.exit.value
-          const state = stateOf(node)
-          inFlightSteps = inFlightSteps - 1
-          if (node.kind === "agent") inFlightAgents = inFlightAgents - 1
-          state.dispatchKey = result.dispatchKey
-          state.attempts = result.attempts
-          state.rebases = result.rebases
-
-          switch (result.outcome) {
-            case "built":
-            case "clean":
-              results.set(node.id, result.result)
-              markSettled(node, result.outcome)
-              break
-            case "failed":
-              markSettled(node, "failed")
-              break
-            case "conflicted": {
-              if (result.strategy === "stop-merge") {
-                markSettled(node, "skipped")
-                // The former dispatch barrier guaranteed that every
-                // conflicting sibling admitted beside this node had reported
-                // its result before `appendMerge` selected winners. Preserve
-                // that semantic boundary only for those already-running
-                // peers; unrelated work never holds the merge cone.
-                pendingMerges.push({
-                  node,
-                  peers: node.conflicts
-                    .map((conflict) => conflict.with)
-                    .filter((peer) => states.get(peer)?.status === "running")
+          const admit = (ready: ReadonlyArray<Plan.PlanNode>) =>
+            Effect.gen(function*() {
+              const decision = scheduling.admit(
+                graph.candidates(ready),
+                { steps: inFlightSteps, agents: inFlightAgents }
+              )
+              const admitted = decision.admitted.map(({ node }) => node)
+              // Event-driven aging: this admission pass considered every ready
+              // node, and only capacity can leave one behind.
+              for (const { node, waited } of decision.deferred) {
+                stateOf(node).waited = waited
+              }
+              if (admitted.length > 0) {
+                admissions = admissions + 1
+                yield* Effect.annotateCurrentSpan({ admissions })
+                yield* Metric.update(EngineStoreMetrics.schedulerAdmissions, 1)
+                yield* Effect.logDebug("scheduler admission launched", {
+                  admission: admissions,
+                  ready: ready.length,
+                  admitted: admitted.length,
+                  agents: decision.agents,
+                  inFlightSteps,
+                  inFlightAgents
                 })
+              }
+              const launches = admitted.map((node) => {
+                const start = dispatchStart(node)
+                graph.start(node.id)
+                inFlightSteps = inFlightSteps + 1
+                if (node.kind === "agent") inFlightAgents = inFlightAgents + 1
+                return { node, start }
+              })
+              for (const { node, start } of launches) {
+                yield* dispatch(node, start).pipe(
+                  Effect.trackDuration(EngineStoreMetrics.schedulerDispatchDuration),
+                  Effect.exit,
+                  Effect.flatMap((exit) => Queue.offer(events, { _tag: "DispatchSettled", node, exit })),
+                  Effect.asVoid,
+                  Effect.forkScoped({ startImmediately: true })
+                )
+              }
+            })
+
+          for (const { intent } of recoveredMerges) yield* emitSettlement(nodesById.get(intent.nodeId)!)
+          yield* Effect.flatMap(advance, admit)
+          while (graph.remaining > 0) {
+            /* v8 ignore next -- compiled plans are acyclic, inferred edges refuse cycle closure, and discovered edges point only from undispatched nodes to the already-settled node whose verdict added them; pending work with no in-flight producer therefore cannot have an empty ready set */
+            if (inFlightSteps === 0) break
+            const event = yield* nextSettlement
+            if (Exit.isFailure(event.exit)) return yield* Effect.failCause(event.exit.cause)
+
+            const node = event.node
+            const result = event.exit.value
+            const state = stateOf(node)
+            inFlightSteps = inFlightSteps - 1
+            if (node.kind === "agent") inFlightAgents = inFlightAgents - 1
+            state.dispatchKey = result.dispatchKey
+            state.attempts = result.attempts
+            state.rebases = result.rebases
+
+            switch (result.outcome) {
+              case "built":
+              case "clean":
+                results.set(node.id, result.result)
+                markSettled(node, result.outcome)
+                break
+              case "failed":
+                markSettled(node, "failed")
+                break
+              case "conflicted": {
+                if (result.strategy === "stop-merge") {
+                  const intent = yield* atomically(
+                    "could not persist the stopped-attempt decision",
+                    Effect.gen(function*() {
+                      const intent = yield* mergeStore.intend(mergeIdentity, {
+                        version: 1,
+                        nodeId: node.id,
+                        nodeKey: node.key,
+                        dispatchKey: state.dispatchKey,
+                        attempts: state.attempts,
+                        rebases: state.rebases,
+                        peers: node.conflicts.map((conflict) => conflict.with)
+                          .filter((peer) => states.get(peer)?.status === "running" || results.has(peer))
+                      }, options.owner).pipe(Effect.catch(mergeFailure))
+                      yield* PlanMerges.validateIntent(plan, intent).pipe(Effect.catch(mergeFailure))
+                      yield* emit(JournalRecords.nodeSettled(source(`node/${node.id}/settled`), {
+                        planId: plan.planId,
+                        nodeId: node.id,
+                        planKey: node.key,
+                        dispatchKey: intent.dispatchKey,
+                        outcome: "skipped",
+                        attempts: intent.attempts,
+                        rebases: intent.rebases
+                      }))
+                      return intent
+                    })
+                  )
+                  markSettled(node, "skipped")
+                  // The former dispatch barrier guaranteed that every
+                  // conflicting sibling admitted beside this node had reported
+                  // its result before `appendMerge` selected winners. Preserve
+                  // that semantic boundary only for those already-running
+                  // peers; unrelated work never holds the merge cone.
+                  state.dispatchKey = intent.dispatchKey
+                  state.attempts = intent.attempts
+                  state.rebases = intent.rebases
+                  pendingMerges.push(intent)
+                  break
+                }
+                const verdict = yield* reconciler.onConflict({
+                  nodeId: node.id,
+                  keyDigest: state.dispatchKey,
+                  attempt: state.attempts,
+                  rebases: state.rebases,
+                  strategy: result.strategy,
+                  conflictsWith: node.conflicts.map((conflict) => conflict.with)
+                })
+                markSettled(node, "failed")
+                yield* applyVerdict(node.id, verdict, "materialization-conflict")
                 break
               }
-              const verdict = yield* reconciler.onConflict({
-                nodeId: node.id,
-                keyDigest: state.dispatchKey,
-                attempt: state.attempts,
-                rebases: state.rebases,
-                strategy: result.strategy,
-                conflictsWith: node.conflicts.map((conflict) => conflict.with)
-              })
-              markSettled(node, "failed")
-              yield* applyVerdict(node.id, verdict, "materialization-conflict")
-              break
             }
+
+            yield* appendReadyMerges
+
+            // The dispatch durably journalled every deviation before its event.
+            // Apply those verdicts before consulting downstream readiness.
+            yield* drainDeviations
+            // A dispatch outcome is provisional until its deviations have been
+            // reconciled. Persist exactly one terminal fact, after a Fail
+            // verdict has had the chance to replace built with failed.
+            yield* emitSettlement(node)
+            graph.reconcile()
+            // Process terminal events already observed by the journal drain
+            // before opening more permits. This preserves fail-fast behavior for
+            // an already-failed sibling while still admitting immediately when
+            // unrelated work is genuinely still in flight.
+            const ready = yield* advance
+            if (pendingSettlements.length === 0) yield* admit(ready)
           }
-
-          yield* appendReadyMerges
-
-          // The dispatch durably journalled every deviation before its event.
-          // Apply those verdicts before consulting downstream readiness.
-          yield* drainDeviations
-          // A dispatch outcome is provisional until its deviations have been
-          // reconciled. Persist exactly one terminal fact, after a Fail
-          // verdict has had the chance to replace built with failed.
-          yield* emitSettlement(node)
-          // Process terminal events already observed by the journal drain
-          // before opening more permits. This preserves fail-fast behavior for
-          // an already-failed sibling while still admitting immediately when
-          // unrelated work is genuinely still in flight.
-          const ready = yield* passiveSettlements
-          if (pendingSettlements.length === 0) yield* admit(ready)
-        }
-      }))
+        }).pipe(Effect.onError((cause) =>
+          Effect.sync(() => {
+            abortedForFailure = cause.reasons.some((reason) => reason._tag === "Fail")
+          })
+        ))
+      ).pipe(Effect.catch((error) =>
+        Effect.fail(
+          cleanupErrors.length === 0 ? error : new SchedulerError({
+            code: error.code,
+            message: error.message,
+            cause: error.cause,
+            cleanupErrors
+          })
+        )
+      ))
 
       const settlements = plan.nodes.map((node) => {
         const state = stateOf(node)
@@ -1490,8 +1674,8 @@ export const make = (options: Options): Service => {
         appended
       }
     }).pipe(
-      Effect.annotateSpans({ runId: options.runId, planId: initial.planId }),
-      Effect.annotateLogs({ runId: options.runId, planId: initial.planId }),
+      Effect.annotateSpans({ runId: options.runId }),
+      Effect.annotateLogs({ runId: options.runId }),
       Effect.onExit((exit) => Effect.annotateCurrentSpan({ outcome: EngineStoreMetrics.exitTag(exit).toLowerCase() }))
     )
   )

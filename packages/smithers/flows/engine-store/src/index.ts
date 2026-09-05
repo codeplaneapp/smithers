@@ -47,9 +47,27 @@ export * as EngineStore from "./EngineStore.ts"
 export * as EngineStoreMetrics from "./EngineStoreMetrics.ts"
 
 /**
+ * Public engine observation exports.
+ *
+ * @since 1.0.0
+ * @category services
+ */
+export * as ExecutionSnapshot from "./ExecutionSnapshot.ts"
+
+/**
+ * Public engine observation exports.
+ *
+ * @since 1.0.0
+ * @category services
+ */
+export * as RunChangeFeed from "./RunChangeFeed.ts"
+
+/**
  * @since 0.1.0
  * @category services
  */
+export * as PlanInputStore from "./PlanInputStore.ts"
+export * as PlanMergeStore from "./PlanMergeStore.ts"
 export * as PlanScheduler from "./PlanScheduler.ts"
 
 /**

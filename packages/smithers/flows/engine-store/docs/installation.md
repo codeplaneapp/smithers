@@ -7,14 +7,19 @@ sidebar:
 
 ## Install the package
 
+`@smthrs/engine-store` is at `1.0.0-rc.0` and is not on npm yet. Release
+candidates publish under the `next` tag rather than `latest`, so install it by
+tag:
+
 ```bash
-pnpm add @smthrs/engine-store
+pnpm add @smthrs/engine-store@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
 CommonJS with TypeScript declarations. Its runtime dependencies, including
 [`effect`](https://effect.website) and the `@smthrs/*` storage packages it
-composes, install with it.
+composes, install with it. Every surface on this site is an Effect service:
+`layer` values you compose and `Effect` values you run.
 
 ## Import forms
 
@@ -47,7 +52,7 @@ executes a flow supplies the four stores, a database, an artifact store, a
 workspace root, and a platform:
 
 ```bash
-pnpm add @smthrs/journal @smthrs/run-store @smthrs/step-cache @smthrs/database @smthrs/artifacts @smthrs/kernel @effect/platform-node
+pnpm add @smthrs/journal@next @smthrs/run-store@next @smthrs/step-cache@next @smthrs/database@next @smthrs/artifacts@next @smthrs/kernel@next @effect/platform-node
 ```
 
 | Package                                 | What it supplies                                                                                                            |
@@ -91,8 +96,8 @@ migration runs reads a table that does not exist yet.
 This entry point bundles for a browser. The two host reads it once made
 directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the
 injectable `OwnerIdentity` service, and every package it composes is
-browser-bundleable. The repository's browser gate bundles this entry point and
-fails the build if that regresses.
+browser-bundleable. A release that broke the bundle would fail the build before
+it shipped.
 
 Bundling is not running. The only durable backing shipped here is local SQLite
 through Node.js `node:sqlite` and `@effect/sql-sqlite-node`. A browser or edge

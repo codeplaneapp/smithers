@@ -22,3 +22,5 @@ export {
   RunCatalogRead,
   type Service
 } from "./internal/RunCatalogOps.ts"
+
+export { Filters, type ListRunsOptions, maximumPageSize, type RunPage } from "./internal/RunListing.ts"

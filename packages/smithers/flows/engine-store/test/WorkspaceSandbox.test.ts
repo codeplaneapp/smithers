@@ -788,8 +788,20 @@ describe("WorkspaceSandbox filesystem host", () => {
   it.effect("reports a refusing host honestly rather than as an empty read set", () =>
     Effect.gen(function*() {
       const fs = FileSystem.makeNoop({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        exists: () => Effect.fail({ _tag: "PlatformError", message: "EIO" } as any)
+        // The refusal rides on the call the sandbox actually makes. A
+        // declared read is measured with one `readFile`, never an `exists`
+        // probe and then a read, and the refusal has to be one the sandbox
+        // cannot read as an answer: `NotFound` IS the answer "not there".
+        readFile: ((path: string) =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "Unknown",
+              module: "FileSystem",
+              method: "readFile",
+              pathOrDescriptor: path,
+              description: "EIO"
+            })
+          )) as never
       })
       const program = Effect.gen(function*() {
         const sandbox = WorkspaceSandbox.makeFileSystem(

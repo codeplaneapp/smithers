@@ -163,7 +163,9 @@ const asking = <A, E>(
   })))
 
 describe("HumanTask.timeoutMs on the durable engine", () => {
-  it.effect("parks the raced attempt without settling its row, and settles on the answer", () =>
+  // The asynchronous resume is observed through settles' bounded sleep/poll
+  // loop; a frozen clock with no adjuster stalls at its first poll.
+  it.live("parks the raced attempt without settling its row, and settles on the answer", () =>
     asking(() =>
       Effect.gen(function*() {
         const store = yield* RunStore.RunStore

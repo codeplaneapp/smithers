@@ -15,7 +15,6 @@ import type { FileBoundary } from "@smthrs/flow/FileBoundary"
 import { Journal, type JournalEvent } from "@smthrs/journal"
 import { Jj } from "@smthrs/kernel"
 import { DerivedKey } from "@smthrs/keys"
-import * as FileSet from "@smthrs/plan/FileSet"
 import { AttemptStore, Ownership, RunStore } from "@smthrs/run-store"
 import { CacheStore } from "@smthrs/step-cache"
 import * as Cause from "effect/Cause"
@@ -32,6 +31,9 @@ import * as StepBoundary from "../StepBoundary.ts"
 import * as StepSandbox from "../StepSandbox.ts"
 import * as WorkspaceSandbox from "../WorkspaceSandbox.ts"
 import * as AttemptAdmission from "./AttemptAdmission.ts"
+import * as CacheAdmission from "./CacheAdmission.ts"
+import * as CacheAgeHistory from "./CacheAgeHistory.ts"
+import * as CacheOutputPolicy from "./CacheOutputPolicy.ts"
 import * as CachePublication from "./CachePublication.ts"
 import * as EffectRecords from "./EffectRecords.ts"
 import * as HostReflection from "./HostReflection.ts"
@@ -559,13 +561,22 @@ const inertJson = (value: unknown, budget: InertJsonBudget): unknown => {
           }
 
           const output: Record<string, InertJsonValue> = {}
+          // This engine-owned error's native Error.message is non-enumerable,
+          // but is part of the durable schema used to classify a landing
+          // conflict. Preserve that one data field, never getters, stacks, or
+          // arbitrary hidden properties. It spends the same bounded budget.
+          const tag = Object.getOwnPropertyDescriptor(current, "_tag")
+          const conflictMessage = tag !== undefined && "value" in tag &&
+            tag.value === WorkspaceSandbox.MaterializationConflict.identifier
           for (const key of Reflect.ownKeys(current)) {
             if (!spendEnumeratedKey(budget, key)) return inertJsonRejected
             if (typeof key !== "string") continue
             const descriptor = Object.getOwnPropertyDescriptor(current, key)
             /* v8 ignore next -- A key returned by Reflect.ownKeys exists on a non-proxy object. */
             if (descriptor === undefined) continue
-            if (!descriptor.enumerable || !("value" in descriptor)) continue
+            if ((!descriptor.enumerable && !(key === "message" && conflictMessage)) || !("value" in descriptor)) {
+              continue
+            }
             const reduced = reduce(descriptor.value, depth + 1)
             if (reduced === inertJsonRejected) return inertJsonRejected
             if (reduced === inertJsonOmitted) continue
@@ -825,8 +836,7 @@ export const make = (deps: Dependencies) => {
       // A source glob is cacheable only after the scheduler pins and replaces
       // it with exact measured inputs. Direct actions retain the pattern, so
       // their key cannot prove which expansion it names and must stay local.
-      const readsKeyedExactly = input.metadata?.readSet.every((entry) => !FileSet.isGlob(entry)) ?? true
-      const cacheable = input.tier === "sealed" && input.metadata?.boundaryMode === "hard" && readsKeyedExactly
+      const cacheDeclaration = CacheAdmission.declaration(input)
       const declarationMeta = {
         tier: input.tier,
         ...(input.nondeterministic === undefined ? {} : { nondeterministic: input.nondeterministic })
@@ -873,6 +883,18 @@ export const make = (deps: Dependencies) => {
         }`,
         sourceSeq: 0
       })
+      const noteUnshareable = (unshareable: CachePublication.Unshareable) =>
+        Effect.gen(function*() {
+          const reason = yield* Schema.decodeUnknownEffect(Sha256)(`${unshareable.stage}:${unshareable.message}`).pipe(
+            Effect.orDie
+          )
+          yield* emitLifecycle(JournalRecords.cacheProvenance(cacheSource(`unpublished:${reason}`), {
+            keyDigest,
+            action: "unpublished",
+            stage: unshareable.stage,
+            message: unshareable.message
+          }))
+        })
       /**
        * Records the sealed completion into the shared cache with provenance,
        * failing (by default) on a divergent first-recorded row. Used by both
@@ -882,7 +904,7 @@ export const make = (deps: Dependencies) => {
        */
       const recordCache = (options: {
         readonly result: unknown
-        readonly meta: AttemptMeta
+        readonly admission: CacheAdmission.PublishCompletion<AttemptMeta>
         readonly createdAtMs: number
       }) =>
         Effect.gen(function*() {
@@ -901,7 +923,8 @@ export const make = (deps: Dependencies) => {
           // a real result away because an optional accelerator was unreachable.
           // It is journalled below instead — the same "visible, not silent"
           // treatment an unverified read set gets (issue #106).
-          let unshareable = yield* CachePublication.publishArtifacts(options.meta.boundary)
+          const meta = options.admission.meta
+          let unshareable = yield* CachePublication.publishArtifacts(meta.boundary)
           // The producer identity folds a digest of the recorded content
           // (issue #129): a constant per-key identity made a post-eviction
           // re-record collapse into a `Duplicate` carrying the EVICTED
@@ -933,7 +956,7 @@ export const make = (deps: Dependencies) => {
           // closed. Canonical JSON makes the stability structural.
           const generation = yield* Schema.decodeUnknownEffect(DerivedKey)({
             kind: "cache-generation",
-            meta: options.meta,
+            meta,
             result: options.result
           }).pipe(Effect.orDie)
           // The provenance record and the row it describes commit together:
@@ -958,7 +981,7 @@ export const make = (deps: Dependencies) => {
               const entry = {
                 keyDigest,
                 result: options.result,
-                meta: options.meta,
+                meta,
                 createdAtMs: options.createdAtMs,
                 recordedRunId: deps.runId,
                 recordedEventSeq: receipt.seq
@@ -966,7 +989,13 @@ export const make = (deps: Dependencies) => {
               const outcome = yield* cache.put(entry)
               return { entry, outcome }
             })
-          )
+          ).pipe(Effect.catchTag("@smthrs/step-cache/CacheStoreError", (error) =>
+            // Only availability of the local transaction is optional. A known
+            // deterministic Conflict below still belongs to Inconsistency.
+            noteUnshareable({ stage: "entry", message: `local cache publication failed: ${error.message}` }).pipe(
+              Effect.as(undefined)
+            )))
+          if (recording === undefined) return
           // ENTRY LAST, AND OUTSIDE THE TRANSACTION. The local row and its
           // provenance record are now durable together; only here does the
           // entry become observable to other machines, which is the second half
@@ -990,21 +1019,11 @@ export const make = (deps: Dependencies) => {
             // *different* refusal is a genuinely new observation that journals
             // fresh — and neither can ever be the same identity carrying
             // different content, which is what an idempotency conflict is.
-            const reason = yield* Schema.decodeUnknownEffect(Sha256)(
-              `${unshareable.stage}:${unshareable.message}`
-            ).pipe(Effect.orDie)
-            yield* emitLifecycle(
-              JournalRecords.cacheProvenance(cacheSource(`unpublished:${reason}`), {
-                keyDigest,
-                action: "unpublished",
-                stage: unshareable.stage,
-                message: unshareable.message
-              })
-            )
+            yield* noteUnshareable(unshareable)
           }
           if (recording.outcome._tag === "Conflict") {
             const conflicting = yield* cache.get(keyDigest)
-            if (options.meta.nondeterministic === true) {
+            if (meta.nondeterministic === true) {
               const recorded = Option.map(conflicting, (entry) => ({
                 runId: entry.recordedRunId,
                 eventSeq: entry.recordedEventSeq
@@ -1150,17 +1169,12 @@ export const make = (deps: Dependencies) => {
            * RUN, not to the incarnation driving it, so the engine that resumes
            * the run reads the same verdict rather than taking a second one.
            *
-           * That identity is what makes the fence read-free. Every field of the
-           * payload except `verdict` is fixed by the identity or by the
-           * declaration — a different `ttlMs` is a different declaration and so
-           * a different step key — so the three receipts are exhaustive and
-           * unambiguous:
-           *
-           * - `Accepted`: this is the first decision. It stands.
-           * - `Duplicate`: the identical verdict is already durable. It stands.
-           * - `idempotency_conflict`: a verdict is durable under this identity
-           *   and it is not this one, so it is the other one, and THAT is the
-           *   answer. No journal scan, no second guess.
+           * `Accepted` records the first decision; `Duplicate` confirms it.
+           * A conflict alone does not identify the recorded verdict: TTL is
+           * not part of every action key, and copied history can carry other
+           * lineage metadata. Only an exact duplicate of the opposite verdict
+           * proves a clock change. Otherwise fail before serving or expiring
+           * the row, preserving the incompatible history for the caller.
            *
            * A row re-recorded under a provenance this run already expired keeps
            * that verdict, which is the same rule read from the other side.
@@ -1170,22 +1184,91 @@ export const make = (deps: Dependencies) => {
               const recorded = { runId: row.recordedRunId, eventSeq: row.recordedEventSeq }
               const nowMs = yield* Clock.currentTimeMillis
               const measured: "admitted" | "expired" = nowMs - row.createdAtMs <= ttlMs ? "admitted" : "expired"
-              return yield* emitLifecycle(
+              const decision = (verdict: "admitted" | "expired") =>
                 JournalRecords.cacheProvenance(cacheSource("ttl", recorded), {
                   keyDigest,
                   action: "ttl",
                   ttlMs,
-                  verdict: measured,
+                  verdict,
                   recordedRunId: recorded.runId,
                   recordedEventSeq: recorded.eventSeq
                 })
-              ).pipe(
-                Effect.as(measured),
-                Effect.catch((error) =>
-                  error.code === "idempotency_conflict"
-                    ? Effect.succeed<"admitted" | "expired">(measured === "admitted" ? "expired" : "admitted")
-                    : Effect.fail(error)
+              // A copied producer whose source fields changed must not look
+              // like a new first decision merely because emit would accept it.
+              const expectedSource = cacheSource("ttl", recorded).sourceId
+              const prior = yield* CacheAgeHistory.find(journal, deps.runId, (entry) => {
+                const payload = entry.payload as {
+                  action?: unknown
+                  keyDigest?: unknown
+                  recordedRunId?: unknown
+                  recordedEventSeq?: unknown
+                } | null
+                return entry.sourceId === expectedSource ||
+                  (payload?.action === "ttl" && payload.keyDigest === keyDigest &&
+                    payload.recordedRunId === recorded.runId && payload.recordedEventSeq === recorded.eventSeq)
+              })
+              if (prior !== undefined && (prior.sourceId !== expectedSource || prior.sourceSeq !== 0)) {
+                yield* emitConverging(JournalRecords.cacheProvenance(cacheSource("replay_failed", recorded), {
+                  keyDigest,
+                  action: "replay_failed",
+                  reason: "incompatible-age-history",
+                  recordedRunId: recorded.runId,
+                  recordedEventSeq: recorded.eventSeq
+                }))
+                return yield* Effect.fail(
+                  new Journal.JournalError({
+                    code: "idempotency_conflict",
+                    message: "incompatible recorded cache-age decision: producer identity changed",
+                    cause: prior
+                  })
                 )
+              }
+              return yield* emitLifecycle(decision(measured)).pipe(
+                Effect.as(measured),
+                Effect.catch((error) => {
+                  if (error.code !== "idempotency_conflict") return Effect.fail(error)
+                  const conflict = new Journal.JournalError({
+                    code: "idempotency_conflict",
+                    message:
+                      "incompatible recorded cache-age decision: restore the original TTL and history identity " +
+                      "or use a new action identity; the cache row was not served or expired",
+                    cause: error
+                  })
+                  const opposite = measured === "admitted" ? "expired" : "admitted"
+                  return emitLifecycle(decision(opposite)).pipe(
+                    Effect.catch((oppositeError) =>
+                      oppositeError.code === "idempotency_conflict"
+                        ? CacheAgeHistory.copiedVerdict({
+                          journal,
+                          runs,
+                          runId: deps.runId,
+                          decision: decision(measured),
+                          conflict
+                        }).pipe(
+                          Effect.tapError((failure) =>
+                            failure.code === "idempotency_conflict"
+                              ? emitConverging(JournalRecords.cacheProvenance(cacheSource("replay_failed", recorded), {
+                                keyDigest,
+                                action: "replay_failed",
+                                reason: "incompatible-age-history",
+                                recordedRunId: recorded.runId,
+                                recordedEventSeq: recorded.eventSeq
+                              })).pipe(Effect.asVoid)
+                              : Effect.void
+                          ),
+                          Effect.map((verdict) => ({ _tag: "Historical" as const, verdict }))
+                        )
+                        : Effect.fail(oppositeError)
+                    ),
+                    Effect.flatMap((receipt) =>
+                      receipt._tag === "Historical" ?
+                        Effect.succeed(receipt.verdict) :
+                        receipt._tag === "Duplicate"
+                        ? Effect.succeed(opposite)
+                        : Effect.fail(conflict)
+                    )
+                  )
+                })
               )
             })
           /**
@@ -1200,22 +1283,70 @@ export const make = (deps: Dependencies) => {
             row: Option.Option<CacheStore.CacheEntry>
           ): Effect.Effect<Option.Option<CacheStore.CacheEntry>, Journal.JournalError | CacheStore.CacheStoreError> =>
             Effect.gen(function*() {
-              if (ttlMs === undefined || Option.isNone(row)) return row
-              if ((yield* admitByAge(ttlMs, row.value)) === "admitted") return row
+              // Removing TTL cannot bypass a verdict this run already consumed,
+              // even if the head was subsequently evicted or replaced.
+              if (ttlMs === undefined) {
+                const recorded = yield* CacheAgeHistory.find(journal, deps.runId, (entry) =>
+                  entry.sourceId.startsWith(`cache:${keyDigest}:ttl:`) ||
+                  ((entry.payload as { action?: unknown } | null)?.action === "ttl" &&
+                    (entry.payload as { keyDigest?: unknown }).keyDigest === keyDigest))
+                if (recorded !== undefined) {
+                  return yield* Effect.fail(
+                    new Journal.JournalError({
+                      code: "idempotency_conflict",
+                      message:
+                        "incompatible recorded cache-age decision: ttlMs cannot be removed after a recorded verdict",
+                      cause: recorded
+                    })
+                  )
+                }
+                return row
+              }
+              if (Option.isNone(row)) {
+                return row
+              }
+              if ((yield* admitByAge(ttlMs, row.value)) === "admitted") {
+                return row
+              }
               yield* expireRow(ttlMs, row.value)
               return Option.none<CacheStore.CacheEntry>()
             })
-          if (cacheable && input.metadata !== undefined) {
-            const cached = yield* admissible(policy?.ttlMs, yield* cache.get(keyDigest))
+          if (cacheDeclaration._tag === "Eligible") {
+            const observed = yield* cache.get(keyDigest).pipe(Effect.catch((error) =>
+              noteUnshareable({ stage: "entry", message: `cache lookup failed: ${error.message}` }).pipe(
+                Effect.as(Option.none<CacheStore.CacheEntry>())
+              )
+            ))
+            const evidenceDecision = CacheAdmission.candidate(
+              Option.isSome(observed) ? decodeMeta(observed.value.meta) : undefined
+            )
+            const outputDecision = evidenceDecision._tag === "CandidateEvidence"
+              ? CacheOutputPolicy.replay(input.metadata, evidenceDecision.evidence)
+              : undefined
+            const candidate = outputDecision?._tag === "Refused" ? outputDecision : evidenceDecision
+            // A descriptor refusal cannot be turned into TTL eviction. Validate
+            // replay authority before any age decision is allowed to prune a head.
+            const cached =
+              Option.isNone(observed) || candidate._tag === "CandidateEvidence" || policy?.ttlMs === undefined
+                ? yield* admissible(policy?.ttlMs, observed)
+                : observed
             if (Option.isSome(cached)) {
-              const meta = decodeMeta(cached.value.meta)
-              if (
-                meta?.tier === "sealed" &&
-                meta.boundary !== undefined &&
-                meta.boundary.deviation === undefined &&
-                meta.boundary.wholeTreeWritesVerified === true &&
-                meta.boundary.hermeticReadsVerified === true
-              ) {
+              if (candidate._tag === "Refused") {
+                yield* emitConverging(JournalRecords.cacheProvenance(
+                  cacheSource("replay_failed", {
+                    runId: cached.value.recordedRunId,
+                    eventSeq: cached.value.recordedEventSeq
+                  }),
+                  {
+                    keyDigest,
+                    action: "replay_failed",
+                    reason: candidate.reason,
+                    recordedRunId: cached.value.recordedRunId,
+                    recordedEventSeq: cached.value.recordedEventSeq
+                  }
+                ))
+              }
+              if (candidate._tag === "CandidateEvidence") {
                 const boundary = yield* StepBoundary.StepBoundary
                 // Skyframe's dirty check, not "the declaration changed" (issue
                 // #90): the read-set digests folded into the step key are caller
@@ -1225,10 +1356,10 @@ export const make = (deps: Dependencies) => {
                 // the refusal is journalled so it is visible rather than silent.
                 // A boundary the host cannot enforce is likewise not a hit; the
                 // dispatch path below re-prepares and fails the attempt properly.
-                const measured = yield* boundary.prepare(input.metadata).pipe(Effect.option)
+                const measured = yield* boundary.prepare(cacheDeclaration.metadata).pipe(Effect.option)
                 const verified = Option.isSome(measured) && StepBoundary.readSetMatches(measured.value)
                 if (verified) {
-                  const evidence = meta.boundary
+                  const evidence = candidate.evidence
                   let materialized = yield* boundary.replayOutputs(evidence).pipe(Effect.exit)
                   if (
                     Exit.isFailure(materialized) &&
@@ -1428,7 +1559,23 @@ export const make = (deps: Dependencies) => {
             if (row.state === "succeeded") {
               const meta = decodeMeta(row.meta)
               let corruptEvidence = false
-              if (meta?.boundary !== undefined) {
+              const outputDecision = meta?.boundary === undefined
+                ? undefined
+                : CacheOutputPolicy.replay(input.metadata, meta.boundary)
+              const storedDecision = CacheAdmission.candidate(meta)
+              const refused = storedDecision._tag === "Refused" &&
+                  (storedDecision.reason === "contradictory-evidence" ||
+                    storedDecision.reason === "quarantined-evidence")
+                ? storedDecision
+                : outputDecision
+              if (refused?._tag === "Refused") {
+                yield* emitConverging(JournalRecords.cacheProvenance(cacheSource("replay_failed"), {
+                  keyDigest,
+                  action: "replay_failed",
+                  reason: refused.reason
+                }))
+              }
+              if (meta?.boundary !== undefined && refused?._tag !== "Refused") {
                 const boundary = yield* StepBoundary.StepBoundary
                 const materialized = yield* boundary.replayOutputs(meta.boundary).pipe(Effect.exit)
                 if (Exit.isFailure(materialized)) {
@@ -1483,7 +1630,9 @@ export const make = (deps: Dependencies) => {
                     // writing `undefined` over it: the attempt store admits
                     // inert JSON, and an own property holding `undefined` is
                     // not JSON, so the patch would be refused outright.
-                    const { boundary: _quarantined, ...retainedMeta } = meta
+                    // New quarantine writes clear both reusable proof fields;
+                    // contradictory legacy rows remain readable without repair.
+                    const { boundary: _quarantined, readSetVerified: _unverified, ...retainedMeta } = meta
                     const quarantinedMeta: AttemptMeta = {
                       ...retainedMeta,
                       boundaryQuarantined: true
@@ -1491,7 +1640,9 @@ export const make = (deps: Dependencies) => {
                     const quarantined = yield* atomically(Effect.gen(function*() {
                       const quarantineAtMs = yield* Clock.currentTimeMillis
                       const fence = yield* runs.heartbeat(deps.runId, deps.owner, quarantineAtMs)
-                      if (fence._tag !== "Updated") return false
+                      if (fence._tag !== "Updated") {
+                        return false
+                      }
                       const patched = yield* attempts.patch(
                         attemptId,
                         { meta: attemptPayload(quarantinedMeta) },
@@ -1499,7 +1650,9 @@ export const make = (deps: Dependencies) => {
                       )
                       return patched._tag === "Patched"
                     }))
-                    if (!quarantined) return yield* Effect.interrupt
+                    if (!quarantined) {
+                      return yield* Effect.interrupt
+                    }
                     if (verdict === "fail") {
                       // The strict verdict still makes the integrity violation
                       // visible by parking this dispatch. The row repair above
@@ -1525,7 +1678,7 @@ export const make = (deps: Dependencies) => {
               // Converge the cache with the durable completion: a crash between
               // `attempts.finish` and `cache.put` otherwise leaves the sealed
               // result permanently missing from the shared cache (issue #24).
-              // Reaching this branch with `cacheable` set means `cache.get`
+              // Reaching this branch with an eligible declaration means `cache.get`
               // above missed or was unfit for replay.
               // Only a row whose recorded read set was verified at prepare
               // time may converge into the shared cache (issue #106): an
@@ -1537,23 +1690,15 @@ export const make = (deps: Dependencies) => {
               // publishing the known-corrupt evidence into the shared cache
               // would hand sibling runs a poisoned hit under this run's
               // provenance.
-              if (
-                !corruptEvidence &&
-                cacheable &&
-                meta?.tier === "sealed" &&
-                meta.boundary !== undefined &&
-                meta.boundary.deviation === undefined &&
-                meta.boundary.wholeTreeWritesVerified === true &&
-                // Fail-closed on BOTH proofs, exactly like the fresh-completion
-                // gate below: a durable row persisted before read verification
-                // existed carries the write proof alone, and convergence must
-                // not promote it into the shared cache on resume.
-                meta.boundary.hermeticReadsVerified === true &&
-                meta.readSetVerified === true
-              ) {
+              const admission = CacheAdmission.completion(
+                cacheDeclaration,
+                meta,
+                corruptEvidence || refused?._tag === "Refused"
+              )
+              if (admission._tag === "PublishCompletion") {
                 yield* recordCache({
                   result: row.outcome,
-                  meta,
+                  admission,
                   createdAtMs: row.finishedAtMs ?? (yield* Clock.currentTimeMillis)
                 })
               }
@@ -1672,7 +1817,9 @@ export const make = (deps: Dependencies) => {
               { ...attemptId, state: "succeeded", finishedAtMs },
               [JournalRecords.attemptFinished(attemptSource("finished"), { ...attemptId, state: "succeeded" })]
             )
-            if (!finished) return yield* Effect.interrupt
+            if (!finished) {
+              return yield* Effect.interrupt
+            }
             return runningRow.outcome
           }
           /**
@@ -1736,7 +1883,9 @@ export const make = (deps: Dependencies) => {
               // lease, and the permit excludes in-process racers.
               const claimAtMs = yield* Clock.currentTimeMillis
               const claimFence = yield* runs.heartbeat(deps.runId, deps.owner, claimAtMs)
-              if (claimFence._tag !== "Updated") return yield* Effect.interrupt
+              if (claimFence._tag !== "Updated") {
+                return yield* Effect.interrupt
+              }
               // Re-home the adopted row to the current incarnation; the patch
               // keeps the dead incarnation's other meta (tier, pre-image
               // snapshot) intact. A vanished row or a lost fence means the
@@ -1747,7 +1896,9 @@ export const make = (deps: Dependencies) => {
                   { ...runningMeta, ...declarationMeta, admittedBy: deps.owner } satisfies AttemptMeta
                 )
               }, deps.owner)
-              if (rehomed._tag !== "Patched") return yield* Effect.interrupt
+              if (rehomed._tag !== "Patched") {
+                return yield* Effect.interrupt
+              }
             }
             yield* emitLifecycle(
               JournalRecords.attemptStarted(attemptSource("started"), { ...attemptId, tier: input.tier })
@@ -1846,7 +1997,9 @@ export const make = (deps: Dependencies) => {
               }),
               JournalRecords.attemptFinished(attemptSource("finished"), { ...attemptId, state: "failed" })
             ])
-            if (!finished) return yield* Effect.interrupt
+            if (!finished) {
+              return yield* Effect.interrupt
+            }
             return yield* Effect.failCause(preparedResult.cause)
           }
           const prepared = preparedResult === undefined ? undefined : preparedResult.value
@@ -1887,7 +2040,9 @@ export const make = (deps: Dependencies) => {
               }),
               JournalRecords.attemptFinished(attemptSource("finished"), { ...attemptId, state: "failed" })
             ])
-            if (!finished) return yield* Effect.interrupt
+            if (!finished) {
+              return yield* Effect.interrupt
+            }
             return yield* Effect.failCause(opened.cause)
           }
           const sandbox = boundary === undefined || input.metadata === undefined
@@ -1952,7 +2107,8 @@ export const make = (deps: Dependencies) => {
           const parked = (cause: Cause.Cause<unknown>) =>
             Effect.map(
               Effect.serviceOption(FlowRuntime.FlowInstance),
-              (instance) => Option.getOrUndefined(instance)?.suspended === true && Cause.hasInterruptsOnly(cause)
+              (instance) =>
+                Option.getOrUndefined(instance)?.suspended === true && Cause.hasInterruptsOnly(cause)
             )
           /**
            * The row's meta as this dispatch last wrote it. The crossing writes
@@ -1986,7 +2142,9 @@ export const make = (deps: Dependencies) => {
           ) =>
             Effect.flatMap(
               atomically(Effect.gen(function*() {
-                if (record !== undefined) yield* emitLifecycle(record)
+                if (record !== undefined) {
+                  yield* emitLifecycle(record)
+                }
                 const patched = yield* attempts.patch(
                   attemptId,
                   {
@@ -1997,7 +2155,8 @@ export const make = (deps: Dependencies) => {
                 )
                 return patched._tag === "Patched"
               })),
-              (recorded) => recorded ? Effect.void : Effect.interrupt
+              (recorded) =>
+                recorded ? Effect.void : Effect.interrupt
             )
           const dispatch = effect === undefined
             ? deps.execute(input)
@@ -2036,7 +2195,8 @@ export const make = (deps: Dependencies) => {
             )
           const outcome = isolated === undefined
             ? yield* dispatch.pipe(Effect.exit)
-            : Exit.map(isolated, (settled) => settled.result)
+            : Exit.map(isolated, (settled) =>
+              settled.result)
           if (Exit.isFailure(outcome)) {
             /**
              * A DURABLE PARK IS NOT A SETTLEMENT (N-08). A body that reaches a
@@ -2089,7 +2249,9 @@ export const make = (deps: Dependencies) => {
                 : []),
               JournalRecords.attemptFinished(attemptSource("finished"), { ...attemptId, state: "failed" })
             ])
-            if (!finished) return yield* Effect.interrupt
+            if (!finished) {
+              return yield* Effect.interrupt
+            }
             return yield* Effect.failCause(outcome.cause)
           }
           if (settlement !== undefined) {
@@ -2100,7 +2262,9 @@ export const make = (deps: Dependencies) => {
               JournalRecords.diffBundleCaptured(attemptSource("diff-bundle"), {
                 ...attemptId,
                 bundleIdentity: settlement.bundleIdentity,
-                changedPaths: settlement.files.map((change) => change.path),
+                changedPaths: settlement.files.map((change) =>
+                  change.path
+                ),
                 deviations: settlement.deviations
               })
             )
@@ -2226,25 +2390,19 @@ export const make = (deps: Dependencies) => {
           )
           if (!finished) return yield* Effect.interrupt
 
-          if (
-            cacheable &&
-            evidence?.deviation === undefined &&
-            evidence?.wholeTreeWritesVerified === true &&
-            evidence?.hermeticReadsVerified === true
-          ) {
-            if (readSetVerified) {
-              yield* recordCache({ result: outcome.value, meta, createdAtMs: finishedAtMs })
-            } else {
-              // Visible, not silent (issue #106): the run continues on its
-              // own result, but the stale declaration is journalled so the
-              // missing cache entry is explainable.
-              yield* emitConverging(
-                JournalRecords.cacheProvenance(cacheSource("unverified_read_set"), {
-                  keyDigest,
-                  action: "unverified_read_set"
-                })
-              )
-            }
+          const admission = CacheAdmission.completion(cacheDeclaration, meta, false)
+          if (admission._tag === "PublishCompletion") {
+            yield* recordCache({ result: outcome.value, admission, createdAtMs: finishedAtMs })
+          } else if (admission.reason === "unverified-recorded-reads") {
+            // Visible, not silent (issue #106): the run continues on its
+            // own result, but the stale declaration is journalled so the
+            // missing cache entry is explainable.
+            yield* emitConverging(
+              JournalRecords.cacheProvenance(cacheSource("unverified_read_set"), {
+                keyDigest,
+                action: "unverified_read_set"
+              })
+            )
           }
           return outcome.value
         })

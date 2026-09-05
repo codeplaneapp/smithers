@@ -8,6 +8,7 @@ import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as PlatformError from "effect/PlatformError"
 import { TestClock } from "effect/testing"
 import * as StepBoundary from "../src/StepBoundary.ts"
 
@@ -83,6 +84,20 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
 
+  /**
+   * How a real host reports absence: a typed `NotFound`, not a bare `Error`.
+   * The boundary reads that refusal instead of probing with `exists` first,
+   * so the fixture has to answer the way the host it stands in for does.
+   */
+  const absent = (method: string, path: string) =>
+    PlatformError.systemError({
+      _tag: "NotFound",
+      module: "FileSystem",
+      method,
+      pathOrDescriptor: path,
+      description: `ENOENT: ${path}`
+    })
+
   /** A deterministic in-memory host filesystem over the kernel seam. */
   const memoryFs = (seed: Record<string, string>) => {
     const files = new Map<string, Uint8Array>(
@@ -97,8 +112,13 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
     }
     for (const path of files.keys()) addParentDirectories(path)
     const failedReads = new Set<string>()
+    // A path that a concurrent process deletes the instant the enumeration
+    // has classified it: listed and stat'd as a file, gone by the time the
+    // boundary reads it.
+    const vanishAfterStat = new Set<string>()
     const mtimes = new Map<string, number>()
     const madeDirectories: Array<string> = []
+    const probes: Array<string> = []
     const reads: Array<string> = []
     const removals: Array<string> = []
     const writes: Array<string> = []
@@ -107,13 +127,27 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       directories.has(path) ||
       [...files.keys(), ...directories].some((candidate) => candidate.startsWith(`${path}/`))
     const fs = FileSystem.makeNoop({
-      exists: ((path: string) => Effect.succeed(present(path))) as never,
+      exists: ((path: string) =>
+        Effect.sync(() => {
+          probes.push(path)
+          return present(path)
+        })) as never,
       readFile: ((path: string) =>
         Effect.suspend(() => {
           reads.push(path)
-          if (failedReads.delete(path)) return Effect.fail(new Error(`EIO: ${path}`))
+          if (failedReads.delete(path)) {
+            return Effect.fail(
+              PlatformError.systemError({
+                _tag: "Unknown",
+                module: "FileSystem",
+                method: "readFile",
+                pathOrDescriptor: path,
+                description: `EIO: ${path}`
+              })
+            )
+          }
           const bytes = files.get(path)
-          return bytes === undefined ? Effect.fail(new Error(`ENOENT: ${path}`)) : Effect.succeed(bytes)
+          return bytes === undefined ? Effect.fail(absent("readFile", path)) : Effect.succeed(bytes)
         })) as never,
       writeFile: ((path: string, bytes: Uint8Array) =>
         Effect.sync(() => {
@@ -121,9 +155,17 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
           addParentDirectories(path)
           files.set(path, bytes)
         })) as never,
-      remove: ((path: string, options?: { readonly recursive?: boolean }) =>
+      remove: ((path: string, options?: { readonly force?: boolean; readonly recursive?: boolean }) =>
         Effect.suspend(() => {
-          const descendantFiles = [...files.keys()].filter((candidate) => candidate.startsWith(`${path}/`))
+          // Node-faithful: removing a path that is not there is an error
+          // unless the caller asked for `force`, which is how a caller says
+          // "absent is the outcome I wanted" without probing first.
+          if (!present(path)) {
+            return options?.force === true ? Effect.void : Effect.fail(absent("remove", path))
+          }
+          const descendantFiles = [...files.keys()].filter((candidate) =>
+            candidate.startsWith(`${path}/`)
+          )
           const descendantDirectories = [...directories].filter((candidate) => candidate.startsWith(`${path}/`))
           if (
             files.has(path) === false &&
@@ -164,7 +206,7 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         Effect.suspend(() => {
           const root = directory === "."
           if (!root && (!present(directory) || files.has(directory))) {
-            return Effect.fail(new Error(`ENOENT: ${directory}`))
+            return Effect.fail(absent("readDirectory", directory))
           }
           const prefix = root ? "" : `${directory}/`
           const entries = new Set<string>()
@@ -177,16 +219,20 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
         })) as never,
       stat: ((path: string) =>
         files.has(path)
-          ? Effect.succeed({
-            type: "File",
-            size: FileSystem.Size(files.get(path)!.length),
-            mtime: Option.some(new Date(mtimes.get(path) ?? Date.now())),
-            dev: 1,
-            ino: Option.some(1)
+          ? Effect.sync(() => {
+            const info = {
+              type: "File",
+              size: FileSystem.Size(files.get(path)!.length),
+              mtime: Option.some(new Date(mtimes.get(path) ?? Date.now())),
+              dev: 1,
+              ino: Option.some(1)
+            }
+            if (vanishAfterStat.delete(path)) files.delete(path)
+            return info
           })
           : present(path)
           ? Effect.succeed({ type: "Directory" })
-          : Effect.fail(new Error(`ENOENT: ${path}`))) as never
+          : Effect.fail(absent("stat", path))) as never
     })
     return {
       directories,
@@ -195,8 +241,10 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
       fs,
       madeDirectories,
       mtimes,
+      probes,
       reads,
       removals,
+      vanishAfterStat,
       writes,
       layer: StepBoundary.layer.pipe(Layer.provide(hostLayer(fs)))
     }
@@ -207,6 +255,78 @@ describe("StepBoundary.layer (filesystem-backed)", () => {
     writeSet: ["output.txt"],
     boundaryMode: "hard"
   })
+
+  it.effect("measures and captures each path in one host call", () =>
+    Effect.gen(function*() {
+      const host = memoryFs({
+        "input.txt": "source",
+        "tree/a.txt": "a",
+        "tree/nested/b.txt": "b"
+      })
+      yield* withCrypto(
+        Effect.gen(function*() {
+          const boundary = yield* StepBoundary.StepBoundary
+          const prepared = yield* boundary.prepare({
+            readSet: [{ path: "input.txt", digest: sha256("source") }, { path: "gone.txt", digest: "absent" }],
+            writeSet: [{ _tag: "TreeArtifact", path: "tree" }],
+            boundaryMode: "hard"
+          })
+          host.reads.length = 0
+          host.probes.length = 0
+          return yield* boundary.settle(prepared)
+        }).pipe(Effect.provide(host.layer))
+      )
+
+      // Every host call is one CPython fork under the confined production
+      // host (`@smthrs/platform-node/AtomicFileSystem`, ~130 ms each), so a
+      // path measured twice — an `exists` probe and then the read that
+      // reports absence anyway — doubled the cost of every boundary.
+      expect(host.probes).toEqual([])
+      // A tree member is measured once. Its digest reaches the tree identity
+      // from the capture that already read it, not from a second read.
+      expect(host.reads).toEqual([
+        "gone.txt",
+        "input.txt",
+        "tree/a.txt",
+        "tree/nested/b.txt"
+      ])
+    }))
+
+  it.effect("records a tree member that vanished after enumeration as absent", () =>
+    Effect.gen(function*() {
+      const present = memoryFs({ "tree/a.txt": "a", "tree/b.txt": "b" })
+      const raced = memoryFs({ "tree/a.txt": "a", "tree/b.txt": "b" })
+      // The enumeration classified `tree/b.txt` as a file; a concurrent
+      // process deleted it before the capture read it.
+      raced.vanishAfterStat.add("tree/b.txt")
+      const tree: FileBoundary = {
+        readSet: [],
+        writeSet: [{ _tag: "TreeArtifact", path: "tree" }],
+        boundaryMode: "hard"
+      }
+      const settle = (host: ReturnType<typeof memoryFs>) =>
+        withCrypto(
+          Effect.gen(function*() {
+            const boundary = yield* StepBoundary.StepBoundary
+            return yield* boundary.settle(yield* boundary.prepare(tree))
+          }).pipe(Effect.provide(host.layer))
+        )
+
+      const complete = yield* settle(present)
+      const partial = yield* settle(raced)
+      const identity = (evidence: StepBoundary.BoundaryEvidence) =>
+        (evidence.declaredOutputs as { readonly trees: ReadonlyArray<{ readonly identity: string }> }).trees[0]!
+          .identity
+
+      // The vanished member is evidence, not a defect: only a declared exact
+      // output may be missing. It is recorded absent, and the tree hashes
+      // differently from the one whose members were all there.
+      expect(
+        (partial.declaredOutputs as { readonly outputs: ReadonlyArray<{ path: string; digest: string | null }> })
+          .outputs
+      ).toContainEqual({ path: "tree/b.txt", digest: null })
+      expect(identity(partial)).not.toBe(identity(complete))
+    }))
 
   it.effect("measures the declared read set for real instead of echoing the declaration", () =>
     Effect.gen(function*() {
@@ -1203,8 +1323,19 @@ describe("StepBoundary.layer host failures", () => {
   it.effect("maps a filesystem failure to UnsupportedBoundary", () =>
     Effect.gen(function*() {
       const fs = FileSystem.makeNoop({
-        exists: (() => Effect.succeed(true)) as never
-        // readFile keeps the noop default and fails: the host cannot measure.
+        // Not a `NotFound`: an absent path is measured as `absent`, so the
+        // host refusal this maps has to be a refusal the boundary cannot
+        // read as an answer.
+        readFile: ((path: string) =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "Unknown",
+              module: "FileSystem",
+              method: "readFile",
+              pathOrDescriptor: path,
+              description: "the host cannot measure"
+            })
+          )) as never
       })
       const failure = yield* withCrypto(
         Effect.gen(function*() {

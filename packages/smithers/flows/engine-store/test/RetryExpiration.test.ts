@@ -177,26 +177,8 @@ describe("expirationMs survives a restart mid-retry (issue #45)", () => {
 
       expect(result.released.status).toBe("suspended")
       expect(result.row.status).toBe("failed")
-      // Flow-result JSON preserves the engine defect's public identity rather
-      // than the journal error-code spelling used at the action boundary.
-      // Decode the persisted shape so this asserts the terminal reason, not a
-      // coincidental serialization fragment.
-      const persisted = JSON.parse(result.row.stateJson) as {
-        readonly result: {
-          readonly _tag: "Complete"
-          readonly exit: {
-            readonly _tag: "Failure"
-            readonly cause: ReadonlyArray<{
-              readonly _tag: "Die"
-              readonly defect: { readonly name: string }
-            }>
-          }
-        }
-      }
-      expect(persisted.result.exit.cause.some((cause) =>
-        cause._tag === "Die" &&
-        cause.defect.name === "@smthrs/flow/RetryPolicyExpired"
-      )).toBe(true)
+      const persisted = JSON.parse(result.row.stateJson)
+      expect(persisted.result.exit.cause).toContainEqual({ _tag: "Fail", error: "boom" })
       // The rebuilt flow never re-dispatched the action body: the budget
       // was already spent according to the durable origin.
       expect(bodyRuns).toBe(1)

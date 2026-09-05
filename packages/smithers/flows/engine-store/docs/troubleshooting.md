@@ -211,12 +211,13 @@ the world deduplicate it.
 **What happened.** The plan scheduler itself refused. A node's own failure is
 not one of these: the run continues and the report says `failed`.
 
-| Code                   | Meaning                                            |
-| ---------------------- | -------------------------------------------------- |
-| `boundary_unavailable` | The boundary could not be measured for a dispatch. |
-| `key_uncomputable`     | The dispatch key could not be derived.             |
-| `elaboration_failed`   | Appending an elaborated subgraph refused.          |
-| `store_failed`         | The plan store or journal refused.                 |
+| Code                   | Meaning                                                                   |
+| ---------------------- | ------------------------------------------------------------------------- |
+| `invalid_plan`         | Plan content, graph annotations, or approval digests failed verification. |
+| `boundary_unavailable` | The boundary could not be measured for a dispatch.                        |
+| `key_uncomputable`     | The dispatch key could not be derived.                                    |
+| `elaboration_failed`   | Appending an elaborated subgraph refused.                                 |
+| `store_failed`         | The plan store or journal refused.                                        |
 
 **What to change.** For `boundary_unavailable`, check the `StepBoundary` layer
 and the host filesystem. For `store_failed`, check that the plan store's
@@ -316,3 +317,9 @@ register the flow can still reclaim it. Then check the waiting reason with
 `DurableEngineState.waiting(runId)`: `timer` with a past `wakeAt` points at
 clock redispatch, `quarantine` points at corrupt evidence, and `released` means
 a shutdown interrupted it and the sweep will re-drive it.
+
+A SchedulerError may carry `cleanupErrors` if sibling attempt settlement failed
+after the primary scheduler failure. Preserve and investigate both: a failed
+cleanup transaction leaves its attempt for recovery and never publishes a
+successful cache entry. The original `code`, `message`, and `cause` remain the
+primary diagnostic.

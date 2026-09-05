@@ -1220,10 +1220,16 @@ export const makeFileSystem = (
   const maxInlineBytes = options.maxInlineBytes ?? defaultMaxInlineBytes
   const root = workspaceRoot.replaceAll(/\/+$/g, "")
   const hostPath = (path: string) => root === "" ? path : `${root}/${path}`
+  // One host call, not two: the read reports an absent path itself, exactly
+  // as `realPathIfPresent` below reads its own refusal. On the confined host
+  // the `exists` probe that used to precede every read was a second CPython
+  // fork (`@smthrs/platform-node/AtomicFileSystem`) for an answer the read
+  // was about to give.
   const readIfPresent = Effect.fn("WorkspaceSandbox.readIfPresent")(function*(path: string) {
-    const present = yield* fs.exists(path).pipe(Effect.mapError(hostFailure))
-    if (!present) return undefined
-    return yield* fs.readFile(path).pipe(Effect.mapError(hostFailure))
+    return yield* fs.readFile(path).pipe(
+      Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
+      Effect.mapError(hostFailure)
+    )
   })
   const realPathIfPresent = (path: string): Effect.Effect<string | undefined, WorkspaceError> =>
     fs.realPath(path).pipe(

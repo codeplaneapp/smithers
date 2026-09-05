@@ -16,7 +16,7 @@ the whole point of the package.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/engine-store @smthrs/flow @smthrs/journal @smthrs/run-store @smthrs/step-cache @smthrs/database @smthrs/artifacts @smthrs/kernel @effect/platform-node
+pnpm add @smthrs/engine-store@next @smthrs/flow@next @smthrs/journal@next @smthrs/run-store@next @smthrs/step-cache@next @smthrs/database@next @smthrs/artifacts@next @smthrs/kernel@next @effect/platform-node
 ```
 
 ## Declare a sealed action and a flow

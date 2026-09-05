@@ -4,6 +4,61 @@
 
 ### Fixed
 
+- Compiled `stop-merge` recovery retains the stopped attempt's `skipped`
+  outcome. `PlanMergeStore` persists eligible peers and atomically commits
+  merge completion with its plan, source observations, and append event.
+  Reopening can recover recorded merge-only extensions from the original base;
+  intervening manual generations still require their approved plan. Generated
+  IDs avoid ordinary user IDs without treating names or bodies as authority.
+  Compose the new layer on the scheduler's database. Migration `3005` refuses
+  old observation heads whose merge state is unknown; finish on the prior
+  runtime or reconcile unfinished effects before starting a new run.
+
+- Compiled recovery binds the normalized runtime environment before dispatch
+  for all effect tiers. Changing `Options.environment` no longer repeats a
+  completed action under a fresh key. Nested environment options are copied at
+  construction. `PlanInputStore.Address` now requires `environmentDigest`,
+  derived by `StepKey.environmentIdentity`; migration `3004` refuses older
+  observation heads whose original environment is unknown instead of guessing.
+  Existing action keys are unchanged. Recover with the original environment,
+  or reconcile unfinished effects before intentionally starting new work.
+
+- `PlanInputStore` persists source digests and glob membership before compiled
+  dispatch. Reopening a self-updating run replays its original key instead of
+  observing its own output as a new input. Appended generations retain earlier
+  pins; corrupt, missing, incompatible or unfenced observations are refused.
+  The new layer is required on the scheduler's database and is included in
+  `TestStores`. Migration `3003` refuses compiled recovery for older runs that
+  already had attempts but no input observations; finish them before upgrading
+  or explicitly reconcile their effects. Changed approved graphs require a
+  new run, not replacement within an observed run.
+
+- File inputs are classified relative to each reader's predecessors. Explicit
+  read-before-write sequences pin initial sources, and intermediate reads see
+  preceding outputs. Future writers/removers no longer cause late source
+  remeasurement or expand source-glob membership. Durable input snapshots now
+  preserve that selection across reopening as well.
+
+- Ready-work admission uses `@smthrs/plan/Scheduling` for priority, aging, plan-
+  order ties and step/agent caps. Priority plus waiting age is compared exactly
+  even outside the safe-number range. This does not change the interpreter's
+  separate execution path or claim conditional scheduling parity.
+
+- Plan scheduling preserves declared effect tiers. Compensable and irreversible
+  work uses run-local, structurally scoped execution keys and never publishes a
+  shared-cache result. Durable replay survives reopening the database;
+  compensable retries restore their pre-image and keyless irreversible retries
+  remain refused. An irreversible conflict fails without automatic rebase or
+  merge execution. Compensable merge elaboration preserves the stopped node's
+  tier instead of turning it into shared-cache work.
+
+- Cancellation through any trampoline round now reaches live successors and
+  linked child lineages, including children created by earlier rounds. Requests
+  and handoffs serialize in the owning write transaction; local interruption
+  is sent only after commit and does not wait on user cleanup. Normal parent
+  exit resolves child policy from the round that created the edge and preserves
+  it across handoffs. Fork ancestry alone does not propagate cancellation.
+
 - Fixed the CommonJS build of the migration set. esbuild compiles a default
   import of a sibling module under `"type": "module"` to Node-style interop,
   where `import_x.default` is the sibling's whole exports object rather than

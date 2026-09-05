@@ -1,77 +1,36 @@
 # @smthrs/engine-store
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://engine-store.smithers.sh
 
-Durable persistence adapter for `@smthrs/engine`. It composes journal-backed
-run ownership, attempts, cache provenance, deferreds, clocks, and workspace
-snapshot boundaries into a `FlowEngine` layer.
+The durable half of the Smithers flow engine. It persists every step a flow
+takes to a SQLite database, so a flow that crashes, is killed, or waits for a
+week resumes where it stopped instead of starting over.
+
+It is an [Effect](https://effect.website) library: every surface it exports is
+a `Layer` you compose or an `Effect` you run.
+
+## Install
+
+`@smthrs/engine-store` is at `1.0.0-rc.0` and is not on npm yet. Release
+candidates publish under the `next` tag rather than `latest`, so install it by
+tag:
 
 ```sh
-pnpm add @smthrs/engine-store
+pnpm add @smthrs/engine-store@next
 ```
 
-## Bundles for the browser, runs on SQLite
+Node.js 22.19.0 or later. The package ships as both ESM and CommonJS with
+TypeScript declarations.
 
-**This entry point bundles for a browser.** The two host reads it once made
-directly — `process.pid` and `randomUUID` from `node:crypto`, used to identify
-an owner and stamp attempt nonces — now enter through the injectable
-`OwnerIdentity` service, whose default reads a process id off `globalThis`
-where one exists and draws an incarnation number from `Random` where none
-does (issue #114). The SQL contracts it imports are driver-neutral, which
-keeps the module graph bundleable. Execution is deliberately narrower: the
-only supported durable backing is local SQLite through Node.js `node:sqlite`
-and `@effect/sql-sqlite-node`. Browser and edge deployments may import the
-types and browser-safe in-memory helpers, but cannot execute durable flows;
-supplying an alternate browser SQL client is not a supported runtime.
+## The shortest real use
 
-`scripts/browser-check.mjs` at the repository root pins that boundary: it
-bundles this entry point for the browser and fails the build if it regresses.
-See [platform support](https://smithers.sh/docs/reference/api/#platform-support).
-
-## Public API
-
-The root exports these namespaces; each is also available from its matching
-`@smthrs/engine-store/*` subpath.
-
-| Namespace            | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DurableEngineState` | `DurableEngineState` / `Service` persist deferreds, clocks, and parked-run state through `deferred`, `completeDeferred`, `clock`, `scheduleClock`, `completeClock`, `dueClocks`, `completeRunClocks`, `pendingClocks`, `completedDeferreds`, `park`, `wake`, `waiting`, and `waitingRuns`. `completeRunClocks` closes every uncompleted clock row of one run, which a terminal transition does in its own transaction; `pendingClocks` and `completedDeferreds` never list a row whose run has settled, so a registration sweep re-arms timers and replays completions for runs that can still make progress and for no others. Every list read skips a row that will not decode and logs a storage-integrity warning naming its primary key, so one corrupt row costs its own row and nothing else, while the point reads `deferred`, `clock`, and `waiting` still fail on one. Address/row types are `DeferredAddress`, `DeferredRow`, `ClockAddress`, `ClockRow`, `Waiting`, `WaitingRow`, and `WaitingRunsFilter`; outcome types are `CompleteDeferredOutcome`, `ScheduleClockOutcome`, `CompleteClockOutcome`, `ParkOutcome`, and `WakeOutcome`; `WaitingReason` is the open wait taxonomy. `make` / `layer` use `DurableWriter`; `makeMemory` / `layerMemory` are deterministic in-memory variants. |
-| `EngineStore`        | `Options` configures owner identity, journal source, liveness probing, and the optional `clockFireRetryPolicy` (defaults to exponential from 100ms capped at 30s, forever). `make` builds the `FlowRuntime` service and `layer` provides `FlowRuntime` plus `FlowEngine.SnapshotBoundary`; `layerWithPrivilegedJj` does the same with a private repository for engine bookkeeping while ambient `Jj` stays for action bodies. A composition failure is an unmet `Requirements` type at compile time, so there is no runtime composition error to handle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `StepBoundary`       | `PreparedBoundary`, `BoundaryDeviation`, `BoundaryEvidence`, `Service`, and `StepBoundary`; errors `UndeclaredWrite`, `UnsupportedBoundary`, and `BoundaryCorruption`; production and test layers. The shared declaration types `FileBoundary`, `BoundaryMode`, and `FileInput` live in `@smthrs/flow`'s `Action` namespace.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `WorkspaceSandbox`   | The functional workspace transaction. Models `Resource`, `InputObservation`, `OutputObservation`, `Provenance`, `FileChange`, `QueuedEffect`, `WorkflowResult`, `Execution`, `DeclarationViolation`, `CacheOutcome`, `Accepted` / `Invalidated` / `ExecutionResult`, and `Host`; services `Workspace` (the in-transaction filesystem and effect outbox) and `EffectDispatcher`; errors `WorkspaceError` and `MaterializationConflict`; the `violations` accessor; `make` / `layer`, `makeHosted`, `makeMemory` (deterministic, browser-safe), and `makeFileSystem` / `layerFileSystem` / `layerDispatcher`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `PlanScheduler`      | Drives a persisted `@smthrs/plan` `Plan`. `Options` configures the run, positive-safe-integer admission caps (`concurrency.steps` / `concurrency.agents`, both defaulting to unbounded), and a non-negative-safe-integer `rebaseLimit`; invalid bounds are rejected at construction. `make` / `layer` build the `Service` (`record`, `append`, `run`) and `PlanScheduler` is its tag. `NodeExecutor` / `Executor` / `layerExecutor` are the DI seam that turns a `NodeInput` into work, `Outcome` is the four-way evaluation result, `Settlement` and `Report` are what a run reports, `Requirements` is what driving one needs, and `SchedulerError` is the scheduler's own refusal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `Reconciliation`     | The pluggable seam that answers a `Deviation` or a `Conflict` with a `Verdict` (`Fail` / `Reorder` / `FactorOut`). `Reconciliation` / `Service` are the tag and shape; `make` / `layer` install one; `makeDefault` / `layerDefault` are the deterministic default. It is the first consumer `flows.engine.expected-set-deviation` has had.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `Retention`          | Explicit deletion of finished run state. `Retention` / `Service` expose `retain(options)`; `RetainOptions` (`olderThanMs`, `limit`, `dryRun`) / `RetainReport` are its contract; `defaultLimit` bounds one pass at 1000 runs; `RetentionError` carries `scan_failed` / `delete_failed`; `make` / `layer` need `SqlClient` and `@smthrs/journal`'s `Journal`. One `journal.transact` deletes every aged terminal run with its attempts, clock deadlines, deferred completions, journal entries, checkpoints, and time-travel archive rows; an aged run whose descendant is still live is retained. `collect` is the host-facing pass `smthrs gc` runs over one database file, over the same lineage guard. Nothing schedules any of it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `RunCatalogRead`     | The workspace's run set, for a `@smthrs/sync` `RunCatalog`. `RunCatalogRead` / `Service` expose `listRunIds(options?)`; `ListOptions` (`limit`) is its contract; `defaultLimit` bounds one read at 10000 runs, newest first by rowid and returned oldest first. `RunCatalogError` carries `invalid_options` or `list_failed`; `make` / `layer` need `SqlClient`. It reads a set rather than a cursor tail so retention of a run removes it from a follower's view. Nothing here polls: the interval belongs to `RunCatalog.makePolling`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `Selection`          | The advisory seam that guesses which sink nodes are safe to postpone and which flows a plan is missing. `SuspectedEdge`, `BeliefSnapshot`, `Candidate`, and the `Verdict` union (`Admit` / `Defer` / `Propose`) are its schemas; `Selection` / `Service` are the tag and shape; `select` returns one verdict per candidate. `layerNoop` admits everything; `layerHeuristic` is the pure glob-match default with optional failure-history stats. `DebtEntry`, `debt`, `card`, `risk`, and `proposeReadSet` are the v2 recertification and presentation helpers; the `recertify` driver ships on `PlanScheduler`, which owns scheduling.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `SelectionStore`     | The durable suspected-edge store. `SelectionStore` / `Service` expose `upsert`, `list`, `snapshot`, and `train`; `make` / `layer` persist through this package's migration set. `snapshot` pins the injected clock, and `train` applies the asymmetric hit/miss confidence rule without creating unknown edges. `SelectionStoreError` distinguishes `invalid_input`, corrupt-row `decode_failed`, and `persistence_failed`; each multi-row mutation is one transaction.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `ArtifactGc`         | Explicit mark/sweep garbage collection for the artifact store. `ArtifactGc` / `Service` expose `gc(options)`; `GcOptions` / `GcReport` are its contract; `ArtifactGcPolicy` / `Policy` / `layerPolicy` configure grace and pinned digests but never schedule collection. `ArtifactGcError` carries `invalid_options`, `mark_failed`, or `sweep_failed`; `make` / `MakeOptions` / `layer` need `SqlClient` and `@smthrs/artifacts`'s `ArtifactSweep`. The mark reads cache, attempt-boundary, and checkpoint roots before inventorying blobs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `Inconsistency`      | `Inconsistency` / `Service` receive `CacheConflict` and return `InconsistencyVerdict`. `MakeOptions`, `make`, `makeNoop`, and `layerNoop` build receivers; `layerStrict` journals and returns `"fail"`, while `layerTolerant` journals and returns `"tolerate"`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `OwnerIdentity`      | `OwnerIdentity` / `Service` mint the `OwnerId` an incarnation fences its writes with. `make` builds one from an implementation, `makeDefault` / `layer` supply the platform default, and `layerConstant(owner)` pins a fixed identity for a test or a host that already holds a lease.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `RunState`           | The versioned run-state envelope schema the engine stores in each run row.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `Migrations`         | `set` is this package's own `MigrationSet`; `sets` is the composed, dependency-ordered list an engine installs; `run` and `layer` execute it through `@smthrs/database`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `test/TestStores`    | Every durable engine service over one database, migrated. `layer` is the private in-memory bundle; `layerAt(filename)` names the database and re-exports the connection and `DurableEngineState`, so two independently built bundles can share one file. `database` / `databaseAt` are the migrated database alone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `Errors`             | Stable `IrreversibleRetryRequiresIdempotencyKey`, `FlowCycleDetected`, `AttemptAdmissionRejected`, `AttemptEvidenceQuarantined`, `AttemptSuspended`, `CacheConflictDetected`, `CacheCorruptionDetected`, `RetentionError`, `RetentionErrorCode`, `RunCatalogError`, and `RunCatalogErrorCode` exports.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-
-The root also exports six focused namespaces that keep the table's primary
-runtime surfaces small:
-
-- `ArtifactSync`: publish blobs before shared cache entries and hydrate replay
-  inputs under an explicit download policy.
-- `CacheSync`: best-effort post-commit publication of local cache entries to a
-  shared tier.
-- `DisasterRecovery`: hot SQLite backup, verification, restore, and restore
-  fencing, including frozen artifact-root verification.
-- `EngineStoreMetrics`: metric handles and observation combinators for engine
-  hot paths; exporters remain host-owned.
-- `StepSandbox`: scope-safe acquisition of isolated step workspaces, with
-  filesystem, deterministic-test, and explicit no-op layers.
-- `WakeBus`: edge-triggered in-process wakes with durable polling as the
-  miss-tolerant fallback; cross-process delivery remains store-driven.
+`EngineStore.layer` is the composition. It provides `FlowRuntime`, the service
+that executes a flow durably, and the snapshot boundary the engine measures
+each step against:
 
 ```ts
 import { EngineStore } from "@smthrs/engine-store"
@@ -88,159 +47,81 @@ const program = Effect.gen(function*() {
 }).pipe(Effect.provide(engineLayer))
 ```
 
-`EngineStore.layer` requires `Journal`, `RunStore`, `AttemptStore`, `CacheStore`,
-Effect's `Crypto`, `DurableEngineState`, `StepBoundary`, `Jj`, `OwnerIdentity`,
-and `Scope`. Run
-migrations before using the SQL-backed durable state; provide
-`OwnerIdentity.layer` unless the host mints its own owner tokens.
+`engineLayer` still needs the storage it composes: `Journal`, `RunStore`,
+`AttemptStore`, `CacheStore`, `DurableEngineState`, `StepBoundary`, `Jj`,
+`OwnerIdentity`, Effect's `Crypto`, and a `Scope`. A missing one is an unmet
+requirement in the layer's type, so a bad composition fails to compile rather
+than at run time. Run the schema migrations before any SQL-backed service reads
+the database, and provide `OwnerIdentity.layer` unless the host mints its own
+owner tokens.
 
-`Options.isAlive` is optional. Its default,
-`Ownership.leaseLiveness(Ownership.heartbeatStaleAfter)`, treats an owner as
-alive while its persisted heartbeat is fresh and gone once the lease expires,
-so this composition reclaims the runs of a hard-killed owner with no host code.
-Supply a check to refuse a takeover for longer: a pid probe guarded by
-`Ownership.sameHostIncarnation`, or an orchestrator's liveness answer.
+[The quickstart](https://engine-store.smithers.sh/quickstart/) wires all of it
+over one SQLite file and watches a sealed step replay after a restart.
 
-`WorkspaceSandbox` and `EffectDispatcher` are **optional** and change what a
-sealed action is worth. Without a sandbox the body runs against the host
-directly and `StepBoundary`'s evidence stays honestly run-local: it can only
-re-measure paths it was told about, so it never claims whole-tree write
-verification and `ActionPersistence` never publishes it. Compose
-`WorkspaceSandbox.layerFileSystem()` and the body runs inside an isolated
-workspace instead — seeded with exactly its declared read set, diffed whole at
-settlement, copied back as a compare-and-set on every pre-image — and its
-result becomes eligible for the shared cross-run cache. `examples/src/durable-layer.ts`
-is that composition; [workspace transactions](https://engine-store.smithers.sh/concepts/workspace-transactions/)
-explains why the transaction is not a security boundary.
+If you want the wiring rather than control over it, reach for
+[`@smthrs/flows`](https://flows.smithers.sh) instead. It ships `NodeRuntime`,
+which composes this package with the flow language, the journal, the run and
+cache stores, and the artifact tier over one file.
 
-`RunStore`, `AttemptStore`, `CacheStore`, and `DurableEngineState` are the
-executable authorities today. Every lifecycle event is written with
-`emitDurable` **inside `Journal.transact`**, the write transaction that also
-carries the state transition it describes: the attempt row and its
-`attemptStarted`/`attemptFinished`, the run-row CAS and its decision, the
-deferred/clock row and its record, the cache provenance entry and the cache
-row. The stores share one `DurableWriter`, so their writes join that transaction as
-savepoints — either both halves are durable or neither is, and audit, sync, and
-time travel can no longer read a hole. A crash before the commit loses the
-whole unit, so an action that had already executed re-executes on adoption.
-No local WAL makes a remote effect atomic, so external effects still need
-idempotency keys, fencing, or compensation.
+## What it gives you
 
-Caller-owned boundary declarations and byte buffers are snapshotted before an
-asynchronous host operation can yield. Durable identity and presentation
-ordering use explicit UTF-16 code-unit comparison rather than locale-sensitive
-collation, so independent hosts derive the same keys and event order.
+- **Durable attempts.** A step opens a row before its body runs and settles it
+  afterwards, so a restart replays the recorded result instead of executing the
+  body a second time.
+- **One owner per run.** Every durable write is fenced against the owner that
+  claimed the run, so two processes over one database cannot both drive it. A
+  dead owner's runs are reclaimed under a liveness check you choose.
+- **Waits that outlive the process.** A parked run holds a durable deferred or
+  clock row, so a timer set by a process that has since died still fires.
+- **Declared file boundaries.** The engine measures the tree a step actually
+  touched against what it declared, refuses a step that wrote outside it, and
+  admits only whole-tree evidence into the cache other runs read.
+- **Explicit deletion.** Old run history and unreferenced artifacts go away
+  when you run a retention or garbage-collection pass, never on a schedule you
+  did not set.
 
-## Selection
+Every durable write is one transaction. A lifecycle event is written inside the
+same transaction that carries the state transition it describes: the attempt
+row with its start and finish records, the run-row compare-and-set with its
+decision, the deferred or clock row with its record, the cache entry with its
+provenance. Either both halves are durable or neither is, so audit, sync, and
+time travel never read a hole. No local transaction makes a remote effect
+atomic, so external effects still need idempotency keys, fencing, or
+compensation.
 
-The pluggable seam that turns recorded belief — which changed paths tend to
-affect which flows — into scheduling advice for `PlanScheduler`. A guess may
-suggest extra work, postpone a low-risk sink, or order the queue; it never
-decides what is cached, correct, or up to date. `Selection.select`,
-`card`, `risk`, and `proposeReadSet` are pure functions of caller-supplied
-data, and selection verdicts never enter a step key or cache row.
+## Bundles for the browser, runs on SQLite
 
-`layerNoop` is the default: every candidate is `Admit`, so installing the
-package changes nothing until a deployment opts into another layer.
-`layerHeuristic` is the shipped deterministic layer. It considers only
-live suspected edges (`validFromMs <= beliefs.pinnedAtMs`) whose `scope`
-matches a changed path; a sink can be deferred only when a live edge names
-that sink. A `Candidate` may also carry `stats?: { failures: number; runs:
-number }`; the likelihood is `max(bestLiveEdgeConfidence, failures /
-max(runs, 1))`. Stats alone never defer a sink, but failure history can keep
-a flaky sink running inline where a low-confidence edge would otherwise defer
-it.
+The entry point bundles for a browser. The two host reads it once made
+directly, `process.pid` and `randomUUID` from `node:crypto`, enter through the
+injectable `OwnerIdentity` service, and the SQL contracts it imports are
+driver-neutral.
 
-**Verdicts.** `Admit` is the pass-through outcome. `Defer { edge, likelihood }`
-postpones a sink to a guess-free pass; a deferred node settles as
-`"deferred"`, writes no cache row, and journals
-`flows.engine.selection-deferred`. `Propose { flow, edge, confidence }`
-journals `flows.engine.selection-proposed` for a flow no exact dependency
-reaches. Proposals are visible advice; this package deliberately does not
-append them to the plan automatically.
-
-**SelectionStore.** `SelectionStore` is the durable suspected-edge store,
-tagged `@smthrs/engine-store/SelectionStore`. `upsert(edges)` inserts or
-replaces by the natural key `(scope, affects)`, `list()` returns every edge,
-and `snapshot()` returns a `BeliefSnapshot` pinned at the injected clock's
-current time rather than `Date.now()`. `train(observations)` updates only
-matching stored edges, ignores unknown `(scope, affects)` pairs, and appends
-each observation to the edge's evidence list. The training rule is asymmetric:
-a hit moves `confidence` to `confidence + 0.05 * (1 - confidence)`, while a
-miss halves it. A miss is a recertified deferral that failed; a hit is one
-that passed. Training is one storage transaction and has no clock read inside
-the rule.
-
-**Selection debt and recertification.** `Selection.debt(runId)` is
-byte-identical to v1: a `selection-deferred` record from that run opens debt, and
-a same-run `node-settled` record with outcome `built`, `clean`, or `failed`
-closes the matching plan key; `skipped` never closes it. v2 widens the query
-with `Selection.debt(runId, { repaidBy })`: opens still come only from the
-deferring run, while closes may also come from the listed repaying runs'
-settlements when their plan key matches. `PlanScheduler.recertify(input)` is the
-primitive for that repayment: it re-drives the compiled plan through
-`PlanScheduler` under a caller-supplied fresh run id with selection full
-override, then returns the repaying run id and the remaining debt computed
-with `debt(deferringRunId, { repaidBy: [freshRunId] })`. The deferring run's
-journal is not rewritten.
-
-**Cards, risk, and read-set proposals.** `Selection.card(input)` renders the
-plan card rows from plain data: `cached`, `run`, `deferred`, and `proposed`
-rows, plus an optional trailing `risk` row. Columns are padded by at least two
-spaces and the templates are fixed by tests:
-
-```text
-cached    <node>
-run       <node>
-deferred  <node>    fail likelihood <l> - recert <cadence>
-proposed  <flow>    suspected edge <confidence> - <scope> touched
-risk      <level> - <reasons joined with '; '>
-```
-
-`Selection.risk({ changed, beliefs })` is a pure annotation, never a gate: high means any live
-matching edge has confidence `>= 0.7`, medium means any has `>= 0.4`, and low
-means none do; reasons are named as `<scope> -> <affects> (<confidence>)`.
-`Selection.proposeReadSet({ beliefs, flow, paths })` returns the workspace
-paths matching the scope of any live edge whose `affects` names that flow,
-deduplicated in input order. It feeds `boundaryMode: "expected"`; agent-step
-wiring is outside this package.
-
-**The laws**, pinned by tests:
-
-1. Guesses never touch keys or the cache.
-2. `deferred` is never `passed`.
-3. Only sinks are deferrable.
-4. Guesses add or postpone, never remove work the plan requires.
-5. Training only moves confidence; it never creates edges or touches any
-   journal, and a miss decays confidence faster than a hit can raise it.
-6. `debt(runId, { repaidBy })` is a pure widening of v1 debt: omitted options
-   preserve v1 byte-for-byte, and listed repayers only close matching plan
-   keys they actually settled as `built`, `clean`, or `failed`.
-7. `card`, `risk`, and `proposeReadSet` are pure functions with no service
-   requirements.
-
-**Still out of scope:** a model-backed `Selection` layer, because
-`engine-store` must not grow a model dependency; CLI verbs, because command
-surfaces belong to `@smthrs/cli`, not this persistence package; approval
-routing from risk levels, because no approval
-machinery lives here; auto-appending proposals, because that design still
-needs human review; and scheduled recertification cadence, because scheduling
-nightly or per-merge full passes is a product/system-flow concern. The
-recertification primitive itself ships here.
+Bundling is not running. The only durable backing shipped here is local SQLite
+through Node.js `node:sqlite` and `@effect/sql-sqlite-node`. A browser or edge
+deployment can import the types and the browser-safe in-memory helpers, but
+cannot execute durable flows, and supplying an alternative browser SQL client
+is not a supported runtime.
 
 ## Documentation
 
 The full documentation is at <https://engine-store.smithers.sh>:
 
+- [Installation](https://engine-store.smithers.sh/installation/): runtime
+  requirements, import forms, and the storage packages a runnable composition
+  adds.
 - [Quickstart](https://engine-store.smithers.sh/quickstart/): compose a durable
   engine over SQLite and watch a step replay after a restart.
-- [API reference](https://engine-store.smithers.sh/reference/api/): every public
-  export, with signatures and error codes.
 - [Compose a durable engine](https://engine-store.smithers.sh/guides/compose-a-durable-engine/):
   the required and optional services, and what each one changes.
+- [API reference](https://engine-store.smithers.sh/reference/api/): every public
+  export, with signatures and error codes.
+- [Observe executions and page runs](https://engine-store.smithers.sh/guides/observe-executions/):
+  coherent snapshots, filtered keyset pages, durable children and revisioned catch-up.
 - [Troubleshooting](https://engine-store.smithers.sh/troubleshooting/): each
   typed failure, its cause, and its fix.
 
 See also [durable execution](https://smithers.sh/docs/concepts/durable-execution/)
 and [content addressing](https://smithers.sh/docs/concepts/content-addressing/)
 on smithers.sh.
+
+List reads of durable wait state skip corrupt rows and log storage-integrity warnings; point reads still fail for an invalid row.
