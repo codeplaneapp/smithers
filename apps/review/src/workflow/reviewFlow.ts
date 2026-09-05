@@ -85,7 +85,7 @@ export const NarrateReview = Flow.make("smithers-review/NarrateReview", {
       }).pipe(Node.catch({ onFailure: () => Node.succeed(null) }))
       : Node.succeed(null);
     return Node.all({ story, quiz }).pipe(
-      Node.andThen((narrated) =>
+      Node.bindPlanned((narrated) =>
         RenderWalkthrough.call({
           input,
           target,
@@ -127,8 +127,8 @@ export const VerifyReview = Flow.make("smithers-review/VerifyReview", {
     }
     return VerifyFindings.call({ findings: review.comments, files: changes.files }).pipe(
       Node.catch({ onFailure: () => Node.succeed(null) }),
-      Node.andThen((verdicts) => ApplyVerdicts.call({ review, verdicts })),
-      Node.andThen((verified) => NarrateReview.to({ input, target, changes, review: verified })),
+      Node.bindPlanned((verdicts) => ApplyVerdicts.call({ review, verdicts })),
+      Node.bindPlanned((verified) => NarrateReview.to({ input, target, changes, review: verified })),
     );
   },
 });
@@ -157,7 +157,7 @@ export const DEFAULT_CONCURRENCY = 8;
  * interpreter settles every dependency of a node concurrently before running
  * the node (`packages/smithers/flows/flow/src/Interpreter.ts`, the `Effect.forEach` over
  * `KeyMaterial.dependencies` with `concurrency: "unbounded"` above the AST
- * switch), so a batch chained onto its predecessor with `Node.andThen` starts
+ * switch), so a batch chained onto its predecessor with `Node.bindPlanned` starts
  * alongside it exactly as `Node.all` does. A five-file review makes five calls
  * at once whatever the flag says. `tests/workflow/reviewFlow.test.ts` holds
  * every scripted call open and pins that width. The ordering has to come from
@@ -186,12 +186,12 @@ export const ReviewFiles = Flow.make("smithers-review/ReviewFiles", {
         );
       }
       outcomes = Node.all({ previous: outcomes, batch: Node.all(members) }).pipe(
-        Node.andThen((both) => MergeFileBatch.call({ previous: both.previous, batch: both.batch })),
+        Node.bindPlanned((both) => MergeFileBatch.call({ previous: both.previous, batch: both.batch })),
       );
     }
     return outcomes.pipe(
-      Node.andThen((collected) => FinalizeReview.call({ input, prepared, outcomes: collected })),
-      Node.andThen((review) =>
+      Node.bindPlanned((collected) => FinalizeReview.call({ input, prepared, outcomes: collected })),
+      Node.bindPlanned((review) =>
         VerifyReview.to({
           input,
           target: prepared.target,
@@ -214,7 +214,7 @@ export const Review = Flow.make("smithers-review/Review", {
   success: ReviewResult,
   body: (input) =>
     PrepareReview.call({ input }).pipe(
-      Node.andThen((prepared) => ReviewFiles.to({ input, prepared })),
+      Node.bindPlanned((prepared) => ReviewFiles.to({ input, prepared })),
     ),
 });
 

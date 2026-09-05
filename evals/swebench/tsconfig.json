@@ -4,7 +4,7 @@
     // The scorecard imports `@smthrs/cli`'s forensics projection, which reaches
     // the control package's WebCrypto sources; those are typed against DOM, as
     // the packages that own them declare.
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
     "composite": false,
     "declaration": false,

@@ -24,7 +24,7 @@
 import alchemy from "alchemy";
 import { D1Database, R2Bucket, Worker } from "alchemy/cloudflare";
 
-const JJHUB_ZONE_ID = "72854846f57d9e46794e7e6aae7e3328";
+const CLOUDFLARE_ZONE_ID = "72854846f57d9e46794e7e6aae7e3328";
 
 const app = await alchemy("smithers-review");
 
@@ -49,7 +49,7 @@ const db = await D1Database("review-db", {
 
 const smithersShRoutes =
   process.env.REVIEW_ENABLE_SMITHERS_SH_ROUTE === "1"
-    ? [{ pattern: "review.smithers.sh/*", zoneId: JJHUB_ZONE_ID, adopt: true }]
+    ? [{ pattern: "review.smithers.sh/*", zoneId: CLOUDFLARE_ZONE_ID, adopt: true }]
     : [];
 
 export const worker = await Worker("smithers-review", {
@@ -66,7 +66,7 @@ export const worker = await Worker("smithers-review", {
     ANTHROPIC_API_KEY: alchemy.secret(anthropicKey),
     PUBLIC_BASE_URL: process.env.REVIEW_PUBLIC_BASE_URL?.trim() || "https://review.jjhub.tech",
   },
-  domains: [{ domainName: "review.jjhub.tech", zoneId: JJHUB_ZONE_ID, adopt: true }],
+  domains: [{ domainName: "review.jjhub.tech", zoneId: CLOUDFLARE_ZONE_ID, adopt: true }],
   routes: smithersShRoutes,
 });
 

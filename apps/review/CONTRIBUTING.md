@@ -96,7 +96,7 @@ jobs:
           path: .smithers-review-tool
       - uses: pnpm/action-setup@v6.0.8
         with:
-          version: 11.21.0
+          version: 11.25.0
           run_install: false
       - uses: actions/setup-node@v6.4.0
         with:

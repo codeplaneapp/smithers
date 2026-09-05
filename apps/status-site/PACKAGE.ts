@@ -44,6 +44,9 @@ const check = Smithers.Typecheck({
  * @since 1.0.0
  * @category test
  */
+// Coverage policy: assertion-only for Bun Worker and static-page contracts.
+// No source coverage percentage is claimed. See scripts/repo-contract/README.md
+// for the exception and the owner of the missing denominator evidence.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["tests"]),

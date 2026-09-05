@@ -52,7 +52,9 @@ const EXPECTED_FLOWS = [
   "create-skill/design",
   "create-skill/document",
   "create-skill/scaffold",
+  "issue-triage",
   "lint",
+  "pr-triage",
   "release-notes",
   "review",
 ];

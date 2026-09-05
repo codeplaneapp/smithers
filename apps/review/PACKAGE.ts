@@ -69,6 +69,9 @@ const checkTests = Smithers.Typecheck({
  * @since 1.0.0
  * @category test
  */
+// Coverage policy: assertion-only for the Bun suite. Mixed CLI/Worker code and
+// the optional credentialed case have no measured whole-source denominator.
+// See scripts/repo-contract/README.md; this is coverage debt, not a 100% claim.
 const unitTests = Smithers.NodeTest({
   runtime: Smithers.Runtime.Bun({ version: ">=1.4.0" }),
   runner: Smithers.testSuite(["tests"]),

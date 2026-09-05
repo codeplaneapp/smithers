@@ -23,7 +23,7 @@ describe("review action manifest", () => {
     // The action installs this repository's workspace with --frozen-lockfile.
     // A pnpm whose lockfile format differs from the committed one fails that
     // install, so the pin has to track the root package manager.
-    expect(setup?.with?.version).toBe("11.21.0");
+    expect(setup?.with?.version).toBe("11.25.0");
   });
 
   test("pins bun and node to the runtimes the workspace gates run on", () => {

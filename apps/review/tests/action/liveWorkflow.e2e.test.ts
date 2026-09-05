@@ -39,9 +39,9 @@ const workflow = parse(
 };
 
 describe("pr-review.yml", () => {
-  test("calls this repository's own action at @main", () => {
+  test("calls this repository's own action at an immutable commit", () => {
     const step = workflow.jobs.review.steps.find((entry) => entry.uses?.includes("apps/review/action"));
-    expect(step?.uses).toBe("smithersai/smithers/apps/review/action@main");
+    expect(step?.uses).toBe("smithersai/smithers/apps/review/action@d55bf6343f79324825c61b079bf11acd89bc0e54");
   });
 
   test("asks for exactly the three permissions the action needs", () => {
