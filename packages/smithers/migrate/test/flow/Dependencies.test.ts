@@ -15,11 +15,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Cli from "@smthrs/migrate/flow/Cli"
 import * as Report from "@smthrs/migrate/Report"
+import ts from "@typescript/typescript6"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import ts from "typescript"
 
 const packageRoot = fileURLToPath(new URL("../..", import.meta.url))
 const sourceRoot = join(packageRoot, "src")

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import ts from "@typescript/typescript6"
 import * as Effect from "effect/Effect"
-import ts from "typescript"
 import * as Constructs from "../src/Constructs.ts"
 import * as Detect from "../src/Detect.ts"
 import * as Inventory from "../src/Inventory.ts"
@@ -80,7 +80,7 @@ const auditPairs: ReadonlyArray<{
       "  <Task id=\"second\" output={outputs.value}>{() => ({ value: \"second\" })}</Task>",
       "</Sequence></Workflow>)"
     ].join("\n"),
-    expects: "First.call({}).pipe(Node.andThen((first) => Second.call({})))",
+    expects: "First.call({}).pipe(Node.bindPlanned((first) => Second.call({})))",
     via: "snippet",
     construct: "Sequence"
   },
@@ -429,12 +429,30 @@ describe("Mapping.snippet", () => {
     }
   })
 
-  it("rewrites an old CLI invocation as the plan, approve, run triple", () => {
+  it("rewrites an old CLI invocation with the same checked command mapper as manifests", () => {
     const text = Mapping.snippet(hit("smithers up", [], { command: "smithers up review.tsx" }))
 
-    expect(text).toContain("smthrs plan")
-    expect(text).toContain("smthrs approve")
-    expect(text).toContain("smthrs run")
+    expect(text).toBe("smthrs flow start review")
+    expect(Mapping.snippet(hit("smithers up", [], { command: "smithers up review.tsx --max-concurrency 8" })))
+      .toBeUndefined()
+    expect(Mapping.snippet(hit("smithers up"))).toBeUndefined()
+  })
+
+  it("claims an automatic CLI rewrite only when the actual invocation can be mapped", () => {
+    expect(Mapping.classify(hit("smithers up", [], { command: "smithers up review.tsx --input '{}'" })))
+      .toBe("automatic")
+    for (
+      const entry of [
+        hit("smithers up"),
+        hit("smithers up", [], { command: "smithers up review.tsx --max-concurrency 8" }),
+        hit("smithers workflow", [], { command: "smithers workflow inspect review.tsx" }),
+        hit("smithers ps", [], { command: "smithers ps" }),
+        hit("smithers cancel", [], { command: "smithers cancel run-1" })
+      ]
+    ) {
+      expect(Mapping.classify(entry), entry.construct).toBe("guided")
+      expect(Mapping.snippet(entry), entry.construct).toBeUndefined()
+    }
   })
 
   it("gives no snippet for a construct with no safe translation", () => {
@@ -474,7 +492,7 @@ describe("Mapping.snippet", () => {
   })
 
   it("drops a chain whose step reads a value no longer in scope", () => {
-    // `Node.andThen` binds one value. A third step that reads the first step's
+    // `Node.bindPlanned` binds one value. A third step that reads the first step's
     // answer cannot see it, so the rewrite that pretended it could would not
     // compile.
     const sequence = hit("Sequence", [], {
@@ -660,7 +678,7 @@ describe("Mapping threads a sequence the way the golden fixture does", () => {
     expect(Mapping.classify(sequence!)).toBe("automatic")
     expect(Mapping.snippet(sequence!)).toBe(
       "Check.call({})" +
-        ".pipe(Node.andThen((check) => Advise.call({ issues: check.issues, score: check.score, summary: check.summary })))"
+        ".pipe(Node.bindPlanned((check) => Advise.call({ issues: check.issues, score: check.score, summary: check.summary })))"
     )
   })
 })

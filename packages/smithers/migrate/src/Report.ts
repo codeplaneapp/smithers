@@ -11,8 +11,10 @@
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import type { Detection } from "./Detect.ts"
+import * as Fs from "./internal/Fs.ts"
 import * as Sort from "./internal/Sort.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import type { MappingClass } from "./Mapping.ts"
@@ -949,20 +951,24 @@ export const toMarkdown = (report: MigrationReport): string => {
 /**
  * Writes `report.json` and `report.md` into `directory`.
  *
+ * Both land atomically: the report is the file a person opens first after a
+ * run that went wrong, and that is exactly the run whose last write may have
+ * been cut in half.
+ *
  * @category combinators
  * @since 1.0.0-rc.0
  */
 export const write = (
   directory: string,
   report: MigrationReport
-): Effect.Effect<ReadonlyArray<string>, MigrateError, FileSystem.FileSystem> =>
+): Effect.Effect<ReadonlyArray<string>, MigrateError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     yield* fs.makeDirectory(directory, { recursive: true })
     const json = `${directory}/report.json`
     const markdown = `${directory}/report.md`
-    yield* fs.writeFileString(json, toJson(report))
-    yield* fs.writeFileString(markdown, toMarkdown(report))
+    yield* Fs.writeAtomic(json, toJson(report))
+    yield* Fs.writeAtomic(markdown, toMarkdown(report))
     return [json, markdown]
   }).pipe(Effect.mapError(io(`could not write the report into "${directory}"`)))
 

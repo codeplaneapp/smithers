@@ -14,10 +14,13 @@ import { Capability, GrantStore, Workspace } from "@smthrs/kernel"
 import * as Command from "@smthrs/migrate/flow/Command"
 import type * as Contract from "@smthrs/migrate/flow/Contract"
 import * as Layers from "@smthrs/migrate/flow/Layers"
+import * as Transform from "@smthrs/migrate/flow/Transform"
 import * as Scan from "@smthrs/migrate/Scan"
 import * as Units from "@smthrs/migrate/Units"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { copyFixture, nodeLayer } from "../fixtures/helpers.ts"
 
 const root = Effect.runSync(Layers.migrationRoot("/tmp/project"))
@@ -225,6 +228,58 @@ describe("Layers.rules over a real grant store", () => {
       GrantStore.layer({
         attended: false,
         rules: Layers.rules({ root, runStatePaths, commands: { typecheck: [], flowsDir: "flows" } })
+      }).pipe(Layer.provide(Workspace.layer(root)), Layer.orDie)
+    )))
+})
+
+describe("Layers.rules over run-state paths outside the project", () => {
+  const gateway = "/tmp/smithers-gateway/workspaces.json"
+
+  it.effect("carries a gateway state file from the scan to a deny on its own absolute path", () =>
+    Effect.gen(function*() {
+      const project = copyFixture("jsx-single")
+      const temporary = copyFixture("jsx-single")
+      mkdirSync(join(temporary, "smithers-gateway"), { recursive: true })
+      writeFileSync(
+        join(temporary, "smithers-gateway", "gateway.json"),
+        JSON.stringify({ workspace: project, port: 7331 })
+      )
+
+      const scanned = yield* Scan.scan(project, { runState: { tmpdir: temporary } }).pipe(Effect.provide(nodeLayer))
+      const paths = Transform.runStatePaths(scanned)
+      const built = Layers.rules({ root, runStatePaths: paths, commands })
+      const denied = built.filter((rule) => rule.effect === "deny").map((rule) => rule.pattern.resource)
+
+      const file = join(temporary, "smithers-gateway", "gateway.json")
+      expect(paths).toContain(file)
+      expect(denied).toContain(file)
+      expect(denied).toContain(`${file}/**`)
+    }).pipe(Effect.provide(nodeLayer)))
+
+  it("denies an absolute gateway state path by its own path, not by one joined under the root", () => {
+    const built = Layers.rules({ root, runStatePaths: [gateway], commands })
+    const denied = built.filter((rule) => rule.effect === "deny").map((rule) => rule.pattern.resource)
+
+    // Joined under the root the pattern is `${root}//tmp/...`, which matches
+    // nothing: the file would sit outside every rule while the report calls
+    // it covered.
+    expect(denied).toContain(gateway)
+    expect(denied).toContain(`${gateway}/**`)
+    expect(denied.some((resource) => resource.includes("//tmp"))).toBe(false)
+  })
+
+  it.effect("keeps the store's answer for the gateway file a refusal", () =>
+    Effect.gen(function*() {
+      const grants = yield* GrantStore.GrantStore
+      const allowed = yield* grants.check(Capability.make("fs:write", gateway)).pipe(
+        Effect.as(true),
+        Effect.catch(() => Effect.succeed(false))
+      )
+      expect(allowed).toBe(false)
+    }).pipe(Effect.provide(
+      GrantStore.layer({
+        attended: false,
+        rules: Layers.rules({ root, runStatePaths: [gateway], commands })
       }).pipe(Layer.provide(Workspace.layer(root)), Layer.orDie)
     )))
 })

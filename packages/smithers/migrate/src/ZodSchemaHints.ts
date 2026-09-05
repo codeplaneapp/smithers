@@ -13,7 +13,7 @@
  *
  * @since 1.0.0-rc.0
  */
-import ts from "typescript"
+import * as ts from "typescript/unstable/ast"
 import type { Detection } from "./Detect.ts"
 import * as Sort from "./internal/Sort.ts"
 import * as Ts from "./internal/Ts.ts"

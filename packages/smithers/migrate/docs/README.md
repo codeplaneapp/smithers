@@ -18,6 +18,10 @@ behind `any`, and never rewrites or resumes 0.x run state.
 npx @smthrs/migrate
 ```
 
+The Smithers 1.0 packages are not on npm yet, so that line resolves once they
+publish. [Installation](./installation.md) has the route from a source checkout
+until then.
+
 That command plans. It reads the project, decides what each unit of work would
 be, writes `.smithers-migrate/report.md`, and changes nothing else. You read
 the report, then decide whether to run `--apply`.
@@ -31,6 +35,21 @@ the report, then decide whether to run `--apply`.
 | `apply` | Checkpoints, rewrites one unit, verifies it, archives the old sources, and repeats. | The project, and the report. |
 
 Only `apply` edits anything, and only when you pass `--apply`.
+
+## Where this sits in Smithers
+
+`@smthrs/migrate` is a tool you run once, not part of the runtime you end up
+on. What it produces is a project that runs on [`@smthrs/cli`](/api/cli), the
+`smthrs` executable every Smithers command lives under: `smthrs flow start` to
+start a flow, `smthrs flow list` to list the flows a project has, `smthrs doctor` to check
+one. Install that package after the migration to use what the migration wrote.
+
+You can also install it first. `@smthrs/cli` carries this same tool as the
+[`smthrs migrate`](/cli/migrate) verb, over the same entry point and the same
+flags. Reach for `npx @smthrs/migrate` when the project is still on 0.x and you
+want to install nothing at all, and for `smthrs migrate` when the CLI is
+already there. [Installation](./installation.md) covers the two differences
+between them.
 
 ## Two gates stand before any edit
 
@@ -56,7 +75,7 @@ installing the 1.0 runtime.
 | Module           | What it reads or decides                                                                                                   |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `MigrateError`   | The single failure type, with the code the CLI maps onto an exit status.                                                   |
-| `Constructs`     | The catalog of every 0.x construct application code can import, with the file in the old tree that defined it.             |
+| `Constructs`     | The catalog of every 0.x construct application code can import, with the Smithers 0.x file that defined it.                |
 | `Mapping`        | What each construct becomes, the class of the rewrite, and the rewrite text for automatic rows.                            |
 | `Detect`         | Packages, lockfiles, imports, pragmas, tsconfig chains, workflow and prompt files, components, tests, scripts, and config. |
 | `RunState`       | Read-only detection of live and parked runs, SQLite databases, Postgres settings, and the operator instructions.           |

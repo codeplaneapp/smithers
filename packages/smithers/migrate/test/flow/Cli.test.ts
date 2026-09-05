@@ -12,6 +12,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Cli from "@smthrs/migrate/flow/Cli"
+import * as Lock from "@smthrs/migrate/flow/Lock"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import { CliConfig, Command } from "effect/unstable/cli"
@@ -66,6 +67,21 @@ describe("the smithers-migrate command in process", () => {
 
       expect(status).toBe(3)
       expect(hashTree(root)).toEqual(before)
+    }))
+
+  it.live("parks a second apply over a live lock with exit 3 and touches nothing", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      // Held by this process, which is alive: exactly what a concurrent apply
+      // in another process looks like to the lock.
+      const held = yield* Lock.acquire({ root, reportDir: ".out" }).pipe(Effect.provide(NodeServices.layer))
+      const before = hashTree(root)
+
+      const status = yield* run(["--root", root, "--apply", "--report-dir", ".out"])
+
+      expect(status).toBe(3)
+      expect(hashTree(root)).toEqual(before)
+      yield* Lock.release(held).pipe(Effect.provide(NodeServices.layer))
     }))
 
   it.live("refuses a report directory that could leave the project with exit 1", () =>

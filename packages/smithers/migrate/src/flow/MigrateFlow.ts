@@ -7,7 +7,7 @@
  *
  * ## Why the units are in the payload
  *
- * A flow body is plan time: `Node.andThen`'s builder runs once, against a
+ * A flow body is plan time: `Node.bindPlanned`'s builder runs once, against a
  * placeholder, before anything executes. A graph therefore cannot fan out over
  * a list the scan step returns at run time — the same constraint
  * `@smthrs/patterns`' `MapReduce` states as "the flow input must be a literal
@@ -1052,7 +1052,9 @@ const writeUnitReport = (
     const path = yield* Path.Path
     const file = path.join(options.root, ...unitArtifact(options, outcome.id).split("/"))
     yield* fs.makeDirectory(path.dirname(file), { recursive: true })
-    yield* fs.writeFileString(file, `${JSON.stringify(encodeUnit(outcome), null, 2)}\n`)
+    // Atomically: a crashed run is read back through these artifacts, so one
+    // must never hold half a report.
+    yield* Fs.writeAtomic(file, `${JSON.stringify(encodeUnit(outcome), null, 2)}\n`)
   }).pipe(Effect.mapError(io(`could not record the report of unit "${outcome.id}"`)))
 
 /**
@@ -1295,7 +1297,7 @@ export const unit = Flow.make(unitTag, {
     // checkpoint's own record feeds the capture, the capture feeds the
     // rewrite, the rewrite's account of what it changed feeds the
     // verification, and both feed the step that settles the unit.
-    return Node.andThen(
+    return Node.bindPlanned(
       Checkpoint.action.call({
         root: options.root,
         unit: outline.id,
@@ -1346,7 +1348,7 @@ export const unit = Flow.make(unitTag, {
           attempt: number,
           rewrite: Node.Node<Transform.UnitResult, MigrateError | AgentAction.AgentFailure, UnitRequires>
         ): Node.Node<UnitOutcome, MigrateError | AgentAction.AgentFailure, UnitRequires> =>
-          Node.andThen(rewrite, (result) =>
+          Node.bindPlanned(rewrite, (result) =>
             Node.branch(
               Verify.action.call({
                 root: options.root,
@@ -1360,7 +1362,7 @@ export const unit = Flow.make(unitTag, {
                 else: (verification) =>
                   attempt >= rounds
                     ? settleWith(result, verification, attempt)
-                    : Node.andThen(
+                    : Node.bindPlanned(
                       // A repair round is shown the sources as they are now,
                       // not as the unit found them: the previous round edited
                       // them, and a prompt that hid that would ask for the
@@ -1382,7 +1384,7 @@ export const unit = Flow.make(unitTag, {
             ))
 
         return Node.catch(
-          Node.andThen(
+          Node.bindPlanned(
             Transform.captureAction.call({ outline, checkpoint }),
             (brief) => round(0, Transform.action.call({ unit: brief }))
           ),
@@ -1414,10 +1416,10 @@ export const flow = Flow.make(tag, {
   success: Report.MigrationReport,
   error: MigrateError,
   body: ({ generatedAt, options, runStateRoots, seal, units }) =>
-    Node.andThen(
+    Node.bindPlanned(
       scanAction.call({ options, generatedAt }),
       (report) =>
-        Node.andThen(
+        Node.bindPlanned(
           gateAction.call({ report, options, unitIds: units.map((outlined) => outlined.id) }),
           (approved) => {
             if (options.mode !== "apply") {
@@ -1458,12 +1460,12 @@ export const flow = Flow.make(tag, {
                   onFailure: (failure) => settleAction.call({ options: approved, outline: outlined, failure })
                 }
               )
-              return Node.andThen(settled, (id) => step(index + 1, id))
+              return Node.bindPlanned(settled, (id) => step(index + 1, id))
             }
             // The seal runs after the gate and reads the tree once more; the
             // first unit runs after the seal, and says so with the root the
             // seal approved. Every later unit runs after the one before it.
-            return Node.andThen(
+            return Node.bindPlanned(
               sealAction.call({ options: approved, seal }),
               (sealed) => step(0, sealed.root)
             )

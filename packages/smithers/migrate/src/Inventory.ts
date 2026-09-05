@@ -16,7 +16,7 @@
  */
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
-import ts from "typescript"
+import * as ts from "typescript/unstable/ast"
 import * as Constructs from "./Constructs.ts"
 import * as Detect from "./Detect.ts"
 import * as Sort from "./internal/Sort.ts"
@@ -751,12 +751,15 @@ export const scanFile = (
         const options = node.arguments?.[0]
         const props = options !== undefined && ts.isObjectLiteralExpression(options)
           ? options.properties.flatMap((property) =>
-            property.name !== undefined && ts.isIdentifier(property.name) ? [property.name.text] : []
+            "name" in property && property.name !== undefined && ts.isIdentifier(property.name)
+              ? [property.name.text]
+              : []
           )
           : []
         const model = options !== undefined && ts.isObjectLiteralExpression(options)
           ? options.properties.find((property) =>
-            property.name !== undefined && ts.isIdentifier(property.name) && property.name.text === "model"
+            "name" in property && property.name !== undefined && ts.isIdentifier(property.name) &&
+            property.name.text === "model"
           )
           : undefined
         const detail = model !== undefined && ts.isPropertyAssignment(model) && ts.isStringLiteral(model.initializer)

@@ -75,7 +75,14 @@ export const Ref = Schema.Struct({
   entries: Schema.Array(Schema.Struct({
     path: Schema.String,
     state: Schema.Literals(["absent", "file"]),
-    digest: Schema.optional(Schema.String)
+    digest: Schema.optional(Schema.String),
+    /**
+     * The file's permission bits (`stat.mode & 0o777`) at the checkpoint, so
+     * a restore puts back an executable or a read-only file rather than the
+     * default mode `writeFile` gives everything. Absent in checkpoints taken
+     * before this field existed; those restore the way they always did.
+     */
+    mode: Schema.optional(Schema.Number)
   })),
   /**
    * A digest of every file under the project's 0.x run-state paths, taken
@@ -146,7 +153,7 @@ export const action = Action.make("smithers/migrate-v1/Checkpoint", {
     files: Schema.Array(Schema.String),
     backupDir: Schema.String,
     allowNoVcs: Schema.Boolean,
-    /** Project-relative directories holding 0.x run state, digested as they are. */
+    /** Directories holding 0.x run state, digested as they are. Project-relative, or absolute for gateway state outside the project. */
     runStateRoots: Schema.optional(Schema.Array(Schema.String)),
     /**
      * Project-relative paths the whole-tree manifest leaves out: the report
@@ -210,7 +217,9 @@ const pending = (
     yield* fs.makeDirectory(path.dirname(file), { recursive: true }).pipe(
       Effect.mapError(io(`could not create ${path.dirname(file)}`))
     )
-    yield* fs.writeFileString(file, `${JSON.stringify(record, null, 2)}\n`).pipe(
+    // Atomically: this file is the crash-recovery record, so a crash halfway
+    // through writing it must not leave one that cannot be read back.
+    yield* Fs.writeAtomic(file, `${JSON.stringify(record, null, 2)}\n`).pipe(
       Effect.mapError(io(`could not record the pending checkpoint ${file}`))
     )
     return ref
@@ -227,6 +236,8 @@ export interface Entry {
   readonly path: string
   readonly state: "absent" | "file"
   readonly digest?: string | undefined
+  /** The permission bits the path carried at the checkpoint, when recorded. */
+  readonly mode?: number | undefined
 }
 
 const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex")
@@ -281,13 +292,19 @@ const backup = (
       )
       yield* fs.writeFile(target, bytes).pipe(Effect.mapError(io(`could not back up ${file}`)))
       yield* verifiedBytes(fs, target, digest, `the backup of ${file}`)
-      entries.push({ path: file, state: "file", digest })
+      entries.push({ path: file, state: "file", digest, mode: info.value.mode & 0o777 })
     }
     return entries
   })
 
 /**
- * Digests every file under the given project-relative roots.
+ * Digests every file under the given roots.
+ *
+ * Most roots are project-relative. A gateway state directory is outside the
+ * project and arrives absolute; it is digested where it is, keyed by its
+ * absolute path, rather than joined under the root onto a path that holds
+ * nothing — which is what used to make the byte-identity check cover a
+ * nonexistent file while the real one went unwatched.
  *
  * @category combinators
  * @since 1.0.0-rc.0
@@ -308,10 +325,14 @@ export const digest = (
     // reached through a symlink cycle would otherwise be walked forever, and
     // reached twice by two names it would be digested twice.
     const walked = new Set<string>()
+    // Absolute roots are taken as they are; relative ones join under the
+    // project. A child of either keeps its parent's form, because the walk
+    // only ever appends a name.
+    const target = (relative: string): string =>
+      path.isAbsolute(relative) ? relative : path.join(root, ...relative.split("/"))
     const walk = (relative: string, rootEntry: boolean): Effect.Effect<void, MigrateError, never> =>
       Effect.gen(function*() {
-        const target = path.join(root, ...relative.split("/"))
-        const info = yield* optionalNotFound(fs.stat(target)).pipe(
+        const info = yield* optionalNotFound(fs.stat(target(relative))).pipe(
           Effect.mapError(io(`could not inspect the run-state path "${relative}"`))
         )
         if (Option.isNone(info)) {
@@ -319,18 +340,18 @@ export const digest = (
           return yield* Effect.fail(make("io", `run-state path "${relative}" disappeared during checkpointing`))
         }
         if (info.value.type === "Directory") {
-          const real = yield* fs.realPath(target).pipe(
+          const real = yield* fs.realPath(target(relative)).pipe(
             Effect.mapError(io(`could not resolve the run-state path "${relative}"`))
           )
           if (walked.has(real)) return
           walked.add(real)
-          const entries = yield* fs.readDirectory(target).pipe(
+          const entries = yield* fs.readDirectory(target(relative)).pipe(
             Effect.mapError(io(`could not list the run-state path "${relative}"`))
           )
           for (const entry of [...entries].sort()) yield* walk(`${relative}/${entry}`, false)
           return
         }
-        const bytes = yield* fs.readFile(target).pipe(
+        const bytes = yield* fs.readFile(target(relative)).pipe(
           Effect.mapError(io(`could not read the run-state path "${relative}"`))
         )
         found.push({ path: relative, digest: sha256(bytes) })
@@ -543,7 +564,6 @@ export const take = (payload: {
   readonly treeExclude?: ReadonlyArray<string> | undefined
 }): Effect.Effect<Ref, MigrateError, FileSystem.FileSystem | Path.Path | ChildProcessSpawner> =>
   Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const takenAt = yield* Clock.currentTimeMillis
     const vcs = yield* detectVcs(payload.root).pipe(
@@ -565,7 +585,7 @@ export const take = (payload: {
     const walked = yield* tree(payload.root, [
       ...new Set([...(payload.treeExclude ?? []), ...(payload.runStateRoots ?? [])])
     ])
-    yield* fs.writeFileString(manifest, `${JSON.stringify(walked)}\n`).pipe(
+    yield* Fs.writeAtomic(manifest, `${JSON.stringify(walked)}\n`).pipe(
       Effect.mapError(io(`could not record the tree manifest ${manifest}`))
     )
     const recorded = { backup: directory, files, entries, digests, takenAt, tree: manifest }
@@ -746,6 +766,11 @@ export const restore = (
         Effect.mapError(io(`could not create ${path.dirname(target)}`))
       )
       yield* fs.writeFile(target, before).pipe(Effect.mapError(io(`could not restore ${file}`)))
+      // The mode goes back before the digest is verified: bytes and
+      // permissions are the same record, and an executable source stays one.
+      if (entry.mode !== undefined) {
+        yield* fs.chmod(target, entry.mode).pipe(Effect.mapError(io(`could not restore the mode of ${file}`)))
+      }
       yield* verifiedBytes(fs, target, entry.digest, `the restored path ${file}`)
       restored.push(file)
     }
@@ -906,7 +931,7 @@ export const recordRollback = (
       catch: io(`could not read the pending checkpoint ${file}`)
     })
     if (record.checkpoint.ref !== ref.ref || record.takenAt !== ref.takenAt) return
-    yield* fs.writeFileString(file, `${JSON.stringify({ ...record, rollback }, null, 2)}\n`).pipe(
+    yield* Fs.writeAtomic(file, `${JSON.stringify({ ...record, rollback }, null, 2)}\n`).pipe(
       Effect.mapError(io(`could not update the pending checkpoint ${file}`))
     )
   })

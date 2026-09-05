@@ -175,6 +175,7 @@ export const reservedDirectories: ReadonlyArray<string> = [".flows", ".git", ".j
  * @since 1.0.0-rc.0
  */
 export const reportDirEntries: ReadonlyArray<string> = [
+  "apply.lock",
   "archive",
   "backup",
   "pending-unit.json",
@@ -414,7 +415,9 @@ export const validateLayout = (
     // The report directory, when it already exists, holds the tool's own
     // files and nothing else. The scan skips it wholesale, so a project
     // directory named as the report directory would otherwise vanish from the
-    // plan and then receive the archive.
+    // plan and then receive the archive. A leftover atomic-write temporary —
+    // the tool's own file, interrupted mid-rename by a crash — is tolerated
+    // rather than reported as foreign.
     const path = yield* Path.Path
     const report = path.join(options.root, ...reportDir(options).split("/"))
     const info = yield* Fs.optionalNotFound(fs.stat(report)).pipe(
@@ -429,7 +432,7 @@ export const validateLayout = (
     const entries = yield* fs.readDirectory(report).pipe(
       Effect.mapError((cause) => make("io", `could not list the report directory "${report}"`, String(cause)))
     )
-    const foreign = entries.filter((entry) => !reportDirEntries.includes(entry)).sort()
+    const foreign = entries.filter((entry) => !reportDirEntries.includes(entry) && !Fs.isStaleTemporary(entry)).sort()
     if (foreign.length > 0) {
       return yield* Effect.fail(make(
         "invalid-layout",

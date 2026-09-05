@@ -37,7 +37,7 @@ run-state directories, and covers:
 
 - Every manifest: the root `package.json`, each workspace member,
   `.smithers/package.json`, and any manifest next to a workflow file. A
-  dependency that only ever existed in the old tree is decided by name; one
+  dependency that only ever existed in Smithers 0.x is decided by name; one
   that exists in both trees is decided by version, against `<1.0.0-0`.
 - Every `effect` declaration in every manifest, and what the lockfile resolved
   `effect` to. Anything other than the pin this release was built against

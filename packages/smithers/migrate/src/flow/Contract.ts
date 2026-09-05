@@ -78,7 +78,7 @@ A workflow is a \`Flow\`. A step is an \`Action\`. A model-backed step is an
 - \`AgentAction.make(tag, { payload, output, seat, system, prompt })\` from
   \`@smthrs/agent/AgentAction\` declares a model call. The author never writes
   \`toLayer\`; the implementation ships as \`.layer\`.
-- \`Node.andThen\`, \`Node.all\`, \`Node.branch\`, \`Node.map\`, \`Node.catch\`
+- \`Node.bindPlanned\`, \`Node.all\`, \`Node.branch\`, \`Node.map\`, \`Node.catch\`
   from \`@smthrs/plan\` are sequence, fan-out, condition, projection, and
   recovery. Plan width is fixed at plan time: fanning out over something a step
   discovered means ending the round and carrying the list in the next flow's
@@ -187,7 +187,7 @@ const Second = Action.make("audit/Second", {
 const SequenceFlow = Flow.make("audit/Sequence", {
   payload: {},
   success: Schema.Array(Schema.String),
-  body: () => First.call({}).pipe(Node.andThen((first) => Second.call({ first })))
+  body: () => First.call({}).pipe(Node.bindPlanned((first) => Second.call({ first })))
 })`
   },
   {
@@ -262,7 +262,7 @@ export const SimpleWorkflow = Flow.make("examples/SimpleWorkflow", {
   error: AgentAction.AgentFailure,
   body: ({ topic }) =>
     Research.call({ topic }).pipe(
-      Node.andThen((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
+      Node.bindPlanned((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
     )
 })`
   }

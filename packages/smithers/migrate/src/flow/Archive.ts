@@ -31,6 +31,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Detect from "../Detect.ts"
+import * as CliScripts from "../internal/CliScripts.ts"
 import * as Fs from "../internal/Fs.ts"
 import * as Jsonc from "../internal/Jsonc.ts"
 import * as Versions from "../internal/Versions.ts"
@@ -109,12 +110,6 @@ export const pinFor = (name: string): string | undefined =>
     ? smithersVersion
     : undefined
 
-const oldCliPattern =
-  /(?:^|\s)(?:(?:bunx|npx|pnpm\s+dlx|pnpm\s+exec)\s+(?:smthrs|smithers-orchestrator)|smithers)\s+(up|workflow\s+run)\s+(\S+)/
-
-const otherVerb =
-  /(?:^|\s)smithers\s+(ui|gui|gateway|serve|hijack|eval|optimize|timeline|snapshots|restore|revert|worktrees|cron|listeners|monitor|supervise|share|packs?|docs|docs-full|graph|tree|diff|output|events|tail|down|bug|agents|memory|openapi|token|claude|gc|init|add|upgrade|migrate|human|ask-human|retry-task|rewind|fork|replay|signal|pause|inspect|approve|deny)\b/
-
 /**
  * What one script line became, and why.
  *
@@ -132,8 +127,8 @@ export interface ScriptRewrite {
  * Rewrites the old CLI invocations in a script map.
  *
  * `smithers up <file>` and `smithers workflow run <file>` become
- * `smthrs run <flow>`, because that is the verb that exists. A verb with no
- * 1.0 counterpart is left exactly as it is and reported: silently deleting a
+ * `smthrs flow start <flow>`, with explicit input and detach flag translation.
+ * A command that cannot be safely mapped is left exactly as it is and reported: silently deleting a
  * script an operator depends on would be worse than leaving one that fails
  * loudly.
  *
@@ -143,24 +138,7 @@ export interface ScriptRewrite {
 export const rewriteScripts = (
   scripts: Readonly<Record<string, string>>
 ): ReadonlyArray<ScriptRewrite> =>
-  Object.entries(scripts).map(([name, before]) => {
-    const match = oldCliPattern.exec(before)
-    if (match !== null) {
-      const flow = Units.flowName(match[2]!)
-      const after = before.replace(match[0], `${match[0].startsWith(" ") ? " " : ""}smthrs run ${flow}`)
-      return { name, before, after }
-    }
-    const other = otherVerb.exec(before)
-    if (other !== null) {
-      return {
-        name,
-        before,
-        after: before,
-        unsupported: `\`smithers ${other[1]}\` has no 1.0 counterpart`
-      }
-    }
-    return { name, before, after: before }
-  })
+  Object.entries(scripts).map(([name, before]) => ({ name, before, ...CliScripts.rewrite(before, Units.flowName) }))
 
 /**
  * Rewrites a `package.json`: old packages out, the 1.0 packages in, the old
@@ -546,6 +524,9 @@ export const run = (payload: {
     const copied: Array<{ readonly file: string; readonly bytes: number }> = []
     for (const file of archivable) {
       const source = path.join(payload.root, ...file.split("/"))
+      const info = yield* Fs.optionalNotFound(fs.stat(source)).pipe(
+        Effect.mapError(io(`could not inspect ${file} to archive it`))
+      )
       const bytes = yield* Fs.optionalNotFound(fs.readFile(source)).pipe(
         Effect.mapError(io(`could not read ${file} to archive it`))
       )
@@ -555,6 +536,13 @@ export const run = (payload: {
         Effect.mapError(io(`could not create ${path.dirname(target)}`))
       )
       yield* fs.writeFile(target, bytes.value).pipe(Effect.mapError(io(`could not archive ${file}`)))
+      // The copy is the record of the file as it was, permissions included:
+      // an executable source reads back as one from the archive.
+      if (info._tag === "Some") {
+        yield* fs.chmod(target, info.value.mode & 0o777).pipe(
+          Effect.mapError(io(`could not keep the mode of ${file} in its archive copy`))
+        )
+      }
       copied.push({ file, bytes: bytes.value.length })
     }
     // Phase two: now that every copy exists, the originals go.

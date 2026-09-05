@@ -11,7 +11,7 @@ them.
 
 ## Before you start
 
-- Node.js 22.19.0 or later.
+- Node.js 22.19+ (Node 22) or 24.11+.
 - A Smithers 0.x project: JSX workflows under `.smithers/workflows/`, an
   `examples/` tree, or a `.smithers` pack.
 - A clean working copy in jj or git. Each unit is checkpointed before it edits
@@ -101,13 +101,16 @@ the model with the failing output, three times by default and
 restored from its checkpoint, recorded as `failed`, and the next unit runs. The
 run exits 1 when any unit failed.
 
-Two refusals exit 3 with the project untouched, and each is a decision you have
-to make rather than a bug to work around:
+Three refusals exit 3 with the project untouched, and each is a decision you
+have to make rather than a bug to work around:
 
 - `run-state-blocked`: the project still holds 0.x run state. See
   [Clear 0.x run state before you apply](./guides/clear-run-state.md).
 - `unsafe-blocked`: the project uses a construct with no safe translation. See
   [Accept constructs with no safe translation](./guides/allow-unsafe-constructs.md).
+- `apply-in-progress`: another apply run still holds this project's lock. Wait
+  for it; a lock whose process died is taken over by the next run, which says
+  so in its report.
 
 ## Read the result
 
@@ -120,7 +123,8 @@ When the run finishes, the tree has changed in four ways:
   replaced. `--keep-old-sources` leaves them in place instead.
 - `package.json`, `tsconfig*.json`, and `.gitignore` are rewritten where they
   are: the 0.x packages removed, `effect` pinned, `smithers up <file>` scripts
-  rewritten to `smthrs run <flow>`, the JSX compiler options and the old path
+  rewritten to `smthrs flow start <flow>` with input/detach flags translated,
+  the JSX compiler options and the old path
   mappings dropped, and `.flows/` ignored.
 - `.smithers-migrate/report.md` records all of it.
 

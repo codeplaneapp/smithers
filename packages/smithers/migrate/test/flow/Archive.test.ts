@@ -6,7 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Archive from "@smthrs/migrate/flow/Archive"
 import * as Effect from "effect/Effect"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { copyFixture, fixture } from "../fixtures/helpers.ts"
 
@@ -38,15 +38,15 @@ describe("Archive.rewriteManifest", () => {
       add: ["effect"]
     })
     expect((JSON.parse(text) as { dependencies: Record<string, string> }).dependencies.effect)
-      .toBe("4.0.0-rc.108")
+      .toBe("4.0.0-rc.112")
   })
 
-  it("rewrites `smithers up <file>` into `smthrs run <flow>`", () => {
+  it("rewrites `smithers up <file>` into the canonical flow start command", () => {
     const { scripts } = Archive.rewriteManifest(read("jsx-single", "package.json"), { remove: [], add: [] })
     const start = scripts.find((entry) => entry.name === "start")
 
     expect(start?.before).toContain("smithers up simple-workflow.jsx")
-    expect(start?.after).toBe("smthrs run simple-workflow --input '{\"topic\":\"x\"}'")
+    expect(start?.after).toBe("smthrs flow start simple-workflow --data '{\"topic\":\"x\"}'")
     expect(start?.unsupported).toBeUndefined()
   })
 
@@ -54,9 +54,9 @@ describe("Archive.rewriteManifest", () => {
     const { scripts } = Archive.rewriteManifest(read("plue-pack", "package.json"), { remove: [], add: [] })
 
     expect(scripts.find((entry) => entry.name === "ci")?.after)
-      .toBe("smthrs run pipelines/ci-fast -d")
+      .toBe("smthrs flow start pipelines/ci-fast --detached")
     expect(scripts.find((entry) => entry.name === "wf")?.after).toBe("smithers workflow run")
-    expect(scripts.find((entry) => entry.name === "wf")?.unsupported).toBeUndefined()
+    expect(scripts.find((entry) => entry.name === "wf")?.unsupported).toEqual(expect.any(String))
   })
 
   it("leaves a verb with no counterpart alone and reports it", () => {
@@ -66,7 +66,7 @@ describe("Archive.rewriteManifest", () => {
       name: "ui",
       before: "smithers ui --app",
       after: "smithers ui --app",
-      unsupported: "`smithers ui` has no 1.0 counterpart"
+      unsupported: "Legacy CLI command requires manual mapping to the 1.0 command tree"
     })
     expect(rewritten[1]?.unsupported).toBeUndefined()
   })
@@ -275,6 +275,27 @@ describe("Archive.run", () => {
         .toBe(read("jsx-single", "simple-workflow.jsx"))
     }).pipe(Effect.provide(platform)))
 
+  it.effect("keeps the source's mode in its archive copy", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      const archiveDir = join(root, ".smithers-migrate", "archive")
+      chmodSync(join(root, "simple-workflow.jsx"), 0o750)
+
+      yield* Archive.run({
+        root,
+        unit: "workflow:simple-workflow",
+        kind: "workflow",
+        targets: [],
+        sources: ["simple-workflow.jsx"],
+        archiveDir,
+        keepOldSources: false
+      })
+
+      // The copy is the record of the file as it was, permissions included.
+      expect(statSync(join(archiveDir, "simple-workflow.jsx")).mode & 0o777).toBe(0o750)
+      chmodSync(join(archiveDir, "simple-workflow.jsx"), 0o644)
+    }).pipe(Effect.provide(platform)))
+
   it.effect("leaves the sources in place when the operator asked to keep them", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
@@ -335,7 +356,7 @@ describe("Archive.run", () => {
       }
       expect(manifest.dependencies["smthrs"]).toBeUndefined()
       expect(manifest.dependencies["effect"]).toBe(Archive.effectVersion)
-      expect(manifest.scripts["start"]).toContain("smthrs run simple-workflow")
+      expect(manifest.scripts["start"]).toContain("smthrs flow start simple-workflow")
       const tsconfig = JSON.parse(readFileSync(join(root, "tsconfig.json"), "utf8")) as {
         compilerOptions: Record<string, unknown>
       }
@@ -385,7 +406,11 @@ describe("Archive.run", () => {
       })
 
       expect(result.unsupportedScripts).toEqual([
-        { script: "ui", file: "package.json", reason: "`smithers gui` has no 1.0 counterpart" }
+        {
+          script: "ui",
+          file: "package.json",
+          reason: "Legacy CLI command requires manual mapping to the 1.0 command tree"
+        }
       ])
       const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
         scripts: Record<string, string>

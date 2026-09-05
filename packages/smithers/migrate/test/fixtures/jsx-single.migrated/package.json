@@ -4,7 +4,7 @@
   "type": "module",
   "version": "0.0.0",
   "scripts": {
-    "start": "smthrs plan simple-workflow topic=x",
+    "start": "smthrs flow start simple-workflow --data '{\"topic\":\"x\"}'",
     "test": "vitest"
   },
   "dependencies": {
@@ -13,6 +13,6 @@
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "effect": "4.0.0-rc.112"
   }
 }

@@ -13,13 +13,15 @@
  *
  * @since 0.1.0
  */
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Command from "@smthrs/migrate/flow/Command"
 import * as Layers from "@smthrs/migrate/flow/Layers"
+import * as Lock from "@smthrs/migrate/flow/Lock"
 import * as MigrateFlow from "@smthrs/migrate/flow/MigrateFlow"
 import * as Transform from "@smthrs/migrate/flow/Transform"
 import * as Effect from "effect/Effect"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -723,5 +725,51 @@ describe("apply over a project that still holds run state", () => {
       yield* apply(root, { acknowledgeRunState: true, keepOldSources: true }, rewriting)
 
       expect(readFileSync(join(root, "package.json"), "utf8")).toBe(manifest)
+    }))
+})
+
+describe("apply under the report-directory lock", () => {
+  it.effect("refuses to start while another apply holds the lock, and leaves the project alone", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      committed(root)
+      // Held by this process, which is alive: exactly what a concurrent apply
+      // in another process looks like to the lock.
+      const held = yield* Lock.acquire({ root, reportDir: ".smithers-migrate" }).pipe(
+        Effect.provide(NodeServices.layer)
+      )
+
+      const failure = yield* Effect.flip(apply(root))
+
+      expect(failure.code).toBe("apply-in-progress")
+      expect(failure.message).toContain(`pid ${process.pid}`)
+      // Nothing ran: no pending marker, no backups, the source untouched.
+      expect(existsSync(join(root, ".smithers-migrate", "pending-unit.json"))).toBe(false)
+      expect(existsSync(join(root, ".smithers-migrate", "backup"))).toBe(false)
+      expect(existsSync(join(root, "simple-workflow.jsx"))).toBe(true)
+
+      yield* Lock.release(held).pipe(Effect.provide(NodeServices.layer))
+    }))
+
+  it.effect("takes over a dead run's lock, notes it in the report, and gives the lock back", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      committed(root)
+      // A lock whose pid is gone: a process that really ran and really exited.
+      const pid = spawnSync(process.execPath, ["-e", ""]).pid
+      mkdirSync(join(root, ".smithers-migrate"), { recursive: true })
+      writeFileSync(
+        join(root, ".smithers-migrate", "apply.lock"),
+        `${JSON.stringify({ pid, startedAt: "2026-01-01T00:00:00.000Z", root })}\n`
+      )
+
+      const { report } = yield* apply(root)
+
+      expect(report.units.every((unit) => unit.status === "migrated")).toBe(true)
+      const note = report.followUps.find((entry) => entry.severity === "info" && entry.text.includes(String(pid)))
+      expect(note?.text).toContain("took over the lock")
+      // The report on disk carries the note, and the run gave the lock back.
+      expect(readFileSync(join(root, ".smithers-migrate", "report.json"), "utf8")).toContain("took over the lock")
+      expect(existsSync(join(root, ".smithers-migrate", "apply.lock"))).toBe(false)
     }))
 })

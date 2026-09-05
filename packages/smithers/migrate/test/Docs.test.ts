@@ -4,11 +4,8 @@
  * falls behind the code, so a new module or a new mapping row cannot land
  * undocumented.
  *
- * They read `docs/api.md`, the prose the package owns, and not the page that
- * prose is projected onto: `scripts/docs.mjs` writes
- * `docs/pages/migration/migrate-tool.md` and its `--check` form is the gate
- * that the page matches this source, so a package test that reached out of the
- * package would be asserting the generator's output twice over.
+ * They read `docs/api.md`, the prose the package owns, and not the copy the
+ * docs site is stitched from, which the site's own drift gate checks.
  *
  * @since 1.0.0-rc.0
  */

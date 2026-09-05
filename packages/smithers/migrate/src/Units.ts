@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema"
 import type { Detection, SpecifierContext } from "./Detect.ts"
 import { localPackageName } from "./Detect.ts"
 import * as CommandLine from "./internal/CommandLine.ts"
+import * as FlowNames from "./internal/FlowNames.ts"
 import * as Sort from "./internal/Sort.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import * as Mapping from "./Mapping.ts"
@@ -328,11 +329,7 @@ const renderArgv = (command: ArgvCommand): string => CommandLine.renderArgv(comm
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const flowName = (path: string): string => {
-  const match = /(?:^|\/)\.smithers\/workflows\/(.+)$/.exec(path)
-  const relative = match?.[1] ?? path
-  return relative.replace(/\.[^./]+$/, "")
-}
+export const flowName = FlowNames.fromPath
 
 /**
  * Every unit id carried by more than one plan, with the sources behind it.

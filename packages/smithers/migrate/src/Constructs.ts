@@ -2,9 +2,9 @@
  * The catalog of Smithers 0.x constructs an application can import.
  *
  * Every row names the construct as application code writes it, the kind of
- * thing it is, and the file in the old tree (`/Users/williamcory/smithers` at
- * `cfb570f193`, version 0.35.0) that defines it. The old source path is what
- * makes a mapping decision auditable: a reader can check the claim.
+ * thing it is, and the file in the Smithers 0.x source tree (version 0.35.0,
+ * commit `cfb570f193`) that defines it. The old source path is what makes a
+ * mapping decision auditable: a reader can check the claim.
  *
  * The catalog is data, not behavior. `Mapping` decides what each row becomes,
  * and `Inventory` decides which rows a project actually uses.

@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Generate `smthrs flow start <flow>` rather than the unrelated root `run`
+  command. Translate `--input` to `--data` and bare `-d` to `--detached`;
+  recognize the legacy `-d <literal JSON object>` data form without changing
+  it into detached execution. Preserve quoted inputs and environment values.
+- Share one checked script mapper between manifest rewrites and migration
+  snippets. Recognize command positions rather than rewriting quoted prose,
+  and preserve simple command lists. Unsupported flags, dynamic flow paths,
+  conflicting input flags, remote-detached combinations, shell control grammar
+  and redirections leave the entire original script unchanged with a report
+  entry. Missing workflow arguments are no longer silently claimed migrated.
+- Recognize literal package-runner version/tag suffixes, report unsupported
+  wrappers, and distinguish real shell assignments from quoted command names.
+  CLI inventory hits without a checked rewrite are guided, not automatic;
+  the `ps` and `cancel` targets are explicitly guided until implemented.
+
 ## [1.0.0-rc.0] - 2026-09-01
 
 ### Security

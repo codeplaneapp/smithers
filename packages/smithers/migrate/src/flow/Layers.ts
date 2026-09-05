@@ -293,10 +293,14 @@ export const rules = (options: {
     // read into a model call has left the machine, and a prompt sentence is
     // not an enforcement. `fs:*` is the read, the write, the listing, the
     // stat, and anything the kernel adds later.
-    ...options.runStatePaths.flatMap((relative) => [
-      deny("fs:*", `${root}/${relative}`),
-      deny("fs:*", `${root}/${relative}/**`)
-    ])
+    ...options.runStatePaths.flatMap((relative) => {
+      // A gateway state file is outside the project and arrives absolute. It
+      // is denied by its own path: joined under the root the pattern would
+      // match nothing, which is exactly the silent gap these rules exist to
+      // close.
+      const target = isAbsolute(relative) ? relative.replace(/\/+$/, "") : `${root}/${relative}`
+      return [deny("fs:*", target), deny("fs:*", `${target}/**`)]
+    })
   ]
 }
 

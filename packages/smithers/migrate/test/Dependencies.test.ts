@@ -8,10 +8,10 @@
  * @since 0.1.0
  */
 import { describe, expect, it } from "@effect/vitest"
+import ts from "@typescript/typescript6"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import ts from "typescript"
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 const sourceRoot = join(packageRoot, "src")
@@ -99,7 +99,13 @@ describe("the scan surface's dependency boundary", () => {
   })
 
   it("keeps the flow-lane packages out of the hard dependencies", () => {
-    expect(Object.keys(manifest.dependencies)).toEqual(["typescript"])
+    // The Node adapter owns its node-shared implementation dependency. The
+    // scanner declares only packages it imports directly.
+    expect(Object.keys(manifest.dependencies).sort()).toEqual([
+      "@effect/platform-node",
+      "effect",
+      "typescript"
+    ])
     expect(Object.keys(manifest.optionalDependencies).every((name) => name.startsWith("@smthrs/"))).toBe(true)
     expect(Object.keys(manifest.optionalDependencies)).toContain("@smthrs/registry")
   })

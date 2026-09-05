@@ -19,11 +19,11 @@ const brief: Contract.UnitBrief = {
   mapping: [
     {
       construct: "Sequence",
-      target: "Node.andThen",
+      target: "Node.bindPlanned",
       targetModule: "@smthrs/plan",
       rule: "Each child's planned value feeds the next call.",
       class: "automatic",
-      snippet: "First.call({}).pipe(Node.andThen((first) => Second.call({ first })))"
+      snippet: "First.call({}).pipe(Node.bindPlanned((first) => Second.call({ first })))"
     }
   ],
   hints: [
@@ -134,7 +134,7 @@ describe("Contract.unitPrompt", () => {
   it("lists the inventory rows, the mapping rows, and the rewrite snippet", () => {
     expect(prompt).toContain("| simple-workflow.jsx | 12 | Task | id, agent | automatic |")
     expect(prompt).toContain("### Sequence (automatic)")
-    expect(prompt).toContain("Node.andThen((first) => Second.call({ first }))")
+    expect(prompt).toContain("Node.bindPlanned((first) => Second.call({ first }))")
   })
 
   it("carries the hints with their captured text", () => {

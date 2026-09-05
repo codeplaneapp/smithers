@@ -318,6 +318,55 @@ export const read = (
     return yield* fs.readFileString(file)
   }).pipe(Effect.mapError(io(`could not read "${file}"`)))
 
+let atomicCounter = 0
+
+/**
+ * Writes a text file atomically: the whole text lands in a sibling temporary
+ * file first, and one rename moves it over the target.
+ *
+ * A reader of the file — a person opening `pending-unit.json` after a crash,
+ * the next run reading a unit artifact back — sees the old bytes or the new
+ * ones, never half of each. The temporary name carries the pid so two
+ * processes writing the same target never share one, and a counter so two
+ * writes in one process never do. A crash between the write and the rename
+ * leaves the temporary file behind; it matches {@link staleTemporary} and is
+ * tolerated rather than reported as a foreign file.
+ *
+ * The caller keeps its own error mapping: this fails with the platform's
+ * error, exactly as `fs.writeFileString` would.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const writeAtomic = (
+  file: string,
+  text: string
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const temporary = path.join(path.dirname(file), `.${path.basename(file)}.tmp-${process.pid}-${atomicCounter++}`)
+    yield* fs.writeFileString(temporary, text).pipe(
+      Effect.andThen(fs.rename(temporary, file)),
+      // A failure after the temporary file landed must not leave it behind:
+      // the report directory refuses entries that are not the tool's own.
+      Effect.onError(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
+    )
+  })
+
+/**
+ * Whether a directory entry is a leftover of a crashed {@link writeAtomic}.
+ *
+ * The report directory's layout check refuses files that are not the tool's
+ * own; a leftover temporary is the tool's own, interrupted. It is allowed to
+ * stay rather than failing the next run, and it is overwritten by nothing —
+ * the next atomic write takes a fresh name.
+ *
+ * @since 1.0.0-rc.0
+ * @private
+ */
+export const isStaleTemporary = (entry: string): boolean => /^\..+\.tmp-\d+-\d+$/.test(entry)
+
 /**
  * Reports whether a path exists.
  *

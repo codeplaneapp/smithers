@@ -11,9 +11,10 @@ import * as Schema from "effect/Schema"
 /**
  * The closed set of migration failure codes.
  *
- * `run-state-blocked` and `unsafe-blocked` are the two operator gates. Both
- * exit 3 ("parked") rather than 1: the project is intact and the operator has
- * a decision to make.
+ * `run-state-blocked` and `unsafe-blocked` are the two operator gates.
+ * `apply-in-progress` refuses a second apply over a project whose first one
+ * is still running. All three exit 3 ("parked") rather than 1: the project is
+ * intact and the operator has a decision to make.
  *
  * `invalid-layout` refuses a root, report directory, or flows directory that
  * could escape or overlap the project. `stale-plan` refuses an apply whose
@@ -26,6 +27,7 @@ import * as Schema from "effect/Schema"
 export const MigrateErrorCode = Schema.Literals([
   "run-state-blocked",
   "unsafe-blocked",
+  "apply-in-progress",
   "no-vcs",
   "checkpoint-failed",
   "verify-failed",

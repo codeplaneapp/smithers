@@ -13,16 +13,17 @@ you can read both before you run anything.
 
 `Constructs.constructs` is the catalog of everything application code can
 import from the 0.x facade and from `@smthrs/components`. Each row names the
-construct as source writes it, its kind, and the file in the old tree that
-defined it. That last field is what makes a decision auditable: you can check
-the claim against the 0.x source rather than take the tool's word for it.
+construct as source writes it, its kind, and the file in the Smithers 0.x
+source tree that defines it. That last field is what makes a decision
+auditable: you can check the claim against Smithers 0.35.0 rather than take the
+tool's word for it.
 
 The kinds are `component`, `ctx`, `factory`, `tool`, `agent`, `runtime`,
 `store`, `server`, `testing`, `subpath`, `pragma`, `config`, `cli`, and
 `value`. A `component` row also lists the props the old component declared,
 because a prop is what can raise a construct's class.
 
-Two halves of the catalog are generated from the 0.x checkout rather than
+Two halves of the catalog are read out of the Smithers 0.x source rather than
 written by hand: every value the old facade exports, and the props each
 `<Name>Props.ts` declares. A name that is missing from the catalog is a name
 the scanner drops, and the old surface is too large to keep by hand. An
@@ -33,9 +34,8 @@ vanishing.
 
 `Mapping.rows` pairs every catalogued construct with a target, the module that
 target lives in, the rule that governs the rewrite, and a class. The complete
-table, several hundred rows, is in the
-[API reference](/reference/api/), rendered from `Mapping.rows` itself and checked
-against it by a test.
+table, several hundred rows, is in the [API reference](/reference/api/), rendered
+from `Mapping.rows` itself.
 
 ## The three classes
 
@@ -89,9 +89,8 @@ Two scanners convert the parts of a project that are data rather than topology.
 `z.object`, `z.string`, `z.number`, `z.boolean`, `z.array`, `z.enum`,
 `z.literal`, `z.union`, `z.record`, `z.int`, `.optional()`, `.nullable()`,
 `.default()`, `.describe()`, and the numeric and length checks all have exact
-equivalents, and a test evaluates every printed form and decodes a sample
-through it. The printer refuses rather than approximates whatever it cannot say
-with the same meaning, and `.passthrough()`, `.refine()`, `.transform()`,
+equivalents. The printer refuses rather than approximates whatever it cannot
+say with the same meaning, and `.passthrough()`, `.refine()`, `.transform()`,
 `z.discriminatedUnion`, `z.lazy`, `z.tuple`, and custom error maps are all
 `guided`, because they carry behavior a text rewrite cannot preserve.
 

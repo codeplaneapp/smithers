@@ -12,7 +12,18 @@ import * as Checkpoint from "@smthrs/migrate/flow/Checkpoint"
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { execFileSync } from "node:child_process"
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { userInfo } from "node:os"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -43,6 +54,21 @@ process.on("exit", () => {
 const write = (root: string, file: string, text: string): void => {
   mkdirSync(join(root, file, "..").replace(/\/\.\.$/, ""), { recursive: true })
   writeFileSync(join(root, file), text)
+}
+
+/** Every file under `directory`, as paths relative to it. */
+const listRecursive = (directory: string): ReadonlyArray<string> => {
+  const found: Array<string> = []
+  const visit = (current: string, prefix: string): void => {
+    for (const entry of readdirSync(current)) {
+      const absolute = join(current, entry)
+      const key = prefix === "" ? entry : `${prefix}/${entry}`
+      if (statSync(absolute).isDirectory()) visit(absolute, key)
+      else found.push(key)
+    }
+  }
+  visit(directory, "")
+  return found
 }
 
 const gitProject = (name: string): string => {
@@ -118,6 +144,83 @@ describe("Checkpoint.take on git", () => {
       expect(execFileSync("git", ["stash", "list"], { cwd: root }).toString()).toBe("")
     }).pipe(Effect.provide(platform)))
 
+  it.effect("restores the mode a file carried, executable and read-only bits included", () =>
+    Effect.gen(function*() {
+      const root = gitProject("modes")
+      write(root, "bin/run.sh", "#!/bin/sh\necho hi\n")
+      chmodSync(join(root, "bin", "run.sh"), 0o755)
+      chmodSync(join(root, "workflow.jsx"), 0o444)
+
+      const ref = yield* Checkpoint.take(payload(root, ["workflow.jsx", "bin/run.sh"]))
+
+      expect(ref.entries.find((entry) => entry.path === "bin/run.sh")?.mode).toBe(0o755)
+      expect(ref.entries.find((entry) => entry.path === "workflow.jsx")?.mode).toBe(0o444)
+
+      // What a unit does: deletes one, rewrites the other. The read-only file
+      // is made writable first, which is what any editor has to do.
+      rmSync(join(root, "bin", "run.sh"))
+      chmodSync(join(root, "workflow.jsx"), 0o644)
+      writeFileSync(join(root, "workflow.jsx"), "migrated\n")
+
+      yield* Checkpoint.restore(root, ref, ["workflow.jsx", "bin/run.sh"])
+
+      expect(statSync(join(root, "bin", "run.sh")).mode & 0o777).toBe(0o755)
+      expect(statSync(join(root, "workflow.jsx")).mode & 0o777).toBe(0o444)
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
+      chmodSync(join(root, "workflow.jsx"), 0o644)
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("restores a checkpoint recorded before entries carried a mode, the way it always did", () =>
+    Effect.gen(function*() {
+      const root = gitProject("modeless")
+      const taken = yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+      // An older checkpoint has no mode field; restore must not demand one.
+      const ref = {
+        ...taken,
+        entries: taken.entries.map((entry) => ({
+          path: entry.path,
+          state: entry.state,
+          ...(entry.digest === undefined ? {} : { digest: entry.digest })
+        }))
+      }
+
+      write(root, "workflow.jsx", "migrated\n")
+      yield* Checkpoint.restore(root, ref, ["workflow.jsx"])
+
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("digests an absolute run-state root where it is, keyed by its own path", () =>
+    Effect.gen(function*() {
+      const root = gitProject("absolute-digest")
+      // Gateway state lives outside the project; joining it under the root
+      // used to digest a path that holds nothing and call the file covered.
+      const gateway = join(scratch("gateway"), "smithers-gateway")
+      mkdirSync(gateway, { recursive: true })
+      writeFileSync(join(gateway, "workspace.json"), `{"workspace":${JSON.stringify(root)}}\n`)
+
+      const digested = yield* Checkpoint.digest(root, [gateway])
+
+      expect(digested).toEqual([{
+        path: join(gateway, "workspace.json"),
+        digest: createHash("sha256").update(readFileSync(join(gateway, "workspace.json"))).digest("hex")
+      }])
+    }).pipe(Effect.provide(platform)))
+
+  it.effect("leaves the report directory without a temporary file behind every JSON it writes", () =>
+    Effect.gen(function*() {
+      const root = gitProject("atomic")
+
+      yield* Checkpoint.take(payload(root, ["workflow.jsx"]))
+
+      // The pending marker and the tree manifest land atomically: a crash
+      // mid-write leaves a `.tmp-<pid>-<n>` file, a finished write leaves
+      // none.
+      const reportDir = join(root, ".smithers-migrate")
+      const leftovers = listRecursive(reportDir).filter((entry) => entry.includes(".tmp-"))
+      expect(leftovers).toEqual([])
+    }).pipe(Effect.provide(platform)))
+
   it.effect("diffs only the paths the unit touched, and restores only those", () =>
     Effect.gen(function*() {
       const root = gitProject("diff")
@@ -155,7 +258,8 @@ describe("Checkpoint.take on git", () => {
       expect(ref.entries).toContainEqual({
         path: "flows/demo/flow.ts",
         state: "file",
-        digest: expect.stringMatching(/^[a-f0-9]{64}$/)
+        digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+        mode: expect.any(Number)
       })
     }).pipe(Effect.provide(platform)))
 
@@ -182,7 +286,12 @@ describe("Checkpoint.take on git", () => {
       // Deduplicated, sorted, and explicit about what was not there.
       expect(ref.entries).toEqual([
         { path: "flows/demo/flow.ts", state: "absent" },
-        { path: "workflow.jsx", state: "file", digest: expect.stringMatching(/^[a-f0-9]{64}$/) }
+        {
+          path: "workflow.jsx",
+          state: "file",
+          digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+          mode: expect.any(Number)
+        }
       ])
       expect(ref.files).toEqual(["workflow.jsx"])
     }).pipe(Effect.provide(platform)))

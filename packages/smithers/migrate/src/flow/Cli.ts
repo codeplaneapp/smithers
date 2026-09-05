@@ -6,7 +6,7 @@
  * Smithers 1.0 yet: `npx @smthrs/migrate` is the first command an operator
  * types, before `@smthrs/cli` is anywhere near the tree. Once the project is
  * migrated the same flow is reachable as `smithers migrate` and as a durable
- * `smthrs plan migrate` / `approve` / `run`.
+ * `smthrs flow start system/migrate`.
  *
  * The default mode is `plan`. Editing is never the default: `--apply` is a
  * thing the operator types after reading `report.md`.
@@ -30,13 +30,13 @@ const optional = <A>(value: { readonly _tag: "Some"; readonly value: A } | { rea
 
 const flags = {
   root: Flag.string("root").pipe(Flag.optional),
-  scan: Flag.boolean("scan"),
-  apply: Flag.boolean("apply"),
+  scan: Flag.boolean("scan").pipe(Flag.withDefault(false)),
+  apply: Flag.boolean("apply").pipe(Flag.withDefault(false)),
   seat: Flag.string("seat").pipe(Flag.optional),
   allowUnsafe: Flag.string("allow-unsafe").pipe(Flag.optional),
-  acknowledgeRunState: Flag.boolean("acknowledge-run-state"),
-  allowNoVcs: Flag.boolean("allow-no-vcs"),
-  keepOldSources: Flag.boolean("keep-old-sources"),
+  acknowledgeRunState: Flag.boolean("acknowledge-run-state").pipe(Flag.withDefault(false)),
+  allowNoVcs: Flag.boolean("allow-no-vcs").pipe(Flag.withDefault(false)),
+  keepOldSources: Flag.boolean("keep-old-sources").pipe(Flag.withDefault(false)),
   unit: Flag.string("unit").pipe(Flag.optional),
   maxRepairRounds: Flag.integer("max-repair-rounds").pipe(Flag.optional),
   reportDir: Flag.string("report-dir").pipe(Flag.optional),
@@ -64,7 +64,7 @@ const flags = {
     Flag.withDescription("The command that runs the tests, instead of the project's own test script"),
     Flag.optional
   ),
-  json: Flag.boolean("json")
+  json: Flag.boolean("json").pipe(Flag.withDefault(false))
 }
 
 /**
@@ -111,12 +111,16 @@ export const command = Command.make("smithers-migrate", flags, (config) =>
     const outcome = yield* Effect.result(CommandModule.runNode(options, { environment: process.env }))
     if (outcome._tag === "Failure") {
       const error: MigrateError = outcome.failure
-      // A refused gate is not a crash. It prints the operator's own
-      // instructions, exits 3, and leaves the project untouched.
+      // A refused gate is not a crash, and neither is a second apply finding
+      // the first one's lock. Both print the operator's own instructions,
+      // exit 3, and leave the project untouched.
       yield* Console.error(
         `smthrs migrate: ${error.message}${error.details === undefined ? "" : `\n${error.details}`}`
       )
-      process.exitCode = error.code === "run-state-blocked" || error.code === "unsafe-blocked" ? 3 : 1
+      process.exitCode = error.code === "run-state-blocked" || error.code === "unsafe-blocked" ||
+          error.code === "apply-in-progress"
+        ? 3
+        : 1
       return
     }
     const report = outcome.success

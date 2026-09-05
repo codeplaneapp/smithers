@@ -2,7 +2,8 @@ import { describe, expect, it } from "@effect/vitest"
 import { Graph } from "@smthrs/flow"
 import * as Effect from "effect/Effect"
 import { createHash } from "node:crypto"
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import * as Checks from "../src/Checks.ts"
 import * as Detect from "../src/Detect.ts"
@@ -378,6 +379,60 @@ describe("Checks.run finds each defect on its own", () => {
         ".smithers/executions/run-9999/stdout.log"
       ])
       expect(named(added, "run state is byte-identical").findings[0]?.message).toContain("run state was added")
+    }))
+
+  it.effect("reads absolute run-state paths where they are, not under the project", () =>
+    Effect.gen(function*() {
+      // Gateway state is the one run state that lives outside the project.
+      // Joined under the root, the check would read a path that holds nothing
+      // and call the real file byte-identical whatever happened to it.
+      const root = copyFixture("persisted-db")
+      const gateway = mkdtempSync(join(tmpdir(), "migrate-gateway-"))
+      try {
+        const file = join(gateway, "workspace.json")
+        writeFileSync(file, "gateway state\n")
+        const digests = new Map([[file, createHash("sha256").update(readFileSync(file)).digest("hex")]])
+
+        const unchanged = yield* run(root, [], { sources: new Map(), digests })
+        expect(named(unchanged, "run state is byte-identical").ok).toBe(true)
+
+        writeFileSync(file, "tampered\n")
+        const changed = yield* run(root, [], { sources: new Map(), digests })
+        expect(named(changed, "run state is byte-identical").findings[0]?.message).toContain("must never write")
+
+        rmSync(file)
+        const removed = yield* run(root, [], { sources: new Map(), digests })
+        expect(named(removed, "run state is byte-identical").findings[0]?.message).toContain("must never touch")
+      } finally {
+        rmSync(gateway, { recursive: true, force: true })
+      }
+    }))
+
+  it.effect("fails when a file appears under an absolute run-state root the checkpoint did not hold", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("persisted-db")
+      const gateway = mkdtempSync(join(tmpdir(), "migrate-gateway-"))
+      try {
+        const file = join(gateway, "workspace.json")
+        writeFileSync(file, "gateway state\n")
+        const digests = new Map([[file, createHash("sha256").update(readFileSync(file)).digest("hex")]])
+        const checkpoint: Checks.CheckpointFiles = {
+          sources: new Map(),
+          digests,
+          runStateRoots: [gateway]
+        }
+
+        const clean = yield* run(root, [], checkpoint)
+        expect(named(clean, "run state is byte-identical").ok).toBe(true)
+
+        writeFileSync(join(gateway, "new.json"), "{}\n")
+        const added = yield* run(root, [], checkpoint)
+        expect(named(added, "run state is byte-identical").findings.map((finding) => finding.file)).toEqual([
+          join(gateway, "new.json")
+        ])
+      } finally {
+        rmSync(gateway, { recursive: true, force: true })
+      }
     }))
 
   it.effect("takes the run-state roots from the scan that found them", () =>

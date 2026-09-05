@@ -36,14 +36,14 @@ export const WriteStep = AgentAction.make("simple-workflow/Write", {
     `Write a short article based on this research:\n\nSummary: ${summary}\nKey Points: ${JSON.stringify(keyPoints)}`
 })
 
-/** The durable flow: the old `<Sequence>` is one `Node.andThen`. */
+/** The durable flow: the old `<Sequence>` is one `Node.bindPlanned`. */
 export const SimpleExample = DurableFlow.make("simple-workflow/SimpleExample", {
   payload: { topic: Schema.String },
   success: Article,
   error: AgentAction.AgentFailure,
   body: ({ topic }) =>
     ResearchStep.call({ topic }).pipe(
-      Node.andThen((research) => WriteStep.call({ summary: research.summary, keyPoints: research.keyPoints }))
+      Node.bindPlanned((research) => WriteStep.call({ summary: research.summary, keyPoints: research.keyPoints }))
     )
 })
 

@@ -150,6 +150,14 @@ export interface RunStateReport {
   readonly postgres: BackendSetting | undefined
   readonly pglite: BackendSetting | undefined
   readonly stateDirs: ReadonlyArray<StateDir>
+  /**
+   * Gateway state files that name this workspace, as ABSOLUTE paths: the
+   * gateway lives outside the project, so these are the one run-state paths
+   * that are not project-relative. Everything downstream — the deny rules,
+   * the checkpoint digests, the byte-identity check — handles them as they
+   * are rather than joining them under the root, where they would name
+   * nothing.
+   */
   readonly gatewayState: ReadonlyArray<string>
   /**
    * `clean` when the project holds no 0.x run state, `history-only` when every
@@ -177,7 +185,13 @@ export interface Options {
 }
 
 /**
- * Every project-relative directory that holds 0.x run state.
+ * Every directory that holds 0.x run state.
+ *
+ * Project-relative, with one exception: the parent of a gateway state file is
+ * absolute, because the gateway's directory is outside the project. It is
+ * carried absolute rather than folded into the root, so the checkpoint's
+ * digests and the checks' membership walk cover the files that are really
+ * there.
  *
  * A checkpoint records these so `Checks.run` can prove the migration wrote
  * nothing under them. The digest map alone cannot: it holds the paths that

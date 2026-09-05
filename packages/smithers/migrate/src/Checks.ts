@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { createHash } from "node:crypto"
-import ts from "typescript"
+import * as ts from "typescript/unstable/ast"
 import * as Detect from "./Detect.ts"
 import * as Fs from "./internal/Fs.ts"
 import * as Ts from "./internal/Ts.ts"
@@ -43,11 +43,16 @@ export interface CheckResult {
 export interface CheckpointFiles {
   /** Project-relative path to file text at the checkpoint. */
   readonly sources: ReadonlyMap<string, string>
-  /** Project-relative path to sha256 at the checkpoint, for run-state paths. */
+  /**
+   * Path to sha256 at the checkpoint, for run-state paths. Project-relative,
+   * except gateway state, which lives outside the project and is keyed by its
+   * absolute path and read from there.
+   */
   readonly digests: ReadonlyMap<string, string>
   /**
-   * Every project-relative directory that holds 0.x run state: the state
-   * directories, and the parent of each database file and gateway state file.
+   * Every directory that holds 0.x run state: the state directories, and the
+   * parent of each database file and gateway state file. Project-relative,
+   * except a gateway state directory, which is absolute.
    *
    * `digests` alone cannot prove run state is untouched, because it holds only
    * the paths that existed when the checkpoint was taken. A file written into
@@ -153,7 +158,7 @@ const declaredFlows = (source: ts.SourceFile): ReadonlyArray<DeclaredFlow> => {
       if (call === undefined || !ts.isCallExpression(call)) continue
       if (!Ts.calleeName(call).endsWith("make")) continue
       const [tag, options] = call.arguments
-      if (tag === undefined || !ts.isStringLiteralLike(tag)) continue
+      if (tag === undefined || !(ts.isStringLiteral(tag) || ts.isNoSubstitutionTemplateLiteral(tag))) continue
       if (options === undefined || !ts.isObjectLiteralExpression(options)) continue
       if (property(options, "body") === undefined) continue
       if (!ts.isIdentifier(declaration.name)) continue
@@ -514,7 +519,9 @@ export const runState = (
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const absolute = (file: string): string => path.join(root, ...file.split("/"))
+    // Gateway state is recorded absolute, because it lives outside the
+    // project. It is read where it is; anything else joins under the root.
+    const absolute = (file: string): string => path.isAbsolute(file) ? file : path.join(root, ...file.split("/"))
     const owned = new Set(checkpointFiles.owned ?? [])
     const findings: Array<{ file: string; line: number; message: string }> = []
     for (const [file, expected] of checkpointFiles.digests) {

@@ -6,7 +6,7 @@ Origin: written by hand from `jsx-single/simple-workflow.jsx`, following `exampl
 
 `flows/simple-workflow/flow.ts` carries two declarations, because flows HEAD needs both:
 
-- the named `SimpleExample`, a `@smthrs/flow` `Flow.make(tag, options)` with the durable body, imported as `DurableFlow` so the default export keeps the `Flow` name. The old `<Sequence>` of two `<Task agent>` elements is one `Node.andThen` over two `AgentAction`s.
+- the named `SimpleExample`, a `@smthrs/flow` `Flow.make(tag, options)` with the durable body, imported as `DurableFlow` so the default export keeps the `Flow` name. The old `<Sequence>` of two `<Task agent>` elements is one `Node.bindPlanned` over two `AgentAction`s.
 - the default export, a `@smthrs/core` `Flow.make(options)` declaration carrying the `description`, `input`, `output`, `capabilities`, and `effects` the registry reads. `@smthrs/flow`'s options do not take a `description`, and `Discovery` reads the literal token sequence `export default Flow.make(` without evaluating the module, so the descriptor is its own declaration and it is the one that keeps the name `Flow`.
 
 Two declarations are not two behaviors. The descriptor admits `SimpleExample` and nothing else: its `input` and `output` ARE that flow's `payload` and `success`, and `Checks.run`'s "every flow module's descriptor describes the flow it declares" reads that out of the source. `test/MigratedFixture.test.ts` and `test/Checks.test.ts` pin the executed half by building `SimpleExample` and finding the two agent calls with the second waiting on the first and the `Article` success schema.

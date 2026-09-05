@@ -16,6 +16,7 @@ smthrs migrate: <message>
 | --------------------- | ---- | ---------------------------------------------------------------------- |
 | `run-state-blocked`   | 3    | The project still holds 0.x run state.                                 |
 | `unsafe-blocked`      | 3    | A construct has no safe translation.                                   |
+| `apply-in-progress`   | 3    | Another apply run holds this project's lock.                           |
 | `no-vcs`              | 1    | The project is under no version control.                               |
 | `invalid-layout`      | 1    | The root, report directory, or flows directory is not usable.          |
 | `unsupported-project` | 1    | The plan does not describe this project.                               |
@@ -50,6 +51,20 @@ read and accepted, or `--allow-unsafe all`. Either way the rewrite leaves a
 `TODO(migrate-smithers-v1)` marker and an `unsupported` report entry rather
 than an imitation. See
 [Accept constructs with no safe translation](./guides/allow-unsafe-constructs.md).
+
+## apply-in-progress
+
+**What happened.** A second `apply` started over a project whose first one is
+still running. Each apply holds a lock in the report directory
+(`.smithers-migrate/apply.lock`) for its whole run, because two runs would
+share the backups and the pending marker, and one run's rollback would delete
+the other's files. The message names the pid and the start time the lock
+recorded.
+
+**What to change.** Wait for the other run to finish. If the lock is stale —
+the pid is gone — you do not have to remove it: the next run takes it over
+itself and notes the takeover in its report, because a run that died mid-unit
+may have left `pending-unit.json` behind with its recovery record.
 
 ## no-vcs
 

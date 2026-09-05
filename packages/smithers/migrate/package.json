@@ -29,7 +29,7 @@
     "migration"
   ],
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.11.0"
   },
   "sideEffects": [
     "./src/flow/bin.ts",
@@ -42,10 +42,36 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
     "./flow/internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Checks": "./src/Checks.ts",
+    "./Constructs": "./src/Constructs.ts",
+    "./Detect": "./src/Detect.ts",
+    "./Inventory": "./src/Inventory.ts",
+    "./Mapping": "./src/Mapping.ts",
+    "./MigrateError": "./src/MigrateError.ts",
+    "./PromptHints": "./src/PromptHints.ts",
+    "./Report": "./src/Report.ts",
+    "./RunState": "./src/RunState.ts",
+    "./Scan": "./src/Scan.ts",
+    "./Units": "./src/Units.ts",
+    "./ZodSchemaHints": "./src/ZodSchemaHints.ts",
+    "./flow/Archive": "./src/flow/Archive.ts",
+    "./flow/Checkpoint": "./src/flow/Checkpoint.ts",
+    "./flow/Cli": "./src/flow/Cli.ts",
+    "./flow/Command": "./src/flow/Command.ts",
+    "./flow/Contract": "./src/flow/Contract.ts",
+    "./flow/Gate": "./src/flow/Gate.ts",
+    "./flow/Layers": "./src/flow/Layers.ts",
+    "./flow/Lock": "./src/flow/Lock.ts",
+    "./flow/MigrateFlow": "./src/flow/MigrateFlow.ts",
+    "./flow/Options": "./src/flow/Options.ts",
+    "./flow/Repair": "./src/flow/Repair.ts",
+    "./flow/Transform": "./src/flow/Transform.ts",
+    "./flow/Verify": "./src/flow/Verify.ts",
+    "./flow/bin": "./src/flow/bin.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -69,14 +95,144 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
       "./flow/internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Checks": {
+        "types": "./dist/esm/Checks.d.ts",
+        "import": "./dist/esm/Checks.js",
+        "require": "./dist/cjs/Checks.js"
+      },
+      "./Constructs": {
+        "types": "./dist/esm/Constructs.d.ts",
+        "import": "./dist/esm/Constructs.js",
+        "require": "./dist/cjs/Constructs.js"
+      },
+      "./Detect": {
+        "types": "./dist/esm/Detect.d.ts",
+        "import": "./dist/esm/Detect.js",
+        "require": "./dist/cjs/Detect.js"
+      },
+      "./Inventory": {
+        "types": "./dist/esm/Inventory.d.ts",
+        "import": "./dist/esm/Inventory.js",
+        "require": "./dist/cjs/Inventory.js"
+      },
+      "./Mapping": {
+        "types": "./dist/esm/Mapping.d.ts",
+        "import": "./dist/esm/Mapping.js",
+        "require": "./dist/cjs/Mapping.js"
+      },
+      "./MigrateError": {
+        "types": "./dist/esm/MigrateError.d.ts",
+        "import": "./dist/esm/MigrateError.js",
+        "require": "./dist/cjs/MigrateError.js"
+      },
+      "./PromptHints": {
+        "types": "./dist/esm/PromptHints.d.ts",
+        "import": "./dist/esm/PromptHints.js",
+        "require": "./dist/cjs/PromptHints.js"
+      },
+      "./Report": {
+        "types": "./dist/esm/Report.d.ts",
+        "import": "./dist/esm/Report.js",
+        "require": "./dist/cjs/Report.js"
+      },
+      "./RunState": {
+        "types": "./dist/esm/RunState.d.ts",
+        "import": "./dist/esm/RunState.js",
+        "require": "./dist/cjs/RunState.js"
+      },
+      "./Scan": {
+        "types": "./dist/esm/Scan.d.ts",
+        "import": "./dist/esm/Scan.js",
+        "require": "./dist/cjs/Scan.js"
+      },
+      "./Units": {
+        "types": "./dist/esm/Units.d.ts",
+        "import": "./dist/esm/Units.js",
+        "require": "./dist/cjs/Units.js"
+      },
+      "./ZodSchemaHints": {
+        "types": "./dist/esm/ZodSchemaHints.d.ts",
+        "import": "./dist/esm/ZodSchemaHints.js",
+        "require": "./dist/cjs/ZodSchemaHints.js"
+      },
+      "./flow/Archive": {
+        "types": "./dist/esm/flow/Archive.d.ts",
+        "import": "./dist/esm/flow/Archive.js",
+        "require": "./dist/cjs/flow/Archive.js"
+      },
+      "./flow/Checkpoint": {
+        "types": "./dist/esm/flow/Checkpoint.d.ts",
+        "import": "./dist/esm/flow/Checkpoint.js",
+        "require": "./dist/cjs/flow/Checkpoint.js"
+      },
+      "./flow/Cli": {
+        "types": "./dist/esm/flow/Cli.d.ts",
+        "import": "./dist/esm/flow/Cli.js",
+        "require": "./dist/cjs/flow/Cli.js"
+      },
+      "./flow/Command": {
+        "types": "./dist/esm/flow/Command.d.ts",
+        "import": "./dist/esm/flow/Command.js",
+        "require": "./dist/cjs/flow/Command.js"
+      },
+      "./flow/Contract": {
+        "types": "./dist/esm/flow/Contract.d.ts",
+        "import": "./dist/esm/flow/Contract.js",
+        "require": "./dist/cjs/flow/Contract.js"
+      },
+      "./flow/Gate": {
+        "types": "./dist/esm/flow/Gate.d.ts",
+        "import": "./dist/esm/flow/Gate.js",
+        "require": "./dist/cjs/flow/Gate.js"
+      },
+      "./flow/Layers": {
+        "types": "./dist/esm/flow/Layers.d.ts",
+        "import": "./dist/esm/flow/Layers.js",
+        "require": "./dist/cjs/flow/Layers.js"
+      },
+      "./flow/Lock": {
+        "types": "./dist/esm/flow/Lock.d.ts",
+        "import": "./dist/esm/flow/Lock.js",
+        "require": "./dist/cjs/flow/Lock.js"
+      },
+      "./flow/MigrateFlow": {
+        "types": "./dist/esm/flow/MigrateFlow.d.ts",
+        "import": "./dist/esm/flow/MigrateFlow.js",
+        "require": "./dist/cjs/flow/MigrateFlow.js"
+      },
+      "./flow/Options": {
+        "types": "./dist/esm/flow/Options.d.ts",
+        "import": "./dist/esm/flow/Options.js",
+        "require": "./dist/cjs/flow/Options.js"
+      },
+      "./flow/Repair": {
+        "types": "./dist/esm/flow/Repair.d.ts",
+        "import": "./dist/esm/flow/Repair.js",
+        "require": "./dist/cjs/flow/Repair.js"
+      },
+      "./flow/Transform": {
+        "types": "./dist/esm/flow/Transform.d.ts",
+        "import": "./dist/esm/flow/Transform.js",
+        "require": "./dist/cjs/flow/Transform.js"
+      },
+      "./flow/Verify": {
+        "types": "./dist/esm/flow/Verify.d.ts",
+        "import": "./dist/esm/flow/Verify.js",
+        "require": "./dist/cjs/flow/Verify.js"
+      },
+      "./flow/bin": {
+        "types": "./dist/esm/flow/bin.d.ts",
+        "import": "./dist/esm/flow/bin.js",
+        "require": "./dist/cjs/flow/bin.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -89,47 +245,45 @@
     "coverage": "vitest --coverage"
   },
   "dependencies": {
-    "typescript": "6.0.3"
+    "@effect/platform-node": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "typescript": "7.0.2"
   },
   "optionalDependencies": {
     "@smthrs/agent": "1.0.0-rc.0",
     "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/engine": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
-    "@smthrs/flows": "1.0.0-rc.0",
     "@smthrs/harness": "1.0.0-rc.0",
     "@smthrs/kernel": "1.0.0-rc.0",
     "@smthrs/model": "1.0.0-rc.0",
-    "@smthrs/patterns": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/platform-node": "1.0.0-rc.0",
     "@smthrs/registry": "1.0.0-rc.0",
-    "@smthrs/std": "1.0.0-rc.0",
     "@smthrs/canonical": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/platform-node-shared": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
+    "@typescript/typescript6": "6.0.2",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript-eslint": "8.65.0",
-    "vitest": "4.1.9"
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.9",
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@effect/platform-node-shared": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112"
+  },
+  "peerDependencies": {
+    "@effect/platform-node-shared": "4.0.0-rc.112"
   }
 }

@@ -121,7 +121,7 @@ describe("MigrateFlow.postconditions", () => {
       const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
         dependencies: Record<string, string>
       }
-      manifest.dependencies["effect"] = "4.0.0-rc.108"
+      manifest.dependencies["effect"] = "4.0.0-rc.112"
       writeFileSync(join(root, "package.json"), `${JSON.stringify(manifest, null, 2)}\n`)
 
       const dependenciesAfter = yield* MigrateFlow.postconditions(root, dependencies)

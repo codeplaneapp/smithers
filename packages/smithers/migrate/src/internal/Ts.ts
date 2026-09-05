@@ -1,8 +1,8 @@
 /**
  * TypeScript compiler helpers shared by the scanners.
  *
- * Every scanner parses one file at a time with `ts.createSourceFile` rather
- * than building a `ts.Program`. A 0.x project does not typecheck against the
+ * Every scanner parses one file at a time in an isolated native compiler
+ * session, without checking types or emitting. A 0.x project does not typecheck against the
  * new packages, its `tsconfig.json` points at a JSX runtime that is being
  * removed, and its `node_modules` may be absent. The syntax tree is all the
  * scanners need, and it is available whatever state the project is in.
@@ -10,7 +10,9 @@
  * @since 1.0.0-rc.0
  * @private
  */
-import ts from "typescript"
+import { resolve } from "node:path"
+import * as ts from "typescript/unstable/ast"
+import { API } from "typescript/unstable/sync"
 
 /**
  * One import in a file, with the local name each binding is written as.
@@ -31,35 +33,50 @@ export interface ImportRecord {
 }
 
 /**
- * Chooses the script kind from the file extension so JSX parses as JSX and a
- * `.ts` file's angle brackets stay type assertions.
- *
- * @since 1.0.0-rc.0
- * @private
- */
-export const scriptKind = (file: string): ts.ScriptKind => {
-  if (file.endsWith(".tsx")) return ts.ScriptKind.TSX
-  if (file.endsWith(".jsx")) return ts.ScriptKind.JSX
-  if (file.endsWith(".mts") || file.endsWith(".cts")) return ts.ScriptKind.TS
-  if (file.endsWith(".mjs") || file.endsWith(".cjs") || file.endsWith(".js")) return ts.ScriptKind.JS
-  return ts.ScriptKind.TS
-}
-
-/**
  * Parses one file. `.js` parses as JS with JSX enabled, because a 0.x example
  * such as `examples/simple-workflow.jsx` is JavaScript carrying JSX.
  *
+ * The compiler sees only the supplied source and a synthetic configuration;
+ * every other filesystem read reports absence without falling back to disk.
+ * Its process closes before returning. The transferred tree remains usable.
+ *
  * @since 1.0.0-rc.0
  * @private
  */
-export const parse = (file: string, text: string): ts.SourceFile =>
-  ts.createSourceFile(
-    file,
-    text,
-    { languageVersion: ts.ScriptTarget.Latest, jsDocParsingMode: ts.JSDocParsingMode.ParseNone },
-    true,
-    scriptKind(file)
-  )
+export const parse = (file: string, text: string): ts.SourceFile => {
+  const directory = resolve(".__smithers_migration_syntax__").replace(/\\/g, "/")
+  const extension = /\.(tsx|jsx|mts|cts|mjs|cjs|js)$/i.exec(file)?.[1]?.toLowerCase() ?? "ts"
+  const input = `${directory}/input.${extension}`
+  const config = `${directory}/tsconfig.json`
+  const files = new Map([
+    [input, text],
+    [
+      config,
+      JSON.stringify({
+        files: [`input.${extension}`],
+        compilerOptions: { noLib: true, noResolve: true, allowJs: true, types: [] }
+      })
+    ]
+  ])
+  const api = new API({
+    cwd: directory,
+    fs: {
+      readFile: (name) => files.get(name) ?? null,
+      fileExists: (name) => files.has(name),
+      directoryExists: (name) => name === directory,
+      getAccessibleEntries: () => ({ files: [], directories: [] }),
+      realpath: (name) => name
+    }
+  })
+  try {
+    const snapshot = api.updateSnapshot({ openProjects: [config] })
+    const source = snapshot.getProject(config)?.program.getSourceFile(input)
+    if (source === undefined) throw new Error(`TypeScript did not return a syntax tree for ${file}`)
+    return source
+  } finally {
+    api.close()
+  }
+}
 
 /**
  * The 1-based line and column of a node.
@@ -118,7 +135,7 @@ export const imports = (source: ts.SourceFile): ReadonlyArray<ImportRecord> => {
 
     if (ts.isImportDeclaration(statement) && statement.importClause !== undefined) {
       const clause = statement.importClause
-      typeOnly = clause.isTypeOnly
+      typeOnly = clause.phaseModifier === ts.SyntaxKind.TypeKeyword
       if (clause.name !== undefined) names.set(clause.name.text, "default")
       const bindings = clause.namedBindings
       if (bindings !== undefined && ts.isNamespaceImport(bindings)) namespace = bindings.name.text
@@ -196,7 +213,7 @@ export const destructuredNames = (pattern: ts.ObjectBindingPattern): ReadonlyMap
   const names = new Map<string, string>()
   for (const element of pattern.elements) {
     if (element.dotDotDotToken !== undefined) continue
-    if (!ts.isIdentifier(element.name)) continue
+    if (element.name === undefined || !ts.isIdentifier(element.name)) continue
     const source = element.propertyName === undefined ? element.name.text : element.propertyName.getText()
     names.set(element.name.text, source)
   }
@@ -241,26 +258,33 @@ export const moduleSpecifiers = (source: ts.SourceFile): ReadonlyArray<Specifier
     records.push({ specifier, form, ...positionOf(source, node) })
   }
   forEachNode(source, (node) => {
-    if (ts.isImportDeclaration(node) && ts.isStringLiteralLike(node.moduleSpecifier)) {
+    if (
+      ts.isImportDeclaration(node) &&
+      (ts.isStringLiteral(node.moduleSpecifier) || ts.isNoSubstitutionTemplateLiteral(node.moduleSpecifier))
+    ) {
       push(node.moduleSpecifier.text, "import", node)
       return
     }
     if (
       ts.isExportDeclaration(node) &&
       node.moduleSpecifier !== undefined &&
-      ts.isStringLiteralLike(node.moduleSpecifier)
+      (ts.isStringLiteral(node.moduleSpecifier) || ts.isNoSubstitutionTemplateLiteral(node.moduleSpecifier))
     ) {
       push(node.moduleSpecifier.text, "export", node)
       return
     }
     if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
       const argument = node.moduleReference.expression
-      if (ts.isStringLiteralLike(argument)) push(argument.text, "require", node)
+      if (ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument)) {
+        push(argument.text, "require", node)
+      }
       return
     }
     if (!ts.isCallExpression(node)) return
     const argument = node.arguments[0]
-    if (argument === undefined || !ts.isStringLiteralLike(argument)) return
+    if (argument === undefined || !(ts.isStringLiteral(argument) || ts.isNoSubstitutionTemplateLiteral(argument))) {
+      return
+    }
     if (node.expression.kind === ts.SyntaxKind.ImportKeyword) push(argument.text, "dynamic", node)
     else if (ts.isIdentifier(node.expression) && node.expression.text === "require") {
       push(argument.text, "require", node)

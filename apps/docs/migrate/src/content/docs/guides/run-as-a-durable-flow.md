@@ -116,7 +116,7 @@ const registerFlows = Command.registration
 ```
 
 `@smthrs/flows`' `NodeRuntime` takes this as its `registerFlows` layer, and
-then `smthrs plan migrate`, `smthrs approve`, and `smthrs run` execute the same
+then `smthrs flow start system/migrate --data '<migration options>'` starts the same
 flow under the same journal as everything else. `Command.flowId` is the name
 the control plane knows it by, `system/migrate`.
 
@@ -132,7 +132,7 @@ feeds the rewrite, the rewrite's account of what it changed feeds the
 verification, and both feed the step that settles the unit.
 
 The units are in the flow's payload rather than in a value the scan step
-returns, for the same reason: `Node.andThen`'s builder runs once against a
+returns, for the same reason: `Node.bindPlanned`'s builder runs once against a
 placeholder before anything executes, so a graph cannot fan out over a list
 produced at run time. The scan still runs inside the flow, is still journaled,
 and is still what the gate and the report read.

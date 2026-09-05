@@ -234,8 +234,13 @@ const hintRows = (
 ]
 
 /**
- * Every project-relative path that holds 0.x run state, which no unit may
- * read, write, move, or resume.
+ * Every path that holds 0.x run state, which no unit may read, write, move,
+ * or resume.
+ *
+ * Project-relative, except the gateway state files, which live outside the
+ * project and stay absolute on purpose: the deny rules and the run-state
+ * digests both take an absolute entry as it is, so the files that are really
+ * on disk are the ones covered.
  *
  * @category combinators
  * @since 1.0.0-rc.0

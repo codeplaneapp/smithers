@@ -18,6 +18,8 @@
  * @since 1.0.0-rc.0
  */
 import * as Constructs from "./Constructs.ts"
+import * as CliScripts from "./internal/CliScripts.ts"
+import * as FlowNames from "./internal/FlowNames.ts"
 import * as Sort from "./internal/Sort.ts"
 import type { InventoryEntry } from "./Inventory.ts"
 import * as PromptHints from "./PromptHints.ts"
@@ -106,7 +108,7 @@ const table: ReadonlyArray<MappingRow> = [
   row("Task.browser", null, null, "Browser-safe entry points only; there is no browser task.", "unsafe"),
   row(
     "Sequence",
-    "Node.andThen",
+    "Node.bindPlanned",
     "@smthrs/plan/Node",
     "Each child's planned value feeds the next call.",
     "automatic"
@@ -331,10 +333,10 @@ const table: ReadonlyArray<MappingRow> = [
   ),
   row("ClassifyAndRoute", "Node.branch", "@smthrs/plan/Node", "Generalized by the core combinators.", "automatic"),
   row("DecisionTable", "Node.branch", "@smthrs/plan/Node", "Each rule becomes a branch predicate.", "automatic"),
-  row("ContentPipeline", "Node.andThen", "@smthrs/plan/Node", "Stages become a chain.", "automatic"),
+  row("ContentPipeline", "Node.bindPlanned", "@smthrs/plan/Node", "Stages become a chain.", "automatic"),
   row(
     "Runbook",
-    "Node.andThen with WithApproval",
+    "Node.bindPlanned with WithApproval",
     "@smthrs/plan/Node, @smthrs/patterns/WithApproval",
     "Steps become a chain; the approval request becomes a decorator.",
     "automatic"
@@ -475,7 +477,7 @@ const table: ReadonlyArray<MappingRow> = [
   ),
   row(
     "package.json",
-    "@smthrs/* at 1.0.0-rc.0 and effect at 4.0.0-rc.108",
+    "@smthrs/* at 1.0.0-rc.0 and effect at 4.0.0-rc.112",
     null,
     "Old packages are removed only in the final `project` unit. `zod` stays only if non-workflow code still imports it.",
     "automatic"
@@ -496,7 +498,7 @@ const table: ReadonlyArray<MappingRow> = [
   ),
   row(
     "docs",
-    "Text pointing at flows/, smthrs plan/approve/run, and report.md",
+    "Text pointing at flows/, smthrs flow start, and report.md",
     null,
     "Documentation that teaches `smithers up` or JSX authoring is rewritten.",
     "guided"
@@ -581,10 +583,10 @@ const familyRow = (construct: Constructs.Construct): MappingRow => {
       )
     case "cli": {
       const mapped: Record<string, string> = {
-        "smithers up": "smthrs plan <flow> [k=v] then smthrs approve <payload> then smthrs run <payload>",
-        "smithers workflow": "smthrs plan <flow> then smthrs run <payload>",
-        "smithers ps": "smthrs ps",
-        "smithers cancel": "smthrs cancel"
+        "smithers up": "smthrs flow start <flow> --data <json> [--detached]",
+        "smithers workflow": "smthrs flow start <flow> --data <json> [--detached]",
+        "smithers ps": "smthrs runs list",
+        "smithers cancel": "smthrs runs cancel <run>"
       }
       const target = mapped[construct.name]
       return target === undefined
@@ -592,15 +594,15 @@ const familyRow = (construct: Constructs.Construct): MappingRow => {
           construct.name,
           null,
           null,
-          "This verb has no flows counterpart and is recorded as unsupported.",
+          "This verb has no verified automatic mapping and is recorded as unsupported; check the 1.0 command tree.",
           "unsafe"
         )
         : row(
           construct.name,
           target,
           "@smthrs/cli",
-          "The old one-shot verb becomes the plan, approve, run triple.",
-          "automatic"
+          "Use the canonical command tree. Preserve input and detach semantics; unsupported scripts require manual mapping.",
+          construct.name === "smithers up" || construct.name === "smithers workflow" ? "automatic" : "guided"
         )
     }
     case "subpath": {
@@ -983,7 +985,9 @@ export const classifyWithReason = (
       class: "guided",
       reason: [
         ...reasons,
-        "the source this rewrite needs was not captured, so the agent writes it under the rule"
+        Constructs.byName(hit.construct)?.kind === "cli"
+          ? "the captured invocation has no verified automatic rewrite; map it under the rule"
+          : "the source this rewrite needs was not captured, so the agent writes it under the rule"
       ].join("; ")
     }
   }
@@ -995,12 +999,12 @@ export const classifyWithReason = (
  * Whether an `automatic` class for this construct is a claim that
  * {@link snippet} emits the rewrite.
  *
- * A pragma, a config file, and a CLI verb are automatic because a machine
- * deletes or renames them, not because a snippet exists. A component is
- * automatic only when the rewrite text does.
+ * A pragma or config file is automatic because a machine deletes or renames
+ * it. A component or CLI invocation is automatic only when the checked
+ * rewrite text exists for that captured source.
  */
 const needsSnippet = (construct: string): boolean =>
-  Constructs.byName(construct)?.kind === "component" || construct === "createSmithers"
+  ["component", "cli"].includes(Constructs.byName(construct)?.kind ?? "") || construct === "createSmithers"
 
 /**
  * The class of one hit.
@@ -1217,7 +1221,7 @@ const payloadOf = (raw: string | undefined): string | undefined => {
  * Every call carries the payload keys that step declares, filled from the flow
  * payload or from the step it is chained onto. `undefined` when any of them
  * cannot be filled from the captured source, or when a step reads a value only
- * an earlier link in the chain still has: a `Node.andThen` binds one value, so
+ * an earlier link in the chain still has: a `Node.bindPlanned` binds one value, so
  * a step three links down cannot see the first step's answer, and a rewrite
  * that pretended otherwise would not compile.
  */
@@ -1234,7 +1238,7 @@ const sequenced = (
   for (const child of rest) {
     const args = callArguments(payloads, child.id, [previous])
     if (args === undefined) return undefined
-    text = `${text}.pipe(Node.andThen((${binding(previous)}) => ${identifier(child.id, "Step")}.call(${args})))`
+    text = `${text}.pipe(Node.bindPlanned((${binding(previous)}) => ${identifier(child.id, "Step")}.call(${args})))`
     previous = child.id
   }
   return text
@@ -1458,8 +1462,10 @@ export const snippet = (hit: InventoryEntry): string | undefined => {
           : undefined
       }
       if (hit.construct === "smithers up" || hit.construct === "smithers workflow") {
-        const command = detail["command"] ?? "smithers up <workflow>"
-        return `# ${command}\nsmthrs plan <flow> [key=value]\nsmthrs approve <payload>\nsmthrs run <payload>`
+        const command = detail["command"]
+        if (command === undefined) return undefined
+        const rewritten = CliScripts.rewrite(command, FlowNames.fromPath)
+        return rewritten.unsupported === undefined && rewritten.after !== command ? rewritten.after : undefined
       }
       return undefined
     }

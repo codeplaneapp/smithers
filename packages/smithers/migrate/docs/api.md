@@ -62,21 +62,23 @@ runnable composition.
 
 | Export             | Signature                                                                     | What it is                                                               |
 | ------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `MigrateErrorCode` | `Schema.Literals([...])`                                                      | The ten codes, as a schema. Its `.Type` is the code union.               |
+| `MigrateErrorCode` | `Schema.Literals([...])`                                                      | The eleven codes, as a schema. Its `.Type` is the code union.            |
 | `MigrateError`     | `class MigrateError`                                                          | The tagged error itself, with `code`, `message`, and optional `details`. |
 | `make`             | `(code: MigrateErrorCode, message: string, details?: string) => MigrateError` | Builds one without naming the fields.                                    |
 | `io`               | `(message: string) => (cause: unknown) => MigrateError`                       | The filesystem seam: turns an unknown cause into an `io` failure.        |
 
 One failure type for the whole package, so the CLI maps a code onto an exit
 status without walking a cause chain. The codes are `run-state-blocked`,
-`unsafe-blocked`, `no-vcs`, `checkpoint-failed`, `verify-failed`,
-`agent-failed`, `io`, `unsupported-project`, `invalid-layout`, and
-`stale-plan`. The first two are the operator gates and exit 3; every other code
-exits 1. `invalid-layout` refuses a root, report directory, or flows directory
-that could leave or overlap the project, before anything is read. `stale-plan`
-refuses an apply whose project changed after it was planned, before anything is
-written. `Command.isMigrateError` is the guard the entry points use: the class
-and its code, never a `_tag` string an arbitrary object can carry.
+`unsafe-blocked`, `apply-in-progress`, `no-vcs`, `checkpoint-failed`,
+`verify-failed`, `agent-failed`, `io`, `unsupported-project`, `invalid-layout`,
+and `stale-plan`. The first two are the operator gates, and the third is a
+second apply finding the first one's lock; all three exit 3, and every other
+code exits 1. `invalid-layout` refuses a root, report directory, or flows
+directory that could leave or overlap the project, before anything is read.
+`stale-plan` refuses an apply whose project changed after it was planned,
+before anything is written. `Command.isMigrateError` is the guard the entry
+points use: the class and its code, never a `_tag` string an arbitrary object
+can carry.
 
 `MigrateError.make(code, message, details?)` builds one. `MigrateError.io(message)`
 is the filesystem seam: it turns an unknown cause into an `io` failure so a
@@ -98,31 +100,28 @@ missing file never escapes as an untyped defect.
 | `isCatalogued`  | `(name: string) => boolean`                         | Whether a name has a row at all. A name with none raises `uncatalogued-import`. |
 
 A `Construct` carries `name` (the identifier application code writes), `kind`,
-`source` (the defining file in the old tree, relative to its repository root),
-and, for a component, `props`: the props that carry semantics, because a prop
-is what raises a construct's class.
+`source` (the file in the Smithers 0.x source tree that defines it, relative to
+that tree's root), and, for a component, `props`: the props that carry
+semantics, because a prop is what raises a construct's class.
 
 `Constructs.constructs` is the catalog of everything application code can
 import from the 0.x facade and from `@smthrs/components`. Every row names the
-construct as source writes it, its `kind`, and the file in the old tree
-(the 0.x checkout at `cfb570f193`, version 0.35.0, named by
-`SMITHERS_0X_CHECKOUT`) that defines
-it. The old source path is what makes a decision auditable: a reader can check
-the claim.
+construct as source writes it, its `kind`, and the file in the 0.x source
+tree that defines it. That last field is what makes a decision auditable: you
+can check the claim against Smithers 0.35.0 rather than take the tool's word
+for it.
 
 The kinds are `component`, `ctx`, `factory`, `tool`, `agent`, `runtime`,
 `store`, `server`, `testing`, `subpath`, `pragma`, `config`, `cli`, and
 `value`. A `component` row also lists the props the old component declared,
 because a prop is what raises a construct's class.
 
-Two halves of the catalog are generated, not written by hand, because the old
-surface is too large to keep by hand and a name that is missing is a name the
-scanner drops. `scripts/generate-facade-exports.mjs` reads the old checkout and
-writes `src/internal/FacadeExports.ts`: every value the facade exports from its root and
-from each subpath, and every prop each `<Name>Props.ts` declares. `value` rows
-come from the first half, and every component row's props are the union of the
-hand-written ones and the second half. Run the script with `--check` to fail on
-a stale file.
+Two halves of the catalog are read out of the 0.x source rather than written
+by hand, because the old surface is too large to keep by hand and a name that
+is missing is a name the scanner drops: every value the facade exports from its
+root and from each subpath, and every prop each `<Name>Props.ts` declares.
+`value` rows come from the first half, and every component row's props are the
+union of the hand-written ones and the second half.
 
 `byName`, `byKind`, `isComponent`, and `isCatalogued` read the catalog. It is
 data, not behavior: `Mapping` decides what a row becomes, and `Inventory`
@@ -143,7 +142,7 @@ decides which rows a project actually uses. An imported name with no row raises
 | `classify`               | `(hit: InventoryEntry) => MappingClass`                            | The class of one occurrence, props included.                              |
 | `classifyWithReason`     | `(hit: InventoryEntry) => { class: MappingClass; reason: string }` | The same call with the reason attached.                                   |
 | `snippet`                | `(hit: InventoryEntry) => string \| undefined`                     | The rewrite text for an `automatic` hit, carrying that hit's identifiers. |
-| `markdownTable`          | `() => string`                                                     | The table below, rendered. A test pins the page against it.               |
+| `markdownTable`          | `() => string`                                                     | The table below, rendered from `rows`.                                    |
 | `subscriptionAgents`     | `ReadonlyArray<string>`                                            | The four constructs whose seat is an operator decision.                   |
 | `subscriptionSuggestion` | `string`                                                           | The suggestion every one of those hits carries into the report.           |
 
@@ -176,10 +175,8 @@ seat is quoted, a step group whose ids would fold to one identifier (`a-b`
 and `a_b`) is refused, and a `Timer` duration is emitted as a number of
 milliseconds or a duration string and refused when it is an expression.
 
-`Mapping.byConstruct(name)` resolves a row for every catalog name. A test keeps
-the table below in sync with `Mapping.rows`.
-
-{/* mapping table: generated from Mapping.rows, checked by test/Docs.test.ts */}
+`Mapping.byConstruct(name)` resolves a row for every catalog name. The table
+below is `Mapping.rows` rendered, so it cannot fall behind the code.
 
 | Old construct                            | New target                                                                                   | Module                                                                          | Class     |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------- |
@@ -210,7 +207,7 @@ the table below in sync with `Mapping.rows`.
 | `ClassifyAndRoute`                       | `Node.branch`                                                                                | `@smthrs/plan/Node`                                                             | guided    |
 | `ClaudeCodeAgent`                        | `An operator decision: subscription auth through the flows harness, or an API seat`          | `@smthrs/harness, @smthrs/agent/SeatResolver`                                   | guided    |
 | `CodexAgent`                             | `An operator decision: subscription auth through the flows harness, or an API seat`          | `@smthrs/harness, @smthrs/agent/SeatResolver`                                   | guided    |
-| `ContentPipeline`                        | `Node.andThen`                                                                               | `@smthrs/plan/Node`                                                             | automatic |
+| `ContentPipeline`                        | `Node.bindPlanned`                                                                           | `@smthrs/plan/Node`                                                             | automatic |
 | `ContinueAsNew`                          | none                                                                                         | none                                                                            | unsafe    |
 | `CursorAgent`                            | `A seat resolved by SeatResolver from the model this agent already names`                    | `@smthrs/agent/SeatResolver, @smthrs/model/Route`                               | guided    |
 | `DC_EDIT_SIGNAL`                         | none                                                                                         | none                                                                            | unsafe    |
@@ -272,12 +269,12 @@ the table below in sync with `Mapping.rows`.
 | `PoolAgent`                              | `A seat resolved by SeatResolver from the model this agent already names`                    | `@smthrs/agent/SeatResolver, @smthrs/model/Route`                               | guided    |
 | `Ralph`                                  | `Recursion.recurse`                                                                          | `@smthrs/patterns/Recursion`                                                    | guided    |
 | `ReviewLoop`                             | `ReviewLoop.run(input, { maxRounds, produce, review, revise })`                              | `@smthrs/patterns/ReviewLoop`                                                   | guided    |
-| `Runbook`                                | `Node.andThen with WithApproval`                                                             | `@smthrs/plan/Node, @smthrs/patterns/WithApproval`                              | automatic |
+| `Runbook`                                | `Node.bindPlanned with WithApproval`                                                         | `@smthrs/plan/Node, @smthrs/patterns/WithApproval`                              | automatic |
 | `Saga`                                   | `Node.catch plus CompensationHandlers`                                                       | `@smthrs/plan/Node, @smthrs/time-travel/CompensationHandlers`                   | guided    |
 | `SagaStep`                               | `Node.catch plus CompensationHandlers`                                                       | `@smthrs/plan/Node, @smthrs/time-travel/CompensationHandlers`                   | guided    |
 | `Sandbox`                                | `WorkspaceSandbox, RemoteChildProcessSpawner, or std Container`                              | `@smthrs/engine-store/WorkspaceSandbox, @smthrs/sandbox, @smthrs/std/Container` | guided    |
 | `ScanFixVerify`                          | `ReviewLoop.run`                                                                             | `@smthrs/patterns/ReviewLoop`                                                   | guided    |
-| `Sequence`                               | `Node.andThen`                                                                               | `@smthrs/plan/Node`                                                             | automatic |
+| `Sequence`                               | `Node.bindPlanned`                                                                           | `@smthrs/plan/Node`                                                             | automatic |
 | `Sidecar`                                | none                                                                                         | none                                                                            | unsafe    |
 | `Signal`                                 | `WaitFor.action over DurableDeferred`                                                        | `@smthrs/flow/WaitFor`                                                          | automatic |
 | `Smithers`                               | `Flow.make`                                                                                  | `@smthrs/flow/Flow`                                                             | automatic |
@@ -400,7 +397,7 @@ the table below in sync with `Mapping.rows`.
 | `delegationV2Schemas`                    | none                                                                                         | none                                                                            | unsafe    |
 | `denyNode`                               | `Control.deny`                                                                               | `@smthrs/control/Control`                                                       | guided    |
 | `devPreviewKindSchema`                   | none                                                                                         | none                                                                            | unsafe    |
-| `docs`                                   | `Text pointing at flows/, smthrs plan/approve/run, and report.md`                            | none                                                                            | guided    |
+| `docs`                                   | `Text pointing at flows/, smthrs flow start, and report.md`                                  | none                                                                            | guided    |
 | `dryRun`                                 | `@smthrs/testing`                                                                            | `@smthrs/testing`                                                               | guided    |
 | `e2eHarness`                             | `@smthrs/testing`                                                                            | `@smthrs/testing`                                                               | guided    |
 | `edit`                                   | `The std flows bound through StandardFlows`                                                  | `@smthrs/std, @smthrs/agent/StandardFlows`                                      | automatic |
@@ -477,7 +474,7 @@ the table below in sync with `Mapping.rows`.
 | `openSmithersBackend`                    | none                                                                                         | none                                                                            | unsafe    |
 | `openSmithersStore`                      | none                                                                                         | none                                                                            | unsafe    |
 | `outputs.<key>`                          | `The planned value in scope`                                                                 | `@smthrs/plan/Node`                                                             | automatic |
-| `package.json`                           | `@smthrs/* at 1.0.0-rc.0 and effect at 4.0.0-rc.108`                                         | none                                                                            | automatic |
+| `package.json`                           | `@smthrs/* at 1.0.0-rc.0 and effect at 4.0.0-rc.112`                                         | none                                                                            | automatic |
 | `parseNamespace`                         | `@smthrs/memory`                                                                             | `@smthrs/memory`                                                                | guided    |
 | `partitionDelegationV2AuthorFuel`        | none                                                                                         | none                                                                            | unsafe    |
 | `prometheusContentType`                  | `The kernel's telemetry and the OTLP layer`                                                  | `@smthrs/kernel, @smthrs/observability`                                         | guided    |
@@ -523,7 +520,7 @@ the table below in sync with `Mapping.rows`.
 | `smithers add`                           | none                                                                                         | none                                                                            | unsafe    |
 | `smithers approve`                       | none                                                                                         | none                                                                            | unsafe    |
 | `smithers ask-human`                     | none                                                                                         | none                                                                            | unsafe    |
-| `smithers cancel`                        | `smthrs cancel`                                                                              | `@smthrs/cli`                                                                   | automatic |
+| `smithers cancel`                        | `smthrs runs cancel <run>`                                                                   | `@smthrs/cli`                                                                   | guided |
 | `smithers cron`                          | none                                                                                         | none                                                                            | unsafe    |
 | `smithers deny`                          | none                                                                                         | none                                                                            | unsafe    |
 | `smithers docs`                          | none                                                                                         | none                                                                            | unsafe    |
@@ -540,7 +537,7 @@ the table below in sync with `Mapping.rows`.
 | `smithers migrate`                       | none                                                                                         | none                                                                            | unsafe    |
 | `smithers optimize`                      | none                                                                                         | none                                                                            | unsafe    |
 | `smithers pause`                         | none                                                                                         | none                                                                            | unsafe    |
-| `smithers ps`                            | `smthrs ps`                                                                                  | `@smthrs/cli`                                                                   | automatic |
+| `smithers ps`                            | `smthrs runs list`                                                                           | `@smthrs/cli`                                                                   | guided |
 | `smithers replay`                        | none                                                                                         | none                                                                            | unsafe    |
 | `smithers restore`                       | none                                                                                         | none                                                                            | unsafe    |
 | `smithers retry-task`                    | none                                                                                         | none                                                                            | unsafe    |
@@ -551,9 +548,9 @@ the table below in sync with `Mapping.rows`.
 | `smithers snapshots`                     | none                                                                                         | none                                                                            | unsafe    |
 | `smithers timeline`                      | none                                                                                         | none                                                                            | unsafe    |
 | `smithers ui`                            | none                                                                                         | none                                                                            | unsafe    |
-| `smithers up`                            | `smthrs plan <flow> [k=v] then smthrs approve <payload> then smthrs run <payload>`           | `@smthrs/cli`                                                                   | automatic |
+| `smithers up`                            | `smthrs flow start <flow> --data <json> [--detached]`                                        | `@smthrs/cli`                                                                   | automatic |
 | `smithers upgrade`                       | none                                                                                         | none                                                                            | unsafe    |
-| `smithers workflow`                      | `smthrs plan <flow> then smthrs run <payload>`                                               | `@smthrs/cli`                                                                   | automatic |
+| `smithers workflow`                      | `smthrs flow start <flow> --data <json> [--detached]`                                        | `@smthrs/cli`                                                                   | automatic |
 | `smithers worktrees`                     | none                                                                                         | none                                                                            | unsafe    |
 | `smithers.config.ts`                     | `Verification commands`                                                                      | none                                                                            | automatic |
 | `smithersMetrics`                        | `The kernel's telemetry and the OTLP layer`                                                  | `@smthrs/kernel, @smthrs/observability`                                         | guided    |
@@ -633,8 +630,8 @@ the table below in sync with `Mapping.rows`.
 | `classifyPrompt`         | `(text: string) => { classification: "interpolation-only" \| "jsx"; ... }`                     | Whether an MDX prompt is convertible text or renders components.          |
 | `resolvedEffectVersions` | `(lock: string) => ReadonlyArray<string>`                                                      | What a pnpm, bun, npm, or yarn lockfile resolved `effect` to.             |
 | `SpecifierContext`       | `interface`                                                                                    | What the manifests decided about names that exist in both trees.          |
-| `oldPackageNames`        | `ReadonlyArray<string>`                                                                        | Names that only ever existed in the old tree.                             |
-| `oldScopes`              | `ReadonlyArray<string>`                                                                        | Scopes that only ever existed in the old tree.                            |
+| `oldPackageNames`        | `ReadonlyArray<string>`                                                                        | Names that only ever existed in Smithers 0.x.                             |
+| `oldScopes`              | `ReadonlyArray<string>`                                                                        | Scopes that only ever existed in Smithers 0.x.                            |
 | `deletedSmthrsPackages`  | `ReadonlyArray<string>`                                                                        | `@smthrs/*` packages 1.0 does not ship.                                   |
 | `companionPackages`      | `ReadonlyArray<string>`                                                                        | Packages recorded beside the old ones: `react`, `zod`, `effect`.          |
 | `foreignAuthoringApis`   | `ReadonlyArray<string>`                                                                        | Known non-Smithers authoring APIs.                                        |
@@ -655,14 +652,14 @@ refuses to `apply` a plan built over one (`scan` and `plan` still report it).
 - **Packages**: the root `package.json`, every workspace member,
   `.smithers/package.json`, and any manifest next to a workflow file.
   `Detect.classifyPackage(name, version)` decides whether a dependency is 0.x:
-  a name that only ever existed in the old tree (`smthrs`,
+  a name that only ever existed in Smithers 0.x (`smthrs`,
   `smithers-orchestrator`, `@smithers/*`) is decided by name; a name that
   exists in both trees (`@smthrs/cli`, `engine`, `memory`, `testing`) is decided
   by version alone, against `<1.0.0-0`. `1.0.0-rc.0` is not before that range, so
   a project already on the release candidate is not reported as old. Companion
   packages (`react`, `ai`, `@ai-sdk/*`, `zod`, `effect`, `xstate`) are recorded.
   Every `effect` declaration in every manifest is kept in `effectDeclarations`
-  with its file and field, and each one that is not exactly `4.0.0-rc.108`
+  with its file and field, and each one that is not exactly `4.0.0-rc.112`
   raises `effect-pin-conflict` naming it: a range, a later prerelease, and two
   manifests that disagree are each a version this release was not built
   against. `Detect.resolvedEffectVersions(lock)` reads what a pnpm, bun, npm,
@@ -860,8 +857,7 @@ to `effect/Schema` text: `z.object`, `z.string`, `z.number`, `z.boolean`,
 and `Schema.check(...)`.
 
 Printed text needs `Schema` in scope, and `Effect` too when a field has a
-default. A test evaluates every printed form and decodes a sample through it,
-so the subset is proved, not asserted.
+default.
 
 The printer refuses, rather than approximates, whatever it cannot say with the
 same meaning: a `z.record` key that is neither a string nor a literal set, a
@@ -1132,26 +1128,6 @@ person has to answer: one per `ClaudeCodeAgent`, `CodexAgent`, `OpenCodeAgent`,
 and `fallbackAgents` hit, each offering subscription auth through the flows
 harness or an API seat, and each saying that a pool stays a pool.
 
-## Fixtures
-
-`test/fixtures` holds real 0.x projects, copied byte for byte, each with a
-`FIXTURE.md` naming its origin, its commit, and every sanitization:
-
-| Fixture               | What it is                                                                                                                                                                                                       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jsx-single`          | A single-file JSX example with MDX prompts, a bun test, and no database.                                                                                                                                         |
-| `plue-pack`           | A real external `.smithers` pack: five workflows under the pre-rename package name, shared components, an agent pool, a workflow UI, and one workflow written against a foreign authoring API.                   |
-| `batch-issues`        | A nested pack that depends on the facade by its bare name through a `file:` spec, and splits `createSmithers` across a re-export module every component imports.                                                 |
-| `mixed-api`           | One real workflow file that imports Smithers 0.x and `@smithers-ai/workflow` together.                                                                                                                           |
-| `persisted-db`        | A project with run state. `make-db.mjs` builds its database at test time from `old-schema.sql`, verbatim `CREATE TABLE` statements from the old tree, with one live run and one parked run on an injected clock. |
-| `jsx-single.migrated` | The hand-written 1.0 output the deterministic checks run against.                                                                                                                                                |
-
-`test/PlueGolden.test.ts` runs `Detect` and `Inventory` read only over the
-pack named by `SMITHERS_MIGRATE_PLUE_PACK`, an unsanitized external pack nobody
-trimmed for the tool, and asserts that every import name, construct, and
-component prop it finds resolves to a catalog row or is reported. It skips with
-a reason when that directory is not on the machine.
-
 ## Contract
 
 ### Exports
@@ -1160,7 +1136,7 @@ a reason when that directory is not on the machine.
 | -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------- |
 | `text`                                             | `string`                                           | The stable system teaching every unit shares.                  |
 | `unitPrompt`                                       | `(unit: UnitBrief, failures?: Failures) => string` | The per-unit task, and the repair round's failing output.      |
-| `prohibitions`                                     | `ReadonlyArray<string>`                            | The twelve rules, one sentence each, so a test can pin them.   |
+| `prohibitions`                                     | `ReadonlyArray<string>`                            | The twelve rules, one sentence each.                           |
 | `role`                                             | `string`                                           | The agent's role, in one paragraph.                            |
 | `targetModel`                                      | `string`                                           | Every API a migrated unit may reach for, with its module.      |
 | `examples`                                         | `ReadonlyArray<Example>`                           | The worked old-to-new pairs.                                   |
@@ -1173,7 +1149,7 @@ a reason when that directory is not on the machine.
 | `ConstructRow`, `MappingRow`, `SourceFile`, `Hint` | `Schema.Struct`                                    | The brief's row types.                                         |
 | `Example`, `Failures`                              | `interface`                                        | A worked pair, and one round's failures.                       |
 
-`src/flow/Contract.ts`. The system teaching every unit shares and the per-unit prompt built from it.
+What each of those exports puts in front of the model:
 
 | Export          | Type                          | What it is                                                                                                                                                                                                                                                                                     |
 | --------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1205,16 +1181,11 @@ Every snippet in a prompt is captured source or a scanner-derived rewrite. The p
 | `instructions`     | `(scan: ScanResult) => ReadonlyArray<string>`                               | The operator texts, in the order to act on them.                     |
 | `incompleteScan`   | `(warnings) => MigrateError \| undefined`                                   | The refusal for a plan built over an unreadable path.                |
 
-`src/flow/Gate.ts`. The two operator decisions, evaluated before `apply` edits anything.
-
-| Export             | Type                                              | What it decides                                                                |
-| ------------------ | ------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `unsafeConstructs` | `(scan) => ReadonlyArray<string>`                 | Every construct with no safe translation, deduplicated.                        |
-| `unwaived`         | `(scan, allowUnsafe) => ReadonlyArray<string>`    | The ones `--allow-unsafe` did not name.                                        |
-| `runStateBlocks`   | `(scan, acknowledgeRunState) => boolean`          | Whether 0.x run state stands in the way. Both `blocked` and `history-only` do. |
-| `instructions`     | `(scan) => ReadonlyArray<string>`                 | What the operator has to do about the run state, in order.                     |
-| `evaluate`         | `(scan, options) => Effect<void, MigrateError>`   | Fails `run-state-blocked` or `unsafe-blocked`; `scan` and `plan` always pass.  |
-| `evaluateReport`   | `(report, options) => Effect<void, MigrateError>` | The same two gates over the report the flow's own scan step recorded.          |
+Both gates hold decisions only a person can make, so `apply` parks with exit 3
+and the project untouched rather than choosing for you. `scan` and `plan`
+always pass: they report the blockage instead of refusing on it. See
+[Clear 0.x run state before you apply](./guides/clear-run-state.md) and
+[Accept constructs with no safe translation](./guides/allow-unsafe-constructs.md).
 
 ## Options
 
@@ -1241,7 +1212,7 @@ Every snippet in a prompt is captured source or a scanner-derived rewrite. The p
 | `reservedDirectories`    | `[".flows", ".git", ".jj", "node_modules"]`                                   | Directory names no layout path may be or live under.                                               |
 | `reportDirEntries`       | `ReadonlyArray<string>`                                                       | Everything the tool itself writes at the top of the report directory.                              |
 
-`src/flow/Options.ts`. What one run was asked to do, as the flow's payload schema.
+What each of those exports defaults to, and what it refuses:
 
 | Export                                | Type                                                                              | Default                                                                                                                                                                                                                                                                                                                                    |
 | ------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -1266,7 +1237,7 @@ step refuse the same layouts.
 
 `apply` is one flow execution, `smithers/migrate-v1`, with one child execution per unit.
 
-The units are in the flow's payload rather than in a value its scan step returns, because a flow body is plan time: `Node.andThen`'s builder runs once against a placeholder before anything executes, so a graph cannot fan out over a list produced at run time. The scan still runs inside the flow, is still journaled, and is still what the gate and the report read; a payload whose units no longer match the project fails the gate with `unsupported-project`.
+The units are in the flow's payload rather than in a value its scan step returns, because a flow body is plan time: `Node.bindPlanned`'s builder runs once against a placeholder before anything executes, so a graph cannot fan out over a list produced at run time. The scan still runs inside the flow, is still journaled, and is still what the gate and the report read; a payload whose units no longer match the project fails the gate with `unsupported-project`.
 
 Every step takes a value from the step before it, and that is the ordering. A plan is a dataflow graph, so a node nothing depends on is free to run whenever the engine likes. The checkpoint's own record feeds the source capture, the capture feeds the rewrite, the rewrite's account of what it changed feeds the verification, and both feed the step that settles the unit.
 
@@ -1302,7 +1273,7 @@ Everything after the tree is read runs inside one restoring scope. The determini
 
 What the scope puts back is read from the tree at the moment it fires, never from a set computed before it: `Checkpoint.rollback` diffs the tree against the checkpoint's manifest then, puts every recorded file back byte for byte, removes every path added since, and deletes the archive copy of anything it put back. A postcondition that fails after the archive has moved a unit's sources therefore leaves the project exactly as the checkpoint found it, and so does any step a later version adds below the archive.
 
-`Archive.run` tells two kinds of source apart. A source the migration replaced moves to `.smithers-migrate/archive/<original path>`, in two phases: every copy is written before any source is removed. A source a 1.0 project keeps, `package.json`, `tsconfig*.json`, `.gitignore`, is rewritten where it is and never moved: old packages out, `effect` pinned to the version this release ships, `smithers up <file>` scripts rewritten to `smthrs run <flow>` and a verb with no 1.0 counterpart reported rather than deleted, the JSX compiler options and old path mappings removed, `.flows/` ignored. A `dependencies` or `integration` unit archives nothing, because its files are the ones the migration edits. Tool code gets the agent's rule too: an archive whose source set reaches a run-state path fails with `run-state-blocked` rather than moving it.
+`Archive.run` tells two kinds of source apart. A source the migration replaced moves to `.smithers-migrate/archive/<original path>`, in two phases: every copy is written before any source is removed. A source a 1.0 project keeps, `package.json`, `tsconfig*.json`, `.gitignore`, is rewritten where it is and never moved: old packages out, `effect` pinned to the version this release ships, `smithers up <file>` scripts rewritten to `smthrs flow start <flow>` with input/detach flags translated and unsafe mappings reported rather than deleted, the JSX compiler options and old path mappings removed, `.flows/` ignored. A `dependencies` or `integration` unit archives nothing, because its files are the ones the migration edits. Tool code gets the agent's rule too: an archive whose source set reaches a run-state path fails with `run-state-blocked` rather than moving it.
 
 `MigrateFlow.postconditions` asks, after the archive, whether the project is in the state this kind of unit exists to produce. The content checks read the files a unit changed, so a unit that changed nothing passes all of them and used to be recorded as migrated on that basis. There is one set per kind, and a file a check needs has to be there: a workflow unit wrote the flow it was planned for; a dependencies or project unit's manifests still exist, declare no 0.x package in any of the six dependency fields, and pin `effect`; a project unit's tsconfigs still exist and configure no JSX runtime, and its root `.gitignore` exists and covers `.flows/` (the project unit owns it, as a source when the project has one and as a target it creates when it does not); an integration unit's sources still exist and no longer import the 0.x facade.
 
@@ -1310,7 +1281,7 @@ The final tree is then verified as the final tree. `Verify.run` runs again over 
 
 Each unit writes its outcome to `<reportDir>/units/<readable id>-<16 hex of sha256(id)>.json`, so two ids that read alike (`workflow:a/b`, `workflow:a-b`) never share a file, and the artifact carries the id inside. `WriteReport` reads one artifact per planned unit, refuses one that cannot be decoded or was written for a different unit, and records a unit with no artifact as `failed` with a `no recorded outcome` entry, so an apply that lost a unit exits 1 rather than 0.
 
-`Command.run` is the entry point the CLI verb, the `smithers-migrate` bin, and the durable control-plane launch share. `Command.registration` is the layer a durable host passes to `NodeRuntime`'s `registerFlows`, so `smthrs plan migrate` / `approve` / `run` execute the same flow under the same journal.
+`Command.run` is the entry point the CLI verb, the `smithers-migrate` bin, and the durable control-plane launch share. `Command.registration` is the layer a durable host passes to `NodeRuntime`'s `registerFlows`, so `smthrs flow start system/migrate --data '<migration options>'` starts the same flow under the same journal.
 
 ## Flow module exports
 
@@ -1397,25 +1368,61 @@ discovery.
 `@smthrs/migrate/flow/Archive`. Replaced sources moved aside; kept files
 rewritten where they are.
 
-| Export                                                  | Signature                                                                                                     | What it is                                                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `action`                                                | `Action.Declared<"smithers/migrate-v1/Archive", ...>`                                                         | The archive step.                                                                                  |
-| `layer`                                                 | `Layer`                                                                                                       | Its implementation.                                                                                |
-| `run`                                                   | `(payload) => Effect<Result, MigrateError, ...>`                                                              | Two phases: every copy written before any source is removed.                                       |
-| `Result`                                                | `Schema.Struct`                                                                                               | What moved, what was rewritten, and what was reported instead.                                     |
-| `rewriteManifest`                                       | `(text: string, rewrite: ManifestRewrite) => { ... }`                                                         | Old packages out, `effect` pinned, scripts rewritten.                                              |
-| `rewriteScripts`                                        | `(scripts: Readonly<Record<string, string>>) => ReadonlyArray<ScriptRewrite>`                                 | `smithers up <file>` becomes `smthrs run <flow>`. A verb with no counterpart is left and reported. |
-| `rewriteTsconfig`                                       | `(text: string, specifiers?: SpecifierContext) => string`                                                     | The JSX options and the old path mappings removed.                                                 |
-| `rewriteGitignore`                                      | `(text: string, flowsState?: string) => string`                                                               | `.flows/` ignored.                                                                                 |
-| `rewritten`                                             | `(file, text, specifiers?, kind?) => { ... }`                                                                 | The rewrite for one kept file.                                                                     |
-| `isRewritable`                                          | `(file: string) => boolean`                                                                                   | Whether a file is rewritten in place rather than moved.                                            |
-| `isOldPathsKey`                                         | `(key: string, specifiers?: SpecifierContext) => boolean`                                                     | Whether a tsconfig path mapping is a 0.x one.                                                      |
-| `withoutComments`                                       | `(text: string) => string`                                                                                    | JSONC without its comments, for parsing.                                                           |
-| `pinFor`                                                | `(name: string) => string \| undefined`                                                                       | The version this release pins a package to.                                                        |
-| `dependencyFields`                                      | `["dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "overrides", "resolutions"]` | The six fields a postcondition checks.                                                             |
-| `effectVersion`                                         | `"4.0.0-rc.108"`                                                                                              | The `effect` version this release was built against.                                               |
-| `smithersVersion`                                       | `"1.0.0-rc.0"`                                                                                                | The `@smthrs/*` version it adds.                                                                   |
-| `ManifestRewrite`, `ScriptRewrite`, `UnsupportedScript` | `interface` or `Schema.Struct`                                                                                | The rewrite inputs and what could not be rewritten.                                                |
+Script rewriting recognizes literal `smithers`/`smthrs` commands, the old local
+`node_modules/.bin` path, and common `bunx`, `npx`, `pnpm exec`/`dlx` wrappers
+(including literal package versions/tags such as `smthrs@0.35.0`).
+The result uses the installed `smthrs` binary from `@smthrs/cli`. Both `up` and
+`workflow run` become `flow start`; root `run` is a different target command.
+
+- `--input` becomes `--data`, including `--input=<value>`. Quoted values are
+  preserved; a literal value must be a JSON object. An explicit input variable
+  such as `--input "$INPUT"` stays a shell expansion and is checked by the CLI
+  when run, never evaluated by migration.
+- Bare `-d` becomes `--detached`. The legacy `-d '<JSON object>'` input form
+  becomes `--data`; ambiguous dynamic/value forms require manual review.
+- `--json`, `--quiet`, root/remote/credential/MCP configuration, and explicit
+  `--detached` are preserved. An explicit `--backend sqlite` is removed because
+  this runtime is SQLite-only; other backends are refused. Remote plus detached
+  is refused because detach starts a local executor.
+- Quoting, literal environment assignments, `exec`/`env`, comments, and simple
+  command lists/pipelines are recognized. Text inside another command's quoted
+  arguments is not rewritten as though it were a command.
+- Unsupported flags, duplicate input flags, missing/dynamic workflow paths,
+  shell control grammar, command substitutions, or redirections leave the
+  **entire original script unchanged** with an `unsupportedScripts` entry.
+  Fix that entry before claiming the migration complete. Other old command
+  families require their own mapping; the report does not pretend their names
+  necessarily have no 1.0 equivalent.
+
+An inventory hit is `automatic` only when its captured invocation produces a
+checked rewrite. Missing or unsupported command text becomes `guided`; `ps`
+and `cancel` currently have guided canonical targets, not automatic rewrites.
+
+This is a POSIX simple-command rewrite, not a general shell interpreter or a
+Windows `cmd.exe` translator. It never runs the source script. Migrating a
+command proves neither its workflow's implementation nor the host's execution
+capabilities; an attached module flow still needs a host that registers and
+drives its implementation.
+
+| Export                                                  | Signature                                                                                                     | What it is                                                                                                            |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `action`                                                | `Action.Declared<"smithers/migrate-v1/Archive", ...>`                                                         | The archive step.                                                                                                     |
+| `layer`                                                 | `Layer`                                                                                                       | Its implementation.                                                                                                   |
+| `run`                                                   | `(payload) => Effect<Result, MigrateError, ...>`                                                              | Two phases: every copy written before any source is removed.                                                          |
+| `Result`                                                | `Schema.Struct`                                                                                               | What moved, what was rewritten, and what was reported instead.                                                        |
+| `rewriteManifest`                                       | `(text: string, rewrite: ManifestRewrite) => { ... }`                                                         | Old packages out, `effect` pinned, scripts rewritten.                                                                 |
+| `rewriteScripts`                                        | `(scripts: Readonly<Record<string, string>>) => ReadonlyArray<ScriptRewrite>`                                 | `smithers up <file>` becomes `smthrs flow start <flow>` with translated flags. Unsafe mappings are left and reported. |
+| `rewriteTsconfig`                                       | `(text: string, specifiers?: SpecifierContext) => string`                                                     | The JSX options and the old path mappings removed.                                                                    |
+| `rewriteGitignore`                                      | `(text: string, flowsState?: string) => string`                                                               | `.flows/` ignored.                                                                                                    |
+| `rewritten`                                             | `(file, text, specifiers?, kind?) => { ... }`                                                                 | The rewrite for one kept file.                                                                                        |
+| `isRewritable`                                          | `(file: string) => boolean`                                                                                   | Whether a file is rewritten in place rather than moved.                                                               |
+| `isOldPathsKey`                                         | `(key: string, specifiers?: SpecifierContext) => boolean`                                                     | Whether a tsconfig path mapping is a 0.x one.                                                                         |
+| `withoutComments`                                       | `(text: string) => string`                                                                                    | JSONC without its comments, for parsing.                                                                              |
+| `pinFor`                                                | `(name: string) => string \| undefined`                                                                       | The version this release pins a package to.                                                                           |
+| `dependencyFields`                                      | `["dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "overrides", "resolutions"]` | The six fields a postcondition checks.                                                                                |
+| `effectVersion`                                         | `"4.0.0-rc.112"`                                                                                              | The `effect` version this release was built against.                                                                  |
+| `smithersVersion`                                       | `"1.0.0-rc.0"`                                                                                                | The `@smthrs/*` version it adds.                                                                                      |
+| `ManifestRewrite`, `ScriptRewrite`, `UnsupportedScript` | `interface` or `Schema.Struct`                                                                                | The rewrite inputs and what could not be rewritten.                                                                   |
 
 ### MigrateFlow
 
@@ -1444,8 +1451,8 @@ implementation.
 
 ### Layers
 
-`@smthrs/migrate/flow/Layers`. The Node composition, its grant rules, and the
-scripted one tests use.
+`@smthrs/migrate/flow/Layers`. The Node composition, its grant rules, and a
+scripted composition to test a migration against.
 
 | Export                                                              | Signature                                                        | What it is                                                                                               |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -1490,8 +1497,8 @@ durable host share.
 
 `@smthrs/migrate/flow/Cli`. The `smithers-migrate` command itself.
 
-| Export    | Signature                             | What it is                                                                                       |
-| --------- | ------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `command` | `Command.Command<"smithers-migrate">` | The flags and the handler, runnable in process by a test.                                        |
-| `main`    | `Effect<void, CliError, never>`       | The executable's entry point. `flow/bin.ts` is the three lines that hand it to the Node runtime. |
-| `version` | `"1.0.0-rc.0"`                        | What `--version` prints and every report records as its tool version.                            |
+| Export    | Signature                             | What it is                                                               |
+| --------- | ------------------------------------- | ------------------------------------------------------------------------ |
+| `command` | `Command.Command<"smithers-migrate">` | The flags and the handler, runnable in process.                          |
+| `main`    | `Effect<void, CliError, never>`       | The executable's entry point: the whole of what `smithers-migrate` runs. |
+| `version` | `"1.0.0-rc.0"`                        | What `--version` prints and every report records as its tool version.    |

@@ -5,6 +5,24 @@ sidebar:
   order: 1
 ---
 
+## Availability
+
+The Smithers 1.0 packages are not on npm yet, so every `npx` and install line
+on this site resolves once they publish. Until then, run the tool from a source
+checkout of the
+[smithers repository](https://github.com/smithersai/smithers):
+
+```bash
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
+pnpm --filter @smthrs/migrate build
+node packages/smithers/migrate/dist/esm/flow/bin.js --root /path/to/project
+```
+
+That executable takes the flags this site documents, so the rest of these pages
+read the same from a checkout as they will from a registry.
+
 ## Run it without installing anything
 
 The tool has to run inside a project that does not have Smithers 1.0 yet, so
@@ -24,11 +42,22 @@ Install the package when you want the scanner API in your own script, or when
 you want the tool pinned in the project you are migrating:
 
 ```bash
+npm install --save-dev @smthrs/migrate
 pnpm add -D @smthrs/migrate
+yarn add -D @smthrs/migrate
+bun add -d @smthrs/migrate
 ```
 
-The package requires Node.js 22.19.0 or later, and ships as both ESM and
+The package requires Node.js 22.19+ (Node 22) or 24.11+, and ships as both ESM and
 CommonJS with TypeScript declarations.
+
+Syntax scanning uses TypeScript 7's version-pinned `unstable` API. It parses
+the supplied text in a closed virtual project, without reading the project's
+configuration or dependencies, checking types, emitting files, or executing
+source. Each compiler session is closed before its tree is returned. Keep
+npm's platform-specific optional dependencies enabled so the native compiler
+executable is installed. The classic compiler used to validate test fixtures
+is a development dependency, not part of the published runtime.
 
 ## Run it as a CLI verb
 
@@ -64,14 +93,13 @@ The package has a read-only half and an editing half, and they need different
 things.
 
 `scan` and `plan` need `effect`, `@effect/platform-node`, and `typescript`, and
-nothing else. Every scanner module imports only those and Node built-ins, and a
-test reads the real source to keep that boundary from drifting.
+nothing else. Every scanner module imports only those and Node built-ins.
 
 `apply` runs the migration flow and its registry discovery check, so it also
 needs the flow-lane packages: `@smthrs/agent`, `@smthrs/core`,
-`@smthrs/engine`, `@smthrs/flow`, `@smthrs/flows`, `@smthrs/harness`,
-`@smthrs/kernel`, `@smthrs/model`, `@smthrs/patterns`, `@smthrs/plan`,
-`@smthrs/platform-node`, `@smthrs/registry`, and `@smthrs/std`. They are
+`@smthrs/engine`, `@smthrs/flow`, `@smthrs/harness`,
+`@smthrs/kernel`, `@smthrs/model`, `@smthrs/plan`,
+`@smthrs/platform-node`, and `@smthrs/registry`. They are
 declared as `optionalDependencies`, so a package manager installs them by
 default and `--no-optional` leaves them out:
 
@@ -79,7 +107,9 @@ default and `--no-optional` leaves them out:
 pnpm add -D @smthrs/migrate --no-optional
 ```
 
-That is the install a scan-only user wants. `Checks.discovery` imports
+That flag also omits TypeScript's platform-specific native compiler package.
+A scan-only installation must supply that compiler executable separately;
+otherwise keep optional dependencies enabled. `Checks.discovery` imports
 `@smthrs/registry` at call time, so importing `@smthrs/migrate` never loads the
 runtime even when the optional packages are present.
 

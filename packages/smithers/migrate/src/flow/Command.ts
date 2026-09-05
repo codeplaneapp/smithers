@@ -30,6 +30,7 @@ import type * as Scan from "../Scan.ts"
 import type * as Units from "../Units.ts"
 import type * as Contract from "./Contract.ts"
 import * as Layers from "./Layers.ts"
+import * as Lock from "./Lock.ts"
 import * as MigrateFlow from "./MigrateFlow.ts"
 import * as Options from "./Options.ts"
 import type * as Transform from "./Transform.ts"
@@ -51,8 +52,8 @@ export const MigrateOptions = Options.MigrateOptions
 export type MigrateOptions = Options.MigrateOptions
 
 /**
- * The name the control plane knows this flow by, so `smthrs plan migrate`,
- * `approve`, and `run` reach the same execution the CLI verb does.
+ * The name the control plane knows this flow by, so
+ * `smthrs flow start system/migrate` reaches the same execution the CLI verb does.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -180,11 +181,45 @@ export const run = (
   Effect.flatMap(survey(options), (surveyed) => launch(options, surveyed))
 
 /**
+ * Notes a taken-over lock in the report and rewrites it, so the audit trail
+ * names the run this one replaced. The lock file said when the earlier run
+ * started; the pending marker beside it says which unit it reached.
+ */
+const noteReclaimedLock = (
+  options: MigrateOptions,
+  reclaimed: Lock.Record,
+  report: Report.MigrationReport
+): Effect.Effect<Report.MigrationReport, MigrateError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function*() {
+    const amended = new Report.MigrationReport({
+      ...report,
+      followUps: [
+        ...report.followUps,
+        {
+          severity: "info" as const,
+          text:
+            `this run took over the lock of an earlier apply (pid ${reclaimed.pid}, started ${reclaimed.startedAt}) whose process is gone; if it stopped mid-unit, ${
+              Options.reportDir(options)
+            }/pending-unit.json holds its recovery record`
+        }
+      ]
+    })
+    yield* Report.write(reportDirectory(options), amended)
+    return amended
+  })
+
+/**
  * Executes the migration flow over a survey taken earlier.
  *
  * This is the seam a durable host uses when the plan was approved in one
  * process and run in another: the survey is the plan, and the flow's own seal
  * step is what refuses it if the project has moved on since.
+ *
+ * An apply runs under the report directory's lock, so a second apply over the
+ * same project refuses instead of sharing the backups and the pending marker
+ * with the first. A lock whose owner died is taken over, and the takeover is
+ * noted in the report the run writes: the earlier run may have stopped
+ * mid-unit, and the report is where a person learns that.
  *
  * @category execution
  * @since 1.0.0-rc.0
@@ -195,7 +230,7 @@ export const launch = (
 ): Effect.Effect<Report.MigrationReport, MigrateError, Requirements> =>
   Effect.gen(function*() {
     const generatedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
-    return yield* MigrateFlow.flow.execute({
+    const execute = MigrateFlow.flow.execute({
       options,
       units: surveyed.outlines,
       runStateRoots: surveyed.runStateRoots,
@@ -205,6 +240,16 @@ export const launch = (
       Effect.mapError((error) =>
         isMigrateError(error) ? error : make("io", "the migration flow could not run", String(error))
       )
+    )
+    if (options.mode !== "apply") return yield* execute
+    return yield* Effect.acquireUseRelease(
+      Lock.acquire({ root: options.root, reportDir: Options.reportDir(options) }),
+      (lock) =>
+        Effect.flatMap(execute, (report) =>
+          lock.reclaimed === undefined
+            ? Effect.succeed(report)
+            : noteReclaimedLock(options, lock.reclaimed, report)),
+      (lock) => Lock.release(lock)
     )
   })
 
@@ -243,8 +288,8 @@ export const layerNode = (config: {
  * The migration's own registrations, for a host that already has an engine.
  *
  * A durable host — `@smthrs/flows`' `NodeRuntime` — takes this as its
- * `registerFlows` layer, and then `smthrs plan migrate` / `approve` / `run`
- * execute the same flow under the same journal as everything else.
+ * `registerFlows` layer, and then `smthrs flow start system/migrate` starts
+ * the same flow under the same journal as everything else.
  *
  * @category layers
  * @since 1.0.0-rc.0
