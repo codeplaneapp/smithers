@@ -53,7 +53,11 @@ BunHost.implementationIds
 Each value names the module actually behind the slot, not the specifier you
 import it through. The filesystem entry says
 `@smthrs/platform-node/AtomicFileSystem` because that is the implementation,
-even though a Bun program reaches it through this package.
+even though a Bun program reaches it through this package. Each key is the
+slot's stable identity in the closed list, which is likewise not always the
+specifier the tag comes from: the spawner key is
+`effect/process/ChildProcessSpawner` while its tag is imported from
+`effect/unstable/process/ChildProcessSpawner`.
 
 Nothing digests these values today. [`@smthrs/plan`](https://plan.smithers.sh/reference/api/)'s step key
 carries a `layers` component they are meant to feed, but no planner derives it
@@ -70,8 +74,8 @@ pass-through decision rather than dropping it.
 re-exported, which means Bun and Node run literally the same module. There is
 no Bun shell wrapper here and no runtime detection, because there is nothing
 to choose between. See
-[Runtime parity with Node](/concepts/runtime-parity/) for what that means
-for your program, and for the tests.
+[Runtime parity with Node](/concepts/runtime-parity/) for what that means for your
+program, and where the parity stops.
 
 **The network** is Effect's `HttpClient`. There is no Smithers transport port
 beneath it, because a raw port would be a second way to reach the network
@@ -94,14 +98,12 @@ client that follows a redirect on its own reaches a host the capability kernel
 never authorized. Following a redirect is the kernel's guarded
 `HttpClient.layer`, which rechecks the capability on every hop.
 
-The package's contract suite drives this against two loopback servers and
-asserts the redirect destination received zero requests, so it is a tested
-property rather than a configured intention.
-
 ## Two slots the bundle composes from Smithers packages
 
 **Version control** is `Jj`, the service whose methods make a step reversible:
-snapshot, restore, diff, workspace lanes. Bun's adapter is
+snapshot, restore, diff, workspace lanes. It runs the `jj` command from
+[Jujutsu](https://jj-vcs.github.io), a version-control system that works on a
+Git repository, so the slot needs that binary on the host. Bun's adapter is
 `@smthrs/jj/bun/BunJj`, which is the Node adapter under another name because
 Bun implements the child-process API it uses. The adapter is imported from
 [`@smthrs/jj`](https://jj.smithers.sh/reference/api/) and deliberately not re-exported here: it belongs to

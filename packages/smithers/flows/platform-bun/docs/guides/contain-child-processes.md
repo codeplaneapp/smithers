@@ -89,9 +89,9 @@ genuinely leads a group. `ProcessReaper.reap` retires such a record as
 incarnation.
 
 That is a durable lie rather than a compile error, which is why the field is
-gone from the type instead of documented as unsupported. The package's suite
-pins it: a caller that casts `platform: "win32"` back in still gets a record
-whose `pgid` is the child's real process group.
+gone from the type instead of documented as unsupported. Casting
+`platform: "win32"` back in past the type changes nothing either: the record
+still carries the child's real process group.
 
 ## `jj` is contained too
 
@@ -115,8 +115,8 @@ const status = Effect.flatMap(Jj, (jj) => jj.status()).pipe(
 )
 ```
 
-That is the observable difference the package's integration suite drives, with
-a `jj` shim installed on `PATH` so the record is asserted rather than assumed.
+That is the observable difference: the same call under `BunHost.layer` leaves
+the ledger empty.
 
 ## What the reaper refuses to kill
 

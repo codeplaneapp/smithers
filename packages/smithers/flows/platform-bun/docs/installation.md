@@ -8,10 +8,18 @@ sidebar:
 ## Install the package and its peer
 
 ```bash
-pnpm add @smthrs/platform-bun@next
+pnpm add @smthrs/platform-bun@1.0.0-rc.0 @smthrs/platform-node@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 @effect/platform-bun@4.0.0-rc.112 effect@4.0.0-rc.112
 ```
 
-`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108` because
+Version 1.0.0-rc.0 is not on npm yet. Until it is published, take the package
+from [the repository](https://github.com/smithersai/smithers); the rest of this
+page applies either way.
+
+`@smthrs/platform-node@1.0.0-rc.0`, `@effect/platform-node@4.0.0-rc.112`, and
+`effect@4.0.0-rc.112` are required peers for the shared filesystem and Node
+fallback. The Effect adapters own their node-shared implementation dependency.
+
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.112` because
 the root entry point and `@smthrs/platform-bun/BunHost` import it at module
 load. Package managers that resolve required peers install it automatically.
 `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` are also
@@ -65,9 +73,8 @@ Two subpath forms are blocked in the export map and are not public:
 `@smthrs/platform-bun/internal/*` and `@smthrs/platform-bun/*/index`.
 `@smthrs/platform-bun/package.json` is exported.
 
-The bundle resolves `node:` built-ins, so it is on the repository's
-`NODE_ONLY` list and is not browser bundleable. A page composes
-[`@smthrs/platform-browser`](/api/platform-browser) instead.
+The bundle resolves `node:` built-ins, so it does not bundle for a browser. A
+page composes [`@smthrs/platform-browser`](/api/platform-browser) instead.
 
 ## What a real composition adds
 
@@ -84,10 +91,11 @@ The bundle resolves `node:` built-ins, so it is on the repository's
   durable journal to write to. See
   [Contain and reap child processes](./guides/contain-child-processes.md).
 
-The `Jj` slot spawns the `jj` executable, which this package does not vendor.
-Install jj yourself if your program uses that slot;
-[`@smthrs/jj`](/api/jj) documents the binary and the `SMITHERS_JJ_PATH`
-override.
+The `Jj` slot spawns the `jj` command from
+[Jujutsu](https://jj-vcs.github.io), a version-control system that works on a
+Git repository. This package vendors no binaries, so install Jujutsu yourself if
+your program uses that slot; [`@smthrs/jj`](/api/jj) documents the resolution
+order and the `SMITHERS_JJ_PATH` override.
 
 ## Next step
 

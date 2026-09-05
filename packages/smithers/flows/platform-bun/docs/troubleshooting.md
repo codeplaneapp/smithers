@@ -22,7 +22,7 @@ installation was disabled.
 built against:
 
 ```bash
-pnpm add @effect/platform-bun@4.0.0-rc.108
+pnpm add @effect/platform-bun@4.0.0-rc.112
 ```
 
 `@smthrs/platform-bun/BunFileSystem` is the one entry point that resolves
@@ -155,8 +155,8 @@ is still running, and the next incarnation does not kill it.
 `node:child_process` reached from `@smthrs/platform-bun`.
 
 **Cause.** The bundle falls back to the `@effect/platform-node` adapters off
-Bun, so it resolves `node:` built-ins by design. It is on the repository's
-`NODE_ONLY` list for exactly this reason.
+Bun, so it resolves `node:` built-ins by design. That is what makes one bundle
+run on both runtimes, and it is exactly what a browser bundler cannot resolve.
 
 **Fix.** Compose [`@smthrs/platform-browser`](/api/platform-browser) in the
 page. It fills the same five slots from browser primitives, so the program
@@ -170,5 +170,6 @@ between them does not change. See
 **Cause.** No usable `jj` executable. This package vendors no binaries and
 installs nothing on your behalf.
 
-**Fix.** Install jj, or set `SMITHERS_JJ_PATH` to the one you want spawned.
+**Fix.** Install [Jujutsu](https://jj-vcs.github.io), which provides the `jj`
+command, or set `SMITHERS_JJ_PATH` to the executable you want spawned.
 [`@smthrs/jj`](/api/jj) documents the resolution order and the failure codes.

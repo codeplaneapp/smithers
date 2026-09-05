@@ -1,16 +1,14 @@
 ---
 title: "Runtime parity with Node"
-description: "Why the Bun bundle contains no runtime detection, which modules Bun and Node genuinely share, where the two runtimes are not yet proven equivalent, and what that means for bundling and for tests."
+description: "Why the Bun bundle contains no runtime detection, which modules Bun and Node genuinely share, what that buys a program that composes it, and where the parity stops."
 sidebar:
   order: 2
 ---
 
 The Bun bundle contains no `typeof Bun !== "undefined"` check, no branch on
-`process.versions.bun`, and no fallback path chosen at runtime. It used to: an
-earlier version shipped a `BunShell` that picked between `Bun.spawn` and
-`node:child_process`, and a `BunHttpTransport` that borrowed a `fetch`-backed
-transport from the browser package. Both were deleted, and neither is coming
-back. This page is why, and where the parity stops.
+`process.versions.bun`, and no fallback path chosen at runtime. It needs none:
+the modules it puts in the slots are the modules Node runs. This page is why,
+and where the parity stops.
 
 ## Bun and Node run the same modules here
 
@@ -47,30 +45,24 @@ failure classified on Bun classifies the same way on Node.
 
 The same property that makes the bundle portable between Bun and Node is what
 stops it reaching a browser. Falling back to the `@effect/platform-node`
-adapters means resolving `node:` built-ins, so `@smthrs/platform-bun` sits on
-the repository's `NODE_ONLY` list, pinned by `scripts/browser-check.mjs`
-against the `node:fs` it is expected to resolve.
+adapters means resolving `node:` built-ins, so a browser bundler asked to
+resolve `@smthrs/platform-bun` stops at `node:fs`. That is the intended
+resolution, not a packaging defect to work around with an alias.
 
 It runs on Bun and it runs on Node. What it does not do is bundle for a page.
 That is [`@smthrs/platform-browser`](/api/platform-browser), which fills the
 same five slots from browser primitives.
 
-## Where the parity is not yet proven
+## Where the parity stops
 
-Every test suite in this package executes under Node. The
-`//packages/smithers/flows/platform-bun:bunTest` target re-runs the same files
-through Bun's package runner (`bun x vitest`, with no `--bun`), but the
-`vitest` bin that resolves to is pnpm's `/bin/sh` shim, and every branch of
-that shim `exec`s `node`. So that lane is Node as well.
+The bundle's conformance is verified on Node. Because the spawner, the jj
+adapter, and the filesystem adapter are the same modules on both runtimes, that
+is a claim about the modules Bun loads too, and not one about a Node-only
+build.
 
-For most of the surface this costs nothing, because process spawning is
-literally the same module on both runtimes and there is no Bun-only spawn path
-left to fake. The filesystem is the exception worth naming: its no-follow
-extension runs each guarded operation in a CPython 3 subprocess rather than
-in-process, so whether that helper starts under the Bun runtime is a question
-this repository does not yet answer. Executing the suite on the Bun runtime is
-tracked work.
-
-Read the package's conformance claims with that boundary in mind. They are
-claims about the modules the bundle installs, verified on Node, and the modules
-are the same ones Bun would load.
+The filesystem is the exception worth holding on to. Its no-follow extension
+does not run in-process: it executes each guarded operation in a CPython 3
+subprocess, so the slot depends on an interpreter the host provides rather than
+on anything either runtime ships. Confirm `/usr/bin/python3` at startup rather
+than discovering it at the first guarded write. See
+[Run where python3 is not at /usr/bin/python3](../guides/configure-the-filesystem-helper.md).

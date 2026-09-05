@@ -1,130 +1,130 @@
 ---
 title: "@smthrs/platform-bun"
-description: "The Bun Host bundle for Smithers: Effect's Bun platform services composed with the jj adapter and the atomic filesystem into the closed five-slot Host surface, with optional process containment."
+description: "The Bun host bundle for Smithers: one Effect layer that fills the five services a program reaches the outside world through, with optional containment for the processes it spawns."
 ---
 
-`@smthrs/platform-bun` is the Bun implementation of the Smithers Host surface.
-A Smithers program reaches the outside world through exactly five Effect
-service tags: `FileSystem`, `Path`, `ChildProcessSpawner`, `Jj`, and
-`HttpClient`. This package fills all five for Bun, and `BunHost.layer` is the
-single layer that provides them.
+`@smthrs/platform-bun` is the Bun host bundle for Smithers, which runs long jobs
+as durable flows: each step is recorded, so a restart resumes what did not
+finish instead of starting over. `BunHost.layer` is a single Effect layer that
+fills the five services a program reaches the outside world through: the
+filesystem, path handling, child processes, version control, and HTTP.
 
-## The problem it solves
+## What it solves
 
-The closed Host list is what makes a program both portable and governable. A
-step written against the five tags runs on any bundle that provides them, and
-[`@smthrs/kernel`](/api/kernel) decorates those same tags in place with
-capability checks, so a consumer that never heard of the kernel still cannot
-get around it. A program that reaches for `Bun.spawn` or a bare `fetch` leaves
-that surface: nothing can attenuate it, deny it, or record it.
+A program that calls `node:fs`, `Bun.spawn`, or a global `fetch` directly cannot
+be permission checked, denied, audited, or replayed, because nothing sits
+between it and the runtime. Smithers closes the outside world behind five Effect
+service tags instead, and a host bundle is the object that fills them. This
+package is that object for a process running on Bun.
 
-Filling the slots on Bun is mostly a composition problem, not an
-implementation problem. `@effect/platform-bun` already ships a child-process
-spawner and a fetch-backed `HttpClient`, and its spawner is
-`@effect/platform-node-shared`'s re-exported unchanged. So this package writes
-no spawner, no HTTP client, and no runtime detection. It composes what exists
-into one closed surface and adds the two things Bun has no answer for: the
-`Jj` adapter from [`@smthrs/jj`](/api/jj), and the descriptor-relative atomic
-filesystem from [`@smthrs/platform-node`](/api/platform-node).
+Composing the same five slots by hand costs you two properties this bundle
+already has:
+
+- **A filesystem that survives a symlink race.** The filesystem slot carries
+  [`@smthrs/platform-node`](/api/platform-node)'s `AtomicFileSystem`, so under
+  [`@smthrs/kernel`](/api/kernel)'s guard an authorized path operation runs
+  against file descriptors and refuses to follow a link, rather than failing
+  closed. A symlink swapped in after authorization cannot redirect the write.
+- **An HTTP client that stops at a redirect.** The bundle configures Effect's
+  fetch-backed client with `RequestInit { redirect: "manual" }`, so a `302`
+  comes back to you as a `302` and the second origin is never contacted. A
+  client that follows redirects on its own reaches a host nobody authorized.
+
+The bundle also runs unchanged on Node.js 22.19.0 or later. Bun's child-process
+spawner is Effect's Node spawner re-exported, so there is no runtime detection
+here and nothing to detect. See
+[Runtime parity with Node](./concepts/runtime-parity.md).
 
 ## Install
 
 ```bash
-pnpm add @smthrs/platform-bun@next
+pnpm add @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.112
 ```
 
-`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.108`. Package
+`@effect/platform-bun` is a required peer at exactly `4.0.0-rc.112`. Package
 managers install it with the other required Effect peers. The filesystem slot
 also needs a CPython 3 interpreter on the host. For both, see
 [Installation](./installation.md).
 
-## The shortest real example
+`@effect/platform-bun` is an optional peer dependency that this package imports
+at module load, so your package manager will not fetch it for you.
+[Installation](./installation.md) covers that, the CPython 3 interpreter the
+filesystem slot spawns, and the import forms.
+
+## Run a command and a file operation through the host
+
+This program names Bun nowhere. It asks for two service tags, and the layer
+decides what fills them:
 
 ```ts
 import { BunHost } from "@smthrs/platform-bun"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 
 const program = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner
-  return yield* spawner.string(ChildProcess.make("git", ["status", "--short"]))
+
+  yield* fs.writeFileString("report.txt", "written through the host filesystem\n")
+  return yield* spawner.string(ChildProcess.make("wc", ["-c", "report.txt"]))
 })
 
-Effect.runPromise(Effect.provide(program, BunHost.layer))
+Effect.runPromise(Effect.provide(program, BunHost.layer)).then(console.log)
 ```
 
-Nothing in the body names Bun. Provide
-[`@smthrs/platform-node`](/api/platform-node)'s `NodeHost.layer` instead and
-the program is untouched.
+Replace `BunHost.layer` with `NodeHost.layer` from
+[`@smthrs/platform-node`](/api/platform-node) and the program above does not
+change a character. That portability is what the five tags buy.
 
-## What fills each slot
+Two variants change one slot each. `BunHost.layerAt(root)` binds version control
+to one absolute repository root instead of the process working directory, which
+a long-lived host wants because the working directory is ambient state anything
+can change. `BunHost.layerContained(options)` routes every spawn through a
+process group with a `SIGTERM`-then-`SIGKILL` deadline and records it in a
+process ledger, so a host that crashes without running a finalizer leaves
+something its next incarnation can act on.
 
-`BunHost.implementationIds` is this table as data, keyed by the kernel's
-closed slot ids, so a swapped implementation is a visible change rather than a
-comment that drifted:
+## How this relates to @smthrs/flows
 
-| Slot                                 | Implementation                                | Whose code it is                            |
-| ------------------------------------ | --------------------------------------------- | ------------------------------------------- |
-| `effect/FileSystem`                  | `@smthrs/platform-node/AtomicFileSystem`      | Smithers, shared byte for byte with Node    |
-| `effect/Path`                        | `effect/Path`                                 | Effect, runtime independent                 |
-| `effect/process/ChildProcessSpawner` | `@effect/platform-bun/BunChildProcessSpawner` | Effect, re-exported from the Node spawner   |
-| `@smthrs/jj/Jj`                      | `@smthrs/jj/bun/BunJj`                        | Smithers, re-exported from the Node adapter |
-| `effect/HttpClient`                  | `@effect/platform-bun/BunHttpClient`          | Effect, fetch backed                        |
+[`@smthrs/flows`](/api/flows) is the durable flow engine: it records each step of
+a long job in a journal, so a restart replays what finished and resumes at what
+did not. Steps still have to read files and spawn processes, and this package is
+one of the three bundles that let them.
 
-[The Host surface on Bun](./concepts/host-surface.md) explains what each slot
-buys and how to take one service without the other four.
+`@smthrs/flows` re-exports no platform bundle on purpose, for the same reason
+`effect`'s own index does not re-export `@effect/platform-node`: a platform is
+chosen by the program that runs, not by the library it depends on. Its
+`NodeRuntime` helper builds a Node host for you, so a program that calls
+`NodeRuntime.layerHost` never imports a platform package. A program that runs on
+Bun composes this package instead and provides `BunHost.layer` itself.
+[`@smthrs/platform-node`](/api/platform-node) and
+[`@smthrs/platform-browser`](/api/platform-browser) are the sibling bundles that
+fill the same five slots on their own runtimes.
 
-## What this bundle refuses
-
-- **No shell service, and no runtime detection.** Running a command is
-  Effect's `ChildProcessSpawner`. Bun's spawner is the Node one, so there is
-  nothing to detect between them.
-- **No HTTP wrapper, and no redirect following.** The bundle provides Effect's
-  fetch-backed client configured with `RequestInit { redirect: "manual" }`, so
-  the runtime never walks to a second origin behind the capability kernel's
-  back. Following a redirect is the kernel's guarded `HttpClient.layer`, which
-  rechecks every hop.
-- **No relative repository root.** `BunHost.layerAt` and
-  `BunHost.layerContainedAt` throw `BunHost.BunHostError` with code
-  `invalid_repository_root` when the root is not absolute, the empty string
-  included.
-- **No caller-supplied `platform` under containment.** The spawner decides
-  process grouping from the real `process.platform`, so accepting a claim
-  about it could only teach the ledger a durable lie.
-- **No browser bundle.** The bundle falls back to the `@effect/platform-node`
-  adapters off Bun and so resolves `node:` built-ins. It runs on Bun and on
-  Node; what it does not do is bundle for a page. That is
-  [`@smthrs/platform-browser`](/api/platform-browser).
-- **No `BunJj` re-export.** The `Jj` adapter belongs to
-  [`@smthrs/jj`](/api/jj) and is imported from there.
-
-## Modules
-
-The root entry point re-exports both modules as namespaces, and each is also
-importable from `@smthrs/platform-bun/<Module>`:
-
-| Namespace       | What it provides                                                                                                                                                                                              |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BunHost`       | The closed Host bundle: `layer`, `layerAt`, `layerContained`, `layerContainedAt`, the `BunHostError` the two root-bound factories throw, and `implementationIds`. It re-exports the four single-slot modules. |
-| `BunFileSystem` | The filesystem slot on its own, plus `layerWith` for a host whose python3 is not at `/usr/bin/python3`.                                                                                                       |
-
-Every export, with its signature and its failure behavior, is on the
-[API reference](./api.md).
+Above both sits [`@smthrs/cli`](/api/cli), the `smithers` command that finds the
+flows in a project, plans them, runs them, and reads their events back. Install
+the CLI to run flows from a shell or a CI job, `@smthrs/flows` when the program
+that runs them is yours, and this package when that program runs on Bun.
 
 ## Where to go next
 
 - [Installation](./installation.md): the peer dependency, the CPython 3
-  prerequisite, the import forms, and what a guarded composition adds.
-- [Quickstart](./quickstart.md): run a command and a file operation through
-  the host, then turn containment on and watch a child enter the ledger.
-- Concepts: [the Host surface on Bun](./concepts/host-surface.md) and
-  [runtime parity with Node](./concepts/runtime-parity.md).
-- Guides: [bind the host to a repository root](./guides/bind-a-repository-root.md),
-  [contain and reap child processes](./guides/contain-child-processes.md), and
-  [run where python3 is not at /usr/bin/python3](./guides/configure-the-filesystem-helper.md).
-- [Troubleshooting](./troubleshooting.md): the failures this bundle produces,
-  what causes each one, and what to change.
+  interpreter, the supported runtimes, and the import forms.
+- [Quickstart](./quickstart.md): the program above, run twice, the second time
+  with containment on and a child visible in the ledger.
+- [The Host surface on Bun](./concepts/host-surface.md): what each of the five
+  slots is, whose code fills it, and how to take one service without the other
+  four.
+- [Contain and reap child processes](./guides/contain-child-processes.md): the
+  escalation deadline, the ledger, and the sweep that kills what a crashed host
+  abandoned.
+- [Bind the host to a repository root](./guides/bind-a-repository-root.md):
+  `layerAt`, `layerContainedAt`, and the refusal they throw.
+- [API reference](./api.md): every export, with its signature.
+- [Troubleshooting](./troubleshooting.md): the failures these modules produce,
+  and what to change.
 
 The host exports `implementationIds` for its five service slots. Its rooted
 factories reject invalid roots before constructing a layer, using the host's
