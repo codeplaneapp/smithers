@@ -71,9 +71,9 @@ a run_, and the run moves on afterwards. Both read the run's terminality first,
 before the idempotency lookup:
 
 - `cancel` runs with replay disabled. A second ask re-executes, reads the run,
-  and answers what is true now. Replaying the first answer left runs that no
-  verb could converge: `smthrs cancel` answered from the receipt and never
-  reached the row.
+  and answers what is true now. A replayed answer would describe the moment of
+  the first ask, so a caller could keep cancelling a run that never moved and
+  keep being told it was cancelled.
 - `resume` reads terminality before the replay for the same reason. Asking to
   restart a completed run must answer `Terminal`, not `AlreadyApplied`, which
   describes an earlier call and says nothing about the run you named.

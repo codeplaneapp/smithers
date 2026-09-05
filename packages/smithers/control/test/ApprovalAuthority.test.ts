@@ -1,106 +1,94 @@
-import { Effect, type Layer } from "effect"
+import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { Control } from "../src/Control.ts"
-import { ControlRuntime } from "../src/ControlRuntime.ts"
-import type { ApprovalTarget, Principal } from "../src/ControlSchema.ts"
-import * as TestControl from "../src/test/TestControl.ts"
-import { durable } from "./DurableStack.ts"
+import * as ApprovalAuthority from "../src/ApprovalAuthority.ts"
 
-const agent: Principal = { id: "mcp", kind: "agent", stampedAt: 0 }
-const operator: Principal = { id: "operator", kind: "operator", stampedAt: 0 }
+const envelope = { capabilities: [], flows: [], budget: {} }
+const actor = { id: "agent-with-delegation", kind: "agent" }
+const principal = { ...actor, stampedAt: 0 }
+const target = { _tag: "Plan" as const, planId: "plan", digest: "digest", envelope }
+const request: ApprovalAuthority.Request = { principal, target, decision: "approved", scope: "once" }
 
-const prepare = (kind: "Plan" | "Node") =>
-  Effect.gen(function*() {
-    const control = yield* Control
-    const runtime = yield* ControlRuntime
-    const card = yield* control.plan({ flowId: "system/test", input: {} })
-    if (kind === "Plan") return card.approval.target
-    yield* control.approve({ ...card.approval, principal: operator })
-    const receipt = yield* control.run({
-      _tag: "Plan",
-      planId: card.planId,
-      digest: card.digest,
-      envelope: card.envelope,
-      idempotencyKey: "launch",
-      principal: operator
-    })
-    if (receipt._tag !== "Accepted" || receipt.runId === undefined) return yield* Effect.die("expected run")
-    const target: Extract<ApprovalTarget, { readonly _tag: "Node" }> = {
-      _tag: "Node",
-      runId: receipt.runId,
-      requestId: "irreversible-action",
-      digest: "ask",
-      envelope: card.envelope
+describe("explicit approval authority", () => {
+  it("does not turn an actor's kind or authentication into approval authority", async () => {
+    for (const actor of [principal, { ...principal, kind: "operator" }, { ...principal, kind: "bearer" }]) {
+      const error = await Effect.runPromise(
+        Effect.flip(ApprovalAuthority.local.authorize({ ...request, principal: actor }))
+      )
+      expect(error._tag).toBe("/control/Unauthorized")
     }
-    yield* runtime.registerApproval(target)
-    yield* runtime.resume(receipt.runId)
-    const fence = yield* runtime.claimFence(receipt.runId)
-    yield* runtime.writeStatus(receipt.runId, fence, "waiting-approval")
-    return target
+    for (const actor of [{ id: "local", kind: "operator" }, { id: "memory", kind: "test" }]) {
+      await Effect.runPromise(ApprovalAuthority.local.authorize({ ...request, principal: { ...actor, stampedAt: 10 } }))
+    }
   })
 
-const stacks: ReadonlyArray<readonly [string, Layer.Layer<Control | ControlRuntime, unknown>]> = [
-  ["memory", TestControl.layer()],
-  ["SQL", durable()]
-]
-
-for (const [name, layer] of stacks) {
-  describe(`${name} approval authority`, () => {
+  it("binds exact scopes to exact target kinds without granting a cross product", async () => {
+    const policy = await Effect.runPromise(ApprovalAuthority.make([
+      { principal: actor, scopes: ["once"], targets: ["Plan"] },
+      { principal: actor, scopes: ["run"], targets: ["Node"] },
+      { principal: actor, scopes: ["run"], targets: ["Node"] }
+    ]))
     for (const kind of ["Plan", "Node"] as const) {
-      for (const decision of ["approve", "deny"] as const) {
-        it.each(["once", "run", "remembered"] as const)(
-          `${kind} ${decision}: refuses agent scope %s before writes`,
-          async (scope) => {
-            await Effect.runPromise(
-              Effect.gen(function*() {
-                const control = yield* Control
-                const runtime = yield* ControlRuntime
-                const target = yield* prepare(kind)
-                const before = yield* runtime.grants
-                const request = { target, scope, idempotencyKey: "decide", principal: agent }
-                const error = yield* Effect.flip(control[decision](request))
-                expect(error).toMatchObject({ _tag: "/control/Unauthorized", code: "unauthorized" })
-                expect(yield* runtime.grants).toEqual(before)
-                expect((yield* runtime.lookupApproval(target)).resolved).toBe(false)
-                if (target._tag === "Node") {
-                  expect((yield* runtime.getRun(target.runId)).status).toBe("waiting-approval")
-                  expect(yield* runtime.pendingResumes).toEqual([])
-                }
-                const receipt = yield* control[decision]({ ...request, principal: operator })
-                expect(receipt._tag).toBe("Accepted")
-                if (target._tag === "Node") expect((yield* runtime.registerApproval(target)).resolved).toBe(true)
-              }).pipe(Effect.provide(layer), Effect.scoped)
-            )
-          }
+      const current = kind === "Plan"
+        ? target
+        : { _tag: "Node" as const, runId: "run", requestId: "ask", digest: "digest", envelope }
+      for (const scope of ["once", "run", "remembered"] as const) {
+        const result = await Effect.runPromise(Effect.exit(policy.authorize({ ...request, target: current, scope })))
+        expect(result._tag).toBe(
+          (kind === "Plan" && scope === "once") || (kind === "Node" && scope === "run") ? "Success" : "Failure"
         )
       }
-
-      it(`${kind}: refuses direct runtime resolution by an agent`, async () => {
-        await Effect.runPromise(
-          Effect.gen(function*() {
-            const runtime = yield* ControlRuntime
-            const target = yield* prepare(kind)
-            const token = yield* runtime.lookupApproval(target)
-            const error = yield* Effect.flip(runtime.resolveApproval(token, "approved", agent))
-            expect(error).toMatchObject({ _tag: "/control/Unauthorized", code: "unauthorized" })
-            expect((yield* runtime.lookupApproval(target)).resolved).toBe(false)
-            yield* runtime.resolveApproval(token, "approved", operator)
-          }).pipe(Effect.provide(layer), Effect.scoped)
-        )
-      })
+      await Effect.runPromise(
+        policy.authorize({ ...request, target: current, decision: "denied", scope: "remembered" })
+      )
     }
   })
-}
 
-it("uses the runtime's agent principal when an approval omits attribution", async () => {
-  await Effect.runPromise(
-    Effect.gen(function*() {
-      const control = yield* Control
-      const runtime = yield* ControlRuntime
-      const card = yield* control.plan({ flowId: "system/test", input: {} })
-      const error = yield* Effect.flip(control.approve(card.approval))
-      expect(error).toMatchObject({ code: "unauthorized" })
-      expect(yield* runtime.grants).toEqual([])
-    }).pipe(Effect.provide(TestControl.layer({ principal: agent })), Effect.scoped)
-  )
+  it("snapshots configuration and keeps identity tuple boundaries distinct", async () => {
+    const grants: Array<ApprovalAuthority.Delegation> = [{
+      principal: { ...actor },
+      scopes: ["once"],
+      targets: ["Plan"]
+    }]
+    const policy = await Effect.runPromise(ApprovalAuthority.make(grants))
+    grants.push({ principal: { id: "another", kind: "agent" }, scopes: ["remembered"], targets: ["Plan"] })
+    Object.assign(grants[0]!.principal, { id: "mutated" })
+    // Use the original identity after mutating the caller's object too.
+    await Effect.runPromise(
+      policy.authorize({ ...request, principal: { id: "agent-with-delegation", kind: "agent", stampedAt: 1 } })
+    )
+    const error = await Effect.runPromise(
+      Effect.flip(policy.authorize({ ...request, principal: { id: "another", kind: "agent", stampedAt: 1 } }))
+    )
+    expect(error._tag).toBe("/control/Unauthorized")
+    const tuples = await Effect.runPromise(ApprovalAuthority.make([
+      { principal: { id: "a:b", kind: "c" }, scopes: ["once"], targets: ["Plan"] }
+    ]))
+    expect(
+      (await Effect.runPromise(
+        Effect.exit(tuples.authorize({ ...request, principal: { id: "a", kind: "b:c", stampedAt: 1 } }))
+      ))._tag
+    ).toBe("Failure")
+  })
+
+  it("refuses malformed or oversized delegation configuration without disclosing it", async () => {
+    const valid = { principal: { id: "RAW-SECRET", kind: "agent" }, scopes: ["once"], targets: ["Plan"] }
+    for (
+      const input of [
+        [{ ...valid, unknown: true }],
+        [{ ...valid, scopes: [] }],
+        [{ ...valid, scopes: ["all"] }],
+        [{ ...valid, targets: [] }],
+        [{ ...valid, targets: ["Unknown"] }],
+        [{ ...valid, principal: { id: "", kind: "agent" } }],
+        Array.from({ length: 1025 }, () => valid)
+      ]
+    ) {
+      const error = await Effect.runPromise(Effect.flip(ApprovalAuthority.make(input as never)))
+      expect(error._tag).toBe("/control/InvalidInput")
+      expect(JSON.stringify(error)).not.toContain("RAW-SECRET")
+    }
+    const empty = await Effect.runPromise(ApprovalAuthority.make([]))
+    expect((await Effect.runPromise(Effect.exit(empty.authorize(request))))._tag).toBe("Failure")
+    await Effect.runPromise(ApprovalAuthority.make(Array.from({ length: 1024 }, () => valid) as never))
+  })
 })

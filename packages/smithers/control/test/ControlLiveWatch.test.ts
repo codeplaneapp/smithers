@@ -238,7 +238,7 @@ describe("ControlLive.watch following", () => {
     expect(keys).toContain(`plan:${observed.card.planId}:0`)
     expect(keys).toContain(`${observed.runId}:0`)
     expect(observed.events.at(-1)).toMatchObject({
-      kind: "control.signal.delivered",
+      kind: "control.signal.admitted",
       runId: observed.runId
     })
   })
@@ -381,4 +381,66 @@ describe("ControlLive.watch following", () => {
     expect(error).toBeInstanceOf(InvalidInput)
     expect((error as InvalidInput).issue).toContain("afterSequence")
   })
+})
+
+describe("ControlLive.watch durable gap checks", () => {
+  for (
+    const scenario of [
+      { name: "an empty durable gap", notices: [2], durable: [] as number[], expected: [2] },
+      { name: "an unused sequence and duplicate tail notice", notices: [0, 0, 3], durable: [0, 3], expected: [0, 3] },
+      { name: "a dropped initial committed notice", notices: [2], durable: [1, 2], error: "PersistenceError" },
+      { name: "a dropped later committed notice", notices: [0, 3], durable: [0, 1, 3], error: "PersistenceError" },
+      { name: "a failed durable gap read", notices: [2], durable: [], error: "Unavailable", fail: true }
+    ]
+  ) {
+    it(`handles ${scenario.name}`, async () => {
+      const result = await Effect.runPromise(
+        Effect.gen(function*() {
+          const subscribed = Deferred.makeUnsafe<void>()
+          const published = yield* PubSub.unbounded<JournalEvent.Entry>()
+          const scripted = Layer.succeed(
+            Journal.Journal,
+            Journal.makeNoop({
+              changes: PubSub.subscribe(published).pipe(Effect.tap(() => Deferred.succeed(subscribed, undefined))),
+              entries: (options) =>
+                scenario.fail
+                  ? Effect.fail(new Journal.JournalError({ code: "unknown", message: "gap read failed" }))
+                  : Effect.succeed({
+                    entries: scenario.durable.filter((seq) => seq > (options.after ?? -1)).slice(0, options.limit).map((
+                      seq
+                    ) => entry(seq, "new-partition")),
+                    hasMore: false
+                  })
+            })
+          )
+          return yield* Effect.gen(function*() {
+            const control = yield* Control
+            const allSeen = Deferred.makeUnsafe<void>()
+            let delivered = 0
+            const collected = yield* control.watch({}).pipe(
+              Stream.tap(() =>
+                ++delivered === scenario.expected?.length ? Deferred.succeed(allSeen, undefined) : Effect.void
+              ),
+              Stream.runCollect,
+              Effect.result,
+              Effect.forkChild({ startImmediately: true })
+            )
+            yield* Deferred.await(subscribed)
+            for (const seq of scenario.notices) yield* PubSub.publish(published, entry(seq, "new-partition"))
+            if (!("error" in scenario)) {
+              yield* Deferred.await(allSeen)
+              yield* PubSub.shutdown(published)
+            }
+            return yield* Fiber.join(collected).pipe(Effect.timeout("5 seconds"))
+          }).pipe(Effect.provide(live({ journal: scripted, notifications: NotificationQueue.layerNoop() })))
+        }).pipe(Effect.scoped, Effect.timeout("5 seconds"))
+      )
+      if ("error" in scenario) {
+        expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: `/control/${scenario.error}` } })
+      } else {
+        expect(result._tag).toBe("Success")
+        if (result._tag === "Success") expect(sequences(result.success)).toEqual(scenario.expected)
+      }
+    })
+  }
 })

@@ -9,22 +9,22 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/con
 ## Install the package
 
 ```bash
-pnpm add @smthrs/control
+pnpm add @smthrs/control@next
 ```
+
+The `next` tag is where the 1.0 release candidates publish.
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
 CommonJS with TypeScript declarations. Its runtime dependencies install with
 it: [`effect`](https://effect.website) and the `@smthrs/*` packages the plane
 composes.
 
-Nothing in `src/` imports `node:*`. Identity comes from `globalThis.crypto`,
-encryption comes from Web Crypto, and persistence speaks the driver-neutral SQL
-contract, so the same modules run in Node and in a browser that supplies a SQL
-driver. The 1.0.0-rc.0 support matrix still records `@smthrs/control` as
-**no claim (no `node:` imports)**: it is not one of the entry points
-`scripts/browser-check.mjs` bundles, so no gate proves it bundles. Read the
-claim as what it is, an absence of `node:` imports rather than a tested
-guarantee.
+The package imports no `node:*` module. Identity comes from
+`globalThis.crypto`, encryption comes from Web Crypto, and persistence speaks
+the driver-neutral SQL contract, so the same modules run in Node.js and in a
+browser that supplies a SQL driver. That is a statement about the imports, not
+a tested guarantee: nothing here is exercised in a browser, so verify your own
+bundle before you depend on it.
 
 ## Import forms
 

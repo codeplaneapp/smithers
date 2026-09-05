@@ -104,7 +104,8 @@ export const ControlRpcs = RpcGroup.make(
       InvalidInput,
       Unauthorized,
       PersistenceError,
-      Unavailable
+      Unavailable,
+      Unauthorized
     ])
   }),
   Rpc.make("Deny", {
@@ -119,7 +120,8 @@ export const ControlRpcs = RpcGroup.make(
       InvalidInput,
       Unauthorized,
       PersistenceError,
-      Unavailable
+      Unavailable,
+      Unauthorized
     ])
   }),
   Rpc.make("Steer", {

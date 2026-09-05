@@ -19,6 +19,7 @@ import { Migrations as RunStoreMigrations, type Ownership, RunStore } from "@smt
 import type { Crypto } from "effect"
 import { Layer } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as ApprovalAuthority from "../src/ApprovalAuthority.ts"
 import type { Control } from "../src/Control.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import * as ControlLive from "../src/ControlLive.ts"
@@ -102,12 +103,13 @@ export const controlPlane = (
   options: {
     readonly executor?: ControlExecutor.Service | undefined
     readonly owner?: Ownership.OwnerId | undefined
+    readonly approvalAuthority?: ApprovalAuthority.Service | undefined
   } = {}
 ): Layer.Layer<Exclude<DurableStack, DurableStackDependencies>, never, DurableStackDependencies> =>
   Layer.provideMerge(
     ControlLive.layer,
     Layer.mergeAll(
-      SqlControlRuntime.layer(options.owner === undefined ? {} : { owner: options.owner }).pipe(Layer.orDie),
+      SqlControlRuntime.layer({ owner: options.owner, approvalAuthority: options.approvalAuthority }).pipe(Layer.orDie),
       NotificationQueue.layer,
       ControlExecutor.layer(options.executor ?? ControlExecutor.makeNoop()),
       Registry.layerNoop()
@@ -123,6 +125,7 @@ export const durable = (
   options: {
     readonly executor?: ControlExecutor.Service | undefined
     readonly owner?: Ownership.OwnerId | undefined
+    readonly approvalAuthority?: ApprovalAuthority.Service | undefined
     readonly database?: Layer.Layer<DurableWriter | SqlClient.SqlClient | RunStore.RunStore, unknown> | undefined
   } = {}
 ): Layer.Layer<DurableStack> =>

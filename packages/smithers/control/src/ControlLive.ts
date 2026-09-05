@@ -9,7 +9,7 @@ import { Journal, JournalEvent } from "@smthrs/journal"
 import { NotificationQueue } from "@smthrs/notifications"
 import * as SteerPayload from "@smthrs/notifications/SteerPayload"
 import { Registry } from "@smthrs/registry"
-import { Cause, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import * as Cancellation from "./Cancellation.ts"
 import {
   type ApprovalInput,
@@ -60,7 +60,7 @@ import {
 } from "./ControlSchema.ts"
 import { schemaIssuePath } from "./internal/issues.ts"
 import * as MutationBoundary from "./internal/MutationBoundary.ts"
-import { canonical } from "./internal/planning.ts"
+import { alreadyApplied, canonical } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
 import * as Steering from "./Steering.ts"
 
@@ -289,6 +289,23 @@ export const layer: Layer.Layer<
     const notifications = yield* NotificationQueue.NotificationQueue
     const registry = yield* Registry.Registry
     const executor = yield* Effect.serviceOption(ControlExecutor)
+    const observe = (run: RunSummary): Effect.Effect<RunSummary, PersistenceError> =>
+      Effect.gen(function*() {
+        if (Option.isNone(executor) || executor.value.readExecution === undefined) return run
+        const observed = yield* executor.value.readExecution(run.runId)
+        if (observed._tag === "Missing") return { ...run, executionObservation: "missing" as const }
+        return {
+          ...run,
+          executionObservation: "observed" as const,
+          status: observed.status,
+          waitingReason: observed.waitingReason,
+          parentRunId: observed.parentRunId,
+          lineageId: observed.lineageId,
+          roundOrdinal: observed.roundOrdinal
+        }
+      })
+    const getRun = (runId: string) => runtime.getRun(runId).pipe(Effect.flatMap(observe))
+    const listRuns = runtime.listRuns.pipe(Effect.flatMap((runs) => Effect.forEach(runs, observe)))
     const mutationSemaphore = yield* Semaphore.make(1)
 
     const emit = (
@@ -377,8 +394,9 @@ export const layer: Layer.Layer<
       principal: typeof Principal.Type | undefined,
       mutationFingerprint: string,
       effect: Effect.Effect<Receipt, E, R>,
-      replay = true
-    ): Effect.Effect<Receipt, E | PersistenceError, R> =>
+      replay = true,
+      claimRunKey = false
+    ): Effect.Effect<Receipt, E | InvalidInput | PersistenceError, R> =>
       mutationSemaphore.withPermits(1)(
         journal.transact(Effect.gen(function*() {
           const durableKey = mutationKey(operation, key, principal)
@@ -388,14 +406,26 @@ export const layer: Layer.Layer<
               ? { ...prior, receiptId: key }
               : prior
           }
-          const receipt = yield* effect
-          // A key that already carries a receipt is not re-recorded: the store
-          // refuses to overwrite one, and the answer this call returns is the
-          // fresh read of the run rather than the record.
-          if (receipt._tag !== "Parked" && prior === undefined) {
-            yield* runtime.recordMutation(durableKey, mutationFingerprint, receipt)
-          }
-          return receipt
+          const claim = claimRunKey
+            ? yield* runtime.claimRunKey(durableKey, mutationFingerprint)
+            : undefined
+          if (claim?._tag === "Raced") return alreadyApplied(key, claim.receipt)
+          return yield* Effect.gen(function*() {
+            const receipt = yield* effect
+            // A key that already carries a receipt is not re-recorded: the store
+            // refuses to overwrite one, and the answer this call returns is the
+            // fresh read of the run rather than the record.
+            if (receipt._tag === "Parked" && claimRunKey) {
+              yield* runtime.releaseRunKey(durableKey)
+            } else if (receipt._tag !== "Parked" && prior === undefined) {
+              yield* runtime.recordMutation(durableKey, mutationFingerprint, receipt)
+            }
+            return receipt
+          }).pipe(Effect.onExit((exit) =>
+            claim?._tag === "Claimed" && Exit.isFailure(exit)
+              ? runtime.releaseRunKey(durableKey)
+              : Effect.void
+          ))
         })).pipe(
           Effect.mapError((cause) =>
             cause instanceof Journal.JournalError
@@ -436,9 +466,9 @@ export const layer: Layer.Layer<
         const input = yield* snapshotApproval(decision, submitted)
         // Check the authenticated identity before replay or any grant writes.
         const principal = yield* runtime.stampPrincipal(input.principal)
-        if (principal.kind === "agent") {
-          return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
-        }
+        // Authorization precedes target reads and idempotency replay: neither
+        // an old receipt nor a terminal run confers authority on this caller.
+        yield* runtime.authorizeApproval({ principal, target: input.target, decision, scope: input.scope })
         // A decision on a settled run decides nothing, and it is read BEFORE
         // the idempotency replay for `resume`'s reason: the recorded receipt
         // describes the earlier call, not the run. Answering `Accepted` sent
@@ -449,7 +479,7 @@ export const layer: Layer.Layer<
         // A plan-level decision has no run yet, and a target whose run this
         // plane cannot find is left to `lookupApproval` to refuse.
         if (input.target._tag === "Node") {
-          const current = yield* runtime.getRun(input.target.runId).pipe(
+          const current = yield* getRun(input.target.runId).pipe(
             Effect.catchTag("/control/RunNotFound", () => Effect.succeed(undefined))
           )
           if (current !== undefined && terminal(current.status)) {
@@ -468,6 +498,10 @@ export const layer: Layer.Layer<
           fingerprint(decision, input.principal, input),
           Effect.gen(function*() {
             const token = yield* runtime.lookupApproval(input.target)
+            // Resolve (and recheck authority) before installing any grant. The
+            // durable adapter commits all three writes in this transaction;
+            // the memory test adapter must also leave no grant on refusal.
+            yield* runtime.resolveApproval(token, decision, principal, input.scope)
             if (decision === "approved") {
               yield* runtime.installBulkGrant(token, input.target.envelope, input.scope)
             }
@@ -482,7 +516,6 @@ export const layer: Layer.Layer<
                 principal
               })
             )
-            yield* runtime.resolveApproval(token, decision, principal)
             if (input.target._tag === "Plan") return accepted(input.idempotencyKey)
             // A decision on a node target has to restart the run the ask parked,
             // in this call. Answering without a restart left the run in
@@ -539,7 +572,7 @@ export const layer: Layer.Layer<
         // release validation asked `run --resume` for a completed run and was told
         // `AlreadyApplied`, which describes the earlier call and says nothing
         // about the run the operator named (spec item 3).
-        const settled = yield* runtime.getRun(input.runId)
+        const settled = yield* getRun(input.runId)
         if (terminal(settled.status)) {
           return { _tag: "Terminal", runId: settled.runId, status: settled.status }
         }
@@ -549,7 +582,7 @@ export const layer: Layer.Layer<
           input.principal,
           fingerprint("resume", input.principal, input),
           Effect.gen(function*() {
-            const current = yield* runtime.getRun(input.runId)
+            const current = yield* getRun(input.runId)
             if (terminal(current.status)) {
               return { _tag: "Terminal", runId: current.runId, status: current.status }
             }
@@ -651,6 +684,8 @@ export const layer: Layer.Layer<
       status: RunSummary["status"]
     ): Effect.Effect<void> =>
       Effect.gen(function*() {
+        // Reconcile the coordination row itself. Applying the engine overlay
+        // here would make a stale row appear settled before it was persisted.
         const current = yield* runtime.getRun(runId)
         if (terminal(current.status)) return
         const fence = yield* runtime.claimFence(runId)
@@ -744,8 +779,8 @@ export const layer: Layer.Layer<
         // `Monitor` pays it once a beat and every `smithers status <run>` pays
         // it too, all to keep a single summary.
         let runs = request.filters?.runId === undefined
-          ? Array.from(yield* runtime.listRuns)
-          : yield* runtime.getRun(request.filters.runId).pipe(
+          ? Array.from(yield* listRuns)
+          : yield* getRun(request.filters.runId).pipe(
             Effect.map((run) => [run]),
             Effect.catchTag("/control/RunNotFound", () => Effect.succeed<ReadonlyArray<RunSummary>>([])),
             Effect.map((found) => Array.from(found))
@@ -879,7 +914,7 @@ export const layer: Layer.Layer<
       )
 
     const journalPartitions = Effect.gen(function*() {
-      const [planIds, runs] = yield* Effect.all([runtime.listPlanIds, runtime.listRuns])
+      const [planIds, runs] = yield* Effect.all([runtime.listPlanIds, listRuns])
       return [
         ...planIds.map((planId) => `plan:${planId}`),
         ...runs.map((run) => run.runId)
@@ -921,6 +956,65 @@ export const layer: Layer.Layer<
               { concurrency: snapshotPartitionConcurrency }
             )
             const highWaterByPartition = new Map(cutoffs)
+            /**
+             * Detects a live tail that silently lost entries.
+             *
+             * `changes` is a sliding PubSub: a watcher that falls behind drops
+             * committed entries with no signal, which turns this follow into a
+             * permanently incomplete stream. Sequence numbers are
+             * partition-local, so each tail entry is checked against the last
+             * sequence this watcher saw for its partition (or the snapshot
+             * cutoff for one it has not tailed yet).
+             *
+             * A gap is not proof of loss on its own: a rolled-back transaction
+             * leaves an allocated sequence unused, and that hole is benign. The
+             * durable journal disambiguates — an entry in the gap that was
+             * committed but never delivered here is a real loss and fails the
+             * stream, while a hole with no durable entry is skipped.
+             *
+             * One limitation, by design: the disambiguation reads the durable
+             * journal, so an entry that was committed, dropped, and then
+             * compacted away before the check runs reports as a benign hole.
+             * Closing that needs a registered reader cursor, which the
+             * partition-merged tail does not hold.
+             */
+            const seenByPartition = new Map<string, number>()
+            const gapCheck = (
+              partition: string,
+              expected: number | undefined,
+              arrived: number
+            ): Effect.Effect<void, ControlError> =>
+              journal.entries({
+                runId: JournalEvent.RunId.make(partition),
+                ...(expected === undefined ? {} : { after: JournalEvent.Seq.make(expected) }),
+                limit: 1
+              }).pipe(
+                Effect.mapError(() => unavailable("watch")),
+                Effect.flatMap((page) => {
+                  const missed = page.entries[0]
+                  if (missed === undefined || missed.seq >= arrived) return Effect.void
+                  return Effect.fail(
+                    new PersistenceError({
+                      operation: "watch",
+                      message:
+                        `the live tail lost journal entries for ${partition}: sequence ${missed.seq} was committed but never delivered to this watcher`
+                    })
+                  )
+                })
+              )
+            const trackTail = (
+              entry: JournalEvent.Entry
+            ): Effect.Effect<Option.Option<JournalEvent.Entry>, ControlError> => {
+              const partition = String(entry.runId)
+              const expected = seenByPartition.get(partition) ?? highWaterByPartition.get(partition)
+              // A committed entry at or below the cursor was already delivered
+              // (or is covered by the snapshot); passing it on teaches nothing.
+              if (expected !== undefined && entry.seq <= expected) return Effect.succeed(Option.none())
+              seenByPartition.set(partition, entry.seq)
+              return expected !== undefined && entry.seq === expected + 1
+                ? Effect.succeed(Option.some(entry))
+                : Effect.map(gapCheck(partition, expected, entry.seq), () => Option.some(entry))
+            }
             const tail = Stream.fromSubscription(subscription).pipe(
               // Every committed entry names its partition, so an entry from one
               // this snapshot never read has no cutoff and passes through.
@@ -928,6 +1022,9 @@ export const layer: Layer.Layer<
                 const highWater = highWaterByPartition.get(String(entry.runId))
                 return highWater === undefined || entry.seq > highWater
               }),
+              Stream.mapEffect(trackTail),
+              Stream.filter(Option.isSome),
+              Stream.map((entry) => entry.value),
               Stream.map(eventFromEntry)
             )
             return Stream.mergeAll(
@@ -1053,7 +1150,9 @@ export const layer: Layer.Layer<
                 receiptId: input.idempotencyKey,
                 runId: launched.run.runId
               }
-            })
+            }),
+            true,
+            true
           ).pipe(
             Effect.tapError((error) =>
               error instanceof LaunchFailed ? settleUnlaunched(error.runId, error.message) : Effect.void
@@ -1085,7 +1184,7 @@ export const layer: Layer.Layer<
                   )
                 )
               }
-              const run = yield* runtime.getRun(input.runId)
+              const run = yield* getRun(input.runId)
               // A run that will never take another turn cannot be steered, and
               // storing the steer anyway would leave an operator watching a
               // message that has no boundary left to deliver it.
@@ -1132,48 +1231,46 @@ export const layer: Layer.Layer<
           Effect.gen(function*() {
             const key = fingerprint("signal", input.principal, input)
             const durableKey = mutationKey("signal", input.idempotencyKey, input.principal)
-            // The idempotency lookup runs first and outside the mutation, because
-            // delivery has to happen before the record and a re-sent signal must
-            // answer with its original receipt rather than be matched against a
-            // wait point its own first delivery already closed.
-            const prior = yield* runtime.lookupMutation(durableKey, key)
-            if (prior !== undefined) {
-              return prior._tag === "AlreadyApplied" ? { ...prior, receiptId: input.idempotencyKey } : prior
-            }
-            const current = yield* runtime.getRun(input.runId)
-            if (terminal(current.status)) {
-              return { _tag: "Terminal", runId: current.runId, status: current.status }
-            }
-            // Delivery decides the receipt, and it runs OUTSIDE the mutation's
-            // write transaction: completing a wait point re-drives the run, and
-            // the engine's own deferred completion flushes the journal on its way
-            // out — a flush that waits on the writer this transaction would be
-            // holding. A crash between delivery and record leaves the run awake
-            // with no control record, which is the survivable half of the pair.
-            const delivery = Option.isNone(executor)
-              ? "unknown" as const
-              : yield* executor.value.deliverSignal({ runId: input.runId, signal: input.signal })
-            // The run is parked, and parked on something else. Recording a
-            // delivery here would leave an operator watching a signal that never
-            // lands, which is exactly the partial behavior rc.0 forbids.
-            if (delivery === "no-match") {
-              return yield* new NoMatchingWait({ runId: input.runId, waitName: input.signal.name })
-            }
-            return yield* mutate(
+            // Admission, payload and receipt commit together before any engine
+            // operation. The writer is released before completing a deferred.
+            const receipt = yield* mutate(
               "signal",
               input.idempotencyKey,
               input.principal,
               key,
               Effect.gen(function*() {
-                yield* runtime.deliverSignal(input.runId, input.signal)
-                yield* emit(input.runId, "control.signal.delivered", {
+                const current = yield* getRun(input.runId)
+                if (terminal(current.status)) {
+                  return { _tag: "Terminal" as const, runId: current.runId, status: current.status }
+                }
+                yield* runtime.admitSignal(durableKey, input.runId, input.signal)
+                yield* emit(input.runId, "control.signal.admitted", {
+                  commandId: durableKey,
                   runId: input.runId,
-                  name: input.signal.name,
-                  payload: input.signal.payload
+                  name: input.signal.name
                 })
                 return accepted(input.idempotencyKey, input.runId)
-              })
+              }),
+              true,
+              true
             )
+            if (receipt._tag !== "Accepted" && receipt._tag !== "AlreadyApplied") return receipt
+            const command = yield* runtime.signalCommand(durableKey)
+            if (command === undefined || command.state === "delivered" || command.state === "terminal") return receipt
+            if (command.state === "rejected") {
+              return yield* new NoMatchingWait({ runId: input.runId, waitName: input.signal.name })
+            }
+            const delivery = Option.isNone(executor) ?
+              "unknown" as const
+              : yield* executor.value.deliverSignal({ ...command })
+            if (delivery === "no-match") {
+              yield* runtime.settleSignal(durableKey, "rejected")
+              return yield* new NoMatchingWait({ runId: input.runId, waitName: input.signal.name })
+            }
+            if (delivery === "delivered") {
+              yield* runtime.settleSignal(durableKey, "delivered")
+            }
+            return receipt
           }))
       ),
       cancel: Effect.fn("Control.cancel")((submitted) =>
@@ -1184,11 +1281,12 @@ export const layer: Layer.Layer<
             input.principal,
             fingerprint("cancel", input.principal, input),
             Effect.gen(function*() {
-              const current = yield* runtime.getRun(input.runId)
+              const current = yield* getRun(input.runId)
               // A run that has already settled cannot be cancelled, and a cancel
               // request journaled against it would be a request nothing can ever
               // act on. Answer with what actually happened to the run.
               if (terminal(current.status)) {
+                yield* reconcileTerminal(input.runId, current.status)
                 return { _tag: "Terminal", runId: current.runId, status: current.status }
               }
               // The durable half, and the only half that reaches a run another

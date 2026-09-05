@@ -35,10 +35,35 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
     "./migrations/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./ApprovalAuthority": "./src/ApprovalAuthority.ts",
+    "./Cancellation": "./src/Cancellation.ts",
+    "./Channels": "./src/Channels.ts",
+    "./Control": "./src/Control.ts",
+    "./ControlClient": "./src/ControlClient.ts",
+    "./ControlError": "./src/ControlError.ts",
+    "./ControlExecutor": "./src/ControlExecutor.ts",
+    "./ControlLive": "./src/ControlLive.ts",
+    "./ControlRpcs": "./src/ControlRpcs.ts",
+    "./ControlRuntime": "./src/ControlRuntime.ts",
+    "./ControlSchema": "./src/ControlSchema.ts",
+    "./ControlServer": "./src/ControlServer.ts",
+    "./Credential": "./src/Credential.ts",
+    "./CredentialCipher": "./src/CredentialCipher.ts",
+    "./CredentialStore": "./src/CredentialStore.ts",
+    "./Lineage": "./src/Lineage.ts",
+    "./Migrations": "./src/Migrations.ts",
+    "./Monitor": "./src/Monitor.ts",
+    "./SqlControlRuntime": "./src/SqlControlRuntime.ts",
+    "./SqlCredentialStore": "./src/SqlCredentialStore.ts",
+    "./Steering": "./src/Steering.ts",
+    "./SystemFlows": "./src/SystemFlows.ts",
+    "./WebCryptoCipher": "./src/WebCryptoCipher.ts",
+    "./WebhookChannel": "./src/WebhookChannel.ts",
+    "./index": "./src/index.ts",
+    "./test/TestControl": "./src/test/TestControl.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -62,14 +87,139 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
       "./migrations/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./ApprovalAuthority": {
+        "types": "./dist/esm/ApprovalAuthority.d.ts",
+        "import": "./dist/esm/ApprovalAuthority.js",
+        "require": "./dist/cjs/ApprovalAuthority.js"
+      },
+      "./Cancellation": {
+        "types": "./dist/esm/Cancellation.d.ts",
+        "import": "./dist/esm/Cancellation.js",
+        "require": "./dist/cjs/Cancellation.js"
+      },
+      "./Channels": {
+        "types": "./dist/esm/Channels.d.ts",
+        "import": "./dist/esm/Channels.js",
+        "require": "./dist/cjs/Channels.js"
+      },
+      "./Control": {
+        "types": "./dist/esm/Control.d.ts",
+        "import": "./dist/esm/Control.js",
+        "require": "./dist/cjs/Control.js"
+      },
+      "./ControlClient": {
+        "types": "./dist/esm/ControlClient.d.ts",
+        "import": "./dist/esm/ControlClient.js",
+        "require": "./dist/cjs/ControlClient.js"
+      },
+      "./ControlError": {
+        "types": "./dist/esm/ControlError.d.ts",
+        "import": "./dist/esm/ControlError.js",
+        "require": "./dist/cjs/ControlError.js"
+      },
+      "./ControlExecutor": {
+        "types": "./dist/esm/ControlExecutor.d.ts",
+        "import": "./dist/esm/ControlExecutor.js",
+        "require": "./dist/cjs/ControlExecutor.js"
+      },
+      "./ControlLive": {
+        "types": "./dist/esm/ControlLive.d.ts",
+        "import": "./dist/esm/ControlLive.js",
+        "require": "./dist/cjs/ControlLive.js"
+      },
+      "./ControlRpcs": {
+        "types": "./dist/esm/ControlRpcs.d.ts",
+        "import": "./dist/esm/ControlRpcs.js",
+        "require": "./dist/cjs/ControlRpcs.js"
+      },
+      "./ControlRuntime": {
+        "types": "./dist/esm/ControlRuntime.d.ts",
+        "import": "./dist/esm/ControlRuntime.js",
+        "require": "./dist/cjs/ControlRuntime.js"
+      },
+      "./ControlSchema": {
+        "types": "./dist/esm/ControlSchema.d.ts",
+        "import": "./dist/esm/ControlSchema.js",
+        "require": "./dist/cjs/ControlSchema.js"
+      },
+      "./ControlServer": {
+        "types": "./dist/esm/ControlServer.d.ts",
+        "import": "./dist/esm/ControlServer.js",
+        "require": "./dist/cjs/ControlServer.js"
+      },
+      "./Credential": {
+        "types": "./dist/esm/Credential.d.ts",
+        "import": "./dist/esm/Credential.js",
+        "require": "./dist/cjs/Credential.js"
+      },
+      "./CredentialCipher": {
+        "types": "./dist/esm/CredentialCipher.d.ts",
+        "import": "./dist/esm/CredentialCipher.js",
+        "require": "./dist/cjs/CredentialCipher.js"
+      },
+      "./CredentialStore": {
+        "types": "./dist/esm/CredentialStore.d.ts",
+        "import": "./dist/esm/CredentialStore.js",
+        "require": "./dist/cjs/CredentialStore.js"
+      },
+      "./Lineage": {
+        "types": "./dist/esm/Lineage.d.ts",
+        "import": "./dist/esm/Lineage.js",
+        "require": "./dist/cjs/Lineage.js"
+      },
+      "./Migrations": {
+        "types": "./dist/esm/Migrations.d.ts",
+        "import": "./dist/esm/Migrations.js",
+        "require": "./dist/cjs/Migrations.js"
+      },
+      "./Monitor": {
+        "types": "./dist/esm/Monitor.d.ts",
+        "import": "./dist/esm/Monitor.js",
+        "require": "./dist/cjs/Monitor.js"
+      },
+      "./SqlControlRuntime": {
+        "types": "./dist/esm/SqlControlRuntime.d.ts",
+        "import": "./dist/esm/SqlControlRuntime.js",
+        "require": "./dist/cjs/SqlControlRuntime.js"
+      },
+      "./SqlCredentialStore": {
+        "types": "./dist/esm/SqlCredentialStore.d.ts",
+        "import": "./dist/esm/SqlCredentialStore.js",
+        "require": "./dist/cjs/SqlCredentialStore.js"
+      },
+      "./Steering": {
+        "types": "./dist/esm/Steering.d.ts",
+        "import": "./dist/esm/Steering.js",
+        "require": "./dist/cjs/Steering.js"
+      },
+      "./SystemFlows": {
+        "types": "./dist/esm/SystemFlows.d.ts",
+        "import": "./dist/esm/SystemFlows.js",
+        "require": "./dist/cjs/SystemFlows.js"
+      },
+      "./WebCryptoCipher": {
+        "types": "./dist/esm/WebCryptoCipher.d.ts",
+        "import": "./dist/esm/WebCryptoCipher.js",
+        "require": "./dist/cjs/WebCryptoCipher.js"
+      },
+      "./WebhookChannel": {
+        "types": "./dist/esm/WebhookChannel.d.ts",
+        "import": "./dist/esm/WebhookChannel.js",
+        "require": "./dist/cjs/WebhookChannel.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./test/TestControl": {
+        "types": "./dist/esm/test/TestControl.d.ts",
+        "import": "./dist/esm/test/TestControl.js",
+        "require": "./dist/cjs/test/TestControl.js"
+      }
     }
   },
   "scripts": {
@@ -83,7 +233,6 @@
   },
   "dependencies": {
     "@smthrs/canonical": "1.0.0-rc.0",
-    "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/crypto": "1.0.0-rc.0",
     "@smthrs/database": "1.0.0-rc.0",
     "@smthrs/journal": "1.0.0-rc.0",
@@ -92,31 +241,32 @@
     "@smthrs/registry": "1.0.0-rc.0",
     "@smthrs/run-store": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@smthrs/core": "1.0.0-rc.0",
     "@smthrs/engine-store": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/jj": "1.0.0-rc.0",
     "@smthrs/step-cache": "1.0.0-rc.0",
     "@smthrs/time-travel": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

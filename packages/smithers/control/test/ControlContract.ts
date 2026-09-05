@@ -15,7 +15,9 @@ import {
   AlreadyResolved,
   ClaimLost,
   EnvelopeMismatch,
+  InvalidInput,
   LaunchFailed,
+  PersistenceError,
   PlanDenied,
   PlanDigestMismatch,
   PlanNotFound,
@@ -23,7 +25,7 @@ import {
 } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime } from "../src/ControlRuntime.ts"
-import type { Envelope, PlanCard, Principal } from "../src/ControlSchema.ts"
+import type { Envelope, PlanCard, Principal, Receipt } from "../src/ControlSchema.ts"
 import { park } from "./Park.ts"
 
 /** Every service a contract test may reach for. */
@@ -121,7 +123,7 @@ export const contract = (name: string, harness: Harness): void => {
         input.nested.value = "mutated after plan"
 
         const token = yield* runtime.lookupApproval(card.approval.target)
-        yield* runtime.resolveApproval(token, "approved", { id: "operator", kind: "test", stampedAt: 1 })
+        yield* runtime.resolveApproval(token, "approved", yield* runtime.stampPrincipal())
         const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
         if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
         ;(launched.run as unknown as { status: string }).status = "failed"
@@ -196,6 +198,74 @@ export const contract = (name: string, harness: Harness): void => {
         expect(started).toMatchObject({ _tag: "Accepted", receiptId: "plan:gated" })
       }))
 
+    test("parks every launch of an undecided plan under one key, then launches it once approved", () =>
+      Effect.gen(function*() {
+        const control = yield* Control
+        const card = yield* control.plan({ flowId: "system/test", input: { suite: "release" } })
+        const attempt = () =>
+          control.run({
+            _tag: "Plan",
+            planId: card.planId,
+            digest: card.digest,
+            envelope: card.envelope,
+            idempotencyKey: "run:release"
+          })
+        const first = yield* attempt()
+        const second = yield* attempt()
+        yield* control.approve(approval(card, "approve:release"))
+        const started = yield* attempt()
+
+        expect(first._tag).toBe("Parked")
+        // A parked launch records no receipt, so its run-key claim is released
+        // with it: a repeat while the plan is still undecided parks again
+        // rather than dying on a key row nobody will ever settle.
+        expect(second._tag).toBe("Parked")
+        expect(started).toMatchObject({ _tag: "Accepted", receiptId: "run:release" })
+      }))
+
+    test("claims a run key before launch and converges a second claim on the recorded receipt", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const key = "run:claim-contract"
+        const fingerprint = "fingerprint-a"
+
+        expect(yield* runtime.claimRunKey(key, fingerprint)).toEqual({ _tag: "Claimed" })
+        // Inside the winner's window there is no receipt to converge on yet.
+        const unsettled = yield* runtime.claimRunKey(key, fingerprint).pipe(Effect.flip)
+        expect(unsettled).toBeInstanceOf(PersistenceError)
+        // A key claimed for another intent is the plan verb's own refusal.
+        const collided = yield* runtime.claimRunKey(key, "fingerprint-b").pipe(Effect.flip)
+        expect(collided).toBeInstanceOf(InvalidInput)
+
+        const receipt: Receipt = { _tag: "Accepted", receiptId: key, runId: "run-1" }
+        yield* runtime.recordMutation(key, fingerprint, receipt)
+        // Once the winner has settled, the loser of the claim race gets the
+        // winner's receipt — the same convergence a losing planner gets.
+        expect(yield* runtime.claimRunKey(key, fingerprint)).toEqual({ _tag: "Raced", receipt })
+
+        yield* runtime.releaseRunKey(key)
+        expect(yield* runtime.claimRunKey(key, fingerprint)).toEqual({ _tag: "Claimed" })
+      }))
+
+    test("refuses a resume delegation a settled run can never take up", () =>
+      Effect.gen(function*() {
+        const runtime = yield* ControlRuntime
+        const settled = yield* start
+        const standing = yield* start
+        yield* runtime.interrupt(settled.runId)
+
+        const refused = yield* runtime.requestResume(settled.runId).pipe(Effect.flip)
+        const sequence = yield* runtime.requestResume(standing.runId)
+        const pending = yield* runtime.pendingResumes
+
+        // The refusal is typed and records nothing: the standing delegation is
+        // the only one any host's poll can see.
+        expect(refused).toBeInstanceOf(InvalidInput)
+        expect((refused as InvalidInput).issue).toContain("cancelled")
+        expect(pending.map((entry) => entry.runId)).toEqual([standing.runId])
+        expect(pending[0]?.sequence).toBe(sequence)
+      }))
+
     test("rejects a digest mismatch", () =>
       Effect.gen(function*() {
         const control = yield* Control
@@ -229,7 +299,7 @@ export const contract = (name: string, harness: Harness): void => {
         const runtime = yield* ControlRuntime
         const { card } = yield* runtime.plan({ flowId: "system/test", input: { suite: "denied" } })
         const token = yield* runtime.lookupApproval(card.approval.target)
-        yield* runtime.resolveApproval(token, "denied", { id: "operator", kind: "test", stampedAt: 1 })
+        yield* runtime.resolveApproval(token, "denied", yield* runtime.stampPrincipal())
         const denied = yield* runtime.launch(card.planId, card.digest, card.envelope).pipe(Effect.flip)
 
         expect(denied).toBeInstanceOf(PlanDenied)
@@ -263,7 +333,7 @@ export const contract = (name: string, harness: Harness): void => {
         expect(conflict).toBeInstanceOf(AlreadyResolved)
       }))
 
-    test("installs the whole envelope as one grant before resolving the token", () =>
+    test("commits the whole envelope as one grant with the approved decision", () =>
       Effect.gen(function*() {
         const control = yield* Control
         const runtime = yield* ControlRuntime
@@ -351,7 +421,7 @@ export const contract = (name: string, harness: Harness): void => {
         // Registration is idempotent: every parked attempt re-registers.
         const first = yield* runtime.registerApproval(target)
         const again = yield* runtime.registerApproval(target)
-        expect(first).toEqual({ tokenId: "ask-1", target, resolved: false })
+        expect(first).toEqual({ tokenId: "ask-1", target, _tag: "Pending" })
         expect(again).toEqual(first)
 
         // A target that disagrees with what was registered is refused, exactly
@@ -363,7 +433,7 @@ export const contract = (name: string, harness: Harness): void => {
         // the grant a resumed attempt reads its decision from.
         yield* control.approve({ target, scope: "run", idempotencyKey: "approve:ask-1" })
         const resolved = yield* runtime.registerApproval(target)
-        expect(resolved.resolved).toBe(true)
+        expect(resolved._tag).toBe("Approved")
         const grants = yield* runtime.grants
         expect(grants.some((grant) => grant.tokenId === "ask-1")).toBe(true)
       }))
@@ -476,6 +546,58 @@ export const contract = (name: string, harness: Harness): void => {
       )
     })
 
+    it("projects engine waits instead of the local coordination status", async () => {
+      const executor = ControlExecutor.makeNoop({
+        readExecution: () =>
+          Effect.succeed({ _tag: "Observed" as const, status: "parked" as const, waitingReason: "timer" })
+      })
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          const { runId } = yield* start
+          const control = yield* Control
+          const runtime = yield* ControlRuntime
+          expect((yield* runtime.getRun(runId)).status).toBe("accepted")
+          const result = yield* control.list({ _tag: "runs", filters: { runId } })
+          expect(result).toMatchObject({
+            _tag: "runs",
+            items: [{ status: "parked", waitingReason: "timer", executionObservation: "observed" }]
+          })
+        }).pipe(Effect.provide(harness(executor)), Effect.scoped)
+      )
+    })
+
+    it("admits the winning signal before delivery and never delivers conflicting payloads", async () => {
+      const delivered: Array<ControlExecutor.Signal> = []
+      let runtime: import("../src/ControlRuntime.ts").Service | undefined
+      const executor = ControlExecutor.makeNoop({
+        deliverSignal: (input) =>
+          Effect.gen(function*() {
+            expect(input.commandId).toBeDefined()
+            const admitted = yield* runtime!.signalCommand(input.commandId!)
+            expect(admitted?.signal).toEqual(input.signal)
+            delivered.push(input)
+            return "delivered" as const
+          })
+      })
+      await Effect.runPromise(
+        Effect.gen(function*() {
+          runtime = yield* ControlRuntime
+          const control = yield* Control
+          const { runId } = yield* start
+          const results = yield* Effect.all(
+            [1, 2].map((payload) =>
+              control.signal({ runId, signal: { name: "reviewed", payload }, idempotencyKey: "contended" })
+            ),
+            { concurrency: "unbounded" }
+          )
+          expect(results.map((receipt) => receipt._tag).sort()).toEqual(["Accepted", "Conflict"])
+          expect(delivered).toHaveLength(1)
+          const admitted = yield* runtime.signalCommand(delivered[0]!.commandId!)
+          expect(admitted?.state).toBe("delivered")
+        }).pipe(Effect.provide(harness(executor)), Effect.scoped)
+      )
+    })
+
     test("records a signal when no executor can deliver it, without resuming the run", () =>
       Effect.gen(function*() {
         const control = yield* Control
@@ -538,7 +660,7 @@ export const contract = (name: string, harness: Harness): void => {
         const runtime = yield* ControlRuntime
         const { card } = yield* runtime.plan({ flowId: "system/test", input: { pending: true } })
         const token = yield* runtime.lookupApproval(card.approval.target)
-        yield* runtime.resolveApproval(token, "approved", { id: "operator", kind: "test", stampedAt: 1 })
+        yield* runtime.resolveApproval(token, "approved", yield* runtime.stampPrincipal())
         const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
         if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
         const fence = yield* runtime.claimFence(launched.run.runId)
@@ -620,7 +742,7 @@ export const contract = (name: string, harness: Harness): void => {
         yield* journal.flush
 
         const events = yield* control.watch({ runId, afterSequence: 0 }).pipe(
-          Stream.filter((event) => event.kind === "control.signal.delivered"),
+          Stream.filter((event) => event.kind === "control.signal.admitted"),
           Stream.take(2),
           Stream.runCollect,
           Effect.forkChild({ startImmediately: true })
@@ -634,8 +756,8 @@ export const contract = (name: string, harness: Harness): void => {
         yield* journal.flush
 
         expect((yield* Fiber.join(events)).map((event) => event.kind)).toEqual([
-          "control.signal.delivered",
-          "control.signal.delivered"
+          "control.signal.admitted",
+          "control.signal.admitted"
         ])
       }))
 
@@ -656,7 +778,7 @@ export const contract = (name: string, harness: Harness): void => {
           Effect.timeout("1 second")
         )
 
-        expect(events.map((event) => event.kind)).toContain("control.signal.delivered")
+        expect(events.map((event) => event.kind)).toContain("control.signal.admitted")
       }))
 
     test("unscoped finite watch includes plan-only journal partitions", () =>

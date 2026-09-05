@@ -11,6 +11,7 @@ import * as ControlClient from "../src/ControlClient.ts"
 import { RunNotFound, TransportError, Unauthorized } from "../src/ControlError.ts"
 import * as ControlRpcs from "../src/ControlRpcs.ts"
 import * as ControlServer from "../src/ControlServer.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 import * as TestStack from "./TestStack.ts"
 
 const token = "control-client-secret"
@@ -30,7 +31,13 @@ const served = (authentication: Layer.Layer<ControlRpcs.ControlAuth> = auth) =>
     { disableListenLog: true, disableLogger: true }
   ).pipe(
     Layer.provideMerge(NodeHttpServer.layer(createServer, { host: "127.0.0.1", port: 0 })),
-    Layer.provideMerge(TestStack.live())
+    Layer.provideMerge(
+      TestStack.live({
+        runtime: TestStack.memoryRuntime({
+          approvalAuthority: delegateApproval({ id: "remote-operator", kind: "bearer" })
+        })
+      })
+    )
   )
 
 const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {

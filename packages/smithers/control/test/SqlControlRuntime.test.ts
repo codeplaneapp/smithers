@@ -20,6 +20,7 @@ import * as ControlExecutor from "../src/ControlExecutor.ts"
 import * as ControlLive from "../src/ControlLive.ts"
 import { ControlRuntime, type Service as ControlRuntimeService } from "../src/ControlRuntime.ts"
 import * as SqlControlRuntime from "../src/SqlControlRuntime.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 import { contract, type Stack } from "./ControlContract.ts"
 import { park } from "./Park.ts"
 
@@ -52,7 +53,7 @@ const durable = (
 ): Layer.Layer<Stack | DurableWriter | SqlClient.SqlClient | RunStore.RunStore | Crypto.Crypto> => {
   const journal = options.database ?? durableJournal
   const runtime = SqlControlRuntime.layer(
-    options.owner === undefined ? {} : { owner: options.owner }
+    { owner: options.owner, approvalAuthority: delegateApproval({ id: "reviewer", kind: "test" }) }
   ).pipe(Layer.orDie)
   // The database is provided once, to the whole stack: `NodeDatabase.layer`
   // opens a fresh `:memory:` connection per build, so provisioning it to each
@@ -204,10 +205,10 @@ describe("SqlControlRuntime", () => {
     expect(observed.second.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
     expect(observed.firstRunId).not.toBe(observed.secondRunId)
     expect(observed.firstAfter).toMatchObject({
-      resolved: true,
+      _tag: "Approved",
       decisionPrincipal: { id: "reviewer", kind: "test", stampedAt: 7 }
     })
-    expect(observed.secondAfter).toMatchObject({ resolved: false })
+    expect(observed.secondAfter).toMatchObject({ _tag: "Pending" })
     expect(observed.persistedPrincipal).not.toBeNull()
     expect(JSON.parse(observed.persistedPrincipal ?? "null")).toEqual({
       id: "reviewer",
@@ -240,9 +241,9 @@ describe("SqlControlRuntime", () => {
       }).pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie)
     )
 
-    expect(observed.plan).toMatchObject({ resolved: false, target: { _tag: "Plan" } })
+    expect(observed.plan).toMatchObject({ _tag: "Pending", target: { _tag: "Plan" } })
     expect(observed.storedPlan.decision).toBe("pending")
-    expect(observed.node).toMatchObject({ resolved: true, target: { _tag: "Node" } })
+    expect(observed.node).toMatchObject({ _tag: "Approved", target: { _tag: "Node" } })
   })
 
   it("still refuses a changed digest for one node approval identity", async () => {
@@ -495,7 +496,7 @@ describe("SqlControlRuntime", () => {
 
     expect(observed.receipt._tag).toBe("Accepted")
     const signalNames = observed.events
-      .filter((event) => event.kind === "control.signal.delivered")
+      .filter((event) => event.kind === "control.signal.admitted")
       .map((event) => (event.payload as { readonly name: string }).name)
     expect(signalNames).toContain("seed-1024")
     expect(signalNames).not.toContain("during-snapshot")

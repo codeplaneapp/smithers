@@ -10,6 +10,9 @@
 import * as DatabaseMigrations from "@smthrs/database/Migrations"
 import * as Layer from "effect/Layer"
 import { initial } from "./migrations/0001_control_tables.ts"
+import { runKeys } from "./migrations/0002_run_keys.ts"
+import { signalCommands } from "./migrations/0003_signal_commands.ts"
+import { approvalDecisions } from "./migrations/0004_approval_decisions.ts"
 
 /**
  * The control package's namespaced migration set.
@@ -21,7 +24,10 @@ export const set: DatabaseMigrations.MigrationSet = {
   namespace: "control",
   idOffset: DatabaseMigrations.idBlock * 6,
   migrations: {
-    "0001_control_tables": initial
+    "0001_control_tables": initial,
+    "0002_run_keys": runKeys,
+    "0003_signal_commands": signalCommands,
+    "0004_approval_decisions": approvalDecisions
   }
 }
 

@@ -340,7 +340,8 @@ describe("Monitor.run over the durable control plane", () => {
       }
     }))
 
-    expect(observed.exit._tag).toBe("Failure")
+    expect(observed.exit._tag).toBe("Success")
+    expect(observed.beats).toHaveLength(6)
     // The run was never healed, and the journal never says it was.
     expect(observed.healed).toEqual([])
     expect(observed.beats.at(-1)?.payload).toMatchObject({ health: "stalled", remedy: "resume" })

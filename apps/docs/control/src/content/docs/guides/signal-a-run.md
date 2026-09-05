@@ -1,106 +1,43 @@
 ---
-title: "Deliver a signal to a waiting run"
-description: "Record a named durable fact for a run, let the executor complete the wait point it names, and understand why a signal that matches no open wait is refused where it arrives."
-sidebar:
-  order: 5
+title: "Signal A Run"
+description: "Control services and RPC projections for flows"
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/control/docs/guides/signal-a-run.md"
 ---
 
-A signal is a durable fact delivered to a run: a name and a JSON payload.
+`Control.signal` admits a named JSON payload under an actor-scoped idempotency
+key. `Accepted` confirms that admission is durable. It does not claim that the
+run has consumed the payload. Reusing the key with different input returns
+`Conflict` before the conflicting payload reaches an executor.
 
-```ts
-import { Control } from "@smthrs/control/Control"
-import * as Effect from "effect/Effect"
+The command, its receipt, and `control.signal.admitted` journal event commit
+in the control database first. Execution occurs after that transaction ends;
+there is no transaction spanning control.db and engine.db.
 
-const signal = Effect.gen(function*() {
-  const control = yield* Control
-  return yield* control.signal({
-    runId: "run-17",
-    signal: { name: "clearance", payload: { approved: true, by: "release-manager" } },
-    idempotencyKey: "signal:run-17:clearance"
-  })
-})
-```
+The production executor binds each command to one concrete durable wait token
+before applying it. One token has at most one admitted command. Application
+atomically checks the engine's current wait token, and recovery verifies the
+stored deferred result. A crash after application but before acknowledgment
+retries the original token. It cannot move the command to a later wait.
 
-A signal says something happened. It does not decide who runs next, which is
-what separates it from a [steer](/guides/steer-a-run/) and from a
-[resume](/guides/cancel-and-resume/).
+Commands without a visible wait remain pending. The running executor
+reconciles a bounded page every 250 milliseconds, starting at host startup,
+so a signal admitted before its wait opens does not require a restart or
+manual resend. Pages rotate so unavailable waits cannot starve later commands.
+Malformed stored payloads are rejected and logged rather than blocking a page.
 
-## What the executor decides
+`ControlRuntime.signalCommand(commandId)` exposes `pending`, `delivered`,
+`rejected`, and `terminal` dispositions for integrations holding the admitted
+command identity. The CLI does not yet expose a dedicated delivery-status
+lookup. A definite incompatible wait raises `NoMatchingWait`; retries preserve
+that refusal. A signal initially submitted to a settled run returns `Terminal`.
 
-`Control.signal` asks the executor to complete the run's open `WaitFor` wait
-point with the payload, and the executor's answer decides the receipt:
+`WaitFor` names one durable fact per `(flowName, executionId, name)`. Calling
+it twice with the same name in the same execution intentionally observes the
+same fact. Use distinct names for distinct rendezvous points. This is not a
+stream of repeated same-name events.
 
-| `SignalDelivery` | Meaning                                                           | Receipt          |
-| ---------------- | ----------------------------------------------------------------- | ---------------- |
-| `delivered`      | The deferred the run is parked on was completed and the run woke. | `Accepted`       |
-| `no-match`       | The run is parked, and parked on something else.                  | `NoMatchingWait` |
-| `unknown`        | This executor drives no execution for the run.                    | `Accepted`       |
-
-`no-match` is refused where it arrives rather than recorded, because recording
-a delivery here would leave an operator watching a signal that never lands.
-The failure names the wait point:
-
-```text
-no wait point named "clearance" is open on run run-17. Read `smthrs status run-17` to see what that run is waiting for.
-```
-
-`unknown` is the answer for a composition with no executor, or one whose engine
-never heard of the run. The recorded message is then the whole delivery, and
-the executor that eventually drives the run replays it at its next start.
-
-Delivery happens _outside_ the mutation's write transaction, because completing
-a wait point re-drives the run and the engine's own journal flush would wait on
-the writer that transaction holds. A crash between delivery and record leaves
-the run awake with no control record, which is the survivable half of the pair.
-
-The idempotency lookup runs first, and outside the mutation too. A re-sent
-signal answers with its original receipt rather than being matched against a
-wait point its own first delivery already closed.
-
-## Completing the wait point yourself
-
-Turning a recorded signal into a completed wait point is the host's job,
-because only the flow author knows which wait points exist and what value each
-carries. At its smallest, that host reads the signals the plane admitted and
-completes the matching `WaitFor` deferred:
-
-```ts
-import * as ControlRuntime from "@smthrs/control/ControlRuntime"
-import { DurableDeferred, WaitFor } from "@smthrs/flow"
-import * as Effect from "effect/Effect"
-
-const deliverSignals = (runId: string) =>
-  Effect.gen(function*() {
-    const runtime = yield* ControlRuntime.ControlRuntime
-    for (const signal of yield* runtime.deliveredSignals(runId)) {
-      const waitPoint = WaitFor.deferred(signal.name)
-      yield* DurableDeferred.succeed(waitPoint, {
-        token: DurableDeferred.tokenFromExecutionId(waitPoint, { flow: Ship, executionId: runId }),
-        value: signal.payload
-      })
-    }
-  })
-```
-
-Naming the wait point after the signal is one convention. A host with several
-conventions writes several of these. The runnable original is
-[`examples/src/18-approval-and-signal.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/18-approval-and-signal.ts).
-
-## Refusals
-
-| Failure          | Cause                                                                           |
-| ---------------- | ------------------------------------------------------------------------------- |
-| `RunNotFound`    | This plane has no such run.                                                     |
-| `NoMatchingWait` | The run is parked on something else. Carries `runId` and `waitName`.            |
-| `InvalidInput`   | The payload is not bounded inert JSON, or the key is not 1 to 1,024 characters. |
-
-A signal to a run that already settled answers `Terminal` and records nothing.
-
-## Where to go next
-
-- [Steer a running agent](/guides/steer-a-run/): the other durable message, and the
-  parks it can end.
-- [Connect an execution engine](/guides/implement-an-executor/): the port that
-  turns `delivered` into a woken run.
-- [`smthrs signal`](https://smithers.sh/docs/reference/cli/signal/): the operator surface over this verb.
+Legacy `control_run_messages` signals have no application identity or token
+binding. They remain readable through `deliveredSignals`, but are not
+replayed automatically by the new inbox. Operators must inspect legacy wait
+state before explicitly resubmitting under a new key; silently replaying them
+could apply historical intent to a different wait.

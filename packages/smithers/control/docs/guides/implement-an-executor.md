@@ -82,9 +82,36 @@ it must start _that_ run: `run.runId` is the execution id, so the events the
 engine journals and the row the plane projects name one run.
 
 ```ts
+import * as ControlExecutor from "@smthrs/control/ControlExecutor"
+import * as ControlRuntime from "@smthrs/control/ControlRuntime"
+import type * as ControlSchema from "@smthrs/control/ControlSchema"
+import type { FlowRuntime } from "@smthrs/flow"
+import { Executable, Registry } from "@smthrs/registry"
+import { RunStore } from "@smthrs/run-store"
+import type * as Crypto from "effect/Crypto"
+import * as Deferred from "effect/Deferred"
+import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import type * as Path from "effect/Path"
+
+/** How a discovered descriptor is loaded, and what it may delegate to. */
+const bridge: Executable.Options = { delegates: [] }
+
+/** Every run this executor started, and the latch that releases each one. */
+const driving: Array<{ readonly runId: string; readonly start: Deferred.Deferred<void> }> = []
+
 const executorLayer = Layer.effect(ControlExecutor.ControlExecutor)(
   Effect.gen(function*() {
-    const services = yield* Effect.context<FlowRuntime.FlowRuntime | Registry.Registry>()
+    const plane = yield* ControlRuntime.ControlRuntime
+    const services = yield* Effect.context<
+      | Crypto.Crypto
+      | FileSystem.FileSystem
+      | FlowRuntime.FlowRuntime
+      | Path.Path
+      | Registry.Registry
+      | RunStore.RunStore
+    >()
 
     return ControlExecutor.makeNoop({
       launch: ({ plan, run }) =>
@@ -96,7 +123,8 @@ const executorLayer = Layer.effect(ControlExecutor.ControlExecutor)(
               Effect.andThen(executable.flow.execute(
                 { input: plan.decodedInput },
                 { executionId: run.runId, discard: true }
-              ))
+              )),
+              Effect.andThen(mirror(plane, run.runId))
             )
           )
           driving.push({ runId: run.runId, start })
@@ -117,19 +145,28 @@ park. Releasing the latch after the receipt is in hand orders the two writes.
 The plane cannot see into the engine's database, so an executor that walked
 away after starting a run would leave every run reading `running` forever.
 Reading the engine's own row back and writing the plane's vocabulary onto the
-plane's row is the whole of that duty:
+plane's row is the whole of that duty, and it is the `mirror` the launch above
+chains onto:
 
 ```ts
-const mirror = (runId: string) =>
+/** The engine's run vocabulary, in the plane's. */
+const planeStatus = (status: RunStore.RunStatus): ControlSchema.RunStatus =>
+  status === "suspended" ? "parked" : status === "pending" ? "accepted" : status
+
+const mirror = (plane: ControlRuntime.Service, runId: string) =>
   Effect.gen(function*() {
     const runs = yield* RunStore.RunStore
     const row = yield* runs.get(runId)
-    const fence = yield* plane.claimFence(runId)
-    yield* plane.writeStatus(runId, fence, row.status === "suspended" ? "parked" : row.status)
-  })
+    const id = runId as ControlSchema.RunId
+    const fence = yield* plane.claimFence(id)
+    yield* plane.writeStatus(id, fence, planeStatus(row.status))
+  }).pipe(Effect.orDie)
 ```
 
-The engine calls a parked run `suspended`; an operator calls it `parked`.
+The engine calls a parked run `suspended`; an operator calls it `parked`. The
+two vocabularies are not the same set, so the mapping is explicit: every status
+the engine reports has to land on a member of `ControlSchema.RunStatus`, which
+is the only vocabulary the plane's row accepts.
 
 The complete, runnable bridge, with discovery, two databases, and one shared
 journal, is

@@ -10,6 +10,7 @@ import * as TimeTravelMigrations from "@smthrs/time-travel/Migrations"
 import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as Migrations from "../src/Migrations.ts"
+import { initial } from "../src/migrations/0001_control_tables.ts"
 import * as SqlControlRuntime from "../src/SqlControlRuntime.ts"
 
 const tableNames = [
@@ -18,10 +19,12 @@ const tableNames = [
   "control_mutations",
   "control_plan_keys",
   "control_plans",
+  "control_run_keys",
   "control_run_messages",
   "control_run_resumes",
   "control_runs",
   "control_sequences",
+  "control_signal_commands",
   "control_tokens"
 ] as const
 
@@ -68,7 +71,22 @@ describe("control migrations", () => {
     withDatabase(Effect.gen(function*() {
       yield* SqlControlRuntime.migrate
       const completed = yield* Migrations.run
-      expect(completed).toHaveLength(1)
+      expect(completed).toHaveLength(4)
       expect(completed[0]?.[0]).toBe(Migrations.set.idOffset + 1)
+    })))
+
+  it.effect("upgrades a database whose initial control migration is already recorded", () =>
+    withDatabase(Effect.gen(function*() {
+      yield* DatabaseMigrations.run([{ ...Migrations.set, migrations: { "0001_control_tables": initial } }])
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`INSERT INTO control_sequences (name, value) VALUES ('upgrade-sentinel', 42)`
+      const completed = yield* Migrations.run
+      expect(completed.map(([id]) => id)).toEqual([
+        Migrations.set.idOffset + 2,
+        Migrations.set.idOffset + 3,
+        Migrations.set.idOffset + 4
+      ])
+      expect(yield* sql`SELECT * FROM control_run_keys`).toEqual([])
+      expect(yield* sql`SELECT value FROM control_sequences WHERE name = 'upgrade-sentinel'`).toEqual([{ value: 42 }])
     })))
 })

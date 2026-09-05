@@ -49,7 +49,7 @@ const Gated = Flow.make("engine-waits/gated", {
   error: WaitFor.WaitForRequestInvalid,
   body: ({ name }) =>
     Mark.call({ label: "before" }).pipe(
-      Node.andThen(() => WaitFor.action.call({ name }))
+      Node.bindPlanned(() => WaitFor.action.call({ name }))
     )
 })
 
@@ -67,7 +67,7 @@ const Twice = Flow.make("engine-waits/twice", {
   error: WaitFor.WaitForRequestInvalid,
   body: () =>
     WaitFor.action.call({ name: "first" }).pipe(
-      Node.andThen(() => WaitFor.action.call({ name: "second" }))
+      Node.bindPlanned(() => WaitFor.action.call({ name: "second" }))
     )
 })
 
@@ -281,7 +281,7 @@ describe("signalling a run parked on a wait point", () => {
     expect(observed.recorded).toEqual([{ name: "approval", payload: { approved: true } }])
   })
 
-  it("refuses a signal that names no open wait point, and records nothing", async () => {
+  it("refuses an incompatible signal and excludes rejected admission from delivered signals", async () => {
     const observed = await run(
       Effect.gen(function*() {
         const control = yield* Control

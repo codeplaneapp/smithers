@@ -293,6 +293,11 @@ export interface Options {
   /**
    * What to do about an unhealthy run. Defaults to `Control.resume` and
    * `Control.cancel` per {@link remedyFor}.
+   *
+   * A heal that fails does not abort the monitor: the failure is logged, the
+   * beat is recorded without `healed` or `receipt`, and the loop moves to the
+   * next beat, where the stall evidence still stands and the remedy is
+   * retried under that beat's own idempotency key.
    */
   readonly heal?: (
     input: { readonly runId: RunId; readonly health: Health; readonly remedy: Remedy; readonly beat: number }
@@ -462,28 +467,48 @@ export const run = (
       if (remedy === "none") {
         beats.push(observed)
       } else {
-        const receipt = yield* heal({ runId: options.runId, health, remedy, beat })
-        // A remedy that returned is not a remedy that was applied. `Terminal`
-        // says the run had already settled, so nothing was healed; `Conflict`
-        // says the key belonged to another mutation, so this monitor's remedy
-        // never ran. Recording either as `healed` claimed something that did
-        // not happen, and resetting the stall count on either erased the
-        // evidence the next beat needs to notice the run is still stuck.
-        const applied = receipt._tag === "Accepted" || receipt._tag === "AlreadyApplied"
-        if (applied) {
-          // Journaled here and not a line earlier: `healed` is a claim about
-          // something that happened, and until the receipt came back it had not.
-          yield* recordHealed(observed, remedy, receipt)
-          // The heal moved the run, so the next beat compares against a run
-          // that has changed. Counting the beats before it as stall evidence
-          // again would heal a second time for the same stall.
-          beatsWithoutProgress = 0
+        const receipt = yield* heal({ runId: options.runId, health, remedy, beat }).pipe(
+          // A remedy that fails must not abort the run of beats: the monitor
+          // is an unattended loop, and one failing heal leaves every other
+          // beat — and every other run it would have observed — unwatched.
+          // The failure is logged with the beat it failed on, and the beat is
+          // recorded without `healed` or `receipt`, exactly as a remedy the
+          // monitor never got to apply reports.
+          Effect.catch((failure) =>
+            Effect.annotateLogs(
+              Effect.logWarning("A monitor remedy failed and was skipped"),
+              { runId: options.runId, beat, health, remedy, cause: String(failure) }
+            ).pipe(Effect.as(undefined))
+          )
+        )
+        if (receipt === undefined) {
+          // The stall evidence stands: nothing provably moved the run, so the
+          // next beat compares against the same progress mark and the remedy
+          // is retried with the beat's own idempotency key.
+          beats.push(observed)
+        } else {
+          // A remedy that returned is not a remedy that was applied. `Terminal`
+          // says the run had already settled, so nothing was healed; `Conflict`
+          // says the key belonged to another mutation, so this monitor's remedy
+          // never ran. Recording either as `healed` claimed something that did
+          // not happen, and resetting the stall count on either erased the
+          // evidence the next beat needs to notice the run is still stuck.
+          const applied = receipt._tag === "Accepted" || receipt._tag === "AlreadyApplied"
+          if (applied) {
+            // Journaled here and not a line earlier: `healed` is a claim about
+            // something that happened, and until the receipt came back it had not.
+            yield* recordHealed(observed, remedy, receipt)
+            // The heal moved the run, so the next beat compares against a run
+            // that has changed. Counting the beats before it as stall evidence
+            // again would heal a second time for the same stall.
+            beatsWithoutProgress = 0
+          }
+          beats.push(applied ? { ...observed, healed: remedy, receipt } : { ...observed, receipt })
+          // A remedy that answered `Terminal` observed the run settle. The loop
+          // ends on the same evidence a terminal summary ends it on, rather than
+          // beating against a run nothing can move.
+          if (receipt._tag === "Terminal") break
         }
-        beats.push(applied ? { ...observed, healed: remedy, receipt } : { ...observed, receipt })
-        // A remedy that answered `Terminal` observed the run settle. The loop
-        // ends on the same evidence a terminal summary ends it on, rather than
-        // beating against a run nothing can move.
-        if (receipt._tag === "Terminal") break
       }
       if (terminal(summary)) break
     }

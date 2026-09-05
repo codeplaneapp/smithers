@@ -120,6 +120,10 @@ export type ResumeUptake = "resuming" | "unknown"
  * @slop
  */
 export interface Signal {
+  /** Actor-scoped durable admission identity, present on control-plane delivery. */
+  readonly commandId?: string
+  /** An existing immutable binding survives a crash before acknowledgment. */
+  readonly token?: string | null
   readonly runId: RunId
   readonly signal: SignalPayload
 }
@@ -142,6 +146,22 @@ export interface Signal {
 export type SignalDelivery = "delivered" | "no-match" | "unknown"
 
 /**
+ * Current engine observation. Missing execution is distinct from a running one.
+ * @category models
+ * @since 1.0.0
+ */
+export type ExecutionObservation =
+  | { readonly _tag: "Missing" }
+  | {
+    readonly _tag: "Observed"
+    readonly status: "accepted" | "running" | "parked" | "waiting-approval" | "completed" | "failed" | "cancelled"
+    readonly waitingReason?: string | undefined
+    readonly parentRunId?: string | undefined
+    readonly lineageId?: string | undefined
+    readonly roundOrdinal?: number | undefined
+  }
+
+/**
  * The executor port: the control plane hands work over to a real run executor
  * and learns only what the executor did with it.
  *
@@ -160,6 +180,8 @@ export type SignalDelivery = "delivered" | "no-match" | "unknown"
  * @slop
  */
 export interface Service {
+  /** Read from the executor's database, never the control coordination copy. */
+  readonly readExecution?: (runId: RunId) => Effect.Effect<ExecutionObservation, PersistenceError>
   readonly launch: (input: Launch) => Effect.Effect<Acceptance, LaunchFailed>
   /**
    * Records a cancellation on the engine row, durably, regardless of which

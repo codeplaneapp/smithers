@@ -11,7 +11,8 @@
  * @since 0.1.0
  */
 import type * as PersistedPlan from "@smthrs/plan/Plan"
-import { Context, Crypto, Effect, Fiber, Layer, Option } from "effect"
+import { Context, Crypto, Effect, Fiber, Layer, Option, Schema } from "effect"
+import * as ApprovalAuthority from "./ApprovalAuthority.ts"
 import type { ApprovalTarget, PlanInput } from "./Control.ts"
 import {
   AlreadyResolved,
@@ -41,6 +42,7 @@ import type {
   SignalPayload,
   SteerMessage
 } from "./ControlSchema.ts"
+import { GrantScope as GrantScopeSchema, Principal as PrincipalSchema } from "./ControlSchema.ts"
 import { canonicalIssue } from "./internal/issues.ts"
 import {
   accepted,
@@ -51,6 +53,20 @@ import {
   sameEnvelope
 } from "./internal/planning.ts"
 import { plannable } from "./SystemFlows.ts"
+
+/**
+ * A durably admitted signal, bound at most once to one concrete wait token.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface SignalCommand {
+  readonly commandId: string
+  readonly runId: RunId
+  readonly signal: SignalPayload
+  readonly token: string | null
+  readonly state: "pending" | "delivered" | "rejected" | "terminal"
+}
 
 /**
  * A decoded input and immutable plan stored before execution.
@@ -66,19 +82,87 @@ export interface StoredPlan {
 }
 
 /**
- * One unresolved durable approval token.
+ * The durable answer to an approval request. A decision is not inferred from
+ * the presence of a grant or from a boolean that also means denial.
  *
  * @category models
  * @since 0.1.0
  * @slop
  */
-export interface ApprovalToken {
+export const ApprovalDecision = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("Pending") }),
+  Schema.Struct({
+    _tag: Schema.Literal("Approved"),
+    decisionPrincipal: PrincipalSchema,
+    decidedAt: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+    scope: GrantScopeSchema
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("Denied"),
+    decisionPrincipal: PrincipalSchema,
+    decidedAt: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+  })
+])
+
+/**
+ * Durable approval state.
+ * @category models
+ * @since 1.0.0
+ */
+export type ApprovalDecision = typeof ApprovalDecision.Type
+
+/**
+ * An identity and its explicit approval decision.
+ * @category models
+ * @since 1.0.0
+ */
+export type ApprovalToken = ApprovalDecision & {
   readonly tokenId: string
   readonly target: ApprovalTarget
-  readonly resolved: boolean
-  /** The authenticated principal that made the terminal decision. */
-  readonly decisionPrincipal?: Principal | undefined
 }
+
+/**
+ * A gate that still needs a decision.
+ * @category errors
+ * @since 1.0.0
+ */
+export class ApprovalPending extends Schema.TaggedError<ApprovalPending>()("/control/ApprovalPending", {
+  tokenId: Schema.String
+}) {
+  override get message(): string {
+    return "Approval is still pending. Wait for a decision before proceeding."
+  }
+}
+
+/**
+ * A gate that was denied, not merely resolved.
+ * @category errors
+ * @since 1.0.0
+ */
+export class ApprovalDenied extends Schema.TaggedError<ApprovalDenied>()("/control/ApprovalDenied", {
+  tokenId: Schema.String,
+  decisionPrincipal: PrincipalSchema
+}) {
+  override get message(): string {
+    return "Approval was denied. This request cannot authorize the gated work."
+  }
+}
+
+/**
+ * Opens only an explicitly approved gate. Callers may park on ApprovalPending;
+ * ApprovalDenied is terminal. This reads a runtime-issued token, not an
+ * authentication credential, and does not itself install permissions.
+ * @category combinators
+ * @since 1.0.0
+ */
+export const requireApproved = (
+  token: ApprovalToken
+): Effect.Effect<Extract<ApprovalToken, { readonly _tag: "Approved" }>, ApprovalPending | ApprovalDenied> =>
+  token._tag === "Approved"
+    ? Effect.succeed(token)
+    : token._tag === "Pending"
+    ? Effect.fail(new ApprovalPending({ tokenId: token.tokenId }))
+    : Effect.fail(new ApprovalDenied({ tokenId: token.tokenId, decisionPrincipal: token.decisionPrincipal }))
 
 /**
  * One bulk permission grant. The envelope is deliberately not split into
@@ -145,6 +229,23 @@ export interface MutationRecord {
 }
 
 /**
+ * The outcome of claiming a run mutation's idempotency key before launch.
+ *
+ * `Claimed` is this call's mandate to launch: the key row was empty or did not
+ * exist, and it now names this call. `Raced` is the resolution the plan verb's
+ * key claim gives a loser — another mutation claimed the key first, and the
+ * receipt it settled is the answer this call must return instead of launching
+ * a second run.
+ *
+ * @category models
+ * @since 0.1.0
+ * @slop
+ */
+export type RunKeyClaim =
+  | { readonly _tag: "Claimed" }
+  | { readonly _tag: "Raced"; readonly receipt: Receipt }
+
+/**
  * Flow metadata used by the memory runtime's input-decoding hook.
  *
  * @category models
@@ -187,6 +288,7 @@ export interface MemoryOptions {
   readonly flows?: ReadonlyArray<MemoryFlow> | undefined
   readonly now?: (() => number) | undefined
   readonly principal?: Omit<Principal, "stampedAt"> | undefined
+  readonly approvalAuthority?: ApprovalAuthority.Service | undefined
 }
 
 /**
@@ -225,6 +327,8 @@ export interface PendingResume {
  * @slop
  */
 export interface Service {
+  /** The owning host's policy, independent of authentication and attribution. */
+  readonly authorizeApproval: ApprovalAuthority.Service["authorize"]
   readonly plan: (input: PlanInput) => Effect.Effect<PlanOutcome, FlowNotFound | InvalidInput | PersistenceError>
   readonly getPlan: (planId: string) => Effect.Effect<StoredPlan, PlanNotFound | PersistenceError>
   readonly listPlanIds: Effect.Effect<ReadonlyArray<string>, PersistenceError>
@@ -242,7 +346,7 @@ export interface Service {
    * targets, so an in-run request (a parked `ask`, a permission requirement)
    * could never be decided through `approve`/`deny`. Registration is
    * idempotent — the executor calls it on every parked attempt — and returns
-   * the token with its current `resolved` state so a resumed attempt can read
+   * the token with its current tagged decision so a resumed attempt can read
    * the decision instead of parking again. A registered target that
    * disagrees with the stored digest or envelope is refused, exactly as
    * `lookupApproval` refuses it.
@@ -258,11 +362,14 @@ export interface Service {
     envelope: Envelope,
     scope: GrantScope
   ) => Effect.Effect<void, PersistenceError>
+  /** Records the decision exactly once. Approval scope defaults to once; the
+   * control boundary supplies the scope of the grant it installed. */
   readonly resolveApproval: (
     token: ApprovalToken,
     decision: "approved" | "denied",
-    principal: Principal
-  ) => Effect.Effect<void, AlreadyResolved | Unauthorized | PersistenceError>
+    principal: Principal,
+    scope?: GrantScope | undefined
+  ) => Effect.Effect<void, AlreadyResolved | Unauthorized | PersistenceError | Unauthorized>
   readonly launch: (
     planId: string,
     digest: string,
@@ -282,6 +389,18 @@ export interface Service {
     runId: RunId
   ) => Effect.Effect<ReadonlyArray<SteerMessage>, RunNotFound | PersistenceError>
   readonly deliverSignal: (runId: RunId, signal: SignalPayload) => Effect.Effect<void, RunNotFound | PersistenceError>
+  readonly admitSignal: (
+    commandId: string,
+    runId: RunId,
+    signal: SignalPayload
+  ) => Effect.Effect<void, RunNotFound | PersistenceError>
+  readonly signalCommand: (commandId: string) => Effect.Effect<SignalCommand | undefined, PersistenceError>
+  readonly pendingSignals: Effect.Effect<ReadonlyArray<SignalCommand>, PersistenceError>
+  readonly bindSignal: (commandId: string, token: string) => Effect.Effect<string | null, PersistenceError>
+  readonly settleSignal: (
+    commandId: string,
+    state: "delivered" | "rejected" | "terminal"
+  ) => Effect.Effect<void, PersistenceError>
   readonly deliveredSignals: (
     runId: RunId
   ) => Effect.Effect<ReadonlyArray<SignalPayload>, RunNotFound | PersistenceError>
@@ -295,8 +414,12 @@ export interface Service {
    * entry is per run and needs a reader that already knows which run to read.
    * The returned sequence is the cursor {@link Service.clearResume} checks, so
    * a resume requested while one is being taken up is not lost with it.
+   *
+   * A terminal run is refused with `InvalidInput`: no host will ever take the
+   * delegation up, and recording it would leave an orphaned row every host's
+   * `pendingResumes` poll filters but nothing ever clears.
    */
-  readonly requestResume: (runId: RunId) => Effect.Effect<number, RunNotFound | PersistenceError>
+  readonly requestResume: (runId: RunId) => Effect.Effect<number, RunNotFound | InvalidInput | PersistenceError>
   /**
    * Every outstanding resume delegation for a run that is not terminal.
    *
@@ -360,6 +483,40 @@ export interface Service {
     fingerprint: string,
     receipt: Receipt
   ) => Effect.Effect<void, PersistenceError>
+  /**
+   * Claims a run mutation's idempotency key before any launch side effect.
+   *
+   * This is the run verb's half of the race `control_plan_keys` closes for
+   * plans: a bare `lookupMutation`/`recordMutation` pair leaves two processes
+   * that both missed the lookup free to both launch, and the loser's run row
+   * outlives the `recordMutation` refusal that follows. The claim must run
+   * FIRST, inside the same write transaction the mutation later records its
+   * receipt in, so the loser's insert conflicts on the winner's committed key
+   * row before a run row, a claim, or a journal entry exists — and the winner's
+   * receipt, committed in that same transaction, is already there to read.
+   *
+   * `Raced` carries the winner's recorded receipt verbatim, which is the
+   * convergence the plan verb gives a losing planner (`created: false` with
+   * the stored card). A key claimed under another fingerprint is refused with
+   * `InvalidInput`, the same refusal `plan` gives a colliding key. A key row
+   * whose winner never recorded — possible only when the claim and the record
+   * were not one transaction — is a `PersistenceError`, because there is no
+   * honest receipt to answer with.
+   */
+  readonly claimRunKey: (
+    key: IdempotencyKey,
+    fingerprint: string
+  ) => Effect.Effect<RunKeyClaim, InvalidInput | PersistenceError>
+  /**
+   * Releases a claim {@link Service.claimRunKey} took, without a receipt.
+   *
+   * Exactly one path needs it: a launch that answered `Parked` created no run
+   * and records no receipt, so the claim must be withdrawn inside the same
+   * transaction or the key would stay held forever by a mutation that settled
+   * nothing. Every other outcome either records a receipt (the claim's whole
+   * point) or fails and rolls the claim back with its transaction.
+   */
+  readonly releaseRunKey: (key: IdempotencyKey) => Effect.Effect<void, PersistenceError>
   readonly grants: Effect.Effect<ReadonlyArray<BulkGrant>, PersistenceError>
 }
 
@@ -392,8 +549,7 @@ interface MutablePlan {
 interface MutableToken {
   readonly tokenId: string
   readonly target: ApprovalTarget
-  resolved: boolean
-  decisionPrincipal?: Principal | undefined
+  decision: ApprovalDecision
 }
 
 interface MutableRun {
@@ -435,8 +591,7 @@ const sameApprovalIdentity = (left: ApprovalTarget, right: ApprovalTarget): bool
 const approvalToken = (token: MutableToken): ApprovalToken => ({
   tokenId: token.tokenId,
   target: snapshot(token.target),
-  resolved: token.resolved,
-  ...(token.decisionPrincipal === undefined ? {} : { decisionPrincipal: snapshot(token.decisionPrincipal) })
+  ...snapshot(token.decision)
 })
 
 /**
@@ -454,6 +609,8 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
     Effect.gen(function*() {
       const crypto = yield* Crypto.Crypto
       const now = options.now ?? Date.now
+      const approvalAuthority = options.approvalAuthority ?? ApprovalAuthority.local
+      const authorizeApproval = approvalAuthority.authorize.bind(approvalAuthority)
       const configuredFlows = options.flows ?? plannable.map((entry): MemoryFlow => ({
         flowId: entry.flowId,
         description: `Reserved ${entry.verb} system flow`,
@@ -474,9 +631,12 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
       const tokens = new Map<string, MutableToken>()
       const runs = new Map<RunId, MutableRun>()
       const mutations = new Map<IdempotencyKey, MutationRecord>()
+      const runKeys = new Map<IdempotencyKey, { readonly fingerprint: string }>()
       const installedGrants: Array<BulkGrant> = []
       const installedGrantKeys = new Set<string>()
       let planSequence = 0
+      const signalCommands = new Map<string, SignalCommand>()
+      let pendingSignalOffset = 0
       let runSequence = 0
       let fenceSequence = 0
       let resumeSequence = 0
@@ -495,6 +655,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           : Effect.void
 
       const service = make({
+        authorizeApproval,
         plan: Effect.fn("ControlRuntime.plan")(function*(input) {
           const flow = flows.get(input.flowId)
           if (flow === undefined) return yield* new FlowNotFound({ flowId: input.flowId })
@@ -546,7 +707,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           tokens.set(approvalKey(card.approval.target), {
             tokenId: planId,
             target: snapshot(card.approval.target),
-            resolved: false
+            decision: { _tag: "Pending" }
           })
           if (submitted.idempotencyKey !== undefined) {
             planKeys.set(submitted.idempotencyKey, {
@@ -599,7 +760,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               actual: canonical(requested.envelope)
             })
           }
-          if (token.resolved) return yield* new AlreadyResolved({ requestId: tokenId })
+          if (token.decision._tag !== "Pending") return yield* new AlreadyResolved({ requestId: tokenId })
           return approvalToken(token)
         }),
         registerApproval: Effect.fn("ControlRuntime.registerApproval")(function*(target) {
@@ -608,7 +769,11 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           const key = approvalKey(requested)
           const existing = tokens.get(key)
           if (existing === undefined) {
-            const stored = { tokenId: requested.requestId, target: requested, resolved: false }
+            const stored: MutableToken = {
+              tokenId: requested.requestId,
+              target: requested,
+              decision: { _tag: "Pending" }
+            }
             tokens.set(key, stored)
             return approvalToken(stored)
           }
@@ -649,23 +814,35 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
             })
           })
         ),
-        resolveApproval: Effect.fn("ControlRuntime.resolveApproval")(function*(token, decision, principal) {
-          if (principal.kind === "agent") {
-            return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
+        resolveApproval: Effect.fn("ControlRuntime.resolveApproval")(
+          function*(token, decision, principal, scope = "once") {
+            const requested = snapshot(token)
+            const requestedPrincipal = snapshot(principal)
+            const answer = yield* Schema.decodeUnknownEffect(ApprovalDecision)(
+              decision === "approved"
+                ? { _tag: "Approved", decisionPrincipal: requestedPrincipal, decidedAt: now(), scope }
+                : { _tag: "Denied", decisionPrincipal: requestedPrincipal, decidedAt: now() }
+            ).pipe(
+              Effect.mapError(() =>
+                new PersistenceError({
+                  operation: "record an approval decision",
+                  message: "The approval decision metadata is invalid"
+                })
+              )
+            )
+            yield* authorizeApproval({ principal: requestedPrincipal, target: requested.target, decision, scope })
+            const mutable = tokens.get(approvalKey(requested.target))
+            if (mutable === undefined || mutable.decision._tag !== "Pending") {
+              return yield* new AlreadyResolved({ requestId: requested.tokenId })
+            }
+            mutable.decision = answer
+            if (requested.target._tag === "Plan") {
+              const plan = plans.get(requested.target.planId)
+              /* v8 ignore next -- a plan token is only ever registered by `plan`, which stores the plan in the same call */
+              if (plan !== undefined) plan.decision = decision
+            }
           }
-          const requested = snapshot(token)
-          const mutable = tokens.get(approvalKey(requested.target))
-          if (mutable === undefined || mutable.resolved) {
-            return yield* new AlreadyResolved({ requestId: requested.tokenId })
-          }
-          mutable.resolved = true
-          mutable.decisionPrincipal = snapshot(principal)
-          if (requested.target._tag === "Plan") {
-            const plan = plans.get(requested.target.planId)
-            /* v8 ignore next -- a plan token is only ever registered by `plan`, which stores the plan in the same call */
-            if (plan !== undefined) plan.decision = decision
-          }
-        }),
+        ),
         launch: Effect.fn("ControlRuntime.launch")(function*(planId, requestedDigest, envelope) {
           const plan = yield* Effect.fromOption(
             Option.fromNullishOr(plans.get(planId)),
@@ -751,11 +928,70 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
         deliverSignal: Effect.fn("ControlRuntime.deliverSignal")((runId, signal) =>
           Effect.tap(requireRun(runId), (run) => Effect.sync(() => void run.signals.push(snapshot(signal))))
         ),
+        admitSignal: Effect.fn("ControlRuntime.admitSignal")(function*(commandId, runId, signal) {
+          yield* requireRun(runId)
+          if (!signalCommands.has(commandId)) {
+            signalCommands.set(commandId, snapshot({ commandId, runId, signal, token: null, state: "pending" }))
+          }
+        }),
+        signalCommand: (commandId) => Effect.sync(() => snapshot(signalCommands.get(commandId))),
+        pendingSignals: Effect.sync(() => {
+          const pending = Array.from(signalCommands.values()).filter((command) => command.state === "pending")
+          if (pendingSignalOffset >= pending.length) pendingSignalOffset = 0
+          const page = pending.slice(pendingSignalOffset, pendingSignalOffset + 100)
+          pendingSignalOffset += page.length
+          return snapshot(page)
+        }),
+        bindSignal: (commandId, token) =>
+          Effect.gen(function*() {
+            const command = signalCommands.get(commandId)
+            if (command === undefined) {
+              return yield* new PersistenceError({
+                operation: "bind signal",
+                message: `No pending signal command ${commandId}`
+              })
+            }
+            if (command.state !== "pending") return command.token
+            if (
+              command.token === null &&
+              Array.from(signalCommands.values()).some((other) =>
+                other.commandId !== commandId && other.token === token
+              )
+            ) return null
+            const bound = command.token ?? token
+            signalCommands.set(commandId, { ...command, token: bound })
+            return bound
+          }),
+        settleSignal: (commandId, state) =>
+          Effect.sync(() => {
+            const command = signalCommands.get(commandId)
+            if (command !== undefined && command.state === "pending") {
+              signalCommands.set(commandId, { ...command, state })
+            }
+          }),
         deliveredSignals: Effect.fn("ControlRuntime.deliveredSignals")((runId) =>
-          Effect.map(requireRun(runId), (run) => snapshot(run.signals))
+          Effect.map(
+            requireRun(runId),
+            (run) =>
+              snapshot([
+                ...run.signals,
+                ...Array.from(signalCommands.values()).filter((command) =>
+                  command.runId === runId && command.state !== "rejected"
+                ).map((command) => command.signal)
+              ])
+          )
         ),
         requestResume: Effect.fn("ControlRuntime.requestResume")(function*(runId) {
           const run = yield* requireRun(runId)
+          if (
+            run.summary.status === "cancelled" ||
+            run.summary.status === "completed" ||
+            run.summary.status === "failed"
+          ) {
+            return yield* new InvalidInput({
+              issue: `run ${runId} is ${run.summary.status} and cannot take a resume`
+            })
+          }
           const sequence = ++resumeSequence
           run.pendingResume = sequence
           run.pendingResumeAtMs = now()
@@ -784,6 +1020,9 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
           Effect.tap(requireRun(runId), (run) =>
             Effect.sync(() => {
               run.fiber = fiber
+              fiber.addObserver(() => {
+                if (run.fiber === fiber) run.fiber = undefined
+              })
             }))
         ),
         interrupt: Effect.fn("ControlRuntime.interrupt")(function*(runId) {
@@ -890,6 +1129,35 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               )
             }
             mutations.set(key, { fingerprint, receipt: snapshot(receipt) })
+          })
+        ),
+        claimRunKey: Effect.fn("ControlRuntime.claimRunKey")(function*(key, fingerprint) {
+          const holder = runKeys.get(key)
+          if (holder !== undefined) {
+            if (holder.fingerprint !== fingerprint) {
+              return yield* new InvalidInput({
+                issue: `idempotency key ${key} was used for another run`
+              })
+            }
+            const record = mutations.get(key)
+            if (record === undefined) {
+              // One process owns this runtime, so reaching here takes a caller
+              // that claimed and never recorded: the cross-process winner this
+              // branch really models commits both in one transaction, which is
+              // `SqlControlRuntime`'s seam.
+              return yield* new PersistenceError({
+                operation: "read a mutation",
+                message: `run key ${key} was claimed by a mutation that recorded no receipt`
+              })
+            }
+            return { _tag: "Raced" as const, receipt: snapshot(record.receipt) }
+          }
+          runKeys.set(key, { fingerprint })
+          return { _tag: "Claimed" as const }
+        }),
+        releaseRunKey: Effect.fn("ControlRuntime.releaseRunKey")((key) =>
+          Effect.sync(() => {
+            runKeys.delete(key)
           })
         ),
         grants: Effect.fn("ControlRuntime.grants")(() => Effect.sync(() => snapshot(installedGrants)))()

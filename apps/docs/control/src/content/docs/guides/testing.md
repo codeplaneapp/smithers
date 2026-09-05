@@ -114,9 +114,9 @@ Use `follow: false`. It ends; the live stream does not.
 ## Hold your own runtime to the contract
 
 `ControlRuntime.layerMemory` and `SqlControlRuntime.layer` are both held to one
-shared suite, in
-[`packages/smithers/control/test/ControlContract.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/test/ControlContract.ts).
-A third implementation earns the same treatment: the contract is what makes
+[shared contract suite](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/test/ControlContract.ts).
+It is not part of the published tarball, so a third implementation copies it
+from the repository and runs it against its own layer. That is what makes
 "behaves like the memory runtime" a checkable claim rather than a hope.
 
 ## Assert on the refusals too

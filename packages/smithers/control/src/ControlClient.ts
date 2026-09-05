@@ -222,13 +222,25 @@ const normalizeStreamRequest = <A, E, R>(
  * Client transport configuration. Unary procedures use HTTP at this URL;
  * `watch` uses the abstract WebSocket supplied by the platform layer.
  *
+ * `credential` reaches the HTTP protocol only. It is attached as a bearer
+ * token on each HTTP RPC request; the `watch` stream rides a WebSocket whose
+ * upgrade request a browser cannot add headers to, so the socket carries no
+ * credential at all in a browser deployment. A deployment that authenticates
+ * control traffic must therefore front the socket (terminate auth at a proxy
+ * that injects the credential on the upgrade) or serve `watch` over the HTTP
+ * protocol instead.
+ *
  * @category models
  * @since 0.1.0
  * @slop
  */
 export interface ClientConfig {
   readonly url: string
-  /** Bearer token attached to every HTTP RPC request when present. */
+  /**
+   * Bearer token attached to every HTTP RPC request when present.
+   *
+   * Not sent on the `watch` WebSocket: see {@link ClientConfig}.
+   */
   readonly credential?: string | undefined
 }
 
@@ -290,6 +302,11 @@ export const layer = (config: ClientConfig) => {
           normalizeRequest(resumeEncoder, input, () => unary.Resume(input))
         ),
         list: Effect.fn("Control.list")((input) => normalizeRequest(listEncoder, input, () => unary.List(input))),
+        // `watch` is the only procedure on the socket protocol, and the
+        // socket is why `credential` cannot protect it: a browser's WebSocket
+        // upgrade takes no headers, so the bearer token that authenticates
+        // every unary call above never reaches this stream. Credentialed
+        // deployments front the socket or use the HTTP protocol for watch.
         watch: (input) => normalizeStreamRequest(watchEncoder, input, () => streaming.Watch(input))
       } as Service)
     })

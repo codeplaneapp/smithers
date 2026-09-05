@@ -104,8 +104,9 @@ deliberately indistinguishable from one the caller may not have.
 
 ### `Unavailable` (`unavailable`)
 
-The operation is not implemented in this composition, and `feature` names it
-while `ticket` names the issue that tracks it.
+The operation is not implemented in this composition. `feature` names the verb
+or capability that is missing, and `ticket` is a constant identifier for the
+integration behind it, stable enough to group reports by.
 
 | `feature`                                     | Cause                                                                                                             |
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -170,9 +171,9 @@ disagrees with what you see elsewhere, the two are different databases.
 ### `waitingReason`, `origin`, and `cancellation` are always absent
 
 Those fields are read from the engine's own columns and journal entries, so
-they need the control runtime and the engine to share one database. The shipped
-CLI keeps `.flows/control.db` and `.flows/engine.db` apart, and the fields are
-empty there by design. See
+they need the control runtime and the engine to share one database. The
+[`smthrs` CLI](/api/cli) keeps `.flows/control.db` and `.flows/engine.db`
+apart, and the fields are empty there by design. See
 [Store control state in a database](./guides/durable-storage.md).
 
 They are also absent on `ControlRuntime.layerMemory`, which has no engine to

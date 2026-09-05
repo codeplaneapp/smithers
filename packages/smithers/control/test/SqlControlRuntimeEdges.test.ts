@@ -28,9 +28,10 @@ import {
   RunNotFound
 } from "../src/ControlError.ts"
 import { ControlRuntime, type Service as ControlRuntimeService } from "../src/ControlRuntime.ts"
-import type { Envelope, Principal } from "../src/ControlSchema.ts"
+import type { Envelope, Principal, SteerMessage } from "../src/ControlSchema.ts"
 import { canonical } from "../src/internal/planning.ts"
 import * as SqlControlRuntime from "../src/SqlControlRuntime.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 
 const envelope: Envelope = { capabilities: [], flows: [], budget: {} }
 const principal: Principal = { id: "operator", kind: "test", stampedAt: 3 }
@@ -67,7 +68,7 @@ const withRuntime = <A, E>(
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function*() {
-      const runtime = yield* SqlControlRuntime.make(options)
+      const runtime = yield* SqlControlRuntime.make({ approvalAuthority: delegateApproval(principal), ...options })
       const sql = yield* SqlClient.SqlClient
       return yield* use(runtime, sql)
     }).pipe(
@@ -335,6 +336,75 @@ describe("SqlControlRuntime and a key another process claimed", () => {
     expect(observed.uncanonical).toBeInstanceOf(InvalidInput)
     expect((observed.uncanonical as InvalidInput).issue).toBe("$.input: canonical_nan")
   })
+
+  it("refuses a raced run-key claim whose settled receipt names another fingerprint", async () => {
+    // The claim row and the receipt row are two tables. A process that
+    // rewrote only the receipt's fingerprint leaves a key whose claim agrees
+    // and whose record does not, and answering that with a launch would run
+    // the other mutation's intent under this caller's key.
+    const error = await withRuntime((runtime, sql) =>
+      Effect.gen(function*() {
+        const receipt = { _tag: "Accepted", receiptId: "run:edge", runId: "run-1" } as const
+        expect(yield* runtime.claimRunKey("run:edge", "fingerprint-a")).toEqual({ _tag: "Claimed" })
+        yield* runtime.recordMutation("run:edge", "fingerprint-a", receipt)
+        yield* sql`UPDATE control_mutations SET fingerprint = 'rewritten' WHERE mutation_key = 'run:edge'`
+        return yield* Effect.flip(runtime.claimRunKey("run:edge", "fingerprint-a"))
+      })
+    )
+
+    expect(error).toBeInstanceOf(PersistenceError)
+    expect((error as PersistenceError).operation).toBe("claim a run key")
+  })
+
+  it("reports a raced run-key claim whose settled receipt no longer decodes", async () => {
+    const error = await withRuntime((runtime, sql) =>
+      Effect.gen(function*() {
+        const receipt = { _tag: "Accepted", receiptId: "run:edge", runId: "run-1" } as const
+        expect(yield* runtime.claimRunKey("run:edge", "fingerprint-a")).toEqual({ _tag: "Claimed" })
+        yield* runtime.recordMutation("run:edge", "fingerprint-a", receipt)
+        yield* sql`UPDATE control_mutations SET receipt_json = 'not json' WHERE mutation_key = 'run:edge'`
+        return yield* Effect.flip(runtime.claimRunKey("run:edge", "fingerprint-a"))
+      })
+    )
+
+    expect(error).toBeInstanceOf(PersistenceError)
+    expect((error as PersistenceError).operation).toContain("control_mutations.receipt_json")
+  })
+})
+
+describe("SqlControlRuntime draining steering", () => {
+  it("drains the valid rows around one corrupt row, which is quarantined", async () => {
+    // A corrupt payload used to roll the whole delete back: one bad row
+    // poisoned every drain that run would ever take. The drain now claims each
+    // row in its own transaction, so the corrupt row is deleted and logged on
+    // its own and the valid rows on either side of it still drain, in order.
+    const observed = await withRuntime((runtime, sql) =>
+      Effect.gen(function*() {
+        const { runId } = yield* start(runtime, "quarantine")
+        const message = (id: string): SteerMessage => ({ messageId: id, body: id, runId, principal, createdAt: 1 })
+        yield* runtime.enqueueSteer(runId, message("first"))
+        yield* sql`
+          INSERT INTO control_run_messages (run_id, kind, payload_json)
+          VALUES (${runId}, 'steer', 'not json')
+        `
+        yield* runtime.enqueueSteer(runId, message("second"))
+        return {
+          drained: yield* runtime.drainSteering(runId),
+          again: yield* runtime.drainSteering(runId),
+          remaining: yield* sql`SELECT seq FROM control_run_messages WHERE run_id = ${runId}`
+        }
+      })
+    )
+
+    expect(observed.drained.map((message) => message.messageId)).toEqual([
+      "first",
+      "second"
+    ])
+    expect(observed.again).toEqual([])
+    // The corrupt row is gone with the valid ones: nothing is left to poison
+    // the next turn boundary's drain.
+    expect(observed.remaining).toEqual([])
+  })
 })
 
 describe("SqlControlRuntime reading rows the engine wrote", () => {
@@ -482,7 +552,7 @@ describe("SqlControlRuntime when the run store answers about another row", () =>
   ): Promise<A> =>
     Effect.runPromise(
       Effect.gen(function*() {
-        const runtime = yield* SqlControlRuntime.make({ flows })
+        const runtime = yield* SqlControlRuntime.make({ flows, approvalAuthority: delegateApproval(principal) })
         return yield* use(runtime)
       }).pipe(
         Effect.provide(
@@ -673,7 +743,7 @@ describe("SqlControlRuntime layers and stores", () => {
     // around the whole listing reported no runs at all.
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
-        const runtime = yield* SqlControlRuntime.make({ flows })
+        const runtime = yield* SqlControlRuntime.make({ flows, approvalAuthority: delegateApproval(principal) })
         const kept = yield* start(runtime, "kept")
         const collected = yield* start(runtime, "collected")
         const listed = yield* runtime.listRuns

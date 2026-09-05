@@ -1,52 +1,75 @@
 ---
 title: "@smthrs/control"
-description: "The Smithers control plane: the transport-independent Control service, the two ports it writes through, the projections it reads back, and the RPC boundary that puts all of it on a wire."
+description: "The control plane for durable agent runs: plan work, approve it, start it, watch it, steer it, and stop it, from any process, with every decision recorded beside the state it changed."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/control/docs/README.md"
 ---
 
-`@smthrs/control` is the control plane for durable runs: the service an
-operator, a CLI, a gateway, or another agent uses to plan work, approve it,
-start it, watch it, steer it, and stop it.
+`@smthrs/control` is the control plane for durable agent runs. It is one
+TypeScript service, `Control`, with ten operations: `plan`, `run`, `approve`,
+`deny`, `steer`, `signal`, `cancel`, `resume`, `list`, and `watch`. A command
+line, a gateway, an MCP server, or a dashboard calls those operations when a
+person or another agent asks for something to start, stop, or change.
 
-`Control` is authority, not execution. It never runs a flow. Every mutation it
-accepts is idempotent, principal-stamped, and recorded in the journal beside
-the state change it caused, so "who asked for this, and when did it take
-effect?" is answered from persisted evidence rather than from a log line.
+## The problem it solves
 
-Three seams keep that promise honest, and a host chooses an implementation of
-each:
+Agent work that runs for hours outlives the process that started it. By the
+time somebody wants to approve a deployment, cancel a run that is going
+nowhere, or ask what a run is waiting on, the process that could have answered
+from memory may be gone, and the run itself may be owned by a different machine.
 
-- `ControlRuntime` is the persistence port: plans, approval tokens, grants,
-  idempotency records, and the fenced run rows. `ControlRuntime.layerMemory`
-  is the deterministic in-memory one; `SqlControlRuntime.layer` is the durable
-  one over a SQL database and the fenced run store.
-- `ControlExecutor` is the execution port: the plane hands a launch, a cancel,
-  a signal, or a resume to a real engine and learns only what the engine did
-  with it.
-- `ControlServer` and `ControlClient` are the transport: the same `Control`
-  vtable served as RPC and projected back on the other side of a wire. A caller
-  handed either one cannot tell which it has.
+`Control` answers from persisted evidence instead, and it holds three promises
+while doing it:
 
-## Who uses this package
+- **Every mutation is idempotent under a key you choose.** A retried cancel, a
+  redelivered webhook, and a double-clicked approve are each one mutation, and
+  the second ask answers with the first one's receipt.
+- **Every mutation is attributed and journaled.** The plane stamps the
+  principal it authenticated, not the one a caller claimed, and writes the
+  journal entry in the same commit as the state change, so "who asked for this,
+  and when did it take effect?" still has an answer a week later.
+- **Nothing here executes a flow.** `Control` is authority, not execution. That
+  split is what lets one plane answer for runs that several processes own, on
+  machines it cannot reach, in a database it shares with an engine it never
+  imports.
 
-Operators reach it through the [`smithers` CLI](https://smithers.sh/docs/reference/cli/ps/) and never import it.
-Hosts import it: a CLI, a gateway, an MCP server, or a supervisor that needs to
-plan a run, decide an approval, or watch a journal it did not write. Flow
-authors reach it only where a step consults a durable decision, as an in-run
-approval does.
+Reach for this package when you are building the thing operators and agents
+point at. Reach for the command line instead when you want to drive runs from a
+shell.
+
+## How it relates to the smthrs CLI
+
+[`@smthrs/cli`](https://cli.smithers.sh/reference/api/) is the `smthrs` command line, and it is a host over
+this package. `smthrs plan`, `smthrs approve`, `smthrs run`, `smthrs ps`, and
+`smthrs cancel` are each one call into the `Control` service defined here and
+into nothing else, which is why the same verb answers the same way against a
+local project directory and against a remote plane: run the CLI with `--remote`
+and it provides `ControlClient.layer` in place of the in-process
+implementation, and no verb notices the difference.
+
+That relationship runs in one direction. `@smthrs/cli` depends on
+`@smthrs/control`; this package knows nothing about a terminal. Install
+[`@smthrs/cli`](https://cli.smithers.sh/reference/api/) when a person drives runs from a shell, and it is
+also the top-level package the rest of Smithers sits under, so start there if
+you are new. Install `@smthrs/control` when you are writing a host of your own:
+a gateway, an MCP server, a supervisor, a dashboard, or a CI job that needs to
+plan a run, decide an approval, or watch a journal it did not write.
+
+Flow authors reach this package only where a step consults a durable decision,
+as an in-run approval does.
 
 ## Install
 
 ```bash
-pnpm add @smthrs/control
+pnpm add @smthrs/control@next
 ```
 
-For the collaborators a working composition adds, see
-[Installation](/installation/).
+The `next` tag is where the 1.0 release candidates publish. The package needs
+Node.js 22.19.0 or later. For the collaborator packages a working composition
+adds, see [Installation](/installation/).
 
 ## The smallest real program
 
-Plan a flow, then ask to run it. A plan starts unapproved, so the launch parks
+Plan a flow, then ask to run it. A plan starts undecided, so the launch parks
 instead of starting anything:
 
 ```ts
@@ -83,6 +106,23 @@ console.log(
 
 The [Quickstart](/quickstart/) carries this through approval, launch,
 listing, and a watch, with no database and no engine.
+
+## The three seams
+
+`Control` keeps its promises through three ports, and a host chooses an
+implementation of each:
+
+- `ControlRuntime` is the persistence port: plans, approval tokens, grants,
+  idempotency records, and the fenced run rows. `ControlRuntime.layerMemory` is
+  the deterministic in-memory one; `SqlControlRuntime.layer` is the durable one
+  over a SQL database and the fenced run store.
+- `ControlExecutor` is the execution port: the plane hands a launch, a cancel,
+  a signal, or a resume to a real engine and learns only what the engine did
+  with it. A composition that provides none records and observes but starts
+  nothing, which is the right shape for a monitor or a read-only dashboard.
+- `ControlServer` and `ControlClient` are the transport: the same `Control`
+  vtable served as RPC and projected back on the other side of a wire. A caller
+  handed either one cannot tell which it has.
 
 ## The package at a glance
 
@@ -142,3 +182,5 @@ Every export of every namespace, with its signature, is on the
   [test against the plane](/guides/testing/).
 - [Troubleshooting](/troubleshooting/): the refusals this package reports,
   what causes them, and what to change.
+- [`@smthrs/cli`](https://cli.smithers.sh/reference/api/): the `smthrs` command line built on this service,
+  and the package the rest of Smithers sits under.

@@ -371,6 +371,8 @@ export type Cancellation = typeof Cancellation.Type
  * @slop
  */
 export const RunSummary = Schema.Struct({
+  /** Whether lifecycle fields were observed in the engine or no engine row was visible. */
+  executionObservation: Schema.optional(Schema.Literals(["observed", "missing"])),
   runId: RunId,
   flowId: FlowId,
   status: RunStatus,

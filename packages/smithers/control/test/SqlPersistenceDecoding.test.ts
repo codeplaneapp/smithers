@@ -10,13 +10,16 @@ import { describe, expect, it } from "vitest"
 import * as Cancellation from "../src/Cancellation.ts"
 import { ClaimLost, PersistenceError } from "../src/ControlError.ts"
 import { ControlRuntime, type Service } from "../src/ControlRuntime.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
 
 const raw = "RAW-CORRUPT-VALUE"
 const principal = { id: "operator", kind: "test", stampedAt: 0 } as const
 
 const run = <A, E>(body: Effect.Effect<A, E, DurableStack>): Promise<A> =>
-  Effect.runPromise(body.pipe(Effect.provide(durable()), Effect.scoped, Effect.orDie))
+  Effect.runPromise(
+    body.pipe(Effect.provide(durable({ approvalAuthority: delegateApproval(principal) })), Effect.scoped, Effect.orDie)
+  )
 
 const plan = (runtime: Service) => runtime.plan({ flowId: "system/test", input: { suite: "decode" } })
 
@@ -131,8 +134,8 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
     expectPersistence(error, "decode control_tokens.target_json")
   })
 
-  it("rejects a structurally invalid steering message", async () => {
-    const error = await run(Effect.gen(function*() {
+  it("removes an invalid steering message so it cannot poison subsequent drains", async () => {
+    const observed = await run(Effect.gen(function*() {
       const runtime = yield* ControlRuntime
       const sql = yield* SqlClient.SqlClient
       const { run: summary } = yield* start(runtime)
@@ -148,10 +151,12 @@ describe("SqlControlRuntime persisted JSON decoding", () => {
         })
       })
       `.pipe(Effect.orDie)
-      return yield* Effect.flip(runtime.drainSteering(summary.runId))
+      const drained = yield* runtime.drainSteering(summary.runId)
+      const remaining = yield* sql`SELECT * FROM control_run_messages WHERE run_id = ${summary.runId}`
+      return { drained, remaining, again: yield* runtime.drainSteering(summary.runId) }
     }))
 
-    expectPersistence(error, "decode control_run_messages.payload_json as steer")
+    expect(observed).toEqual({ drained: [], remaining: [], again: [] })
   })
 
   it("rejects a structurally invalid signal message", async () => {

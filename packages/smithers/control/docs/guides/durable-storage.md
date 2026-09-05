@@ -118,7 +118,7 @@ engine's own columns and journal entries:
 
 They are read through the `SqlClient` the runtime was built over. A composition
 that wants them must give the control runtime and the engine **one** database.
-The shipped `smithers` CLI does not: it keeps `.flows/control.db` and
+The [`smthrs` CLI](/api/cli) does not: it keeps `.flows/control.db` and
 `.flows/engine.db` as two files, so one run has two rows and these projections
 are empty there. Cancellation still converges, because the request travels
 through the [executor port](./implement-an-executor.md) and the owning driver

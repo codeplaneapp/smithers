@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Breaking: approval decisions require an independent `ApprovalAuthority` host
+  policy, checked before reads/replay and again at resolution. Custom agent,
+  gateway, and operator identities need explicit delegation; attribution and
+  authentication alone do not authorize approval. RPC approval errors include
+  `Unauthorized`. Policy storage failure leaves the gate closed.
+
+- Breaking: approval tokens now expose `Pending`, `Approved`, or `Denied`
+  instead of `resolved`. Terminal decisions retain their principal and time;
+  approvals also retain scope. `requireApproved` fails closed on pending or
+  denied requests. The documented gate no longer proceeds after denial or
+  mistakes a storage error for approval.
+- Migration 6004 stores the decision atomically with resolution. Legacy pending
+  requests remain pending; old terminal requests that erased their decision are
+  refused on recovery. Preserve old evidence and start a new run/request. This
+  does not migrate old executable identities or cached gate results.
+
 ### Fixed
 
 - Fixed the CommonJS build of the migration set. `migrations/0001_control_tables`

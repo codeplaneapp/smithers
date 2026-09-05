@@ -1,7 +1,7 @@
 # @smthrs/control
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://control.smithers.sh
@@ -12,14 +12,21 @@ and RPC implementations, verified ingress channels, credentials, and the shared
 wire schemas both halves decode.
 
 ```sh
-npm install @smthrs/control
+pnpm add @smthrs/control@next
 ```
 
-Nothing here imports `node:*`, but the 1.0.0-rc.0 support matrix records
-`@smthrs/control` as **no claim (no `node:` imports)**: it is not one of the 28
-entry points `scripts/browser-check.mjs` bundles, so no gate proves it bundles
-in a browser. Read the claim as what it is, an absence of `node:` imports rather
-than a tested guarantee.
+The `next` tag is where the 1.0 release candidates publish. The package
+requires Node.js 22.19.0 or later and ships as both ESM and CommonJS with
+TypeScript declarations.
+
+It imports no `node:*` module, so the same modules run in Node.js and in a
+browser that supplies a SQL driver. That is a statement about the imports, not
+a tested guarantee: verify your own bundle before you depend on it.
+
+The `smthrs` command line, [`@smthrs/cli`](https://cli.smithers.sh), is a host
+over this package: its verbs call the `Control` service defined here and
+nothing else. Install the CLI to drive runs from a shell; install this package
+to build a host of your own, such as a gateway, an MCP server, or a dashboard.
 
 ## Public API
 
@@ -68,6 +75,13 @@ earlier call under the same idempotency key did, `Conflict` means the key names
 a different intent, `Parked` means the plan is waiting for an approval, and
 `Terminal` means the run had already settled and reports the status it settled
 with.
+
+For `signal`, `Accepted` means durable admission. The command and its receipt
+commit before execution observes the payload. Delivery is tracked separately
+by `ControlRuntime.signalCommand`: `pending`, `delivered`, `rejected`, or
+`terminal`. A definite incompatible wait still raises `NoMatchingWait`, and
+that rejected disposition survives retries. Admission emits
+`control.signal.admitted`; queued commands are never announced as delivered.
 
 Before its first wait, each mutation copies only bounded JSON own data fields
 and schema-decodes that detached value. Its durable fingerprint is a canonical

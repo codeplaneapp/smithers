@@ -25,12 +25,12 @@ Signatures in this reference use the usual shorthand: `Effect<A, E, R>` for
 The transport-independent control vtable. Every implementation in this package
 and every client projects onto this one interface.
 
-| Export      | Kind      | Signature                                                                                                                                 |
-| ----------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `Control`   | class     | `Context.Service<Control, Service>` at key `/control/Control`                                                                             |
-| `Service`   | interface | The ten operations in the following table                                                                                                 |
-| `make`      | function  | `(implementation: Service) => Service`                                                                                                    |
-| `layerNoop` | layer     | `Layer<Control>`. Every operation fails `Unavailable`, naming the verb as `feature` and `control-runtime-engine-integration` as `ticket`. |
+| Export      | Kind      | Signature                                                                                                                                              |
+| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Control`   | class     | `Context.Service<Control, Service>` at key `/control/Control`                                                                                          |
+| `Service`   | interface | The ten operations in the following table                                                                                                              |
+| `make`      | function  | `(implementation: Service) => Service`                                                                                                                 |
+| `layerNoop` | layer     | `Layer<Control>`. Every operation fails `Unavailable`, naming the verb as `feature` and the constant `control-runtime-engine-integration` as `ticket`. |
 
 ### Service
 
@@ -38,7 +38,7 @@ and every client projects onto this one interface.
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `plan`    | `(input: PlanInput) => Effect<PlanCard, FlowNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                   | The reviewable card, whether or not this call created it.                                            |
 | `run`     | `(input: RunInput) => Effect<Receipt, RunNotFound \| PlanNotFound \| PlanDenied \| PlanDigestMismatch \| EnvelopeMismatch \| ClaimLost \| InvalidInput \| LaunchFailed \| PersistenceError \| Unavailable>` | `Accepted`, `AlreadyApplied`, `Conflict`, or `Parked` for a plan; a resume answers as `resume` does. |
-| `approve` | `(input: ApprovalInput) => Effect<Receipt, PlanDigestMismatch \| EnvelopeMismatch \| AlreadyResolved \| PlanNotFound \| RunNotFound \| InvalidInput \| Unauthorized \| PersistenceError \| Unavailable>`    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `approve` | `(input: ApprovalInput) => Effect<Receipt, PlanDigestMismatch \| EnvelopeMismatch \| AlreadyResolved \| PlanNotFound \| RunNotFound \| InvalidInput \| PersistenceError \| Unavailable \| Unauthorized>`                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `deny`    | same as `approve`                                                                                                                                                                                           | same as `approve`.                                                                                   |
 | `steer`   | `(input: SteerInput) => Effect<Receipt, RunNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `signal`  | `(input: SignalInput) => Effect<Receipt, RunNotFound \| NoMatchingWait \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
@@ -56,8 +56,8 @@ also reject agent principals. `ControlClient` refuses agent approval decisions
 before serialization, so operator RPC credentials cannot elevate an MCP caller.
 MCP exposes this error as `UNAUTHORIZED`.
 
-There is no `pause`. The frozen 1.0.0-rc.0 contract removed it, and an operator
-park is written through `ControlRuntime.writeStatus(runId, fence, "parked")`.
+There is no `pause`. An operator park is written through
+`ControlRuntime.writeStatus(runId, fence, "parked")`.
 
 ### Inputs
 
@@ -101,7 +101,7 @@ schema constant and a type of the same name unless noted.
 
 | Export           | Shape                                                                                                                                                                                |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `PlanNodeStatus` | `"cached" \| "run"`. The two outcomes a step key already decides. `release` belongs to orphan reconciliation and is deliberately not part of a card.                                 |
+| `PlanNodeStatus` | `"cached" \| "run"`. The two outcomes a step key already decides: reuse the cached result, or run the step. A card reports nothing else.                                             |
 | `PlanNode`       | The persisted plan node's fields plus `status`. `key` is the step key [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) compiled, so a node named here and a node in the persisted plan are the same node. |
 | `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.                        |
 
@@ -233,18 +233,21 @@ in-memory implementation. A production adapter fences every owner-sensitive
 write, implements resume as join-or-claim, releases claims on every waiting or
 terminal transition, and translates conflicts into typed failures.
 
-| Export           | Kind     | Signature                                                                   |
-| ---------------- | -------- | --------------------------------------------------------------------------- |
-| `ControlRuntime` | class    | `Context.Service<ControlRuntime, Service>` at key `/control/ControlRuntime` |
-| `make`           | function | `(implementation: Service) => Service`                                      |
-| `layerMemory`    | layer    | `(options?: MemoryOptions) => Layer<ControlRuntime, never, Crypto>`         |
+| Export                              | Kind          | Signature                                                                                                   |
+| ----------------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------- |
+| `ControlRuntime`                    | class         | `Context.Service<ControlRuntime, Service>` at key `/control/ControlRuntime`                                 |
+| `make`                              | function      | `(implementation: Service) => Service`                                                                      |
+| `layerMemory`                       | layer         | `(options?: MemoryOptions) => Layer<ControlRuntime, never, Crypto>`                                         |
+| `requireApproved`                   | function      | `(token: ApprovalToken) => Effect<ApprovalToken & { _tag: "Approved" }, ApprovalPending \| ApprovalDenied>` |
+| `ApprovalDecision`                  | schema        | Tagged `Pending \| Approved \| Denied` decision                                                             |
+| `ApprovalPending`, `ApprovalDenied` | error schemas | Fail-closed gate outcomes; include them in action/flow error schemas                                        |
 
 ### Service
 
 | Group             | Members                                                                                                                                                                |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Plans             | `plan(input: PlanInput) => Effect<PlanOutcome, FlowNotFound \| InvalidInput \| PersistenceError>`, `getPlan(planId)`, `listPlanIds`                                    |
-| Approvals         | `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal)`, `grants`          |
+| Approvals         | `authorizeApproval(request)`, `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal, scope?)`, `grants`  |
 | Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                              |
 | Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                      |
 | Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                        |
@@ -256,29 +259,59 @@ claim to runs this plane launched, which every steer wake and every
 approval-driven restart passes. An explicit `Control.resume` omits it.
 
 `registerApproval` is idempotent and returns the token with its current
-`resolved` state, so a resumed attempt reads the decision instead of parking
-again. A registration that disagrees with the stored digest or envelope is
-refused exactly as `lookupApproval` refuses it.
+tagged decision. `Pending` parks, `Approved` opens a gate, and `Denied` fails it.
+Use `requireApproved` to enforce this distinction. A registration that disagrees
+with the stored digest or envelope is refused exactly as `lookupApproval`
+refuses it. Terminal decisions carry `decisionPrincipal` and `decidedAt`;
+`Approved` also carries `scope`. The low-level `resolveApproval` defaults scope
+to `once`; when installing a wider grant, pass that same scope explicitly.
+`Control.approve` does this automatically. Resolution checks the owning
+`ApprovalAuthority` again and may fail with `Unauthorized`; it does not install
+a grant. `installBulkGrant` is a trusted storage port, not an authorization API.
+
+Migration 6004 preserves legacy rows. Unknown old terminal decisions are
+refused with `PersistenceError`; pending rows remain pending. Preserve the old
+database and start a new run/request instead of inferring approval from a grant.
 
 `requestResume` returns the durable sequence `clearResume` checks, so a resume
 requested while one is being taken up is not lost with it.
 
 ### Models
 
-| Type             | Shape                                                                                                                                                          |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                     |
-| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget; resolved: boolean; decisionPrincipal?: Principal }`                                                                |
-| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                              |
-| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                           |
-| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                 |
-| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                    |
-| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                    |
-| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely. |
-| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt"> }`                                                                       |
+| Type             | Shape                                                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                                    |
+| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget } & ApprovalDecision`; `_tag: "Pending"`, or `_tag: "Approved"` with principal/time/scope, or `_tag: "Denied"` with principal/time |
+| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                                             |
+| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                                          |
+| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                                |
+| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                   |
+| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                   |
+| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely.                |
+| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                                                                      |
 
 `layerMemory` models the production fence and approval ordering seams but keeps
 everything in a `Map`. Nothing it decides survives the process.
+
+## ApprovalAuthority
+
+Host-owned approval policy, separate from authentication and granted workflow
+capabilities. Import `@smthrs/control/ApprovalAuthority` or its root namespace.
+
+- `Request`: `{ principal, target, decision: "approved" | "denied", scope }`.
+- `Service.authorize(request)`: `Effect<void, Unauthorized | PersistenceError>`.
+- `Delegation`: schema/type for `{ principal: { id, kind }, scopes, targets }`.
+  Exact scopes are `once`, `run`, `remembered`; target kinds are `Plan`, `Node`.
+- `make(delegations)`: validates and snapshots up to 1,024 explicit delegations;
+  returns `Effect<Service, InvalidInput>`. Empty configuration denies everyone.
+- `local`: default policy for the fixed `local/operator` and `memory/test`
+  identities only. Custom identities, including bearer and agent identities,
+  need explicit delegation. A principal's `kind` is not itself a role grant.
+
+`Control.approve` and `deny` check before reads and receipt replay. Both runtime
+adapters check again at resolution. Denial requires a delegated target kind but
+does not require a grant scope because it grants nothing. See the
+[approval guide](/guides/approvals/#who-may-decide) for host composition.
 
 ## SqlControlRuntime
 
@@ -288,7 +321,7 @@ The durable `ControlRuntime` over a SQL database and the fenced run store from
 | Export           | Kind      | Signature                                                                                                          |
 | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
 | `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                |
-| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt"> }`                   |
+| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                   |
 | `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                      |
 | `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`       |
 | `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>` |
@@ -380,6 +413,13 @@ Unary procedures use HTTP at `url`; `watch` uses the abstract WebSocket the
 platform layer supplies. Declared control failures cross the wire as
 themselves; everything else becomes a `TransportError` whose `retryable` flag
 classifies the transport phase.
+
+In rc.0, `ClientConfig.credential` authenticates HTTP calls only; it does not
+authenticate the `watch` WebSocket upgrade. Authenticated remote watch requires
+a socket implementation that sends the Authorization header, or a trusted
+proxy that authenticates the caller and supplies it. The default client fails
+closed against a credentialed gateway. Tokens in URL query strings are not
+supported.
 
 ## Lineage
 
@@ -594,9 +634,9 @@ The reserved command-line verb to flow-id map the CLI projects.
 
 `plannable: false` means the row is command-line metadata and nothing else: the
 verb is named so the binary can refuse it by name. `system/replay` is the case
-that matters. The frozen rc.0 contract removed the verb, yet every runtime
-turned the whole catalog into plannable flows, so planning it returned a real
-approval card and only a later `run` failed.
+that matters. It is in `catalog` and not in `plannable`, so a runtime that
+offers `plannable` as its flow catalog refuses it at `plan` rather than minting
+an approval card no `run` can honor.
 
 Both runtimes default their flow catalog to `plannable`, so a composition that
 builds its own map and the runtimes' defaults cannot disagree about which

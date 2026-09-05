@@ -22,7 +22,7 @@ stream that says it again from durable evidence.
 - A package with the dependency installed:
 
 ```bash
-pnpm add @smthrs/control
+pnpm add @smthrs/control@next
 ```
 
 ## Declare the flow the plane may plan

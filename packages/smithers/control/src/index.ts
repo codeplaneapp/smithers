@@ -22,6 +22,12 @@
 export * as Control from "./Control.ts"
 
 /**
+ * @category services
+ * @since 1.0.0
+ */
+export * as ApprovalAuthority from "./ApprovalAuthority.ts"
+
+/**
  * @category errors
  * @since 0.1.0
  * @slop

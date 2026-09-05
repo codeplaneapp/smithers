@@ -693,6 +693,42 @@ describe("ControlLive mutations", () => {
 })
 
 describe("ControlLive executor acceptance", () => {
+  it("releases a failed launch's memory claim so the same request can be retried", async () => {
+    let launches = 0
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const card = yield* control.plan({ flowId: "system/test", input: {} })
+        yield* control.approve({ ...card.approval, idempotencyKey: "approve:retry" })
+        const input = {
+          _tag: "Plan" as const,
+          planId: card.planId,
+          digest: card.digest,
+          envelope: card.envelope,
+          idempotencyKey: "run:retry"
+        }
+        const first = yield* Effect.flip(control.run(input))
+        const second = yield* control.run(input)
+        return { first, second }
+      }),
+      live({
+        runtime: memoryRuntime({ flows }),
+        executor: ControlExecutor.makeNoop({
+          launch: ({ run }) =>
+            Effect.suspend(() => {
+              launches++
+              return launches === 1
+                ? Effect.fail(new LaunchFailed({ runId: run.runId, message: "retry later" }))
+                : Effect.succeed("pending" as const)
+            })
+        })
+      })
+    )
+    expect(observed.first).toBeInstanceOf(LaunchFailed)
+    expect(observed.second._tag).toBe("Accepted")
+    expect(launches).toBe(2)
+  })
+
   it("surfaces an executor's refusal as a launch failure, and settles the run it recorded", async () => {
     const observed = await run(
       Effect.gen(function*() {

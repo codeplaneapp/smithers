@@ -19,6 +19,7 @@ import {
 } from "../src/ControlError.ts"
 import { ControlRuntime, type MemoryOptions, type Service } from "../src/ControlRuntime.ts"
 import type { Envelope, Principal } from "../src/ControlSchema.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 import { memoryRuntime } from "./TestStack.ts"
 
 const envelope: Envelope = { capabilities: [], flows: [], budget: {} }
@@ -32,7 +33,11 @@ const withRuntime = <A, E>(
     Effect.gen(function*() {
       const runtime = yield* ControlRuntime
       return yield* use(runtime)
-    }).pipe(Effect.provide(memoryRuntime(options)), Effect.scoped, Effect.orDie)
+    }).pipe(
+      Effect.provide(memoryRuntime({ approvalAuthority: delegateApproval(principal), ...options })),
+      Effect.scoped,
+      Effect.orDie
+    )
   )
 
 /** Plans, approves, and launches one run through the port itself. */
@@ -183,9 +188,9 @@ describe("ControlRuntime.layerMemory", () => {
     expect(observed.second.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
     expect(observed.secondAfter.target).toMatchObject({ _tag: "Node", runId: observed.secondRunId })
     expect(observed.firstRunId).not.toBe(observed.secondRunId)
-    expect(observed.firstAfter).toMatchObject({ resolved: true, decisionPrincipal: principal })
-    expect(observed.secondAfter).toMatchObject({ resolved: false })
-    expect(observed.secondAfter.decisionPrincipal).toBeUndefined()
+    expect(observed.firstAfter).toMatchObject({ _tag: "Approved", decisionPrincipal: principal })
+    expect(observed.secondAfter).toMatchObject({ _tag: "Pending" })
+    expect(observed.secondAfter).not.toHaveProperty("decisionPrincipal")
   })
 
   it("keeps colliding plan and node token strings as distinct approvals", async () => {
@@ -211,9 +216,9 @@ describe("ControlRuntime.layerMemory", () => {
       })
     )
 
-    expect(observed.plan).toMatchObject({ resolved: false, target: { _tag: "Plan" } })
+    expect(observed.plan).toMatchObject({ _tag: "Pending", target: { _tag: "Plan" } })
     expect(observed.storedPlan.decision).toBe("pending")
-    expect(observed.node).toMatchObject({ resolved: true, target: { _tag: "Node" } })
+    expect(observed.node).toMatchObject({ _tag: "Approved", target: { _tag: "Node" } })
   })
 
   it("still refuses a changed digest for one node approval identity", async () => {
@@ -239,7 +244,7 @@ describe("ControlRuntime.layerMemory", () => {
     const grants = await withRuntime((runtime) =>
       Effect.gen(function*() {
         const { card } = yield* start(runtime)
-        const token = { tokenId: card.planId, target: card.approval.target, resolved: false }
+        const token = { tokenId: card.planId, target: card.approval.target, _tag: "Pending" as const }
         // A retried decision presents the same token; a second grant would
         // widen what one approval installed.
         yield* runtime.installBulkGrant(token, { ...envelope, capabilities: ["fs:write"] }, "remembered")
@@ -254,7 +259,7 @@ describe("ControlRuntime.layerMemory", () => {
     const observed = await withRuntime((runtime) =>
       Effect.gen(function*() {
         const { card } = yield* runtime.plan({ flowId: "system/test", input: {} })
-        const token = { tokenId: card.planId, target: card.approval.target, resolved: false }
+        const token = { tokenId: card.planId, target: card.approval.target, _tag: "Pending" as const }
         yield* runtime.resolveApproval(token, "denied", principal)
         const again = yield* Effect.flip(runtime.resolveApproval(token, "approved", principal))
         const unknown = yield* Effect.flip(

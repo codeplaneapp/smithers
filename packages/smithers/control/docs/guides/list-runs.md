@@ -43,9 +43,9 @@ Filtering on `runId` is one read. Everything else projects every row, so prefer
 so does every `smthrs status <run>`.
 
 `filters.principalId` is on the wire and is refused rather than removed.
-rc.0 records no launch principal on a run summary, so there is nothing to
-evaluate the filter against, and a caller using it as a tenant restriction
-would otherwise receive every run.
+Version 1.0.0-rc.0 records no launch principal on a run summary, so there is
+nothing to evaluate the filter against, and a caller using it as a tenant
+restriction would otherwise receive every run.
 
 ## Page through the result
 
@@ -88,9 +88,6 @@ with a plausible page:
 InvalidInput: limit: must be an integer between 1 and 500, received 0
 InvalidInput: cursor: must be a cursor this listing returned, received "abc"
 ```
-
-A zero-sized page used to answer `{ items: [], nextCursor: "0" }`, which is a
-cursor a client loops on forever.
 
 ## What a summary carries
 

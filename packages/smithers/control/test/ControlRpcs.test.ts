@@ -10,12 +10,19 @@ import { ControlRuntime } from "../src/ControlRuntime.ts"
 import type { Envelope, Principal, RunSummary, SteerMessage } from "../src/ControlSchema.ts"
 import * as ControlServer from "../src/ControlServer.ts"
 import * as TestControl from "../src/test/TestControl.ts"
+import { delegateApproval } from "./ApprovalFixtures.ts"
 import { durable, type DurableStack } from "./DurableStack.ts"
 
 const principal = { id: "server", kind: "test", stampedAt: 1 }
 
 const layer = Layer.merge(ControlServer.layer, layerNoopAuth(principal)).pipe(
-  Layer.provide(TestControl.layer({ principal: { id: principal.id, kind: principal.kind }, now: () => 1 }))
+  Layer.provide(
+    TestControl.layer({
+      principal: { id: principal.id, kind: principal.kind },
+      now: () => 1,
+      approvalAuthority: delegateApproval(principal)
+    })
+  )
 )
 
 const makeClient = RpcTest.makeClient(ControlRpcs)
@@ -220,7 +227,7 @@ const authenticated: Principal = { id: "remote-operator", kind: "bearer", stampe
 const spoofed: Principal = { id: "victim", kind: "human", stampedAt: 0 }
 
 const attributed = Layer.merge(ControlServer.layer, layerNoopAuth(authenticated)).pipe(
-  Layer.provideMerge(durable())
+  Layer.provideMerge(durable({ approvalAuthority: delegateApproval(authenticated) }))
 )
 
 /** The client, and everything the durable stack exposes, over one database. */
@@ -297,8 +304,8 @@ describe("approval identity over RPC", () => {
       })
     )
 
-    expect(observed.first).toMatchObject({ resolved: true, target: { runId: observed.firstRunId } })
-    expect(observed.second).toMatchObject({ resolved: false, target: { runId: observed.secondRunId } })
+    expect(observed.first).toMatchObject({ _tag: "Approved", target: { runId: observed.firstRunId } })
+    expect(observed.second).toMatchObject({ _tag: "Pending", target: { runId: observed.secondRunId } })
     expect(observed.firstRunId).not.toBe(observed.secondRunId)
   })
 })
@@ -372,7 +379,7 @@ describe("the identity an authenticated control mutation is journaled under", ()
     const clocked = Layer.merge(
       ControlServer.layer,
       layerAuth({ authenticate: () => Effect.succeed({ ...authenticated, stampedAt: ++stampedAt }) })
-    ).pipe(Layer.provideMerge(durable()))
+    ).pipe(Layer.provideMerge(durable({ approvalAuthority: delegateApproval(authenticated) })))
 
     const observed = await durably(
       (rpc) =>

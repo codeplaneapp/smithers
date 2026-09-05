@@ -47,8 +47,9 @@
  */
 import { DurableWriter } from "@smthrs/database/DurableWriter"
 import { Ownership, RunStore } from "@smthrs/run-store"
-import { Clock, Crypto, Effect, Fiber, Layer, Option, Schema } from "effect"
+import { Clock, Crypto, Effect, Fiber, Layer, Option, Result, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as ApprovalAuthority from "./ApprovalAuthority.ts"
 import * as Attribution from "./Cancellation.ts"
 import type { PlanInput } from "./Control.ts"
 import {
@@ -65,7 +66,7 @@ import {
   Unauthorized
 } from "./ControlError.ts"
 import type { ApprovalToken, BulkGrant, LaunchResult, MemoryFlow, Service, StoredPlan } from "./ControlRuntime.ts"
-import { ControlRuntime, make } from "./ControlRuntime.ts"
+import { ApprovalDecision, ControlRuntime, make } from "./ControlRuntime.ts"
 import {
   ApprovalTarget,
   type Cancellation,
@@ -81,10 +82,14 @@ import {
   SignalPayload,
   SteerMessage
 } from "./ControlSchema.ts"
+import * as ActiveFibers from "./internal/activeFibers.ts"
 import { canonicalIssue, cappedIssue, schemaIssuePath } from "./internal/issues.ts"
 import { accepted, alreadyApplied, canonical, emptyEnvelope, planCard, sameEnvelope } from "./internal/planning.ts"
 import * as Lineage from "./Lineage.ts"
 import { initial } from "./migrations/0001_control_tables.ts"
+import { runKeys } from "./migrations/0002_run_keys.ts"
+import { signalCommands } from "./migrations/0003_signal_commands.ts"
+import { approvalDecisions } from "./migrations/0004_approval_decisions.ts"
 import { plannable } from "./SystemFlows.ts"
 
 /**
@@ -116,6 +121,7 @@ export interface Options {
   readonly flows?: ReadonlyArray<DurableFlow> | undefined
   readonly owner?: Ownership.OwnerId | undefined
   readonly principal?: Omit<Principal, "stampedAt"> | undefined
+  readonly approvalAuthority?: ApprovalAuthority.Service | undefined
 }
 
 const persistence = (operation: string) => (cause: unknown): PersistenceError =>
@@ -227,6 +233,7 @@ interface TokenRow {
   readonly targetJson: string
   readonly resolved: number
   readonly decisionPrincipalJson: string | null
+  readonly decisionJson: string | null
 }
 
 interface ApprovalIdentity {
@@ -250,14 +257,34 @@ const tokenFromRow = (
   target: ApprovalTarget
 ): Effect.Effect<ApprovalToken, PersistenceError> =>
   Effect.gen(function*() {
-    const decisionPrincipal = row.decisionPrincipalJson === null
+    const decision = row.decisionJson === null
+      ? { _tag: "Pending" as const }
+      : yield* decodeStoredJson("control_tokens.decision_json", ApprovalDecision, row.decisionJson)
+    if (row.decisionJson === null && row.resolved === 1) {
+      return yield* new PersistenceError({
+        operation: "recover an approval decision",
+        message:
+          "This legacy approval erased its decision. Preserve the database for review; create a new run and request a new approval. It cannot safely resume through this gate."
+      })
+    }
+    const expectedPrincipal = decision._tag === "Pending" ? undefined : decision.decisionPrincipal
+    const storedPrincipal = row.decisionPrincipalJson === null
       ? undefined
       : yield* decodeStoredJson("control_tokens.decision_principal_json", Principal, row.decisionPrincipalJson)
+    if (
+      row.resolved !== (decision._tag === "Pending" ? 0 : 1) ||
+      JSON.stringify(storedPrincipal) !== JSON.stringify(expectedPrincipal)
+    ) {
+      return yield* storedFailure(
+        "control_tokens.decision_json",
+        "$",
+        "approval decision disagrees with its resolution"
+      )
+    }
     return {
       tokenId: row.tokenId,
       target,
-      resolved: row.resolved !== 0,
-      ...(decisionPrincipal === undefined ? {} : { decisionPrincipal })
+      ...decision
     }
   })
 
@@ -290,6 +317,9 @@ const EngineStateProjection = Schema.Struct({ flowName: Schema.NonEmptyString })
  * @slop
  */
 export const migrate: Effect.Effect<void, PersistenceError, SqlClient.SqlClient> = initial.pipe(
+  Effect.andThen(runKeys),
+  Effect.andThen(signalCommands),
+  Effect.andThen(approvalDecisions),
   // A standalone runtime cannot record control's high-offset migration first:
   // that high-water mark would make later journal and run-store sets look
   // skipped. The idempotent bootstrap keeps standalone construction safe. The
@@ -321,6 +351,8 @@ const makeRuntime = (
       nonce: randomId()
     })
     : Object.freeze({ ...options.owner })
+  const approvalAuthority = options.approvalAuthority ?? ApprovalAuthority.local
+  const authorizeApproval = approvalAuthority.authorize.bind(approvalAuthority)
 
   return Effect.gen(function*() {
     const crypto = yield* Crypto.Crypto
@@ -341,6 +373,7 @@ const makeRuntime = (
     // has none, and interrupting a run it does not own is the other process's
     // job — so this map is process-local by design, not by omission.
     const fibers = new Map<RunId, Fiber.Fiber<unknown, unknown>>()
+    let pendingSignalCursor = 0
 
     const now = Clock.currentTimeMillis
 
@@ -812,11 +845,8 @@ const makeRuntime = (
             SELECT run_id AS "runId", parent_run_id AS "parentRunId" FROM ancestry
           `.pipe(Effect.mapError(persistence("walk a run's ancestry")))
           if (rows.length === 0) {
-            // No row at all: the caller's own `requireRow` reports that. The
-            // walk only reaches an id it has already visited by following a
-            // spawn edge back into the chain, and that id had a row.
-            /* v8 ignore next -- an already-visited id always had a row */
-            if (!visited.has(start)) chain.push(start)
+            // No row at all: the caller's own `requireRow` reports that.
+            chain.push(start)
             break
           }
           let last: string | undefined
@@ -982,6 +1012,7 @@ const makeRuntime = (
       })
 
     const service = make({
+      authorizeApproval,
       plan: Effect.fn("SqlControlRuntime.plan")(function*(input: PlanInput) {
         const flow = flows.get(input.flowId)
         if (flow === undefined) {
@@ -1097,7 +1128,7 @@ const makeRuntime = (
         const identity = approvalIdentity(target)
         const rows = yield* sql<TokenRow>`
           SELECT token_id AS "tokenId", target_json AS "targetJson", resolved,
-                 decision_principal_json AS "decisionPrincipalJson"
+                 decision_principal_json AS "decisionPrincipalJson", decision_json AS "decisionJson"
           FROM control_tokens
           WHERE target_tag = ${identity.targetTag}
             AND run_id = ${identity.runId}
@@ -1133,8 +1164,9 @@ const makeRuntime = (
             actual: canonical(target.envelope)
           })
         }
-        if (row.resolved !== 0) return yield* new AlreadyResolved({ requestId: tokenId })
-        return yield* tokenFromRow(row, stored)
+        const token = yield* tokenFromRow(row, stored)
+        if (token._tag !== "Pending") return yield* new AlreadyResolved({ requestId: tokenId })
+        return token
       }),
       registerApproval: Effect.fn("SqlControlRuntime.registerApproval")(function*(
         target: Extract<ApprovalTarget, { readonly _tag: "Node" }>
@@ -1153,7 +1185,7 @@ const makeRuntime = (
         `.pipe(Effect.mapError(persistence("register an approval token")))
         const rows = yield* sql<TokenRow>`
           SELECT token_id AS "tokenId", target_json AS "targetJson", resolved,
-                 decision_principal_json AS "decisionPrincipalJson"
+                 decision_principal_json AS "decisionPrincipalJson", decision_json AS "decisionJson"
           FROM control_tokens
           WHERE target_tag = ${identity.targetTag}
             AND run_id = ${identity.runId}
@@ -1216,18 +1248,39 @@ const makeRuntime = (
       resolveApproval: Effect.fn("SqlControlRuntime.resolveApproval")(function*(
         token: ApprovalToken,
         decision: "approved" | "denied",
-        principal: Principal
+        principal: Principal,
+        scope: GrantScope = "once"
       ) {
-        if (principal.kind === "agent") {
-          return yield* new Unauthorized({ message: "Approval decisions are operator-only" })
-        }
-        const identity = approvalIdentity(token.target)
+        // Caller-owned objects can change while the clock or writer yields.
+        // Bind both representations of the principal, and the plan update,
+        // to the same captured request rather than reading the caller again.
+        const requested = yield* Effect.try({
+          try: () => structuredClone({ target: token.target, principal, tokenId: token.tokenId }),
+          catch: () =>
+            new PersistenceError({
+              operation: "record an approval decision",
+              message: "The approval request cannot be captured"
+            })
+        })
+        const identity = approvalIdentity(requested.target)
+        const requestedPrincipal = requested.principal
+        const tokenId = requested.tokenId
+        const decidedAt = yield* now
+        const answer = yield* decodeStoredValue(
+          "approval decision",
+          ApprovalDecision,
+          decision === "approved"
+            ? { _tag: "Approved", decisionPrincipal: requestedPrincipal, decidedAt, scope }
+            : { _tag: "Denied", decisionPrincipal: requestedPrincipal, decidedAt }
+        )
         // Exactly once: the guard is in the UPDATE, so two concurrent decisions
         // cannot both observe an unresolved token.
         const resolved = yield* writer.write(Effect.gen(function*() {
+          yield* authorizeApproval({ principal: requestedPrincipal, target: requested.target, decision, scope })
           const rows = yield* sql<{ readonly tokenId: string }>`
             UPDATE control_tokens
-            SET resolved = 1, decision_principal_json = ${JSON.stringify(principal)}
+            SET resolved = 1, decision_principal_json = ${JSON.stringify(requestedPrincipal)},
+                decision_json = ${JSON.stringify(answer)}
             WHERE target_tag = ${identity.targetTag}
               AND run_id = ${identity.runId}
               AND target_id = ${identity.targetId}
@@ -1235,12 +1288,16 @@ const makeRuntime = (
             RETURNING token_id AS "tokenId"
           `
           if (rows.length === 0) return false
-          if (token.target._tag === "Plan") {
-            yield* sql`UPDATE control_plans SET decision = ${decision} WHERE plan_id = ${token.target.planId}`
+          if (identity.targetTag === "Plan") {
+            yield* sql`UPDATE control_plans SET decision = ${decision} WHERE plan_id = ${identity.targetId}`
           }
           return true
-        })).pipe(Effect.mapError(persistence("resolve an approval")))
-        if (!resolved) return yield* new AlreadyResolved({ requestId: token.tokenId })
+        })).pipe(Effect.mapError((error) =>
+          error instanceof Unauthorized || error instanceof PersistenceError
+            ? error
+            : persistence("resolve an approval")(error)
+        ))
+        if (!resolved) return yield* new AlreadyResolved({ requestId: tokenId })
       }),
       launch: Effect.fn("SqlControlRuntime.launch")(function*(
         planId: string,
@@ -1348,20 +1405,35 @@ const makeRuntime = (
       ),
       drainSteering: Effect.fn("SqlControlRuntime.drainSteering")(function*(runId: RunId) {
         yield* requireRow(runId)
-        // Read and delete in one transaction: two turn boundaries draining at
-        // once must not both see the same message.
-        const drained = yield* writer.write(Effect.gen(function*() {
-          const rows = yield* sql<{ readonly payloadJson: string }>`
-            DELETE FROM control_run_messages WHERE run_id = ${runId} AND kind = 'steer'
+        const drained: Array<SteerMessage> = []
+        // Every message is claimed in its own transaction: two turn boundaries
+        // draining at once can never both take one message. Decoding happens
+        // AFTER the claim commits, one row at a time, so a row that fails to
+        // decode is quarantined by that claim — deleted and logged — instead
+        // of rolling the whole drain back and poisoning every drain after it.
+        while (true) {
+          const claimed = yield* writer.write(sql<{ readonly payloadJson: string }>`
+            DELETE FROM control_run_messages
+            WHERE seq = (
+              SELECT MIN(seq) FROM control_run_messages
+              WHERE run_id = ${runId} AND kind = 'steer'
+            )
             RETURNING payload_json AS "payloadJson"
-          `
-          return yield* Effect.forEach(
-            rows,
-            (row) => decodeStoredJson("control_run_messages.payload_json as steer", SteerMessage, row.payloadJson)
+          `).pipe(Effect.mapError(persistence("drain steering")))
+          const row = claimed[0]
+          if (row === undefined) break
+          const decoded = yield* Effect.result(
+            decodeStoredJson("control_run_messages.payload_json as steer", SteerMessage, row.payloadJson)
           )
-        })).pipe(
-          Effect.mapError((cause) => cause instanceof PersistenceError ? cause : persistence("drain steering")(cause))
-        )
+          if (Result.isFailure(decoded)) {
+            yield* Effect.annotateLogs(
+              Effect.logWarning("A stored steer message could not be decoded and was quarantined"),
+              { runId, issue: decoded.failure.message }
+            )
+            continue
+          }
+          drained.push(decoded.success)
+        }
         return drained
       }),
       deliverSignal: Effect.fn("SqlControlRuntime.deliverSignal")((runId: RunId, signal: SignalPayload) =>
@@ -1369,12 +1441,121 @@ const makeRuntime = (
         // fact, it does not decide who runs next.
         appendMessage(runId, "signal", signal)
       ),
+      admitSignal: Effect.fn("SqlControlRuntime.admitSignal")(function*(commandId, runId, signal) {
+        yield* requireRow(runId)
+        yield* writer.write(sql`INSERT INTO control_signal_commands (command_id, run_id, payload_json)
+          VALUES (${commandId}, ${runId}, ${JSON.stringify(signal)}) ON CONFLICT(command_id) DO NOTHING`).pipe(
+          Effect.mapError(persistence("admit signal command"))
+        )
+      }),
+      signalCommand: Effect.fn("SqlControlRuntime.signalCommand")(function*(commandId) {
+        const rows = yield* sql<
+          {
+            commandId: string
+            runId: string
+            payloadJson: string
+            token: string | null
+            state: "pending" | "delivered" | "rejected" | "terminal"
+          }
+        >`
+          SELECT command_id AS "commandId", run_id AS "runId", payload_json AS "payloadJson", wait_token AS token, state
+          FROM control_signal_commands WHERE command_id = ${commandId}`.pipe(query("read signal command"))
+        const row = rows[0]
+        if (row === undefined) return undefined
+        return {
+          commandId: row.commandId,
+          runId: row.runId,
+          token: row.token,
+          state: row.state,
+          signal: yield* decodeStoredJson("control_signal_commands.payload_json", SignalPayload, row.payloadJson)
+        }
+      }),
+      pendingSignals: Effect.gen(function*() {
+        const read = (after: number) =>
+          sql<
+            {
+              seq: number
+              commandId: string
+              runId: string
+              payloadJson: string
+              token: string | null
+              state: "pending"
+            }
+          >`
+          SELECT seq, command_id AS "commandId", run_id AS "runId", payload_json AS "payloadJson", wait_token AS token, state
+          FROM control_signal_commands WHERE state = 'pending' AND seq > ${after} ORDER BY seq LIMIT 100`.pipe(
+            query("read pending signals")
+          )
+        let rows = yield* read(pendingSignalCursor)
+        if (rows.length === 0 && pendingSignalCursor !== 0) rows = yield* read(0)
+        pendingSignalCursor = rows.at(-1)?.seq ?? 0
+        const decoded = yield* Effect.forEach(
+          rows,
+          (row) =>
+            decodeStoredJson("control_signal_commands.payload_json", SignalPayload, row.payloadJson).pipe(
+              Effect.map((signal) =>
+                Option.some({ commandId: row.commandId, runId: row.runId, token: row.token, state: row.state, signal })
+              ),
+              Effect.catch((error) =>
+                writer.write(
+                  sql`UPDATE control_signal_commands SET state = 'rejected' WHERE command_id = ${row.commandId} AND state = 'pending'`
+                ).pipe(
+                  Effect.mapError(persistence("quarantine malformed signal")),
+                  Effect.andThen(
+                    Effect.logWarning("Malformed admitted signal rejected", { commandId: row.commandId, error })
+                  ),
+                  Effect.as(Option.none())
+                )
+              )
+            )
+        )
+        return decoded.filter(Option.isSome).map((item) => item.value)
+      }),
+      bindSignal: Effect.fn("SqlControlRuntime.bindSignal")((commandId, token) =>
+        writer.write(Effect.gen(function*() {
+          yield* sql`UPDATE control_signal_commands SET wait_token = ${token} WHERE command_id = ${commandId} AND wait_token IS NULL AND state = 'pending' AND NOT EXISTS (SELECT 1 FROM control_signal_commands WHERE wait_token = ${token})`
+          const rows = yield* sql<
+            { token: string | null }
+          >`SELECT wait_token AS token FROM control_signal_commands WHERE command_id = ${commandId}`
+          if (rows[0] === undefined) {
+            return yield* new PersistenceError({
+              operation: "bind signal",
+              message: `No pending signal command ${commandId}`
+            })
+          }
+          return rows[0].token
+        })).pipe(Effect.mapError(persistence("bind signal")))
+      ),
+      settleSignal: Effect.fn("SqlControlRuntime.settleSignal")((commandId, state) =>
+        writer.write(
+          sql`UPDATE control_signal_commands SET state = ${state} WHERE command_id = ${commandId} AND state = 'pending'`
+        ).pipe(Effect.asVoid, Effect.mapError(persistence("settle signal")))
+      ),
       deliveredSignals: Effect.fn("SqlControlRuntime.deliveredSignals")(function*(runId: RunId) {
         yield* requireRow(runId)
-        return yield* messages(runId, "signal", SignalPayload)
+        const legacy = yield* messages(runId, "signal", SignalPayload)
+        const rows = yield* sql<
+          { payloadJson: string }
+        >`SELECT payload_json AS "payloadJson" FROM control_signal_commands WHERE run_id = ${runId} AND state != 'rejected' ORDER BY seq`
+          .pipe(query("read admitted signals"))
+        return [
+          ...legacy,
+          ...yield* Effect.forEach(
+            rows,
+            (row) => decodeStoredJson("control_signal_commands.payload_json", SignalPayload, row.payloadJson)
+          )
+        ]
       }),
       requestResume: Effect.fn("SqlControlRuntime.requestResume")(function*(runId: RunId) {
-        yield* requireRow(runId)
+        const summary = yield* summaryOf(yield* requireRow(runId))
+        // A settled run has no host left to take the delegation up: recording
+        // one anyway leaves an orphaned row that `pendingResumes` filters out
+        // of every poll but nothing ever clears.
+        if (terminal(summary.status)) {
+          return yield* new InvalidInput({
+            issue: `run ${runId} is ${summary.status} and cannot take a resume`
+          })
+        }
         const sequence = yield* nextSequence("resume")
         const timestamp = yield* now
         yield* writer.write(sql`
@@ -1418,7 +1599,7 @@ const makeRuntime = (
         fiber: Fiber.Fiber<unknown, unknown>
       ) {
         yield* requireRow(runId)
-        fibers.set(runId, fiber)
+        ActiveFibers.register(fibers, runId, fiber)
       }),
       interrupt: Effect.fn("SqlControlRuntime.interrupt")(function*(runId: RunId) {
         const row = yield* requireRow(runId)
@@ -1567,6 +1748,72 @@ const makeRuntime = (
           Effect.mapError((cause) =>
             cause instanceof PersistenceError ? cause : persistence("record a mutation")(cause)
           )
+        )
+      ),
+      claimRunKey: Effect.fn("SqlControlRuntime.claimRunKey")((
+        key: IdempotencyKey,
+        fingerprint: string
+      ) => {
+        const claimant = randomId()
+        return writer.write(Effect.gen(function*() {
+          yield* sql`
+            INSERT INTO control_run_keys (idempotency_key, fingerprint, claimant)
+            VALUES (${key}, ${fingerprint}, ${claimant})
+            ON CONFLICT (idempotency_key) DO NOTHING
+          `
+          const holders = yield* sql<{
+            readonly fingerprint: string
+            readonly claimant: string
+          }>`
+            SELECT fingerprint, claimant FROM control_run_keys
+            WHERE idempotency_key = ${key}
+          `
+          const holder = holders[0]
+          /* v8 ignore next 6 -- the insert above either wrote this row or left the one already there; a read that finds neither is a storage failure no test can stage */
+          if (holder === undefined) {
+            return yield* new PersistenceError({
+              operation: "claim a run key",
+              message: `Run key ${key} disappeared while it was being claimed`
+            })
+          }
+          if (holder.fingerprint !== fingerprint) {
+            return yield* new InvalidInput({
+              issue: `idempotency key ${key} was used for another run`
+            })
+          }
+          if (holder.claimant === claimant) return { _tag: "Claimed" as const }
+
+          // Serialized writers make the winner's key and receipt visible in
+          // one commit. Seeing its key without its receipt is therefore
+          // corruption (or a claim written by an older, non-atomic build), not
+          // permission to launch a second run.
+          const rows = yield* sql<{ readonly fingerprint: string; readonly receiptJson: string }>`
+            SELECT fingerprint, receipt_json AS "receiptJson"
+            FROM control_mutations WHERE mutation_key = ${key}
+          `
+          const record = rows[0]
+          if (record === undefined || record.fingerprint !== fingerprint) {
+            return yield* new PersistenceError({
+              operation: "claim a run key",
+              message: `Run key ${key} has no matching settled receipt`
+            })
+          }
+          const receipt = yield* decodeStoredJson("control_mutations.receipt_json", Receipt, record.receiptJson)
+          return { _tag: "Raced" as const, receipt }
+        })).pipe(
+          Effect.mapError((cause) =>
+            cause instanceof InvalidInput || cause instanceof PersistenceError
+              ? cause
+              : persistence("claim a run key")(cause)
+          )
+        )
+      }),
+      releaseRunKey: Effect.fn("SqlControlRuntime.releaseRunKey")((key: IdempotencyKey) =>
+        writer.write(sql`
+          DELETE FROM control_run_keys WHERE idempotency_key = ${key}
+        `).pipe(
+          Effect.asVoid,
+          Effect.mapError(persistence("release a run key"))
         )
       ),
       grants: Effect.fn("SqlControlRuntime.grants")(() =>

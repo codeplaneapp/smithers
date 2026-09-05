@@ -33,9 +33,10 @@ plane portable.
 [notification queue](https://notifications.smithers.sh/reference/api/) a steer travels through and the
 [registry](https://registry.smithers.sh/reference/api/) a flow listing reads.
 
-Both runtimes are held to one shared contract suite, in
-`packages/smithers/control/test/ControlContract.ts`, so a behavior you observe
-against the memory runtime is a behavior the durable one owes you.
+Both runtimes are held to one
+[shared contract suite](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/test/ControlContract.ts),
+so a behavior you observe against the memory runtime is a behavior the durable
+one owes you.
 
 ## The executor is optional, and the absence is a real composition
 
@@ -59,7 +60,7 @@ builds on purpose.
 
 A control run row and an engine run row are different documents about the same
 work, and they do not collide by accident: the plane keeps its own
-`flows_runs`, and the engine keeps its own. The shipped `smithers` CLI runs
+`flows_runs`, and the engine keeps its own. The [`smthrs` CLI](https://cli.smithers.sh/reference/api/) runs
 them as two files, `.flows/control.db` and `.flows/engine.db`.
 
 They share the journal, and that is what makes `watch` worth having: one stream

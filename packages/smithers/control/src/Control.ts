@@ -180,6 +180,7 @@ export interface Service {
     | Unauthorized
     | PersistenceError
     | Unavailable
+    | Unauthorized
   >
   readonly deny: (
     input: ApprovalInput
@@ -194,6 +195,7 @@ export interface Service {
     | Unauthorized
     | PersistenceError
     | Unavailable
+    | Unauthorized
   >
   readonly steer: (
     input: SteerInput

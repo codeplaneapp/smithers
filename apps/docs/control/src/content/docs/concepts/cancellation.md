@@ -103,9 +103,9 @@ arrived, and that answer suppresses the second record.
 
 A cancel whose executor reports that the engine row has already settled writes
 no attribution, because nobody cancelled anything, and reconciles the control
-row onto the engine's own status instead. Leaving the two rows disagreeing was
-permanent: no verb converged it, `smthrs ps` listed the run as live, and
-`gc` skipped it forever.
+row onto the engine's own status instead. Nothing else converges the two rows,
+so a control row left disagreeing with a settled engine row would list the run
+as live forever.
 
 Over RPC the `Cancel` procedure carries the reason and refuses a caller-named
 principal. The server stamps the identity it authenticated, so a remote
