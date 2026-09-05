@@ -38,19 +38,19 @@ export const Package = Smithers.Package({ targets: { page, referenceDocs } })
 
 The `DiffAttrs` schema declares eleven fields:
 
-| Name        | Type                                             | Default                              | Description                                                                                                                             |
-| ----------- | ------------------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`     | `AgentSelector`                                  | the workspace agent named `default`  | A workspace agent reference (`Smithers.Agents.<name>`) or an inline declaration (`Smithers.Agent.ClaudeCode`, `.Codex`, `.Pool`).        |
-| `prompt`    | `Input.File`                                     | `required`                           | The prompt file. A `//` path resolves from the workspace root, any other from the declaring package. A file over 1048576 bytes fails the read.     |
-| `payload`   | `Record<string, Reference.InputSpec>`            | `{}`                                 | Invoker inputs declared with `Smithers.Input.String`, `.Literals`, and `.Optional`, supplied as `--input name=value`.                    |
-| `mcp`       | `Array<Reference.McpHttp>`                       | `[]`                                 | MCP servers declared with `Smithers.Mcp.Http(name, url)`, prechecked for reachability before any session spawn.                          |
-| `data`      | `Attr.Data`                                      | `required`                           | Targets and declared inputs the agent reads. `Smithers.gitDiff` entries become the review slice; the other files reach the prompt.       |
-| `changes`   | `Array<string>`                                  | `required`                           | The write-set globs every candidate edit stays inside. A path outside it rejects the whole candidate.                                    |
-| `gates`     | `Array<Target.Target>`                           | `required`                           | Targets that must be green against each candidate tree. An outward or Run rule as a gate refuses the invocation.                             |
-| `secrets`   | `Array<Secret.HttpCredential>`                   | `optional`                           | Destination-bound credentials declared with `Smithers.HttpSecret`. The declaration records the variable name and audience, never a value. |
-| `sandbox`   | `"none" \| { network?: boolean \| "loopback" }` | `optional`                           | The confinement policy for the node. Omitted, the node keeps the workspace default confinement.                                         |
-| `approval`  | `"required"`                                     | `optional`                           | Declaring it refuses the invocation before any effect, because the build system has no durable approval store.                           |
-| `maxRounds` | `number`                                         | `required`                           | Candidate and gate rounds, at least 1 and at most `maximumRounds`, which is 16.                                                          |
+| Name        | Type                                            | Default                             | Description                                                                                                                                    |
+| ----------- | ----------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`     | `AgentSelector`                                 | the workspace agent named `default` | A workspace agent reference (`Smithers.Agents.<name>`) or an inline declaration (`Smithers.Agent.ClaudeCode`, `.Codex`, `.Pool`).              |
+| `prompt`    | `Input.File`                                    | `required`                          | The prompt file. A `//` path resolves from the workspace root, any other from the declaring package. A file over 1048576 bytes fails the read. |
+| `payload`   | `Record<string, Reference.InputSpec>`           | `{}`                                | Invoker inputs declared with `Smithers.Input.String`, `.Literals`, and `.Optional`, supplied as `--input name=value`.                          |
+| `mcp`       | `Array<Reference.McpHttp>`                      | `[]`                                | MCP servers declared with `Smithers.Mcp.Http(name, url)`, prechecked for reachability before any session spawn.                                |
+| `data`      | `Attr.Data`                                     | `required`                          | Targets and declared inputs the agent reads. `Smithers.gitDiff` entries become the review slice; the other files reach the prompt.             |
+| `changes`   | `Array<string>`                                 | `required`                          | The write-set globs every candidate edit stays inside. A path outside it rejects the whole candidate.                                          |
+| `gates`     | `Array<Target.Target>`                          | `required`                          | Targets that must be green against each candidate tree. An outward or Run rule as a gate refuses the invocation.                               |
+| `secrets`   | `Array<Secret.HttpCredential>`                  | `optional`                          | Destination-bound credentials declared with `Smithers.HttpSecret`. The declaration records the variable name and audience, never a value.      |
+| `sandbox`   | `"none" \| { network?: boolean \| "loopback" }` | `optional`                          | The confinement policy for the node. Omitted, the node keeps the workspace default confinement.                                                |
+| `approval`  | `"required"`                                    | `optional`                          | Declaring it refuses the invocation before any effect, because the build system has no durable approval store.                                 |
+| `maxRounds` | `number`                                        | `required`                          | Candidate and gate rounds, at least 1 and at most `maximumRounds`, which is 16.                                                                |
 
 {/* verify: DiffAttrs.maxRounds is Schema.Number while DiffPayload.maxRounds is Schema.Int; does a fractional maxRounds fail at the declaration or at payload decoding? */}
 
@@ -70,9 +70,9 @@ Each round the session answers with complete-file candidate edits. They apply to
 
 The declaration passes these channel schemas:
 
-| Channel | Type                                                                                                                                                  |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Success | `AgentTarget.DiffResult`, with `vacuous`, `rounds`, `diff`, `edits`, and `gateReport`                                                                     |
+| Channel | Type                                                                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Success | `AgentTarget.DiffResult`, with `vacuous`, `rounds`, `diff`, `edits`, and `gateReport`                                                               |
 | Error   | `AgentTarget.DiffError`, the union of `AgentNeedsInput`, `AgentMcpUnreachable`, `AgentWriteEscape`, `AgentRoundsExhausted`, and `AgentSessionError` |
 
 ## Status
