@@ -81,7 +81,7 @@ export type BrowserFetchOutcome = BrowserFetchSuccess | BrowserFetchFailure
  * @since 1.0.0
  * @category models
  */
-export type ResolveHost = (hostname: string) => Promise<ReadonlyArray<string>>
+export type ResolveHost = (hostname: string, signal?: AbortSignal) => Promise<ReadonlyArray<string>>
 
 const BLOCKED_HOSTNAMES = new Set(["localhost", "localhost.localdomain"])
 
@@ -171,10 +171,14 @@ export const isPublicAddress = (raw: string): boolean => {
 
 const guardTarget = async (
   url: URL,
-  resolveHost: ResolveHost
+  resolveHost: ResolveHost,
+  signal?: AbortSignal
 ): Promise<BrowserFetchFailure | { readonly addresses: ReadonlyArray<string> }> => {
   if (url.protocol !== "https:") {
     return { ok: false, message: "Only https:// pages can be read." }
+  }
+  if (url.username !== "" || url.password !== "") {
+    return { ok: false, message: "Pages that include credentials in the URL cannot be read." }
   }
   const hostname = url.hostname
   if (hostname === "" || isBlockedHostname(hostname)) {
@@ -188,7 +192,7 @@ const guardTarget = async (
   }
   let addresses: ReadonlyArray<string>
   try {
-    addresses = await resolveHost(hostname)
+    addresses = await resolveHost(hostname, signal)
   } catch {
     return { ok: false, message: `The host ${hostname} could not be resolved.` }
   }
@@ -258,12 +262,28 @@ const frameability = (headers: Headers): { frameable: boolean; blockReason: stri
   return { frameable: true, blockReason: null }
 }
 
-const readCapped = async (body: ReadableStream<Uint8Array>): Promise<string> => {
+/** The same deadline covers DNS, response headers, redirects and body bytes. */
+const abortable = <T>(pending: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise((resolve, reject) => {
+    const abort = (): void => reject(signal.reason)
+    pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
+    if (signal.aborted) { reject(signal.reason); return }
+    signal.addEventListener("abort", abort, { once: true })
+  })
+
+const readCapped = async (body: ReadableStream<Uint8Array>, signal: AbortSignal): Promise<string> => {
   const reader = body.getReader()
   const chunks: Array<Uint8Array> = []
   let received = 0
   for (;;) {
-    const { value, done } = await reader.read()
+    let chunk: Awaited<ReturnType<typeof reader.read>>
+    try {
+      chunk = await abortable(reader.read(), signal)
+    } catch (error) {
+      void reader.cancel(error).catch(() => {})
+      throw error
+    }
+    const { value, done } = chunk
     if (done) break
     received += value.byteLength
     chunks.push(value)
@@ -315,35 +335,41 @@ export const browserFetch = async (
     return { ok: false, message: "That is not a URL I can read." }
   }
   const timeoutMs = deps.timeoutMs ?? BROWSER_FETCH_TIMEOUT_MS
+  const timeout = AbortSignal.timeout(timeoutMs)
 
   let current = url
+  const failedRead = (error: unknown): BrowserFetchFailure => ({
+    ok: false,
+    message: timeout.aborted
+      ? `Reading ${current.host} took too long and was stopped.`
+      : `Reading ${current.host} failed: ${error instanceof Error ? error.message : "unknown error"}`
+  })
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const guarded = await guardTarget(current, deps.resolveHost)
+    let guarded: Awaited<ReturnType<typeof guardTarget>>
+    try {
+      guarded = await abortable(guardTarget(current, deps.resolveHost, timeout), timeout)
+    } catch (error) {
+      return failedRead(error)
+    }
     if ("ok" in guarded) return guarded
     if (deps.fetchImpl === undefined) {
       return { ok: false, message: "Secure pinned egress is unavailable for the browser tool." }
     }
     const address = guarded.addresses[0]!
-    const timeout = AbortSignal.timeout(timeoutMs)
     let response: Response
     try {
-      response = await deps.fetchImpl(current.toString(), {
+      response = await abortable(deps.fetchImpl(current.toString(), {
         method: "GET",
         redirect: "manual",
         signal: timeout,
         headers: {
           "user-agent": "smithers-browser",
+          "accept-encoding": "identity",
           accept: "text/html,application/xhtml+xml,text/plain,text/markdown;q=0.8,*/*;q=0.5"
         }
-      }, address)
+      }, address), timeout)
     } catch (error) {
-      const timedOut = timeout.aborted
-      return {
-        ok: false,
-        message: timedOut
-          ? `Reading ${current.host} took too long and was stopped.`
-          : `Reading ${current.host} failed: ${error instanceof Error ? error.message : "unknown error"}`
-      }
+      return failedRead(error)
     }
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location")
@@ -372,7 +398,12 @@ export const browserFetch = async (
         blockReason
       }
     }
-    const raw = await readCapped(response.body)
+    let raw: string
+    try {
+      raw = await readCapped(response.body, timeout)
+    } catch (error) {
+      return failedRead(error)
+    }
     const text = contentType.includes("html") || contentType.includes("xhtml")
       ? extractReadableText(raw)
       : raw.slice(0, BROWSER_FETCH_MAX_TEXT)
@@ -393,11 +424,11 @@ export const browserFetch = async (
  * @since 1.0.0
  * @category conversions
  */
-export const resolveHostOverHttps: ResolveHost = async (hostname) => {
+export const resolveHostOverHttps: ResolveHost = async (hostname, signal) => {
   const query = async (type: string): Promise<Array<string>> => {
     const response = await fetch(
       `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(hostname)}&type=${type}`,
-      { headers: { accept: "application/dns-json" } }
+      { headers: { accept: "application/dns-json" }, ...(signal === undefined ? {} : { signal }) }
     )
     if (!response.ok) {
       await response.body?.cancel()

@@ -834,7 +834,7 @@ export const splitLabel = (label: string): { readonly package: string; readonly 
 }
 
 /*
- * The jjhub Cloud seam on the local origin (docs/decisions/0001-piper-one-truth.md):
+ * The Smithers Cloud seam on the local origin (docs/decisions/0001-piper-one-truth.md):
  * `/api/cloud/*` proxies to the cloud API (SMITHERS_CLOUD_API, default
  * https://api.jjhub.tech) with the Bun-held bearer attached, and the
  * `/api/cloud-auth/*` routes run the CLI's browser login. The token NEVER

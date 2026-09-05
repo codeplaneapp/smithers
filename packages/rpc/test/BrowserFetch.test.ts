@@ -57,6 +57,24 @@ describe("browserFetch guards", () => {
     if (!outcome.ok) expect(outcome.message).toContain("https")
   })
 
+  test("URL credentials never become an implicit Authorization header, including on redirects", async () => {
+    let fetches = 0
+    const deps = {
+      resolveHost: publicResolver,
+      fetchImpl: async () => {
+        fetches += 1
+        return new Response(null, { status: 302, headers: { location: "https://user:secret@example.com/" } })
+      }
+    }
+    const direct = await browserFetch("https://user:secret@example.com/", deps)
+    expect(direct.ok).toBe(false)
+    expect(fetches).toBe(0)
+    const redirect = await browserFetch("https://example.com/", deps)
+    expect(redirect.ok).toBe(false)
+    expect(fetches).toBe(1)
+    if (!redirect.ok) expect(redirect.message).toContain("credentials")
+  })
+
   test("internal hostnames are refused without resolving", async () => {
     for (const host of ["localhost", "db.internal", "nas.local", "home.lan"]) {
       let resolved = 0
@@ -248,6 +266,44 @@ describe("browserFetch guards", () => {
     })
     expect(outcome.ok).toBe(false)
     if (outcome.ok === false) expect(outcome.message).toContain("connection refused")
+  })
+
+  test("the total deadline bounds a resolver that never returns", async () => {
+    let fetched = false
+    const outcome = await browserFetch("https://example.com", {
+      timeoutMs: 20,
+      resolveHost: () => new Promise(() => {}),
+      fetchImpl: async () => { fetched = true; return okPage("unexpected") }
+    })
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.message).toContain("took too long")
+    expect(fetched).toBe(false)
+  })
+
+  test("a stalled body times out and cancels its stream after headers arrive", async () => {
+    let cancelled = false
+    const outcome = await browserFetch("https://example.com", {
+      timeoutMs: 20,
+      resolveHost: publicResolver,
+      fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) { controller.enqueue(new TextEncoder().encode("partial")) },
+        cancel() { cancelled = true }
+      }))
+    })
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.message).toContain("took too long")
+    expect(cancelled).toBe(true)
+  })
+
+  test("a body error is returned as a failure instead of rejecting the route", async () => {
+    const outcome = await browserFetch("https://example.com", {
+      resolveHost: publicResolver,
+      fetchImpl: async () => new Response(new ReadableStream({
+        start(controller) { controller.error(new Error("body disconnected")) }
+      }))
+    })
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.message).toContain("body disconnected")
   })
 })
 

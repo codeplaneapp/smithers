@@ -753,8 +753,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
           author: z.string().nullable(),
           comments: z.number().int().nonnegative(),
           updatedAt: z.string().nullable(),
-          /** Where the row came from: jjhub's own tracker, or GitHub for a mirrored repo. Optional so older cards parse. */
-          source: z.enum(["jjhub", "github"]).optional(),
+          /** Where the row came from: Smithers Cloud's own tracker, or GitHub for a mirrored repo. Optional so older cards parse. */
+          source: z.enum(["smithers-cloud", "github"]).optional(),
           htmlUrl: z.string().optional()
         })
       ),
@@ -1071,6 +1071,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("file-list"),
     payload: z.object({
       repo: z.string(),
+      /** Exact local working copy; display names can name several checkouts. */
+      localRepoId: z.string().optional(),
       path: z.string(),
       entries: z.array(z.object({ name: z.string(), kind: z.enum(["file", "dir"]) })),
       /** True when the listing was cut (a local directory past its cap); optional so older cards parse. */
@@ -1090,6 +1092,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("file"),
     payload: z.object({
       repo: z.string(),
+      /** Exact local working copy; retained by refresh and code-intelligence actions. */
+      localRepoId: z.string().optional(),
       path: z.string(),
       content: z.string(),
       /** True when the read was cut at the card cap; the full file stays upstream. */
@@ -1350,7 +1354,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
       environment: WorkspaceEnvironmentSchema.nullable().optional(),
       /** `persistent` / `ephemeral`, verbatim from the DTO. */
       persistence: z.string().nullable().optional(),
-      /** `<vm>@ssh.jjhub.tech` — the copyable line (plue#446). */
+      /** `<vm>@<ssh host>` — the copyable line (plue#446). */
       sshHost: z.string().nullable().optional(),
       snapshots: z.array(
         z.object({ id: z.string(), name: z.string(), createdAt: z.string().nullable() })
@@ -1662,6 +1666,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
       ),
       draft: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
       given: z.record(z.string(), z.unknown()),
+      /** A submission holds the form until its invocation settles. */
+      submitting: z.boolean().optional(),
       /** The last submit's honest refusal, kept on the card. */
       error: z.string().optional()
     })

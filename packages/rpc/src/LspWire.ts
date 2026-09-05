@@ -205,7 +205,7 @@ export const LSP_CLIENT_CAPABILITIES = {
   textDocument: {
     synchronization: { dynamicRegistration: false, didSave: false },
     hover: { contentFormat: ["markdown", "plaintext"] },
-    publishDiagnostics: { relatedInformation: false }
+    publishDiagnostics: { relatedInformation: false, versionSupport: true }
   },
   workspace: { configuration: true, workspaceFolders: true }
 } as const

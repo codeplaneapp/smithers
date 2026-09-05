@@ -28,14 +28,15 @@ export const APP_BOOTSTRAP_PATH = "/api/bootstrap"
  */
 export const RuntimeCapabilitySchema = z.enum([
   "agent",
+  "browser.read", // guarded, pinned HTTPS page reads on this host
   "identity",
-  "jjhub",
+  "cloud",
   "billing.checkout",
   "keys.byok",
   // Cloud doors a host serves itself, declared by the host that opens them
   // (packages/rpc/src/HostCapabilities.ts holds the per-host tables).
   "cloud.terminal", // this origin tunnels workspace terminals (/api/cloud-ws/*)
-  "cloud.pat", // a host-held jjhub PAT session (/api/cloud-auth/*, the Linear loopback)
+  "cloud.pat", // a host-held Smithers Cloud PAT session (/api/cloud-auth/*, the Linear loopback)
   "local.repositories",
   "local.repository-path-entry",
   "local.targets",

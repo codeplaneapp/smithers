@@ -99,6 +99,7 @@ describe("the LSP wire conversion", () => {
   test("both adapters announce the same client capabilities: markdown hovers, no related information, full-text sync", () => {
     expect(LSP_CLIENT_CAPABILITIES.textDocument.hover.contentFormat).toEqual(["markdown", "plaintext"])
     expect(LSP_CLIENT_CAPABILITIES.textDocument.publishDiagnostics.relatedInformation).toBe(false)
+    expect(LSP_CLIENT_CAPABILITIES.textDocument.publishDiagnostics.versionSupport).toBe(true)
     expect(LSP_CLIENT_CAPABILITIES.workspace).toEqual({ configuration: true, workspaceFolders: true })
   })
 })

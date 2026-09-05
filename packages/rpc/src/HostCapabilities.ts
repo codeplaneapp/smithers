@@ -20,21 +20,23 @@ import type { RuntimeCapability } from "./AppBootstrap.ts"
  * @category models
  */
 export interface CloudCapabilityEnv {
+  readonly browser?: boolean
   readonly identity: boolean
-  readonly jjhub: boolean
+  readonly cloud: boolean
   readonly agent: boolean
   readonly checkout: boolean
   readonly terminal: boolean
 }
 
-/** What a Bun launch has configured. `jjhub` is the cloud upstream; offline launches have none.
+/** What a Bun launch has configured. `cloud` is the cloud upstream; offline launches have none.
  * @since 1.0.0
  * @category models
  */
 export interface LocalCapabilityOptions {
+  readonly browser?: boolean
   readonly agent: boolean
   readonly identity: boolean
-  readonly jjhub: boolean
+  readonly cloud: boolean
   readonly pathEntry: boolean
 }
 
@@ -48,14 +50,15 @@ const present = (rows: ReadonlyArray<readonly [RuntimeCapability, boolean]>): Ar
 export const cloudCapabilities = (env: CloudCapabilityEnv): Array<RuntimeCapability> =>
   present([
     ["agent", env.agent],
+    ["browser.read", env.browser === true],
     ["identity", env.identity],
-    ["jjhub", env.jjhub],
+    ["cloud", env.cloud],
     ["billing.checkout", env.checkout],
     ["cloud.terminal", env.terminal]
   ])
 
 /**
- * Both cloud doors ride the jjhub upstream: without one, the Bun server
+ * Both cloud doors ride the Smithers Cloud upstream: without one, the Bun server
  * answers 501 on `/api/cloud-auth/*` and on the `/api/cloud-ws/` tunnel, so
  * claiming either would name a door the host has closed.
  * @since 1.0.0
@@ -64,10 +67,11 @@ export const cloudCapabilities = (env: CloudCapabilityEnv): Array<RuntimeCapabil
 export const localCapabilities = (opts: LocalCapabilityOptions): Array<RuntimeCapability> =>
   present([
     ["agent", opts.agent],
+    ["browser.read", opts.browser === true],
     ["identity", opts.identity],
-    ["jjhub", opts.jjhub],
-    ["cloud.terminal", opts.jjhub],
-    ["cloud.pat", opts.jjhub],
+    ["cloud", opts.cloud],
+    ["cloud.terminal", opts.cloud],
+    ["cloud.pat", opts.cloud],
     ["local.repositories", true],
     ["local.repository-path-entry", opts.pathEntry],
     ["local.targets", true],
