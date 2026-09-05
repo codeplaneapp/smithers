@@ -26,6 +26,29 @@ is the deferred computation a runtime executes.
 
 ## The CLI
 
+### Affected and Watch process lifetime
+
+`@smthrs/build-cli/Affected` exports `changedPaths(root, options)`, `select`,
+and `AffectedGitError`. Discovery options include `base`, optional `head` or
+`files`, and optional `signal`, `environment`, and `timeoutMs`. The timeout is
+per Git invocation, defaults to 60,000 milliseconds, and must be an integer
+from 1 through 86,400,000. Each output stream is limited to 16 MiB and decoded
+as strict UTF-8. Explicit files bypass Git. An already aborted signal refuses
+the call before discovery.
+
+`AffectedGitError` carries `_tag`, `code`, the exact Git `args`, and `cause`.
+Codes distinguish `timed_out`, `cancelled`, `nonzero_exit`, `process_failed`,
+`output_limit`, `cleanup_failed`, and `invalid_timeout`. Cleanup completes
+before timeout or cancellation is reported, adding up to five seconds of TERM
+grace and five seconds to verify disappearance after KILL. The CLI passes its
+runtime signal and environment through to discovery.
+
+`@smthrs/build-cli/Watch.run` resolves a cycle and invokes `cycleCompleted`
+only after its owned POSIX process group is gone. File changes, watcher errors,
+and the caller's signal all await that cleanup. Cleanup failure rejects the
+watch instead of starting another cycle. See [Commands](./cli.md) for the
+platform and parent-crash limits.
+
 ### makeCli
 
 ```ts

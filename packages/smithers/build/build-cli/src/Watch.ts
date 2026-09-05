@@ -1,10 +1,10 @@
 /** Dependency-aware execution in fresh processes, with cancellation on file changes.
  * @since 0.1.0
  */
-import { spawn } from "node:child_process"
 import { watch } from "node:fs"
 import { createRequire } from "node:module"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import * as ContainedProcess from "./internal/ContainedProcess.ts"
 
 /** Runs fresh CLI processes until interrupted, cancelling stale work when an input changes.
  * @category execution
@@ -71,45 +71,29 @@ export const run = async (options: {
     while (!options.signal?.aborted && watchError === undefined) {
       const startedAt = revision
       cycles += 1
-      exitCode = await new Promise<number>((resolve, reject) => {
-        let output = ""
-        const child = spawn(process.execPath, [entry, ...options.args, "--workspace", options.root], {
+      const controller = new AbortController()
+      stopChild = () => controller.abort()
+      let output = ""
+      try {
+        exitCode = await ContainedProcess.run({
+          command: process.execPath,
+          args: [entry, ...options.args, "--workspace", options.root],
           cwd: options.root,
-          env: options.environment ?? process.env,
-          stdio: ["ignore", "pipe", "pipe"],
-          detached: process.platform !== "win32"
+          environment: options.environment,
+          signal: controller.signal,
+          stdout: (text) => {
+            if (options.cycleCompleted !== undefined) output = `${output}${text}`.slice(-16 * 1024)
+            options.stdout(text)
+          },
+          stderr: options.stderr
         })
-        let killTimer: ReturnType<typeof setTimeout> | undefined
-        const kill = (signal: NodeJS.Signals) => {
-          if (child.pid === undefined) return
-          try {
-            if (process.platform === "win32") child.kill(signal)
-            else process.kill(-child.pid, signal)
-          } catch { /* The child may have settled between the event and the signal. */ }
-        }
-        stopChild = () => {
-          kill("SIGTERM")
-          killTimer ??= setTimeout(() => kill("SIGKILL"), 5000)
-          killTimer.unref()
-        }
-        child.stdout.on("data", (chunk: Buffer) => {
-          const text = chunk.toString()
-          if (options.cycleCompleted !== undefined) output = `${output}${text}`.slice(-16 * 1024)
-          options.stdout(text)
-        })
-        child.stderr.on("data", (chunk: Buffer) => options.stderr(chunk.toString()))
-        child.once("error", (error) => {
-          clearTimeout(killTimer)
-          reject(error)
-        })
-        child.once("close", (code) => {
-          clearTimeout(killTimer)
-          stopChild = () => {}
-          options.cycleCompleted?.({ number: cycles, exitCode: code ?? 1, output })
-          resolve(code ?? 1)
-        })
-        if (options.signal?.aborted) stopChild()
-      })
+      } catch (cause) {
+        if (!(cause instanceof ContainedProcess.ProcessError) || cause.code !== "cancelled") throw cause
+        exitCode = 1
+      } finally {
+        stopChild = () => {}
+      }
+      options.cycleCompleted?.({ number: cycles, exitCode, output })
       if (options.once) break
       if (startedAt === revision && !options.signal?.aborted && watchError === undefined) {
         await new Promise<void>((resolve) => {

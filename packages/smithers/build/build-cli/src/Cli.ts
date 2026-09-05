@@ -1120,7 +1120,11 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       async run(context) {
         try {
           const index = await openPackageIndex(context.options, config)
-          const files = await Affected.changedPaths(index.root, context.options)
+          const files = await Affected.changedPaths(index.root, {
+            ...context.options,
+            signal: config.signal,
+            environment: environmentOf(config)
+          })
           const changed = Affected.select(index, context.args.pattern, files)
           const kinds = context.args.verb === "ci" ? ciKinds : [context.args.verb]
           const resolutionCache: RepoResolution.ResolutionCache = new Map()

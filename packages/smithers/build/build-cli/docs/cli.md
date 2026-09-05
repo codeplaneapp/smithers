@@ -307,11 +307,28 @@ and untracked files when `--head` is absent. Repeatable `--files` bypasses Git
 discovery, and `--list` explains the selection without executing it. Unknown
 or ambient inputs conservatively select the graph.
 
+Each Git invocation has a 60-second deadline and a 16 MiB limit on each output
+stream. Cancellation interrupts discovery as well as target execution. A Git
+timeout, invalid output, or nonzero exit fails `affected`; it never becomes an
+empty changed-file list. Embedded callers can pass `signal` and `timeoutMs`
+to `Affected.changedPaths` and inspect its typed `AffectedGitError`.
+
 `clean` executes only declared `Clean` targets and refuses an empty selection.
 `watch` runs the selected verb in fresh child processes, cancels stale work,
 and replans after a change. It ignores `.git`, `node_modules`, cache state, and
 declared outputs. `--debounce-ms` defaults to 200 with a minimum of 20;
 `--once` performs one cycle. Watch is deliberately unavailable through MCP.
+
+On POSIX, stopping a cycle sends SIGTERM to its process group, escalates to
+SIGKILL after five seconds if any member survives, and waits for the group to
+disappear before reporting completion or starting a replacement. A leader that
+exits early does not cancel escalation. If the group remains five seconds after
+SIGKILL or signalling fails, watch reports a cleanup failure and stops. This
+also cleans up descendants left by a completed cycle. These command-scoped
+processes have no durable flow host identity or process journal; recovery after
+the watch parent itself is killed is outside this contract. Windows uses the
+Node spawner's process-tree termination and does not provide the POSIX group
+absence check.
 
 ## Scaffolding
 

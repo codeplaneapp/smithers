@@ -4,16 +4,25 @@
 import * as Input from "@smthrs/targets/Input"
 import * as Target from "@smthrs/targets/Target"
 import { minimatch } from "minimatch"
-import { execFile } from "node:child_process"
 import * as Path from "node:path"
-import { promisify } from "node:util"
+import * as ContainedProcess from "./internal/ContainedProcess.ts"
 import type { PackageIndex } from "./PackageIndex.ts"
 import { productionSourceRoots } from "./Planner.ts"
 
-const exec = promisify(execFile)
-const gitPaths = async (root: string, args: ReadonlyArray<string>): Promise<ReadonlyArray<string>> => {
-  const { stdout } = await exec("git", [...args], { cwd: root, maxBuffer: 16 * 1024 * 1024 })
-  return stdout.split("\0").filter(Boolean)
+/** Affected discovery refused a git result or could not finish within its bound.
+ * @category errors
+ * @since 1.0.0-rc.0
+ */
+export class AffectedGitError extends Error {
+  readonly _tag = "AffectedGitError"
+  readonly code: ContainedProcess.ProcessError["code"] | "nonzero_exit" | "invalid_timeout"
+  readonly args: ReadonlyArray<string>
+
+  constructor(code: AffectedGitError["code"], args: ReadonlyArray<string>, message: string, cause?: unknown) {
+    super(message, { cause })
+    this.code = code
+    this.args = [...args]
+  }
 }
 
 /** Collects changed paths from explicit inputs or a verified Git comparison.
@@ -24,18 +33,66 @@ export const changedPaths = async (root: string, options: {
   readonly base: string
   readonly head?: string | undefined
   readonly files?: ReadonlyArray<string> | undefined
+  readonly signal?: AbortSignal | undefined
+  readonly timeoutMs?: number | undefined
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
 }): Promise<ReadonlyArray<string>> => {
+  if (options.signal?.aborted) {
+    throw new AffectedGitError("cancelled", [], "affected discovery cancelled", options.signal.reason)
+  }
   if (options.files !== undefined) return [...new Set(options.files)].sort()
+  const timeoutMs = options.timeoutMs ?? 60_000
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 86_400_000) {
+    throw new AffectedGitError("invalid_timeout", [], "git timeout must be an integer from 1 to 86400000ms")
+  }
+  const git = async (args: ReadonlyArray<string>): Promise<string> => {
+    let stdout = ""
+    let stderr = ""
+    let code: number
+    try {
+      code = await ContainedProcess.run({
+        command: "git",
+        args,
+        cwd: root,
+        signal: options.signal,
+        environment: options.environment,
+        timeoutMs,
+        maxOutputBytes: 16 * 1024 * 1024,
+        fatalUtf8: true,
+        stdout: (text) => {
+          stdout += text
+        },
+        stderr: (text) => {
+          stderr += text
+        }
+      })
+    } catch (cause) {
+      throw new AffectedGitError(
+        cause instanceof ContainedProcess.ProcessError ? cause.code : "process_failed",
+        args,
+        `git ${args[0]} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        cause
+      )
+    }
+    if (code !== 0) {
+      throw new AffectedGitError("nonzero_exit", args, `git ${args[0]} exited ${code}: ${stderr.trim()}`, {
+        exitCode: code,
+        stderr
+      })
+    }
+    return stdout
+  }
+  const gitPaths = async (args: ReadonlyArray<string>) => (await git(args)).split("\0").filter(Boolean)
   // Resolve user revisions before passing them to diff; a leading dash cannot become an option.
   const revision = async (ref: string) =>
-    (await exec("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], { cwd: root })).stdout.trim()
+    (await git(["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`])).trim()
   const base = await revision(options.base)
   const paths = options.head === undefined
     ? [
-      ...await gitPaths(root, ["diff", "--name-only", "--no-renames", "-z", base, "--"]),
-      ...await gitPaths(root, ["ls-files", "--others", "--exclude-standard", "-z"])
+      ...await gitPaths(["diff", "--name-only", "--no-renames", "-z", base, "--"]),
+      ...await gitPaths(["ls-files", "--others", "--exclude-standard", "-z"])
     ]
-    : await gitPaths(root, ["diff", "--name-only", "--no-renames", "-z", base, await revision(options.head), "--"])
+    : await gitPaths(["diff", "--name-only", "--no-renames", "-z", base, await revision(options.head), "--"])
   return [...new Set(paths)].sort()
 }
 
