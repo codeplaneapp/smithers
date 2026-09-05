@@ -91,7 +91,16 @@ if (result === undefined) {
 }
 
 if (result.status !== 200) await fail(`The worker answered ${result.status}: ${result.body}`)
-if (!result.body.includes(expected)) {
+let outcome
+try {
+  outcome = JSON.parse(result.body)
+} catch {
+  await fail(`The worker did not return JSON: ${result.body}`)
+}
+if (
+  outcome?._tag !== "settled" || outcome.transition?._tag !== "complete" ||
+  outcome.transition.output !== expected
+) {
   await fail(`The cell did not complete inside workerd. The worker answered: ${result.body}`)
 }
 

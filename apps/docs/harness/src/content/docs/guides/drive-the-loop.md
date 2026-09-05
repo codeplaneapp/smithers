@@ -35,9 +35,29 @@ const state = CellTurn.make({
 })
 ```
 
-The required declarations are `session`, `seat`, `modelParams`, `layers`,
-`capabilityEnvelope`, `placement`, and `contextWindow`. Everything else is a
-budget with a default; every budget's zero disarms it:
+The required declarations are:
+
+- `session`: the durable session the frames belong to. It is folded into every
+  call identity, so a resumed run replays under the same name.
+- `seat`: the model this run speaks to, as `provider:model`. The controller
+  takes the model id from the part after the colon, and a steer may move the
+  seat between frames.
+- `modelParams`: the `ModelRequest.GenerationParams` of
+  [`@smthrs/model`](https://model.smithers.sh/reference/api/), carried by every sealed model step.
+- `layers`: the registry layer set in effect. It is key material on both the
+  sealed model step and each call's identity, so a run under a different layer
+  set never replays another run's records.
+- `capabilityEnvelope`: the `Capability.CapabilityPattern` list of
+  [`@smthrs/capability`](https://capability.smithers.sh/reference/api/) that bounds this run. A flow
+  declaring a capability the envelope does not allow settles as a catchable
+  `capability_refused` failure instead of dispatching.
+- `placement`: where this run is placed, as `client`, `local`, `sandbox`, or
+  `remote` from [`@smthrs/registry`](https://registry.smithers.sh/reference/api/), folded into the model
+  step's key material. `Option.none()` declares none.
+- `contextWindow`: the window the first frame renders, usually the result of
+  `CellTurn.teach` below.
+
+Everything else is a budget with a default; every budget's zero disarms it:
 
 | Option            | Default                                 | What it bounds                                                                                                                            |
 | ----------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

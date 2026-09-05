@@ -1,6 +1,6 @@
 ---
 title: "Run on Cloudflare workerd"
-description: "How to run harness cells inside Cloudflare's workerd by naming the QuickJS build through the Variant seam, and how to prove it with the shipped worker smoke."
+description: "How to run @smthrs/harness cells inside Cloudflare workerd by naming the QuickJS build through the Variant seam, and a whole worker that proves it."
 sidebar:
   order: 4
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/harness/docs/guides/workerd.md"
@@ -52,47 +52,88 @@ The compiled module is cached per variant, so two sandboxes over one variant
 share it. `QuickJSSandbox.layerVariantLive` provides the single-file default,
 and `makeWithVariant` is the effectful constructor over the same seam.
 
-Under Node, `test/QuickJSVariant.test.ts` exercises the same path by reading
-and compiling the `.wasm` file itself in place of the bundler, and pinning
-`wasmLocation` to a path that does not exist so a passing cell can only have
-run against the named module.
-
 ## Run one cell in a worker
 
-The repository ships a wrangler project at `test/workerd/` that imports the
-sandbox, names the bundled `.wasm` module, and runs one cell in its `fetch`
-handler. The worker is the example above plus an evaluation:
+The worker below is the layer above plus one evaluation: it opens a realm,
+runs a cell that calls a flow and completes, and returns the frame's outcome
+as JSON. A `200` response carrying a `complete` transition means the realm
+opened, the host bridge settled a call, and the transition came back.
 
 ```ts
-const cell = `const files = await ctx.call("fs/list", { path: "." })
+import wasmfile from "@jitl/quickjs-wasmfile-release-sync"
+import wasmModule from "@jitl/quickjs-wasmfile-release-sync/wasm"
+import * as Cell from "@smthrs/harness/Cell"
+import * as QuickJSSandbox from "@smthrs/harness/QuickJSSandbox"
+import * as Sandbox from "@smthrs/harness/Sandbox"
+import { Effect, Layer, Option } from "effect"
+import type { QuickJSSyncVariant } from "quickjs-emscripten-core"
+import { newVariant } from "quickjs-emscripten-core"
+
+const base = wasmfile as unknown as QuickJSSyncVariant
+
+const layer = QuickJSSandbox.layerWithVariant.pipe(
+  Layer.provide(QuickJSSandbox.layerVariant(newVariant(base, { wasmModule })))
+)
+
+const flows: Readonly<Record<string, Cell.FlowProjection>> = {
+  "fs/list": new Cell.FlowProjection({
+    name: "fs/list",
+    description: "List a directory.",
+    capabilities: ["fs:read:**"],
+    tier: "sealed",
+    placement: Option.none(),
+    input: Option.none()
+  })
+}
+
+const call: Sandbox.Handler = () => Effect.succeed(new Cell.CallResult({ outcome: "success", value: ["README.md"] }))
+
+const cell = `const files: Array<string> = await ctx.call("fs/list", { path: "." })
 ctx.done(files.join(","))`
+
+const runCell = Effect.gen(function*() {
+  const sandbox = yield* Sandbox.Sandbox
+  const realm = yield* sandbox.openRealm!({ flows })
+  const frame = yield* realm.evaluate({ cell: Cell.source(cell, "typescript"), frame: 0, call })
+  return frame.outcome
+}).pipe(Effect.scoped, Effect.provide(layer))
+
+export default {
+  fetch: (): Promise<Response> =>
+    Effect.runPromise(
+      runCell.pipe(
+        Effect.map((outcome) => Response.json(outcome)),
+        Effect.catchCause((cause) => Effect.succeed(new Response(String(cause), { status: 500 })))
+      )
+    )
+}
 ```
 
-The project is not a pnpm workspace member, because wrangler ships the
-workerd binary and nothing else in the repository needs it. Run the smoke:
+`main` names this file. The `CompiledWasm` rule explicitly matches the package's
+extensionless `/wasm` export so Wrangler bundles it as a compiled module. The
+`nodejs_compat` flag is on because the packages the harness imports for
+canonical JSON and schema decoding reach Node builtins, even though the
+harness itself reaches none:
 
-```bash
-cd packages/smithers/agent/harness/test/workerd
-npm install
-node smoke.mjs
+```json
+{
+  "name": "harness-cell-worker",
+  "main": "worker.ts",
+  "compatibility_date": "2025-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm", "@jitl/quickjs-wasmfile-release-sync/wasm"],
+      "fallthrough": true
+    }
+  ]
+}
 ```
 
-`smoke.mjs` starts `wrangler dev`, waits for the worker, and fails unless the
-cell completed. `npm run dev` serves the same worker on
-`http://127.0.0.1:8799` for hand inspection.
-
-## Run the smoke from the test suite
-
-The smoke is not part of the default `pnpm --filter @smthrs/harness run test`:
-it needs a separate install and a downloaded runtime, so
-`test/WorkerdSmoke.test.ts` skips unless `FLOWS_WORKERD_SMOKE=1` is set:
-
-```bash
-FLOWS_WORKERD_SMOKE=1 pnpm --filter @smthrs/harness run test
-```
-
-`FLOWS_WORKERD_PORT` and `FLOWS_WORKERD_STARTUP_MS` override the port (8799)
-and the readiness deadline (120,000 ms).
+Cell parsing and TypeScript type erasure run in JavaScript; they do not start a
+native compiler process. The smoke fixture under `test/workerd` executes the
+typed cell above and checks its exact completion output.
 
 ## What a failure here means
 

@@ -1,11 +1,11 @@
 ---
 title: "Module and export inventory"
-description: "Every public module of @smthrs/harness and every export it publishes: import path, kind, category, and summary, generated from source JSDoc and verified against the exports map."
+description: "Every public module of @smthrs/harness and every export it publishes, one table per module."
 ---
 
-This inventory lists all 27 public modules and their 336 documented exports,
-one table per module. Behavior, signatures, and error semantics for each
-module are in the [API reference](./api.md); this page is the lookup table.
+This page lists every public module and the exports it publishes, one table
+per module. Behavior, signatures, and error semantics for each module are in
+the [API reference](./api.md); this page is the lookup table.
 
 The root barrel `@smthrs/harness` re-exports every module below as a
 namespace, except `QuickJSSandbox`, which is imported from its own subpath
@@ -24,7 +24,7 @@ importable as `@smthrs/harness/<Module>`.
 | `Compaction` | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply` | Declarations for sealed transcript-summary steps. |
 | `Steering` | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop` | Turn-boundary steering values and their source contract. |
 | `Notifications` | `Options`, `make`, `layer` | Adapter from the durable notification queue to harness turn boundaries. |
-| `Cell` | `Language`, `Source`, `digestOf`, `source`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract` | The cell contract. |
+| `Cell` | `Language`, `Source`, `digestOf`, `source`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `CallSuccess`, `CallFailure`, `CallResultVariant`, `decodeCallResult`, `decodeOutcome`, `decodeTransition`, `callFailure`, `Extracted`, `extract` | The cell contract. |
 | `Sandbox` | `SandboxErrorCode`, `SandboxError`, `Invocation`, `Mint`, `Minter`, `mintUnavailable`, `Handler`, `Limits`, `Capabilities`, `defaultLimits`, `minimumSteps`, `minimumTimeMs`, `minimumMemoryBytes`, `printFrameBytes`, `printStatementFloor`, `printRetainedBytes`, `withDefaults`, `Intent`, `replTransition`, `RealmEvaluation`, `RealmFrame`, `Realm`, `RealmOptions`, `Sandbox`, `make`, `layer`, `makeNoop`, `layerNoop`, `realmUnsupported`, `callTimedOut`, `compile`, `PendingCall`, `Latch`, `latch`, `driveCell`, `raisedOutcome` | The deterministic script sandbox port. |
 | `CellTurn` | `defaultMaxFrames`, `defaultReadOnlyFrames`, `defaultModelCallMs`, `defaultRepeatFrames`, `defaultNarrowingDemands`, `defaultUnmovedDemands`, `defaultUnresolvedDemands`, `defaultRevalidations`, `defaultMaxCheckpoints`, `State`, `Input`, `make`, `teach`, `run` | The cell-first controller. |
 | `CellHistory` | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop` | The source of every cell the current turn executed. |
@@ -310,6 +310,8 @@ made inside one. Nothing here executes anything. Governing designs:
 | `checkpoint` | const | constructors | Builds the handle a cell holds for one checkpoint. |
 | `checkpointOf` | const | conversions | Reads the checkpoint id out of whatever a cell passed as `at`. |
 | `CallResult` | class | models | The settled outcome of one flow call. |
+| `CallSuccess`, `CallFailure`, `CallResultVariant` | const | schemas | Discriminated JSON results; success cannot carry a failure code. |
+| `decodeCallResult`, `decodeOutcome`, `decodeTransition` | const | decoders | Validate host or recorded values, preserving original causes in typed errors. |
 | `callFailure` | const | conversions | The failure envelope a cell observes when a flow call does not succeed. |
 | `Extracted` | interface | models | One reply's cell program, and how many fenced blocks it was written in. |
 | `extract` | const | conversions | Extracts the cell program one model settlement emitted. |
@@ -561,7 +563,7 @@ asked to fix in this frame.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |
-| `Validation` | interface | models | What the boundary learned by parsing one cell. |
+| `Validation` | type | models | Either compiled source or a rejection, never both. |
 | `normalize` | const | conversions | Rewrites a cell's top-level declarations so a persistent realm can re-run it. |
 | `validate` | const | conversions | Parses one cell and reports everything the parse can decide. |
 
@@ -614,8 +616,8 @@ The evidence that is already complete.
 `import * as VacuousVerification from "@smthrs/harness/VacuousVerification"`
 
 The proof that was already true before anything changed. This control is not
-wired into `CellTurn`; the table describes what it does when an arm turns it
-on.
+wired into `CellTurn`; the table describes what it does for a host that wires
+it in.
 
 | Export | Kind | Category | Summary |
 | --- | --- | --- | --- |

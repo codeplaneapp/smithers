@@ -1,52 +1,78 @@
 ---
 title: "@smthrs/harness"
-description: "The Smithers built-in agent loop: a cell-first controller whose model turns produce JavaScript cells that run in a persistent realm and reach the world only through durable flow calls."
+description: "An agent loop where the model writes JavaScript instead of calling tools: each turn runs as one program in a sandbox that outlives it, and reaches the world only through durable flow calls."
 ---
 
-`@smthrs/harness` is the Smithers built-in agent loop, expressed as pure
-translation plus a small set of service ports. One frame of the loop is:
+`@smthrs/harness` runs an agent loop in which the model writes JavaScript
+instead of calling tools. Each turn the model emits a **cell**: a small
+program that runs in a sandbox the run keeps open, and that reaches the
+outside world through exactly one function, `ctx.call(flowName, input)`.
+
+A **flow** is the unit `ctx.call` names: a declaration that states what the
+call takes, what it returns, and what it is allowed to touch, paired with the
+code that runs it. Every capability an agent reaches is one of these, so a
+cell reaches a file read, an MCP tool, and a subagent with the same two lines.
+[`@smthrs/core`](/api/core) is where flow declarations come from.
+
+The package is written with [Effect](https://effect.website): the functions
+below return `Effect` values, and you run them with `Effect.runPromise` or
+compose them into a larger program.
+
+## Why you would reach for it
+
+A tool-calling agent spends a model turn per tool call and carries nothing
+between calls except what it wrote back into the transcript. A cell does a
+whole step of work in one turn: search, branch on what the search found, read
+the region that matters, edit it, run the check again, all as ordinary
+JavaScript with real control flow. The sandbox outlives the turn, so a name
+one cell binds is still bound in the next, and what a cell prints is what the
+next model turn reads.
+
+Handing a model a script engine usually costs you durability. It does not
+here. Every `ctx.call` is its own keyed, journaled, permission-gated boundary,
+so a cell is never one opaque activity: a crash or an approval pause in the
+middle of a cell re-executes the cell from the top, replays the calls that
+already settled, and arrives back at the one that stopped. A cell says how the
+run should proceed by calling `ctx.done(output)` to finish,
+`ctx.park(reason, message)` to wait durably, or neither, which continues to the
+next turn.
+
+One frame of the loop is:
 
 ```text
 model -> generated cell -> realm evaluation -> individually durable flow calls -> next transition
 ```
 
-The model emits fenced `cell` blocks of JavaScript. The blocks run as one
-program in a realm that outlives the frame, so a name one cell binds is still
-bound in the next. The only authority a cell holds is `ctx.call(flowName,
-input)`: every effect an agent can reach is a registered flow, and every call
-settles through its own keyed, journaled boundary. A cell states its intent by
-calling `ctx.done(output)` to complete, `ctx.park(reason, message)` to wait
-durably, or neither, which continues the run.
+## How this fits with @smthrs/agent
 
-The package holds no scheduler, no database, no transport, and no provider
-client. `EngineLike` is the port a durable engine answers, `Sandbox` is the
-port a script realm answers, `Steering.Source` is the port a notification
-queue answers, and the QuickJS-WASM binding ships behind its own subpath. The
-assembled production composition over the durable engine lives in
-[`@smthrs/agent`](/api/agent).
+`@smthrs/harness` is the loop and the contracts around it, and nothing else.
+It holds no scheduler, no database, no transport, and no model client; those
+arrive through ports. `EngineLike` is the port a durable engine answers,
+`Sandbox` is the port a script realm answers, and `Steering.Source` is the port
+a notification queue answers.
 
-## Who uses this package
+[`@smthrs/agent`](/api/agent) is the package that fills those ports in. It
+composes this loop over the durable Smithers engine and publishes it as one
+service you can run, plus adapters that run it as a control-plane session or as
+a typed step inside a larger flow. If you want to run an agent, start there and
+come back here for the contracts underneath it.
 
-- **Hosts composing an agent runtime.** `CellTurn` is the controller: it
-  decides continue, park, or finish from the transition a cell settled and the
-  run's budgets, and streams every decision as journaled `AgentEvent`s. For
-  the assembled composition, see [`@smthrs/agent`](/api/agent).
-- **Engine authors.** Implementing `EngineLike` connects the controller to a
-  durable engine: sealed model steps, durable flow calls, journaled records,
-  workspace observation, checkpoints, and suspension.
-- **Hosts embedding cells.** `QuickJSSandbox` runs the same single-file
-  QuickJS build on Node and in a browser, and names a build on runtimes that
-  forbid compiling WebAssembly from bytes, such as Cloudflare's workerd.
+Reach for `@smthrs/harness` directly when you are building the host yourself:
+your own durable engine behind `EngineLike`, your own script realm behind
+`Sandbox`, or a cell runner embedded in something that is not a Smithers run.
+The QuickJS binding at `@smthrs/harness/QuickJSSandbox` is usable on its own,
+on Node, in a browser, and on Cloudflare workerd.
 
-## Install
+Both packages sit under [`@smthrs/cli`](/api/cli), the `smithers` command-line
+tool, which runs, watches, and steers agents without your writing a host at
+all.
 
-```bash
-pnpm add @smthrs/harness@next
-```
+## Get the package
 
-The package publishes release candidates to the `next` dist-tag. For
-requirements and the full entry-point table, see
-[Installation](./installation.md).
+`@smthrs/harness` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](./installation.md) covers how to depend on it from a checkout,
+the runtimes it supports, and the `effect` version it pins.
 
 ## A working example in one screen
 
@@ -95,11 +121,9 @@ the [Quickstart](./quickstart.md).
 - [Run on Cloudflare workerd](./guides/workerd.md): name the QuickJS build a
   worker can instantiate.
 - [Concepts](./concepts.md): the cell loop, the persistent realm, durable
-  flow calls as the only I/O, and the designs the source cites.
+  flow calls as the only I/O, and the design each module enforces.
 - [API reference](./api.md): behavior and signatures for every public export.
 - [Module and export inventory](./reference.md): every module and its
   exports, one table per module.
 - [Troubleshooting](./troubleshooting.md): the failure modes the package
   raises, and what to do about each.
-- [Development history](./history.md): the wave-by-wave record of why each
-  control exists.

@@ -1,5 +1,5 @@
 /**
- * The workerd smoke: one cell, run inside Cloudflare's runtime.
+ * The workerd smoke: one TypeScript cell, run inside Cloudflare's runtime.
  *
  * workerd runs no WebAssembly it did not compile itself. `WebAssembly.compile`
  * over bytes is refused at runtime, so the single-file build the sandbox
@@ -9,7 +9,8 @@
  * imported module and `QuickJSSandbox.layerVariant` puts it behind the seam.
  *
  * The cell calls a flow and then completes, so a passing response means the
- * realm opened, the host bridge settled a call, and the transition came back.
+ * types were erased, the realm opened, the host bridge settled a call, and
+ * the transition came back.
  *
  * See `packages/smithers/agent/harness/README.md` for how to run this.
  */
@@ -57,13 +58,13 @@ const layer = QuickJSSandbox.layerWithVariant.pipe(
   Layer.provide(QuickJSSandbox.layerVariant(newVariant(base, { wasmModule })))
 )
 
-const cell = `const files = await ctx.call("fs/list", { path: "." })
+const cell = `const files: Array<string> = await ctx.call("fs/list", { path: "." })
 ctx.done(files.join(","))`
 
 const runCell = Effect.gen(function*() {
   const sandbox = yield* Sandbox.Sandbox
   const realm = yield* sandbox.openRealm!({ flows })
-  const frame = yield* realm.evaluate({ cell: Cell.source(cell), frame: 0, call })
+  const frame = yield* realm.evaluate({ cell: Cell.source(cell, "typescript"), frame: 0, call })
   return frame.outcome
 }).pipe(Effect.scoped, Effect.provide(layer))
 

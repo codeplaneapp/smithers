@@ -1,12 +1,12 @@
 ---
 title: "Concepts"
-description: "The mental models behind @smthrs/harness: cells, the persistent realm, durable flow calls as the only I/O, and the governing designs the source JSDoc cites."
+description: "The mental models behind @smthrs/harness: cells, the persistent realm, durable flow calls as the only I/O, and the design decisions each module enforces."
 ---
 
-The source JSDoc in this package cites the design each module implements. This
-page states each design: what it decides and where the decision is enforced.
-Three mental models organize all of them: the cell, the persistent realm, and
-the durable flow call.
+This page states the designs `@smthrs/harness` is built on: what each one
+decides, and which module holds you to the decision. Three mental models
+organize all of them: the cell, the persistent realm, and the durable flow
+call.
 
 ## The cell loop
 
@@ -60,7 +60,7 @@ Consequences the code enforces:
 - `VariablesPanel` exists because the value is still there under the name the
   panel prints. The panel measures each name cheaply rather than serializing it.
 
-Implemented by `Sandbox.ts`, `QuickJSSandbox.ts`, `VariablesPanel.ts`.
+Enforced by `Sandbox`, `QuickJSSandbox`, and `VariablesPanel`.
 
 ## Durable cell loop
 
@@ -85,7 +85,7 @@ same reason. `(name, identity)` together key a record, and the controller folds
 each boundary's purpose into its identity so it is correct even under an engine
 that keys on identity alone.
 
-Implemented by `CellTurn.ts`, `Cell.ts`, `EngineLike.ts`.
+Enforced by `CellTurn`, `Cell`, and `EngineLike`.
 
 ## Agent cell context
 
@@ -100,7 +100,7 @@ What a cell can see and reach, and nothing else:
 - `ctx.checkpoint()` mints a read-only view of the tree; a mint settles on the
   call channel and spends the call budget.
 
-Implemented by `QuickJSSandbox.ts`'s prelude, `Cell.ts`, `internal/cellPrompt.ts`.
+Enforced by the `QuickJSSandbox` realm prelude and the `Cell` contract.
 
 ## Flow registry
 
@@ -114,7 +114,7 @@ with `declaration_changed` rather than dispatched to a body the model never saw.
 An executable binding answers before a discovered implementation, because a
 binding is the implementation of the declaration it projected.
 
-Implemented by `CellCalls.ts`, `FlowBinding.ts`, `Cell.ts`.
+Enforced by `CellCalls`, `FlowBinding`, and `Cell`.
 
 ## Context window
 
@@ -131,7 +131,7 @@ Compaction summaries are rendered as user messages, including summaries read
 from older journal records. This keeps every compacted request anchored by a
 leading user turn on providers that reject assistant-first conversations.
 
-Implemented by `ContextWindow.ts`, `Tokens.ts`, `Compaction.ts`.
+Enforced by `ContextWindow`, `Tokens`, and `Compaction`.
 
 ## Structured output
 
@@ -142,7 +142,7 @@ the schema digest, the candidate digest, the corrections spent, the budget, and
 a bounded list of `{ path, message }` issues, so two identical-looking refusals
 are distinguishable and a consumer branches on `code`.
 
-Implemented by `StructuredOutput.ts`.
+Enforced by `StructuredOutput`.
 
 ## Notification queue
 
@@ -157,7 +157,7 @@ transitions. A completion is an idle boundary: queued follow-ups can keep the
 run going. When the frame budget is exhausted, undeliverable notifications stay
 pending in the durable queue for the host to carry forward.
 
-Implemented by `Notifications.ts`, `Steering.ts`.
+Enforced by `Notifications` and `Steering`.
 
 ## Step keys and the model layer
 
@@ -168,7 +168,7 @@ would miss its cache the moment a host retuned it. `SealedModelStep.modelCallMs`
 is the example, and it travels on the step so the number the controller journals
 as armed is the number the engine enforces.
 
-Implemented by `EngineLike.ts`, with the request shape owned by `@smthrs/model`.
+Enforced by `EngineLike`, with the request shape owned by [`@smthrs/model`](/api/model).
 
 ## Child plans and the splice boundary
 
@@ -176,21 +176,14 @@ Implemented by `EngineLike.ts`, with the request shape owned by `@smthrs/model`.
 boundary that turns a batch into running children and streams their progress
 back. The harness translates and never schedules.
 
-Implemented by `Plan.ts`, `EngineLike.ts`.
+Enforced by `Plan` and `EngineLike`.
 
 ## Model authoring surface
 
 The cell contract is the text the model is taught with, and its size is a cost
-the run pays every frame. It is pinned by a token ceiling in
-`test/CellPrompt.test.ts`, so growing it is a deliberate act with a number
-attached.
+the run pays every frame. The package pins a token ceiling on the rendered
+contract, so growing it is a deliberate act with a number attached.
 
-Implemented by `internal/cellPrompt.ts`.
-
-## Citing this file from source
-
-The JSDoc of this package cites these sections by package-relative path,
-because `src/**` ships in the published tarball and a monorepo-rooted path does
-not resolve once it is there: `../docs/concepts.md#<anchor>` from `src/`, and
-`../../docs/concepts.md#<anchor>` from `src/internal/`. Section anchors are
-therefore stable names; renaming a heading is a source-visible change.
+Enforced by `CellTurn.teach`, which renders the contract and the callable-flow
+catalog into the prefix zone of a `ContextWindow`, where every transition
+preserves them.

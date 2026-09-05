@@ -51,7 +51,7 @@ behavior and signatures.
 | `Compaction`                 | `summaryInstruction`, `InvalidStep`, `Summarizer`, `CompactionStep`, `TokenAccounting`, `shouldCompact`, `selectPrefix`, `declare`, `summaryRequest`, `apply`                                                                                                                                                                                                                                                                                                                                                                                                                                           | Declarations for sealed transcript-summary steps.                                                        |
 | `Steering`                   | `Delivery`, `SteerInsert`, `QueueInsert`, `Insert`, `SeatChange`, `ThinkingChange`, `ActivateTools`, `Item`, `Queue`, `Drain`, `BoundaryInput`, `DrainRecord`, `drainRecord`, `PromotionState`, `empty`, `enqueue`, `drainAtClose`, `promoteAtIdle`, `Source`, `SourceInput`, `make`, `makeNoop`, `layer`, `layerNoop`                                                                                                                                                                                                                                                                                  | Turn-boundary steering values and their source contract.                                                 |
 | `Notifications`              | `Options`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Adapter from the durable notification queue to harness turn boundaries.                                  |
-| `Cell`                       | `Language`, `Source`, `digestOf`, `source`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `callFailure`, `Extracted`, `extract`                                                                                                                                                                                      | The cell contract.                                                                                       |
+| `Cell`                       | `Language`, `Source`, `digestOf`, `source`, `Continue`, `Complete`, `Park`, `Transition`, `renderText`, `RejectionCode`, `Settled`, `Raised`, `Rejected`, `Outcome`, `FlowProjection`, `project`, `CallFailureCode`, `defaultCallFailureCode`, `callFailureHint`, `CallIdentity`, `declarationDigest`, `Call`, `baseCheckpoint`, `checkpoint`, `checkpointOf`, `CallResult`, `CallSuccess`, `CallFailure`, `CallResultVariant`, `decodeCallResult`, `decodeOutcome`, `decodeTransition`, `callFailure`, `Extracted`, `extract`                                                                          | The cell contract.                                                                                       |
 | `Sandbox`                    | `SandboxErrorCode`, `SandboxError`, `Invocation`, `Mint`, `Minter`, `mintUnavailable`, `Handler`, `Limits`, `Capabilities`, `defaultLimits`, `minimumSteps`, `minimumTimeMs`, `minimumMemoryBytes`, `printFrameBytes`, `printStatementFloor`, `printRetainedBytes`, `withDefaults`, `Intent`, `replTransition`, `RealmEvaluation`, `RealmFrame`, `Realm`, `RealmOptions`, `Sandbox`, `make`, `layer`, `makeNoop`, `layerNoop`, `realmUnsupported`, `callTimedOut`, `compile`, `PendingCall`, `Latch`, `latch`, `driveCell`, `raisedOutcome`                                                             | The deterministic script sandbox port.                                                                   |
 | `CellTurn`                   | `defaultMaxFrames`, `defaultReadOnlyFrames`, `defaultModelCallMs`, `defaultRepeatFrames`, `defaultNarrowingDemands`, `defaultUnmovedDemands`, `defaultUnresolvedDemands`, `defaultRevalidations`, `defaultMaxCheckpoints`, `State`, `Input`, `make`, `teach`, `run`                                                                                                                                                                                                                                                                                                                                     | The cell-first controller.                                                                               |
 | `CellHistory`                | `ExecutedCell`, `Service`, `CellHistory`, `make`, `makeCells`, `makeNoop`, `layer`, `layerCells`, `layerNoop`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | The source of every cell the current turn executed.                                                      |
@@ -114,8 +114,8 @@ reading is cleared with the refusal, because freeing is itself done by a cell.
 
 ## Bytes
 
-Every bound this package states in bytes is measured in UTF-8 bytes, by the one
-helper in `internal/bytes.ts`, and every elision notice states the real number.
+Every bound this package states in bytes is measured in UTF-8 bytes by one
+shared helper, and every elision notice states the real number.
 The print channel, the retention ceiling, the call ledger's line sizes and the
 memory probe all read the same unit, so a CJK or emoji payload is bounded by
 what it actually costs rather than by how many UTF-16 code units it happens to
@@ -157,7 +157,6 @@ frame boundary.
   reserved for a future foreign-adapter loop and carry no compatibility promise.
 - It runs no scheduler and owns no storage. `Plan` describes child batches;
   `EngineLike` splices them.
-- It never loads or migrates a 0.x run database.
 
 ## CellTurn
 
@@ -421,9 +420,13 @@ replays. `Cell.declarationDigest(descriptor)` hashes the complete material
 declaration: every top-level `FlowDescriptor` field except `provenance.pack`,
 with `capabilities` sorted and every other array in declaration order.
 
-**Call results.** `Cell.CallResult` is `{ outcome: "success" | "failure",
-value, message?, code? }`, with `code` a `Cell.CallFailureCode` (absent means
-`Cell.defaultCallFailureCode`, `"flow_failed"`). `Cell.callFailure(result)`
+**Call results.** `Cell.CallResultVariant` is a discriminated union of
+`CallSuccess` (`outcome: "success"`, JSON `value`, optional `message`) and
+`CallFailure` (`outcome: "failure"`, JSON `value`, optional `message` and
+`code`). A success cannot carry a failure code. The existing `Cell.CallResult`
+class constructor validates the same variants and preserves valid encoded
+field names. A failure's absent code means `Cell.defaultCallFailureCode`,
+`"flow_failed"`. `Cell.callFailure(result)`
 projects a failed result into the fixed envelope the cell observes:
 
 ```json
@@ -435,6 +438,26 @@ branch the model already wrote still runs; a successful call resolves with the
 flow's own value, unwrapped. `Cell.callFailureHint` maps each of the 13 codes
 to the one action that recovers it. The codes and hints are tabulated in
 [troubleshooting](./troubleshooting.md#a-flow-call-fails).
+
+`Cell.decodeCallResult`, `Cell.decodeOutcome` and `Cell.decodeTransition`
+accept untrusted host or recorded input. They refuse contradictory fields,
+missing required values and unsupported variants with `HarnessError`
+(`engine_failed`), retaining the original cause. Outcome and transition
+decoders validate encoded fields even on class instances, then reconstruct
+the schema classes required by the recorder. Sandbox settlement and the
+durable cell recorder apply these boundaries before emitting successful
+observations. A missing success value is corrupt input, not an implicit null.
+Valid current records retain their JSON representation, including failures
+whose code is absent. `CellValidation.Validation` likewise separates compiled
+source from rejection so the two cannot be supplied together.
+
+Value compatibility does not establish identical schema-derived step keys.
+The stricter result schema has a versioned representation identity. A host
+that includes result schemas in sealed keys must version its key contract and
+drain old writers before adopting it. Existing approvals and recorded keys
+remain bound to their original bytes; no decoder translates those identities.
+The current-record fixtures prove value decoding, not an in-place upgrade of
+every host's running execution.
 
 **Checkpoints.** `Cell.baseCheckpoint` is `"base"`, the id naming the tree a
 run opened on, pinned for free and always present. `Cell.checkpoint(id)`
@@ -939,13 +962,13 @@ and spends no cap.
 
 The proof that was already true before anything changed. **This control is
 not wired into `CellTurn`: nothing in a production run reads it, and no run
-is told anything by it.** The module, its suite, and
-`AgentEvent.VacuousVerificationObserved` are kept intact so it can be measured
-on its own. Its `stored` input reads a reserved `verification` key out of
-durable state that the current surface populates with nothing, so an arm that
-re-wires it first decides where a realm run declares its verification. When an
-arm turns it on, `find` locates the pristine-tree pass a stored verification
-stands on and `observation` states the fact once per distinct input.
+is told anything by it.** The module and
+`AgentEvent.VacuousVerificationObserved` are exported so a host can wire it in
+and measure it on its own. Its `stored` input reads a reserved `verification`
+key out of durable state that nothing currently writes, so a host that turns
+it on first decides where a run declares its verification. Once it is wired,
+`find` locates the pristine-tree pass a stored verification stands on and
+`observation` states the fact once per distinct input.
 
 ## TruncatedOutput
 

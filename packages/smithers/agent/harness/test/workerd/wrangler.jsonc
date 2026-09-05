@@ -6,5 +6,14 @@
   // The harness itself reaches no Node builtin, but the packages it imports for
   // canonical JSON and schema decoding do. The flag costs nothing here and
   // keeps the smoke about WebAssembly rather than about module resolution.
-  "compatibility_flags": ["nodejs_compat"]
+  "compatibility_flags": ["nodejs_compat"],
+  // The package's public WASM export has no .wasm suffix. Match that import
+  // explicitly so Wrangler collects it as a compiled module, not JavaScript.
+  "rules": [
+    {
+      "type": "CompiledWasm",
+      "globs": ["**/*.wasm", "@jitl/quickjs-wasmfile-release-sync/wasm"],
+      "fallthrough": true
+    }
+  ]
 }

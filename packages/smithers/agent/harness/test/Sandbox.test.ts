@@ -907,7 +907,7 @@ describe("Sandbox.compile", () => {
     expect(Sandbox.compile(Cell.source("const held = {", "typescript"))).toStrictEqual(
       new Cell.Rejected({
         code: "compile_failed",
-        message: "The cell did not compile — line 1, column 15: '}' expected.\n  const held = {"
+        message: "The cell did not compile — line 1, column 15: Unexpected token\n  const held = {"
       })
     )
   })
@@ -918,7 +918,7 @@ describe("Sandbox.compile", () => {
     expect(Sandbox.compile(Cell.source("const a = 1\nif (a) {\n  ctx.done('x')\n", "javascript"))).toStrictEqual(
       new Cell.Rejected({
         code: "compile_failed",
-        message: "The cell did not compile — line 4, column 1: '}' expected."
+        message: "The cell did not compile — line 4, column 1: Unexpected token"
       })
     )
   })

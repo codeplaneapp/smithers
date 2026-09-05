@@ -118,12 +118,12 @@ const frameBlock = (model: ScriptedModel.Fixture, index: number): string =>
 
 describe("CellValidation", () => {
   it("reports the offending line of a syntax error, and only when it has one to quote", () => {
-    const quoted = CellValidation.validate(Cell.source(`const a = 1\nconst b = (\n`)).rejected
-    expect(quoted?.message).toBe("The cell did not compile — line 2, column 12: Expression expected.\n  const b = (")
+    const quoted = CellValidation.validate(Cell.source(`const a = 1\nconst b = )\n`)).rejected
+    expect(quoted?.message).toBe("The cell did not compile — line 2, column 11: Unexpected token\n  const b = )")
     // A compiler that points past the last token names a blank line, and a
     // quoted blank line reads like a truncation, so it is left out.
     const blank = CellValidation.validate(Cell.source(`const a = 1\nif (a) {\n  return null\n`)).rejected
-    expect(blank?.message).toBe("The cell did not compile — line 4, column 1: '}' expected.")
+    expect(blank?.message).toBe("The cell did not compile — line 4, column 1: Unexpected token")
   })
 
   it("refuses module syntax and non-erasable TypeScript before anything runs", () => {

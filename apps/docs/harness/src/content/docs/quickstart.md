@@ -14,9 +14,19 @@ the agent loop does; driving the whole loop comes after.
 ## Before you start
 
 Install the package as described in [Installation](/installation/). You
-need Node.js 22.19.0 or later.
+need Node.js 22.19+ (Node 22) or 24.11+.
 
 ## Write the program
+
+A `Cell.FlowProjection` is the cell-visible half of a flow: the part
+`ctx.flows` shows the model. Two of its fields come from the flow's registry
+descriptor and are worth naming before you copy them. `tier` is how reversible
+the call is, one of `sealed`, `compensable`, or `irreversible`. `placement` is
+where the flow runs, one of `client`, `local`, `sandbox`, or `remote`, and
+`Option.none()` means the flow pins none. Both are defined by
+[`@smthrs/registry`](https://registry.smithers.sh/reference/api/). A real host builds projections with
+`Cell.project(descriptor)`; this quickstart writes one by hand so the program
+runs with nothing else composed.
 
 Save this as `quickstart.ts`:
 

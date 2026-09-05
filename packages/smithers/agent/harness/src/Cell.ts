@@ -24,7 +24,8 @@
 import * as Digest from "@smthrs/core/Digest"
 import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import * as Descriptor from "@smthrs/registry/Descriptor"
-import { Effect, Option, Result, Schema } from "effect"
+import { Cause, Effect, Option, Result, Schema } from "effect"
+import { HarnessError } from "./HarnessError.ts"
 
 const NonNegativeSafeInt = Schema.Int.check(
   Schema.isGreaterThanOrEqualTo(0),
@@ -563,22 +564,120 @@ export const checkpointOf = (value: Schema.Json): string | undefined => {
  * @since 0.1.0
  * @slop
  */
-export class CallResult extends Schema.Class<CallResult>("flows/harness/Cell/CallResult")({
-  outcome: Schema.Literals(["success", "failure"]),
+export class CallResult extends Schema.Class<CallResult>("flows/harness/Cell/CallResult")(
+  Schema.Struct({
+    outcome: Schema.Literals(["success", "failure"]),
+    value: Schema.Json,
+    message: Schema.optional(Schema.String),
+    /**
+     * Why a failed call failed, from the closed set the cell may branch on.
+     *
+     * Prose is what a boundary says; a code is what a program reads. Without one
+     * the only way for a cell to tell "that flow does not exist" from "that
+     * command timed out" was to match the message, so cells did not tell them
+     * apart at all. Absent means {@link defaultCallFailureCode}, which is what a
+     * flow's own failure gets: the flow said why in `message` and the harness
+     * does not classify it.
+     */
+    code: Schema.optional(CallFailureCode)
+  }).check(Schema.makeFilter(
+    (result) => result.outcome !== "success" || result.code === undefined,
+    {
+      // Sealed action keys persist the result schema. Opaque checks need a
+      // stable identity as well as their runtime predicate.
+      representation: { id: "flows/harness/Cell/CallResult/success-without-failure-code/v1", payload: null }
+    }
+  ))
+) {
+  constructor(props: CallResultVariant, options?: Schema.MakeOptions) {
+    super(CallResultVariant.make(props), options)
+  }
+}
+
+/**
+ * A successful call cannot carry a failure code. The wire field names remain
+ * the same as current CallResult records.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const CallSuccess = Schema.Struct({
+  outcome: Schema.Literal("success"),
   value: Schema.Json,
   message: Schema.optional(Schema.String),
-  /**
-   * Why a failed call failed, from the closed set the cell may branch on.
-   *
-   * Prose is what a boundary says; a code is what a program reads. Without one
-   * the only way for a cell to tell "that flow does not exist" from "that
-   * command timed out" was to match the message, so cells did not tell them
-   * apart at all. Absent means {@link defaultCallFailureCode}, which is what a
-   * flow's own failure gets: the flow said why in `message` and the harness
-   * does not classify it.
-   */
+  code: Schema.optionalKey(Schema.Never)
+})
+
+/**
+ * A failed call, with the existing absent-code meaning of flow_failed.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const CallFailure = Schema.Struct({
+  outcome: Schema.Literal("failure"),
+  value: Schema.Json,
+  message: Schema.optional(Schema.String),
   code: Schema.optional(CallFailureCode)
-}) {}
+})
+
+/**
+ * Discriminated result at a decoded persistence or host boundary.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const CallResultVariant = Schema.Union([CallSuccess, CallFailure])
+
+/**
+ * Discriminated result at a decoded persistence or host boundary.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type CallResultVariant = typeof CallResultVariant.Type
+
+const decodeBoundary = <S extends Schema.Constraint>(schema: S, name: string) => (value: unknown) =>
+  Effect.suspend(() =>
+    Effect.gen(function*() {
+      const encoded = yield* Schema.decodeUnknownEffect(Schema.toEncoded(schema), { onExcessProperty: "error" })(value)
+      return yield* Schema.decodeUnknownEffect(schema, { onExcessProperty: "error" })(encoded)
+    })
+  ).pipe(
+    Effect.catchCause((cause) =>
+      Effect.fail(
+        new HarnessError({
+          code: "engine_failed",
+          message: `Invalid recorded cell ${name}`,
+          cause: Cause.squash(cause)
+        })
+      )
+    )
+  )
+
+/**
+ * Decode a host or persisted result before the cell can observe it.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeCallResult = decodeBoundary(CallResultVariant, "call result")
+
+/**
+ * Refuse contradictory or incomplete recorded evaluation outcomes.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeOutcome = decodeBoundary(Outcome, "outcome")
+
+/**
+ * Refuse contradictory or incomplete recorded transitions.
+ *
+ * @category decoders
+ * @since 1.0.0
+ */
+export const decodeTransition = decodeBoundary(Transition, "transition")
 
 /**
  * The failure envelope a cell observes when a flow call does not succeed.

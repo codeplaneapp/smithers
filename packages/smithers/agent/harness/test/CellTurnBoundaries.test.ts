@@ -271,9 +271,8 @@ const stubEngine = (
 /**
  * The result a host engine settled without a value.
  *
- * The port's type says the value is JSON, and nothing at the boundary enforces
- * it. The frame must still summarize such a call rather than fail on a value
- * that will not serialize.
+ * The port's type says the value is JSON. A host bypassing that contract must
+ * fail admission before the cell or its durable success event can observe it.
  */
 const valueless = (): Cell.CallResult =>
   Object.assign(new Cell.CallResult({ outcome: "success", value: null }), { value: undefined as never })
@@ -620,7 +619,7 @@ describe("CellTurn call classification", () => {
     expect(resolvedText(events)).toBe("recovered")
   })
 
-  it("summarizes a call the host settled without a value rather than failing on it", async () => {
+  it("refuses a host settlement without a value before recording success", async () => {
     const model = ScriptedModel.make([
       emits(
         `await ctx.call("fs/list", { path: "." })
@@ -629,10 +628,11 @@ describe("CellTurn call classification", () => {
       emits(`ctx.done("recovered")`)
     ])
     const engine = stubEngine(model.model, { call: () => Effect.succeed(valueless()) })
-    const { events } = await collect({ state: state(), flows: [lister] }, { engine: engine.layer })
+    const { events, failure } = await collect({ state: state(), flows: [lister] }, { engine: engine.layer })
 
-    expect(messagesOf(model, 1)).toContain("1. fs/list -> ok: null")
-    expect(resolvedText(events)).toBe("recovered")
+    expect(failure).toMatchObject({ code: "engine_failed" })
+    expect(of(events, "cell-call-settled")).toEqual([])
+    expect(messagesOf(model, 1)).toBe("[]")
   })
 
   it("settles a frame that makes no call at all", async () => {

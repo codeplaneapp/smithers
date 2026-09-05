@@ -1,36 +1,39 @@
 ---
 title: "Installation"
-description: "Install @smthrs/harness, the runtimes it supports, the entry points its exports map publishes, and the effect version it pins."
+description: "How to get @smthrs/harness, the runtimes it supports, the entry points its exports map publishes, and the effect version it pins."
 sidebar:
   order: 1
 ---
 
+## Get the package
+
+`@smthrs/harness` is not published to npm at 1.0.0-rc.0, so
+`pnpm add @smthrs/harness` does not resolve. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers). Clone that
+repository, install its dependencies, and declare the package where you need
+it:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/harness": "workspace:*"
+  }
+}
+```
+
 ## Requirements
 
-- Node.js 22.19.0 or later for the Node runtime, matching the package's
+- Node.js 22.19+ (Node 22) or 24.11+ for the Node runtime, matching the package's
   `engines` field.
+- [`effect`](https://effect.website) 4.0.0-rc.112, as an exact peer
+  dependency. Pin the same version in the consuming project, so the service
+  tags and schemas this package exports are the same class instances the
+  project constructs.
 - A browser runtime works unchanged: the QuickJS binding compiles the same
   single-file WebAssembly build on Node and in a browser.
 - Cloudflare workerd works through the build-naming seam, because workerd
   runs no WebAssembly it did not compile itself. For the setup, see
   [Run on Cloudflare workerd](./guides/workerd.md).
-
-## Install the package
-
-```bash
-pnpm add @smthrs/harness@next
-```
-
-The package publishes release candidates to the `next` dist-tag.
-
-The package pins `effect` 4.0.0-rc.108 as a dependency. A project that imports
-`effect` in its own code installs the same version, so the service tags and
-schemas the package exports are the same class instances the project
-constructs:
-
-```bash
-pnpm add effect@4.0.0-rc.108
-```
 
 ## Entry points
 

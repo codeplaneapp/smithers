@@ -458,12 +458,9 @@ describe("QuickJSSandbox calls", () => {
   })
 
   it("refuses source the boundary parse accepts and the realm does not", async () => {
-    // The boundary parse is TypeScript's; the realm's is QuickJS's, and the two
-    // do not draw the line in the same place. `#a in o` outside any class is a
-    // grammar error TypeScript reports semantically and QuickJS reports at
-    // compile, so the realm's own refusal is still reachable and still has to
-    // read as one sentence a model can act on.
-    const outcome = await outcomeOf(`const o = { a: 1 }\nctx.done(String(#a in o))`)
+    // The parser accepts explicit resource management, but this QuickJS
+    // release does not. The realm must retain its own compile refusal.
+    const outcome = await outcomeOf(`function f() { using resource = null; }\nf()`)
 
     expect(outcome).toMatchObject({ _tag: "rejected", code: "compile_failed" })
     expect((outcome as Cell.Rejected).message).toContain("The cell did not compile:")

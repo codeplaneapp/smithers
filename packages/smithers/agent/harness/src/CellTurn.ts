@@ -1443,14 +1443,15 @@ const issued = (
       Effect.timeoutOrElse({
         duration: callMs,
         orElse: () => Effect.succeed(Sandbox.callTimedOut(flow, callMs))
-      })
+      }),
+      Effect.flatMap(Cell.decodeCallResult)
     )
     return yield* engine.record({
       name: "cell-call",
       identity: { session: state.session, frame: state.frame, boundary: `cell-call:${cell}:${ordinal}` },
-      success: Cell.CallResult,
+      success: Cell.CallResultVariant,
       execute: Effect.succeed(settlement)
-    })
+    }).pipe(Effect.flatMap(Cell.decodeCallResult))
   })
 
 /**
@@ -2160,7 +2161,7 @@ const frame = (
         Effect.tap((result) =>
           Effect.sync(() => {
             const rendered = result.outcome === "success"
-              ? JSON.stringify(result.value) ?? "null"
+              ? JSON.stringify(result.value)
               : result.message ?? "failed"
             // The ordinal this call will carry in the run's ledger, computed
             // here so the salvage line can name it: a summary the next frame
@@ -2241,13 +2242,14 @@ const frame = (
     // a completion the original never reached. That divergence runs in the
     // dangerous direction: the run forks into fresh sealed keys and re-bought
     // model calls.
+    const observedOutcome = yield* Cell.decodeOutcome(observedFrame.outcome)
     const evaluated = yield* engine.record({
       name: "cell-frame",
       identity: { session: state.session, frame: state.frame, boundary: `cell-frame:${cell.digest}` },
       success: RecordedFrame,
-      execute: Effect.succeed(observedFrame)
+      execute: Effect.succeed({ ...observedFrame, outcome: observedOutcome })
     })
-    const outcome = evaluated.outcome
+    const outcome = yield* Cell.decodeOutcome(evaluated.outcome)
     const bindings = evaluated.bindings
     printed = printsObservation(evaluated.prints)
     yield* emit(

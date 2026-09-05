@@ -1,27 +1,21 @@
----
-title: "Development history"
-description: "The wave-by-wave record of how the @smthrs/harness cell-first loop was built: why each control exists and what it cost when it was measured."
----
+# Development history of @smthrs/harness
 
-The entries below are the wave-by-wave record of how the cell-first loop was
-built, moved here from `CHANGELOG.md` when the 1.0.0-rc.0 section was cut. They
-are kept because they say WHY each control exists and what it cost when it was
-measured, which is the part a later change needs. They are not a release log:
-none of these entries describes a published version, and several describe
-surfaces later entries removed.
+This file is a contributor record, not published documentation. It is the
+wave-by-wave account of how the cell-first loop was built, moved out of
+`CHANGELOG.md` when the 1.0.0-rc.0 section was cut, and it is kept because it
+says WHY each control exists and what it cost when it was measured. It is not
+a release log: no entry here describes a published version, and several
+describe surfaces that later entries removed.
 
-Two things to know before reading them:
+Two things to know before reading:
 
-- They cite wave reports and benchmark analysis files (`fullbench/reports/*`,
+- Entries cite wave reports and benchmark analysis files (`fullbench/reports/*`,
   `evals/swebench/fullbench/*`) that live outside this repository. The numbers
   quoted from them are reproduced here; the files are not.
 - One entry says a test pins the rendered cell contract's SHA-256 at
-  `25a1c933…` over 9,193 characters. A test does pin both, and both numbers
-  have moved since: `test/CellPrompt.test.ts` pins 8,811 characters and
-  `58be572b…`, alongside the 2,400-token estimate ceiling. Read the test for
-  the current values; the entry records what was measured at the time.
-
----
+  `25a1c933...` over 9,193 characters. A test does pin both, and both numbers
+  have moved since. Read `test/CellPrompt.test.ts` for the current values; the
+  entry records what was measured at the time.
 
 ### Changed
 

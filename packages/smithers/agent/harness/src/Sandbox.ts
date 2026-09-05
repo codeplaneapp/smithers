@@ -797,6 +797,7 @@ const drive = (
               orElse: () => Effect.succeed(callTimedOut(next.flow, callMs))
             })
           )).pipe(
+            Effect.flatMap(Cell.decodeCallResult),
             Effect.onExit((exit) =>
               Exit.isSuccess(exit)
                 ? Effect.void
@@ -816,7 +817,7 @@ const drive = (
         continue
       }
       const outcome = pump.finished()
-      if (outcome !== undefined) return outcome
+      if (outcome !== undefined) return yield* Cell.decodeOutcome(outcome)
       yield* pump.wait
     }
   })

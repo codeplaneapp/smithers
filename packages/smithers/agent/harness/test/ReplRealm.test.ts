@@ -62,6 +62,18 @@ const named = (bindings: ReadonlyArray<VariablesPanel.Binding>, name: string): V
   bindings.find((binding) => binding.name === name)
 
 describe("QuickJSSandbox.openRealm", () => {
+  it("rejects hoisted host-binding replacement without damaging the next cell", async () => {
+    const frames = await session([
+      "if (true) { var ctx = 1 }",
+      "for (var console of [1]) {}",
+      "console.log(typeof ctx.call)"
+    ])
+    expect(frames[0]!.outcome).toMatchObject({ _tag: "rejected", code: "compile_failed" })
+    expect(frames[1]!.outcome).toMatchObject({ _tag: "rejected", code: "compile_failed" })
+    expect(frames[2]!.outcome._tag).toBe("settled")
+    expect(frames[2]!.prints).toBe("function")
+  })
+
   it("keeps a cell's top-level declarations bound in the next cell", async () => {
     const frames = await session([
       "const kept = 41\nlet counter = 1",
@@ -672,7 +684,7 @@ describe("QuickJSSandbox.openRealm", () => {
   })
 
   it("refuses source the boundary parse accepts and the realm does not", async () => {
-    const frames = await session(["const o = { a: 1 }\nconsole.log(String(#a in o))"])
+    const frames = await session(["function f() { using resource = null; }\nf()"])
     const outcome = frames[0]!.outcome
     expect(outcome).toMatchObject({ _tag: "rejected", code: "compile_failed" })
     expect(outcome._tag === "rejected" && outcome.message).toContain("The cell did not compile:")

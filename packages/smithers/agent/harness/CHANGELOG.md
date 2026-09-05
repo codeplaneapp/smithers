@@ -15,7 +15,7 @@
 
 The first published release of this package. `0.1.0` was never published; the
 wave-by-wave record of how this loop was built is in
-[`docs/history.md`](./docs/history.md).
+[`HISTORY.md`](./HISTORY.md).
 
 ### Added
 
