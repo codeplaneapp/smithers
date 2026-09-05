@@ -68,8 +68,7 @@ difference afterwards. Pass values that do not change, or copy before binding.
 This is the one deliberate exception to the snapshotting this package does
 everywhere else. A ground truth is frequently a value with no JSON
 representation, an image buffer or a class instance, and refusing those at
-binding time would be the larger break. `test/Binding.test.ts` pins the
-behavior so the policy cannot change silently.
+binding time would be the larger break.
 
 ## Decide a sample
 

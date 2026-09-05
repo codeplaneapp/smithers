@@ -22,9 +22,9 @@ scorerKey = sha256(canonical({ id, version, config: config ?? null }))
 `canonical` is the canonical JSON encoder from [`@smthrs/core`](https://core.smithers.sh/reference/api/), so
 key order does not matter: `{b: 2, a: 1}` and `{a: 1, b: 2}` hash identically.
 The result is 64 lowercase hex characters. A fixed declaration produces a fixed
-key forever, and `test/Scorer.test.ts` freezes one so a change to
-canonicalization or hashing fails there rather than silently starting a second
-identity for the same scorer.
+key forever, and a golden key freezes that, so a change to canonicalization or
+hashing fails a test rather than silently starting a second identity for the
+same scorer.
 
 Three consequences follow directly:
 

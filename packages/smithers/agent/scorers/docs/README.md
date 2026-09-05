@@ -3,7 +3,11 @@ title: "@smthrs/scorers"
 description: "Flow-native scoring for Smithers: declare a scorer with a durable identity, attach it to a target flow, sample deterministically, and persist every score or failure as an observation."
 ---
 
-`@smthrs/scorers` grades work a flow already did, and keeps the grade.
+`@smthrs/scorers` grades work a flow already did, and keeps the grade. A flow
+is a Smithers unit of work: a callable, schema-described declaration with typed
+input and output, from [`@smthrs/core`](/api/core). This package never runs one.
+It reads the input and the output of an execution and writes a grade beside
+them.
 
 A scorer is a declaration: an id, a version, an optional configuration, and one
 `score` function that turns an execution into a number in `[0, 1]`. The
@@ -13,43 +17,53 @@ attributable to the exact scorer that produced it. A binding attaches that
 scorer to a target flow, a sampling policy decides which target steps get
 graded, and the store keeps the results across restarts.
 
-The package deliberately stops there. It does not decide what to score or when
-to score it. [`@smthrs/evals`](/api/evals) does that: it filters bindings by
-target, calls `Sampling.decide` for each candidate step, and hands the selected
-work to a `Runner`. If you want suites, baselines, and CI gates, start with
-[the evals documentation](/pkg/evals) and come back here for the scorer
-contract.
+## What it solves
 
-## Who uses this package
+Grading agent output is easy to start and hard to keep. Reach for this package
+once you have hit one of these four problems:
 
-Author a scorer here when you need a reusable grader with a stable identity:
-an exact-match check, a rubric, a model judge. Compose the store and the runner
+- **Attribution.** Six months of scores are worthless if you cannot say which
+  grader produced each number. A `scorerKey` is `sha256` over the
+  `{id, version, config}` declaration, so rewriting the `score` function leaves
+  old scores attributable and bumping `version` starts a clean history beside
+  them.
+- **Cost.** Grading every step of a long-running flow is often too expensive. A
+  sampling policy grades a deterministic fraction instead, and the decision is
+  a pure function of the step key, the scorer key, and your seed, so a run that
+  resumes after a crash never re-decides a step it already skipped.
+- **Blast radius.** A judge that times out must not fail the work it was
+  judging. A scorer failure becomes an `inconclusive` observation carrying a
+  classified code and a reason, and the target flow and the rest of the batch
+  carry on.
+- **Retries.** Scoring gets retried, and a naive append turns one graded step
+  into five rows. Each job claims a durable identity, and the claim and the
+  observation commit in one transaction.
+
+Write a scorer here when you need a reusable grader with a stable identity: an
+exact-match check, a rubric, a model judge. Compose the store and the runner
 here when you host evaluation yourself and need the observations to survive a
-restart. Everything else about running an evaluation lives in
-[`@smthrs/evals`](/api/evals).
+restart.
+
+Runtime grading belongs to `@smthrs/scorers/ScoreGate`: score samples, verdicts,
+threshold checks, CI grades, and `ScoreGateError` share one pure contract.
+`@smthrs/testing/ScoreGate` is its test facade and also supplies a fixed-suite
+runner. Runtime evaluation code imports scorers directly.
 
 ## Install
 
-The package is workspace-private at `0.1.0` and is not published to npm. Inside
-this repository, add it as a workspace dependency:
+Install the current release candidate with `pnpm add @smthrs/scorers@next`.
 
-```json
-{
-  "dependencies": {
-    "@smthrs/scorers": "workspace:*"
-  }
-}
-```
-
-For the runtime requirements and the import forms, see
+It needs Node.js 22.19.0 or later and [`effect`](https://effect.website), plus
+[`@smthrs/database`](/api/database) when you persist observations. For the
+runtime requirements and the import forms, see
 [Installation](./installation.md).
 
-## The smallest real example
+## Grade one execution
 
-A scorer, a job identity, and one batch:
+A scorer runs on its own, with no store and no runner behind it:
 
 ```ts
-import { Runner, Scorer } from "@smthrs/scorers"
+import { Scorer } from "@smthrs/scorers"
 import { Effect } from "effect"
 
 const exactMatch = Scorer.make({
@@ -58,6 +72,21 @@ const exactMatch = Scorer.make({
   name: "exact-match",
   score: ({ groundTruth, output }) => Effect.succeed({ score: output === groundTruth ? 1 : 0 })
 })
+
+const graded = await Effect.runPromise(
+  exactMatch.score({ input: { name: "Ada" }, output: "Hello, Ada", groundTruth: "Hello, Ada" })
+)
+```
+
+`graded` is `{ score: 1 }`, and `exactMatch.scorerKey` is the 64-character hex
+digest that will identify this grader in every row it ever writes.
+
+To keep the grade instead of printing it, hand the work to a `Runner`. Each job
+pairs one scorer execution with the identity that makes its write idempotent:
+
+```ts
+import { Runner } from "@smthrs/scorers"
+import { Effect } from "effect"
 
 const program = Effect.gen(function*() {
   const runner = yield* Runner.Runner
@@ -72,8 +101,28 @@ const program = Effect.gen(function*() {
 
 `runBatch` returns one observation per job and never fails: a scorer that
 throws produces an inconclusive observation instead of failing the batch or the
-target it was grading. For the composition that executes this program against a
-real database, see the [Quickstart](./quickstart.md).
+target it was grading. The [Quickstart](./quickstart.md) composes the database
+layers this program needs and runs it end to end.
+
+## Where it sits in Smithers
+
+`@smthrs/scorers` is one of the agent-layer packages of Smithers.
+[`@smthrs/agent`](/api/agent) is the package that layer is named for: it runs
+the agent loop, and its executions are the work a scorer grades. The two are
+independent, and that is deliberate. A scorer is a plain declaration that reads
+an input and an output, so it grades an agent step, a hand-written flow, or a
+fixture from a file with the same code. Start at
+[`@smthrs/agent`](/api/agent) for the loop itself, and at
+[`@smthrs/cli`](/api/cli) for the `smithers` command line that every one of
+these packages sits under.
+
+This package deliberately stops at the scorer contract. It does not decide what
+to score or when to score it. [`@smthrs/evals`](/api/evals) does that: it
+filters bindings by target, calls `Sampling.decide` for each candidate step,
+and hands the selected work to a `Runner`. If you want suites, baselines, and
+regression gates rather than the grading primitives, start with
+[the evals documentation](/pkg/evals) and come back here for the scorer
+contract.
 
 ## The package at a glance
 
@@ -93,7 +142,7 @@ also importable from `@smthrs/scorers/<Module>`:
 | `Migrations`    | The score-store schema migrations, applied by `SqlScoreStore` or on their own.                      |
 
 Every export of every namespace, with signatures and bounds, is on the
-[API reference](./api.md). The generated member index is in
+[API reference](./api.md). The one-line member index is in
 [Exported members](./exports.md).
 
 ## Where to go next

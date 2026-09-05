@@ -6,24 +6,17 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/age
 
 `@smthrs/scorers` declares scorers, attaches them to target flows, decides
 replay-stable sampling, and persists the resulting observations. It does not
-decide what to score or when: [`@smthrs/evals`](https://evals.smithers.sh/reference/api/) does that and is
-the only consumer in the tree.
+decide what to score or when: [`@smthrs/evals`](https://evals.smithers.sh/reference/api/) does that.
 
 The root entry point re-exports every module as a namespace. Top-level modules
-are also importable directly as `@smthrs/scorers/<Module>`. `internal/*` and
-nested `*/index` subpaths are blocked, so the migration aggregator is reachable
-only through the root `Migrations` namespace. The four `migrations/*` modules
-are blocked as well; each exports its migration effect as the named binding
-`migration`, and `Migrations` imports every one of them by name. None has a
-default export, because the CommonJS build reads a default import of a sibling
-module as the whole interop wrapper rather than the effect. For the import
-forms, see [Installation](/installation/#import-forms).
+are also importable directly as `@smthrs/scorers/<Module>`. The `internal/*`,
+`migrations/*`, and nested `*/index` subpaths are blocked, so the four
+migrations are reachable only through the root `Migrations` namespace. For the
+import forms, see [Installation](/installation/#import-forms).
 
-Every declaration carrying `@category` is listed in the
-[Exported members](/exports/) index. `test/docs.test.ts` drift-checks that
-index against the `@category` tags in `src/`, and keeps the curated contract
-table at the end of this page synchronized by public export name, so a member
-added without its rows fails the package's `test` target.
+Every export is listed once in the contract table at the end of this page,
+and once with its kind and a one-line summary in
+[Exported members](/exports/).
 
 ```typescript
 import { Runner, RunnerLive, Scorer, ScoreStore, SqlScoreStore } from "@smthrs/scorers"
@@ -52,6 +45,15 @@ const inert = RunnerLive.layer().pipe(Layer.provide(ScoreStore.layerNoop))
 
 For a runnable composition including the database layers, see the
 [Quickstart](/quickstart/).
+
+## ScoreGate
+
+`ScoreGate` is the pure grading contract shared by runtime evaluations and the
+`@smthrs/testing/ScoreGate` facade. Import it from `@smthrs/scorers/ScoreGate`
+or the root `ScoreGate` namespace. It needs only Effect, with no store, runner,
+or test framework. [Grade fixed samples](/guides/grade-fixed-samples/)
+documents every member, verdict rule, and error field. The fixed-suite test
+runner remains in testing.
 
 ## A scorer is a declaration, not a flow body
 
@@ -106,10 +108,10 @@ constructed and carried into a run.
 
 `decide(sampling, targetStepKey, scorerKey)` is deterministic across processes
 and replays. The material is length-prefixed and the FNV-1a hash runs over
-UTF-8 bytes. Both rules are load-bearing and are frozen by golden vectors in
-`test/Sampling.test.ts`: hashing UTF-16 code units collapsed every astral
-character in a 1024-code-point block onto one value, and joining components
-with `":"` gave `("a:b", "c", "d")` and `("a", "b:c", "d")` one decision.
+UTF-8 bytes. Both rules are load-bearing, and golden vectors freeze them:
+hashing UTF-16 code units collapsed every astral character in a
+1024-code-point block onto one value, and joining components with `":"` gave
+`("a:b", "c", "d")` and `("a", "b:c", "d")` one decision.
 Changing either moves every sampling decision already taken downstream.
 
 ## Bindings
@@ -147,8 +149,8 @@ once `capacity` queued jobs are outstanding, so it is not safe on a
 latency-critical path. `runBatchCorrelated` runs jobs at the configured
 concurrency and returns an `Outcome` for each one. Each outcome carries the job
 identity and reports `persisted`, `duplicate`, or `failed` for the durable
-write. `runBatch` is derived from it and returns only the observations in job
-order to preserve the existing contract.
+write. `runBatch` is derived from it and returns only the observations, in job
+order.
 
 Both are governed by one rule: a scorer failure becomes an inconclusive
 observation and never fails the target or the batch. Fiber interruption still
@@ -195,9 +197,9 @@ one answer.
 
 `submit` copies a job's scalar fields as it queues it, and `record` and
 `recordOnce` copy and fully encode an observation when they are _called_, not
-when the Effect they return is run. Both entry points used to read the caller's
-object at run time, so building `record(observation)`, mutating the object, and
-then running the Effect persisted the mutated value.
+when the Effect they return is run. Building `record(observation)`, mutating the
+object, and then running the Effect stores the observation as it stood at the
+call.
 
 `Binding` does **not** copy `context` or `groundTruth`. It is the one deliberate
 exception: a ground truth is frequently a value with no JSON representation, and
@@ -212,8 +214,8 @@ before binding.
 retried job records once. The identity must be non-empty, at most
 `maxIdentityBytes` UTF-8 bytes, and stable across a restart. Build it with
 `Runner.jobIdentity([...parts])`, which length-prefixes each component: joining
-parts with a delimiter lets two different tuples produce one identity, and a
-blank identity used to make every observation after the first vanish silently.
+parts with a delimiter lets two different tuples produce one identity, and one
+shared identity drops every observation after the first.
 The claim must report exactly zero or one affected row. Zero is a duplicate;
 one proceeds to the observation insert; any other driver result fails and rolls
 the transaction back.
@@ -228,8 +230,7 @@ builds the store needs neither.
 
 ## Reference
 
-Every export carrying a `@category` tag, once. `test/docs.test.ts` fails when
-this table and `src/` disagree.
+Every public export, once.
 
 | Export                               | Category     | Summary                                                                         |
 | ------------------------------------ | ------------ | ------------------------------------------------------------------------------- |
@@ -278,3 +279,18 @@ this table and `src/` disagree.
 | `RunnerLive.layer`                   | layers       | Provides the scoped queue and the blocking batch runner.                        |
 | `Migrations.run`                     | migrations   | Applies all score-store migrations.                                             |
 | `Migrations.layer`                   | layers       | Applies score-store migrations when the layer is constructed.                   |
+
+### ScoreGate export index
+
+| Export                         | Kind      | Category     | Contract                                                                |
+| ------------------------------ | --------- | ------------ | ----------------------------------------------------------------------- |
+| `ScoreGate.ScoreGateCode`      | const     | codes        | The five stable grading and misuse codes.                               |
+| `ScoreGate.InvalidScoreSample` | const     | codes        | Schema naming a rejected score observation.                             |
+| `ScoreGate.ScoreGateError`     | class     | errors       | Typed grading misuse with optional threshold, actual, and samples.      |
+| `ScoreGate.ScoreSample`        | type      | models       | One fixed score or inconclusive observation.                            |
+| `ScoreGate.Verdict`            | type      | models       | Passed, Failed, or Inconclusive with findings and faults kept separate. |
+| `ScoreGate.validateSamples`    | const     | gates        | Reject every non-finite or out-of-range score.                          |
+| `ScoreGate.combine`            | const     | grading      | Compose findings and unresolved observations in first-seen order.       |
+| `ScoreGate.grade`              | const     | grading      | Map a verdict to exit code 0, 1, or 5 and its full summary.             |
+| `ScoreGate.ScoreExpectation`   | interface | constructors | Mean, minimum, and per-case threshold gates.                            |
+| `ScoreGate.expectScores`       | const     | constructors | Build gates over caller-owned fixed samples.                            |

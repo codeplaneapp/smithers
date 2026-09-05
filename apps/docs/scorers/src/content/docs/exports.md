@@ -4,16 +4,11 @@ description: "Every categorized member reachable through the root namespaces of 
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/agent/scorers/docs/exports.md"
 ---
 
-<!-- Hand-maintained. `scripts/docs.mjs` wrote this file from packages/smithers/agent/scorers/src
-     until the rc.0 docs-tooling dissolution removed it. Add the row when you add
-     the member. -->
-
 Every categorized member reachable through the root namespaces, in source
-order. `test/docs.test.ts` drift-checks the table against the `@category`
-declarations in `src/`, so a member added without its row fails the package's
-`test` target.
+order. Signatures, bounds, and the reasoning behind each rule are on the
+[API reference](/reference/api/).
 
-9 namespaces, 50 documented members.
+10 namespaces, 62 documented members.
 
 | Export                               | Kind      | Category     | Summary                                                                                       |
 | ------------------------------------ | --------- | ------------ | --------------------------------------------------------------------------------------------- |
@@ -67,3 +62,15 @@ declarations in `src/`, so a member added without its row fails the package's
 | `RunnerLive.layer`                   | const     | layers       | Provides a scoped non-blocking queue and a blocking batch runner.                             |
 | `Migrations.run`                     | const     | migrations   | Applies all score-store migrations.                                                           |
 | `Migrations.layer`                   | const     | layers       | Applies score-store migrations when the layer is constructed.                                 |
+| `ScoreGate.ScoreGateCode`            | const     | codes        | The five stable grading and misuse codes.                                                     |
+| `ScoreGate.ScoreGateCode`            | type      | codes        | Decoded grading code.                                                                         |
+| `ScoreGate.InvalidScoreSample`       | const     | codes        | Schema naming a rejected score observation.                                                   |
+| `ScoreGate.InvalidScoreSample`       | type      | codes        | Decoded rejected observation.                                                                 |
+| `ScoreGate.ScoreGateError`           | class     | errors       | Typed grading misuse with optional threshold, actual, and samples.                            |
+| `ScoreGate.ScoreSample`              | type      | models       | One fixed score or inconclusive observation.                                                  |
+| `ScoreGate.Verdict`                  | type      | models       | Passed, Failed, or Inconclusive with findings and faults kept separate.                       |
+| `ScoreGate.validateSamples`          | const     | gates        | Reject every non-finite or out-of-range score.                                                |
+| `ScoreGate.combine`                  | const     | grading      | Compose findings and unresolved observations in first-seen order.                             |
+| `ScoreGate.grade`                    | const     | grading      | Map a verdict to exit code 0, 1, or 5 and its full summary.                                   |
+| `ScoreGate.ScoreExpectation`         | interface | constructors | Mean, minimum, and per-case threshold gates.                                                  |
+| `ScoreGate.expectScores`             | const     | constructors | Build gates over caller-owned fixed samples.                                                  |

@@ -55,13 +55,14 @@ describe("documentation", () => {
     expect([...rows].sort()).toEqual([...exported()].sort())
   })
 
-  it("keeps the README pointing at the colocated reference instead of repeating it", () => {
+  it("points the README at the published documentation instead of repeating it", () => {
     const readme = read("../README.md")
-    expect(readme).toContain("docs/api.md")
-    expect(readme).toContain("docs/durability.md")
-    expect(readme).toContain("docs/exports.md")
-    // A private package has nothing to install, and the README used to open
-    // with `npm install @smthrs/scorers`.
+    // npm renders this file, so its references have to resolve for a reader
+    // who has only the tarball. A relative `docs/` path does not.
+    expect(readme).toContain("https://scorers.smithers.sh")
+    expect(readme).not.toMatch(/\]\(\.\/docs\//)
+    // Nothing is published yet, and an install command paired with an
+    // admission that it does not work reads as a note to self.
     expect(readme).not.toContain("npm install")
   })
 
@@ -82,16 +83,18 @@ describe("documentation", () => {
     )
   })
 
-  it("states one package version everywhere it is named", () => {
-    // The README and the colocated docs claimed `1.0.0-rc.0`, the synchronized
-    // version of the published packages, while the manifest is independent.
+  it("keeps repository-only install instructions out of the reader-facing docs", () => {
+    // The changelog is where a version belongs. Prose that names one goes
+    // stale, and this package versions independently of the release train, so
+    // naming that train's version would be wrong as well as stale.
     const version = (JSON.parse(read("../package.json")) as { readonly version: string }).version
-    expect(version).toBe("0.1.0")
-    for (const path of ["../README.md", "../docs/README.md", "../CHANGELOG.md"]) {
-      expect(read(path)).toContain(version)
-    }
-    for (const path of ["../README.md", "../docs/README.md"]) {
-      expect(read(path)).not.toMatch(/workspace-private at `1\.0\.0-rc\.0`/)
+    expect(read("../CHANGELOG.md")).toContain(version)
+    for (const path of ["../README.md", "../docs/README.md", "../docs/installation.md"]) {
+      const page = read(path)
+      expect(page).not.toContain("1.0.0-rc.0")
+      // `workspace:*` resolves only inside the source tree, so it is not an
+      // install instruction anyone reading the package can follow.
+      expect(page).not.toContain("workspace:*")
     }
   })
 

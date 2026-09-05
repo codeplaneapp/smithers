@@ -1,33 +1,24 @@
 ---
 title: "Installation"
-description: "Add @smthrs/scorers as a workspace dependency, meet its runtime requirements, and learn its import forms and the packages a persistent composition adds."
+description: "What @smthrs/scorers needs at run time, which import forms it supports, which subpaths are blocked, and what a persistent composition adds."
 sidebar:
   order: 1
 ---
 
-## Add the dependency
+## Install
 
-`@smthrs/scorers` is workspace-private at `0.1.0`, versioned independently of
-the published `1.0.0-rc.0` packages, and is not published to npm. Depend on it
-from another package in this repository with the workspace protocol:
-
-```json
-{
-  "dependencies": {
-    "@smthrs/scorers": "workspace:*"
-  }
-}
+```bash
+pnpm add @smthrs/scorers@next
 ```
 
-[`@smthrs/evals`](/api/evals) is the one consumer in the tree, and its
-`package.json` is the working example of this declaration.
+[`@smthrs/evals`](/api/evals) is the worked example of the complete pipeline.
 
 ## Requirements
 
 - Node.js 22.19.0 or later.
-- [`effect`](https://effect.website) 4.0.0-rc.108, the version the workspace
-  pins. Every public function returns an `Effect`, and every schema is an
-  `effect/Schema`.
+- [`effect`](https://effect.website) 4.0.0-rc.112, the version this package is
+  built against. Every public function returns an `Effect`, and every schema is
+  an `effect/Schema`.
 - [`@smthrs/core`](/api/core) for `Flow` and `Digest`. A scorer is a flow
   declaration, and the canonical JSON that derives a `scorerKey` comes from
   `Digest`.
@@ -51,13 +42,13 @@ import * as Sampling from "@smthrs/scorers/Sampling"
 import * as Scorer from "@smthrs/scorers/Scorer"
 ```
 
-Three subpath families are blocked in the export map, in development and in the
-published build alike: `@smthrs/scorers/internal/*`,
+Three subpath families are blocked in the export map:
+`@smthrs/scorers/internal/*`,
 `@smthrs/scorers/migrations/*`, and `@smthrs/scorers/*/index`. The migration
 steps are implementation detail, so the aggregator is reachable only as the
 root `Migrations` namespace. Importing a blocked subpath fails with Node's
-`ERR_PACKAGE_PATH_NOT_EXPORTED`, which `test/Exports.test.ts` pins under both
-`import` and `require`. `@smthrs/scorers/package.json` is exported.
+`ERR_PACKAGE_PATH_NOT_EXPORTED`, under `import` and `require` alike.
+`@smthrs/scorers/package.json` is exported.
 
 ## What a persistent composition adds
 

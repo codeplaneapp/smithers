@@ -90,8 +90,8 @@ The invariants worth pinning are the ones this package promises:
 - **A retry records once.** Run the same batch twice and assert the second
   round reports `duplicate` for every job.
 - **A sampling decision is stable.** Call `Sampling.decide` twice with the same
-  tuple and assert one answer, and bracket a known ratio to pin the hash. The
-  golden vectors in `test/Sampling.test.ts` are the pattern.
+  tuple and assert one answer, and bracket a known ratio to pin the hash. A
+  golden vector for one tuple is the pattern.
 - **A declaration is refused at plan time.** `Scorer.make` throws
   synchronously, so assert with a `try`/`catch` or `expect(...).toThrow`, not
   with an Effect failure.

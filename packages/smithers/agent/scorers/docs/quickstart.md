@@ -12,9 +12,8 @@ in-memory, so the whole thing runs from one file with no setup.
 
 ## Prerequisites
 
-Node.js 22.19.0 or later, and a workspace package that depends on
-`@smthrs/scorers` and `@smthrs/database`. See
-[Installation](./installation.md).
+Node.js 22.19.0 or later, and a project that depends on `@smthrs/scorers` and
+`@smthrs/database`. See [Installation](./installation.md).
 
 ## Declare the scorer
 

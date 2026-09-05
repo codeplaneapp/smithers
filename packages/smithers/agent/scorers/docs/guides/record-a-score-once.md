@@ -27,9 +27,8 @@ v1:5:run-1:9:greet/ada:64:9aa8b7b36ddaf6599509edf03e0eef728b2fba7c96ec5cc51f74b5
 
 Never build an identity by joining strings with a delimiter. Joining lets two
 different tuples produce one identity, and one shared identity silently drops
-every observation after the first. The only consumer of this package built its
-identity by joining five unconstrained strings with `NUL`, which is why this
-constructor exists.
+every observation after the first. No delimiter is safe: any character a
+delimiter could use can also appear inside a component.
 
 Three properties make an identity correct:
 
@@ -73,8 +72,8 @@ reports the answer as `recorded: "persisted"` or `recorded: "duplicate"`.
 ## What each failure does to the claim
 
 - **A failure inside the transaction rolls the claim back**, so the job can be
-  retried. `test/ScoreStore.test.ts` proves this with a real SQL failure, and
-  proves a committed claim survives a process restart against the same file.
+  retried. A committed claim survives a process restart against the same
+  database file.
 - **A contradictory driver result fails the whole transaction.** The claim is a
   single-row insert with `ON CONFLICT DO NOTHING`, so it may affect only zero
   or one row. Zero is the duplicate path and one proceeds to the observation

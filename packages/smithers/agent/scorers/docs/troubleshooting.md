@@ -128,13 +128,13 @@ Stored observation 41 does not match the durable observation contract
 That row was written by something other than this store. The id is in the
 message so you can find and repair it.
 
-## Every retry of a job returns false and no observation is stored
+## recordOnce returns false and no observation is stored
 
-**What happened.** The job identity is already claimed, but the observation
-never landed. Two causes produce this, and both are fixed in the current code:
-an identity that is not stable across a restart, so each retry claims a fresh
-one and appends a duplicate row; or a driver whose affected-row count was
-misread, which committed the claim without the observation.
+**What happened.** The identity is already claimed, so the write is suppressed
+as a duplicate. Two different units of work derive the same identity, and only
+the first one was recorded. The mirror defect is an identity that is not stable
+across a restart: every retry claims a fresh one and appends a second row for
+work that was already scored.
 
 **What to change.** Derive the identity from durable values only: a run id, the
 target step key, and the scorer key. Never a process id, a random value, or a
@@ -142,17 +142,20 @@ wall clock. Build it with `Runner.jobIdentity`, which length-prefixes each
 component so two different tuples cannot collide. See
 [Record a score exactly once](./guides/record-a-score-once.md).
 
-## Sampling decisions moved after an upgrade
+## A ratio decision differs from one taken earlier
 
-**What happened.** The sampling hash changed. It now runs over UTF-8 bytes with
-length-prefixed components; the earlier version hashed UTF-16 code units and
-joined components with `":"`. Every ratio decision taken before that change
-differs from the one taken after it.
+**What happened.** `Sampling.decide` is a pure function of the target step key,
+the scorer key, and the seed, so a decision moves only when one of those three
+moves. A seed rebuilt per process, a target step key that carries a run id, or
+a bumped scorer `version` or changed `config` each give every step a fresh
+decision.
 
-**What to change.** Nothing, if you are on the current version: the golden
-vectors in `test/Sampling.test.ts` freeze the hash, so it cannot move again
-without a failing test. Treat a deliberate change as a data migration, not a
-patch. See [Replay-stable sampling](./concepts/sampling.md).
+**What to change.** Pin the seed to a durable value, keep run-specific data out
+of the target step key, and treat a `version` bump as the start of a separate
+sampling history. The hash encoding itself is frozen by golden vectors, so it
+cannot move without a failing test; changing it deliberately would be a data
+migration rather than a patch. See
+[Replay-stable sampling](./concepts/sampling.md).
 
 ## Two scorers share one key
 
@@ -209,7 +212,7 @@ otherwise.
 
 **What happened.** `@smthrs/scorers/internal/*`,
 `@smthrs/scorers/migrations/*`, and `@smthrs/scorers/*/index` are blocked in
-the export map, in development and in the published build.
+the export map.
 
 **What to change.** Import the root namespace (`Migrations` for the migration
 aggregator) or a top-level module subpath. See

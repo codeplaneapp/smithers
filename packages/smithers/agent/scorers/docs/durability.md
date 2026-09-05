@@ -4,10 +4,11 @@ description: "What the score store guarantees across a restart: the rows it refu
 ---
 
 `SqlScoreStore.layer` runs this package's migrations when it is built and then
-serves `ScoreStore` over the shared SQLite database. It owns three tables:
-`flows_scores`, `flows_score_jobs`, and its own migration ledger
-`flows_scorers_migrations`. Every write goes through `DurableWriter`, so it is
-serialized and retried under the same policy as the rest of the durable stores.
+serves `ScoreStore` over the SQLite database supplied by
+[`@smthrs/database`](/api/database). It owns three tables: `flows_scores`,
+`flows_score_jobs`, and its own migration ledger `flows_scorers_migrations`.
+Every write goes through that package's `DurableWriter`, which serializes writes
+against the database file and retries the ones worth retrying.
 
 ## What the store refuses to persist
 
@@ -22,15 +23,15 @@ SQL `CHECK` constraints, so no writer, including a hand-written `INSERT`, can
 bypass them:
 
 - `target_step_key` and `scorer_key` are non-empty. The read path requires a
-  non-empty key, so one blank-keyed row made every later `observations()` call
-  for that target fail.
-- `at_ms` is a non-negative integer. It used to be a bare number, and SQLite's
-  REAL affinity kept `1.7` intact.
+  non-empty key, so a blank-keyed row would make every later `observations()`
+  call for that target fail.
+- `at_ms` is a non-negative integer. SQLite's REAL affinity would otherwise
+  store a fractional `1.7` intact.
 - A score is non-null and within `[0, 1]`, has no failure code, and an
   inconclusive row has no value, a non-empty `reason`, and one of the eight
   `ScorerErrorCode` literals. Migration `0004_require_failure_codes` backfills
   older unclassified failures as `inconclusive` before making the code
-  mandatory. Accepting a reasonless or unclassified row used to poison reads.
+  mandatory.
 - `metadata_json` is `NULL` or valid JSON.
 
 The remaining rules have no useful SQL spelling and are enforced by the store
@@ -48,8 +49,8 @@ alone, before the write:
   to a string loses the original value type.
 - `meta` is encoded through the same canonical JSON the scorer key uses, so key
   order is stable. Encoding happens before the transaction opens: a bare
-  `JSON.stringify` ran caller getters, Proxy traps, and `toJSON` while holding
-  the write lock.
+  `JSON.stringify` inside it would run caller getters, Proxy traps, and `toJSON`
+  while holding the write lock.
 
 A read decodes every row against that same contract and names the row id in the
 failure, so a hand-edited database produces an actionable error rather than an
@@ -61,17 +62,17 @@ anonymous one.
 `flows_score_jobs` with `ON CONFLICT DO NOTHING` and writes the observation
 only when the claim is new, both inside one transaction. The affected-row count
 is read with `DurableWriter.affectedRows`, which is dialect-agnostic and
-accepts the bigint that `SqlClient.SafeIntegers` produces. Reading an own
-numeric `changes` treated that bigint as "already claimed", committed the claim,
-and dropped the observation forever on every retry.
+accepts the bigint that `SqlClient.SafeIntegers` produces. Reading a driver's
+own numeric `changes` instead would read that bigint as "already claimed",
+commit the claim, and drop the observation on every retry.
 
 The single-row insert may report only zero or one affected row. Zero is the
 conflict path and one is a new claim; a larger count is a contradictory driver
 result, so the store fails and rolls the whole transaction back.
 
 A failure inside the transaction rolls the claim back, so the job can be
-retried. `test/ScoreStore.test.ts` proves that with a real SQL failure and
-proves the claim survives a process restart against the same file.
+retried. A committed claim survives a process restart against the same
+database file.
 
 ## Reading
 

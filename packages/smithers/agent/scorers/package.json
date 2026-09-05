@@ -1,12 +1,11 @@
 {
   "name": "@smthrs/scorers",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.0",
   "license": "MIT",
   "smthrs": {
     "group": "agent"
   },
-  "private": true,
   "description": "Flow-native scoring, durable observations, and asynchronous score runners for flows",
   "homepage": "https://github.com/smithersai/smithers",
   "repository": {
@@ -36,10 +35,19 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
     "./migrations/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./Binding": "./src/Binding.ts",
+    "./Runner": "./src/Runner.ts",
+    "./RunnerLive": "./src/RunnerLive.ts",
+    "./Sampling": "./src/Sampling.ts",
+    "./ScoreGate": "./src/ScoreGate.ts",
+    "./ScoreStore": "./src/ScoreStore.ts",
+    "./Scorer": "./src/Scorer.ts",
+    "./ScorerError": "./src/ScorerError.ts",
+    "./SqlScoreStore": "./src/SqlScoreStore.ts",
+    "./index": "./src/index.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -55,6 +63,7 @@
   "publishConfig": {
     "access": "public",
     "provenance": true,
+    "tag": "next",
     "exports": {
       "./package.json": "./package.json",
       ".": {
@@ -62,14 +71,59 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
       "./migrations/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./Binding": {
+        "types": "./dist/esm/Binding.d.ts",
+        "import": "./dist/esm/Binding.js",
+        "require": "./dist/cjs/Binding.js"
+      },
+      "./Runner": {
+        "types": "./dist/esm/Runner.d.ts",
+        "import": "./dist/esm/Runner.js",
+        "require": "./dist/cjs/Runner.js"
+      },
+      "./RunnerLive": {
+        "types": "./dist/esm/RunnerLive.d.ts",
+        "import": "./dist/esm/RunnerLive.js",
+        "require": "./dist/cjs/RunnerLive.js"
+      },
+      "./Sampling": {
+        "types": "./dist/esm/Sampling.d.ts",
+        "import": "./dist/esm/Sampling.js",
+        "require": "./dist/cjs/Sampling.js"
+      },
+      "./ScoreGate": {
+        "types": "./dist/esm/ScoreGate.d.ts",
+        "import": "./dist/esm/ScoreGate.js",
+        "require": "./dist/cjs/ScoreGate.js"
+      },
+      "./ScoreStore": {
+        "types": "./dist/esm/ScoreStore.d.ts",
+        "import": "./dist/esm/ScoreStore.js",
+        "require": "./dist/cjs/ScoreStore.js"
+      },
+      "./Scorer": {
+        "types": "./dist/esm/Scorer.d.ts",
+        "import": "./dist/esm/Scorer.js",
+        "require": "./dist/cjs/Scorer.js"
+      },
+      "./ScorerError": {
+        "types": "./dist/esm/ScorerError.d.ts",
+        "import": "./dist/esm/ScorerError.js",
+        "require": "./dist/cjs/ScorerError.js"
+      },
+      "./SqlScoreStore": {
+        "types": "./dist/esm/SqlScoreStore.d.ts",
+        "import": "./dist/esm/SqlScoreStore.js",
+        "require": "./dist/cjs/SqlScoreStore.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      }
     }
   },
   "scripts": {
@@ -83,25 +137,28 @@
   },
   "dependencies": {
     "@smthrs/core": "1.0.0-rc.0",
-    "@smthrs/database": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108"
+    "@smthrs/database": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
     "vitest": "4.1.9"
   }
 }

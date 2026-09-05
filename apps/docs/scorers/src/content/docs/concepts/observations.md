@@ -70,14 +70,14 @@ Two fields keep an inconclusive row actionable:
   is classified `inconclusive`. The eight codes are listed in the
   [API reference](/reference/api/#failures).
 - **`reason`** names the cause, truncated to `ScoreStore.maxReasonBytes` on a
-  code-point boundary. A fixed sentence used to make a `TypeError` (a bug to
-  fix) indistinguishable from an outage (something to wait out).
+  code-point boundary. A fixed sentence would make a `TypeError` (a bug to fix)
+  indistinguishable from an outage (something to wait out).
 
 A store failure is different again: it never fails a batch either, but it is
 logged as a warning and reported through `runBatchCorrelated` as
-`recorded: "failed"`. Total silence was the earlier behavior, and it made a
-persisted observation, a duplicate suppressed by the job claim, and an
-observation lost to a database failure indistinguishable. See
+`recorded: "failed"`. Without that report, a persisted observation, a duplicate
+suppressed by the job claim, and an observation lost to a database failure would
+be indistinguishable. See
 [Run a batch of scorers](/guides/run-a-batch-of-scorers/).
 
 ## What an aggregate means

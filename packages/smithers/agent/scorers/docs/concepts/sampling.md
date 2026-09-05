@@ -48,13 +48,13 @@ seed is yours, the same tuple always answers the same way.
 
 ## Two encoding rules that look like details
 
-Both rules exist because breaking them produced silent collisions, and both are
-frozen by golden hash vectors in `test/Sampling.test.ts`.
+Both rules exist because breaking either one produces silent collisions, and
+golden hash vectors freeze both.
 
-**The hash runs over UTF-8 bytes.** An earlier version read UTF-16 code units
-with `charCodeAt(0)`, which sees only the high surrogate of an astral code
-point. Every emoji in the same 1024-code-point block hashed identically, so
-step keys containing them shared one decision.
+**The hash runs over UTF-8 bytes.** Reading UTF-16 code units with
+`charCodeAt(0)` sees only the high surrogate of an astral code point, so every
+emoji in the same 1024-code-point block would hash identically and step keys
+containing them would share one decision.
 
 **The components are length-prefixed, not delimiter-joined.** With a `":"`
 join, `("a:b", "c", "d")` and `("a", "b:c", "d")` produce the same material and
@@ -62,9 +62,9 @@ therefore the same decision, for two unrelated steps. Length prefixing removes
 every such collision, because no character inside a component can imitate a
 boundary.
 
-A change to either rule moves every ratio decision already taken downstream.
-Treat the golden vectors as a contract: recompute them and note the shift in
-the changelog rather than editing a number to make a test pass.
+A change to either rule moves every ratio decision already taken downstream, so
+the encoding is a contract rather than an implementation detail. A release that
+changed it would be a data migration, and the changelog would say so.
 
 ## Choosing a seed
 
