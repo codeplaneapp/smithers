@@ -1,3 +1,8 @@
+/**
+ * Pins command schema publication and authoritative input decoding.
+ *
+ * @since 0.1.0
+ */
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import { Cause, Context, Effect, Option, Schema, SchemaTransformation } from "effect"
 import { z } from "incur"
@@ -136,6 +141,45 @@ describe("SchemaBridge", () => {
     expect(
       (await failure(command.decode(command.assemble([], { count: 1, mode: "sideways", note: null })))).code
     ).toBe("decode_failed")
+  })
+
+  it.each([
+    { name: "nullable string", field: Schema.NullOr(Schema.String), value: "note", optional: false },
+    {
+      name: "optional nullable string",
+      field: Schema.optional(Schema.NullOr(Schema.String)),
+      value: "note",
+      optional: true
+    },
+    {
+      name: "nullable enum",
+      field: Schema.NullOr(Schema.Literals(["fast", "slow"])),
+      value: "fast",
+      optional: false
+    },
+    {
+      name: "optional nullable enum",
+      field: Schema.optional(Schema.NullOr(Schema.Literals(["fast", "slow"]))),
+      value: "slow",
+      optional: true
+    }
+  ])("preserves the declared $name schema and accepted inputs", async ({ field, optional, value }) => {
+    const Input = Schema.Struct({ choice: field })
+    const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, Input))
+    const advertised = z.toJSONSchema(command.options!, { unrepresentable: "any" })
+    const declared = Schema.toJsonSchemaDocument(Input).schema
+
+    expect(advertised.properties).toEqual(declared.properties)
+    expect(advertised.required).toEqual(declared.required)
+    for (const choice of [value, null]) {
+      expect(await Effect.runPromise(command.decode(command.assemble([], { choice })))).toEqual({ choice })
+    }
+    expect((await failure(command.decode(command.assemble([], { choice: 42 })))).code).toBe("decode_failed")
+    if (optional) {
+      expect(await Effect.runPromise(command.decode(command.assemble([], {})))).toEqual({})
+    } else {
+      expect((await failure(command.decode(command.assemble([], {})))).code).toBe("decode_failed")
+    }
   })
 
   it("supports an explicit args property and schema definitions", async () => {
