@@ -59,6 +59,54 @@ per-process entropy and could never answer a cross-process hit.
 names a file every node's key material is appended to when a hit you expected
 did not happen.
 
+## Executable identity
+
+The package executor includes the resolved path and SHA-256 content digest of
+host executables in cache keys. Replacing a tool at the same path with the
+same version string causes a miss on the next invocation. Symlinks are
+followed to their targets. Executables inside the workspace use relative
+paths so a checkout can move without changing its keys.
+
+This covers `Host.bin`, `NodeModule.Bin` entry points, runtime and package
+manager executables (including npx), Bun, resolved Nix/Mise tools, Go and
+Cargo executables, Cargo plugins, and the shell and leading literal program
+of a `Shell.Build` command. Shebang
+scripts also include their interpreter's path and bytes, including the PATH
+lookup in `#!/usr/bin/env node` and `#!/usr/bin/env -S node ...`. Unsupported
+`env` option or quoting forms refuse planning instead of guessing. Commands
+computed by shell expressions or launched later by a script need declared
+tool dependencies; the executor does not trace arbitrary subprocesses.
+
+Go identities include the selected `GOROOT/bin` executables and `GOTOOLDIR`
+tools, so a stable launcher cannot hide a changed compiler. Rust identities
+include the declared rustup executable and the installed Cargo, rustc,
+Clippy, and rustfmt components selected by the declared toolchain. Target
+environment overrides participate in Go and Rust toolchain selection. Native
+libraries and runtime data are installation dependencies, not executable
+files traced by this contract.
+
+`NodeModule(package)` is an installed dependency reference. Its manifest
+version and the workspace's full lockfile digest identify the installation;
+there is no per-package lockfile slice in this executor. The contract assumes
+installed package contents match the lockfile, including its integrity and
+patch records. Local edits to module source or transitive files are not
+independently hashed by this reference. Declare editable sources as file or
+closure inputs. `NodeModule.Bin` additionally hashes the actual executable
+entry point.
+
+A target used as `bin` contributes its producer key and the produced
+executable's content identity after the producer has settled. Its plan key
+is a preview: a missing output on a cold checkout is not a missing host tool.
+Consumers and their dependents use the settled key at execution time.
+
+Executable byte memoization belongs to one plan and is never persisted.
+Execution checks the observed files before consulting the cache and again
+before storing a successful result. A change since planning refuses the
+operation and asks for a new invocation. These checks do not lock host files
+or provide an atomic filesystem snapshot: tools and their installations
+must remain stable while a subprocess runs. A change and restoration wholly
+between checks cannot be detected.
+
 ## The content-addressed store
 
 A target's declared `outDir` trees and `outFile` files are captured into

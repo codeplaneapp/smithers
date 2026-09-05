@@ -146,6 +146,21 @@ The cargo surface: `Cargo.Fetch`, `Cargo.Build`, `Cargo.Test`, `Cargo.Nextest`, 
 
 The shell target flavors: `Shell.Build`, `Shell.Test`, `Shell.Run`, `Shell.Serve`, and `Shell.Diff`. Each requires exactly one of `bin`, `bun`, `command`, or `script`, and `Shell.Build` also requires at least one `outDirs` or `outFiles` entry. `Shell.Run`, `Shell.Test`, `Shell.Build`, and `Shell.Diff` plan an exec through the shared `Exec` action; `Shell.Serve` runs under the package executor.
 
+`Host.bin(name)` resolves a declared host binary on PATH. Its resolved path
+and executable bytes enter the package executor's cache key, even when its
+version output is unchanged. Symlinks follow the target bytes. Shebang
+interpreters, including PATH interpreters selected by `/usr/bin/env`, are
+identified too. A target used as `bin` is identified after its executable
+output has been produced.
+
+`Shell.Build` command forms key the shell and the leading literal executable.
+Declare tool dependencies for commands computed dynamically or launched later
+in shell text. Executable installations must stay stable while a run is in
+progress; the executor rejects observed changes between planning, cache
+lookup, and result storage. See the build CLI's
+[executable identity contract](/docs/build-cli/concepts/caching/#executable-identity)
+for the Go, Rust, Node module, and within-run guarantees.
+
 ### `Smithers.Docker`
 
 - **Type:** the `Docker` module
