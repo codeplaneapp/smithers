@@ -170,19 +170,14 @@
     "madge": "8.0.0",
     "typescript": "5.9.3",
     "typescript-eslint": "8.69.0",
-    "vitest": "4.1.9",
-    "@effect/platform-node-shared": "4.0.0-rc.112"
+    "vitest": "4.1.9"
   },
   "peerDependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
-    "effect": "4.0.0-rc.112",
-    "@effect/platform-node-shared": "4.0.0-rc.112"
+    "effect": "4.0.0-rc.112"
   },
   "peerDependenciesMeta": {
     "@effect/platform-node": {
-      "optional": true
-    },
-    "@effect/platform-node-shared": {
       "optional": true
     }
   }

@@ -111,6 +111,7 @@ export const main: Effect.Effect<string> = Greeting.execute(
 
 ```ts title="run-memory.ts"
 import { main } from "./greeting.ts"
+import * as Effect from "effect/Effect"
 
 Effect.runPromise(main).then(console.log)
 ```

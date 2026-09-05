@@ -156,8 +156,9 @@ describe("barrel", () => {
     // `build/infra` is the hosted cache Worker that ships inside
     // `smithers-build`; it is a member nested under `packages/smithers/build`, and the
     // universe descends now, so it is named here like every other tooling
-    // package.
+    // package. The private repo-targets package owns repository policy macros.
     expect(packageNamesForGroup("tooling").sort()).toEqual([
+      "repo-targets",
       "rpc",
       "smithers/build",
       "smithers/build/build-cli",

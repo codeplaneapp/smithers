@@ -525,7 +525,9 @@ describe("a body is refused for computing on a value that does not exist yet", (
           success: Schema.Number,
           body: ({ value }) =>
             Increment.call({ value }).pipe(
-              Node.bindPlanned((next) => Node.succeed(Number((next as unknown as { toString: () => string }).toString())))
+              Node.bindPlanned((next) =>
+                Node.succeed(Number((next as unknown as { toString: () => string }).toString()))
+              )
             )
         }),
         { value: 0 }

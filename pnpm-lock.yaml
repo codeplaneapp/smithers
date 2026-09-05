@@ -3183,6 +3183,10 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.9)(happy-dom@20.13.2)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.13)(yaml@2.9.0))
 
   packages/smithers/build/infra:
+    dependencies:
+      '@smthrs/canonical':
+        specifier: 1.0.0-rc.0
+        version: link:../../flows/canonical
     devDependencies:
       '@cloudflare/workers-types':
         specifier: 5.20260903.1
@@ -3725,6 +3729,10 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.9)(happy-dom@20.13.2)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.13)(yaml@2.9.0))
 
   packages/smithers/flows/capability:
+    dependencies:
+      '@smthrs/canonical':
+        specifier: 1.0.0-rc.0
+        version: link:../canonical
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.2
@@ -5261,9 +5269,6 @@ importers:
       '@effect/platform-node':
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1(@opentelemetry/api@1.9.1))
-      '@effect/platform-node-shared':
-        specifier: 4.0.0-rc.112
-        version: 4.0.0-rc.112(effect@4.0.0-rc.112)
       '@effect/vitest':
         specifier: 4.0.0-rc.112
         version: 4.0.0-rc.112(effect@4.0.0-rc.112)(vitest@4.1.9)
@@ -5354,6 +5359,9 @@ importers:
       '@smthrs/journal':
         specifier: 1.0.0-rc.0
         version: link:../flows/journal
+      '@smthrs/kernel':
+        specifier: 1.0.0-rc.0
+        version: link:../flows/kernel
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.2
@@ -5367,9 +5375,6 @@ importers:
       '@eslint/js':
         specifier: 9.39.5
         version: 9.39.5
-      '@smthrs/kernel':
-        specifier: 1.0.0-rc.0
-        version: link:../flows/kernel
       '@smthrs/model':
         specifier: 1.0.0-rc.0
         version: link:../agent/model

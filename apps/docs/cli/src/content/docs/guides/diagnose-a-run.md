@@ -79,6 +79,19 @@ Startup cleanup can therefore happen while running a local control command,
 not only when resuming the crashed run. Remote clients do not reap local
 processes. Cleanup does not undo filesystem writes or other completed effects.
 
+## What happens to subprocesses after a crash?
+
+The local control executor records agent shell and configured MCP subprocesses
+in the execution journal. On normal shutdown it escalates termination after
+two seconds if a child does not stop. After a crash, the next local control
+executor startup checks those records and reaps verified children whose owner
+has died. It leaves another live CLI's children alone and refuses to signal a
+process whose identity it cannot verify.
+
+Startup cleanup can therefore happen while running a local control command,
+not only when resuming the crashed run. Remote clients do not reap local
+processes. Cleanup does not undo filesystem writes or other completed effects.
+
 ## What did it do, step by step?
 
 ```bash

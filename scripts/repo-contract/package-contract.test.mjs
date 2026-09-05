@@ -245,7 +245,7 @@ describe("the workspace package contract", () => {
     const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-node")
     assert.ok(platform, "@smthrs/platform-node must be publishable")
 
-    for (const name of ["effect", "@effect/platform-node", "@effect/platform-node-shared"]) {
+    for (const name of ["effect", "@effect/platform-node"]) {
       assert.equal(
         platform.manifest.peerDependencies?.[name],
         effectVersion,
@@ -280,5 +280,13 @@ describe("the workspace package contract", () => {
 
     assert.equal(platform.manifest.peerDependencies?.["@effect/platform-bun"], "4.0.0-rc.112")
     assert.notEqual(platform.manifest.peerDependenciesMeta?.["@effect/platform-bun"]?.optional, true)
+  })
+
+  it("keeps node-shared available only to the Node host's development checks", () => {
+    const platform = publishable.find((entry) => entry.manifest.name === "@smthrs/platform-node")
+    assert.ok(platform, "@smthrs/platform-node must be publishable")
+    assert.equal(platform.manifest.peerDependencies?.["@effect/platform-node-shared"], undefined)
+    assert.equal(platform.manifest.dependencies?.["@effect/platform-node-shared"], undefined)
+    assert.equal(platform.manifest.devDependencies?.["@effect/platform-node-shared"], effectVersion)
   })
 })

@@ -23,8 +23,9 @@ fallback. The Effect adapters own their node-shared implementation dependency.
 `@effect/platform-bun` is a required peer at exactly `4.0.0-rc.112` because
 the root entry point and `@smthrs/platform-bun/BunHost` import it at module
 load. Package managers that resolve required peers install it automatically.
-`effect`, `@effect/platform-node`, and `@effect/platform-node-shared` are also
-exact peers at that version, so the host shares one compatible Effect runtime.
+`effect` and `@effect/platform-node` are also exact peers at that version, so
+the host shares one compatible Effect runtime; `@effect/platform-node-shared`
+arrives through `@effect/platform-node` rather than as a peer of this package.
 
 ## Supported runtimes
 

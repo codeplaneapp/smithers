@@ -100,6 +100,19 @@ provided.
 `restore` is unaffected, so rewinding a run to a recorded change id works here
 exactly as it does on the CLI.
 
+### `revert` is not available
+
+The compiled ABI has no revert operation, so `BrowserJj.layer` defines `revert`
+and fails it with `not_installed` and the message "jj is not available in the
+browser". Calling it is how you find that out: the method stays defined so that
+feature detection never depends on an optional property disappearing. A host
+that offers an "undo this attempt" affordance should call `revert` once and hide
+the affordance on `not_installed`, rather than branching on which layer it
+provided.
+
+`restore` is unaffected, so rewinding a run to a recorded change id works here
+exactly as it does on the CLI.
+
 ### Repository initialization is explicit in the wasm ABI
 
 Only the `init` ABI operation creates a repository. `status`, `diff`, and

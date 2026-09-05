@@ -719,7 +719,7 @@ describe("vitest coverage isolation conformance", () => {
     // Browser support is a hard requirement met through layers; the browser
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:browserContract'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:webBundleContract'$/m)
     expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.'$/m)
     // The Bun compatibility matrix. It used to be `//ci/...`, a directory whose
     // only content was one Vitest target per package, declared from outside the
@@ -969,11 +969,10 @@ describe("vitest coverage isolation conformance", () => {
       // mapping always converts to a non-null object. Both guards keep the
       // redacted diagnostic path total across future parser upgrades.
       "smithers/flows/core/src/internal/skillFrontmatter.ts": 2,
-      // Four guards remain after filesystem failures gained durable-settlement
-      // tests: producer-covered globs already required FileSystem; dispatched
-      // values come from sealed, settled nodes; merge elaboration cannot hit
-      // Plan.append's refusals; and acyclic pending work has a ready node.
-      "smithers/flows/engine-store/src/PlanScheduler.ts": 4,
+      // Guards remaining in the merged PlanScheduler: key material and upstream
+      // values already crossed admission and serialization, and acyclic pending
+      // work has a ready node.
+      "smithers/flows/engine-store/src/PlanScheduler.ts": 2,
       // One `else` arm in recursive enumeration: special entries (symlinks,
       // sockets) are neither materializable leaves nor prunable scaffolding
       // and are intentionally discarded.

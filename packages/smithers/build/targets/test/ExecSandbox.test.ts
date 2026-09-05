@@ -179,6 +179,21 @@ describe("plan", () => {
     expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
   })
 
+  /**
+   * A write is the one declaration that would open a hole: binding a path
+   * that resolves outside the root would give the tool a writable window on
+   * the host. It is dropped, not anchored back inside and not refused, which
+   * is the same answer an escaping read gets.
+   */
+  it("drops a declared write and a read-only path that escape the root", () => {
+    const plan = planned(linux, {
+      writes: ["dist", "../outside", "../../etc/passwd"],
+      readOnly: [".flows/cache", "../outside"]
+    })
+    expect(plan.writes).toEqual(["/work/ws/dist"])
+    expect(plan.readOnly).toEqual(["/work/ws/.flows/cache"])
+  })
+
   it("collapses a path covered by a broader entry", () => {
     const plan = planned(
       host("linux", { bwrap: "/usr/bin/bwrap" }, ["/work/ws/src/a.ts", "/work/ws/src/b.ts"], [
@@ -351,6 +366,31 @@ describe("folding declared files into directories", () => {
     expect(plan.reads).not.toContain("/work/ws/src/lib")
     expect(plan.reads).not.toContain("/work/ws/src")
     expect(plan.reads).toContain("/work/ws/src/lib/deep")
+  })
+
+  it("keeps a directory's declared files when the host cannot list that one directory", () => {
+    // `entries` answers for the workspace but not for one candidate: the
+    // deepest directory is neither promoted nor denied, and because it stays
+    // uncovered its parents cannot be folded over it either.
+    const unlistable: ExecSandbox.Host = {
+      ...listingHost,
+      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? undefined : listing[directory])
+    }
+    const plan = planned(unlistable, { reads, writes: [] })
+    expect([...plan.reads].sort()).toEqual([...files].sort())
+    expect(plan.readDenies).toEqual([])
+  })
+
+  it("keeps a directory's declared files when the host lists that directory as empty", () => {
+    // An empty listing is not evidence that the declaration covers the
+    // directory, so it is treated exactly like an unreadable one.
+    const emptied: ExecSandbox.Host = {
+      ...listingHost,
+      entries: (directory) => (directory === "/work/ws/src/lib/deep" ? [] : listing[directory])
+    }
+    const plan = planned(emptied, { reads, writes: [] })
+    expect([...plan.reads].sort()).toEqual([...files].sort())
+    expect(plan.readDenies).toEqual([])
   })
 
   it("keeps a directory's declared files when the host cannot list that one directory", () => {

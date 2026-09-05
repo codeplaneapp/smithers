@@ -65,13 +65,19 @@ cd ledger
 pnpm install
 ```
 
-The install brings the app's own stack with it: React 19, Vite 8, Vitest 5,
+The install brings the app's own stack with it: React 19, Vite 8, Vitest 4.1.9,
 wrangler, and the Cloudflare Vite plugin. It also installs this package's
 executable, `smithers-routes`, which the app's `pnpm routes` script runs.
 
 The generated `flows/chat/flow.e2e.ts` uses the optional testing adapter.
-Before running that test, install the prerequisites in the optional-peer
-section below. That command also selects the compatible Vitest 4 runner.
+The template already declares its `@smthrs/testing` and
+`@effect/platform-node` prerequisites and the compatible Vitest 4 runner.
+
+For npm consumers of `@smthrs/create-app/testing`, use npm 11.16.0 or newer.
+The release smoke certifies npm 11.16.0 on Node 22.19.0 and 24.18.0. Node
+22.19.0's bundled npm 10.9.3 crashes in Arborist while resolving this valid
+optional-peer graph; the same manifest installs and runs with npm 11.16.0.
+This is an installer requirement, separate from the supported Node runtime.
 
 ## Import forms
 

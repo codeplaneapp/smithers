@@ -82,6 +82,11 @@ describe.each(templates)("template/%s", (template) => {
     expect(manifest.pnpm?.overrides).toBeUndefined()
   })
 
+  it("requires no package-manager overrides", () => {
+    expect(manifest.overrides).toBeUndefined()
+    expect(manifest.pnpm?.overrides).toBeUndefined()
+  })
+
   it.each(specifiers)("pins %s at the installable release line", (name, specifier) => {
     const workspace = workspaceManifests.get(name)
     expect(workspace, `${name} is not a package in this workspace`).toBeDefined()

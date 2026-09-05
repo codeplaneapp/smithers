@@ -94,7 +94,13 @@ describe("NodeControl.engineDurable", () => {
           const runtime = yield* ControlRuntime
           const { card } = yield* runtime.plan({ flowId: "system/test", input: { owner: true } })
           const token = yield* runtime.lookupApproval(card.approval.target)
-          yield* runtime.resolveApproval(token, "approved", { id: "test", kind: "test", stampedAt: 0 })
+          expect(
+            (yield* Effect.flip(
+              runtime.resolveApproval(token, "approved", { id: "test", kind: "test", stampedAt: 0 })
+            ))._tag
+          ).toBe("/control/Unauthorized")
+          expect((yield* runtime.getPlan(card.planId)).decision).toBe("pending")
+          yield* runtime.resolveApproval(token, "approved", yield* runtime.stampPrincipal())
           const launched = yield* runtime.launch(card.planId, card.digest, card.envelope)
           if (launched._tag !== "Started") return yield* Effect.die("expected a started run")
           return launched.run

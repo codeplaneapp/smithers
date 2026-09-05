@@ -1,0 +1,13 @@
+import { expect, it } from "@effect/vitest"
+import { readFileSync } from "node:fs"
+
+it("ships the testing prerequisites selected by the default chat test", () => {
+  const manifest = JSON.parse(
+    readFileSync(new URL("../template/default/package.json", import.meta.url), "utf8")
+  ) as { readonly devDependencies: Readonly<Record<string, string>> }
+  const test = readFileSync(new URL("../template/default/flows/chat/flow.e2e.ts", import.meta.url), "utf8")
+  expect(test).toContain("\"@smthrs/create-app/testing\"")
+  expect(manifest.devDependencies["@effect/platform-node"]).toBe("4.0.0-rc.112")
+  expect(manifest.devDependencies["@smthrs/testing"]).toBe("1.0.0-rc.0")
+  expect(manifest.devDependencies.vitest).toBe("4.1.9")
+})

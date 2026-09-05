@@ -185,6 +185,9 @@ adapters may omit the operation; truncating adapters must implement it. The
 `JournalGeneration.initialize` subpath shares the table installation with time
 travel without adding a migration below an already applied migration block.
 
+SQLite is the supported backend at `1.0.0-rc.0`. PostgreSQL and PGlite are not;
+see [storage compatibility](https://smithers.sh/docs/migration/compatibility/).
+
 ## Documentation
 
 - [State and event authority](./docs/concepts/state-event-authority.md)

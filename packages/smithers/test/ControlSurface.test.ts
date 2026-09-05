@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { Control as ControlService, ControlError, ControlRuntime, type ControlSchema } from "@smthrs/control"
+import * as ApprovalAuthority from "@smthrs/control/ApprovalAuthority"
 import * as TestControl from "@smthrs/control/test/TestControl"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
@@ -623,6 +624,9 @@ describe("Control surface", () => {
   })
 
   it("runs plan, approval, launch, and finite logs through an authenticated remote server", async () => {
+    const approvalAuthority = await Effect.runPromise(ApprovalAuthority.make([
+      { principal: { id: "alpha", kind: "bearer" }, scopes: ["run"], targets: ["Plan"] }
+    ]))
     const local = await Effect.runPromise(
       scenario().pipe(
         Effect.provide(testControl),
@@ -647,7 +651,7 @@ describe("Control surface", () => {
             principal: { id: "alpha", kind: "bearer" },
             now: () => 0
           }, { port: 0 }).pipe(
-            Layer.provide(testControl)
+            Layer.provide(TestControl.layer({ now: () => 0, flows: [demoFlow], approvalAuthority }))
           )
         ),
         Effect.scoped

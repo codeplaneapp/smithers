@@ -16,6 +16,8 @@
  * Separate npm and pnpm consumers then certify default libraries, selected
  * Node/browser/Bun adapters, create-app/testing, and migration install shapes
  * against the same tarballs before a successful smoke receipt is written.
+ * Requires npm >=11.16.0 on PATH, including under Node 22.19.0. Its bundled
+ * npm 10.9.3 crashes in Arborist when resolving the testing optional peers.
  *
  * usage: node scripts/smoke-release.mjs <pack-directory>
  */
@@ -29,7 +31,8 @@ import { captureProcess as runQuietly } from "./release-process.mjs"
 import { releaseRegistry } from "./release-registry.mjs"
 import { recordSmokeSuccess, verifyLocalCandidate } from "./publish-release.mjs"
 import { assertNodeSupport } from "./release-node-support.mjs"
-import { adapterProfiles, migrationProfiles, minimalProfiles, runConsumerMatrix, templateProfile } from "./fixtures/dependency-consumers.mjs"
+import { assertSmokeNpmSupport } from "./release-npm-support.mjs"
+import { adapterProfiles, migrationProfiles, minimalProfiles, releasePackageManager, runConsumerMatrix, templateProfile } from "./fixtures/dependency-consumers.mjs"
 
 const repoRoot = resolve(import.meta.dirname, "..")
 
@@ -44,9 +47,11 @@ const noticeFirstLine = "smthrs 1.0 is a migration notice, not a runtime."
 
 const run = (command, args, cwd) =>
   new Promise((resolveRun, reject) => {
+    const started = Date.now()
     const child = spawn(command, args, { cwd, stdio: "inherit" })
     child.once("error", reject)
     child.once("exit", (code, signal) => {
+      console.log(JSON.stringify({ command, args, cwd, node: process.version, exit: code, signal, durationMs: Date.now() - started }))
       if (code === 0) {
         resolveRun()
       } else {
@@ -65,6 +70,10 @@ const absolutePackDirectory = resolve(packDirectory)
 await rm(join(absolutePackDirectory, "smoke-evidence.json"), { force: true })
 const candidate = JSON.parse(await readFile(join(absolutePackDirectory, "release-manifest.json"), "utf8"))
 await verifyLocalCandidate(absolutePackDirectory, candidate)
+const npmVersion = await runQuietly("npm", ["--version"], repoRoot)
+if (!npmVersion.ok) throw new Error(`npm --version failed: ${npmVersion.output}`)
+assertSmokeNpmSupport(npmVersion.output.trim())
+console.log(JSON.stringify({ smokeToolchain: { node: process.version, npm: npmVersion.output.trim(), pnpm: releasePackageManager } }))
 const packManifest = JSON.parse(
   await readFile(join(absolutePackDirectory, "manifest.json"), "utf8")
 )
@@ -91,6 +100,7 @@ try {
     `${JSON.stringify({
       private: true,
       type: "module",
+      packageManager: releasePackageManager,
       dependencies: {
         ...releaseDependencies,
         typescript: "7.0.2",
@@ -102,6 +112,7 @@ try {
   // registry. Root file: dependencies do not satisfy transitive registry edges
   // in pnpm. This uses unchanged published manifests, without overrides,
   // workspace linking, or requiring an unreleased package to exist on npm.
+  await run("pnpm", ["--dir", smokeRoot, "--version"], repoRoot)
   await run(
     "pnpm",
     [

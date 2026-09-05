@@ -751,6 +751,233 @@ describe("PlanScheduler durable input admission", () => {
   }
 })
 
+describe("PlanScheduler durable input admission", () => {
+  for (const kind of ["sealed", "compensable", "irreversible"] as const) {
+    it(`refuses changed environments before replay for ${kind} work, while a new run remains independent`, async () => {
+      const node = draft("node")
+      const plan = await runPromise(compile([{ ...node, material: { ...node.material, kind } }]))
+      let executions = 0
+      const executor: PlanScheduler.Executor = { execute: () => Effect.sync(() => ++executions) }
+      const environment = { declared: true as const, layers: ["runtime"], capabilities: { fs: ["b", "a", "a"] } }
+      const drive = (runId: string, identity: StepKey.EnvironmentIdentity | undefined) =>
+        scheduler({ runId, executor, options: { environment: identity } }).run(plan)
+      await runPromise(
+        Effect.gen(function*() {
+          yield* activate("environment-original")
+          const first = yield* drive("environment-original", environment)
+          const equivalent = yield* drive("environment-original", { ...environment, capabilities: { fs: ["a", "b"] } })
+          expect(equivalent.settlements[0]!.dispatchKey).toBe(first.settlements[0]!.dispatchKey)
+          expect(executions).toBe(1)
+          for (
+            const changed of [undefined, { ...environment, layers: ["replacement"] }, {
+              ...environment,
+              declared: false as const,
+              runScope: "environment-original"
+            }]
+          ) {
+            const failure = yield* Effect.flip(drive("environment-original", changed))
+            expect(failure).toMatchObject({ code: "store_failed", cause: { code: "incompatible_state" } })
+          }
+          expect(executions).toBe(1)
+          yield* activate("environment-new")
+          yield* drive("environment-new", { ...environment, layers: ["replacement"] })
+          expect(executions).toBe(2)
+        }).pipe(
+          Effect.provide(harness({ runId: "environment-original", executor })),
+          Effect.provide(TestStores.layer())
+        )
+      )
+    })
+  }
+
+  it("captures nested environment data at construction, before admission and throughout dispatch", async () => {
+    const plan = await runPromise(compile([
+      draft("first"),
+      draft("second", { inputs: [{ _tag: "Pending", from: "first" }] })
+    ]))
+    const original = { declared: true as const, layers: ["runtime"], capabilities: { fs: ["a"] } }
+    const input = { declared: true as const, layers: ["runtime"], capabilities: { fs: ["a"] } }
+    let executions = 0
+    const executor: PlanScheduler.Executor = {
+      execute: () =>
+        Effect.sync(() => {
+          input.layers[0] = "during-dispatch"
+          input.capabilities.fs.push("during-dispatch")
+          return ++executions
+        })
+    }
+    const service = scheduler({ runId: "environment-capture", executor, options: { environment: input } })
+    input.layers[0] = "before-admission"
+    input.capabilities.fs.push("before-admission")
+    await runPromise(
+      Effect.gen(function*() {
+        yield* activate("environment-capture")
+        const first = yield* service.run(plan)
+        const replay = yield* scheduler({
+          runId: "environment-capture",
+          executor,
+          options: { environment: original }
+        }).run(plan)
+        expect(replay.settlements.map((node) => node.dispatchKey)).toEqual(
+          first.settlements.map((node) => node.dispatchKey)
+        )
+        expect(executions).toBe(2)
+      }).pipe(Effect.provide(harness({ runId: "environment-capture", executor })), Effect.provide(TestStores.layer()))
+    )
+  })
+
+  it("rejects invalid runtime environments before observation and leaves no durable binding", async () => {
+    const plan = await runPromise(compile([draft("node")]))
+    let executions = 0
+    const executor: PlanScheduler.Executor = { execute: () => Effect.sync(() => ++executions) }
+    await runPromise(
+      Effect.gen(function*() {
+        yield* activate("environment-invalid")
+        const sql = yield* SqlClient.SqlClient
+        for (
+          const environment of [
+            null,
+            { declared: false, layers: [], capabilities: {} },
+            {
+              declared: true,
+              layers: [42],
+              capabilities: {}
+            },
+            { declared: true, layers: ["\ud800"], capabilities: {} },
+            { declared: true, layers: [], capabilities: {}, unknown: "ignored?" },
+            {
+              get declared() {
+                throw new Error("private identity detail")
+              }
+            }
+          ]
+        ) {
+          const failure = yield* Effect.flip(
+            scheduler({
+              runId: "environment-invalid",
+              executor,
+              options: { environment: environment as StepKey.EnvironmentIdentity }
+            }).run(plan)
+          )
+          expect(failure).toMatchObject({ code: "key_uncomputable" })
+          expect(JSON.stringify(failure)).not.toContain("private identity detail")
+        }
+        expect(yield* sql`SELECT * FROM flows_plan_input_heads`).toEqual([])
+        expect(executions).toBe(0)
+        yield* scheduler({ runId: "environment-invalid", executor }).run(plan)
+        expect(executions).toBe(1)
+      }).pipe(
+        Effect.provide(harness({ runId: "environment-invalid", executor })),
+        Effect.provide(TestStores.layerAt(":memory:"))
+      )
+    )
+  })
+
+  it("refuses replacing the approved graph inside an already observed run", async () => {
+    const before = await runPromise(compile([draft("node", { body: "first" })]))
+    const after = await runPromise(compile([draft("node", { body: "changed" })]))
+    let executions = 0
+    const executor: PlanScheduler.Executor = { execute: () => Effect.sync(() => ++executions) }
+    const failure = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("input-plan-changed")
+        const service = scheduler({ runId: "input-plan-changed", executor })
+        yield* service.run(before)
+        return yield* Effect.flip(service.run(after))
+      }).pipe(Effect.provide(harness({ runId: "input-plan-changed", executor })), Effect.provide(TestStores.layer()))
+    )
+    expect(failure.cause).toMatchObject({ code: "incompatible_state" })
+    expect(executions).toBe(1)
+  })
+
+  it("self-interrupts before observation or execution when cancellation removed its fence", async () => {
+    const plan = await runPromise(compile([draft("reader", { reads: ["input"] })]))
+    let executions = 0
+    const executor: PlanScheduler.Executor = { execute: () => Effect.sync(() => ++executions) }
+    const exit = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("input-fence-lost")
+        const runs = yield* RunStore.RunStore
+        yield* runs.requestCancel("input-fence-lost", 2)
+        return yield* Effect.exit(scheduler({ runId: "input-fence-lost", executor }).run(plan))
+      }).pipe(Effect.provide(harness({ runId: "input-fence-lost", executor })), Effect.provide(TestStores.layer()))
+    )
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    expect(executions).toBe(0)
+  })
+
+  it("rejects an incomplete host measurement before persisting it and can retry with a valid host", async () => {
+    const plan = await runPromise(compile([draft("reader", { reads: ["input"] })]))
+    const executor: PlanScheduler.Executor = { execute: () => Effect.succeed("executed") }
+    const { failure, report } = await runPromise(
+      Effect.gen(function*() {
+        yield* activate("input-bad-host")
+        const service = scheduler({ runId: "input-bad-host", executor })
+        const failure = yield* Effect.flip(service.run(plan)).pipe(Effect.provide(harness({
+          runId: "input-bad-host",
+          executor,
+          boundary: StepBoundary.layerTest({ readSnapshot: [] })
+        })))
+        const report = yield* service.run(plan).pipe(Effect.provide(harness({ runId: "input-bad-host", executor })))
+        return { failure, report }
+      }).pipe(Effect.provide(TestStores.layer()))
+    )
+    expect(failure.cause).toMatchObject({ code: "corrupt_state" })
+    expect(outcomes(report)).toEqual({ reader: "built" })
+  })
+
+  for (const produced of [false, true]) {
+    it(`recovers glob observations without source enumeration; preceding producer present: ${produced}`, async () => {
+      const glob = { _tag: "Glob" as const, include: ["src/**"] as [string] }
+      const reader = {
+        ...draft("reader"),
+        effects: { reads: [glob], writes: ["reader.out"], boundaryMode: "hard" as const }
+      }
+      const plan = await runPromise(
+        compile(produced ? [draft("producer", { writes: ["src/file"] }), reader] : [reader])
+      )
+      let executions = 0
+      const executor: PlanScheduler.Executor = { execute: () => Effect.sync(() => ++executions) }
+      const exit = await runPromise(
+        Effect.gen(function*() {
+          yield* activate("input-glob-recovery")
+          const store = yield* PlanInputStore.PlanInputStore
+          yield* store.record({
+            runId: "input-glob-recovery",
+            planId: plan.planId,
+            baseDigest: plan.baseDigest,
+            environmentDigest: yield* StepKey.environmentIdentity(),
+            generation: 0
+          }, {
+            version: 1,
+            generation: 0,
+            nodes: plan.nodes.map((node) => ({
+              id: node.id,
+              key: node.key,
+              reads: node.id === "reader" ?
+                [{
+                  entry: glob,
+                  sourcePaths: produced ? [] : ["src/file"]
+                }] :
+                []
+            })),
+            pins: produced ? [] : [{ path: "src/file", digest: "initial" }]
+          }, owner)
+          return yield* Effect.exit(scheduler({ runId: "input-glob-recovery", executor }).run(plan))
+        }).pipe(Effect.provide(harness({ runId: "input-glob-recovery", executor })), Effect.provide(TestStores.layer()))
+      )
+      if (produced) {
+        expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toMatchObject({
+          code: "boundary_unavailable"
+        })
+      } else {
+        expect(Exit.isSuccess(exit) ? outcomes(exit.value) : undefined).toEqual({ reader: "built" })
+      }
+      expect(executions).toBe(1)
+    })
+  }
+})
+
 // These admission cases have one deviator (`own.out`) and a separate writer.
 // Supply the deviator's evidence explicitly; classification is tested over a real filesystem.
 const admissionBoundary = Layer.effect(
@@ -1186,6 +1413,117 @@ describe("PlanScheduler conflict strategies", () => {
     expect(Option.getOrThrow(persisted).nodes.map((node) => node.id)).toEqual(["lane-a", "lane-b", "lane-b+merge"])
     expect(Option.getOrThrow(persisted).generation).toBe(1)
   })
+
+  for (const resumeFrom of ["base", "grown"] as const) {
+    for (const collision of [false, true]) {
+      it(`preserves stopped-node meaning after reopening from ${resumeFrom}, collision=${collision}`, async () => {
+        const directory = await mkdtemp(join(tmpdir(), "scheduler-merge-reopen-"))
+        try {
+          const filename = join(directory, "engine.sqlite")
+          const runId = "merge-reopened"
+          const plan = await runPromise(compile([
+            draft("lane-a", { writes: ["shared.out"] }),
+            draft("lane-b", { writes: ["shared.out"], conflictStrategy: "lane", runtimeStrategy: "stop-merge" }),
+            ...(collision ? [draft("lane-b+merge", { writes: ["unrelated.out"] })] : [])
+          ]))
+          const calls: Array<string> = []
+          const executor: PlanScheduler.Executor = {
+            execute: ({ node }) =>
+              Effect.suspend(() => {
+                calls.push(node.id)
+                return node.id === "lane-b" ?
+                  Effect.fail(conflict())
+                  : Effect.succeed(node.kind === "merge" ? { merged: node.material.body } : node.id)
+              })
+          }
+          const service = scheduler({ runId, executor })
+          const first = await runPromise(
+            Effect.gen(function*() {
+              yield* activate(runId)
+              yield* service.record(plan)
+              return yield* service.run(plan).pipe(Effect.provide(harness({ runId, executor })))
+            }).pipe(Effect.provide(TestStores.layerAt(filename)), Effect.scoped)
+          )
+          const mergeId = collision ? "lane-b+merge#1" : "lane-b+merge"
+          expect(first.appended).toEqual([mergeId])
+          expect(outcomes(first)).toEqual({
+            "lane-a": "built",
+            "lane-b": "skipped",
+            ...(collision ? { "lane-b+merge": "built" } : {}),
+            [mergeId]: "built"
+          })
+          const executed = [...calls]
+          expect([...executed].sort()).toEqual(
+            ["lane-a", "lane-b", mergeId, ...(collision ? ["lane-b+merge"] : [])].sort()
+          )
+
+          // Each provide creates and closes independent SQLite-backed services.
+          // Repeat recovery to detect accumulating generations or journal drift.
+          for (let restart = 0; restart < 2; restart++) {
+            const reopened = await runPromise(
+              Effect.gen(function*() {
+                const store = yield* PlanStore.PlanStore
+                const loaded = Option.getOrThrow(yield* store.get(plan.planId))
+                const report = yield* scheduler({ runId, executor }).run(resumeFrom === "base" ? plan : loaded)
+                  .pipe(Effect.provide(harness({ runId, executor })))
+                return { report, persisted: Option.getOrThrow(yield* store.get(plan.planId)) }
+              }).pipe(Effect.provide(TestStores.layerAt(filename)), Effect.scoped)
+            )
+            expect(outcomes(reopened.report)).toEqual({
+              "lane-a": "clean",
+              "lane-b": "skipped",
+              ...(collision ? { "lane-b+merge": "clean" } : {}),
+              [mergeId]: "clean"
+            })
+            expect(reopened.report.results).toEqual(first.results)
+            expect(reopened.report.appended).toEqual([])
+            expect(reopened.persisted.generation).toBe(1)
+            expect(calls).toEqual(executed)
+          }
+        } finally {
+          await rm(directory, { recursive: true, force: true })
+        }
+      })
+    }
+  }
+
+  it("refuses an automatic merge that would exceed the approved graph-size ceiling", async () => {
+    const plan = await runPromise(compile([
+      draft("lane-a", { writes: ["shared.out"], priority: 100 }),
+      draft("lane-b", {
+        writes: ["shared.out"],
+        priority: 100,
+        conflictStrategy: "lane",
+        runtimeStrategy: "stop-merge"
+      }),
+      ...Array.from({ length: Plan.maximumPlanNodes - 2 }, (_, index) => draft(`pending-${index}`, { writes: [] }))
+    ]))
+    const calls: Array<string> = []
+    const executor: PlanScheduler.Executor = {
+      execute: ({ node }) =>
+        Effect.suspend(() => {
+          calls.push(node.id)
+          return node.id === "lane-b" ? Effect.fail(conflict()) : Effect.succeed(node.id)
+        })
+    }
+    await runPromise(
+      Effect.gen(function*() {
+        const runId = "merge-graph-ceiling"
+        yield* activate(runId)
+        const service = scheduler({ runId, executor, options: { concurrency: { steps: 1, agents: 1 } } })
+        yield* service.record(plan)
+        const failure = yield* Effect.flip(service.run(plan).pipe(Effect.provide(harness({ runId, executor }))))
+        expect(failure).toMatchObject({ code: "elaboration_failed", cause: { code: "graph_too_large" } })
+        const store = yield* PlanStore.PlanStore
+        expect(Option.getOrThrow(yield* store.get(plan.planId)).generation).toBe(0)
+        const sql = yield* SqlClient.SqlClient
+        expect(yield* sql`SELECT generation FROM flows_plan_input_generations`).toEqual([{ generation: 0 }])
+        expect(yield* sql`SELECT * FROM flows_plan_merge_completions`).toEqual([])
+        expect(yield* sql`SELECT count(*) AS count FROM flows_plan_merge_intents`).toEqual([{ count: 1 }])
+        expect(calls).toEqual(["lane-a", "lane-b"])
+      }).pipe(Effect.provide(TestStores.layerAt(":memory:")), Effect.scoped)
+    )
+  }, 120_000)
 
   for (const resumeFrom of ["base", "grown"] as const) {
     for (const collision of [false, true]) {

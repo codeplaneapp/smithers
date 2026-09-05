@@ -30,5 +30,8 @@
     "eslint": "9.39.1",
     "typescript-eslint": "8.65.0",
     "dprint": "0.55.2"
+  },
+  "dependencies": {
+    "@smthrs/canonical": "1.0.0-rc.0"
   }
 }

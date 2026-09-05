@@ -108,17 +108,17 @@ principal in the payload cannot override the authenticated actor.
 member neither command raises would be a recovery branch no client's code could
 ever reach.
 
-| Failure              | Means                                                    | What to do                                                   |
-| -------------------- | -------------------------------------------------------- | ------------------------------------------------------------ |
-| `Unauthorized`       | the caller lacks approval authority for this target/scope | ask an authorized operator; do not keep retrying unchanged |
-| `PlanDigestMismatch` | the plan changed since the gate was published            | re-read the gate and show the new plan before deciding again |
-| `EnvelopeMismatch`   | the capability envelope is not the one that was approved | re-read the gate; do not widen the envelope client-side      |
-| `AlreadyResolved`    | someone already decided this gate                        | refresh the row; the decision stands                         |
-| `PlanNotFound`       | the plan the target names is gone                        | re-plan                                                      |
-| `RunNotFound`        | the run the target names is gone                         | drop the gate from the inbox                                 |
-| `InvalidInput`       | the payload is not a decidable approval payload          | submit the row's `payload` unchanged                         |
-| `PersistenceError`   | the control plane could not write the decision           | retry with the same `idempotencyKey`                         |
-| `Unavailable`        | the control plane is not serving this operation          | retry later                                                  |
+| Failure              | Means                                                     | What to do                                                   |
+| -------------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| `Unauthorized`       | the caller lacks approval authority for this target/scope | ask an authorized operator; do not keep retrying unchanged   |
+| `PlanDigestMismatch` | the plan changed since the gate was published             | re-read the gate and show the new plan before deciding again |
+| `EnvelopeMismatch`   | the capability envelope is not the one that was approved  | re-read the gate; do not widen the envelope client-side      |
+| `AlreadyResolved`    | someone already decided this gate                         | refresh the row; the decision stands                         |
+| `PlanNotFound`       | the plan the target names is gone                         | re-plan                                                      |
+| `RunNotFound`        | the run the target names is gone                          | drop the gate from the inbox                                 |
+| `InvalidInput`       | the payload is not a decidable approval payload           | submit the row's `payload` unchanged                         |
+| `PersistenceError`   | the control plane could not write the decision            | retry with the same `idempotencyKey`                         |
+| `Unavailable`        | the control plane is not serving this operation           | retry later                                                  |
 
 Retrying is safe. The payload carries an `idempotencyKey`, so a second
 submission of the same decision lands one effect.

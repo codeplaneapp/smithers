@@ -12,6 +12,9 @@ import { build as bundle } from "esbuild"
 
 const effect = "4.0.0-rc.112"
 const firstParty = "1.0.0-rc.0"
+// Temporary projects must select the same pnpm toolchain as the repository.
+// Otherwise a different pnpm on a Node-version PATH can change command support.
+export const releasePackageManager = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8")).packageManager
 const runners = ["vitest", "@effect/vitest", "@smthrs/testing"]
 const nodeAdapters = ["@smthrs/platform-node", "@effect/platform-node", "@effect/platform-node-shared", "@effect/sql-sqlite-node"]
 const telemetryAdapters = [
@@ -164,7 +167,7 @@ export const consumerCommand = (command, args, cwd) => new Promise((resolveRun, 
   child.once("error", reject)
   child.once("close", (exit, signal) => {
     console.log(JSON.stringify({ command, args, cwd, node: process.version, exit, signal, durationMs: Date.now() - started }))
-    if (exit !== 0 || command.endsWith("/vitest")) console.log(output)
+    if (exit !== 0 || command.endsWith("/vitest") || args[0] === "--version") console.log(output)
     resolveRun({ exit, signal, output })
   })
 })
@@ -180,8 +183,10 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
   try {
     await writeFile(join(consumer, ".npmrc"), "@smthrs:registry=" + registryUrl + "\n")
     await writeFile(join(consumer, "package.json"), JSON.stringify({
-      name: "dependency-profile", version: "1.0.0", private: true, type: "module", dependencies: profile.dependencies
+      name: "dependency-profile", version: "1.0.0", private: true, type: "module",
+      packageManager: releasePackageManager, dependencies: profile.dependencies
     }))
+    const managerVersion = (await successful(manager, ["--version"], consumer)).output.trim()
     const args = ["install", "--ignore-scripts", ...(manager === "npm" ? ["--no-audit", "--no-fund", "--strict-peer-deps"] : ["--strict-peer-dependencies"])]
     if (profile.omitOptional) args.push(manager === "npm" ? "--omit=optional" : "--no-optional")
     await successful(manager, args, consumer)
@@ -209,7 +214,7 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
       }
     }
     console.log("consumer ok " + manager + " " + profile.name + ": " + tree.count + " packages; one Effect; " + (profile.absent?.length ?? 0) + " absent adapters")
-    return { manager, profile: profile.name, ...tree }
+    return { manager, managerVersion, profile: profile.name, ...tree }
   } finally {
     await rm(consumer, { recursive: true, force: true })
   }
@@ -221,8 +226,10 @@ export const refuseIncompatibleRc = async (manager, registryUrl) => {
     await writeFile(join(consumer, ".npmrc"), "@smthrs:registry=" + registryUrl + "\n")
     // Adjacent published RC, deliberately incompatible with the exact library peer.
     await writeFile(join(consumer, "package.json"), JSON.stringify({
-      private: true, dependencies: { "@smthrs/database": firstParty, effect: "4.0.0-rc.111" }
+      private: true, packageManager: releasePackageManager,
+      dependencies: { "@smthrs/database": firstParty, effect: "4.0.0-rc.111" }
     }))
+    await successful(manager, ["--version"], consumer)
     const result = await consumerCommand(manager, ["install", "--ignore-scripts",
       ...(manager === "npm" ? ["--strict-peer-deps", "--no-audit", "--no-fund"] : ["--strict-peer-dependencies"])], consumer)
     assert.notEqual(result.exit, 0, "incompatible RC must be refused")

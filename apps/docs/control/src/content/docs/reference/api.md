@@ -38,7 +38,7 @@ and every client projects onto this one interface.
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `plan`    | `(input: PlanInput) => Effect<PlanCard, FlowNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                   | The reviewable card, whether or not this call created it.                                            |
 | `run`     | `(input: RunInput) => Effect<Receipt, RunNotFound \| PlanNotFound \| PlanDenied \| PlanDigestMismatch \| EnvelopeMismatch \| ClaimLost \| InvalidInput \| LaunchFailed \| PersistenceError \| Unavailable>` | `Accepted`, `AlreadyApplied`, `Conflict`, or `Parked` for a plan; a resume answers as `resume` does. |
-| `approve` | `(input: ApprovalInput) => Effect<Receipt, PlanDigestMismatch \| EnvelopeMismatch \| AlreadyResolved \| PlanNotFound \| RunNotFound \| InvalidInput \| PersistenceError \| Unavailable \| Unauthorized>`                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
+| `approve` | `(input: ApprovalInput) => Effect<Receipt, PlanDigestMismatch \| EnvelopeMismatch \| AlreadyResolved \| PlanNotFound \| RunNotFound \| InvalidInput \| PersistenceError \| Unavailable \| Unauthorized>`    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `deny`    | same as `approve`                                                                                                                                                                                           | same as `approve`.                                                                                   |
 | `steer`   | `(input: SteerInput) => Effect<Receipt, RunNotFound \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                                    | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `signal`  | `(input: SignalInput) => Effect<Receipt, RunNotFound \| NoMatchingWait \| InvalidInput \| PersistenceError \| Unavailable>`                                                                                 | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
@@ -46,15 +46,6 @@ and every client projects onto this one interface.
 | `resume`  | same as `cancel`                                                                                                                                                                                            | `Accepted`, `AlreadyApplied`, `Conflict`, or `Terminal`.                                             |
 | `list`    | `(input: ListRequest) => Effect<ListResponse, ControlError>`                                                                                                                                                | A bounded page of flows or runs.                                                                     |
 | `watch`   | `(filter: WatchFilter) => Stream<ControlEvent, ControlError>`                                                                                                                                               | Committed journal entries, plus the deltas the plane derives.                                        |
-
-Approval and denial require operator authority. A principal with `kind: "agent"`
-receives `Unauthorized` (`code: "unauthorized"`) for plan and node decisions at
-all scopes, including `remembered`, before idempotency replay or grant writes.
-The runtime supplies the principal when the input omits one; its configured
-agent identity cannot bypass this check. Direct runtime `resolveApproval` calls
-also reject agent principals. `ControlClient` refuses agent approval decisions
-before serialization, so operator RPC credentials cannot elevate an MCP caller.
-MCP exposes this error as `UNAUTHORIZED`.
 
 There is no `pause`. An operator park is written through
 `ControlRuntime.writeStatus(runId, fence, "parked")`.
@@ -244,15 +235,15 @@ terminal transition, and translates conflicts into typed failures.
 
 ### Service
 
-| Group             | Members                                                                                                                                                                |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plans             | `plan(input: PlanInput) => Effect<PlanOutcome, FlowNotFound \| InvalidInput \| PersistenceError>`, `getPlan(planId)`, `listPlanIds`                                    |
-| Approvals         | `authorizeApproval(request)`, `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal, scope?)`, `grants`  |
-| Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                              |
-| Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                      |
-| Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                        |
-| Ownership         | `registerFiber(runId, fiber)`, `interrupt(runId)`, `resume(runId, options?)`, `claimFence(runId)`, `releasePending(runId, fence)`, `writeStatus(runId, fence, status)` |
-| Identity          | `stampPrincipal(submitted?)`, `lookupMutation(key, fingerprint)`, `recordMutation(key, fingerprint, receipt)`                                                          |
+| Group             | Members                                                                                                                                                                                             |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plans             | `plan(input: PlanInput) => Effect<PlanOutcome, FlowNotFound \| InvalidInput \| PersistenceError>`, `getPlan(planId)`, `listPlanIds`                                                                 |
+| Approvals         | `authorizeApproval(request)`, `lookupApproval(target)`, `registerApproval(nodeTarget)`, `installBulkGrant(token, envelope, scope)`, `resolveApproval(token, decision, principal, scope?)`, `grants` |
+| Runs              | `launch(planId, digest, envelope) => Effect<LaunchResult, ...>`, `getRun(runId)`, `listRuns`, `listFlows`                                                                                           |
+| Messages          | `enqueueSteer(runId, message)`, `drainSteering(runId)`, `deliverSignal(runId, signal)`, `deliveredSignals(runId)`                                                                                   |
+| Resume delegation | `requestResume(runId) => Effect<number, ...>`, `pendingResumes`, `clearResume(runId, sequence)`                                                                                                     |
+| Ownership         | `registerFiber(runId, fiber)`, `interrupt(runId)`, `resume(runId, options?)`, `claimFence(runId)`, `releasePending(runId, fence)`, `writeStatus(runId, fence, status)`                              |
+| Identity          | `stampPrincipal(submitted?)`, `lookupMutation(key, fingerprint)`, `recordMutation(key, fingerprint, receipt)`                                                                                       |
 
 `resume` takes `{ scope?: "launched" \| "any" }`. `"launched"` restricts the
 claim to runs this plane launched, which every steer wake and every
@@ -288,7 +279,7 @@ requested while one is being taken up is not lost with it.
 | `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                   |
 | `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                   |
 | `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely.                |
-| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                                                                      |
+| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                       |
 
 `layerMemory` models the production fence and approval ordering seams but keeps
 everything in a `Map`. Nothing it decides survives the process.
@@ -318,14 +309,14 @@ does not require a grant scope because it grants nothing. See the
 The durable `ControlRuntime` over a SQL database and the fenced run store from
 [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/).
 
-| Export           | Kind      | Signature                                                                                                          |
-| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
-| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                |
-| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                   |
-| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                      |
-| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`       |
-| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>` |
-| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                          |
+| Export           | Kind      | Signature                                                                                                                                       |
+| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                                             |
+| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }` |
+| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                                                   |
+| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                    |
+| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                              |
+| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                                                       |
 
 Omitting `owner` mints one synthetic identity for this runtime only, so
 separately constructed runtimes cannot cross each other's fences. Hosts that

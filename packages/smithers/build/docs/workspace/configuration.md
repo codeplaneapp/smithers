@@ -43,12 +43,9 @@ so Linux refuses `{ network: "loopback" }`; use `{ network: true }` only as an
 explicit full-network opt-in. Targets that declare `services` must declare one
 of those network postures themselves.
 
-`Workspace` validates its options and performs no I/O, so `PACKAGE.ts` evaluation
-stays pure. The export name does not matter; when several exports are `Workspace`
-values, the workspace takes the first one in ascending export-name order.
-
-For the full schema and every validation target, see
-[the Workspace reference](../reference/config.md).
+`S.Workspace` validates its options and performs no I/O, so evaluating the
+module stays pure. For the full option list and every refusal, see
+[the workspace reference](../reference/config.md).
 
 ## Precedence
 

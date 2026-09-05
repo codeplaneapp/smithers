@@ -379,9 +379,10 @@ export type Executable =
     readonly runtimeArgs?: never
   }
 
-const exclusive = <D extends (...args: any[]) => any>(
+const exclusive = <D extends (attrs: never) => unknown>(
   definition: D
-): Omit<D, keyof Function> & ((attrs: Parameters<D>[0] & Executable) => ReturnType<D>) => definition
+): Pick<D, keyof D> & ((attrs: Parameters<D>[0] & Executable) => ReturnType<D>) =>
+  definition as Pick<D, keyof D> & ((attrs: Parameters<D>[0] & Executable) => ReturnType<D>)
 
 /**
  * A tool run producing the declared output directories.

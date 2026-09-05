@@ -75,6 +75,24 @@ describe("browserFetch guards", () => {
     if (!redirect.ok) expect(redirect.message).toContain("credentials")
   })
 
+  test("URL credentials never become an implicit Authorization header, including on redirects", async () => {
+    let fetches = 0
+    const deps = {
+      resolveHost: publicResolver,
+      fetchImpl: async () => {
+        fetches += 1
+        return new Response(null, { status: 302, headers: { location: "https://user:secret@example.com/" } })
+      }
+    }
+    const direct = await browserFetch("https://user:secret@example.com/", deps)
+    expect(direct.ok).toBe(false)
+    expect(fetches).toBe(0)
+    const redirect = await browserFetch("https://example.com/", deps)
+    expect(redirect.ok).toBe(false)
+    expect(fetches).toBe(1)
+    if (!redirect.ok) expect(redirect.message).toContain("credentials")
+  })
+
   test("internal hostnames are refused without resolving", async () => {
     for (const host of ["localhost", "db.internal", "nas.local", "home.lan"]) {
       let resolved = 0

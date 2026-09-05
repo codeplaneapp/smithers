@@ -13,8 +13,32 @@
 // Run it with `node --test scripts/check-npm-dedupe.test.mjs`.
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { SINGLETONS, copiesOf, optionalPeersOf, resolveConsumerTree, resolveConsumerProfiles } from "./check-npm-dedupe.mjs";
+import { assertConsumerTree } from "./fixtures/dependency-consumers.mjs";
+
+it("requires exactly one physical Effect copy at the zero, one, and two-copy boundaries", async () => {
+  for (const count of [0, 1, 2]) {
+    const root = await mkdtemp(join(tmpdir(), "smithers-k-effect-boundary-"));
+    try {
+      for (let index = 0; index < count; index++) {
+        const directory = index === 0
+          ? join(root, "node_modules/effect")
+          : join(root, "node_modules/parent/node_modules/effect");
+        await mkdir(directory, { recursive: true });
+        await writeFile(join(directory, "package.json"), JSON.stringify({ name: "effect", version: "4.0.0-rc.112" }));
+      }
+      const profile = { name: "boundary-" + count, dependencies: { effect: "4.0.0-rc.112" } };
+      if (count === 1) assert.equal(assertConsumerTree(root, profile).effectCopies.length, 1);
+      else assert.throws(() => assertConsumerTree(root, profile), /expected exactly one physical Effect copy/);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
 
 it("distinguishes optional library peers from a selected executable's requirements", () => {
   const library = { peerDependencies: { runtime: "1", renderer: "1" },
@@ -35,6 +59,7 @@ it("isolates each default library and the CLI on npm and pnpm, and refuses an in
     for (const profile of profiles) {
       assert.equal(profile.effectCopies.length, 1);
       assert.ok(profile.resolutions.length > 0);
+      if (manager === "pnpm") assert.equal(profile.managerVersion, "11.25.0", "consumer must use the release toolchain, including on Node 22");
     }
     assert.equal(results.filter((result) => result.incompatible?.manager === manager).length, 1);
   }

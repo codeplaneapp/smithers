@@ -100,6 +100,36 @@ that any existing deployment has already been updated.
 
 ### Other upstream services
 
+### 1.0 gateway migration
+
+The deployment-identity gateway proxy has been removed. `/rpc`, `/projections`,
+`/sync`, `/health` and their subpaths return HTTP 410 with
+`code: "gateway_proxy_removed"`, including WebSocket upgrade requests. They
+never forward under a deployment bearer or a placeholder user. Cross-origin
+requests may be refused earlier by the existing same-origin guard.
+
+`GATEWAY_UPSTREAM_URL`, `GATEWAY_AUTH_TOKEN` and
+`GATEWAY_SESSION_USER_ID` / `_ROLE` / `_SCOPES` no longer configure this Worker.
+Remove leftover legacy secrets when deploying the new version; they are ignored
+and cannot reactivate the proxy. This is a breaking removal, not an optional
+hardening flag. A deployment identity is not evidence of an incoming user's
+authority to use a workspace.
+
+Product clients use `/api/workflow/provision` and `/api/workflow/rpc`. These
+require a validated, allowlisted session, obtain the user's Cloud identity,
+resolve gateway records by that login and repository, and apply the relay's
+procedure/path allowlist. Gateway tokens remain server-side in
+`GATEWAY_SESSIONS`; client-supplied identity headers cannot select another user.
+Keep the identity and per-user Cloud gateway configuration described in
+`wrangler.jsonc`. Clients needing the gateway's native RPC/WebSocket protocols
+must connect to a separately authenticated gateway, not to these retired mounts.
+
+The local launch/canary scripts now assert the explicit retirement response.
+Their expectations should ship with this Worker version; they are not evidence
+that any existing deployment has already been updated.
+
+### Other upstream services
+
 Sign-in, balance, chat turns, and recommendations resolve in sibling
 Workers that live in a different repository (`smithersai/ui`, under
 `workers/`).

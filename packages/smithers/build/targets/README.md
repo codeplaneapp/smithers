@@ -61,6 +61,7 @@ export const Workspace = S.Workspace("example", {
 ```ts
 import { packageTargets } from "./package-targets.ts"
 import { Smithers } from "@smthrs/targets"
+import { packageTargets } from "./package-targets.ts"
 
 // PACKAGE.ts: no manager, no runtime.
 export const Package = Smithers.Package({

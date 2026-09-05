@@ -25,7 +25,7 @@ import {
   PlanDigestMismatch,
   PlanNotFound,
   RunNotFound,
-  Unauthorized
+  type Unauthorized
 } from "./ControlError.ts"
 import type {
   Envelope,
@@ -369,7 +369,7 @@ export interface Service {
     decision: "approved" | "denied",
     principal: Principal,
     scope?: GrantScope | undefined
-  ) => Effect.Effect<void, AlreadyResolved | Unauthorized | PersistenceError | Unauthorized>
+  ) => Effect.Effect<void, AlreadyResolved | PersistenceError | Unauthorized>
   readonly launch: (
     planId: string,
     digest: string,

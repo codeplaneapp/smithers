@@ -4,7 +4,6 @@ This package declares `effect` as an exact
 `4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
-**Documentation:** https://sync.smithers.sh
 **Documentation:** https://smithers-sync.smithers.sh
 
 Browser-safe, read-only replication of canonical

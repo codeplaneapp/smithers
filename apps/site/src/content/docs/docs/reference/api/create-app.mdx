@@ -26,6 +26,7 @@ runtime class. Import the one whose class matches the file doing the importing.
 | Import                         | Runtime                |
 | ------------------------------ | ---------------------- |
 | `@smthrs/create-app`           | Node                   |
+| `@smthrs/create-app/index`     | Node                   |
 | `@smthrs/create-app/app`       | browser, workerd, Node |
 | `@smthrs/create-app/ui`        | browser, workerd, Node |
 | `@smthrs/create-app/runtime`   | browser, workerd, Node |
@@ -43,6 +44,7 @@ filesystem.
 The root entry point re-exports `./app` and `./package` flat, rather than as
 namespaces, because it is an authoring API rather than a service API: an app
 writes `defineFlow`, not `App.defineFlow`.
+The explicit `@smthrs/create-app/index` subpath serves the same root module.
 
 ## @smthrs/create-app/package
 
