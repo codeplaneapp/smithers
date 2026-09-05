@@ -6,18 +6,37 @@
  * dissolving it bought: package-relative globs over `test/faults`, the second
  * vitest config the serial tier needs, and a target that still refuses
  * coverage.
+ *
+ * @since 0.1.0
  */
 import { describe, expect, it } from "vitest"
 import { FaultSuite } from "../src/FaultSuite.ts"
 import * as Input from "../src/Input.ts"
 import * as Target from "../src/Target.ts"
-import type * as Vitest from "../src/Vitest.ts"
+import * as Vitest from "../src/Vitest.ts"
 import { plannedArgv } from "./plan.ts"
 import { packageManager } from "./toolchain.ts"
 
 const attrsOf = (target: unknown): Vitest.Attrs => Target.metadata(target as never).attrs as Vitest.Attrs
 
 describe("FaultSuite", () => {
+  it("marks its Vitest target exclusive", () => {
+    const attrs = attrsOf(FaultSuite({ cwd: "packages/smithers/flows" }))
+    expect(attrs).toHaveProperty("exclusive", true)
+    expect(Target.isExclusive(attrs)).toBe(true)
+    const ordinary = attrsOf(Vitest.Vitest({
+      tests: [],
+      sources: [],
+      deps: [],
+      config: null,
+      environment: "node",
+      passWithNoTests: false
+    }))
+    expect(ordinary.exclusive).toBe(false)
+    expect(Target.isExclusive(ordinary)).toBe(false)
+    expect(Target.isExclusive(undefined)).toBe(false)
+  })
+
   it("declares the package's own cases, harness, sources, and faults config", () => {
     const attrs = attrsOf(FaultSuite({ cwd: "packages/smithers/flows" }))
     expect(attrs.cwd).toBe("packages/smithers/flows")

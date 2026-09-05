@@ -13,6 +13,7 @@
  *
  * @since 0.1.0
  */
+import * as Target from "@smthrs/targets/Target"
 import * as SchemaIssue from "effect/SchemaIssue"
 import * as Os from "node:os"
 import * as NodeUtil from "node:util/types"
@@ -264,6 +265,10 @@ const validateWorkList = (targets: ReadonlyArray<Planner.PlannedTarget>): string
 /**
  * Drains a dependency-ordered work list with at most `jobs` in flight.
  *
+ * Targets with `exclusive: true` attrs run alone. Ready ordinary work drains
+ * first, then each ready exclusive target gets its own window. Dependencies
+ * still run first, including exclusive prerequisites of ordinary targets.
+ *
  * The work list and the concurrency bound are validated before anything is
  * dispatched, and an invalid one rejects without running a target. See
  * {@link validateWorkList}: a duplicate label, a duplicate or unknown or
@@ -305,6 +310,9 @@ export const schedule = (
   }
   const invalid = validateWorkList(targets)
   if (invalid !== undefined) return Promise.reject(new Error(`scheduler refused the work list: ${invalid}`))
+  const exclusiveLabels = new Set(
+    targets.filter((target) => Target.isExclusive(target.attrs)).map((target) => target.label)
+  )
   const remaining = new Map<string, number>()
   const dependents = new Map<string, Array<string>>()
   const ready: Array<string> = []
@@ -319,6 +327,7 @@ export const schedule = (
   }
   return new Promise((done, fail) => {
     let active = 0
+    let exclusiveActive = false
     let dispatched = 0
     let settled = false
     let failure: Error | undefined
@@ -337,12 +346,16 @@ export const schedule = (
       }
     }
     const pump = (): void => {
-      while (failure === undefined && active < jobs && ready.length > 0) {
-        const label = ready.shift()!
+      while (failure === undefined && !exclusiveActive && active < jobs && ready.length > 0) {
+        const ordinary = ready.findIndex((label) => !exclusiveLabels.has(label))
+        if (ordinary < 0 && active > 0) break
+        const label = ready.splice(ordinary < 0 ? 0 : ordinary, 1)[0]!
+        exclusiveActive = exclusiveLabels.has(label)
         active += 1
         dispatched += 1
         dispatch(label).then(() => {
           active -= 1
+          if (exclusiveLabels.has(label)) exclusiveActive = false
           for (const dependent of dependents.get(label) ?? []) {
             const left = (remaining.get(dependent) ?? 1) - 1
             remaining.set(dependent, left)
@@ -351,6 +364,7 @@ export const schedule = (
           pump()
         }, (cause: unknown) => {
           active -= 1
+          if (exclusiveLabels.has(label)) exclusiveActive = false
           // Keep the first fault: a later one is usually a consequence of it.
           failure ??= Diagnostic.error(cause, "scheduled target rejected")
           pump()

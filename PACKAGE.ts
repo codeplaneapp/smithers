@@ -279,12 +279,11 @@ const ci = Smithers.GithubCiGen({
       // only place they could live; each case now sits in the package whose
       // behaviour it asserts, and `//packages/...:faults` selects all of them.
       //
-      // `-j 1` is load-bearing rather than a throughput choice. A fault case
-      // kills process groups, binds ephemeral ports, and reads the machine's
-      // process table, so two packages' fault suites cannot run at once for the
-      // same reason two files inside one of them cannot: each package's
-      // `vitest.faults.config.ts` sets `fileParallelism: false`, and this flag
-      // is the same rule one level up.
+      // FaultSuite marks its target exclusive, so ordinary workspace CI and
+      // package-suite wildcards omit it. The explicit matrix selects the tier;
+      // the executor runs each exclusive target alone. Keep `-j 1` here to
+      // state the job's serial intent, and `fileParallelism: false` in each
+      // vitest.faults.config.ts to serialize cases within a target.
       //
       // Required. It was advisory while `case22 ... redacts the credential out
       // of the operator's terminal` was red by design: rc.0
@@ -307,7 +306,7 @@ const ci = Smithers.GithubCiGen({
       runsOn: ubuntu,
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({ runtimes: [node], jj }),
-      steps: [{ name: "Fault matrix", verb: Smithers.Verb.Test, pattern: "//packages/...:faults", parallelism: 1 }]
+      steps: [{ name: "Exclusive fault matrix", verb: Smithers.Verb.Test, pattern: "//packages/...:faults", parallelism: 1 }]
     },
     {
       id: "browser",

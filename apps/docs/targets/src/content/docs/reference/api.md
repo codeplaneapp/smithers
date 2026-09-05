@@ -101,6 +101,16 @@ target beside it stays the coverage gate. A package declares it beside its
 single `//e2e:faults` in a workspace member that owned every case in the
 repository.
 
+The emitted Vitest target carries `exclusive: true`, so wildcard `ci` and
+`test` selections omit it regardless of its exported key. Select the matrix
+explicitly with `smithers-build test '//packages/...:faults' --jobs 1`, or opt
+a wildcard into all tiers with `--include-exclusive`. The executor drains ready
+ordinary work first and runs each exclusive target alone, even with a larger
+`--jobs` value. Dependencies keep their ordering. This isolates targets within
+one invocation; independent invocations still need separate machines or external
+coordination. A wildcard whose ordinary target depends on an exclusive target
+refuses with an opt-in diagnostic instead of silently adding the fault suite.
+
 `DurableIdentityGuard`, `DocsReferenceSync`, and `JsdocTruthfulness` are the
 model-review macros. Each one bakes a rubric, the prompt framing, the engine,
 the model tier, the batch size, and the failure threshold into an `LlmLint`,

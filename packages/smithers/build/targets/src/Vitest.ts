@@ -39,6 +39,8 @@ export const Attrs = Schema.Struct({
   config: Schema.NullOr(Input.File),
   environment: Schema.NonEmptyString,
   passWithNoTests: Schema.Boolean,
+  /** Whether this target requires explicit selection and runs alone in the executor. */
+  exclusive: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
   /**
    * Whether the run may compute coverage. `false` renders
    * `--coverage.enabled=false`, which a config with coverage enabled needs on a

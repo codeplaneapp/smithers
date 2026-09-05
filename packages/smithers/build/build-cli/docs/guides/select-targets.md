@@ -33,10 +33,10 @@ the unsupported rule rather than returning a false green.
 ## Narrow with the label grammar
 
 ```bash
-# every target in the workspace
+# ordinary test targets in the workspace
 pnpm exec smithers-build test '//...'
 
-# every target under one subtree
+# ordinary test targets under one subtree
 pnpm exec smithers-build test '//packages/...'
 
 # one named target in every package of a subtree
@@ -61,9 +61,23 @@ across every package that declares it, so a matrix is a property of the
 packages rather than of a central list. A package that does not declare the
 key is simply not selected.
 
+Fault suites declare `exclusive: true`. Wildcard `test` and `ci` selections
+omit exclusive targets, including suites exported under another name. An exact
+label or a named recursive pattern such as `//packages/...:faults` includes
+them. To include all tiers in one invocation:
+
+```bash
+pnpm exec smithers-build test '//packages/...' --include-exclusive
+```
+
+An ordinary target that depends on an exclusive target makes a wildcard plan
+refuse with a diagnostic naming `--include-exclusive`. The planner preserves
+required dependencies instead of silently dropping them.
+
 ## Check the selection before running it
 
-`query` lists exactly what a pattern selects, and executes nothing:
+`query` lists pattern matches without filtering by verb or exclusive tier,
+and executes nothing:
 
 ```bash
 pnpm exec smithers-build query '//packages/...:faults'
@@ -74,6 +88,8 @@ still without executing:
 
 ```bash
 pnpm exec smithers-build test '//packages/...' --plan
+pnpm exec smithers-build ci '//packages/...' --plan
+pnpm exec smithers-build test '//packages/...:faults' --plan
 ```
 
 Use `query` when you are unsure the pattern matches. Use `--plan` when you are
@@ -82,11 +98,18 @@ unsure the run is safe or want to see which targets the cache already covers.
 ## Bound the concurrency
 
 `--jobs, -j <n>` caps concurrent targets; the default is the host's available
-parallelism. Lower it when targets contend for a shared resource:
+parallelism. The executor drains ready ordinary targets first, then gives each
+exclusive target a window with no other target running. Dependencies retain
+their ordering, so an exclusive prerequisite can run before its ordinary
+consumer. This holds even when `--jobs` is greater than one:
 
 ```bash
 pnpm exec smithers-build test '//packages/...:faults' --jobs 1
 ```
+
+Isolation covers one invocation. Separate CLI invocations still need separate
+machines or external coordination. Fault configs must also keep Vitest's
+`fileParallelism: false` so cases within one target remain serial.
 
 ## Skip the cache for one run
 

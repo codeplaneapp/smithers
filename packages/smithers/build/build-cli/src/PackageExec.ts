@@ -506,6 +506,8 @@ export interface RunOptions {
   readonly remoteCache?: Workspace.RemoteCacheAccess | undefined
   readonly verb: PackageVerb
   readonly pattern: string
+  /** Opts wildcard test and CI selections into the exclusive tier. */
+  readonly includeExclusive?: boolean | undefined
   /**
    * The plan runs with nobody attending it: the aggregate `ci` verb. Roots
    * whose rule spawns an agent under a verb `ci` aggregates (`Docs.Page`
@@ -3164,9 +3166,13 @@ export interface PackagePlan {
 export const plan = async (options: RunOptions): Promise<PackagePlan> => {
   const index = options.index
   const log = Reporter.of(options).note
-  const rows = index.resolve(options.pattern)
   const verb = options.verb
   const parsedPattern = Label.parse(options.pattern, index.currentPackage ?? "")
+  const omitExclusive = (verb === "test" || options.unattended === true) &&
+    parsedPattern._tag === "Subtree" && parsedPattern.target === undefined && options.includeExclusive !== true
+  const rows = index.resolve(options.pattern).filter((row) =>
+    !omitExclusive || !Target.isExclusive(Target.metadata(row.target).attrs)
+  )
   const repoResolutions: RepoResolution.ResolutionCache = new Map()
   const eligible = verb === "auto"
     ? rows
@@ -3286,6 +3292,9 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     workLabels.add(label)
     const node = context.nodes.get(label)
     if (node === undefined) throw new Error(`planned execution edge names an unplanned node: ${label}`)
+    if (omitExclusive && Target.isExclusive(node.attrs)) {
+      throw new Error(`wildcard selection reaches exclusive dependency ${label}; use --include-exclusive to run it`)
+    }
     for (const dependency of node.dependencies) queue.push(dependency)
     // A refused consumer never acts, so its gates are not scheduled: running
     // them would be work in the name of a check nothing will consume.

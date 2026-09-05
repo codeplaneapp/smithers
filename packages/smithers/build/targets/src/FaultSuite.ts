@@ -22,8 +22,8 @@ import { Vitest } from "./Vitest.ts"
  */
 export interface Options {
   /**
-   * The package manager the run goes through. Omitted — which is what a
-   * PACKAGE.ts writes — it resolves from the workspace declaration when the
+   * The package manager the run goes through. When omitted in a PACKAGE.ts,
+   * it resolves from the workspace declaration when the
    * graph is planned.
    */
   readonly packageManager?: PackageManager.PackageManager | undefined
@@ -64,8 +64,14 @@ export interface Options {
  * rather than more files under the package's ordinary `test`: a unit suite
  * that ran beside a case would be racing a process reaper it never declared.
  *
- * Coverage is off for the same reason `BunSuite` turns it off — not because
- * the instrumentation cannot attach, but because these cases are the wrong
+ * The emitted Vitest target carries `exclusive: true`. Wildcard `ci` and
+ * `test` selections omit it unless `--include-exclusive` opts in. An explicit
+ * label such as `//packages/...:faults` selects it directly. The executor
+ * drains ready ordinary work before running each exclusive target alone,
+ * regardless of `--jobs`. This isolation covers one executor invocation;
+ * independent invocations still need separate machines or external coordination.
+ *
+ * Coverage is off because these cases are the wrong
  * instrument for it. A case spends most of its wall time in child processes
  * whose coverage this process never sees, and the package's `test` target
  * beside it stays the coverage gate.
@@ -97,6 +103,7 @@ export const FaultSuite = (options: Options): ReturnType<typeof Vitest> =>
     config: options.config === undefined ? Input.file("vitest.faults.config.ts") : options.config,
     environment: options.environment ?? "node",
     coverage: false,
+    exclusive: true,
     passWithNoTests: false,
     cwd: options.cwd
   })

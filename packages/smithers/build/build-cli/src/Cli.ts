@@ -40,7 +40,12 @@ const workspaceOption = z.object({
 
 const executionOptions = workspaceOption.extend({
   plan: z.boolean().default(false).describe("Print the inert plan instead of executing"),
-  jobs: z.number().int().min(1).optional().describe("Maximum concurrent targets; defaults to host parallelism"),
+  jobs: z.number().int().min(1).optional().describe(
+    "Maximum concurrent targets; defaults to host parallelism. Exclusive targets run alone after ready ordinary work"
+  ),
+  includeExclusive: z.boolean().default(false).describe(
+    "Include exclusive targets in wildcard ci/test selections; explicit labels already include them"
+  ),
   cache: z.boolean().default(true).describe("Consult the result cache before running; --no-cache bypasses reads")
 })
 
@@ -84,6 +89,7 @@ interface WorkspaceFlags {
 interface ExecutionFlags extends WorkspaceFlags {
   readonly plan: boolean
   readonly jobs?: number | undefined
+  readonly includeExclusive?: boolean | undefined
   readonly cache: boolean
 }
 
@@ -506,6 +512,7 @@ const runPackageVerb = async (
     write: flags.write,
     fix: flags.fix,
     plan: flags.plan,
+    includeExclusive: flags.includeExclusive,
     jobs: flags.jobs,
     readCache: flags.cache,
     signal: config.signal,
@@ -601,6 +608,7 @@ const runCi = async (
             verb: kind,
             pattern,
             plan: flags.plan,
+            includeExclusive: flags.includeExclusive,
             jobs: flags.jobs,
             readCache: flags.cache,
             signal: config.signal,
@@ -816,7 +824,7 @@ export const makeCli = (config: RuntimeConfig = {}) =>
         )
     })
     .command("test", {
-      description: "Execute the test targets selected by a pattern",
+      description: "Execute test targets; wildcards omit exclusive tiers unless --include-exclusive is set",
       args: patternArgument,
       options: executionOptions,
       alias: executionAlias,
@@ -933,7 +941,8 @@ export const makeCli = (config: RuntimeConfig = {}) =>
       }
     })
     .command("ci", {
-      description: "Execute build, test, lint, and documentation targets over one merged graph",
+      description:
+        "Execute build, test, lint, and documentation targets; wildcards omit exclusive tiers unless --include-exclusive is set",
       args: patternArgument,
       options: executionOptions,
       alias: executionAlias,

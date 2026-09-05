@@ -37,11 +37,17 @@ in the workspace declaration, then `.flows`. See
 `build`, `test`, `lint`, `docs`, `review`, `run`, `target`, and `ci` add these
 to the workspace options.
 
-| Option                   | Alias | Type       | Default          | Meaning                                                         |
-| ------------------------ | ----- | ---------- | ---------------- | --------------------------------------------------------------- |
-| `--plan`                 |       | boolean    | `false`          | Print the inert plan and execute nothing.                       |
-| `--jobs`                 | `-j`  | integer 1+ | host parallelism | Maximum concurrent targets.                                     |
-| `--cache` / `--no-cache` |       | boolean    | `true`           | Consult the cache before running. `--no-cache` still publishes. |
+| Option                   | Alias | Type       | Default          | Meaning                                                           |
+| ------------------------ | ----- | ---------- | ---------------- | ----------------------------------------------------------------- |
+| `--plan`                 |       | boolean    | `false`          | Print the inert plan and execute nothing.                         |
+| `--jobs`                 | `-j`  | integer 1+ | host parallelism | Maximum concurrent targets.                                       |
+| `--include-exclusive`    |       | boolean    | `false`          | Include exclusive targets in wildcard `ci` and `test` selections. |
+| `--cache` / `--no-cache` |       | boolean    | `true`           | Consult the cache before running. `--no-cache` still publishes.   |
+
+Exclusive targets run alone after ready ordinary work drains, regardless of
+`--jobs`. Dependencies keep their ordering. Explicit labels, including
+`//packages/...:faults`, select exclusive targets without an opt-in flag.
+`--plan` applies the same selection rules and executes no targets.
 
 ## Global options
 

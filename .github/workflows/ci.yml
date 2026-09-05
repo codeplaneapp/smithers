@@ -265,7 +265,7 @@ jobs:
           tool: jj-cli@0.39.0
       - name: Initialize colocated jj repository
         run: jj git init --colocate
-      - name: Fault matrix
+      - name: Exclusive fault matrix
         run: pnpm exec smithers-build test '//packages/...:faults' --jobs 1
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"

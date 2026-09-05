@@ -52,6 +52,18 @@ const kindNames: ReadonlySet<string> = new Set(["build", "test", "lint", "run", 
 const isKind = (value: unknown): value is Kind => typeof value === "string" && kindNames.has(value)
 
 /**
+ * Whether validated target attrs require an exclusive execution window.
+ *
+ * Rules opt into this tier with an `exclusive` boolean attr. Wildcard test
+ * and CI selections omit these targets unless explicitly opted in; once
+ * selected, each runs alone within its executor invocation.
+ *
+ * @category guards
+ * @since 0.1.0
+ */
+export const isExclusive = (attrs: unknown): boolean => Predicate.isObject(attrs) && attrs["exclusive"] === true
+
+/**
  * Runtime marker shared by source and installed copies of this package.
  *
  * @category type ids
