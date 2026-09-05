@@ -21,7 +21,7 @@
  * `@smthrs/platform-browser`'s `BrowserHost` and `@smthrs/platform-bun`'s
  * `BunHost`.
  */
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"

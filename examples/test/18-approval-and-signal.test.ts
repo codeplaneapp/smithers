@@ -33,7 +33,7 @@ it.effect("gates a launch on a plan approval and ends a durable wait with a sign
     // The step ran twice and read the token both times: unresolved on the
     // drive that parked, resolved on the drive after an operator decided. It
     // did not run a third time, because by then its result was recorded.
-    expect(summary.run.clearanceReads).toEqual([false, true])
+    expect(summary.run.clearanceReads).toEqual(["Pending", "Approved"])
 
     // The run parked again after the gate opened, this time on its signal.
     expect(summary.run.parked).toBe("parked")
@@ -41,7 +41,9 @@ it.effect("gates a launch on a plan approval and ends a durable wait with a sign
 
     // The in-run approval resolved exactly once and is durable.
     expect(summary.run.approvalReceipt).toBe("Accepted")
-    expect(summary.run.approvalResolved).toBe(true)
+    expect(summary.run.approvalDecision).toBe("Approved")
+    expect(summary.run.deniedClearanceReads).toEqual(["Pending", "Denied"])
+    expect(summary.run.deniedFailure).toBe("/control/ApprovalDenied")
     expect(summary.run.approvals).toEqual(["Node"])
 
     // The signal is a recorded fact; the host is what turned it into a

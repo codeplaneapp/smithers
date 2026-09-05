@@ -1,14 +1,13 @@
 /**
- * A live smoke test against a fully local model: the same assembled
- * production agent stack as `liveOpenAiSmoke` (see `12-agent-live-smoke.ts`),
- * run against Ollama over `Route.openaiChatCompatible` instead of a paid provider.
+ * Run a model-backed action against a local Ollama endpoint.
  *
- * This needs no API key, no billing, and no external network access: only
- * a local Ollama daemon with a model pulled (`ollama pull qwen2.5:7b`). It
- * exists because both real provider keys available in the authoring
- * environment (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) were out of credit,
- * and a "production ready candidate" has to be testable without asking
- * anyone to go get a credit card out.
+ * The composition uses `Route.openaiChatCompatible` with a local model server.
+ * Start Ollama and download the model configured by the example before running
+ * it. `main` accepts the server base URL and defaults to
+ * `http://localhost:11434`.
+ *
+ * This example needs a running local model; it is not a deterministic substitute
+ * for the scripted-model tests.
  *
  * The test requires explicit opt-in even when Ollama is running. From
  * `examples/`, run

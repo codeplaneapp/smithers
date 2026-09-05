@@ -1,11 +1,10 @@
 /**
- * Retry a flaky action, and read the policy that decides when to stop.
+ * Inspect a retry policy and retry an action that fails before succeeding.
  *
- * `RetryPolicy` is data. `nextDelay` and `decide` are pure functions over that
- * data, so a deployment can inspect a backoff ladder without running anything.
- * `Action.retry` is the runtime side: it re-dispatches the action and
- * advances `Action.CurrentAttempt`, which is the attempt number the durable
- * store addresses each attempt row by.
+ * `RetryPolicy.nextDelay` and `decide` inspect a policy as data. Separately,
+ * `Action.retry` wraps an effect with Effect retry options and advances
+ * `Action.CurrentAttempt` for durable dispatch. The policy inspection and
+ * executed retry loop are separate parts of this example.
  */
 import { Action, Flow, Interpreter, RetryPolicy } from "@smthrs/flow"
 import * as Effect from "effect/Effect"

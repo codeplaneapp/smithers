@@ -1,17 +1,11 @@
 /**
- * A live smoke test: the assembled production agent stack (the real cell
- * loop, the real durable engine, the real `AgentAction` machinery) run
- * against a real model over the network with a real API key.
+ * Run a model-backed action against a live OpenAI provider.
  *
- * Every example before this one scripts its model deliberately, so CI runs
- * with no credentials and no cost. `packages/smithers/agent/test/Agent.test.ts` says
- * why this one exists anyway: "a smoke test that calls a provider is not a
- * smoke test" if it doesn't. This is that smoke test, for the example
- * composition rather than the harness's own hand-wired one.
- *
- * Requires `OPENAI_API_KEY`. Not part of the deterministic example suite; its
- * test requires `SMITHERS_LIVE_EXAMPLES=1` as well as the key. The ordinary
- * `pnpm run test:examples` suite clears the key in its test environment.
+ * This exercises the agent loop, action adapter, and engine with a network
+ * request. `main` reads `OPENAI_API_KEY`; importing the module does not call the
+ * provider. The dedicated test requires both the key and
+ * `SMITHERS_LIVE_EXAMPLES=1`; a skipped result does not verify live execution.
+ * The ordinary example suite clears the key in its test environment.
  * From `examples/`, run
  * `SMITHERS_LIVE_EXAMPLES=1 pnpm exec vitest run test/12-agent-live-smoke.test.ts`.
  * The test allows 300 seconds for the model round trip.

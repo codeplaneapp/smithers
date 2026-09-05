@@ -1,31 +1,15 @@
 /**
- * Declare how long a recorded result stays good, and what to undo when a step
- * that already changed the world fails.
+ * Apply a cache lifetime and restore workspace state before retrying a
+ * compensable action.
  *
- * The two halves are the two ends of an action's lifetime.
+ * `CacheEnvironment.withCache` declares the result's scope and age bound. The
+ * engine records its cache-age decision so a resumed execution can reuse that
+ * decision.
  *
- * **A cache policy is a declaration on the action.**
- * `CacheEnvironment.withCache(action, { ttlMs, scope })` annotates it, and
- * `@smthrs/engine-store` reads the annotation at dispatch: `scope` narrows the
- * address the row is stored under, and `ttlMs` bounds the age of a row the
- * engine may serve. The age judgement is journalled as a
- * `flows.engine.cache-provenance` record with `action: "ttl"` before it is
- * acted on, so a reader can tell an expiry from a plain miss and a resumed run
- * reads the verdict it already took instead of re-judging it against a fresh
- * clock.
- *
- * **A compensation is a tier, not a callback.** A `compensable` action tells
- * the engine that its body changes the workspace, so the engine takes a `Jj`
- * pre-image before the attempt and, on a retry, restores that pre-image before
- * the next one. The undo is therefore the engine's, not the body's: an action
- * that fails halfway through leaves nothing behind for attempt two to trip
- * over. The `Jj` here is a real one that copies a directory, so the file on
- * disk is the evidence.
- *
- * Three declarations make a sealed result shareable, and all three are here:
- * the action's `idempotencyKey`, its hard file boundary, and the composition's
- * complete `CacheEnvironment`. Missing any one of them scopes the key to its own
- * run. See `35-remote-cache.ts` for what the same three buy across machines.
+ * The compensable action captures a workspace pre-image and restores it before
+ * another attempt. The example uses a directory-copying `Jj` implementation to
+ * check the file state. Cross-run sealed reuse also needs an idempotency key, a
+ * hard file boundary, and a complete cache environment.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"

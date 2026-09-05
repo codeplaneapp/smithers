@@ -1,22 +1,13 @@
 /**
- * Keep the durable engine here, and place one action body somewhere else.
+ * Place an action's host operations in a provisioned session.
  *
- * Placement decides which machine supplies the host services an action sees.
- * The engine still plans the flow, dispatches the action, and journals its
- * result through the local SQLite composition. Only the implementation layer
- * is given `Sandbox.layerHost`, so its file operations and child processes use
- * one provisioned session instead of the engine host.
+ * The engine and journal remain local. `Sandbox.layerHost` supplies filesystem
+ * and process services from one session, so a process can read the file written
+ * through that session's filesystem.
  *
- * The body itself knows none of that. It asks for Effect's ordinary
- * `FileSystem` and `ChildProcessSpawner`, writes a relative path, and runs
- * `wc -c` against that path. `Sandbox.layerHost` projects both services from
- * the SAME session, which is why the process sees the file without either
- * operation naming a provider or a remote path.
- *
- * `DirectorySandbox` makes the provisioned machine a real scratch directory
- * for this runnable example. The action execution scope owns the host layer;
- * completing the action closes that scope, releases the session, and removes
- * its workspace. The engine and journal remain open over the local database.
+ * The example uses a scratch directory as its provisioned environment. Closing
+ * the action scope releases the session and removes its workspace; the action's
+ * JavaScript still executes in the engine host.
  */
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"

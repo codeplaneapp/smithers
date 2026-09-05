@@ -1,14 +1,12 @@
 /**
- * Bounded loops: repair a config until it is clean, then tune a summary.
+ * Repair a configuration and refine a summary with bounded loop patterns.
  *
- * Every pattern here has the same two halves. `make` declares the conservative
- * topology, unrolling the bound so a plan states the worst case. `run` is the
- * Effect that stops when the work is actually done. This program uses `run`,
- * because the value the loop stops on is a runtime value; see
- * `docs/pages/api/patterns-loops.md` for what the declarations look like.
+ * The example calls each pattern's runtime `run` operation, which stops when its
+ * value-dependent condition is met. The declaration-side `make` operation
+ * describes the conservative graph with its bound.
  *
- * The fixtures are deterministic, so the program answers the same way on every
- * run and needs no model, no engine, and no network.
+ * The fixtures are deterministic and need no model, durable engine, or network.
+ * See the patterns API reference for the declaration forms.
  */
 import * as DriftDetector from "@smthrs/patterns/DriftDetector"
 import * as Loop from "@smthrs/patterns/Loop"

@@ -1,17 +1,13 @@
 /**
- * A live smoke test of `packages/smithers/agent/model` itself: `Route` → `Model.stream`,
- * with no `AgentAction`/`Interpreter` cell-REPL convention layered on top.
+ * Stream a response directly through the model package.
  *
- * `12`-`14` proved this same routing/protocol code is correct by driving it
- * through the full production agent harness, which wraps every call in a
- * sophisticated structured-completion convention meant for capable models
- * (GPT-4/Claude/Gemini-class). That convention is real production code,
- * working as designed. It is simply the wrong bar for a model small enough
- * to run for free on a nearly-full local disk. What this session actually
- * built and fixed lives in `packages/smithers/agent/model` (the Chat Completions protocol,
- * the route constructors, the harness's cause-field serialization), and
- * that is exactly what this file proves, directly, with nothing else in
- * the way.
+ * `ask` accepts a question, model ID, compatible endpoint, and API key. It
+ * constructs a route, calls `Model.stream`, and collects response text. This
+ * isolates model transport from the agent's cell loop and structured completion
+ * protocol.
+ *
+ * Running the file directly uses its command-line arguments and contacts the
+ * selected endpoint. The defaults target a local model server.
  *
  * @since 0.1.0
  */

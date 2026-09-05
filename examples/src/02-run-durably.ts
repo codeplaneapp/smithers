@@ -1,12 +1,10 @@
 /**
- * Run a flow on the durable engine and read the journal it wrote.
+ * Run a flow on the durable engine and read its journal.
  *
- * The authoring model is the one example 01 introduces: `Bundle` is the
- * declared atom the flow's `body` names, and `Compile` is the sealed action
- * that atom's implementation runs. What changes here is the engine underneath:
- * `EngineStore` claims a run row, fences it with a heartbeat, persists every
- * action attempt, and commits each lifecycle event in the same transaction as
- * the state transition it describes.
+ * The flow calls `Bundle`, whose implementation executes a sealed `Compile`
+ * action. The durable engine claims the run, maintains its ownership heartbeat,
+ * and persists action attempts. It commits lifecycle events together with the
+ * state changes they describe.
  */
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"

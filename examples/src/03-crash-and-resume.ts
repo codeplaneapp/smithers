@@ -1,16 +1,13 @@
 /**
- * Suspend a run, drop the engine, and resume from durable state.
+ * Suspend a run and resume it through a fresh engine over the same SQLite file.
  *
- * Each phase builds its own engine over the same SQLite file, which is what a
- * process restart looks like from the database's point of view. Phase one runs
- * until `DurableDeferred.await` finds no recorded completion, suspends, and
- * releases ownership. Phase two attaches the same implementation, completes the
- * deferred, and drives the run to a result.
+ * The first drive waits on a durable deferred and releases ownership. The second
+ * drive completes that deferred and finishes the execution.
  *
- * The flow is a body over one declared step, `Assess`. Its implementation is
- * where the durable wait lives, which is what makes the counters below the
- * replay contract: the step's implementation runs twice, and the sealed
- * action in front of the suspension dispatches once.
+ * The counters identify what repeats: the `Assess` implementation enters twice,
+ * while the sealed read action before the wait executes once. This simulates an
+ * engine restart after a durable suspension; it does not kill a process
+ * mid-write.
  */
 import { Action, DurableDeferred, Flow, FlowRuntime, Interpreter } from "@smthrs/flow"
 import * as Effect from "effect/Effect"

@@ -1,20 +1,12 @@
 /**
- * Poll something until it is ready, and survive a restart in the middle of the
- * wait.
+ * Resume a poll after stopping the engine during its durable timer.
  *
- * `Poll.make` declares a flow whose body is ONE attempt, so a poll is a lineage
- * of durable rounds rather than a loop inside a step. That is what makes the
- * waiting free: the round that is sleeping holds no process, and the round that
- * wakes replays the attempt it already made instead of making it again.
+ * Each `Poll.make` round performs one check. The first drive parks between
+ * attempts; a fresh engine opens the same SQLite state after the deadline and
+ * continues.
  *
- * Each phase below builds its own engine over the same SQLite file, which is
- * what a restart looks like from the database's point of view. Phase one runs
- * the first attempt and parks on the durable timer between attempts. The engine
- * is then dropped while the timer is still pending. Phase two attaches a fresh
- * engine after the timer is due and drives the poll to a satisfied check.
- *
- * `checks` is the contract: one dispatch per attempt, across both phases. A
- * poll that re-ran attempt one after the restart would show four.
+ * The returned check count verifies that the resumed run does not repeat the
+ * recorded first attempt.
  */
 import { Action, Interpreter, Poll, Sleep } from "@smthrs/flow"
 import * as Effect from "effect/Effect"

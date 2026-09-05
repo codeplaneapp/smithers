@@ -1,22 +1,13 @@
 /**
- * Kill a host, and watch the next one clean up after it.
+ * Recover process cleanup after a host is killed with SIGKILL.
  *
- * Cancelling a run interrupts fibers, and closing a scope signals the children
- * that scope still holds a handle for. Neither of those happens when the host
- * process is KILLED: no finalizer runs, and the agents it started keep running
- * with nobody left to signal them.
+ * The host records each spawned process group in the durable `ProcessLedger`. A
+ * later incarnation of the same host ID inspects those records, reaps groups
+ * whose owner is gone, and journals the result.
  *
- * `NodeRuntime.layerHost` closes that hole with two pieces that only make sense
- * together. Every child it spawns leads its own process group and is recorded
- * in the durable `ProcessLedger` under the host's id; and every host, on the way
- * up, reads the records earlier incarnations of the SAME host id left behind,
- * kills the groups whose owner is gone, and journals
- * `flows.host.process-reaped.v1` so a third incarnation does not try the same
- * kill against a pid the operating system has since handed to somebody else.
- *
- * The first phase is a real child process, killed with `SIGKILL`, because a
- * host that shuts down politely proves the opposite of what this example is
- * about.
+ * The companion host program runs in a separate process so the example can kill
+ * it without running its finalizers. This exercises recovery that a graceful
+ * shutdown would not test.
  */
 import { Journal, Kernel } from "@smthrs/flows"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"

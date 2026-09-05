@@ -1,25 +1,13 @@
 /**
- * Share step results between two engines through a real HTTP action cache.
+ * Share a sealed step result between engines with separate databases.
  *
- * Everything before this example keeps a step's recorded result on the machine
- * that produced it. Here a second engine, over a database file the first one
- * never touched, replays that result without executing the body, because both
- * engines compose `CombinedCacheStore` over a shared HTTP tier.
+ * Both engines compose a local cache with the same HTTP action-cache tier.
+ * Deferred publication keeps the remote request outside the local state
+ * transaction. A refused publication leaves the run successful and records an
+ * unpublished provenance result.
  *
- * Two seams make it safe, and both are visible below:
- *
- * - `publication: "deferred"` keeps the shared write out of the transaction
- *   that makes the local row durable. `CacheSync` performs it afterwards.
- * - A refused publication never fails the run. The result is already durable on
- *   this host, so the engine journals an `unpublished` cache-provenance record
- *   and carries on. The third scenario below asserts exactly that.
- *
- * The server here speaks the action-cache half of the dumb-HTTP protocol
- * (`GET`/`PUT /ac/{keyDigest}`) over plain HTTP on localhost. The artifact half
- * (`RemoteArtifacts`, `/cas/{digest}`) is deliberately not composed: it refuses
- * any endpoint that is not HTTPS, because it carries credentials, and a
- * loopback exception would be a credential leak waiting for a misconfiguration.
- * A shared artifact tier belongs behind TLS like every other one.
+ * The example server uses loopback HTTP for the action-cache protocol. It does
+ * not compose the remote artifact tier, which requires HTTPS.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"

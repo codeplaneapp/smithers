@@ -66,7 +66,7 @@ const suite = Smithers.Vitest({
  * declared in apps/site never expands into this package, so the group is the
  * edge that makes a page regenerate when its example changes.
  */
-const docs = Smithers.Filegroup({ srcs: [sources, fixtures], cwd })
+const docs = Smithers.Filegroup({ srcs: [sources, tests, fixtures], cwd })
 
 export const Package = Smithers.Package({
   targets: { check, suite, docs }

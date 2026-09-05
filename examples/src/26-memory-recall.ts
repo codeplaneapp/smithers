@@ -1,42 +1,13 @@
 /**
- * Write facts one run learned, recall them in a later run, and let one policy
- * decide which bank the whole flow tree reads and writes.
+ * Store facts in one run and recall them in a later execution.
  *
- * Memory is durable and cross-run by construction. `MemoryStore` is a SQL store
- * over the same database the engine runs on, and `remember` and `recall` are
- * ordinary flow declarations a cell calls by name. There is no `ctx.memory` and
- * no side channel: a cell that writes a fact runs the same two lines as a cell
- * that reads a file, which is why the whole example is `FlowBinding` plus six
- * durable runs.
+ * Separate durable runs share the SQL memory store. `WithMemory.withMemory`
+ * applies namespace, recall budget, and retention policy to a flow tree. The
+ * handler source must use the annotated flow so those policies reach the store.
  *
- * Six runs rather than six function calls, because "recall it in a later run"
- * is the claim. Run 1 records three facts and settles. Run 2 is a separate
- * durable execution with its own row, its own journal, and its own frames, and
- * it finds them. Nothing is handed between them but the database.
- *
- * The part worth reading twice is the policy. A delegated plan generates work
- * nobody named, so "which namespace does this write go to" cannot be an
- * argument threaded through every call. `WithMemory.withMemory(flow, policy)`
- * attaches it to the declaration instead, and every flow that declaration names
- * inherits the same one. `Flows.handlersFor(flow)` is what reads it back, which
- * is why `memorySource` binds the copy `withMemory` produced rather than
- * the bare export. Binding the bare declaration reaches the store with no
- * namespace, no budget, and no way to honour a refusal.
- *
- * Two of the four policy fields are refusals rather than defaults, and both win
- * over what the caller asked for. `recall: "none"` never reaches the recall
- * service, and `retain: "never"` drops the write while still answering with the
- * key the caller asked for. Runs 4 and 5 are those two, bound to sources that
- * differ from run 2's only in the policy they carry.
- *
- * Recall here is SQLite FTS5, which is a real index the store maintains rather
- * than a scan this example writes. `enableFts` is the store's own switch, and a
- * namespace kind it was never enabled for fails loudly instead of quietly
- * returning nothing.
- *
- * The seat resolves to a scripted model, so this runs in CI with no API key.
- * The model reads its task out of the prompt and answers with a cell, which is
- * what makes it a scripted MODEL rather than a scripted answer.
+ * The scenarios also exercise `recall: "none"` and `retain: "never"`. Recall
+ * uses SQLite FTS5, enabled for the relevant namespace kind. A scripted model
+ * keeps the example independent of provider access.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"

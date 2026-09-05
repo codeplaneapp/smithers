@@ -1,30 +1,14 @@
 /**
- * A model-backed step with a typed output schema, chained into another one.
+ * Pass typed output from a research action into a writing action.
  *
- * This is the Smithers form of a two-step research-then-write workflow: the
- * first step asks a model to research a topic and hands back
- * `{ summary, keyPoints }`, the second turns that into an article. Both are
- * model calls, and neither is special topology: the unified flow-authoring
- * model says a model call is an ordinary action, so `AgentAction.make`
- * declares one exactly
- * the way `Action.make` declares any other. The difference is that the author
- * does not write `toLayer`: a model call has one implementation, it runs the
- * cell loop, and it ships with the declaration as `.layer`.
+ * Both steps use `AgentAction.make`. The research step returns a summary and key
+ * points; the writing step consumes those fields. The output schema is included
+ * in the agent's instructions and validates its final answer, with a bounded
+ * correction attempt for invalid output.
  *
- * What the author declares is the seat, the system teaching, the prompt built
- * from the step payload, and the `output` schema. That schema is enforced:
- * it is rendered into the run's system teaching as JSON Schema, and the agent's
- * final answer is decoded by it, with one correction re-prompt before the step
- * fails `StructuredOutputFailure`. A downstream step therefore reads
- * `research.summary` as a `string`, not as text somebody has to parse.
- *
- * The host half is two services. `AgentAction.Host` carries the registry a cell
- * may call into and the sandbox budget every model-backed action in the
- * composition shares; `SeatResolver` turns the declared seat string into a live
- * model, and it is the only place a credential would appear. This example
- * resolves every seat to a scripted model, which is why it runs in CI with no
- * API key. Point the resolver at a real provider route and nothing above it
- * changes.
+ * `AgentAction.Host` supplies the callable registry and sandbox budget.
+ * `SeatResolver` supplies a scripted model, so this example needs no provider
+ * credential.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
@@ -82,7 +66,7 @@ export const Write = AgentAction.make("examples/Write", {
 
 /**
  * The workflow. Nothing executes at plan time: `Research.call` records one
- * node, and `Node.andThen` feeds its planned result into `Write.call`.
+ * node, and `Node.bindPlanned` feeds its planned result into `Write.call`.
  */
 export const SimpleWorkflow = Flow.make("examples/SimpleWorkflow", {
   payload: { topic: Schema.String },
@@ -90,7 +74,7 @@ export const SimpleWorkflow = Flow.make("examples/SimpleWorkflow", {
   error: AgentAction.AgentFailure,
   body: ({ topic }) =>
     Research.call({ topic }).pipe(
-      Node.andThen((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
+      Node.bindPlanned((research) => Write.call({ summary: research.summary, keyPoints: research.keyPoints }))
     )
 })
 

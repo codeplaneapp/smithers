@@ -1,18 +1,12 @@
 /**
  * Define a typed flow and run it on the in-memory engine.
  *
- * This is the shortest complete program in the library, and it is the two nouns
- * of the unified flow-authoring model at their smallest. `Action.make`
- * declares the atom that does the work (schemas and a stable
- * tag, no code) and `toLayer` attaches the implementation separately, where
- * the code can run. `Flow.make` declares the composite, and its `body` names
- * the action rather than calling it: a body is planned, so `Greet.call`
- * records one node and executes nothing.
+ * `Action.make` declares the greeting operation and its schemas. `toLayer`
+ * supplies its implementation. The flow body describes one `Greet.call`, which
+ * the interpreter executes through the registered implementation.
  *
- * `Interpreter.layer` is what turns that plan into a run, over the
- * `Action.layerImplementations` table the implementation files itself in, and
- * `FlowEngine.layerMemory` supplies an engine that keeps its state in the
- * process.
+ * `FlowEngine.layerMemory` keeps state in the process. The result is useful for
+ * learning the authoring API and for tests; it does not survive process exit.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { FlowEngine } from "@smthrs/engine"

@@ -1,23 +1,12 @@
 /**
- * Draft, review, revise, and stop, either when the reviewer approves or when
- * the round budget runs out.
+ * Draft, review, and revise until approval or the round limit.
  *
- * A flow body is built before it runs, so it cannot contain a `while` over a
- * value that does not exist yet. A bounded loop is therefore unrolled into
- * topology: one review per round, one revision between rounds, and a `branch`
- * whose predicate decides on the real verdict. Every round the loop could reach
- * is in the plan an operator reads, including the exit taken when the budget is
- * spent, and only the arm the predicate chose ever settles.
+ * The plan contains the bounded review rounds and their branches before
+ * execution. A runtime verdict chooses which branch settles. The reviewer is a
+ * deterministic action; a model-backed action can use the same graph shape.
  *
- * That unrolling is what makes the bound enforceable. A budget checked inside a
- * step is a promise the step makes; a budget that is the last round in the plan
- * is a fact about the graph, and no reviewer, however stubborn, can spend a
- * fourth round that was never planned.
- *
- * The reviewer here is a plain action so the example is deterministic. Swapping
- * it for `@smthrs/agent`'s `AgentAction.make` changes the implementation and
- * nothing about this topology: a model call is an ordinary action, with the same
- * `.call()` and the same plan node. See `11-agent-step.ts`.
+ * The example verifies both approval before the limit and termination when the
+ * available rounds are exhausted.
  */
 import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
@@ -90,7 +79,7 @@ const reviewRound = (
     else: index >= maxRounds
       ? () => Publish.call({ text, approved: false, rounds: index })
       : (verdict) =>
-        Node.andThen(
+        Node.bindPlanned(
           Revise.call({ text, feedback: verdict.feedback }),
           (revised: Planned.Planned<string>) => reviewRound(index + 1, revised)
         )
@@ -101,7 +90,7 @@ export const Article = Flow.make("examples/Article", {
   payload: { topic: Schema.String },
   success: Outcome,
   body: ({ topic }: { readonly topic: string }) =>
-    Node.andThen(Draft.call({ topic }), (text: Planned.Planned<string>) => reviewRound(1, text))
+    Node.bindPlanned(Draft.call({ topic }), (text: Planned.Planned<string>) => reviewRound(1, text))
 })
 
 /** How many nodes of each action the built plan holds, before anything runs. */

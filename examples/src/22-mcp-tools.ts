@@ -1,34 +1,13 @@
 /**
- * Give a model tools that live in somebody else's process.
+ * Give an agent tools supplied by a separate MCP server process.
  *
- * An MCP server is a subprocess speaking newline-delimited JSON-RPC over stdio,
- * and its tools are code this repository does not own. None of that reaches the
- * cell. `McpFlows.mcp(client)` projects a connected session's catalog as an
- * ordinary `FlowBinding.Source`, one flow per tool, and a cell that calls an MCP
- * tool runs the identical two lines as a cell that reads a file: find it in
- * `ctx.flows`, invoke it with `ctx.call`. Compare
- * `25-agent-tools-in-sandbox.ts`: the composition below differs by one source
- * and one capability.
+ * `McpFlows.mcp` projects the server's catalog into callable flow bindings. The
+ * cell discovers and calls them through the same flow interface as other tools.
  *
- * Two details are the adapter's honesty rather than its convenience.
- *
- * A tool-level failure is DATA. MCP distinguishes "the call failed" from "the
- * tool ran and reported a problem", and the second one comes back as
- * `{ isError: true }` on a successful call, which is what the `explode` tool
- * below demonstrates. A transport failure is the other channel entirely and
- * fails the step.
- *
- * The declared authority is the conservative wildcard. An MCP tool is opaque
- * code, so `"*"` is the truthful declaration and a narrower guess would be a
- * claim nobody can back. It is also not a decision the ADAPTER can make: what a
- * given server may do depends on which server you connected and why. So the
- * host makes it, in `granting` below, and the run's envelope names that
- * grant rather than `*:*`. Connecting a server you trust and saying what you
- * trust it with are one decision, taken in one place.
- *
- * The server is `22-mcp-server.ts`, a dependency-free Node program in this
- * directory. It imports nothing from this repository, which is the point: the
- * process on the other end of an MCP session need not be ours.
+ * The example distinguishes a transport failure from a tool-reported `isError`
+ * result. The host explicitly grants the authority of the connected server; the
+ * adapter cannot infer the safety of opaque tool code. The companion
+ * `22-mcp-server.ts` implements the stdio protocol without importing Smithers.
  */
 import { NodeServices } from "@effect/platform-node"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

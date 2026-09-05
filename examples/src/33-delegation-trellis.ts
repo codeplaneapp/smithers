@@ -1,24 +1,13 @@
 /**
- * Run a plan a model authored, durably, one trampoline round per plan.
+ * Execute a model-authored plan across durable flow rounds.
  *
- * A flow body is built before it runs, so a body can only branch on values it
- * already holds. A delegated plan is not one: it is written while the run is in
- * flight. That is the whole reason `@smthrs/patterns` splits `Trellis` into a
- * declaration half and a runtime half, and it is why the durable recipe is a
- * handoff rather than a loop inside one round.
+ * `Delegate` calls the author action and hands its plan to `RunPlan` as the next
+ * round's payload. `RunPlan` can then validate that concrete plan and build its
+ * leaves into a `Node.all` join.
  *
- * The two rounds below are those halves:
- *
- * 1. `Delegate` calls the author step and hands the plan off with `.to`. The
- *    plan leaves this round as the next round's PAYLOAD, which is what makes it
- *    ordinary data by the time anything reads it.
- * 2. `RunPlan` receives that payload, so `Trellis.validate` and `Trellis.leaves`
- *    run over a real plan while the graph is being built. The leaves become one
- *    `Node.all` join of durable steps, and the round settles.
- *
- * Each round is its own journal segment, so a crash resumes at a round boundary
- * and never inside a tree no graph described. See
- * `docs/pages/api/patterns-delegation.md`.
+ * The handoff makes runtime-generated work available as input to a subsequent
+ * planning round. See the patterns API reference for `Trellis.validate` and
+ * `Trellis.leaves`.
  */
 import { Action, Flow, Graph, Interpreter } from "@smthrs/flow"
 import { Trellis } from "@smthrs/patterns"
@@ -89,7 +78,7 @@ export const Delegate = Flow.make("examples/Delegate", {
   success: Schema.Array(Schema.String),
   body: ({ goal }: { readonly goal: string }) =>
     AuthorPlan.call({ goal }).pipe(
-      Node.andThen(Node.capture({ goal }, (plan) => RunPlan.to({ goal, plan })))
+      Node.bindPlanned(Node.capture({ goal }, (plan) => RunPlan.to({ goal, plan })))
     )
 })
 

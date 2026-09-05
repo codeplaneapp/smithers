@@ -1,36 +1,13 @@
 /**
- * Give a model-backed step real tools, and run the code it writes inside a
- * sandbox.
+ * Run a scripted agent with filesystem tools inside a bounded QuickJS cell loop.
  *
- * Example 11 is one model call with no tools. This is the same shape with the
- * one thing a working agent adds: a catalog. There is no `ctx.fs`, no
- * `ctx.shell`, and no tool-call protocol. A capability is an ordinary flow
- * declaration plus the code that runs it, bound through
- * `@smthrs/harness/FlowBinding`, and the model reaches it the way it reaches
- * anything else: it finds it in `ctx.flows` and calls it with `ctx.call`.
- * `StandardFlows.filesystem` is that pairing for the seven standard file
- * capabilities, over whatever `FileSystem` the host provides. Here that is the
- * real Node one, pointed at a real directory.
+ * The cell reaches tools through registered flows. The host supplies a
+ * capability envelope, the sandbox limits cell evaluation, and durable call
+ * boundaries record tool outcomes for replay.
  *
- * The model does not run the code either. It answers with a fenced `cell`
- * block, and the block is evaluated inside the QuickJS sandbox
- * `Agent.layerDefaults` supplies: a separate WebAssembly realm with an explicit
- * budget, no ambient host access, and exactly one way out, which is a call to a
- * declared flow. A cell that loops forever spends its budget and stops; a cell
- * that reaches for `require` finds nothing there.
- *
- * Three boundaries therefore stack in one step, and each is visible below:
- *
- * - the CAPABILITY envelope, which is the host's answer to "what may this run
- *   touch at all". The standard flows declare real capabilities, and an empty
- *   envelope refuses every one of them.
- * - the SANDBOX budget, which bounds the code the model wrote.
- * - the durable step boundary, which records each call as a keyed
- *   `cell-call-started`/`cell-call-settled` pair, so a re-driven step replays
- *   the calls instead of repeating them.
- *
- * The seat resolves to a scripted model, so the example runs in CI with no API
- * key. Point `SeatResolver` at a provider route and nothing above it changes.
+ * The standard filesystem flows operate on a scratch directory through the
+ * supplied host service. The scripted seat makes the test deterministic and
+ * requires no API key.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"

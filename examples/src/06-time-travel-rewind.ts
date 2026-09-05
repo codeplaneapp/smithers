@@ -1,28 +1,13 @@
 /**
- * Rewind an ordinary engine run to an earlier frame, and re-derive a view.
+ * Inspect a run at a frame, then rewind its persistent state.
  *
- * Both operations hang off one injectable service:
+ * `inspect` folds the committed prefix through a reducer without running
+ * actions. `rewind` claims the run, assesses recorded effects, restores the
+ * workspace, and archives the suffix after the frame.
  *
- * `inspect` folds committed journal entries up to a frame through a pure
- * reducer. It reads; it never plans a flow body or runs an action.
- *
- * `rewind` is the mutating protocol. Behind the one call it claims the run,
- * records an audit, assesses external effects recorded on the journal, restores
- * the workspace, and archives and truncates the suffix past the frame in one
- * transaction. The ownership claim, the audit id, and the compensation-handler
- * registry are wired inside the service: none of them appear here.
- *
- * A position is a run id plus a frame `{ lineageId, seq }`, and `inspect` folds
- * only entries whose `meta.lineageId` matches. **Nothing below writes that
- * metadata.** The engine mints the lineage id from the run and stamps it on
- * every record it writes, so an ordinary run driven by the production
- * composition is inspectable as it stands. This example used to hand-author a
- * journal with `meta: { lineageId }` on every entry precisely because it was
- * not.
- *
- * The run is left SUSPENDED on purpose: rewind is a writer, so it takes the
- * ownership claim like any driver and refuses a live run. Phase one below parks
- * the run at a `DurableDeferred.await`, which is what makes it rewindable.
+ * The example parks the run on a durable deferred before rewinding, because a
+ * live run cannot be taken over for a rewind. Frame lineage metadata comes from
+ * engine-written records.
  */
 import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"

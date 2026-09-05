@@ -1,56 +1,14 @@
 /**
- * Drive a run over the wire: plan, approve, run, and watch a flow the host
- * discovered on disk, through an HTTP and WebSocket control server on loopback.
+ * Plan, approve, launch, and watch a flow through a loopback control server.
  *
- * Everything the in-process control plane does is reachable remotely, and
- * nothing about the vtable changes to make that true. `ControlServer.layerHttp`
- * mounts the same `Control` service as RPC, with unary procedures over
- * `POST /rpc` and the `watch` stream over `WebSocket /rpc/ws`, and
- * `ControlClient.layer` projects the RPC client back into the identical
- * `Control` interface. The
- * caller below could be handed either one and could not tell.
+ * Unary calls use HTTP RPC; the watch stream uses WebSocket RPC. The catalog
+ * comes from the example project's flow declarations, and its executor connects
+ * an approved plan to the registered durable implementation.
  *
- * Two transports, because the operations divide cleanly. Plan, approve, run and
- * list are requests with answers. `watch` is a projection of the journal that
- * keeps arriving, so it rides a socket, and a client that subscribes after the
- * fact still receives the entries it missed: the cursor is durable, not a live
- * fan-out that forgets.
- *
- * **The catalog is discovery, not a list in this file.** `<root>/flows/**` is
- * scanned by `Executable.layerProject` into the registry `control.list` reads,
- * so the flow the client plans is named by the directory it was found in.
- * `Executable.layer` turns each discovered descriptor into a registered durable
- * flow, so the same descriptor the client planned is the one the engine drives:
- * the run the watch follows is `flows/ship/flow.mdx` executing through the
- * `examples/RemoteShip` flow its frontmatter delegates to.
- *
- * **One chain, not two halves.** `ControlExecutor` is the seam between the
- * plane and a real engine, and `executorLayer` below is the whole bridge:
- * it resolves the approved plan's flow out of the registry, starts a durable
- * run under the run id the plane just minted, and mirrors what that run did
- * back onto the plane's row. So the run the client watches is the run the
- * client planned and approved, addressed by the id the `Accepted` receipt
- * handed back. Nothing in this file starts a run out of band.
- *
- * It forks rather than runs inline, and the fork waits on a latch, for the
- * reason `AgentSession` does the same: `Control.run` writes `running` on the
- * row after the executor answers `accepted`, so an executor that let the run
- * park first would have that write land on top of the park. Releasing the latch
- * after the receipt is in hand orders the two writes.
- *
- * **Two databases, one journal.** The plane and the engine keep their own run
- * tables, which is what `smthrs` itself does: `.flows/control.db` holds plans,
- * approvals, and the plane's projection of each run, `.flows/engine.db` holds
- * the durable execution state. They cannot share one, because a plane run row
- * and an engine run row are different documents under the same key. They DO
- * share the journal, and that is what makes `watch` worth having: one stream
- * carries `control.run.accepted` and `flows.engine.attempt-started` in the order
- * they happened.
- *
- * The server binds `127.0.0.1` on an ephemeral port and authenticates nothing,
- * which is a decision for a loopback example and nothing else. A control plane
- * that listens anywhere else needs a real authenticator; `ControlRpcs` ships a
- * bearer one, and `ControlClient` attaches the credential to both transports.
+ * Control state and execution state use separate databases while the journal
+ * supplies the event stream. The server binds an ephemeral loopback port without
+ * authentication. A host listening beyond loopback needs an authenticator and
+ * client credentials.
  */
 import { NodeHttpClient, NodeHttpServer, NodeSocket } from "@effect/platform-node"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -310,7 +268,9 @@ export const main = (root: string): Effect.Effect<Summary> =>
         // The server: the same `Control` service, mounted as RPC.
         const served = HttpRouter.serve(
           ControlServer.layerHttp.pipe(
-            Layer.provide(ControlRpcs.layerNoopAuth()),
+            // Trusted loopback callers act as the local operator. Authentication
+            // alone does not delegate approval authority to a test identity.
+            Layer.provide(ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })),
             Layer.provide(RpcSerialization.layerNdjson)
           ),
           { disableListenLog: true, disableLogger: true }

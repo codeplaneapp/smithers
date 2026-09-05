@@ -1,38 +1,13 @@
 /**
- * Run two flows as real children of a third, join their results, and observe
- * that a re-driven parent does not run them again.
+ * Run two child flows, join their results, and resume the parent without
+ * duplicating the children.
  *
- * `flow.call(payload)` splices a flow's body into the caller's graph: one plan,
- * one run. `flow.child(payload)` is the other thing entirely: a separate
- * durable run with its own row, its own claim, and its own journal, opened
- * through the same `execute` a handler would call. The parent suspends while a
- * child is unsettled and resumes when it settles, and the engine records the
- * lineage edge in `flows_run_parents` so the relationship survives the process
- * that created it.
+ * `flow.child` creates a separate durable execution whose identity is derived
+ * from its parent and node address. `flow.call` instead composes into the
+ * caller's graph. Re-driving the parent reuses the children's recorded results.
  *
- * That durability is what the second phase shows. Re-executing the parent under
- * the same execution id observes each child's persisted result instead of
- * starting a second child under the same id, so the children's bodies run once
- * across both executions.
- *
- * The join is an ordinary `Node.all`: two children settle concurrently, and the
- * report step reads each result off the joined placeholder as a payload field.
- *
- * The third phase is the same flow reached from the other direction: a model
- * calling it as a tool. A flow handed to an agent is an ordinary
- * `FlowBinding.Source` whose handler executes it, so the cell calls `compile`
- * the way it calls `read` or an MCP tool, and a real durable run of
- * `examples/Compile` happens because of it.
- *
- * That run is a real child. The engine takes the lineage edge from the
- * execution the handler ran inside, so `flows_run_parents` links it to the
- * agent step's run without the handler saying anything about parents.
- *
- * What `.child()` adds on top is IDENTITY. The interpreter derives a child's
- * execution id from the parent's id and the node's address, so a re-driven
- * parent lands on the child it already started. A tool call names its own id,
- * which is why `toolRunId` is a constant here: the handler owns the
- * at-most-once question that the boundary would otherwise answer for it.
+ * The final scenario exposes a flow as an agent tool. That handler chooses an
+ * explicit execution ID so repeated calls refer to the intended child work.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as Agent from "@smthrs/agent/Agent"
@@ -102,7 +77,7 @@ export const Release = Flow.make("examples/Release", {
   payload: { target: Schema.String },
   success: Schema.String,
   body: ({ target }: { readonly target: string }) =>
-    Node.andThen(
+    Node.bindPlanned(
       Node.all({
         bundle: Compile.child({ target }),
         signature: Notarize.child({ target })

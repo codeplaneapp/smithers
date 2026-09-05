@@ -1,27 +1,13 @@
 /**
- * Cancel a run, and watch the cancellation reach everything the run was
- * holding: its linked child, and the operating-system process its step started.
+ * Cancel a run and observe attached child and process cleanup.
  *
- * Cancellation in this engine is durable, not a flag anybody polls. Interrupting
- * a run writes its terminal transition and, in the SAME transaction, walks the
- * `flows_run_parents` edge table and cancel-requests every linked descendant. A
- * crash cannot therefore leave a cancelled parent over a live child, and a
- * cancellation observed from durable state by a process that never spawned the
- * children still reaches them.
+ * The parent's terminal transaction records cancellation requests for linked
+ * descendants under their recorded parent-exit policy. Each child's driver
+ * settles its own request under ownership fencing.
  *
- * Two things follow from that, and this example shows both.
- *
- * **The parent writes a request, not the child's terminal row.** Ownership
- * fencing forbids one run's driver writing state for a run another driver owns,
- * so the child's own driver settles the request at its next boundary. What is
- * atomic with the parent's exit is the REQUEST; the settlement is the child's.
- *
- * **A process is not a fiber.** Interrupting a fiber does nothing to a
- * subprocess it started, so containment is the host's job:
- * `NodeRuntime.layerHost` gives every spawned process its own process group,
- * records it in the durable `ProcessLedger`, and signals then kills the group
- * when the action's scope closes. Cancelling the run closes that scope, which is
- * what makes the group go away.
+ * For operating-system processes, `NodeRuntime.layerHost` tracks process groups
+ * in a durable ledger and terminates the group when its action scope closes. The
+ * example checks both durable child state and process cleanup.
  */
 import { Capability } from "@smthrs/flows"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"

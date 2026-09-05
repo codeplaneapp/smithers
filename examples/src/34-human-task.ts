@@ -1,31 +1,12 @@
 /**
- * Ask a person, refuse the answer, restart the process, and ask again.
+ * Reject an invalid human answer and ask again after an engine restart.
  *
- * A human task is the one wait that routinely outlives the process holding it:
- * a reviewer answers tomorrow, and whatever asked them is long gone. This
- * example is that whole shape on the durable engine. Each phase builds its own
- * engine over the same SQLite file, which is what a restart looks like from the
- * database's point of view.
+ * The first drive parks on an approval token. The second supplies an invalid
+ * answer, records the refusal, and parks on a new attempt's token. The third
+ * answers that token and completes the run.
  *
- * - Phase one asks. The run parks on the first attempt's wait point and
- *   releases its claim.
- * - Phase two answers with prose, which a `confirm` cannot accept. The run
- *   replays the recorded answer, refuses it, and parks again, on the SECOND
- *   attempt's wait point, because a durable deferred keeps its first
- *   completion and re-asking needs a wait point that has none.
- * - Phase three answers the second attempt, and the run completes.
- *
- * The token each phase answers is computed from outside the run, exactly as a
- * control plane computes it: the flow, the execution id, and the attempt.
- *
- * Which attempt the question is open on is READ BACK from the engine rather
- * than assumed. A suspended run has a waiting row, and this run's row carries
- * the `approval` reason and the token of the one wait point that is currently
- * open, so `parkedAttempt` recovers the attempt number from durable
- * state. The refusal is read back the same way: it is a sealed step, so it has
- * an attempt row, and `refusalsRecorded` finds it through the journal.
- * Nothing about "which attempt is this" lived in the process that died, and
- * nothing about it is asserted from a counter this file keeps.
+ * The active attempt is read from persistent waiting state. The example does not
+ * rely on a process-local counter to decide which request to answer.
  */
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { Action, DurableDeferred, HumanTask, Interpreter } from "@smthrs/flow"

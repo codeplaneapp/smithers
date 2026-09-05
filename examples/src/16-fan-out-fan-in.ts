@@ -1,43 +1,14 @@
 /**
- * Fan out over a fixed set of checks, two at a time, urgent ones first, then
- * join every verdict into one report.
+ * Run checks in batches of two and join their verdicts into a report.
  *
- * Three separate ideas meet in this one body, and keeping them apart is the
- * point of the example.
+ * Each batch is a `Node.all`. A dependency on the previous batch keeps later
+ * checks from starting early. Priority chooses which ready checks run first
+ * without changing their result identity.
  *
- * **Width is topology, not a runtime flag.** `Node.all` settles its members
- * concurrently with no bound, which is right for three calls and wrong for
- * fifty. The bound here is one `Node.all` per batch, and each batch takes the
- * previous batch's verdicts as payload. That reference is what sequences them:
- * the interpreter settles a node's dependencies before the node, so naming the
- * earlier batch is what stops the later one from starting beside it. An
- * operator reading the plan sees exactly how many checks can be in flight.
- *
- * **Priority is an annotation.** `Node.priority` orders ready work and changes
- * nothing else. It never enters key material, so raising it cannot invalidate a
- * recorded result. Here it decides which members share the first batch, which
- * is what makes the release blocker start first instead of last.
- *
- * **The fan-in is a step.** Each batch settles to a planned record, and each
- * member's verdict is read off it by field access and passed into the
- * collecting step's payload. A planned value may be passed; it may never be
- * computed on. So the report is built by an action that receives five strings,
- * not by a function in the body that tries to concatenate placeholders.
- *
- * **A member replays, it does not re-dispatch.** `main` drives the gate twice
- * under one execution id. Every check's verdict is recorded against its own
- * step key, and the keys are stable because the batch a check lands in is a
- * total function of the declaration order. So the second drive rebuilds the
- * same five keys, reads five recorded verdicts, and dispatches nothing.
- *
- * **The same gate, declared on disk.** The second half of the file runs the
- * identical topology from `16-project/flows/gate/flow.ts`, a flow the project
- * declares rather than one this file names. `@smthrs/registry`'s `Executable`
- * bridge loads that descriptor, resolves the delegate the host registered for
- * it, and lowers the priority the file declares onto the delegating node. It is
- * the same annotation `Node.priority` writes, arriving from a file rather than
- * from a call, which is what makes priority a property of the declaration
- * instead of a property of the code that happens to hold it.
+ * A collecting action receives the planned verdicts as payload fields and builds
+ * the report at execution time. Driving the same execution again reuses the
+ * recorded checks. The second half loads equivalent declarations from the
+ * example's project directory.
  */
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
@@ -163,7 +134,7 @@ const gateBody = (target: string): Node.Node<string, never, GateRequirements> =>
     for (const name of batch) {
       members[name] = Node.priority(Check.call({ name, target, after }), priorityOf(name))
     }
-    return Node.andThen(
+    return Node.bindPlanned(
       Node.all(members),
       (verdicts: Planned.Planned<Readonly<Record<string, string>>>) => {
         const next: Record<string, Planned.Planned<string>> = { ...collected }
