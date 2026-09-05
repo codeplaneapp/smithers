@@ -36,7 +36,7 @@ const writeEntry = (runId: JournalEvent.RunId, text: string) =>
       new JournalEvent.Input({
         runId,
         sourceId: "flows/participant/alice" as JournalEvent.SourceId,
-        eventType: "flows/branch/command",
+        eventType: "authorization-test-message",
         payload: { text },
         meta: null
       })

@@ -6,7 +6,7 @@ import { defineDocsSite } from "@smithers/docs-shared/starlight"
 
 export default defineDocsSite({
   starlight,
-  slug: "sync",
+  slug: "smithers-sync",
   title: "@smthrs/sync",
   description: "Workspace read-path sync protocol, server, and client for flows",
   sourceDir: "packages/smithers/flows/sync",

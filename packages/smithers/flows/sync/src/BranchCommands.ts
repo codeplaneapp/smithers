@@ -25,7 +25,6 @@ import * as JournalEvent from "@smthrs/journal/JournalEvent"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Semaphore from "effect/Semaphore"
 import {
@@ -41,6 +40,7 @@ import {
   ShareCapability
 } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
+import * as Admission from "./internal/admission.ts"
 import { causeCode, journalErrorCode } from "./internal/causeText.ts"
 import { positiveInt } from "./internal/options.ts"
 import { SyncError } from "./SyncError.ts"
@@ -186,8 +186,15 @@ export const defaultHydrationLimit = defaultLedgerCapacity
  */
 export interface Options {
   /**
+   * Largest encoded journal entry followers accept. Defaults to
+   * {@link SyncProtocol.defaultMaxFrameBytes}. Configure the server and client
+   * with the same or a larger ceiling. Admission reserves the full durable
+   * envelope, including generated sequence and timestamp fields, before writing.
+   */
+  readonly maxFrameBytes?: number | undefined
+  /**
    * Largest encoded command submission admitted, in bytes. Defaults to
-   * {@link SyncProtocol.defaultMaxFrameBytes}.
+   * {@link defaultMaxCommandBytes}.
    */
   readonly maxCommandBytes?: number | undefined
   /**
@@ -206,6 +213,7 @@ export interface Options {
 const makeWith = (
   resolved: {
     readonly maxCommandBytes: number
+    readonly maxFrameBytes: number
     readonly ledgerCapacity: number
     readonly hydrationLimit: number
   }
@@ -231,7 +239,7 @@ const makeWith = (
       const ledger = new Map<BranchId, Map<CommandId, CommandReceipt>>()
       const cursors = new Map<BranchId, JournalEvent.Seq>()
       const hydrated = new Set<BranchId>()
-      const { hydrationLimit, ledgerCapacity, maxCommandBytes } = resolved
+      const { hydrationLimit, ledgerCapacity, maxCommandBytes, maxFrameBytes } = resolved
 
       const receiptOf = (branchId: BranchId, commandId: CommandId): CommandReceipt | undefined =>
         ledger.get(branchId)?.get(commandId)
@@ -242,15 +250,18 @@ const makeWith = (
        * the least recently recorded one; re-recording a known command
        * refreshes it in place rather than growing the branch.
        */
-      const record = (receipt: CommandReceipt): void => {
-        const branch = ledger.get(receipt.branchId) ?? new Map<CommandId, CommandReceipt>()
+      const recordIn = (branch: Map<CommandId, CommandReceipt>, receipt: CommandReceipt): void => {
         branch.delete(receipt.commandId)
         branch.set(receipt.commandId, receipt)
         for (const oldest of branch.keys()) {
           if (branch.size <= ledgerCapacity) break
           branch.delete(oldest)
         }
-        ledger.set(receipt.branchId, branch)
+      }
+
+      const record = (receipt: CommandReceipt): void => {
+        // Successful hydration installs the branch map before admission.
+        recordIn(ledger.get(receipt.branchId)!, receipt)
       }
 
       const duplicateOf = (known: CommandReceipt): CommandReceipt =>
@@ -289,13 +300,14 @@ const makeWith = (
               ...(after === undefined ? {} : { after }),
               limit: Math.min(pageSize, remaining)
             }).pipe(Effect.mapError(journalFailure))
-            for (const entry of page.entries) {
+            const admitted = yield* Admission.entries(page.entries, runId, after ?? -1)
+            for (const entry of admitted) {
               after = entry.seq
               remaining -= 1
-              const submission = entry.eventType === CommandEvent
-                ? Schema.decodeUnknownOption(CommandIdentity)(entry.payload)
-                : Option.none()
-              visit(entry, Option.isSome(submission) ? submission.value.commandId : undefined)
+              const commandId = entry.eventType === CommandEvent
+                ? Schema.decodeUnknownSync(CommandIdentity)(entry.payload).commandId
+                : undefined
+              visit(entry, commandId)
             }
             // An empty page ends the walk whatever the page claims, the same
             // guard `SyncServer.tail` carries: `after` cannot move, so the
@@ -313,15 +325,24 @@ const makeWith = (
        * and again after an admission conflict, to read the command another
        * writer admitted after this process last looked.
        *
-       * The cursor advances entry by entry rather than at the end, so a walk
-       * that stops on its budget leaves the cursor exactly where it stopped
-       * and the next replay resumes there instead of re-reading the prefix.
+       * The staged cursor tracks each visited entry. A successful bounded walk
+       * commits exactly where it stopped, so the next replay resumes there.
+       * Failure or interruption discards the staged cursor and receipts together.
        */
       const replay = (branchId: BranchId, budget: number): Effect.Effect<void, SyncError> =>
-        walk(branchId, cursors.get(branchId), budget, (entry, commandId) => {
-          cursors.set(branchId, entry.seq)
-          if (commandId === undefined) return
-          record(new CommandReceipt({ branchId, commandId, status: "admitted", seq: entry.seq }))
+        Effect.gen(function*() {
+          // Stage at most ledgerCapacity receipts. A malformed later page or an
+          // interruption must leave both the ledger and replay cursor untouched.
+          const staged = new Map(ledger.get(branchId))
+          let position = cursors.get(branchId)
+          yield* walk(branchId, position, budget, (entry, commandId) => {
+            position = entry.seq
+            if (commandId !== undefined) {
+              recordIn(staged, new CommandReceipt({ branchId, commandId, status: "admitted", seq: entry.seq }))
+            }
+          })
+          if (position !== undefined) cursors.set(branchId, position)
+          ledger.set(branchId, staged)
         })
 
       /**
@@ -397,7 +418,8 @@ const makeWith = (
           // command missing from the ledger is missing from the journal too.
           // Reading the whole history to confirm that would let one small
           // request cost one full log scan.
-          const mayHaveEvicted = (ledger.get(submission.branchId)?.size ?? 0) >= ledgerCapacity
+          // Successful replay always installs the branch's staged map.
+          const mayHaveEvicted = ledger.get(submission.branchId)!.size >= ledgerCapacity
           const seq = mayHaveEvicted
             ? yield* admittedSeq(submission.branchId, submission.commandId)
             : undefined
@@ -410,6 +432,23 @@ const makeWith = (
           })
         })
 
+      const journalInput = (submission: CommandSubmission): JournalEvent.Input =>
+        new JournalEvent.Input({
+          runId: branchRunId(submission.branchId),
+          sourceId: commandSourceId(submission.commandId),
+          sourceSeq: commandSourceSeq,
+          eventType: CommandEvent,
+          payload: {
+            branchId: submission.branchId,
+            commandId: submission.commandId,
+            participantId: submission.participantId,
+            name: submission.name,
+            args: submission.args,
+            target: submission.target
+          },
+          meta: null
+        })
+
       const admit = (request: SubmitRequest): Effect.Effect<CommandReceipt, SyncError> =>
         Effect.gen(function*() {
           const submission = request.submission
@@ -420,21 +459,7 @@ const makeWith = (
           // log — participants own no branch run, and command admissions are
           // first-writer-wins on the command id.
           const receipt = yield* journal.emitDurableUnfenced(
-            new JournalEvent.Input({
-              runId: branchRunId(submission.branchId),
-              sourceId: commandSourceId(submission.commandId),
-              sourceSeq: commandSourceSeq,
-              eventType: CommandEvent,
-              payload: {
-                branchId: submission.branchId,
-                commandId: submission.commandId,
-                participantId: submission.participantId,
-                name: submission.name,
-                args: submission.args,
-                target: submission.target
-              },
-              meta: null
-            })
+            journalInput(submission)
           ).pipe(
             // A `Duplicate` receipt is another writer landing the identical
             // submission first: the journal deduplicated durably and returned
@@ -464,7 +489,10 @@ const makeWith = (
           return receipt
         })
 
-      const submit = Effect.fn("BranchCommands.submit")(function*(request: SubmitRequest) {
+      const submit = Effect.fn("BranchCommands.submit")(function*(supplied: SubmitRequest) {
+        const decoded = yield* Admission.decode(SubmitRequest, supplied, "invalid_request")
+        // Freeze the authorized submission across asynchronous signature verification.
+        const request = { capability: decoded.capability, submission: { ...decoded.submission } }
         yield* Effect.annotateCurrentSpan({
           branchId: request.submission.branchId,
           commandId: request.submission.commandId,
@@ -482,6 +510,26 @@ const makeWith = (
             })
           )
         }
+        const input = journalInput(request.submission)
+        // The journal owns these fields. Reserve their largest encoded forms,
+        // so acceptance does not depend on wall clock or current history length.
+        // Event identity repeats run/source IDs; their escaping and UTF-8 cost
+        // must be measured, not replaced by a fixed envelope allowance.
+        const entryBytes = SyncProtocol.encodedByteLength({
+          ...input,
+          seq: Number.MAX_SAFE_INTEGER - 1,
+          eventId: JournalEvent.makeEventId(input.runId, input.sourceId, commandSourceSeq),
+          emittedAtMs: Number.MAX_VALUE
+        })
+        if (entryBytes > maxFrameBytes) {
+          return yield* Effect.fail(
+            new SyncError({
+              code: "frame_too_large",
+              message:
+                `Encoded command journal entry requires up to ${entryBytes} bytes, exceeding the ${maxFrameBytes}-byte frame ceiling`
+            })
+          )
+        }
         // The permit is taken AFTER authorization so an unauthorized caller
         // cannot serialize (and therefore stall) legitimate collaborators,
         // and it is this BRANCH's permit so a slow branch stalls only itself.
@@ -492,8 +540,18 @@ const makeWith = (
     }
   )
 
+/**
+ * Inclusive UTF-8 JSON submission ceiling. The separate sync entry ceiling
+ * leaves room for the durable envelope around every admitted command.
+ *
+ * @category constants
+ * @since 1.0.0
+ */
+export const defaultMaxCommandBytes = 1024 * 1024
+
 const defaults = {
-  maxCommandBytes: SyncProtocol.defaultMaxFrameBytes,
+  maxCommandBytes: defaultMaxCommandBytes,
+  maxFrameBytes: SyncProtocol.defaultMaxFrameBytes,
   ledgerCapacity: defaultLedgerCapacity,
   hydrationLimit: defaultHydrationLimit
 }
@@ -523,6 +581,11 @@ export const makeLiveWith = (
 ): Effect.Effect<Service, SyncError, Journal.Journal | BranchShare.BranchShare> =>
   Effect.flatMap(
     Effect.all({
+      maxFrameBytes: positiveInt(
+        "BranchCommands.Options.maxFrameBytes",
+        options.maxFrameBytes,
+        defaults.maxFrameBytes
+      ),
       maxCommandBytes: positiveInt(
         "BranchCommands.Options.maxCommandBytes",
         options.maxCommandBytes,

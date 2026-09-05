@@ -59,8 +59,8 @@ export type Scope = typeof Scope.Type
  * step then fails must not treat the cursor as an acknowledgement of that
  * apply. A consumer that needs the stronger meaning supplies
  * `SubscribeOptions.apply`, which the client runs to success before the cursor
- * moves. Stating the rule here keeps the schema and the client from meaning
- * two different things by the same field.
+ * moves. `Progress` distinguishes that application claim with an `Applied`
+ * tag; a bare wire cursor never acknowledges application to the server.
  *
  * `generation` identifies the run's current history after rewinds. Requests may
  * omit it for persisted generation-zero cursors. Server responses must include
@@ -105,6 +105,31 @@ export const WorkspaceCursor = Schema.Array(RunCursor)
  */
 export type WorkspaceCursor = typeof WorkspaceCursor.Type
 
+/** Transport delivery positions. These are never application acknowledgements.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const DeliveredProgress = Schema.TaggedStruct("Delivered", { cursors: WorkspaceCursor })
+
+/** Application positions committed after a successful apply or restore callback.
+ * Consumers must persist state and these positions in the same transaction.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const AppliedProgress = Schema.TaggedStruct("Applied", { cursors: WorkspaceCursor })
+
+/** Distinct delivery and application claims; delivery cannot be used as an acknowledgement.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const Progress = Schema.Struct({ delivered: DeliveredProgress, applied: AppliedProgress })
+
+/** The value form of progress.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type Progress = typeof Progress.Type
+
 /**
  * The first run named twice in a cursor set, or `undefined` when every run is
  * named at most once.
@@ -131,16 +156,13 @@ export const duplicateCursorRunId = (cursors: WorkspaceCursor): JournalEvent.Run
  * Compaction deletes the entries below a checkpoint, so a cursor under the
  * floor names history that no longer exists. `checkpointSeq` is that floor:
  * the checkpoint's state subsumes every entry at or below it, so a follower
- * resumes by setting the run's cursor to `checkpointSeq` and reading forward.
+ * must restore a snapshot covering that sequence before reading forward.
+ * Its applied cursor names that snapshot, which may be newer than this floor.
  *
- * This is deliberately the SMALLEST wire addition that answers "where do I
- * start again". It rides on {@link SyncError} as one optional field rather
- * than as a new frame variant or a new RPC, so a follower that never meets a
- * compacted run sees no change at all, and the room to grow stays open: a
- * later revision can add the checkpoint STATE here (or as its own RPC) without
- * moving what already exists. What it does not carry today is that state, so a
- * projection rebuilt from the sync stream alone is missing the prefix the
- * checkpoint stands for; see `@smthrs/journal`'s `latestCheckpoint`.
+ * This field carries no replacement state. The client fails closed without
+ * an explicit recovery handler returning the cursor it actually restored.
+ * `SnapshotRequest` fetches a separately selected public projection. Raw journal
+ * checkpoints are unredacted and must not be exposed under history permission.
  *
  * @category models
  * @since 0.1.0
@@ -157,6 +179,46 @@ export const Resync = Schema.Struct({
  * @since 0.1.0
  */
 export type Resync = typeof Resync.Type
+
+const snapshotIdentity = {
+  protocolVersion: Schema.Literal(1),
+  runId: JournalEvent.RunId,
+  lineageId: Schema.NonEmptyString.check(Schema.isMaxLength(512)),
+  projection: Schema.NonEmptyString.check(Schema.isMaxLength(128)),
+  projectionVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), Schema.isLessThan(Number.MAX_SAFE_INTEGER))
+}
+
+/**
+ * Requests an explicitly public projection covering the missing prefix.
+ * Identity and version must match exactly; this never requests raw engine state.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const SnapshotRequest = Schema.Struct({
+  ...snapshotIdentity,
+  atLeastSeq: JournalEvent.Seq,
+  capability: Schema.optional(ShareCapability)
+})
+
+/** A decoded request for an explicitly public projection.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type SnapshotRequest = typeof SnapshotRequest.Type
+
+/**
+ * A complete public projection through `seq`, inclusive. Apply its state and
+ * durable cursor atomically, then read entries strictly after `seq`.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export const Snapshot = Schema.Struct({ ...snapshotIdentity, seq: JournalEvent.Seq, state: Schema.Json })
+
+/** A complete, versioned public projection at one journal sequence.
+ * @category models
+ * @since 1.0.0-rc.0
+ */
+export type Snapshot = typeof Snapshot.Type
 
 /**
  * Largest number of entries one {@link ReadRequest} may ask for.
@@ -352,16 +414,18 @@ export const covers = (scope: Scope, runId: JournalEvent.RunId): boolean =>
   scope._tag === "Workspace" || scope.runId === runId
 
 /**
- * Default ceiling on the encoded entries one frame, page, or command may
+ * Default ceiling on the encoded entries one frame or page may
  * carry, in bytes.
  *
- * Both ends of the wire enforce it: the server refuses to serve or append
- * anything larger, and the client refuses to apply anything larger.
+ * Both ends enforce the sum of encoded journal entries, excluding the outer
+ * RPC/frame envelope. Transports must allow their own envelope overhead.
+ * Commands default to 1 MiB; the 2 MiB entry ceiling includes their durable
+ * journal envelope and keeps already-admitted maximum commands consumable.
  *
  * @category limits
  * @since 0.1.0
  */
-export const defaultMaxFrameBytes = 1024 * 1024
+export const defaultMaxFrameBytes = 2 * 1024 * 1024
 
 const utf8 = new TextEncoder()
 

@@ -71,9 +71,9 @@ every round, so a run created after it opened joins it.
 
 ## Acknowledge only what you applied
 
-By default the cursor advances as an entry is handed to the consumer. If your
-consumer writes somewhere durable, supply `apply` so the cursor advances only
-after that write succeeds:
+By default only a delivered bookmark advances as an entry is handed to the
+consumer. Supply `apply` to record separately tagged applied progress after
+the callback succeeds:
 
 ```ts
 const followed = Effect.gen(function*() {
@@ -92,21 +92,27 @@ redelivery is what a retry looks like here.
 
 ## Resume after a restart
 
-`client.cursors` reports the acknowledged position, one entry per run, sorted
-by run id. Persist it after the work it stands for, and hand it back on the
-next subscription:
+`client.cursors` reports delivery bookmarks. `(yield* client.progress).applied`
+reports successfully applied positions, one entry per run, sorted by run id.
+Both maps are in memory. A durable consumer commits its projection and cursor
+together in its application transaction, then seeds a fresh client with that
+durable cursor after restart:
 
 ```ts
-const resume = (saved: ReadonlyArray<{ readonly runId: JournalEvent.RunId; readonly afterSeq: JournalEvent.Seq }>) =>
+const resume = (
+  saved: ReadonlyArray<{ readonly runId: JournalEvent.RunId; readonly afterSeq: JournalEvent.Seq }>,
+  apply: NonNullable<SyncClient.SubscribeOptions["apply"]>
+) =>
   Effect.gen(function*() {
     const sync = yield* SyncClient.Sync
-    return sync.subscribe({ scope: { _tag: "Workspace" }, cursors: saved })
+    return sync.subscribe({ scope: { _tag: "Workspace" }, cursors: saved, apply })
   })
 ```
 
-The effective start position is the later of your cursor and what this client
-has already acknowledged. To replay from an earlier position, build a fresh
-client: its acknowledged map is empty, so your cursor is the only one there is.
+The effective start position is the later of your cursor and the matching
+progress map: applied when `apply` is supplied, delivered otherwise. An earlier
+delivery-only subscription cannot skip unapplied history. Independent
+materializations and rebuilds use fresh clients with empty progress maps.
 
 ## Present a credential
 
@@ -127,13 +133,12 @@ subscription itself as `capability`. See
 
 ## Handle the failures that reach you
 
-The stream fails with `SyncError` or `SyncGapError`. The client already absorbs
-two cases, so what reaches you is deliberately short:
+The stream fails with `SyncError` or `SyncGapError`. Two cases have recovery paths:
 
 - `transport_failed` is retried under exponential backoff capped at five
   seconds and only surfaces if the stream is otherwise ended.
-- `compacted` is recovered by moving that run's cursor to the checkpoint the
-  server named and restarting. See
+- `compacted` requires an explicit `onResync` handler to restore a checkpoint
+  and return its exact cursor before restarting. Without one it fails closed. See
   [Handle a compacted run](/guides/handle-a-compacted-run/).
 
 Everything else is yours:

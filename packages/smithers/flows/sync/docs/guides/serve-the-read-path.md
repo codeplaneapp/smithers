@@ -108,7 +108,7 @@ const tuned = SyncServer.layerWith({
 
 | Option           | Default | What it bounds                                                                                         |
 | ---------------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `maxFrameBytes`  | 1 MiB   | Summed encoded entries of one read page or subscription frame.                                         |
+| `maxFrameBytes`  | 2 MiB   | Summed encoded entries of one read page or subscription frame.                                         |
 | `concurrency`    | 64      | Journal reads one workspace subscription holds open at once.                                           |
 | `tailIntervalMs` | 1000    | Milliseconds a workspace subscription waits before revisiting every covered run when nothing wakes it. |
 

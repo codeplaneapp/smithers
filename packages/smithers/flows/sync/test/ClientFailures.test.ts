@@ -420,7 +420,11 @@ describe("SyncClient failure paths", () => {
       })
 
       const entries = yield* (
-        client.subscribe({ scope: { _tag: "Workspace" }, cursors: [] }).pipe(
+        client.subscribe({
+          scope: { _tag: "Workspace" },
+          cursors: [],
+          onResync: ({ runId, checkpointSeq }) => Effect.succeed({ runId, afterSeq: checkpointSeq })
+        }).pipe(
           Stream.take(2),
           Stream.runCollect
         )

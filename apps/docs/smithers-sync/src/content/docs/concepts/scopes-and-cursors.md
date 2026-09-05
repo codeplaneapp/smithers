@@ -52,12 +52,16 @@ at every boundary that could break it.
 
 ## Delivered and applied are different claims
 
-By default a cursor names what a follower was **delivered**. The client hands
-an entry to the consumer and moves the cursor in the same step, so a consumer
-whose own write then fails holds a cursor naming an entry it never
-materialized. On the next subscription that entry is gone.
+`RunCursor` is an exclusive transport bookmark. The server's response cursors
+and `client.cursors` describe delivery, and never acknowledge application.
+`client.progress` reports two schema-backed, discriminated claims:
 
-`SubscribeOptions.apply` upgrades the claim to **applied**:
+- `delivered: { _tag: "Delivered", cursors }` records transport delivery.
+- `applied: { _tag: "Applied", cursors }` records successful `apply` or `onResync` callbacks.
+
+The matching schemas are `DeliveredProgress`, `AppliedProgress`, and `Progress`
+in `SyncProtocol`. Delivery-only subscriptions leave applied progress empty.
+Use `SubscribeOptions.apply` to acknowledge materialization:
 
 ```ts
 import type { JournalEvent } from "@smthrs/journal"
@@ -70,7 +74,7 @@ const apply = (entry: JournalEvent.Entry): Effect.Effect<void, SyncError> =>
 
 The callback runs to success before the cursor moves. A failure fails the
 subscription with that entry unacknowledged, so the next subscription from
-`client.cursors` delivers it again. Redelivery is what a retry is here, so the
+`client.progress`'s applied cursors delivers it again. Redelivery is what a retry is here, so the
 callback must be idempotent.
 
 Use it whenever the consumer writes somewhere durable. Leave it off when the
@@ -78,34 +82,39 @@ consumer is a view that is rebuilt on reconnect anyway.
 
 ## The client's effective cursor is the later of two
 
-A `SyncClient` keeps one acknowledged cursor map shared by every subscription
-it serves. The position a subscription actually starts from is the later of the
-caller's cursor and the acknowledged one, per run.
+A `SyncClient` keeps separate delivered and applied maps. An applying
+subscription uses the later of the caller's cursor and the shared applied
+cursor. A delivery-only subscription uses shared delivered progress. Earlier
+delivery cannot fast-forward an applying consumer past unapplied entries.
+One client instance belongs to one materialization; independent projections
+must use independent clients even when they read the same run.
 
 Both halves matter. A caller that restored its own progress from durable
 storage is never regressed and never re-receives entries it has already
-materialized. A caller asking for history this client already acknowledged is
-fast-forwarded, because the promise every consumer of a shared client depends
-on is that an entry is never read twice.
+materialized. A caller behind its matching shared progress map is fast-forwarded.
+Failed application can redeliver the unapplied entry; consumers must be idempotent.
 
 To rebuild a projection from an earlier position, construct a fresh client. Its
-acknowledged map is empty, so the caller's cursor is the only one there is.
+progress maps are empty, so the caller's cursor is the only one there is.
 
 ## Persisting a cursor
 
-`client.cursors` is an `Effect` returning the acknowledged set, canonicalized:
-one entry per run, sorted by run id. Read it after the batch you intend to
-survive a restart, never before:
+`client.progress` returns canonical sets with one entry per run, sorted by run
+id. Its applied positions advance only after application succeeds. Fetching a
+snapshot does not move either set:
 
 ```ts
 import * as SyncClient from "@smthrs/sync/SyncClient"
 import * as Effect from "effect/Effect"
 
-const checkpoint = Effect.flatMap(SyncClient.Sync, (sync) => sync.cursors)
+const checkpoint = Effect.flatMap(SyncClient.Sync, (sync) => Effect.map(sync.progress, (progress) => progress.applied))
 ```
 
-Persist the cursors a read returned only after applying the entries that read
-delivered. The cursor is a claim about work already done.
+For durable recovery, the callback must commit state and its cursor in the
+same application transaction. Reading progress later and writing a separate
+cursor file is not that transaction. Seed a fresh client from the durable
+transaction's cursor after restart. Supply cursors only for state already
+restored; an input bookmark is the caller's assertion, not proof of application.
 
 ## Related pages
 

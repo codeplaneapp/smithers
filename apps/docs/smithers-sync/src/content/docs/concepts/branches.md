@@ -5,11 +5,11 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ---
 
 :::warning
-Branch collaboration ships unserved at 1.0.0-rc.0. `@smthrs/gateway` mounts
-`SyncRpcs` on `POST /sync` and `/sync/ws`; nothing outside this package's own
-tests mounts `BranchRpcs`, so the seven branch procedures have no in-repo
-integration against a real host. Treat these modules as a library surface
-pending a host, not as a served endpoint.
+Branch collaboration ships unserved at 1.0.0-rc.0.
+[`@smthrs/gateway`](https://gateway.smithers.sh/reference/api/) mounts `SyncRpcs` on `POST /sync` and
+`/sync/ws`; nothing outside this package's own tests mounts `BranchRpcs`, so
+the seven branch procedures have no integration against a real host yet. Treat
+these modules as a library surface pending a host, not as a served endpoint.
 :::
 
 A branch is one shared live document that several people edit at once. It has
@@ -76,6 +76,21 @@ A branch journal has exactly one durable event shape,
 commands, so the projection has exactly one decoder. `branch.say` is the
 command that appends a chat message; a command's `target` names the shared
 field it durably edits and is `""` for one that only appends.
+
+Sync admission and command hydration validate known command records before
+advancing progress. Malformed commands and foreign run/branch identities fail
+typed; they cannot become a partial hydration or a new durable write. Hydration
+stages a bounded receipt map and commits it with the replay cursor only after
+all pages in that replay succeed. Existing decoding defaults for absent `args`
+and `target` remain in force. Malformed retained records require explicit
+repair by their authority; this package never rewrites them or silently treats
+them as successful commands.
+
+`BranchProjection.apply` and `project` are pure folds over admitted canonical
+records, not admission APIs. Their convergence rules permit redelivery and
+reordering of that canonical set. Use the validated sync read path before
+folding transport or host input. The read path rejects malformed known records
+before those pure folds can ignore them.
 
 ## Presence is a lease, and is never journalled
 

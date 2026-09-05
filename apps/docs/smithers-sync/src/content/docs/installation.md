@@ -6,16 +6,21 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/sync/docs/installation.md"
 ---
 
+## Install the package
+
+`@smthrs/sync` is at `1.0.0-rc.0` and is not on npm yet. Release candidates
+publish under the `next` tag rather than `latest`, so install it by tag:
+
 ```bash
-pnpm add @smthrs/sync
+pnpm add @smthrs/sync@next effect@4.0.0-rc.112
 ```
 
 ## Requirements
 
 - Node.js 22.19.0 or later, or a browser with Web Crypto. The signing paths
   call `crypto.subtle` directly so one module serves both.
-- `effect` at the version the package declares. It is a direct dependency, not
-  a peer dependency, so a single install is enough for a follower.
+- `effect` exactly at the version the package declares. It is a peer dependency
+  so the follower and Smithers use one runtime.
 - [`@smthrs/journal`](https://journal.smithers.sh/reference/api/), also a direct dependency. The entry
   envelope every frame carries is the journal's `JournalEvent.Entry`.
 

@@ -1,128 +1,156 @@
 ---
 title: "Handle a compacted run"
-description: "Fill the history a compaction deleted: write an onResync hook that restores the checkpoint prefix before the client moves the cursor, or fails so nothing is skipped."
+description: "Restore a checkpoint and return its exact cursor before replaying the remaining history."
 sidebar:
   order: 5
 ---
 
-When a follower's cursor sits below a run's compaction floor, the server
-refuses the read with `compacted` and names the checkpoint to resume from.
-`SyncClient.subscribe` recovers on its own: it moves that run's cursor to the
-checkpoint and restarts, so one compacted run costs a reconnect instead of the
-whole subscription.
+A cursor below a run's compaction floor names deleted history. The server
+refuses it with `compacted` and `resync: { runId, checkpointSeq }`.
+The client fails without moving its cursor unless you supply `onResync`.
 
-What the client cannot do is restore the entries the compaction deleted. This
-guide is about that hole.
+The handler must restore the missing prefix and return
+`{ runId, afterSeq }` for the snapshot actually applied. A newer snapshot can
+have a sequence above the reported floor. Returning the older floor after
+applying that snapshot would replay part of its state twice.
 
-## Decide whether you have a hole at all
+## Restore a remote public projection
 
-You do not, if your consumer holds no derived state. A view that is rebuilt
-from whatever the stream delivers next has nothing to lose, and the default
-hook is already right for it: it logs the skipped range and continues.
+The host must configure `SyncServer.SnapshotSource` with a provider that selects
+only public state for the requested run, lineage, projection and schema version.
+All authorized readers of that run can fetch it. Narrower or private data needs
+its own authorization boundary. A raw `Journal.latestCheckpoint` passthrough is
+unsafe because execution checkpoints are intentionally unredacted.
 
-You do, if your consumer folds entries into something durable. The entries
-between your old cursor and the checkpoint are gone from the journal and this
-wire carries no checkpoint state in their place, so a fold that resumes at the
-checkpoint is missing their effect permanently.
+The client can fetch that projection in its recovery handler:
 
-## Restore the prefix from the journal
+```ts
+import type * as SyncClient from "@smthrs/sync/SyncClient"
+import { SyncError } from "@smthrs/sync/SyncError"
+import type * as SyncProtocol from "@smthrs/sync/SyncProtocol"
+import * as Effect from "effect/Effect"
 
-A follower with access to the journal reads the checkpoint out of band. The
-hook runs before the cursor moves and must succeed, so restoring here is
-ordered correctly with respect to everything that follows:
+const recoverPublic = (
+  sync: SyncClient.Service,
+  identity: Pick<SyncProtocol.SnapshotRequest, "lineageId" | "projection" | "projectionVersion" | "capability">,
+  applySnapshot: (snapshot: SyncProtocol.Snapshot) => Effect.Effect<void, SyncError>
+) =>
+(resync: SyncProtocol.Resync): Effect.Effect<SyncProtocol.RunCursor, SyncError> =>
+  Effect.gen(function*() {
+    const snapshot = yield* sync.snapshot({
+      ...identity,
+      protocolVersion: 1,
+      runId: resync.runId,
+      atLeastSeq: resync.checkpointSeq
+    })
+    const cursor = { runId: snapshot.runId, afterSeq: snapshot.seq }
+    yield* applySnapshot(snapshot)
+    return cursor
+  })
+```
+
+`snapshot` validates identity, version, sequence and byte limits; your callback
+must still decode the projection's application schema and transactionally apply
+its state and durable cursor. A fetch alone never acknowledges missing history.
+The host must retain a snapshot covering the compaction floor. If the floor
+moves again before replay, recovery runs again for the newer floor.
+
+## Restore through an authorized local source
+
+A trusted local follower may alternatively read its execution checkpoint from
+the journal and supply its own application callback:
 
 ```ts
 import { Journal } from "@smthrs/journal"
-import * as SyncClient from "@smthrs/sync/SyncClient"
 import { SyncError } from "@smthrs/sync/SyncError"
 import type * as SyncProtocol from "@smthrs/sync/SyncProtocol"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 
-const onResync = (resync: SyncProtocol.Resync): Effect.Effect<void, SyncError, Journal.Journal> =>
+const recoverFromJournal = (
+  journal: Journal.Service,
+  applySnapshot: (checkpoint: Journal.Checkpoint) => Effect.Effect<void, SyncError>
+) =>
+(resync: SyncProtocol.Resync): Effect.Effect<SyncProtocol.RunCursor, SyncError> =>
   Effect.gen(function*() {
-    const journal = yield* Journal.Journal
-    const checkpoint = yield* journal.latestCheckpoint(resync.runId).pipe(
+    const saved = yield* journal.latestCheckpoint(resync.runId).pipe(
       Effect.mapError(() =>
         new SyncError({
           code: "compacted",
-          message: `Could not read the checkpoint for run ${resync.runId}`
+          message: "Could not read the checkpoint",
+          resync
         })
       )
     )
-    if (Option.isNone(checkpoint)) {
-      return yield* new SyncError({
-        code: "compacted",
-        message: `Run ${resync.runId} is compacted and has no checkpoint to restore from`
-      })
+    if (
+      Option.isNone(saved) ||
+      saved.value.runId !== resync.runId ||
+      saved.value.seq < resync.checkpointSeq
+    ) {
+      return yield* Effect.fail(
+        new SyncError({
+          code: "compacted",
+          message: "No checkpoint covers the requested history",
+          resync
+        })
+      )
     }
-    yield* Effect.logInfo(`restored ${resync.runId} from checkpoint ${checkpoint.value.seq}`)
+    const checkpoint = saved.value
+    const cursor = { runId: checkpoint.runId, afterSeq: checkpoint.seq }
+    yield* applySnapshot(checkpoint)
+    return cursor
   })
 ```
 
-`SubscribeOptions.onResync` is typed `(resync) => Effect<void, SyncError>`, so
-resolve the journal before you build the subscription rather than inside the
-hook:
+Pass the returned function as `onResync`. The required `applySnapshot`
+callback must actually decode and restore the projection; logging a checkpoint
+is not restoration. Validate its run/lineage and projection schema/version
+before using the state. Journal checkpoints are generic and intentionally
+unredacted: never expose raw execution checkpoints to a remote follower merely
+because that follower can read redacted history.
 
-```ts
-const subscription = Effect.gen(function*() {
-  const sync = yield* SyncClient.Sync
-  const journal = yield* Journal.Journal
-  return sync.subscribe({
-    scope: { _tag: "Workspace" },
-    cursors: [],
-    onResync: (resync) => Effect.provideService(onResync(resync), Journal.Journal, journal)
-  })
-})
-```
+For a durable projection, commit the restored state **and its durable cursor**
+in one application-owned transaction. On restart, seed a fresh sync client with
+that committed cursor. The sync client's cursor is only in memory; its
+interruption mask cannot make writes to separate stores atomic. Make recovery
+idempotent so a crash or a moving compaction floor can safely repeat it.
 
-## Refuse instead, when you cannot restore
+Apply the same rule to every suffix entry: the `apply` callback must commit its
+projection changes and durable cursor together before returning. Keep the
+cursor with its run/lineage and projection version, so a cursor for one
+projection cannot skip the history needed by another. On restart, read that
+durable cursor, not a cursor cached separately before the crash.
 
-A consumer that must not silently skip history fails the hook. The cursor stays
-where it was and the subscription fails, which is a visible outage rather than
-a quiet divergence:
+| Crash point                                                | Durable recovery                                                                  |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Between state and cursor writes, before transaction commit | Both writes roll back; restore the snapshot again.                                |
+| After snapshot commit, before `onResync` returns           | Seed the fresh client with the committed snapshot cursor; replay only its suffix. |
+| After an event commit, before `apply` returns              | Seed from that event's committed cursor; do not apply the event twice.            |
 
-```ts
-const refuse = (resync: SyncProtocol.Resync): Effect.Effect<void, SyncError> =>
-  Effect.fail(
-    new SyncError({
-      code: "compacted",
-      message: `Run ${resync.runId} compacted past this consumer's cursor`,
-      resync
-    })
-  )
-```
+These are application-store transaction guarantees. The sync client does not
+make arbitrary callbacks or external side effects exactly-once.
 
-Failing is the safer default for any projection you cannot rebuild from
-scratch.
+The client validates the receipt's run and sequence before advancing. Missing,
+invalid, foreign-run or behind-floor receipts fail with the cursor unchanged.
+If compaction moves again before the next read, recovery runs again for the
+new floor.
 
-## Discard the run's derived state
+## Refuse when restoration is unavailable
 
-The third answer is to throw away what you have for that run and start again
-from the checkpoint. Do it in the hook, so the discard and the cursor move
-happen in the right order:
+Omit `onResync` to preserve the original `compacted` refusal and cursor.
+A handler may also fail explicitly if its snapshot is missing, unauthorized,
+incompatible, or cannot be applied. Failed or interrupted application never
+acknowledges the deleted prefix.
 
-```ts
-const discard = (
-  forget: (runId: SyncProtocol.Resync["runId"]) => Effect.Effect<void>
-) =>
-(resync: SyncProtocol.Resync): Effect.Effect<void, SyncError> => forget(resync.runId)
-```
+A browser or remote follower without a configured public snapshot source must
+not pretend to have rebuilt complete state. The RPC fails closed when the
+host has not provided the requested public projection.
 
-## What not to do
-
-Do not widen the cursor yourself in response to a `compacted` error you catch
-outside the client. The client already owns that move, and doing it twice skips
-entries the second move steps over.
-
-Do not treat `compacted` as retryable. A checkpoint at or below what the
-subscription already covers cannot move the cursor forward, so the client
-deliberately leaves that case a failure rather than looping on the same
-refusal.
+Returning the reported floor without restoring state would claim application
+of deleted history. Keep the typed `compacted` result when reconstruction is
+unavailable; clearing a projection does not recreate its missing prefix.
 
 ## Related pages
 
-- [Compaction and resync](../concepts/compaction.md): what the refusal means
-  and why it is recoverable.
-- [Checkpoints and compaction](/pkg/journal/concepts/compaction): how a floor
-  advances in the first place.
+- [Compaction and resync](../concepts/compaction.md): scope and failure semantics.
+- [Checkpoints and compaction](/pkg/journal/concepts/compaction): journal retention.

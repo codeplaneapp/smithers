@@ -126,14 +126,14 @@ describe("sync payload and frame limits", () => {
 
   // Entries that individually fit but together outgrow the ceiling are
   // ordinary traffic: branch commands are admitted up to 1 MiB each, so three
-  // 400 KB commands compose one. The read truncates the page at the budget and
+  // 800 KB commands compose one. The read truncates the page at the budget and
   // reports `done: false`, so the follower pages again from the cursor it was
   // actually served instead of being wedged on an unretryable refusal.
   it.effect("truncates an aggregate page at the byte budget and serves the rest on the next page", () =>
     Effect.gen(function*() {
       const entries = Array.from(
         { length: 4 },
-        (_, sequence) => entry(sequence, "x".repeat(384 * 1024))
+        (_, sequence) => entry(sequence, "x".repeat(768 * 1024))
       )
       const read = (cursors: SyncProtocol.WorkspaceCursor) =>
         Effect.gen(function*() {

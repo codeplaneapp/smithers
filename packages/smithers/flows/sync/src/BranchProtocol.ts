@@ -257,8 +257,8 @@ export class CommandEventPayload extends Schema.Class<CommandEventPayload>(
 /**
  * The one field a ledger rebuild needs from a stored command: its id.
  *
- * Kept as its own schema so the rebuild decodes only what it uses — a payload
- * whose other fields have since changed shape still yields its identity.
+ * Kept as its own schema for callers that need the identity alone. Sync
+ * hydration validates the complete known command before extracting this field.
  *
  * @category schemas
  * @since 0.1.0

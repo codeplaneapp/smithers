@@ -5,7 +5,7 @@
  */
 import { Rpc, RpcGroup, RpcMiddleware } from "effect/unstable/rpc"
 import { SyncError } from "./SyncError.ts"
-import { Frame, ReadRequest, ReadResponse, SubscribeRequest } from "./SyncProtocol.ts"
+import { Frame, ReadRequest, ReadResponse, Snapshot, SnapshotRequest, SubscribeRequest } from "./SyncProtocol.ts"
 
 /**
  * Authentication boundary for the sync RPC group.
@@ -23,7 +23,7 @@ import { Frame, ReadRequest, ReadResponse, SubscribeRequest } from "./SyncProtoc
 export class SyncAuth extends RpcMiddleware.Service<SyncAuth>()("@smthrs/sync/SyncAuth", { error: SyncError }) {}
 
 /**
- * The two remote procedures of the sync read path.
+ * The remote procedures of the sync read path.
  *
  * A subscription's `credit` is a hard frame limit. Clients reconnect with
  * their materialized cursor to replenish it; there is no separate
@@ -33,6 +33,7 @@ export class SyncAuth extends RpcMiddleware.Service<SyncAuth>()("@smthrs/sync/Sy
  * @since 0.1.0
  */
 export const SyncRpcs = RpcGroup.make(
+  Rpc.make("Sync.Snapshot", { payload: SnapshotRequest, success: Snapshot, error: SyncError }),
   Rpc.make("Sync.Read", { payload: ReadRequest, success: ReadResponse, error: SyncError }),
   Rpc.make("Sync.Subscribe", { payload: SubscribeRequest, success: Frame, error: SyncError, stream: true })
 ).middleware(SyncAuth)

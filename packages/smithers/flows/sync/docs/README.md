@@ -1,136 +1,156 @@
 ---
 title: "@smthrs/sync"
-description: "Browser-safe, read-only replication of a workspace's journal: the wire protocol, the fail-closed server, the replay-then-follow client, and the branch collaboration surface built on the same runs."
+description: "Read-only replication of a Smithers journal: a wire protocol, a server that pages and streams entries, and a browser-safe client that replays a run's history and then follows it live."
 ---
 
-`@smthrs/sync` replicates [`@smthrs/journal`](/api/journal) entries to readers
-that do not own the journal. A second process, a browser tab, or an operator's
-dashboard opens one subscription, receives the durable history it has never
-seen, and then receives new entries as they commit.
+`@smthrs/sync` copies the history of a run to readers that do not own it. It
+carries three things: a wire protocol, a server that serves that protocol over
+[Effect](https://effect.website) RPC, and a browser-safe client that replays a
+run's durable history and then follows it live through one stream.
 
-The package is read-only by construction. `SyncRpcs` carries exactly two
-procedures, `Sync.Read` and `Sync.Subscribe`, and nothing in it appends to a
-journal. Replication therefore introduces no second source of truth: the
-canonical sequence a follower sees is the sequence the journal assigned.
+The history it replicates is a [`@smthrs/journal`](/api/journal) run. Nothing in
+this package writes to a journal, so a follower cannot corrupt what it reads.
 
-Three properties follow from that, and they are what the package is for:
-
-- **A cursor is per run and tolerates holes.** `afterSeq` means "entries after
-  this number", never "expect the next number to be one greater". Dropped
-  admissions leave legitimate gaps, and a follower that treats a gap as
-  corruption stalls on ordinary traffic.
-- **Every fan-out surface is bounded.** One follower's cost is a function of
-  the configured bound, not of the workspace's size or of how far behind that
-  follower has fallen.
-- **Authorization fails closed.** A connection that presents no credential
-  reads no non-branch run, and a subscription ends with `unauthorized` when the
-  credential that opened it expires.
-
-`BranchProtocol` and the six modules around it add **branch collaboration** on
-top of the same runs: a branch is one shared live document whose durable state
-is exactly one journal run, so multiplayer reuses the sequence, cursors, gap
-detection, and resumable follow that already exist. Branch collaboration ships
-unserved at 1.0.0-rc.0; see [Branch collaboration](./concepts/branches.md).
-
-## Who uses this package
-
-Host authors serve the read path: they compose `SyncServer` over a journal and
-a run catalog and mount `SyncRpcs` on a transport.
-[`@smthrs/gateway`](/api/gateway) is the shipped host, and it mounts the group
-on `POST /sync` and `/sync/ws`.
-
-Client authors follow a run: they compose `SyncClient` over an RPC protocol and
-consume a stream of entries. The client is browser safe, so a tab following a
-run runs the same code a Node follower does.
-
-If you are writing a flow, you do not reach this package at all. The engine
-writes the journal, and sync is how something else watches.
-
-## Install
+The 1.0 release candidate is not on npm yet, and publishes under the `next` tag
+rather than `latest`. The examples here import `@smthrs/journal` and `effect`
+directly, so install all three:
 
 ```bash
-pnpm add @smthrs/sync
+pnpm add @smthrs/sync@next @smthrs/journal@next effect@4.0.0-rc.112
 ```
 
-For the import forms, the browser posture, and the packages a serving
-composition adds, see [Installation](./installation.md).
+## What it solves
 
-## The smallest real example
+A long-running job records what it did in a journal, on the machine that ran
+it. Everyone else who cares about that job is somewhere else: a dashboard in a
+browser, a terminal tailing a build another process started, a second engine
+reconciling its own view. Each of them needs the same entries, in the same
+order, without reaching into the writer's database.
 
-A follower subscribes to one run and receives its history, then its live
-entries, through one stream:
+Writing that by hand means solving the same problems every time, and getting
+any one of them wrong loses history quietly. This package solves them once:
+
+- **Catch up and then follow, through one call.** `subscribe` pages durable
+  history until the server reports it reached the tail, then switches to live
+  frames. The consumer sees one stream and never sees the switch.
+- **Resume where you stopped.** A cursor is per run and exclusive, so a
+  follower that persists its cursors hands them back after a restart and reads
+  forward from there.
+- **Acknowledge what you applied, not what you received.** By default a cursor
+  names what was delivered. Supply `apply` and the cursor advances only after
+  your own write succeeds, so a consumer that fails halfway re-receives the
+  entry instead of skipping it.
+- **Cost a bound, not a workspace.** Every fan-out surface has a configured
+  ceiling: page size, frame bytes, subscription credit, concurrent journal
+  reads. One follower's cost is a function of those numbers rather than of how
+  large the workspace is or how far behind the follower has fallen.
+- **Read nothing until you are authorized.** The default principal is
+  anonymous and reads nothing. A connection becomes a reader by presenting a
+  signed, expiring capability, and an open subscription ends when that
+  capability expires.
+- **Distrust the server.** The client refuses a page or frame that carries
+  another run's entry, repeats or reorders a sequence, or serves an entry at or
+  below the cursor it asked from. It refuses before any cursor moves, so a
+  faulty server or a rewriting proxy costs an error rather than a hole.
+
+## Follow a run
+
+A follower composes the client over a transport and subscribes. This program
+prints every entry of one run, starting with the history that already exists:
 
 ```ts
 import type { JournalEvent } from "@smthrs/journal"
 import * as SyncClient from "@smthrs/sync/SyncClient"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Stream from "effect/Stream"
+import * as RpcClient from "effect/unstable/rpc/RpcClient"
+import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 
 const runId = "build-42" as JournalEvent.RunId
 
-const follow = Effect.gen(function*() {
+export const follow = Effect.gen(function*() {
   const sync = yield* SyncClient.Sync
-  return yield* Stream.runCollect(
-    sync.subscribe({ scope: { _tag: "Run", runId }, cursors: [] }).pipe(Stream.take(10))
+  yield* sync.subscribe({ scope: { _tag: "Run", runId }, cursors: [] }).pipe(
+    Stream.runForEach((entry) => Effect.logInfo(`${entry.seq} ${entry.eventType}`))
   )
 })
+
+export const clientLayer = SyncClient.layer.pipe(
+  Layer.provide(RpcClient.layerProtocolSocket()),
+  Layer.provide(RpcSerialization.layerJson)
+)
 ```
 
-`cursors: []` starts from the beginning of the run. The client pages through
-`Sync.Read` until the server reports it reached the durable tail, then switches
-to `Sync.Subscribe` and stays there. For a version that runs end to end against
-a real server, see the [Quickstart](./quickstart.md).
+The socket that protocol runs over comes from your platform: a WebSocket in a
+browser, `@effect/platform-node`'s socket layer in Node. Pass
+`{ _tag: "Workspace" }` instead of a run scope to follow every run the server
+lists and your credential covers.
 
-## The package at a glance
+The serving side is `SyncServer` over a journal and a run catalog.
+[`@smthrs/gateway`](/api/gateway) already mounts it on `POST /sync` and
+`/sync/ws`, so a follower against a Smithers gateway writes only the code
+above. [Serve the read path](./guides/serve-the-read-path.md) builds it into a
+host of your own.
 
-The root entry point exports these namespaces, and each is also importable from
-`@smthrs/sync/<Module>`:
+To watch both halves work with no network and no database, run the
+[quickstart](./quickstart.md): it stands the real server and the real client up
+over an in-memory socket pair and follows an entry that commits while you are
+watching.
 
-| Namespace          | What it is                                                                                                                       |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `SyncProtocol`     | The wire contract: scopes, cursors, requests, responses, frames, and the size and count limits.                                  |
-| `SyncError`        | `ErrorCode`, the `SyncError` every procedure declares with its structural guard `SyncError.is`, and the terminal `SyncGapError`. |
-| `SyncRpcs`         | The read-path RPC group and the `SyncAuth` middleware tag it is bound to.                                                        |
-| `SyncServer`       | The workspace-side implementation of the read path, its policy, and `layerHandlers`.                                             |
-| `SyncClient`       | The browser-safe replay-then-follow client and its subscription options.                                                         |
-| `RunCatalog`       | The workspace run set a workspace subscription reconciles against: static, in-memory, and polling forms.                         |
-| `SyncAuth`         | The middleware implementations: `layer` verifies a header, `layerClient` sends one, plus the header codec.                       |
-| `SyncPrincipal`    | The per-request identity reference, its constructors, and `layerWorkspace` for in-process owners.                                |
-| `WorkspaceShare`   | The workspace capability authority over a `Redacted` keyring with `kid` rotation.                                                |
-| `BranchProtocol`   | The branch vocabulary: ids, claims, capabilities, submissions, receipts, and the branch-to-run mapping.                          |
-| `BranchShare`      | The branch capability authority: one branch, one access level, one expiry, signed.                                               |
-| `BranchIds`        | The port fresh branch and capability ids are minted through.                                                                     |
-| `BranchCommands`   | Idempotent admission of commands onto a branch's journal run.                                                                    |
-| `BranchPresence`   | The ephemeral, lease-expiring roster, which is never journalled.                                                                 |
-| `BranchProjection` | The order-independent fold from branch commands to a document view.                                                              |
-| `BranchRpcs`       | The branch collaboration wire group.                                                                                             |
-| `BranchServer`     | The handler layer that projects the branch services onto that group.                                                             |
+## Branch collaboration
 
-Two test doubles ship under explicit subpaths: `@smthrs/sync/test/TestSocket`
-is an in-memory socket pair with fault injection, and
-`@smthrs/sync/test/TestSync` binds a real server and client over it.
+The package also carries a branch surface: several people editing one shared
+live document, whose entire durable state is one journal run. Reusing a run
+means multiplayer inherits the canonical sequence, the cursors, the gap
+detection, and the resumable follow rather than introducing a second source of
+truth.
 
-Every export, with signatures and error codes, is in the
-[API reference](./api.md).
+Branch collaboration ships unserved at 1.0.0-rc.0. The gateway mounts the read
+path and nothing mounts the branch procedures, so treat those modules as a
+library surface waiting for a host. [Branch collaboration](./concepts/branches.md)
+describes what they guarantee.
 
-## Where to go next
+## Where this sits
 
-- [Installation](./installation.md): the import forms, the browser posture, and
-  what a serving composition adds.
-- [Quickstart](./quickstart.md): write two entries, follow the run, and watch a
-  third arrive live.
-- [Wire protocol](./protocol.md): the normative message shapes, for a client
-  written against the wire rather than against `SyncClient`.
-- Concepts: [scopes and cursors](./concepts/scopes-and-cursors.md),
-  [replay then follow](./concepts/replay-then-follow.md),
-  [authorization](./concepts/authorization.md),
-  [compaction and resync](./concepts/compaction.md), and
-  [branch collaboration](./concepts/branches.md).
-- Guides: [follow a run](./guides/follow-a-run.md),
-  [serve the read path](./guides/serve-the-read-path.md),
-  [authorize a connection](./guides/authorize-a-connection.md),
-  [list a workspace's runs](./guides/list-workspace-runs.md),
-  [handle a compacted run](./guides/handle-a-compacted-run.md), and
-  [test a follower](./guides/test-a-follower.md).
-- [Troubleshooting](./troubleshooting.md): every `SyncError` code, the symptom
-  it produces, and what to change.
+`@smthrs/sync` is one package of the Smithers durable flow engine, and it owns
+exactly the read path out of that engine. [`@smthrs/flows`](/api/flows) is the
+engine's barrel: it re-exports this package as a namespace next to the journal,
+the stores, and the Node runtime that wires them over one SQLite file, so
+`import { Sync } from "@smthrs/flows"` reaches the same code as
+`import * as Sync from "@smthrs/sync"`. Depend on the barrel when you want a
+working engine in one dependency. Depend on this package when replication is
+the part you need, which is what a browser wants: the root here is browser
+safe, and the barrel's Node runtime has no place in a bundle.
+
+The two packages either side of it are worth knowing.
+[`@smthrs/journal`](/api/journal) writes the entries this one replicates and
+owns compaction, which is the one refusal a follower has to recover from.
+[`@smthrs/gateway`](/api/gateway) is the host that puts the read path on a
+port.
+
+Above the whole engine sits the
+[`smithers` command-line interface](/api/cli), which runs flows out of a
+project directory without your composing any of this by hand.
+
+## Next steps
+
+- [Installation](./installation.md): the import forms, and what a follower and
+  a server each add on top of this package.
+- [Quickstart](./quickstart.md): a real server and a real client following one
+  run end to end, with no network.
+- [Scopes and cursors](./concepts/scopes-and-cursors.md): what a request covers,
+  what a cursor claims, and why journal sequences have holes.
+- [Replay then follow](./concepts/replay-then-follow.md): the two phases of a
+  subscription and the bounds on each.
+- [Authorization](./concepts/authorization.md): the two fail-closed boundaries
+  and why a subscription carries its own expiry.
+- [Follow a run](./guides/follow-a-run.md): the follower above, with cursors
+  you persist and the failures that reach you.
+- [Test a follower](./guides/test-a-follower.md): drop, stall, and corrupt
+  frames against the production client.
+- [Wire protocol](./protocol.md): the normative message shapes, for a client in
+  another language.
+- [API reference](./api.md): every public export, its bounds, and its defaults.
+- [Troubleshooting](./troubleshooting.md): every error code, the symptom it
+  produces, and the change that fixes it.

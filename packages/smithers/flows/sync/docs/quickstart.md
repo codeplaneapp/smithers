@@ -11,9 +11,8 @@ piece that is not production is the transport: an in-memory socket pair stands
 in for a WebSocket. By the end you will have one subscription that delivers two
 entries of history and then a third entry that commits while you are watching.
 
-The runnable original is
-[`examples/src/07-sync-follower.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/07-sync-follower.ts)
-in the repository.
+A runnable copy lives in the Smithers repository, as
+[`examples/src/07-sync-follower.ts`](https://github.com/smithersai/smithers/blob/main/examples/src/07-sync-follower.ts).
 
 ## Prerequisites
 
@@ -21,7 +20,7 @@ in the repository.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/sync @smthrs/journal effect
+pnpm add @smthrs/sync@next @smthrs/journal@next effect@4.0.0-rc.112
 ```
 
 ## Name the run
@@ -149,7 +148,7 @@ ones.
 
 One `subscribe` call ran both phases of the protocol. The client issued
 `Sync.Read` pages until the server reported it had reached the durable tail,
-then opened `Sync.Subscribe` from the cursors it had acknowledged. The third
+then opened `Sync.Subscribe` from its delivered bookmarks. The third
 entry arrived on the second phase. Nothing was delivered twice, because the
 cursor the follow resumed from was exactly the last sequence the replay handed
 over.

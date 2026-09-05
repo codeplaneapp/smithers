@@ -224,7 +224,8 @@ describe("subscription lifetime", () => {
           Effect.provide(
             Layer.mergeAll(
               Journal.layerNoop({
-                entries: ({ runId }) => Effect.succeed({ entries: [entry(runId, 0)], hasMore: false })
+                entries: ({ runId, after }) =>
+                  Effect.succeed({ entries: after === undefined ? [entry(runId, 0)] : [], hasMore: false })
               }),
               Layer.succeed(
                 RunCatalog.RunCatalog,

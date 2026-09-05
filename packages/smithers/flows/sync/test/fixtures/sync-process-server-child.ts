@@ -119,6 +119,7 @@ const program = Effect.scoped(
     const handlers = SyncRpcs.SyncRpcs.toLayer(
       Effect.succeed(
         SyncRpcs.SyncRpcs.of({
+          "Sync.Snapshot": (request) => sync.snapshot(request),
           "Sync.Read": (readRequest) => sync.read(readRequest),
           "Sync.Subscribe": (subscribeRequest) => sync.subscribe(subscribeRequest)
         })

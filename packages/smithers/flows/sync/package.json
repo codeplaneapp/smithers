@@ -35,9 +35,28 @@
   "exports": {
     "./package.json": "./package.json",
     ".": "./src/index.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./BranchCommands": "./src/BranchCommands.ts",
+    "./BranchIds": "./src/BranchIds.ts",
+    "./BranchPresence": "./src/BranchPresence.ts",
+    "./BranchProjection": "./src/BranchProjection.ts",
+    "./BranchProtocol": "./src/BranchProtocol.ts",
+    "./BranchRpcs": "./src/BranchRpcs.ts",
+    "./BranchServer": "./src/BranchServer.ts",
+    "./BranchShare": "./src/BranchShare.ts",
+    "./RunCatalog": "./src/RunCatalog.ts",
+    "./SyncAuth": "./src/SyncAuth.ts",
+    "./SyncClient": "./src/SyncClient.ts",
+    "./SyncError": "./src/SyncError.ts",
+    "./SyncPrincipal": "./src/SyncPrincipal.ts",
+    "./SyncProtocol": "./src/SyncProtocol.ts",
+    "./SyncRpcs": "./src/SyncRpcs.ts",
+    "./SyncServer": "./src/SyncServer.ts",
+    "./WorkspaceShare": "./src/WorkspaceShare.ts",
+    "./index": "./src/index.ts",
+    "./test/TestSocket": "./src/test/TestSocket.ts",
+    "./test/TestSync": "./src/test/TestSync.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -61,13 +80,108 @@
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./BranchCommands": {
+        "types": "./dist/esm/BranchCommands.d.ts",
+        "import": "./dist/esm/BranchCommands.js",
+        "require": "./dist/cjs/BranchCommands.js"
+      },
+      "./BranchIds": {
+        "types": "./dist/esm/BranchIds.d.ts",
+        "import": "./dist/esm/BranchIds.js",
+        "require": "./dist/cjs/BranchIds.js"
+      },
+      "./BranchPresence": {
+        "types": "./dist/esm/BranchPresence.d.ts",
+        "import": "./dist/esm/BranchPresence.js",
+        "require": "./dist/cjs/BranchPresence.js"
+      },
+      "./BranchProjection": {
+        "types": "./dist/esm/BranchProjection.d.ts",
+        "import": "./dist/esm/BranchProjection.js",
+        "require": "./dist/cjs/BranchProjection.js"
+      },
+      "./BranchProtocol": {
+        "types": "./dist/esm/BranchProtocol.d.ts",
+        "import": "./dist/esm/BranchProtocol.js",
+        "require": "./dist/cjs/BranchProtocol.js"
+      },
+      "./BranchRpcs": {
+        "types": "./dist/esm/BranchRpcs.d.ts",
+        "import": "./dist/esm/BranchRpcs.js",
+        "require": "./dist/cjs/BranchRpcs.js"
+      },
+      "./BranchServer": {
+        "types": "./dist/esm/BranchServer.d.ts",
+        "import": "./dist/esm/BranchServer.js",
+        "require": "./dist/cjs/BranchServer.js"
+      },
+      "./BranchShare": {
+        "types": "./dist/esm/BranchShare.d.ts",
+        "import": "./dist/esm/BranchShare.js",
+        "require": "./dist/cjs/BranchShare.js"
+      },
+      "./RunCatalog": {
+        "types": "./dist/esm/RunCatalog.d.ts",
+        "import": "./dist/esm/RunCatalog.js",
+        "require": "./dist/cjs/RunCatalog.js"
+      },
+      "./SyncAuth": {
+        "types": "./dist/esm/SyncAuth.d.ts",
+        "import": "./dist/esm/SyncAuth.js",
+        "require": "./dist/cjs/SyncAuth.js"
+      },
+      "./SyncClient": {
+        "types": "./dist/esm/SyncClient.d.ts",
+        "import": "./dist/esm/SyncClient.js",
+        "require": "./dist/cjs/SyncClient.js"
+      },
+      "./SyncError": {
+        "types": "./dist/esm/SyncError.d.ts",
+        "import": "./dist/esm/SyncError.js",
+        "require": "./dist/cjs/SyncError.js"
+      },
+      "./SyncPrincipal": {
+        "types": "./dist/esm/SyncPrincipal.d.ts",
+        "import": "./dist/esm/SyncPrincipal.js",
+        "require": "./dist/cjs/SyncPrincipal.js"
+      },
+      "./SyncProtocol": {
+        "types": "./dist/esm/SyncProtocol.d.ts",
+        "import": "./dist/esm/SyncProtocol.js",
+        "require": "./dist/cjs/SyncProtocol.js"
+      },
+      "./SyncRpcs": {
+        "types": "./dist/esm/SyncRpcs.d.ts",
+        "import": "./dist/esm/SyncRpcs.js",
+        "require": "./dist/cjs/SyncRpcs.js"
+      },
+      "./SyncServer": {
+        "types": "./dist/esm/SyncServer.d.ts",
+        "import": "./dist/esm/SyncServer.js",
+        "require": "./dist/cjs/SyncServer.js"
+      },
+      "./WorkspaceShare": {
+        "types": "./dist/esm/WorkspaceShare.d.ts",
+        "import": "./dist/esm/WorkspaceShare.js",
+        "require": "./dist/cjs/WorkspaceShare.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./test/TestSocket": {
+        "types": "./dist/esm/test/TestSocket.d.ts",
+        "import": "./dist/esm/test/TestSocket.js",
+        "require": "./dist/cjs/test/TestSocket.js"
+      },
+      "./test/TestSync": {
+        "types": "./dist/esm/test/TestSync.d.ts",
+        "import": "./dist/esm/test/TestSync.js",
+        "require": "./dist/cjs/test/TestSync.js"
+      }
     }
   },
   "scripts": {
@@ -82,27 +196,27 @@
   "dependencies": {
     "@smthrs/journal": "1.0.0-rc.0"
   },
-  "peerDependencies": {
-    "effect": "4.0.0-rc.108"
-  },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@smthrs/time-travel": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
-    "vitest": "4.1.9"
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.9",
+    "@smthrs/time-travel": "1.0.0-rc.0"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-rc.112"
   }
 }

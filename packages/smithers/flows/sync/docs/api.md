@@ -23,9 +23,10 @@ const follow = Effect.gen(function*() {
 | `@smthrs/sync/test/TestSync`   | [src/test/TestSync.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sync/src/test/TestSync.ts)     | Node     |
 | `@smthrs/sync/test/TestSocket` | [src/test/TestSocket.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sync/src/test/TestSocket.ts) | any      |
 
-The root is browser safe and is entry 42 of the browser bundle contract
-(`pnpm run browser`). The signing paths use Web Crypto directly for that
-reason. `TestSync.layerTest` binds the Node SQLite test journal.
+The root is browser safe, and the package's own bundle check holds it that
+way. The signing paths call Web Crypto directly for that reason, so one module
+serves Node and the browser. `TestSync.layerTest` binds the Node SQLite test
+journal, which is why it is a separate subpath.
 
 ## Authorization
 
@@ -63,22 +64,22 @@ Every fan-out surface is bounded, so one follower's cost is a function of the
 configured bound rather than of the workspace's size or of how far behind that
 follower has fallen.
 
-| Bound                                            | Default                                       | What it caps                                                                                                                                                                    |
-| ------------------------------------------------ | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SyncProtocol.maxReadLimit`                      | 1024                                          | Entries one `Sync.Read` may ask for. Over the limit is refused at the wire; an in-process caller is clamped.                                                                    |
-| `SyncProtocol.maxSubscribeCredit`                | 4096                                          | Frames one `Sync.Subscribe` may hold open. Zero is refused rather than served as an empty stream.                                                                               |
-| `SyncServer.Options.concurrency`                 | `SyncServer.defaultConcurrency` (64)          | Journal reads one workspace subscription holds open at once. Each round reads one bounded page per covered run, so a busy run wakes the next round instead of holding its slot. |
-| `SyncServer.Options.tailIntervalMs`              | `SyncServer.defaultTailIntervalMs` (1000)     | Milliseconds a workspace subscription waits before revisiting every covered run when nothing wakes it.                                                                          |
-| `SyncServer.Options.maxFrameBytes`               | `SyncProtocol.defaultMaxFrameBytes` (1 MiB)   | Summed encoded entries of one read page or subscription frame.                                                                                                                  |
-| `SyncClient.SubscribeOptions.credit`             | `SyncClient.defaultCredit` (256)              | Frames one subscription round carries before the follow replenishes the window by resubscribing from its acknowledged cursors.                                                  |
-| `SyncClient.make` `bootstrapLimit`               | `SyncClient.defaultBootstrapLimit` (256)      | Entries one catch-up page asks for.                                                                                                                                             |
-| `BranchCommands.Options.maxCommandBytes`         | `SyncProtocol.defaultMaxFrameBytes` (1 MiB)   | Encoded size of one command submission, refused before anything is appended.                                                                                                    |
-| `BranchCommands.Options.ledgerCapacity`          | `BranchCommands.defaultLedgerCapacity` (4096) | Receipts one branch keeps in memory. The journal's producer identity is the durable dedupe, so an evicted receipt costs a round trip and never correctness.                     |
-| `BranchCommands.Options.hydrationLimit`          | `BranchCommands.defaultHydrationLimit` (4096) | Entries one branch's first-touch hydration reads before it stops, so a long history is not charged to the next writer's latency. What the walk misses, the journal answers.     |
-| `BranchPresence.PresenceOptions.maxParticipants` | `BranchPresence.defaultMaxParticipants` (256) | Participants one branch may hold at once; a further announce is refused with `backpressure`.                                                                                    |
-| `RunCatalog.MemoryOptions.changesCapacity`       | `RunCatalog.defaultChangesCapacity` (1024)    | Announcements a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                          |
-| `RunCatalog.PollingOptions.intervalMs`           | `RunCatalog.defaultPollIntervalMs` (1000)     | Milliseconds between reads of the durable run set: one bounded query per interval per composition, not per subscriber.                                                          |
-| `BranchPresence.PresenceOptions.changesCapacity` | `BranchPresence.defaultChangesCapacity` (256) | Roster notifications a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                   |
+| Bound                                            | Default                                         | What it caps                                                                                                                                                                    |
+| ------------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SyncProtocol.maxReadLimit`                      | 1024                                            | Entries one `Sync.Read` may ask for. Over the limit is refused at the wire; an in-process caller is clamped.                                                                    |
+| `SyncProtocol.maxSubscribeCredit`                | 4096                                            | Frames one `Sync.Subscribe` may hold open. Zero is refused rather than served as an empty stream.                                                                               |
+| `SyncServer.Options.concurrency`                 | `SyncServer.defaultConcurrency` (64)            | Journal reads one workspace subscription holds open at once. Each round reads one bounded page per covered run, so a busy run wakes the next round instead of holding its slot. |
+| `SyncServer.Options.tailIntervalMs`              | `SyncServer.defaultTailIntervalMs` (1000)       | Milliseconds a workspace subscription waits before revisiting every covered run when nothing wakes it.                                                                          |
+| `SyncServer.Options.maxFrameBytes`               | `SyncProtocol.defaultMaxFrameBytes` (2 MiB)     | Summed encoded entries of one read page or subscription frame.                                                                                                                  |
+| `SyncClient.SubscribeOptions.credit`             | `SyncClient.defaultCredit` (256)                | Frames one subscription round carries before the follow replenishes the window by resubscribing from its acknowledged cursors.                                                  |
+| `SyncClient.make` `bootstrapLimit`               | `SyncClient.defaultBootstrapLimit` (256)        | Entries one catch-up page asks for.                                                                                                                                             |
+| `BranchCommands.Options.maxCommandBytes`         | `BranchCommands.defaultMaxCommandBytes` (1 MiB) | Encoded size of one command submission, refused before anything is appended.                                                                                                    |
+| `BranchCommands.Options.ledgerCapacity`          | `BranchCommands.defaultLedgerCapacity` (4096)   | Receipts one branch keeps in memory. The journal's producer identity is the durable dedupe, so an evicted receipt costs a round trip and never correctness.                     |
+| `BranchCommands.Options.hydrationLimit`          | `BranchCommands.defaultHydrationLimit` (4096)   | Entries one branch's first-touch hydration reads before it stops, so a long history is not charged to the next writer's latency. What the walk misses, the journal answers.     |
+| `BranchPresence.PresenceOptions.maxParticipants` | `BranchPresence.defaultMaxParticipants` (256)   | Participants one branch may hold at once; a further announce is refused with `backpressure`.                                                                                    |
+| `RunCatalog.MemoryOptions.changesCapacity`       | `RunCatalog.defaultChangesCapacity` (1024)      | Announcements a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                          |
+| `RunCatalog.PollingOptions.intervalMs`           | `RunCatalog.defaultPollIntervalMs` (1000)       | Milliseconds between reads of the durable run set: one bounded query per interval per composition, not per subscriber.                                                          |
+| `BranchPresence.PresenceOptions.changesCapacity` | `BranchPresence.defaultChangesCapacity` (256)   | Roster notifications a stalled `changes` subscriber may fall behind by; the oldest slide out.                                                                                   |
 
 Every numeric option is validated where it enters: a value that is not a
 positive safe integer fails the constructor with `invalid_request` instead of
@@ -94,10 +95,31 @@ notification therefore costs latency and never state.
 
 ## Read path
 
-`SyncServer.Service` has `read(request)` and `subscribe(request)`.
+`SyncServer.Service` has `read(request)`, `subscribe(request)`, and `snapshot(request)`.
 `makeLiveWith(options)` and `layerWith(options)` take the `Options` policy
 above; `makeLive` and `layer` use the defaults. The live layer requires
 `Journal` and `RunCatalog`.
+
+`SyncServer.SnapshotSource` is an optional host service with
+`read(SnapshotRequest): Effect<Snapshot, SyncError>`. It provides only public
+projections, never raw unredacted execution checkpoints. The server authorizes
+the run/branch before invoking it, checks expiry before returning data, and
+refuses missing providers. Providers must select the exact requested lineage,
+projection and version and retain state covering the requested sequence.
+
+`SyncClient.Service.snapshot(request)` fetches that projection through
+`Sync.Snapshot` without applying state or advancing cursors. `SnapshotRequest`
+and `Snapshot` in `SyncProtocol` carry protocol version 1, run/lineage identity,
+projection name/version, minimum or actual sequence, and response JSON state.
+Both ends validate identities and the full response's encoded UTF-8 byte limit
+using `maxFrameBytes`. Invalid or stale state is refused, not coerced or skipped.
+
+`SyncClient.Service.progress` returns `SyncProtocol.Progress`: separate
+`{ _tag: "Delivered", cursors }` and `{ _tag: "Applied", cursors }` fields.
+`cursors` on the service remains a delivery bookmark. Applied progress advances
+only after successful application or restoration; an applying subscription
+uses the shared applied map when choosing its start position. Use one client
+per projection and persist projection state and its cursor in one transaction.
 
 A read shares its page across the runs it covers and stops at the first of three
 bounds: the request's `limit`, the frame ceiling, or the durable tail of every
@@ -122,7 +144,7 @@ the echoed response state would otherwise disagree about where the page began.
 Effect RPC client and `layer` derives that client from `RpcClient.Protocol`.
 A subscription replays through `Sync.Read` until the server reports `done`,
 then follows through `Sync.Subscribe` in credit windows, replenishing each
-window by resubscribing from the cursors it has acknowledged.
+window by resubscribing from its matching delivered or applied progress.
 
 Server responses are admitted, never trusted, on both paths. A frame or page
 whose encoded entries exceed `maxFrameBytes` is refused with
@@ -133,34 +155,36 @@ page that makes no progress fails typed instead of re-reading forever.
 
 Transport, authentication, and reconnect are handled here rather than left to
 the application. A live follow that loses its transport reconnects under
-exponential backoff capped at five seconds, resuming from the acknowledged
-cursors; gaps, authorization refusals, and server closes propagate to the
+exponential backoff capped at five seconds, resuming from the subscription's
+progress; gaps, authorization refusals, and server closes propagate to the
 consumer instead of retrying.
 
-A cursor names what has been DELIVERED. `SubscribeOptions.apply` upgrades that
-to what has been APPLIED: the callback runs to success before the cursor moves,
-so a consumer whose own application fails re-receives the entry on its next
-subscription rather than skipping it.
+A delivery bookmark names what was delivered. `SubscribeOptions.apply`
+additionally records `AppliedProgress`: the callback runs to success before
+that cursor moves, so a failed application is retried by the next applying
+subscription. A delivery-only subscription cannot acknowledge application.
 
 ## Compaction and resync
 
 Compaction deletes a run's entries below a checkpoint, so a cursor under that
 floor names history that no longer exists. The server maps the journal's
 `compacted` failure onto its own code with the run id the read was issued for,
-and `SyncError.resync` carries `{ runId, checkpointSeq }`. The client catches
-it, moves that run's cursor to the checkpoint, and restarts the subscription,
-so one compacted run costs a reconnect rather than the whole subscription. A
+and `SyncError.resync` carries `{ runId, checkpointSeq }`. The client fails closed
+unless `onResync` restores a snapshot and returns its `{ runId, afterSeq }`.
+It validates that receipt before advancing to the actual restored sequence. A
 checkpoint at or below what the subscription already covers cannot move the
 cursor forward, so it stays a failure rather than a retry of the same refusal.
 
 :::warning
 The resync moves a cursor, not state. The entries below `checkpointSeq` are
-gone from the journal, and this wire carries no checkpoint state to stand in
-for them. `SubscribeOptions.onResync` is the seam a consumer fills that hole
-through: it runs BEFORE the cursor moves and must succeed, so a failure leaves
+gone from the journal. `SyncClient.snapshot` can fetch a configured public
+projection, but does not apply it. `SubscribeOptions.onResync` is the seam a consumer fills that hole
+through: it runs BEFORE the cursor moves and must return a valid restored cursor, so a failure leaves
 the cursor where it was and nothing is skipped silently. A Node follower reads
-the prefix from `Journal.latestCheckpoint(runId)`; the default hook logs the
-skipped range, which is what a follower with no derived state wants.
+the prefix from `Journal.latestCheckpoint(runId)` and applies it. With no handler,
+the original refusal is preserved. A consumer that cannot restore the prefix
+must not return an applied receipt for it. Durable consumers must commit snapshot state and
+their durable cursor in their own transaction; the client cursor is in memory.
 :::
 
 ## Errors
@@ -196,11 +220,12 @@ branch services onto it. The payload schemas ARE the service schemas, so the
 wire and the services cannot drift about what a legal message is.
 
 :::warning
-Branch collaboration ships unserved at 1.0.0-rc.0. `packages/smithers/gateway` mounts
-`SyncRpcs` on `POST /sync` and `/sync/ws`; nothing outside this package's tests
-mounts `BranchRpcs`, so the seven branch procedures have no in-repo
-integration against a real gateway. Treat the branch modules as a library
-surface pending a host, not as a served endpoint.
+Branch collaboration ships unserved at 1.0.0-rc.0.
+[`@smthrs/gateway`](/api/gateway) mounts `SyncRpcs` on `POST /sync` and
+`/sync/ws`; nothing outside this package's own tests mounts `BranchRpcs`, so
+the seven branch procedures have no integration against a real gateway yet.
+Treat the branch modules as a library surface pending a host, not as a served
+endpoint.
 :::
 
 ## Test helpers
@@ -210,13 +235,18 @@ surface pending a host, not as a served endpoint.
 | `TestSync.layerTest`, `layerWorkspaceAuth`, `layerNoop`, `connect` | [src/test/TestSync.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sync/src/test/TestSync.ts)     | a real server and client over an in-memory socket pair |
 | `TestSocket.makePair`, `Pair`, `TestFaults`, `FrameFilter`         | [src/test/TestSocket.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sync/src/test/TestSocket.ts) | fault-injecting socket pair                            |
 
-Subscription fan-out is covered by budget assertions, not only by frame
-assertions: `test/ServerSoak.test.ts` runs five concurrent workspace
-subscribers and requires an identical frame set from each, drains 200
-subscribe/complete cycles and requires every per-run journal stream to be
-released afterwards, and soaks 200 five-subscriber rounds under a retained-heap
-budget. A regression that retains per-subscriber state passes every frame
-assertion in the other suites, so these are the tests that see it.
+Subscription fan-out is held to budgets, not only to frame assertions. The
+package's soak suite runs five concurrent workspace subscribers and requires an
+identical frame set from each, drains 200 subscribe and complete cycles and
+requires every per-run journal stream to be released afterwards, and soaks 200
+five-subscriber rounds under a retained-heap budget. A regression that retains
+per-subscriber state satisfies every frame assertion elsewhere, so those are
+the checks that catch it.
+
+The optional [long soak tier](./guides/run-a-long-soak.md) adds repeated
+post-warmup resource samples, growth slopes, real TCP reconnects, on-disk
+compaction and checkpoint retention, and a stalled subscriber. It writes a
+machine-verifiable JSON artifact; ordinary PR gates do not start a timed run.
 
 ### Rewind generations
 

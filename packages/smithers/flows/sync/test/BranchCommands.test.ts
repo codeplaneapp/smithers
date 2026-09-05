@@ -188,7 +188,11 @@ describe("BranchCommands", () => {
         payload: { commandId: "engine" },
         meta: null
       })
-      const shapes: ReadonlyArray<unknown> = ["text", null, { commandId: 7 }, { commandId: "c-known" }]
+      const shapes: ReadonlyArray<unknown> = ["text", null, { commandId: 7 }, {
+        commandId: "c-known",
+        participantId: "alice",
+        name: "branch.say"
+      }]
       const history = shapes.map((payload, index) =>
         new JournalEvent.Entry({
           runId,
@@ -197,7 +201,7 @@ describe("BranchCommands", () => {
           sourceId: BranchProtocol.commandSourceId(commandId(`command-${index}`)),
           sourceSeq: BranchProtocol.commandSourceSeq,
           emittedAtMs: 0,
-          eventType: BranchProtocol.CommandEvent,
+          eventType: index === 3 ? BranchProtocol.CommandEvent : "extension/event",
           payload,
           meta: null
         })

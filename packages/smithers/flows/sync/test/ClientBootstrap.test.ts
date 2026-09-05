@@ -349,6 +349,7 @@ describe("SyncClient compaction seam", () => {
             onResync: (resync) =>
               Effect.sync(() => {
                 seen.push(resync)
+                return { runId: resync.runId, afterSeq: resync.checkpointSeq }
               }),
             scope
           }),

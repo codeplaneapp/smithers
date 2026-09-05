@@ -17,7 +17,7 @@ bounds:
 
 - the request's `limit`, capped at `SyncProtocol.maxReadLimit`;
 - the frame ceiling, `SyncServer.Options.maxFrameBytes`, which defaults to
-  1 MiB of summed encoded entries;
+  2 MiB of summed encoded entries;
 - the durable tail of every covered run.
 
 Only the third reports `done: true`, and that is the signal to switch to the
@@ -47,8 +47,8 @@ never reached the runs behind it and never reached the live follow either.
 server. It is not a sliding acknowledgement window, and there is no `Ack`
 procedure.
 
-A follower that wants more frames resubscribes from the cursors it has
-acknowledged. `SyncClient` does exactly that, once per window, defaulting to
+A follower that wants more frames resubscribes from its current subscription
+progress. `SyncClient` does exactly that, once per window, defaulting to
 `SyncClient.defaultCredit` of 256 frames.
 
 The number is a real trade. At `credit: 1` the window closes after every single
@@ -101,10 +101,13 @@ all is refused for the same reason rather than retried.
 ## Reconnecting
 
 A live follow that loses its transport reconnects under exponential backoff
-capped at five seconds, resuming from the acknowledged cursors, and the
+capped at five seconds, resuming from the subscription's progress, and the
 schedule resets once entries flow again. Only `transport_failed` retries. Gaps,
 authorization refusals, and server closes propagate to the consumer, because
-none of them is fixed by trying again.
+none of them is fixed by trying again. Delivery-only subscriptions resume from
+delivered bookmarks; applying subscriptions resume from applied progress.
+An unrelated defect or interruption accompanying a disconnect stays terminal,
+with its complete cause preserved.
 
 Transport, authentication, and reconnect all live in this package rather than
 in the application. A follower that had to implement them would have to

@@ -5,19 +5,23 @@
  */
 import { Journal } from "@smthrs/journal"
 import type * as JournalEvent from "@smthrs/journal/JournalEvent"
+import * as Cause from "effect/Cause"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as PubSub from "effect/PubSub"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import type * as Rpc from "effect/unstable/rpc/Rpc"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import { type BranchId, branchOfRunId, type ShareCapability, type ShareClaims } from "./BranchProtocol.ts"
 import * as BranchShare from "./BranchShare.ts"
+import * as Admission from "./internal/admission.ts"
 import { causeCode, journalErrorCode } from "./internal/causeText.ts"
 import { positiveInt, requestCount } from "./internal/options.ts"
+import * as SnapshotBoundary from "./internal/snapshot.ts"
 import * as RunCatalog from "./RunCatalog.ts"
 import { SyncError } from "./SyncError.ts"
 import * as SyncPrincipal from "./SyncPrincipal.ts"
@@ -31,6 +35,7 @@ import { SyncRpcs } from "./SyncRpcs.ts"
  * @since 0.1.0
  */
 export interface Service {
+  readonly snapshot: (request: SyncProtocol.SnapshotRequest) => Effect.Effect<SyncProtocol.Snapshot, SyncError>
   readonly read: (request: SyncProtocol.ReadRequest) => Effect.Effect<SyncProtocol.ReadResponse, SyncError>
   readonly subscribe: (request: SyncProtocol.SubscribeRequest) => Stream.Stream<SyncProtocol.Frame, SyncError>
 }
@@ -42,6 +47,21 @@ export interface Service {
  * @since 0.1.0
  */
 export class SyncServer extends Context.Service<SyncServer, Service>()("@smthrs/sync/SyncServer") {}
+
+/**
+ * Explicit host opt-in for public projection snapshots. Never bind this to raw
+ * Journal.latestCheckpoint: executable checkpoints are intentionally unredacted.
+ * Providers must select the requested lineage/projection/version, retain a
+ * snapshot covering compaction, and return a complete state through its sequence.
+ * Run/branch read authorization occurs before this callback. Its output must be
+ * safe for every reader authorized for that run; narrower data needs a separate
+ * authorization boundary. Missing providers fail closed.
+ * @category services
+ * @since 1.0.0-rc.0
+ */
+export class SnapshotSource extends Context.Service<SnapshotSource, {
+  readonly read: (request: SyncProtocol.SnapshotRequest) => Effect.Effect<SyncProtocol.Snapshot, SyncError>
+}>()("@smthrs/sync/SnapshotSource") {}
 
 /**
  * Constructs a sync server from an implementation.
@@ -59,6 +79,7 @@ export const make = (implementation: Service): Service => SyncServer.of(implemen
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   make({
+    snapshot: () => Effect.fail(new SyncError({ code: "not_found", message: "Public snapshots are unavailable" })),
     read: Effect.fn("SyncServer.read")(() => Effect.succeed({ entries: [], cursors: [], done: true })),
     subscribe: (): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.succeed<SyncProtocol.Frame>({ _tag: "Closed", reason: "Sync server is unavailable" }),
@@ -175,7 +196,7 @@ const tailBatchSize = 256
  * Read-path policy.
  *
  * The default caps the encoded entries of one read page or one subscription
- * frame at 1 MiB, and the run streams one subscription holds open at
+ * frame at 2 MiB, and the run streams one subscription holds open at
  * {@link defaultConcurrency}.
  *
  * @category models
@@ -271,6 +292,7 @@ const makeWith = (
     const journal = yield* Journal.Journal
     const catalog = yield* RunCatalog.RunCatalog
     const share = yield* Effect.serviceOption(BranchShare.BranchShare)
+    const snapshots = yield* Effect.serviceOption(SnapshotSource)
 
     /**
      * Refuses ONE entry whose own encoded size outgrows the ceiling.
@@ -481,8 +503,36 @@ const makeWith = (
           })
         )
 
-    const read = (request: SyncProtocol.ReadRequest): Effect.Effect<SyncProtocol.ReadResponse, SyncError> =>
+    const snapshot = (input: SyncProtocol.SnapshotRequest): Effect.Effect<SyncProtocol.Snapshot, SyncError> =>
       Effect.gen(function*() {
+        const request = yield* SnapshotBoundary.request(input)
+        const { expiresAtMs } = yield* runIdsFor({ _tag: "Run", runId: request.runId }, request.capability)
+        if (expiresAtMs <= (yield* Clock.currentTimeMillis)) return yield* Effect.fail(expired)
+        if (Option.isNone(snapshots)) {
+          return yield* Effect.fail(new SyncError({ code: "not_found", message: "Public snapshots are unavailable" }))
+        }
+        const supplied = yield* Effect.suspend(() => snapshots.value.read({ ...request })).pipe(
+          Effect.catchCause((cause) =>
+            Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(
+              new SyncError({ code: "not_found", message: "Public snapshot is unavailable" })
+            )
+          )
+        )
+        // A slow provider may finish after the credential that admitted it expires.
+        if (expiresAtMs <= (yield* Clock.currentTimeMillis)) return yield* Effect.fail(expired)
+        return yield* SnapshotBoundary.response(request, supplied, maxFrameBytes)
+      })
+
+    const read = (input: SyncProtocol.ReadRequest): Effect.Effect<SyncProtocol.ReadResponse, SyncError> =>
+      Effect.gen(function*() {
+        const request = {
+          ...input,
+          ...yield* Admission.decode(
+            Schema.Struct({ scope: SyncProtocol.Scope, cursors: SyncProtocol.WorkspaceCursor }),
+            input,
+            "invalid_request"
+          )
+        }
         yield* requireProtocolVersion(request.protocolVersion)
         yield* requireUniqueCursors(request.cursors)
         // The schema bounds `limit` at the wire; this bounds it again for an
@@ -512,9 +562,9 @@ const makeWith = (
          * Serves at most `cap` of one run's unserved entries into the page.
          *
          * The byte ceiling is a PAGE budget, not a verdict on the read. A run
-         * whose next unserved entries sum past 1 MiB is ordinary — branch
-         * commands are admitted individually up to the same ceiling, so three
-         * 400 KB commands produce it — and failing the read for it wedged the
+         * whose next unserved entries sum past 2 MiB is ordinary — branch
+         * commands are admitted individually up to 1 MiB, so three
+         * 800 KB commands produce it — and failing the read for it wedged the
          * follower forever: `frame_too_large` is neither retried nor
          * retryable, and the client's next bootstrap carries the same cursors
          * and gets the same refusal. So the page stops at the budget and
@@ -532,7 +582,8 @@ const makeWith = (
               limit: cap
             }).pipe(Effect.mapError(journalFailure(runId)))
             yield* generationOf(runId, generation)
-            for (const accepted of page.entries) {
+            const admitted = yield* Admission.entries(page.entries, runId, after ?? -1)
+            for (const accepted of admitted) {
               const bytes = SyncProtocol.encodedByteLength(accepted)
               if (bytes > maxFrameBytes) {
                 oversized = bytes
@@ -590,10 +641,20 @@ const makeWith = (
         const supplied = cursors.find((cursor) => cursor.runId === runId)
         const after = supplied?.afterSeq
         const generation = yield* generationOf(runId, supplied === undefined ? undefined : supplied.generation ?? 0)
+        let admitted: number = after ?? -1
         const entries = journal.stream({ runId, ...(after === undefined ? {} : { afterSequence: after }) }).pipe(
           Stream.mapError(journalFailure(runId)),
           Stream.chunks,
-          Stream.tap((chunk) => Effect.andThen(generationOf(runId, generation), guardEntryChunk(chunk))),
+          Stream.mapEffect((chunk) =>
+            Admission.entries(chunk, runId, admitted).pipe(
+              Effect.tap(() => generationOf(runId, generation)),
+              Effect.tap(guardEntryChunk),
+              Effect.map((captured) => {
+                for (const entry of captured) admitted = entry.seq
+                return captured as readonly [JournalEvent.Entry, ...Array<JournalEvent.Entry>]
+              })
+            )
+          ),
           Stream.flattenArray,
           Stream.mapAccum(
             () => after === undefined ? -1 : after,
@@ -756,10 +817,11 @@ const makeWith = (
               limit: tailBatchSize
             }).pipe(Effect.mapError(journalFailure(runId)))
             yield* generationOf(runId, generation)
-            yield* guardEntryChunk(page.entries)
+            const admitted = yield* Admission.entries(page.entries, runId, after ?? -1)
+            yield* guardEntryChunk(admitted)
             const frames: Array<SyncProtocol.Frame> = []
             let previous = after === undefined ? -1 : after
-            for (const accepted of page.entries) {
+            for (const accepted of admitted) {
               frames.push({
                 _tag: "Entries",
                 runId,
@@ -770,7 +832,7 @@ const makeWith = (
               })
               previous = accepted.seq
             }
-            const last = page.entries.at(-1)
+            const last = admitted.at(-1)
             // An empty page ends the walk whatever the page claims, so a
             // journal that reports more without returning any cannot spin.
             if (last === undefined) return Stream.empty
@@ -853,9 +915,17 @@ const makeWith = (
         )
         : stream
 
-    const subscribe = (request: SyncProtocol.SubscribeRequest): Stream.Stream<SyncProtocol.Frame, SyncError> =>
+    const subscribe = (input: SyncProtocol.SubscribeRequest): Stream.Stream<SyncProtocol.Frame, SyncError> =>
       Stream.unwrap(
         Effect.gen(function*() {
+          const request = {
+            ...input,
+            ...yield* Admission.decode(
+              Schema.Struct({ scope: SyncProtocol.Scope, cursors: SyncProtocol.WorkspaceCursor }),
+              input,
+              "invalid_request"
+            )
+          }
           yield* requireProtocolVersion(request.protocolVersion)
           yield* requireUniqueCursors(request.cursors)
           // The schema bounds `credit` at the wire; this bounds it again for
@@ -873,7 +943,7 @@ const makeWith = (
         })
       )
 
-    return make({ read, subscribe })
+    return make({ snapshot, read, subscribe })
   })
 
 /**
@@ -954,6 +1024,7 @@ export const layerHandlers: Layer.Layer<
   Effect.gen(function*() {
     const sync = yield* SyncServer
     return SyncRpcs.of({
+      "Sync.Snapshot": (request) => sync.snapshot(request),
       "Sync.Read": (request) => sync.read(request),
       "Sync.Subscribe": (request) => sync.subscribe(request)
     })

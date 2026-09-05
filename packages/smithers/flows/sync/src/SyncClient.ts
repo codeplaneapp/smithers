@@ -10,13 +10,16 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Schedule from "effect/Schedule"
+import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
-import type * as RpcClientError from "effect/unstable/rpc/RpcClientError"
+import * as RpcClientError from "effect/unstable/rpc/RpcClientError"
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup"
 import type { ShareCapability } from "./BranchProtocol.ts"
-import { boundedText, causeText } from "./internal/causeText.ts"
+import * as Admission from "./internal/admission.ts"
+import { boundedText, causeCode, causeText } from "./internal/causeText.ts"
 import { boundedInt, positiveInt } from "./internal/options.ts"
+import * as SnapshotBoundary from "./internal/snapshot.ts"
 import { SyncError, SyncGapError } from "./SyncError.ts"
 import {
   covers,
@@ -24,13 +27,17 @@ import {
   duplicateCursorRunId,
   encodedByteLength,
   type EntriesFrame,
+  Frame,
   maxReadLimit,
   maxSubscribeCredit,
+  type Progress,
   protocolVersion,
-  type ReadResponse,
+  ReadResponse,
   type Resync,
-  type RunCursor,
-  type Scope,
+  RunCursor,
+  Scope,
+  type Snapshot,
+  type SnapshotRequest,
   type WorkspaceCursor
 } from "./SyncProtocol.ts"
 import { SyncRpcs } from "./SyncRpcs.ts"
@@ -79,7 +86,8 @@ export interface SubscribeOptions {
   readonly scope: Scope
   /**
    * Where this subscription starts, per run. The effective position is the
-   * LATER of this and what the client has already acknowledged, so a caller
+   * LATER of this and the client's matching progress map (applied when an
+   * apply callback is present, delivered otherwise), so a caller
    * ahead of the shared view keeps its place and a caller behind it is
    * fast-forwarded. Rebuild from an earlier position with a fresh client.
    */
@@ -97,26 +105,30 @@ export interface SubscribeOptions {
    * Without it the cursor advances as each entry is handed to the consumer,
    * so a consumer whose own application then fails has a cursor naming an
    * entry it never materialized. With it the cursor advances only after this
-   * effect succeeds, which makes `RunCursor` mean what its schema says. A
+   * effect succeeds, and records separate `AppliedProgress`. A
    * failure here fails the subscription with the entry unacknowledged, so the
-   * next subscription from `client.cursors` delivers it again; the effect must
+   * next applying subscription delivers it again; the effect must
    * therefore be idempotent, because a redelivery is exactly what a retry is.
    */
   readonly apply?: ((entry: JournalEvent.Entry) => Effect.Effect<void, SyncError>) | undefined
   /**
-   * Runs when the server refuses a cursor below a run's compaction floor,
-   * BEFORE the client moves that run's cursor to the checkpoint and restarts.
+   * Restores state when the server refuses a cursor below a compaction floor.
+   * Return the exact run and sequence actually restored, after applying it.
    *
-   * The entries under the floor are deleted, and this wire carries no
-   * checkpoint state to stand in for them, so a consumer rebuilding a
-   * projection has a real hole to fill. This is the seam it fills it through:
-   * load `Journal.latestCheckpoint(runId)`, or discard the run's derived
-   * state, or refuse. A failure here fails the subscription with the cursor
-   * unmoved, so nothing is silently skipped. The default logs the skipped
-   * range and continues, which is what a follower with no derived state
-   * wants.
+   * The entries under the floor are deleted. Fetch an explicitly public
+   * projection through `snapshot` or an authorized local source; a
+   * projection has a real hole to fill. The returned sequence must cover the
+   * requested floor; a newer snapshot resumes at its own sequence, not the
+   * older floor. Missing handlers, failures, interruption, and invalid receipts
+   * leave the cursor unmoved. There is no implicit skip of deleted history.
+   *
+   * Durable consumers must commit their restored state and durable cursor in
+   * their own transaction and seed a fresh client from that cursor on restart.
+   * This client's cursor is in memory, not an atomic cross-store transaction.
+   * Recovery must be idempotent, including when a newer compaction requires
+   * another restoration before the suffix can be read.
    */
-  readonly onResync?: ((resync: Resync) => Effect.Effect<void, SyncError>) | undefined
+  readonly onResync?: ((resync: Resync) => Effect.Effect<RunCursor, SyncError>) | undefined
 }
 
 /**
@@ -126,8 +138,13 @@ export interface SubscribeOptions {
  * @since 0.1.0
  */
 export interface Service {
+  /** Fetches a public snapshot without applying state or advancing a cursor. */
+  readonly snapshot: (request: SnapshotRequest) => Effect.Effect<Snapshot, SyncError>
   readonly subscribe: (options: SubscribeOptions) => Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError>
+  /** Transport bookmarks only. For application acknowledgement use progress.applied. */
   readonly cursors: Effect.Effect<WorkspaceCursor>
+  /** Separately typed delivery and application positions. */
+  readonly progress: Effect.Effect<Progress>
 }
 
 /**
@@ -146,8 +163,13 @@ export class Sync extends Context.Service<Sync, Service>()("@smthrs/sync/Sync") 
  */
 export const makeNoop = (overrides: Partial<Service> = {}): Service =>
   Sync.of({
+    snapshot: () => Effect.fail(new SyncError({ code: "closed", message: "Sync client is closed" })),
     subscribe: () => Stream.fail(new SyncError({ code: "closed", message: "Sync client is closed" })),
     cursors: Effect.succeed([]),
+    progress: Effect.succeed({
+      delivered: { _tag: "Delivered", cursors: [] },
+      applied: { _tag: "Applied", cursors: [] }
+    }),
     ...overrides
   })
 
@@ -165,6 +187,8 @@ type Client = RpcClient.RpcClient<RpcGroup.Rpcs<typeof SyncRpcs>, RpcClientError
 const transportError = (cause: unknown): SyncError =>
   cause instanceof SyncError
     ? cause
+    : cause instanceof RpcClientError.RpcClientError && cause.reason._tag === "RpcClientDefect"
+    ? new SyncError({ code: "protocol_violation", message: "Sync RPC protocol failed", cause: causeCode(cause.reason) })
     : new SyncError({
       code: "transport_failed",
       // Bounded like `cause`. `message` is `Schema.String` and it is the
@@ -173,6 +197,21 @@ const transportError = (cause: unknown): SyncError =>
       message: cause instanceof Error ? boundedText(cause.message) : "Sync RPC transport failed",
       cause: causeText(cause)
     })
+
+/** Effect RPC decodes malformed peer values with orDie. Restore the sync
+ * boundary's typed refusal without swallowing unrelated defects or interruption.
+ */
+const rpcCause = (cause: Cause.Cause<unknown>): Cause.Cause<SyncError> =>
+  Cause.fromReasons(
+    Cause.map(cause, transportError).reasons.map((reason) =>
+      Cause.isDieReason(reason) && Schema.isSchemaError(reason.defect)
+        ? Cause.makeFailReason(
+          new SyncError({ code: "decode_failed", message: "Invalid sync RPC response", cause: "SchemaError" })
+        )
+          .annotate(Context.makeUnsafe(reason.annotations))
+        : reason
+    )
+  )
 
 type Cursors = Map<JournalEvent.RunId, RunCursor>
 
@@ -214,13 +253,14 @@ const reconnectPolicy = Schedule.min([
   Schedule.exponential(500, 1.5),
   Schedule.spaced(5000)
 ]).pipe(
-  Schedule.while(({ input }) => SyncError.is(input) && input.code === "transport_failed")
+  Schedule.while(({ input }: { readonly input: Cause.Cause<SyncError | SyncGapError> }) => isTransportCause(input))
 )
 
-const isTransportCause = (cause: Cause.Cause<SyncError | SyncGapError>): boolean =>
-  cause.reasons.filter(Cause.isFailReason).some((reason) =>
+const isTransportCause = (cause: Cause.Cause<SyncError | SyncGapError>): boolean => {
+  const reason = cause.reasons[0]!
+  return cause.reasons.length === 1 && Cause.isFailReason(reason) &&
     SyncError.is(reason.error) && reason.error.code === "transport_failed"
-  )
+}
 
 const lineageChanged = (runId: JournalEvent.RunId): SyncError =>
   new SyncError({
@@ -253,18 +293,21 @@ const frameViolation = (frame: EntriesFrame): SyncError | undefined => {
     if (entry.runId !== frame.runId) {
       return new SyncError({
         code: "protocol_violation",
+        cause: "foreign_run",
         message: `Frame for run ${frame.runId} carried an entry for run ${entry.runId}`
       })
     }
     if (entry.seq <= previous) {
       return new SyncError({
         code: "protocol_violation",
+        cause: "non_monotonic_sequence",
         message: `Frame entries must ascend strictly: sequence ${entry.seq} arrived after ${previous}`
       })
     }
     if (entry.seq < frame.fromSeq || frame.toSeq < entry.seq) {
       return new SyncError({
         code: "protocol_violation",
+        cause: "invalid_frame_interval",
         message: `Entry ${entry.seq} lies outside the frame's covered interval ${frame.fromSeq}..${frame.toSeq}`
       })
     }
@@ -294,7 +337,8 @@ const pageViolation = (
   requested: ReadonlyMap<JournalEvent.RunId, RunCursor>,
   response: ReadResponse
 ): SyncError | undefined => {
-  const violation = (message: string): SyncError => new SyncError({ code: "protocol_violation", message })
+  const violation = (message: string): SyncError =>
+    new SyncError({ code: "protocol_violation", message, cause: "invalid_read_page" })
   for (const cursor of response.cursors) {
     if (cursor.generation === undefined) return violation("Read response lacks a generation")
     const previous = requested.get(cursor.runId)
@@ -328,8 +372,9 @@ const pageViolation = (
 /**
  * Projects a Sync RPC client into the local replication service.
  *
- * The acknowledged cursors are per-service state in a `Ref`: concurrent
- * subscriptions share the view, and each commit only ever advances it. A
+ * Delivered and applied cursors are separate per-service `Ref` maps: concurrent
+ * subscriptions for one materialization share them, and each commit advances
+ * its matching map monotonically. A
  * cursor advances in the same stream pull that admits each entry to the
  * consumer, or — when the caller supplies `SubscribeOptions.apply` — only
  * after that callback has applied the entry. Interrupted partial pages
@@ -351,17 +396,13 @@ const pageViolation = (
  * resubscribing from the cursors it has acknowledged, so an entry is never
  * re-read and the round-trip cost does not scale with the run's traffic.
  *
- * A `compacted` refusal is recoverable rather than terminal: the run's cursor
- * moves to the checkpoint the server named and the subscription restarts, so
- * one compacted run costs a reconnect instead of the whole subscription. The
- * entries below that checkpoint are gone from the journal, and this wire
- * carries no checkpoint state to stand in for them, so the hole is real:
- * `SubscribeOptions.onResync` is the seam a consumer fills it through, and it
- * runs to success before the cursor moves. The default logs the skipped
- * range, which is what a follower with no derived state wants.
+ * A `compacted` refusal fails closed unless `SubscribeOptions.onResync`
+ * restores the missing prefix and returns its exact cursor. Snapshot fetching
+ * never applies state or advances cursors. Only a validated receipt for the requested run at or
+ * above its compaction floor advances the cursor before reading the suffix.
  *
  * A subscription's effective cursor per run is the LATER of the caller's and
- * the acknowledged one: a caller that restored its own progress is never
+ * the matching progress map: a caller that restored its own progress is never
  * regressed, and a caller asking for history this client already acknowledged
  * is fast-forwarded. Rebuild a projection from an earlier position with a
  * fresh client, whose acknowledged map is empty.
@@ -387,12 +428,37 @@ export const make = ({
   readonly bootstrapLimit?: number | undefined
 }): Effect.Effect<Service> =>
   Effect.sync(() => {
-    const acknowledged = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, RunCursor>>(new Map())
+    const delivered = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, RunCursor>>(new Map())
+    const applied = Ref.makeUnsafe<ReadonlyMap<JournalEvent.RunId, RunCursor>>(new Map())
 
-    const cursors = Effect.map(Ref.get(acknowledged), canonicalCursors)
+    const cursors = Effect.map(Ref.get(delivered), canonicalCursors)
+    const progress: Effect.Effect<Progress> = Effect.gen(function*() {
+      return {
+        delivered: { _tag: "Delivered", cursors: yield* cursors },
+        applied: { _tag: "Applied", cursors: canonicalCursors(yield* Ref.get(applied)) }
+      }
+    })
 
-    const subscribe = (options: SubscribeOptions): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
+    const snapshot = (input: SnapshotRequest): Effect.Effect<Snapshot, SyncError> =>
+      Effect.gen(function*() {
+        yield* positiveInt("SyncClient.make.maxFrameBytes", maxFrameBytes, defaultMaxFrameBytes)
+        const request = yield* SnapshotBoundary.request(input)
+        const supplied = yield* client["Sync.Snapshot"]({ ...request }).pipe(
+          Effect.catchCause((cause) => Effect.failCause(rpcCause(cause)))
+        )
+        return yield* SnapshotBoundary.response(request, supplied, maxFrameBytes)
+      })
+
+    const subscribe = (input: SubscribeOptions): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
       Stream.unwrap(Effect.gen(function*() {
+        const options = {
+          ...input,
+          ...yield* Admission.decode(
+            Schema.Struct({ scope: Scope, cursors: Schema.Array(RunCursor) }),
+            input,
+            "invalid_request"
+          )
+        }
         // Every policy this subscription runs under is checked once, here.
         // The declared types say `number`, and `NaN` disabled each comparison
         // it appears in rather than tightening it.
@@ -410,21 +476,9 @@ export const make = ({
           maxReadLimit
         )
         const cursor = cursorMap(options.cursors)
-        // The contract: the effective cursor is `max(caller, acknowledged)`
-        // per run. The shared map used to win in BOTH directions, which broke
-        // the promise this client is built on from either side — a caller that
-        // restored its own progress was regressed and re-received entries it
-        // had already materialized, and a caller asking for history the client
-        // had already acknowledged was silently fast-forwarded past it.
-        //
-        // Dedupe wins the tie because it is the promise every consumer of a
-        // shared client already depends on: an entry is never re-read, and the
-        // subscriptions sharing this map would each have to re-decide what to
-        // do about a redelivery if one of them could rewind it. Rebuilding a
-        // projection from an older position is a different object, and it has
-        // an exact answer: construct a fresh client, whose acknowledged map is
-        // empty, so the caller's cursor is the only one there is.
-        for (const [runId, position] of yield* Ref.get(acknowledged)) {
+        // A previous delivery-only subscriber cannot skip work for an applying subscriber.
+        // Rebuilding an independent projection requires a fresh client.
+        for (const [runId, position] of yield* Ref.get(options.apply === undefined ? delivered : applied)) {
           const supplied = cursor.get(runId)
           if (supplied !== undefined && (supplied.generation ?? 0) !== position.generation) {
             return yield* Effect.fail(lineageChanged(runId))
@@ -434,16 +488,25 @@ export const make = ({
 
         const snapshot = (): WorkspaceCursor => canonicalCursors(cursor)
 
-        const commit = (runId: JournalEvent.RunId, throughSeq: JournalEvent.Seq, generation: number) =>
+        const commit = (
+          runId: JournalEvent.RunId,
+          throughSeq: JournalEvent.Seq,
+          generation: number,
+          wasApplied: boolean
+        ) =>
           Effect.gen(function*() {
-            const accepted = yield* Ref.modify(acknowledged, (shared) => {
-              const previous = shared.get(runId)
-              if (previous !== undefined && previous.generation !== generation) return [false, shared] as const
-              return [true, advance(shared, runId, throughSeq, generation)] as const
-            })
-            if (!accepted) return yield* Effect.fail(lineageChanged(runId))
+            // Delivery and application have distinct cursors, but both are bound
+            // to the same journal generation and advance without an interrupt gap.
+            for (const view of wasApplied ? [delivered, applied] : [delivered]) {
+              const previous = (yield* Ref.get(view)).get(runId)
+              if (previous !== undefined && previous.generation !== generation) {
+                return yield* Effect.fail(lineageChanged(runId))
+              }
+            }
+            yield* Ref.update(delivered, (shared) => advance(shared, runId, throughSeq, generation))
+            if (wasApplied) yield* Ref.update(applied, (shared) => advance(shared, runId, throughSeq, generation))
             cursor.set(runId, { runId, afterSeq: throughSeq, generation })
-          })
+          }).pipe(Effect.uninterruptible)
 
         const applyEntry = options.apply
 
@@ -470,8 +533,10 @@ export const make = ({
           return Stream.concat(
             Stream.drain(Stream.fromEffect(
               applyEntry === undefined
-                ? commit(runId, through, generation)
-                : Effect.andThen(applyEntry(entry), commit(runId, through, generation))
+                ? commit(runId, through, generation, false)
+                : Effect.uninterruptibleMask((restore) =>
+                  Effect.andThen(restore(applyEntry(entry)), commit(runId, through, generation, true))
+                )
             )),
             Stream.succeed(entry)
           )
@@ -481,6 +546,15 @@ export const make = ({
           if (frame.generation === undefined) {
             return Stream.fail(
               new SyncError({ code: "protocol_violation", message: "Entries frame lacks a generation" })
+            )
+          }
+          if (!covers(options.scope, frame.runId)) {
+            return Stream.fail(
+              new SyncError({
+                code: "protocol_violation",
+                message: "Live frame is outside the subscription scope",
+                cause: "foreign_run"
+              })
             )
           }
           const frameBytes = entriesByteLength(frame.entries)
@@ -523,7 +597,13 @@ export const make = ({
               })
             )
           ).pipe(
-            Stream.mapError(transportError),
+            Stream.catchCause((cause) => Stream.failCause(rpcCause(cause))),
+            Stream.mapEffect((frame) => Admission.decode(Frame, frame)),
+            Stream.mapEffect((frame): Effect.Effect<Frame, SyncError> =>
+              frame._tag === "Entries"
+                ? Effect.map(Admission.records(frame.entries), (entries) => ({ ...frame, entries }))
+                : Effect.succeed(frame)
+            ),
             Stream.flatMap((frame) => {
               switch (frame._tag) {
                 case "Entries":
@@ -552,7 +632,11 @@ export const make = ({
                 ? Effect.logWarning("sync live follow transport failed; reconnecting with backoff", cause)
                 : Effect.void
             ),
-            Stream.retry(reconnectPolicy)
+            // Schedule the complete cause so retry refusal cannot discard an
+            // accompanying defect, interruption, or tracing annotation.
+            Stream.catchCause((cause) => Stream.fail(cause)),
+            Stream.retry(reconnectPolicy),
+            Stream.catch((cause) => Stream.failCause(cause))
           )
 
         const bootstrap = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
@@ -572,7 +656,11 @@ export const make = ({
                 limit: bootstrapLimit,
                 ...(options.capability === undefined ? {} : { capability: options.capability })
               }).pipe(
-                Effect.mapError(transportError),
+                Effect.catchCause((cause) => Effect.failCause(rpcCause(cause))),
+                Effect.flatMap((response) => Admission.decode(ReadResponse, response)),
+                Effect.flatMap((response) =>
+                  Effect.map(Admission.records(response.entries), (entries) => ({ ...response, entries }))
+                ),
                 Effect.map((response) => {
                   const pageBytes = entriesByteLength(response.entries)
                   if (pageBytes > maxFrameBytes) return Stream.fail(oversized(pageBytes, maxFrameBytes))
@@ -625,57 +713,67 @@ export const make = ({
           return covered >= failure.resync.checkpointSeq ? undefined : failure.resync
         }
 
-        /**
-         * The subscription, restarted from a run's checkpoint whenever the
-         * server refuses a cursor below that run's compaction floor.
-         *
-         * Compaction is opt-in today, but the day a workspace enables it this
-         * is the difference between a follower that catches up and one that
-         * never can: the refusal repeats for the same cursors, so without a
-         * resync every resubscribe fails identically, and a whole-workspace
-         * subscription dies over a single compacted run.
-         *
-         * The entries between the old cursor and the checkpoint are gone from
-         * the journal and are therefore never delivered. That is a REAL hole
-         * in what the consumer sees, so it is logged rather than absorbed: the
-         * checkpoint state that stands for those entries is not carried on
-         * this wire, and a consumer rebuilding a projection has to read it
-         * from the journal's own `latestCheckpoint`.
-         */
-        const onResync = options.onResync ?? ((resync: Resync) =>
-          Effect.logWarning(
-            "sync follower resyncing a compacted run from its checkpoint; entries below it are gone"
-          ).pipe(Effect.annotateLogs({ runId: resync.runId, checkpointSeq: resync.checkpointSeq })))
+        const onResync = options.onResync
 
         const resynced = (): Stream.Stream<JournalEvent.Entry, SyncError | SyncGapError> =>
-          Stream.catch(bootstrap(), (failure) => {
+          Stream.catchCause(bootstrap(), (cause) => {
+            const reason = cause.reasons[0]!
+            if (cause.reasons.length !== 1 || !Cause.isFailReason(reason)) return Stream.failCause(cause)
+            const failure = reason.error
             const resync = resyncTarget(failure)
-            if (resync === undefined) return Stream.fail(failure)
+            if (resync === undefined) return Stream.failCause(cause)
+            if (!covers(options.scope, resync.runId)) {
+              return Stream.fail(
+                new SyncError({
+                  code: "protocol_violation",
+                  message: "Compaction target is outside the subscription scope"
+                })
+              )
+            }
+            if (onResync === undefined) return Stream.failCause(cause)
             // Snapshotted before the hook runs, for the reason `deliver`
             // snapshots: the hook is handed the value the commit is read from,
             // and re-reading it afterwards let a consumer move its own cursor
             // arbitrarily far forward from inside the callback.
             const runId = resync.runId
             const checkpointSeq = resync.checkpointSeq
-            return Stream.unwrap(
-              // The consumer's hook runs FIRST and must succeed. It is the
-              // only point at which a projection can restore the prefix the
-              // checkpoint stands for, and a failure here leaves the cursor
-              // where it was, so nothing is skipped behind the consumer's
-              // back.
-              onResync(resync).pipe(
-                // The cursor must move BEFORE the restart reads it: the
-                // bootstrap snapshots the cursors as it is issued.
-                Effect.andThen(commit(runId, checkpointSeq, cursor.get(runId)?.generation ?? 0)),
-                Effect.map(resynced)
-              )
-            )
+            return Stream.unwrap(Effect.uninterruptibleMask((restore) =>
+              Effect.gen(function*() {
+                // Application remains interruptible. Once it returns success,
+                // validation and the in-memory commit finish without an async
+                // cancellation gap. Durable state/cursor atomicity belongs to
+                // the consumer's own transaction, not to this mask.
+                const receipt = yield* restore(onResync(resync))
+                const applied = yield* Effect.try({
+                  try: () => {
+                    const captured = {
+                      runId: receipt.runId,
+                      afterSeq: receipt.afterSeq,
+                      generation: receipt.generation ?? cursor.get(runId)?.generation ?? 0
+                    }
+                    if (
+                      !Schema.is(RunCursor)(captured) || captured.runId !== runId || captured.afterSeq < checkpointSeq
+                    ) {
+                      throw new Error("Invalid restored cursor")
+                    }
+                    return captured
+                  },
+                  catch: () =>
+                    new SyncError({
+                      code: "invalid_request",
+                      message: "Recovery must return the restored run cursor at or above its compaction floor"
+                    })
+                })
+                yield* commit(applied.runId, applied.afterSeq, applied.generation, true)
+                return resynced()
+              })
+            ))
           })
 
         return resynced()
       }))
 
-    return Sync.of({ subscribe, cursors })
+    return Sync.of({ snapshot, subscribe, cursors, progress })
   })
 
 /**

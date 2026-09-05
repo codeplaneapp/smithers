@@ -91,8 +91,9 @@ const withHole = Effect.gen(function*() {
 
 The follower stalls at sequence 0 forever. That is the correct outcome:
 sequence 1 is not a legitimate journal hole, it is a frame the transport ate,
-and skipping it would lose an entry. `test/TransportFaults.test.ts` asserts
-exactly this by requiring the subscription to time out rather than complete.
+and skipping it would lose an entry. The package's own transport-fault suite
+asserts exactly this, by requiring the subscription to time out rather than
+complete.
 
 `dropRange` recognizes the JSON form of an `Entries` frame without importing
 the protocol, so it works only when the connection uses JSON serialization,
@@ -133,8 +134,8 @@ delivered rather than dropped.
 `faults.disconnect()` fails both queues with a socket error, which is what a
 dropped WebSocket looks like to the client. The subscription does not fail:
 `SyncClient` classifies the failure as `transport_failed` and retries under
-exponential backoff capped at five seconds, resuming from the cursors it has
-acknowledged. Assert that the stream stays open, not that it errors:
+exponential backoff capped at five seconds, resuming from the subscription's
+progress. Assert that the stream stays open, not that it errors:
 
 ```ts
 const survivesDisconnect = Effect.gen(function*() {

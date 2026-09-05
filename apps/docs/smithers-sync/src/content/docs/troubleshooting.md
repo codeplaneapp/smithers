@@ -26,19 +26,19 @@ answers `false` rather than raising.
 
 ## Error codes
 
-| Code                                              | Where it comes from                                                                                                                                                                                                      | What to do                                                                                         |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `unauthorized`                                    | No workspace principal, a refused workspace capability, a missing or foreign branch capability, or a credential that expired while a subscription was open.                                                              | Present a credential, or mint a new one and resubscribe.                                           |
-| `invalid_request`                                 | A cursor set naming one run twice, a numeric option that is not a positive safe integer, an option above the ceiling the wire allows, a keyring with a duplicate or dangling `kid`, or claims that do not survive UTF-8. | Fix the request or the option. The message names the field.                                        |
-| `compacted`                                       | The request's cursor for one run sits below that run's compaction floor. `resync` names the run and the checkpoint sequence.                                                                                             | The client recovers this itself. See [Handle a compacted run](/guides/handle-a-compacted-run/). |
-| `frame_too_large`                                 | A single entry whose own encoded size exceeds the frame ceiling, or a page or frame whose entries sum past the ceiling the client enforces.                                                                              | Raise `maxFrameBytes` on both sides, or stop writing entries that large.                           |
-| `protocol_violation`                              | A server page or frame that contradicted itself: another run's entry, a repeated or reordered sequence, an entry at or below the requested cursor, or an incomplete page with no entries.                                | Report it. No cursor moved, so nothing was skipped. A rewriting proxy is the usual cause.          |
-| `transport_failed`                                | The RPC transport failed.                                                                                                                                                                                                | The client retries this under backoff. It reaches you only if the stream ends for another reason.  |
-| `closed`                                          | The server sent a `Closed` frame, the journal reported `journal_closed`, or the operation ran against `SyncClient.makeNoop`, `SyncServer.layerNoop`, or `BranchCommands.layerNoop`.                                      | Check that the composition provides real services, then resubscribe.                               |
-| `backpressure`                                    | The journal's admission queue overflowed, or a branch already holds `maxParticipants` participants.                                                                                                                      | Retry. Raise the bound only after confirming the producer is not the problem.                      |
-| `decode_failed`                                   | The journal could not decode a stored payload.                                                                                                                                                                           | Inspect the run's storage. The sync boundary is reporting, not causing, this.                      |
-| `unknown`                                         | A journal failure this boundary has no counterpart for, or Web Crypto refusing to import or use the signing key.                                                                                                         | Read `cause`, which carries the underlying error's name and its own enumerated code.               |
-| `not_found`, `gap_detected`, `optimistic_timeout` | Declared in the vocabulary so the wire can carry them. No path in this package raises them.                                                                                                                              | A gap is reported as `SyncGapError`, not as `gap_detected`.                                        |
+| Code                                              | Where it comes from                                                                                                                                                                                                      | What to do                                                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `unauthorized`                                    | No workspace principal, a refused workspace capability, a missing or foreign branch capability, or a credential that expired while a subscription was open.                                                              | Present a credential, or mint a new one and resubscribe.                                                                                |
+| `invalid_request`                                 | A cursor set naming one run twice, a numeric option that is not a positive safe integer, an option above the ceiling the wire allows, a keyring with a duplicate or dangling `kid`, or claims that do not survive UTF-8. | Fix the request or the option. The message names the field.                                                                             |
+| `compacted`                                       | The request's cursor for one run sits below that run's compaction floor. `resync` names the run and the checkpoint sequence.                                                                                             | Restore through an explicit `onResync` handler or retain the refusal. See [Handle a compacted run](/guides/handle-a-compacted-run/). |
+| `frame_too_large`                                 | A single entry whose own encoded size exceeds the frame ceiling, or a page or frame whose entries sum past the ceiling the client enforces.                                                                              | Raise `maxFrameBytes` on both sides, or stop writing entries that large.                                                                |
+| `protocol_violation`                              | A server page or frame that contradicted itself: another run's entry, a repeated or reordered sequence, an entry at or below the requested cursor, or an incomplete page with no entries.                                | Report it. No cursor moved, so nothing was skipped. A rewriting proxy is the usual cause.                                               |
+| `transport_failed`                                | The RPC transport failed.                                                                                                                                                                                                | The client retries this under backoff. It reaches you only if the stream ends for another reason.                                       |
+| `closed`                                          | The server sent a `Closed` frame, the journal reported `journal_closed`, or the operation ran against `SyncClient.makeNoop`, `SyncServer.layerNoop`, or `BranchCommands.layerNoop`.                                      | Check that the composition provides real services, then resubscribe.                                                                    |
+| `backpressure`                                    | The journal's admission queue overflowed, or a branch already holds `maxParticipants` participants.                                                                                                                      | Retry. Raise the bound only after confirming the producer is not the problem.                                                           |
+| `decode_failed`                                   | The journal could not decode a stored payload.                                                                                                                                                                           | Inspect the run's storage. The sync boundary is reporting, not causing, this.                                                           |
+| `unknown`                                         | A journal failure this boundary has no counterpart for, or Web Crypto refusing to import or use the signing key.                                                                                                         | Read `cause`, which carries the underlying error's name and its own enumerated code.                                                    |
+| `not_found`, `gap_detected`, `optimistic_timeout` | Declared in the vocabulary so the wire can carry them. No path in this package raises them.                                                                                                                              | A gap is reported as `SyncGapError`, not as `gap_detected`.                                                                             |
 
 The `cause` field is a bounded string and never the host object that failed.
 `SyncError` is the declared error schema of every procedure in both RPC groups,
@@ -147,14 +147,16 @@ not do.
 
 **Symptom.** `compacted` reaches your consumer instead of being absorbed.
 
-**Cause.** Either the error carries no `resync`, or the checkpoint it names is
+**Cause.** No recovery handler was supplied, application failed, the error
+carries no `resync`, or the checkpoint it names is
 at or below what the subscription already covers. A resync to a position the
 client has passed cannot move it forward, so retrying would re-read the same
 refusal forever.
 
-**Fix.** Rebuild the follower from the checkpoint yourself. If you supplied
-`onResync`, check whether it failed: the hook runs before the cursor moves and
-must succeed, so a failure deliberately leaves the cursor where it was rather
+**Fix.** Supply `onResync` only when you can restore the missing state. Return
+the exact `{ runId, afterSeq }` actually applied, covering the reported floor.
+If you supplied a handler, check whether it failed: it runs before the cursor moves and
+must return a valid receipt, so a failure deliberately leaves the cursor where it was rather
 than skipping the range silently. See
 [Handle a compacted run](/guides/handle-a-compacted-run/).
 
@@ -179,12 +181,12 @@ nothing looks like, so confirm the principal before changing the catalog.
 **Symptom.** You pass an older cursor, and the subscription starts later than
 that cursor.
 
-**Cause.** The effective start position is the later of your cursor and what
-this client has already acknowledged. The shared acknowledged map wins the tie,
-because never re-reading an entry is the promise every consumer of a shared
-client depends on.
+**Cause.** The effective start position is the later of your cursor and the
+matching shared progress map: applied for a subscription with `apply`, delivered
+otherwise. One client belongs to one materialization. A delivered bookmark is
+not proof that a projection applied the corresponding history.
 
-**Fix.** Build a fresh client. Its acknowledged map is empty, so your cursor is
+**Fix.** Build a fresh client. Its progress maps are empty, so your cursor is
 the only one there is. Rebuilding a projection from an earlier position is a
 different job from following, and it gets its own client.
 

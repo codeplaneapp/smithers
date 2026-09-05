@@ -114,7 +114,9 @@ const connect = (
           initialMessage: Effect.succeed(Option.none()),
           supportsAck: true,
           supportsTransferables: false,
-          supportsSpanPropagation: false
+          supportsSpanPropagation: false,
+          supportsNotifications: true,
+          codecFor: RpcSerialization.json.codecFor
         }
       })
     )

@@ -11,6 +11,7 @@ import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 import * as RpcServer from "effect/unstable/rpc/RpcServer"
 import * as Socket from "effect/unstable/socket/Socket"
+import * as SocketServer from "effect/unstable/socket/SocketServer"
 import * as RunCatalog from "../RunCatalog.ts"
 import * as SyncClient from "../SyncClient.ts"
 import * as SyncPrincipal from "../SyncPrincipal.ts"
@@ -78,37 +79,22 @@ export const layerNoop = Layer.mergeAll(
 export const connect = (pair: Pair) =>
   Effect.gen(function*() {
     const sync = yield* SyncServer.SyncServer
-    const serverSerialization = RpcSerialization.json.makeUnsafe()
-    const serverWriter = yield* pair.server.writer
     const handlers = SyncServer.layerHandlers.pipe(
       Layer.provide(Layer.succeed(SyncServer.SyncServer, sync))
     )
-    // Use the production schema boundary: raw server exits contain Effect
-    // causes, whose JSON representation is not the RPC wire encoding.
-    const serverProtocol = yield* RpcServer.Protocol.make((writeRequest) =>
-      Effect.gen(function*() {
-        yield* pair.server.runRaw((bytes) =>
-          Effect.forEach(
-            serverSerialization.decode(bytes),
-            (message) => writeRequest(0, message as never),
-            { discard: true }
-          )
-        ).pipe(Effect.forkScoped)
-        return {
-          disconnects: yield* Queue.make<number>(),
-          send: (_clientId, response) => Effect.orDie(serverWriter(serverSerialization.encode(response)!)),
-          end: () => Effect.void,
-          clientIds: Effect.succeed(new Set([0])),
-          initialMessage: Effect.succeedNone,
-          supportsAck: true,
-          supportsTransferables: false,
-          supportsSpanPropagation: true
-        }
-      })
+    // Use the production schema-aware protocol. JSON.stringify on the raw
+    // makeNoSerialization responses happened to encode successes, but not
+    // Effect's Cause representation: typed RPC failures never reached clients.
+    const serverProtocol = yield* RpcServer.makeProtocolSocketServer.pipe(
+      Effect.provideService(SocketServer.SocketServer, {
+        address: { _tag: "TcpAddress", hostname: "test-socket", port: 0 },
+        run: (handler) => handler(pair.server).pipe(Effect.orDie, Effect.andThen(Effect.never))
+      }),
+      Effect.provide(RpcSerialization.layerJson)
     )
     yield* RpcServer.make(SyncRpcs.SyncRpcs, { disableFatalDefects: true }).pipe(
-      Effect.provide(handlers),
       Effect.provideService(RpcServer.Protocol, serverProtocol),
+      Effect.provide(handlers),
       Effect.forkScoped
     )
 

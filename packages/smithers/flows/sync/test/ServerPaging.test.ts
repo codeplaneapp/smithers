@@ -33,6 +33,7 @@ const entry = (id: JournalEvent.RunId, sequence: number) =>
 // server runs every request as the workspace principal.
 const principal = SyncPrincipal.workspace("paging-suite")
 const asWorkspace = (server: SyncServer.Service): SyncServer.Service => ({
+  snapshot: (request) => Effect.provideService(server.snapshot(request), SyncPrincipal.SyncPrincipal, principal),
   read: (request) => Effect.provideService(server.read(request), SyncPrincipal.SyncPrincipal, principal),
   subscribe: (request) => Stream.provideService(server.subscribe(request), SyncPrincipal.SyncPrincipal, principal)
 })
