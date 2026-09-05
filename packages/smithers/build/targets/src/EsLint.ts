@@ -41,11 +41,13 @@ export type Attrs = typeof Attrs.Type
 /**
  * Reduces declared sources to the patterns ESLint lints.
  *
- * ESLint expands glob patterns itself, so a glob passes through as written,
- * a file contributes its path, and a git diff contributes nothing.
+ * ESLint expands glob patterns itself. Workspace-rooted paths must first be
+ * rendered from the tool's cwd; the declared inputs remain unchanged for keying.
+ * A file contributes its path, and a git diff contributes nothing.
  */
-const lintPatterns = (sources: ReadonlyArray<Input.Declared>): ReadonlyArray<string> =>
+const lintPatterns = (cwd: string, sources: ReadonlyArray<Input.Declared>): ReadonlyArray<string> =>
   sources.flatMap((source) => source._tag === "File" ? [source.path] : source._tag === "Glob" ? [source.pattern] : [])
+    .map((pattern) => Input.rootRelative(cwd, pattern))
 
 /**
  * Plans ESLint over declared source sets.
@@ -81,7 +83,7 @@ export const EsLint = Target.make("EsLint", {
         "--max-warnings",
         String(attrs.maxWarnings),
         ...(attrs.fix ? ["--fix"] : []),
-        ...lintPatterns(attrs.sources)
+        ...lintPatterns(attrs.cwd, attrs.sources)
       ])
     })
   }
