@@ -6,17 +6,36 @@ sidebar:
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/installation.md"
 ---
 
-## Install the package
+## Get the package
+
+`@smthrs/kernel` is not on npm at 1.0.0-rc.0. It ships as a member of the
+[smithers repository](https://github.com/smithersai/smithers) workspace, so
+using it today means working from a checkout:
 
 ```bash
-pnpm add @smthrs/kernel
+git clone https://github.com/smithersai/smithers.git
+cd smithers
+pnpm install
 ```
 
+Code that consumes it lives in that workspace too, either an existing package
+or one you add under `packages/`, and depends on it with a workspace specifier:
+
+```json
+{
+  "dependencies": {
+    "@smthrs/kernel": "workspace:*"
+  }
+}
+```
+
+## Requirements
+
 The package requires Node.js 22.19.0 or later and ships as ESM, CommonJS, and
-TypeScript declarations. Its runtime dependencies install with it:
-[`effect`](https://effect.website), [`@smthrs/capability`](https://capability.smithers.sh/reference/api/),
-[`@smthrs/jj`](https://jj.smithers.sh/reference/api/), [`@smthrs/journal`](https://journal.smithers.sh/reference/api/), and
-[`@smthrs/platform-browser`](https://platform-browser.smithers.sh/reference/api/).
+TypeScript declarations. Its Smithers dependencies install with it:
+[`@smthrs/capability`](https://capability.smithers.sh/reference/api/), [`@smthrs/jj`](https://jj.smithers.sh/reference/api/), and
+[`@smthrs/journal`](https://journal.smithers.sh/reference/api/). The host supplies the exact
+`effect@4.0.0-rc.112` peer so the library never installs a second runtime.
 
 The root entry point carries no Node built-ins. A package test bundles the
 whole root dependency graph for the browser and asserts that no
@@ -48,38 +67,28 @@ and `@smthrs/kernel/*/index`. `@smthrs/kernel/package.json` is exported.
 
 ## Test subpaths
 
-Three subpaths ship for testing. They are published code, not dev-only files:
+Two subpaths ship for testing. They are published code, not dev-only files:
 
-| Subpath                              | What it gives you                                                                                    | Platform |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------- | -------- |
-| `@smthrs/kernel/test/TestGrantStore` | `layerAllow`, `layerDeny`, and `layerScripted` grant-store doubles.                                  | any      |
-| `@smthrs/kernel/test/TestHost`       | The deterministic host bundle: in-memory filesystem, scripted interpreter, `TestClock`, seeded PRNG. | Node.js  |
-| `@smthrs/kernel/test/contract`       | `runHostContract`, the shared behavioral contract every host bundle must satisfy.                    | Node.js  |
+| Subpath                              | What it gives you                                                                 | Platform |
+| ------------------------------------ | --------------------------------------------------------------------------------- | -------- |
+| `@smthrs/kernel/test/TestGrantStore` | `layerAllow`, `layerDeny`, and `layerScripted` grant-store doubles.               | any      |
+| `@smthrs/kernel/test/contract`       | `runHostContract`, the shared behavioral contract every host bundle must satisfy. | Node.js  |
 
-`test/TestHost` and `test/contract` are Node-only: `effect/testing`'s
-`TestClock` reaches for `node:assert`, and the contract uses Node process and
-temporary-directory fixtures.
+`test/contract` is Node-only because it uses Node process and
+temporary-directory fixtures. The deterministic host bundle is published by
+`@smthrs/testing/TestHost`; keeping it with the other test utilities avoids a
+kernel-to-platform dependency cycle.
 
 `test/contract` registers Vitest cases, so importing it requires the declared
-peers:
-
-```bash
-pnpm add -D @effect/vitest@4.0.0-rc.108 vitest@4.1.9
-```
-
-Both peers are optional. A consumer that imports only the kernel or
-`test/TestGrantStore` needs neither. See [Testing](/testing/) for what each
-one covers.
+peers, `@effect/vitest@4.0.0-rc.112` and `vitest@4.1.9`. Both are optional: a
+consumer that imports only the kernel or `test/TestGrantStore` needs neither.
+See [Testing](/testing/) for what each one covers.
 
 ## What a working host adds
 
 The kernel holds no platform implementations. It decorates ports that
 something else provides, so a composition that actually reaches a machine adds
 a platform bundle:
-
-```bash
-pnpm add @smthrs/platform-node
-```
 
 - [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) implements the five ports on
   Node, attaches the descriptor-relative filesystem executor the kernel

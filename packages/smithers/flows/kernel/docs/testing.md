@@ -36,12 +36,12 @@ Install the optional `@smthrs/platform-browser@1.0.0-rc.0` peer before using
 `TestHost`. It supplies this test helper's browser host services and is not
 installed by normal kernel consumers.
 
-`@smthrs/kernel/test/TestHost` is the whole host surface with every source of
+`@smthrs/testing/TestHost` is the whole host surface with every source of
 nondeterminism pinned: a `Map`-backed filesystem, a scripted interpreter,
 `TestClock` so time moves only when a test moves it, and a seeded PRNG.
 
 ```ts
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 
 const host = TestHost.layer({
   files: { "/workspace/README.md": "# hello" },
@@ -62,9 +62,10 @@ layers, exactly as `NodeChildProcessSpawner` is, so the interpreter and the
 `commands` fails the way a real shell reports a missing binary, so a test
 cannot accidentally depend on a host tool being installed.
 
-`Jj` is the package's ticket-failing browser layer, so a test that reaches for
-the repository fails loudly rather than touching the real machine, and
-`HttpClient` is the unavailable stub.
+`Jj` is [`@smthrs/jj`](/api/jj)'s `layerUnsupported`, whose every operation
+fails with `not_installed`, so a test that reaches for the repository fails
+loudly rather than touching the real machine. `HttpClient` is
+`HttpClient.layerNoop`, which reports the absent host as a `TransportError`.
 
 The module is Node-only: `effect/testing`'s `TestClock` reaches for
 `node:assert`.
@@ -78,7 +79,7 @@ multi-leg pipelines. The Node, Bun, browser, test, and deliberately
 unsupported bundles all run it.
 
 It registers Vitest cases, so it requires the declared peers
-(`@effect/vitest@4.0.0-rc.108` and `vitest@4.1.9`) and Node process and
+(`@effect/vitest@4.0.0-rc.112` and `vitest@4.1.9`) and Node process and
 temporary-directory fixtures. See
 [Adapt a new host platform](./guides/adapt-a-new-host-platform.md) for how to
 declare your bundle's capabilities to it.

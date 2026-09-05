@@ -20,8 +20,8 @@ import * as GrantStore from "@smthrs/kernel/GrantStore"
 `@smthrs/kernel/internal/*` and `@smthrs/kernel/*/index` are not public.
 `@smthrs/kernel/package.json` is exported.
 
-:::danger
-Schema ids (`@smthrs/kernel/GrantEvent/RunGrant` and its siblings), journal event types (`flows.kernel.grant.*`, `flows.host.process-*`), and the `HostServiceIds` slot ids are durable identity. They round-trip through the journal and are digested into step keys, so renaming one invalidates recorded runs.
+:::note
+Schema ids (`@smthrs/kernel/GrantEvent/RunGrant` and its siblings), journal event types (`flows.kernel.grant.*`, `flows.host.process-*`), and the `HostServiceIds` slot ids are durable identity rather than internal names. They are written to the journal and read back on replay, so code that reads grant or process history can match on them. They change only when the service behind the id changes.
 :::
 
 ## Entry points
@@ -537,9 +537,9 @@ const HostServiceIds: readonly [
 ]
 ```
 
-Stable slot identifiers, each the tag key of its slot's service. They are
-digested into step keys, so a rename invalidates every cached step naming the
-slot. Rename only when the service itself changes.
+Stable slot identifiers, each the tag key of its slot's service. These are the
+names a slot carries in durable records, so they change only when the service
+behind a slot changes.
 
 ### HostServices.layer
 

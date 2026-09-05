@@ -29,6 +29,9 @@ export default defineConfig({
       // profile with every test passing (issues #115/#121).
       reportsDirectory: join(tmpdir(), `flows-kernel-coverage-${process.pid}`),
       include: ["src/**/*.ts"].map((pattern) => join(import.meta.dirname, pattern)),
+      // The published host-contract runner is exercised by the concrete host
+      // suites in @smthrs/testing, which owns its cross-platform coverage.
+      exclude: ["src/test/HostContract.ts"],
       // Accurate, enforceable floors measured against the committed suite.
       // Ratchet upward as tests land; never lower without a written
       // justification.

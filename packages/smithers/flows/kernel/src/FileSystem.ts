@@ -25,12 +25,16 @@ import {
   Layer,
   Option,
   Path as EffectPath,
-  type PlatformError,
+  PlatformError,
+  Result,
   Sink,
   Stream
 } from "effect"
+import * as Batch from "./FileSystemBatch.ts"
 import { GrantStore } from "./GrantStore.ts"
 import { Workspace } from "./Workspace.ts"
+
+export * from "./FileSystemBatch.ts"
 
 /**
  * The directory name that stands in for the host's system temporary directory
@@ -76,6 +80,8 @@ export interface AtomicRequest {
   readonly data?: string | undefined
   readonly encoding?: string | undefined
   readonly options?: object | undefined
+  readonly requests?: ReadonlyArray<Batch.BatchRequest> | undefined
+  readonly rootIdentity?: string | undefined
 }
 
 /** Trusted host extension implementing atomic path resolution and operation.
@@ -92,6 +98,8 @@ export interface AtomicFileSystem {
    * as one descriptor-relative request may delegate only through this surface.
    */
   readonly isolated?: EffectFileSystem.FileSystem | undefined
+  /** Advertised only by executors implementing the bounded batch protocol. */
+  readonly batchLimits?: { readonly size: number; readonly response: number } | undefined
 }
 
 /** An Effect filesystem carrying the atomic host extension.
@@ -331,6 +339,7 @@ export const layer: Layer.Layer<
     const normalize = (value: string): string => normalizeFrom(workspace.root, value)
     const logicalRoot = normalize(workspace.root)
     const boundaryRoot = yield* fileSystem.realPath(logicalRoot)
+    const batchRoot = atomic?.batchLimits === undefined ? undefined : yield* fileSystem.stat(boundaryRoot)
     const refuse = (method: string, resource: string) => (error: PermissionError): PlatformError.PlatformError =>
       toPlatformError({ module: "FileSystem", method, pathOrDescriptor: resource, error })
     /**
@@ -825,6 +834,128 @@ export const layer: Layer.Layer<
         })
       })
     }
-    return guarded
+    if (batchRoot === undefined) {
+      return guarded
+    } else {
+      const limits = atomic!.batchLimits!
+      const rootIdentity = Option.map(batchRoot.ino, (ino) => `${batchRoot.dev}:${ino}`)
+      const executeBatch: Batch.FileSystemBatch["execute"] = Effect.fn("FileSystem.batch")(function*(requests) {
+        if (requests.length === 0 || requests.length > Math.min(limits.size, Batch.maxBatchSize)) {
+          return yield* Effect.fail(
+            PlatformError.badArgument({
+              module: "FileSystem",
+              method: "batch",
+              description: `batch must contain 1 to ${Math.min(limits.size, Batch.maxBatchSize)} operations`
+            })
+          )
+        }
+        if (Option.isNone(rootIdentity)) {
+          return yield* Effect.fail(atomicUnavailable("fs:read", logicalRoot, "batch"))
+        }
+        // Snapshot before any asynchronous root or permission checks.
+        const captured = snapshotOptions(requests).map((request) => ({
+          ...request,
+          path: request.operation === "glob"
+            ? normalizeFrom(normalize(request.root), request.path)
+            : normalize(request.path),
+          ...(request.operation === "glob" ? { root: normalize(request.root) } : {})
+        }))
+        const rootChanged = (cause: unknown) =>
+          PlatformError.systemError({
+            _tag: "Busy",
+            module: "FileSystem",
+            method: "batch",
+            pathOrDescriptor: logicalRoot,
+            description: "batch root no longer names the authorized descriptor",
+            cause
+          })
+        // A vanished workspace is a lost boundary, not N absent files. Check
+        // before canonical resource resolution could turn it into per-path
+        // NotFound results. Check the logical path as well: a workspace alias
+        // may be retargeted while its old canonical directory still exists.
+        // The helper separately checks the canonical root through no-follow
+        // handles, binding both names to the same captured descriptor.
+        const expectedRoot = rootIdentity.value
+        const verifyRoot = () =>
+          fileSystem.stat(logicalRoot).pipe(
+            Effect.mapError(rootChanged),
+            Effect.flatMap((current) =>
+              Option.isSome(current.ino) && `${current.dev}:${current.ino.value}` === expectedRoot
+                ? Effect.void
+                : Effect.fail(rootChanged(new Error("workspace descriptor identity changed")))
+            )
+          )
+        yield* verifyRoot()
+        // Resolve in bounded groups while retaining request-order grant
+        // decisions. Quota/once grants therefore retain their ordering, and
+        // native metadata latency need not serialize every member twice.
+        const resources = yield* Effect.forEach(captured, (request) =>
+          Effect.result(
+            resolvedResource("fs:read", "read", request.path)
+          ), { concurrency: Batch.fallbackConcurrency })
+        const admitted: Array<Batch.BatchRequest> = []
+        const indexes: Array<number> = []
+        const entries: Array<Batch.BatchEntry> = []
+        const granted: Array<
+          { readonly request: Batch.BatchRequest; readonly index: number; readonly resource: string }
+        > = []
+        for (const [index, request] of captured.entries()) {
+          const resource = resources[index]!
+          const checked = Result.isFailure(resource) ? Result.fail(resource.failure) : yield* Effect.result(
+            grants.check(makeCapability("fs:read", resource.success)).pipe(
+              Effect.mapError(refuse("read", resource.success))
+            )
+          )
+          if (Result.isFailure(checked)) {
+            entries.push({ index, path: request.path, result: Result.fail(checked.failure) })
+          } else granted.push({ request, index, resource: Result.getOrThrow(resource) })
+        }
+        const settled = yield* Effect.forEach(
+          granted,
+          ({ request, resource }) =>
+            resolvedResource("fs:read", "read", request.path).pipe(
+              Effect.flatMap((current) =>
+                current === resource ? Effect.void : Effect.fail(
+                  refuse("read", resource)(permissionDenied(
+                    makeCapability("fs:read", resource),
+                    "path no longer names the resource that was authorized"
+                  ))
+                )
+              ),
+              Effect.result
+            ),
+          { concurrency: Batch.fallbackConcurrency }
+        )
+        for (const [position, member] of granted.entries()) {
+          const checked = settled[position]!
+          if (Result.isFailure(checked)) {
+            entries.push({ index: member.index, path: member.request.path, result: Result.fail(checked.failure) })
+          } else {
+            admitted.push(member.request)
+            indexes.push(member.index)
+          }
+        }
+        yield* verifyRoot()
+        if (admitted.length > 0) {
+          const measured = yield* atomic!.execute<Batch.BatchResponse>({
+            operation: "batch",
+            boundaryRoot,
+            logicalRoot,
+            rootIdentity: rootIdentity.value,
+            requests: admitted
+          })
+          for (const entry of measured.entries) entries.push({ ...entry, index: indexes[entry.index]! })
+        }
+        entries.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : a.index - b.index)
+        return { rootIdentity: rootIdentity.value, entries }
+      })
+      return Object.assign(guarded, {
+        [Batch.FileSystemBatchTypeId]: {
+          maxSize: Math.min(limits.size, Batch.maxBatchSize),
+          maxResponseBytes: limits.response,
+          execute: executeBatch
+        }
+      })
+    }
   })
 )

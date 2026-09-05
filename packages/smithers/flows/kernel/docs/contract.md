@@ -1,3 +1,8 @@
+---
+title: "The kernel contract"
+description: "What @smthrs/kernel guarantees at a host boundary: checks that run before the operation, snapshotted inputs, the filesystem isolation a host must supply, and the structured refusal each service channel carries."
+---
+
 `@smthrs/kernel` owns the closed host boundary and decorates the same service
 tags supplied by each platform adapter. Capability checks happen before a host
 operation, and mutable inputs are snapshotted so the operation executed after

@@ -26,6 +26,9 @@ import * as Path from "./Path.ts"
 
 /**
  * The CLOSED LIST of platform ports the kernel protects.
+ * Optional filesystem batches belong to the existing FileSystem slot. The
+ * decorator grants each member separately and exposes no additional tag or
+ * unguarded executor to consumers; host slot identities remain unchanged.
  *
  * Everything that touches the outside world enters Smithers through exactly one
  * of these tags — there is no ambient `node:fs`, no bare `spawn`, no global

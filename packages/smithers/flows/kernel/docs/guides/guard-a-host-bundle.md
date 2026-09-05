@@ -80,24 +80,25 @@ everything composed above it. Code that captured the raw service before the
 decorator was composed, or that resolves it from a context built without the
 decorator, is not guarded. If some part of the host genuinely needs unguarded
 access, give it a **separate service** rather than a stale reference to the
-shared one. The engine does exactly that: its snapshot bookkeeping uses a
-private `Jj` service built over the raw host, so it grants no repository
-authority to the action context.
+shared one. [`@smthrs/engine`](/api/engine) does exactly that: its snapshot
+bookkeeping holds a private `Jj` service built over the raw host, so the flow
+bodies it runs get no repository authority from it.
 
-**Guarding the engine's own bookkeeping.** A database directory the engine
-must create in order to exist at all cannot be something the engine asks
-permission for, and a whole-tree sandbox copy is engine bookkeeping rather
-than an agent reaching for a file. Build the engine's storage over the raw
-host and the flow body's services over the guarded one. An action resolves its
-host services from the engine's context, which is why the engine is built
-**over** the kernel rather than beside it.
+**Guarding your own bookkeeping.** The guarded surface exists to check the
+code you did not write. The machinery your host needs in order to run at all,
+the directory its database lives in, the working copy it lays down before it
+hands anything to a subject, has to exist before there is anyone to ask, so it
+cannot be behind a permission check. Build that machinery over the raw bundle,
+build the services you hand to the guarded code over the decorated one, and
+give the guarded code no way to reach the first set.
 
 ## The real thing
 
-`@smthrs/flows`'s `NodeRuntime` is this composition at full size: the Node
-host with containment on, the kernel over an unattended store, storage, the
-step boundary, the workspace sandbox, the engine, and signal handling. Read it
-when you need the whole picture rather than the shape.
+[`@smthrs/flows`](/api/flows) composes this at full size in its `NodeRuntime`:
+the Node host with containment on, the kernel over an unattended store,
+storage, the step boundary, the workspace sandbox, the engine, and signal
+handling. [Stand up a Node runtime](/pkg/flows/guides/stand-up-a-node-runtime)
+walks it when you need the whole picture rather than the shape.
 
 ## Related
 

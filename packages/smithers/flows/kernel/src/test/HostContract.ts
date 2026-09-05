@@ -22,6 +22,9 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { type ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import * as FileSystemBatchContract from "./FileSystemBatchContract.ts"
+
+export { check as checkFileSystemBatch } from "./FileSystemBatchContract.ts"
 
 /**
  * A capability that must fail with a stable typed code.
@@ -529,6 +532,7 @@ export const runHostContract = (
             yield* Effect.gen(function*() {
               yield* fs.makeDirectory(root, { recursive: true })
               yield* fs.writeFile(`${root}/source.txt`, bytes)
+              yield* FileSystemBatchContract.check(fs, root)
               yield* Effect.forEach(
                 FileSystemOperations,
                 (operation) => {

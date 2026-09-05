@@ -17,17 +17,18 @@ request an operator resolves.
 ## Prerequisites
 
 - Node.js 22.19.0 or later.
-- A package with the kernel and a test runner installed:
+- A package that depends on `@smthrs/kernel`. See
+  [Installation](./installation.md) for how to get it.
+- A test runner, for the second half:
 
 ```bash
-pnpm add @smthrs/kernel
-pnpm add -D @effect/vitest@4.0.0-rc.108 vitest@4.1.9
+pnpm add -D @effect/vitest@4.0.0-rc.112 vitest@4.1.9
 ```
 
 ## Build the raw host
 
 The kernel decorates ports; something else has to provide them.
-`@smthrs/kernel/test/TestHost` is the deterministic bundle: an in-memory
+`@smthrs/testing/TestHost` is the deterministic bundle: an in-memory
 filesystem, a scripted interpreter, `TestClock`, and a seeded PRNG. `Workspace`
 names the root that filesystem capability resources are resolved against.
 
@@ -35,7 +36,7 @@ Create `quickstart.ts`:
 
 ```ts
 import { GrantStore, HostServices, Permission, Workspace } from "@smthrs/kernel"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
+import * as TestHost from "@smthrs/testing/TestHost"
 import { Effect, Fiber, FileSystem, Layer, Option, type PlatformError } from "effect"
 
 /** The unguarded platform bundle plus the workspace root. */

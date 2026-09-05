@@ -2,15 +2,31 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Capability from "@smthrs/capability/Capability"
 import * as Permission from "@smthrs/capability/Permission"
 import * as HostJj from "@smthrs/jj"
-import { Effect, Fiber, FileSystem as EffectFileSystem, Option, Path as EffectPath, type PlatformError } from "effect"
+import * as BrowserJj from "@smthrs/jj/browser/BrowserJj"
+import {
+  Effect,
+  Fiber,
+  FileSystem as EffectFileSystem,
+  Layer,
+  Option,
+  Path as EffectPath,
+  type PlatformError,
+  Sink,
+  Stream
+} from "effect"
 import * as EffectHttpClient from "effect/unstable/http/HttpClient"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { ChildProcessSpawner as EffectChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import {
+  ChildProcessSpawner as EffectChildProcessSpawner,
+  ExitCode,
+  make as makeSpawner,
+  makeHandle,
+  ProcessId
+} from "effect/unstable/process/ChildProcessSpawner"
 import * as FileSystem from "../src/FileSystem.ts"
 import * as GrantStore from "../src/GrantStore.ts"
 import * as HostServices from "../src/HostServices.ts"
 import * as KernelHttpClient from "../src/HttpClient.ts"
-import * as TestHost from "../src/test/TestHost.ts"
 import * as Workspace from "../src/Workspace.ts"
 
 const allowAll = GrantStore.GrantStore.of({
@@ -31,6 +47,31 @@ const fileSystem = FileSystem.withIsolatedFileSystem(EffectFileSystem.makeNoop({
     } as EffectFileSystem.File.Info),
   readFile: () => Effect.succeed(new Uint8Array())
 }))
+
+const encoder = new TextEncoder()
+
+const testHost = Layer.mergeAll(
+  EffectPath.layer,
+  BrowserJj.layerUnsupported,
+  Layer.succeed(EffectChildProcessSpawner)(
+    makeSpawner(() => {
+      const stdout = Stream.succeed(encoder.encode("protected\n"))
+      return Effect.succeed(makeHandle({
+        pid: ProcessId(1),
+        exitCode: Effect.succeed(ExitCode(0)),
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout,
+        stderr: Stream.empty,
+        all: stdout,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void)
+      }))
+    })
+  )
+)
 
 describe("HostServices", () => {
   it("shares one closed platform-port list with one tag per slot", () => {
@@ -80,10 +121,7 @@ describe("HostServices", () => {
         Effect.provide(HostServices.layer),
         Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
         Effect.provideService(EffectHttpClient.HttpClient, http),
-        Effect.provide(TestHost.layer({
-          files: { "/workspace/.keep": "" },
-          commands: { fixture: { stdout: "protected\n" } }
-        })),
+        Effect.provide(testHost),
         Effect.provide(Workspace.layer("/workspace")),
         Effect.provideService(GrantStore.GrantStore, allowAll)
       )
@@ -140,7 +178,7 @@ describe("HostServices", () => {
         Effect.provide(HostServices.layer),
         Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
         Effect.provideService(EffectHttpClient.HttpClient, http),
-        Effect.provide(TestHost.layer({ files: { "/workspace/.keep": "" } })),
+        Effect.provide(testHost),
         Effect.provide(Workspace.layer("/workspace")),
         Effect.provideService(GrantStore.GrantStore, deny),
         Effect.scoped
@@ -202,7 +240,7 @@ describe("HostServices", () => {
             Effect.provide(HostServices.layer),
             Effect.provideService(EffectFileSystem.FileSystem, fileSystem),
             Effect.provideService(EffectHttpClient.HttpClient, http),
-            Effect.provide(TestHost.layer({ files: { "/workspace/.keep": "" } })),
+            Effect.provide(testHost),
             Effect.provideService(GrantStore.GrantStore, store)
           )
         })

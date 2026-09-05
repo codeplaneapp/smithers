@@ -1,6 +1,6 @@
 ---
-title: "Contract"
-description: "Capability kernel: effect tiers, monotone capability sets, grant store, and permission-decorating layers over the Host services"
+title: "The kernel contract"
+description: "What @smthrs/kernel guarantees at a host boundary: checks that run before the operation, snapshotted inputs, the filesystem isolation a host must supply, and the structured refusal each service channel carries."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/contract.md"
 ---
 

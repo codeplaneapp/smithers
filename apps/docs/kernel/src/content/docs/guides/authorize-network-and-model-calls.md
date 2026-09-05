@@ -99,7 +99,7 @@ A body that is neither immutable nor copyable fails with
 `TransportError` naming the request and the cause
 `"HTTP is unavailable on this host"`. Use it for a host that genuinely cannot
 reach the network, so an unconfigured capability answers rather than vanishing.
-`@smthrs/kernel/test/TestHost` composes it.
+`@smthrs/testing/TestHost` composes it.
 
 ## Related
 

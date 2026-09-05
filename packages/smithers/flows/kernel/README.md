@@ -5,191 +5,150 @@
 test helper. Normal kernel imports do not install browser test support.
 
 This package declares `effect` as an exact
-`4.0.0-rc.108` peer dependency. Keep the application on that version so
+`4.0.0-rc.112` peer dependency. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://kernel.smithers.sh
 
-The closed host boundary and the capability kernel over it. This package owns
-the closed list of platform ports every side effect enters through, monotone
-authority, typed permission/grant decisions, journal-backed grants, and
-permission-aware replacements for every protected Host service.
+A capability kernel for [Effect](https://effect.website) hosts. It puts a
+permission check in front of every side effect a program can reach: the five
+service tags a host provides, `FileSystem`, `Path`, `ChildProcessSpawner`,
+`HttpClient`, and `Jj`, are decorated in place, so each operation is named as a
+capability, checked against a grant store, and refused with a typed error when
+nobody authorized it.
 
-The implementations behind those ports live in `@smthrs/platform-node`,
-`@smthrs/platform-bun`, and `@smthrs/platform-browser`. Four of the five ports
-are Effect's own tags — `FileSystem`, `Path`, `ChildProcessSpawner`, and
-`HttpClient` — so Smithers supplies implementations of them rather than wrappers
-around them.
+Decorating in place is the point. A protected second service only guards the
+callers who agreed to use it, and the first dependency that reaches for the
+ordinary `FileSystem` tag walks straight past it. Once this layer is composed,
+the guarded implementation is what the tag resolves to, so there is no
+unguarded one left to reach for. Code that calls `fs.readFileString` is checked
+without ever mentioning permission.
 
-```sh
-pnpm add @smthrs/kernel
+## Install
+
+`@smthrs/kernel` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and the
+[installation page](https://kernel.smithers.sh/installation/) covers how to
+depend on it from a checkout, the import forms, and the three test subpaths.
+
+It needs Node.js 22.19.0 or later and `effect` 4.0.0-rc.112. It carries no
+platform implementations of its own, so a composition that reaches a real
+machine also adds a bundle such as
+[`@smthrs/platform-node`](https://platform-node.smithers.sh).
+
+## Refuse an operation nobody authorized
+
+This program composes the kernel over the deterministic host from
+`@smthrs/testing`. The policy allows reads
+under the workspace and says nothing about writes:
+
+```ts
+import { Capability, GrantStore, HostServices, Permission, Workspace } from "@smthrs/kernel"
+import * as TestHost from "@smthrs/testing/TestHost"
+import { Effect, FileSystem, Layer } from "effect"
+
+const rules = [
+  new Permission.Rule({
+    effect: "allow",
+    pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: "/workspace/**" })
+  })
+]
+
+const guarded = HostServices.layer.pipe(
+  Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules }))),
+  Layer.provideMerge(TestHost.layer({ files: { "/workspace/README.md": "# hello" } })),
+  Layer.provide(Workspace.layer("/workspace"))
+)
+
+/** Ordinary Effect code. Nothing here knows a kernel exists. */
+const program = Effect.gen(function*() {
+  const fs = yield* FileSystem.FileSystem
+  const readme = yield* fs.readFileString("/workspace/README.md")
+  yield* fs.writeFileString("/workspace/out.txt", readme)
+})
+
+Effect.runPromise(program.pipe(Effect.provide(guarded), Effect.scoped))
 ```
+
+The read returns `"# hello"`. The write never reaches the filesystem. Effect
+fixes that method's error channel to `PlatformError`, so the kernel projects
+its refusal into one and keeps the structured original on the cause, where
+`Permission.fromPlatformError` reads it back as a `PermissionRequired` naming
+`fs:write` on `/workspace/out.txt`.
+
+`permission_required`, not `permission_denied`: no rule matched, silence is not
+consent, and this store has nobody to ask. Build the store with
+`attended: true` instead and the same write parks on a request an operator can
+answer, then resumes the operation it was authorized for. The
+[quickstart](https://kernel.smithers.sh/quickstart/) runs both halves.
+
+## What a yes or no answer leaves open
+
+- **Confinement.** A path is authorized as a canonical resource and the
+  operation runs through a pinned directory descriptor, so a symlink or a
+  rename between the decision and the call cannot redirect it. A host that
+  cannot address the real filesystem attests whole-volume isolation instead; a
+  path-only adapter is unsupported and fails closed.
+- **Containment.** A cancelled run signals its children, escalates to
+  `SIGKILL` on a deadline, and records each child in a durable ledger, so a
+  host that dies leaves orphan records its successor can reap.
+- **A ceiling that only narrows.** `CapabilitySet.attenuate` bounds what a
+  fiber may ask for, and no public operation widens it again.
+- **Grants that outlive the process.** A decision is written to a journal
+  before it takes effect, so a permission a person chose to remember is still
+  in force after a restart.
 
 ## Public API
 
-The root exports these namespaces. Every module that lives in this package is
-also available from its matching `@smthrs/kernel/*` subpath; `Capability` and
-`Permission` are re-exports whose modules live in `@smthrs/capability`, so
-their deep imports are `@smthrs/capability/Capability` and
-`@smthrs/capability/Permission`.
+The root entry point exports these namespaces, and each is also importable from
+`@smthrs/kernel/<Module>`. Every export, with its signature and its bounds, is
+on the [API reference](https://kernel.smithers.sh/reference/api/).
 
-| Namespace                 | Public exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Capability`              | Re-export of `@smthrs/capability/Capability`: `Action`, exact `Capability`, `PatternAction`, and `CapabilityPattern`; `make`, `format`, `parse`, `parsePattern`, `patternFromCapability`, `withinMatchBudget`, `matches`, and `subsumes`; `EffectTier`, `TierOptions`, `tierOf`, and `requiresIdempotencyKey`.                                                                                                                                                                                                                                                                     |
-| `CapabilitySet`           | `CapabilitySet`; `fromPatterns`, empty authority `none`, `allows`, `intersect`, `equals`, ambient `current`, and monotone `attenuate`. No widening constructor or unrestricted value is public.                                                                                                                                                                                                                                                                                                                                                                                    |
-| `Permission`              | Re-export of `@smthrs/capability/Permission`: `PermissionRequired`, `PermissionDenied`, `GrantStoreErrorCode`, `GrantStoreError`, and the `PermissionError` union; policy `RuleEffect`, `Rule`, and `evaluate`; constructors `permissionRequired` and `permissionDenied`; `isPermissionError`, `formatError`, and the `PlatformError` projection `toPlatformError` / `fromPlatformError`.                                                                                                                                                                                          |
-| `GrantEvent`              | `GrantTier`, `GrantScope`, `OnceGrant`, `RememberedGrant`, `RunGrant`, `DeniedGrant`, `EnvelopeGrant`, `GrantEventSchema`, `GrantEvent`, `decode`, and `encode`.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `GrantStore`              | `PendingRequest`, `Resolution`, `EnvelopeGrantOptions`, `Persist`, and `MakeOptions`; `Service` / `GrantStore` operations `check`, `reply`, `list`, and `grantEnvelope`; `canonicalEnvelopePatterns`, `envelopeSignature`, `isValidGrantPattern`, and `isValidEnvelopePattern`; limits `maximumRules`, `maximumEnvelopePatterns`, `maximumPendingRequests`, `maximumMetadataDepth`, `maximumMetadataMembers`, `maximumMetadataBytes`, `maximumEventBytes`, `maximumIdentityLength`, and `maximumCapabilityResourceLength`; `make`, `layer`, allow-all `makeNoop`, and `layerNoop`. |
-| `JournalGrantStore`       | `JournalGrantStoreOptions`; `make` and `layer` replay and persist grants through `Journal`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `HostServices`            | The one closed list: `HostService`, `HostServiceTags`, `HostServiceIds`, and aggregate decorator `layer`. Each slot is decorated in place, so there is no second tag list.                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `FileSystem`              | `canonicalResource`, the atomic-host extension, isolated-volume attestation, and decorator `layer` over Effect's own `FileSystem` tag. Path operations run only through a descriptor-relative/no-follow executor or an enforceably isolated filesystem; unsupported hosts fail closed with a typed permission error.                                                                                                                                                                                                                                                               |
-| `HttpClient`              | Decorator `layer` over Effect's own `HttpClient` tag; the tag and `make` are re-exported unchanged, plus the `ModelCall` reference and `withModelCall`, the `toHttpClientError` / `fromHttpClientError` projection, and a `makeNoop` / `layerNoop` stub that reports the missing host as a `TransportError`.                                                                                                                                                                                                                                                                       |
-| `ChildProcessSpawner`     | Decorator `layer` over Effect's own `ChildProcessSpawner` tag; the tag and `make` are re-exported unchanged, plus a `makeNoop` / `layerNoop` stub that reports the missing host as a `NotFound` `PlatformError`.                                                                                                                                                                                                                                                                                                                                                                   |
-| `ChildProcessEnvironment` | `inheritedNames`, `credentialNamePattern`, `isCredentialName`, and `make` build a replacement environment from bootstrap names plus explicit declarations.                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `ContainedSpawner`        | `defaultGraceMs`, `Options`, `withContainment`, `groupOf`, and decorator `layer` over Effect's own `ChildProcessSpawner` tag: every child gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` entry released when its scope closes.                                                                                                                                                                                                                                                                                                                                     |
-| `ProcessLedger`           | `SpawnedEventType`, `ExitedEventType`, `ReapedEventType`, `SkippedEventType`, `sourceId`, `hostRunId`, `Spawned`, `ProcessRecord`, `Options`; `Service` / `ProcessLedger` operations `record`, `release`, `reaped`, `skipped`, `live`, and `orphans`; `make`, `layer`, journal-free `makeMemory`, and `layerMemory`.                                                                                                                                                                                                                                                               |
-| `CommandLine`             | `render`, `quote`, `cwd`, and `env` — one renderer shared by the `proc:spawn` capability resource and by the interpreters that execute the line.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `Jj`                      | Decorator `layer` over `@smthrs/jj`'s own `Jj` tag; the tag, `make`, `makeNoop`, and `layerNoop` are re-exported unchanged.                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `Path`                    | Effect `Path` type/tag and explicit pass-through `layer`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `Workspace`               | `Service` / `Workspace` root configuration; `make`, `layer`, relative test value `makeNoop`, and `layerNoop`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Namespace             | What it is                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `Capability`          | The vocabulary a decision is made in: actions, exact capabilities, patterns, matching, and effect tiers.     |
+| `Permission`          | The typed failure contract, plus policy rules and their evaluation.                                          |
+| `CapabilitySet`       | The authority ceiling. `attenuate` narrows it; no public operation widens it again.                          |
+| `GrantStore`          | The service that decides: check a capability, park a request, reply to it, and the bounds every value obeys. |
+| `JournalGrantStore`   | A grant store that replays and persists its decisions through `Journal`.                                     |
+| `GrantEvent`          | The durable grant vocabulary: once, remembered, run, denied, and envelope grants, with their schema.         |
+| `HostServices`        | The closed list of five host slots, and the aggregate layer that decorates all of them in place.             |
+| `FileSystem`          | The guarded filesystem, its canonical resources, and the confinement a host attaches at its boundary.        |
+| `HttpClient`          | The guarded HTTP client: `net:get`, `net:post`, `model:call`, and every redirect hop rechecked.              |
+| `ChildProcessSpawner` | The guarded spawner over Effect's own tag.                                                                   |
+| `ContainedSpawner`    | A `SIGTERM`-then-`SIGKILL` deadline on every child, and a ledger entry released when its scope closes.       |
+| `ProcessLedger`       | The durable record of spawned processes, and the `orphans` a dead host leaves its successor to reap.         |
+| `CommandLine`         | The one renderer shared by the `proc:spawn` capability resource and the interpreters that run the line.      |
+| `Jj`                  | The guarded [Jujutsu](https://jj-vcs.github.io) repository port over `@smthrs/jj`'s own tag.                 |
+| `Path`                | Effect's `Path`, passed through unchecked by decision.                                                       |
+| `Workspace`           | The root that filesystem capability resources are resolved against.                                          |
 
-Three public test subpaths are shipped:
+`ChildProcessEnvironment` builds a replacement environment from bootstrap names plus explicit declarations, withholding credential-shaped ambient values.
 
-- `@smthrs/kernel/test/TestGrantStore` exports `layerAllow`,
-  `layerDeny(reason?)`, and `layerScripted(replies)`.
-- `@smthrs/kernel/test/TestHost` exports the deterministic Host bundle,
-  in-memory filesystem, scripted interpreter, seeded random layer, and
-  `TestClock` composition.
-- `@smthrs/kernel/test/contract` exports `runHostContract` and its complete
-  FileSystem, process, Jj, and HTTP capability matrices for third-party Host
-  adapters.
+`Capability` and `Permission` are re-exports; their modules live in
+[`@smthrs/capability`](https://capability.smithers.sh).
 
-`test/TestHost` and `test/contract` are Node-only. The contract registers
-Vitest cases and uses Node process/temp-directory fixtures, so consumers must
-install the declared `@effect/vitest@4.0.0-rc.108` peer and `vitest@4.1.9`
-(the latter is optional unless the contract subpath is imported).
+Two test subpaths ship in the package's export map, not as dev-only files:
+`@smthrs/kernel/test/TestGrantStore` for allow, deny, and scripted grant-store
+doubles and `@smthrs/kernel/test/contract` for `runHostContract`, the behavioral
+contract every host bundle must satisfy. The contract is Node-only. The
+deterministic host bundle lives at `@smthrs/testing/TestHost` so the kernel does
+not depend back on a platform implementation.
 
-```ts
-import { Capability, GrantStore } from "@smthrs/kernel"
-import { Effect } from "effect"
+## Documentation
 
-const program = Effect.gen(function*() {
-  const grants = yield* GrantStore.GrantStore
-  yield* grants.check(Capability.make("fs:read", "/workspace/README.md"))
-}).pipe(Effect.provide(GrantStore.layerNoop))
+- [Overview](https://kernel.smithers.sh)
+- [Quickstart](https://kernel.smithers.sh/quickstart/)
+- [Guard a host bundle](https://kernel.smithers.sh/guides/guard-a-host-bundle/)
+- [Write a capability policy](https://kernel.smithers.sh/guides/write-a-capability-policy/)
+- [Decoration in place](https://kernel.smithers.sh/concepts/decoration-in-place/)
+- [API reference](https://kernel.smithers.sh/reference/api/)
+- [Troubleshooting](https://kernel.smithers.sh/troubleshooting/), which lists
+  every refusal this package raises, what it means, and what to change.
 
-Effect.runPromise(program)
-```
+`@smthrs/kernel` is one package of the Smithers durable flow engine, which
+ships whole as [`@smthrs/flows`](https://flows.smithers.sh).
 
-`HostServices.layer` decorates the closed Host surface in place: composed over
-a raw platform bundle, the guarded FileSystem, Path, ChildProcessSpawner, Jj,
-and HttpClient implementations shadow the raw ones under the same tags. Where
-Effect owns the tag (`FileSystem`, `ChildProcessSpawner`) a refused operation
-surfaces as a `PlatformError` with reason `PermissionDenied` and the structured
-kernel failure on `cause` (`Permission.fromPlatformError` reads it back);
-`HttpClient` does the same one module out, projecting a denial into an
-`HttpClientError` whose reason is a `TransportError` carrying the kernel
-failure (`HttpClient.fromHttpClientError` reads it back). `Jj` keeps
-`Permission.PermissionError` in its own channel.
+## License
 
-Filesystem confinement does not authorize a checked pathname and then hand the
-same pathname to the host. That pattern is vulnerable to symlink swaps. Native
-hosts must attach `withAtomicFileSystem` with operations rooted at a pinned
-descriptor; browser/test volumes that cannot address the host filesystem may
-use `withIsolatedFileSystem`. A raw path-only adapter is unsupported and every
-relevant read, write, directory, remove, rename, list, stat, glob, stream, and
-handle operation fails closed.
-
-`withAtomicFileSystem` and `withIsolatedFileSystem` decorate the supplied
-service object in place and return that same identity. Compose them once at
-the host boundary; do not retain an undecorated alias. `withIsolatedFileSystem`
-throws on a service that already carries a descriptor-relative executor, so a
-whole-volume attestation can never downgrade a native host to path delegation. The guarded filesystem,
-HTTP, and child-process layers snapshot option records, nested arrays/maps, and
-mutable request/byte buffers before any permission suspension, so mutation by
-the caller cannot change the operation after authorization. `CapabilitySet`
-and GrantStore results likewise own frozen copies rather than aliases to
-caller state.
-
-Network access is Effect's `HttpClient` — there is no Smithers transport port.
-Consumers require `HttpClient.HttpClient` from `effect/unstable/http`, and the
-kernel decorator shadows it. GET and HEAD are checked as `net:get`; every other
-method is `net:post`. For `https:`, the resource is the lowercased URL host. For
-any other scheme, it is `<scheme>//<lowercased host>`, so `https` is implicit
-and a host grant cannot authorize a cleartext `http` downgrade. `model:call`
-uses the same rule with `/<model id>` appended. A redirect is a second
-destination, so the decorator composes Effect's `followRedirects` _above_ the
-grant check: every hop is rechecked, and platform bundles hand over a client
-that never follows a redirect on its own.
-
-## Identity, failures, and bounds
-
-Capability actions, resources, pattern resources, run IDs, plan digests, and
-grant metadata are identity values. Smithers validates well-formed Unicode but
-does not normalize it: comparison, hashing, signatures, and journal replay use
-the exact JavaScript string/code-unit sequence supplied. Callers that want NFC
-or another normalization must apply it before constructing the value.
-
-Permission failures retain their stable public code:
-`permission_required`, `permission_denied`, or one of
-`duplicate_request`, `request_not_found`, `journal_failed`, `store_closed`, and
-`invalid_resolution` in `GrantStoreErrorCode`. Platform adapters preserve the
-structured failure as a cause when projecting it into `PlatformError` or
-`HttpClientError`. Validation errors identify the rejected field but never
-retain or print unbounded hostile input.
-
-The in-memory GrantStore is deliberately finite: at most 1,024 policy rules,
-1,024 activated envelope signatures, 256 patterns per envelope, and 1,024
-pending requests. The envelope ceiling applies to the construction envelope as
-well as to `grantEnvelope`, so replayed history cannot grow past what a later
-construction is willing to read back. Metadata is limited to
-16 levels, 1,024 members, and 64 KiB of canonical JSON; one encoded event is
-limited to 256 KiB. Identity fields are at most 4,096 UTF-16 code units, and
-capability resources use `Capability.maxResourceLength` (4,096). Exceeding a
-GrantStore bound fails with `invalid_resolution` before state or the journal
-changes.
-
-## Process containment
-
-The `proc:spawn` grant identity is `CommandLine.render(command)` alone. The
-working directory, environment overrides, and pipeline `from`/`to` routing are
-not part of what the grant authorizes. `cwd` and the names of overridden
-environment variables reach an attended surface as display metadata only.
-
-Cancelling a run must leave no process behind. Effect's spawner signals a
-child's process group when the spawn scope closes and then waits for the exit,
-and with no `forceKillAfter` it waits forever: a child that traps `SIGTERM`
-turns a cancellation into a hung host. `ContainedSpawner.layer` closes that
-hole by rewriting every command it spawns to carry an escalation deadline
-(`SIGTERM`, then `SIGKILL` after `graceMs`, default 2000) and by recording the
-started process in the `ProcessLedger`, releasing it when the scope closes.
-Both legs of a pipeline get the same policy; a command that already names a
-`killSignal` or `forceKillAfter` keeps the policy its caller chose.
-
-The ledger is the durable half. Each spawn is written to `Journal` as an
-ownerless record on the run `flows.host:<hostId>`, so the next incarnation of
-the same host replays that history, subtracts the processes that reported an
-exit, and reads `orphans`: the process groups an owner that is no longer alive
-abandoned. `@smthrs/platform-node`'s `ProcessReaper` signals them.
-`ProcessLedger.layerMemory` keeps the in-memory half without a journal, which
-contains this incarnation and inherits nothing.
-
-A ledger write that does not commit is reported, not swallowed. `record`,
-`release`, `reaped`, and `skipped` all carry the journal's failure, and the
-spawner refuses a spawn whose record failed: it signals the child and fails the
-call, because a child no incarnation can discover is the exact outcome
-containment exists to prevent. The one exception is the release finalizer, which
-has nowhere to report anything; a missed release leaves the record inherited,
-and the next reaper finds the pid already gone and retires it then.
-
-The release is announced only after the process has been signalled. The
-finalizer that retires a record is registered before the spawn, so scope closure
-runs it after Effect's own kill finalizer.
-
-`groupOf` takes the platform, because Effect detaches a child that names no
-`detached` option everywhere except win32. A win32 record claiming `pgid = pid`
-would name a group the child does not lead, so it records no group instead.
-
-See the [kernel reference](https://github.com/smithersai/smithers/blob/main/docs/pages/api/kernel.md),
-[host and capability concepts](https://github.com/smithersai/smithers/blob/main/docs/pages/concepts/hosts-and-capabilities.md),
-and [step keys](https://github.com/smithersai/smithers/blob/main/docs/pages/concepts/step-keys.md).
+MIT. See [LICENSE](./LICENSE).

@@ -51,12 +51,12 @@ them:
 `"effect/HttpClient"`).
 
 Two things depend on the list being closed. A service that is not on it cannot
-be attenuated, denied, or audited, so it must not exist. And step keys digest
-the list as their `layers` component: which platform implementations were in
-scope is part of a step's identity, so a replay under different layers is a
-different step rather than a silent lie. A slot id is therefore renamed only
-when the service itself changes, as when `Shell` was replaced by Effect's
-`ChildProcessSpawner`.
+be attenuated, denied, or audited, so it must not exist. And the list is part
+of what a durable run records about itself: [`@smthrs/engine`](https://engine.smithers.sh/reference/api/)
+folds the implementations that were in scope into the identity of every step it
+caches, so a replay under a different set of them is a different step rather
+than a silent substitution. The slot ids are durable for that reason too, and
+change only when the service behind a slot changes.
 
 ## Four of the five tags are Effect's
 

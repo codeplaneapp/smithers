@@ -1,143 +1,162 @@
 ---
 title: "@smthrs/kernel"
-description: "The capability kernel: the closed list of platform ports every side effect enters through, and the middleware layers that check a capability before any of them acts."
+description: "A capability kernel for Effect hosts: it decorates the filesystem, process, network, path, and Jujutsu service tags in place, so every side effect is checked against a grant store before it runs and refused with a typed error when nobody authorized it."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/kernel/docs/README.md"
 ---
 
-`@smthrs/kernel` is the boundary between a Smithers flow and the machine it
-runs on.
+`@smthrs/kernel` puts a permission check in front of every side effect an
+[Effect](https://effect.website) program can reach. It wraps the five service
+tags a host provides, `FileSystem`, `Path`, `ChildProcessSpawner`, `HttpClient`,
+and `Jj`, with middleware that names the operation as a capability, asks a grant
+store whether it may proceed, and refuses it with a typed error when no rule
+allows it and nobody is there to ask. Four of those tags are Effect's own; `Jj`
+is the [Jujutsu](https://jj-vcs.github.io) repository port from
+[`@smthrs/jj`](https://jj.smithers.sh/reference/api/).
 
-Everything that touches the outside world enters through one of five service
-tags: `FileSystem`, `Path`, `ChildProcessSpawner`, `Jj`, and `HttpClient`. The
-kernel decorates each of those tags **in place**, with a middleware `Layer`
-over the very tag a platform adapter provides. Composed over a host bundle,
-the guarded implementation shadows the raw one, so code that never heard of
-the kernel is guarded anyway. There is no second, protected tag to import,
-and therefore no way to hold the unguarded service by accident.
+## What it solves
 
-Before each operation the decorator names it as a capability, an action and a
-resource, and asks a `GrantStore` whether it may proceed. The store consults
-the fiber's authority ceiling, evaluates the policy rules, and answers allow,
-deny, or ask. Ask is the default for anything no rule matched: nothing here
-silently allows.
+Running code you did not write, an agent's plan, a plugin, a generated build
+script, means every file write and every spawned process needs an answer to one
+question: did anyone authorize this. The usual way to enforce that answer is a
+second, protected service, and to tell every caller to use it. That breaks on
+the first dependency that never heard of your kernel and reaches for the
+ordinary `FileSystem` tag instead.
+
+This package decorates the ordinary tag in place. Once the layer is composed,
+the guarded implementation _is_ what the tag resolves to, so there is no
+unguarded one left to reach for. Code that calls `fs.readFileString` is checked
+without ever mentioning permission.
+
+A yes or no answer is not enough on its own, so the kernel also closes the gaps
+around it:
+
+- **Confinement.** A path is authorized as a canonical resource and the
+  operation runs through a pinned directory descriptor, so a symlink or a
+  rename between the decision and the call cannot redirect it.
+- **Containment.** A cancelled run signals its children, escalates to
+  `SIGKILL` on a deadline, and records each child in a durable ledger, so a
+  host that dies leaves orphan records its successor can reap.
+- **A ceiling that only narrows.** `CapabilitySet.attenuate` bounds what a
+  fiber may ask for, and no public operation widens it again.
+- **Grants that outlive the process.** A decision is written to a journal
+  before it takes effect, so a permission a person chose to remember is still
+  in force after a restart.
 
 ## Install
 
-```bash
-pnpm add @smthrs/kernel
-```
+`@smthrs/kernel` is not on npm at 1.0.0-rc.0. Its source lives in the
+[smithers repository](https://github.com/smithersai/smithers), and
+[Installation](/installation/) covers how to depend on it from a checkout,
+the import forms, and the three test subpaths.
 
-For the runtime requirements, the import forms, and the packages a real
-composition adds, see [Installation](/installation/).
+The package needs Node.js 22.19.0 or later. It carries no platform
+implementations of its own, so a composition that reaches a real machine also
+adds a bundle such as [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/).
 
-## The smallest real example
+## Refuse an operation nobody authorized
 
-One policy, one guarded host, one refused command:
+This program composes the kernel over the deterministic host that ships with
+the package, so it runs with nothing else installed. The policy allows reads
+under the workspace and says nothing about writes:
 
 ```ts
 import { Capability, GrantStore, HostServices, Permission, Workspace } from "@smthrs/kernel"
-import * as TestHost from "@smthrs/kernel/test/TestHost"
-import { Effect, FileSystem, Layer, Option, type PlatformError } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import * as TestHost from "@smthrs/testing/TestHost"
+import { Effect, FileSystem, Layer } from "effect"
 
-const policy = [
+const rules = [
   new Permission.Rule({
     effect: "allow",
     pattern: new Capability.CapabilityPattern({ action: "fs:read", resource: "/workspace/**" })
   })
 ]
 
-const guarded: Layer.Layer<HostServices.HostService> = HostServices.layer.pipe(
-  Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules: policy }))),
+const guarded = HostServices.layer.pipe(
+  Layer.provide(Layer.orDie(GrantStore.layer({ attended: false, rules }))),
   Layer.provideMerge(TestHost.layer({ files: { "/workspace/README.md": "# hello" } })),
-  Layer.provide(Workspace.layer("/workspace")),
-  Layer.orDie
+  Layer.provide(Workspace.layer("/workspace"))
 )
 
+/** Ordinary Effect code. Nothing here knows a kernel exists. */
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
-  // Allowed by the rule above.
-  yield* fs.readFileString("/workspace/README.md")
+  const readme = yield* fs.readFileString("/workspace/README.md")
+  yield* fs.writeFileString("/workspace/out.txt", readme)
+})
 
-  // No rule matches `proc:spawn`, and an unattended store has nobody to ask.
-  const spawner = yield* ChildProcessSpawner
-  const failure = yield* Effect.flip(spawner.string(ChildProcess.make("ls")))
-  const denial = Option.getOrThrow(
-    Permission.fromPlatformError(failure as PlatformError.PlatformError)
-  )
-  return denial.code // "permission_required"
-}).pipe(Effect.provide(guarded))
+Effect.runPromise(program.pipe(Effect.provide(guarded), Effect.scoped))
 ```
 
-The `fs.readFileString` call is Effect's own filesystem method. Nothing in the
-program mentions permission, and the refusal still arrives, as a
-`PlatformError` whose cause carries the structured kernel failure.
-[Quickstart](/quickstart/) builds this up step by step and shows the
-attended half, where a person answers the request instead.
+The read returns `"# hello"`. The write never reaches the filesystem. Effect
+fixes that method's error channel to `PlatformError`, so the kernel projects
+its refusal into one and keeps the structured original on the cause;
+`Permission.fromPlatformError` reads it back:
 
-## Who uses this package
+```text
+{
+  _tag: '@smthrs/capability/PermissionRequired',
+  code: 'permission_required',
+  requestId: 'permission-1',
+  capability: { action: 'fs:write', resource: '/workspace/out.txt' },
+  tier: 'compensable',
+  meta: {}
+}
+```
 
-Host authors compose `HostServices.layer` over a platform bundle to build the
-surface a flow body runs on. Platform packages implement the five ports and
-attach the filesystem confinement extension the kernel requires. Control
-planes drive the attended `GrantStore`: they read pending requests, show them
-to an operator, and reply. Flow and action authors normally use none of this
-directly; they call the ordinary Effect services and the checks happen
-underneath.
+The `tier` says what re-running the refused operation would cost: a write
+inside the workspace is `compensable`, because the run can undo it from its own
+snapshot. See [effect tiers](https://capability.smithers.sh/concepts/effect-tiers/) for the
+other two.
 
-## The package at a glance
+`permission_required`, not `permission_denied`: no rule matched, silence is not
+consent, and this store has nobody to ask. Build the store with
+`attended: true` instead and the same write parks on a request an operator can
+answer, then resumes the operation it was authorized for. The
+[Quickstart](/quickstart/) runs both halves.
 
-The root entry point exports these namespaces, and each module is also
-importable from `@smthrs/kernel/<Module>`:
+## How this fits with @smthrs/flows
 
-| Namespace                  | What it is                                                                                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Capability`, `Permission` | Re-exports of [`@smthrs/capability`](https://capability.smithers.sh/reference/api/): the capability vocabulary, patterns, effect tiers, policy rules, and the typed permission failures. |
-| `CapabilitySet`            | The fiber's monotone authority ceiling. Its public operations preserve or narrow authority and can never widen it.                                         |
-| `GrantStore`               | The decision service: `check` asks, `reply` answers, `list` shows what is parked, `grantEnvelope` approves a plan's whole set at once.                     |
-| `GrantEvent`               | The five durable wire shapes a decision is persisted as.                                                                                                   |
-| `JournalGrantStore`        | A `GrantStore` that writes each decision to the journal before activating it, and replays the history on the next process.                                 |
-| `HostServices`             | The closed port list (`HostService`, `HostServiceTags`, `HostServiceIds`) and the aggregate decorator `layer`.                                             |
-| `FileSystem`               | The `fs:read` and `fs:write` decorator, canonical resource resolution, and the two host confinement extensions.                                            |
-| `ChildProcessSpawner`      | The `proc:spawn` decorator over Effect's spawner tag.                                                                                                      |
-| `ContainedSpawner`         | Kill-escalation and ledger recording over the same tag, so cancelling a run leaves no process behind.                                                      |
-| `ProcessLedger`            | The host's durable record of the processes it started, and the orphans a dead incarnation left.                                                            |
-| `CommandLine`              | The one renderer shared by the `proc:spawn` resource and the adapters that execute the line.                                                               |
-| `HttpClient`               | The `net:get`, `net:post`, and `model:call` decorator over Effect's HTTP client tag.                                                                       |
-| `Jj`                       | The Jujutsu decorator over [`@smthrs/jj`](https://jj.smithers.sh/reference/api/)'s own tag.                                                                                              |
-| `Path`                     | Effect's path service, passed through explicitly: pure string manipulation carries no authority to guard.                                                  |
-| `Workspace`                | The workspace root that makes filesystem capability resources stable.                                                                                      |
+`@smthrs/kernel` is one package of the Smithers durable flow engine, which
+ships whole as [`@smthrs/flows`](https://flows.smithers.sh/reference/api/). Inside that engine the kernel is
+the layer between a flow's body and the machine:
+[`@smthrs/capability`](https://capability.smithers.sh/reference/api/) supplies the vocabulary it decides with,
+the [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/) family implements the ports it
+decorates, and [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) runs steps over the guarded
+surface it composes. `@smthrs/flows` re-exports all of it as the `Kernel`
+namespace, and the durable Node runtime it builds is this composition at full
+size, so a program that already depends on the barrel does not install this
+package separately.
 
-Every export of every namespace, with signatures, limits, and error codes, is
-on the [API reference](/reference/api/).
+Depend on `@smthrs/kernel` on its own when you are guarding a host of your own
+rather than running Smithers flows. Its only Smithers dependencies are the
+capability vocabulary, the journal, and the Jujutsu port, and its root entry
+point imports no Node built-ins, so the kernel runs wherever its host does.
+
+Further up, [`@smthrs/cli`](https://cli.smithers.sh/reference/api/) is the `smthrs` command line that
+everything here sits under. It finds the flows in a project, plans them, takes
+an approval, and runs them, and it builds its host through this kernel with a
+policy scoped to the project root, which is how a step that reaches outside
+that root gets stopped.
 
 ## Where to go next
 
-- [Installation](/installation/): requirements, subpaths, and the platform
-  package a real host adds.
-- [Quickstart](/quickstart/): guard a host, refuse a call, and answer a
-  permission request.
-- Concepts: [decoration in place](/concepts/decoration-in-place/),
-  [how a grant decision is made](/concepts/grant-decisions/),
-  [filesystem confinement](/concepts/filesystem-confinement/), and
-  [process containment](/concepts/process-containment/).
-- Guides: [guard a host bundle](/guides/guard-a-host-bundle/),
-  [write a capability policy](/guides/write-a-capability-policy/),
-  [answer permission requests](/guides/answer-permission-requests/),
-  [persist grants across restarts](/guides/persist-grants-across-restarts/),
-  [authorize network and model calls](/guides/authorize-network-and-model-calls/),
-  [contain spawned processes](/guides/contain-spawned-processes/), and
-  [adapt a new host platform](/guides/adapt-a-new-host-platform/).
-- [Testing](/testing/): the grant-store doubles, the deterministic host
-  bundle, and the shared host contract suite.
-- [Troubleshooting](/troubleshooting/): the refusals this package produces
-  and what each one asks you to change.
-
-## What the kernel does not do
-
-The kernel checks capabilities at adapter call sites. It does not sandbox the
-operating system, and it cannot observe host access that bypasses the
-decorated services: a dependency that reaches for `node:fs` directly is
-outside its view. Hermetic execution additionally requires a `StepBoundary`
-from [`@smthrs/engine`](https://engine.smithers.sh/reference/api/).
+- [Installation](/installation/): runtime requirements, the import forms,
+  the three test subpaths, and the platform bundle you choose yourself.
+- [Quickstart](/quickstart/): refuse a read on an unattended store, then
+  answer the same read on an attended one.
+- [Guard a host bundle](/guides/guard-a-host-bundle/): the composition over
+  a real platform, in the right order, and the two mistakes that defeat it.
+- [Write a capability policy](/guides/write-a-capability-policy/): the four
+  rulesets, the hard veto, and the resource each action names.
+- [Answer permission requests](/guides/answer-permission-requests/): the
+  code on the other side of a parked request.
+- [Decoration in place](/concepts/decoration-in-place/): why the kernel
+  guards the platform's own tags instead of publishing protected copies.
+- [How a grant decision is made](/concepts/grant-decisions/): the ceiling,
+  the four rulesets, and the order they are consulted in.
+- [API reference](/reference/api/): every public export, its signature, and its
+  bounds.
+- [The kernel contract](/contract/): what this package guarantees at a host
+  boundary, in one paragraph.
+- [Troubleshooting](/troubleshooting/): each refusal this package raises,
+  what it means, and what to change.

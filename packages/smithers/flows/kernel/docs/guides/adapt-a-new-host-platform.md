@@ -86,11 +86,11 @@ identity. Attach once, at the boundary, and keep no undecorated alias.
 ## Prove it with the contract suite
 
 `@smthrs/kernel/test/contract` exports `runHostContract`, the shared
-behavioral contract every bundle in the fleet runs. It registers Vitest cases,
+behavioral contract every host bundle must satisfy. It registers Vitest cases,
 so install the peers first:
 
 ```bash
-pnpm add -D @effect/vitest@4.0.0-rc.108 vitest@4.1.9
+pnpm add -D @effect/vitest@4.0.0-rc.112 vitest@4.1.9
 ```
 
 Then declare, per slot, whether your bundle supports the capability and what it

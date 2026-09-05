@@ -36,9 +36,27 @@
     "./package.json": "./package.json",
     ".": "./src/index.ts",
     "./test/contract": "./src/test/HostContract.ts",
-    "./*": "./src/*.ts",
     "./internal/*": null,
-    "./*/index": null
+    "./*/index": null,
+    "./CapabilitySet": "./src/CapabilitySet.ts",
+    "./ChildProcessSpawner": "./src/ChildProcessSpawner.ts",
+    "./CommandLine": "./src/CommandLine.ts",
+    "./ContainedSpawner": "./src/ContainedSpawner.ts",
+    "./FileSystem": "./src/FileSystem.ts",
+    "./GrantEvent": "./src/GrantEvent.ts",
+    "./GrantStore": "./src/GrantStore.ts",
+    "./HostError": "./src/HostError.ts",
+    "./HostServices": "./src/HostServices.ts",
+    "./HttpClient": "./src/HttpClient.ts",
+    "./Jj": "./src/Jj.ts",
+    "./JournalGrantStore": "./src/JournalGrantStore.ts",
+    "./Path": "./src/Path.ts",
+    "./ProcessLedger": "./src/ProcessLedger.ts",
+    "./Workspace": "./src/Workspace.ts",
+    "./index": "./src/index.ts",
+    "./test/HostContract": "./src/test/HostContract.ts",
+    "./test/TestGrantStore": "./src/test/TestGrantStore.ts",
+    "./ChildProcessEnvironment": "./src/ChildProcessEnvironment.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -67,13 +85,103 @@
         "import": "./dist/esm/test/HostContract.js",
         "require": "./dist/cjs/test/HostContract.js"
       },
-      "./*": {
-        "types": "./dist/esm/*.d.ts",
-        "import": "./dist/esm/*.js",
-        "require": "./dist/cjs/*.js"
-      },
       "./internal/*": null,
-      "./*/index": null
+      "./*/index": null,
+      "./CapabilitySet": {
+        "types": "./dist/esm/CapabilitySet.d.ts",
+        "import": "./dist/esm/CapabilitySet.js",
+        "require": "./dist/cjs/CapabilitySet.js"
+      },
+      "./ChildProcessSpawner": {
+        "types": "./dist/esm/ChildProcessSpawner.d.ts",
+        "import": "./dist/esm/ChildProcessSpawner.js",
+        "require": "./dist/cjs/ChildProcessSpawner.js"
+      },
+      "./CommandLine": {
+        "types": "./dist/esm/CommandLine.d.ts",
+        "import": "./dist/esm/CommandLine.js",
+        "require": "./dist/cjs/CommandLine.js"
+      },
+      "./ContainedSpawner": {
+        "types": "./dist/esm/ContainedSpawner.d.ts",
+        "import": "./dist/esm/ContainedSpawner.js",
+        "require": "./dist/cjs/ContainedSpawner.js"
+      },
+      "./FileSystem": {
+        "types": "./dist/esm/FileSystem.d.ts",
+        "import": "./dist/esm/FileSystem.js",
+        "require": "./dist/cjs/FileSystem.js"
+      },
+      "./GrantEvent": {
+        "types": "./dist/esm/GrantEvent.d.ts",
+        "import": "./dist/esm/GrantEvent.js",
+        "require": "./dist/cjs/GrantEvent.js"
+      },
+      "./GrantStore": {
+        "types": "./dist/esm/GrantStore.d.ts",
+        "import": "./dist/esm/GrantStore.js",
+        "require": "./dist/cjs/GrantStore.js"
+      },
+      "./HostError": {
+        "types": "./dist/esm/HostError.d.ts",
+        "import": "./dist/esm/HostError.js",
+        "require": "./dist/cjs/HostError.js"
+      },
+      "./HostServices": {
+        "types": "./dist/esm/HostServices.d.ts",
+        "import": "./dist/esm/HostServices.js",
+        "require": "./dist/cjs/HostServices.js"
+      },
+      "./HttpClient": {
+        "types": "./dist/esm/HttpClient.d.ts",
+        "import": "./dist/esm/HttpClient.js",
+        "require": "./dist/cjs/HttpClient.js"
+      },
+      "./Jj": {
+        "types": "./dist/esm/Jj.d.ts",
+        "import": "./dist/esm/Jj.js",
+        "require": "./dist/cjs/Jj.js"
+      },
+      "./JournalGrantStore": {
+        "types": "./dist/esm/JournalGrantStore.d.ts",
+        "import": "./dist/esm/JournalGrantStore.js",
+        "require": "./dist/cjs/JournalGrantStore.js"
+      },
+      "./Path": {
+        "types": "./dist/esm/Path.d.ts",
+        "import": "./dist/esm/Path.js",
+        "require": "./dist/cjs/Path.js"
+      },
+      "./ProcessLedger": {
+        "types": "./dist/esm/ProcessLedger.d.ts",
+        "import": "./dist/esm/ProcessLedger.js",
+        "require": "./dist/cjs/ProcessLedger.js"
+      },
+      "./Workspace": {
+        "types": "./dist/esm/Workspace.d.ts",
+        "import": "./dist/esm/Workspace.js",
+        "require": "./dist/cjs/Workspace.js"
+      },
+      "./index": {
+        "types": "./dist/esm/index.d.ts",
+        "import": "./dist/esm/index.js",
+        "require": "./dist/cjs/index.js"
+      },
+      "./test/HostContract": {
+        "types": "./dist/esm/test/HostContract.d.ts",
+        "import": "./dist/esm/test/HostContract.js",
+        "require": "./dist/cjs/test/HostContract.js"
+      },
+      "./test/TestGrantStore": {
+        "types": "./dist/esm/test/TestGrantStore.d.ts",
+        "import": "./dist/esm/test/TestGrantStore.js",
+        "require": "./dist/cjs/test/TestGrantStore.js"
+      },
+      "./ChildProcessEnvironment": {
+        "types": "./dist/esm/ChildProcessEnvironment.d.ts",
+        "import": "./dist/esm/ChildProcessEnvironment.js",
+        "require": "./dist/cjs/ChildProcessEnvironment.js"
+      }
     }
   },
   "scripts": {
@@ -91,10 +199,10 @@
     "@smthrs/journal": "1.0.0-rc.0"
   },
   "peerDependencies": {
-    "@effect/vitest": "4.0.0-rc.108",
-    "@smthrs/platform-browser": "1.0.0-rc.0",
-    "effect": "4.0.0-rc.108",
-    "vitest": "4.1.9"
+    "@effect/vitest": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "vitest": "4.1.9",
+    "@smthrs/platform-browser": "1.0.0-rc.0"
   },
   "peerDependenciesMeta": {
     "@effect/vitest": {
@@ -108,23 +216,23 @@
     }
   },
   "devDependencies": {
-    "@effect/language-service": "0.87.1",
-    "@effect/vitest": "4.0.0-rc.108",
-    "@eslint/js": "9.39.1",
-    "@smthrs/platform-browser": "1.0.0-rc.0",
-    "@types/node": "25.9.5",
+    "@effect/language-service": "0.87.2",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@eslint/js": "9.39.5",
+    "@types/node": "26.4.1",
     "@vitest/coverage-v8": "4.1.9",
-    "dprint": "0.55.2",
-    "effect": "4.0.0-rc.108",
-    "esbuild": "0.28.1",
-    "eslint": "9.39.1",
+    "dprint": "0.57.1",
+    "effect": "4.0.0-rc.112",
+    "esbuild": "0.28.2",
+    "eslint": "9.39.5",
     "eslint-import-resolver-typescript": "4.4.5",
     "eslint-plugin-import": "2.32.0",
-    "eslint-plugin-jsdoc": "64.1.0",
-    "eslint-plugin-unicorn": "61.0.2",
+    "eslint-plugin-jsdoc": "64.3.4",
+    "eslint-plugin-unicorn": "65.0.0",
     "madge": "8.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0",
-    "vitest": "4.1.9"
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.9",
+    "@smthrs/platform-browser": "1.0.0-rc.0"
   }
 }
