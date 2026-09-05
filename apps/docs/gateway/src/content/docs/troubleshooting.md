@@ -129,7 +129,10 @@ the mount and the RPC protocol reports the defect itself.
 
 **Fix** Send less, or raise the limit at the bind. A declared length over the
 limit is refused without reading the body, so a client that lies low in
-`content-length` is still measured as the body is read.
+`content-length` is still measured as the body is read. A streaming body has no
+declared size; when it crosses the limit, the Node host destroys the source
+rather than draining attacker-controlled bytes, so the client may observe a
+connection reset instead of the 413 response.
 
 ### 400 malformed_request: a body the server could not read
 
@@ -288,9 +291,9 @@ as its first 500.
 ### An abandoned run is never resumed
 
 **Cause** `SuperviseRuntime` is a declared host seam, not an installed feature.
-This release ships `make`, `makeNoop`, and `layerNoop` only, and no production
-host installs it: scanning returns no candidates and resuming performs no work
-unless a host overrides them.
+This release ships `make`, `makeNoop`, and `layerNoop` only, and the no-ops are
+what a composition gets unless it passes its own `Service`: scanning returns no
+candidates and resuming performs no work.
 
 **Fix** Recovery is a reclaim rather than a supervisor. A run becomes
 reclaimable once the heartbeat its owner stopped renewing is older than 30

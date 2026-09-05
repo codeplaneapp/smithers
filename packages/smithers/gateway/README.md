@@ -1,18 +1,33 @@
 # @smthrs/gateway
 
 This package declares `effect`, `@effect/platform-node`, and `@effect/platform-node-shared` as exact
-`4.0.0-rc.108` peer dependencies. Keep the application on that version so
+`4.0.0-rc.112` peer dependencies. Keep the application on that version so
 all Smithers packages share one Effect runtime.
 
 **Documentation:** https://gateway.smithers.sh
 
 The assembled workspace gateway: one HTTP surface carrying the control plane, the sync read path, the served projections, and a health probe. It also defines the gateway wire schemas and the stale-run supervision port, and re-exports the durable journal synchronization package gateway hosts use.
 
+The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://gateway.smithers.sh/reference/api/). This file lists what the package exports and shows how a host composes it.
+
+`smthrs serve`, from [`@smthrs/cli`](https://cli.smithers.sh), is a host over this package: it resolves a project on disk, builds the control plane and the journal over that project's database, and hands the assembly here to bind and serve. Install the CLI when you want a gateway without writing code; install this package when you are writing a client against the wire, or embedding the surface in a process of your own.
+
+## Install
+
 ```sh
-npm install @smthrs/gateway
+pnpm add @smthrs/gateway@1.0.0-rc.0
 ```
 
-The mounts, the bind and credential policy, the projections and their rows, the subscription and cursor semantics, every failure code with the status it answers, and the resource limits are documented once, on [the API page](https://gateway.smithers.sh/reference/api/). Start from [the quickstart](https://gateway.smithers.sh/quickstart/) to serve a workspace and read it back, or [Host the gateway in your own process](https://gateway.smithers.sh/guides/host-the-gateway/) to compose it yourself. This file lists what the package exports and shows how a host composes it.
+Node 22.19.0 or later is required. `effect@4.0.0-rc.112` is a required peer.
+The root and protocol subpaths install no Node adapter. The optional peer
+`@effect/platform-node@4.0.0-rc.112` is required by `node/NodeGateway`,
+including the hosting example below:
+
+```sh
+pnpm add effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
+```
+
+Name the version. This README describes 1.0.0-rc.0, and until that release candidate reaches the registry the unqualified package name still resolves to the 0.x line, whose exports and wire format it does not describe.
 
 ## Public API
 
@@ -32,14 +47,12 @@ The root entry point exports these namespaces; local modules are also importable
 | `node/NodeGateway`          | `ServerOptions`, `defaultServerOptions`, `isLoopbackHost`, `bindRefusal`, `listenOptions`, `layerAuth`, `layer`                                                                                                                                                                                                                                                                                                                                                                | Binds the assembled gateway to a Node HTTP server under the bind and credential policy.                      |
 | `test/TestSuperviseRuntime` | `TestSuperviseRuntimeOptions`, `TestSuperviseRuntime`, `make`, `layer`                                                                                                                                                                                                                                                                                                                                                                                                         | Provides a controllable supervision test service.                                                            |
 
-`test/ReadmeExports.test.ts` diffs this table against `Object.keys` of every module, so a new export cannot land without a row.
-
 ## Hosting it
 
 ```ts
 import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
 
-// The composition a `smthrs serve` verb hosts. The caller supplies
+// The composition `smthrs serve` hosts. The caller supplies
 // `Control`, `Projections`, `SyncServer`, and the `SyncAuth` middleware.
 const gateway = NodeGateway.layer(
   { workspaceHash: "…", gatewayId: "…", protocolVersion: "1", version: "1.0.0-rc.0" },
@@ -62,9 +75,9 @@ codes, and the same rule runs on HTTP and WebSocket upgrades.
 
 ## Supervision posture at 1.0.0-rc.0
 
-The package ships no production supervision layer. `makeNoop` and `layerNoop` are closed stubs: unless overridden, scanning returns no candidates and resuming performs no work. Nothing wires this port to the durable engine's run-driver sweep, so a run abandoned through the gateway is not automatically discovered, reclaimed, or resumed.
+`SuperviseRuntime` is a declared seam, not an installed feature. The package ships `make`, `makeNoop`, and `layerNoop` only, and the no-ops are closed stubs: unless a host overrides them, scanning returns no candidates and resuming performs no work. Nothing here watches for a run whose owner died, so a run abandoned through the gateway is not automatically discovered, reclaimed, or resumed.
 
-Recovery is a reclaim rather than a supervisor. A run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smthrs` process with the flow registered takes it over. Nothing outside such a process watches for dead owners, so an operator either brings up a host composition running the durable engine driver with the relevant flows registered, or recovers the run explicitly.
+Recovery is a reclaim rather than a supervisor. A run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smthrs` process with the flow registered takes it over. Bring up a host composition running the durable engine driver with the relevant flows registered, or recover the run explicitly.
 
 ```ts
 import { SuperviseRuntime } from "@smthrs/gateway"

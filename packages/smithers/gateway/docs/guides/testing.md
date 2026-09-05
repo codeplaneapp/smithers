@@ -5,17 +5,28 @@ sidebar:
   order: 7
 ---
 
-Every suite in this package runs against one real stack: a durable journal, a
-durable run store, the SQL control runtime, `ControlLive`, the served
-projections, the sync read path, and the assembled HTTP surface bound to an
-ephemeral loopback port. Nothing below the control plane is stubbed.
+Test a gateway client against one real stack: a durable journal, a durable run
+store, the SQL control runtime, `ControlLive`, the served projections, the sync
+read path, and the assembled HTTP surface bound to an ephemeral loopback port.
+Stub nothing below the control plane.
 
-That is deliberate. The behaviours worth pinning here, an approval projected
-out of a parked run, a cancellation's attribution, a child run's visibility,
-are exactly the places a mocked control plane would agree with the gateway and
-disagree with production.
+The behaviours worth pinning are an approval projected out of a parked run, a
+cancellation's attribution, and a child run's visibility. Those are exactly the
+places a mocked control plane agrees with your assertion and disagrees with the
+gateway a real workspace serves.
 
 ## Compose the stack
+
+The stack reaches below this package's own dependencies, so add the four that
+supply the storage and the control runtime's ports:
+
+```bash
+pnpm add -D \
+  @smthrs/database@1.0.0-rc.0 \
+  @smthrs/journal@1.0.0-rc.0 \
+  @smthrs/notifications@1.0.0-rc.0 \
+  @smthrs/registry@1.0.0-rc.0
+```
 
 ```ts
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
@@ -66,8 +77,9 @@ export const stack = (filename: string) =>
   )
 ```
 
-The whole helper, including the temporary-file lifecycle, is
-[`test/GatewayStack.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/test/GatewayStack.ts).
+A worked version of this helper, with the temporary-file lifecycle around it,
+is [`GatewayStack.ts`](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/test/GatewayStack.ts)
+in the package source.
 
 ## Bind an ephemeral port and read it back
 

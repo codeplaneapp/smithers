@@ -12,8 +12,7 @@
  *    another machine, an unauthenticated one is a remote execution service.
  *
  * A loopback bind with no credential is allowed and is the local default:
- * the trust boundary there is the machine account, and requiring a token to
- * talk to your own workspace would only teach people to write it down.
+ * ingress checks Host and Origin so a web page cannot exercise that trust.
  *
  * @since 1.0.0
  */
@@ -35,6 +34,8 @@ import * as GatewayServer from "../GatewayServer.ts"
  * @category models
  */
 export interface ServerOptions extends ListenOptions {
+  /** Additional accepted Host header names (without ports), for network or proxy access. */
+  readonly allowedHosts?: ReadonlyArray<string> | undefined
   /** The `--listen` opt-in required for a non-loopback host. */
   readonly listen?: boolean | undefined
   /** The shared bearer credential, required for a non-loopback bind. */
@@ -114,6 +115,7 @@ export const listenOptions = (options: ServerOptions): Effect.Effect<ListenOptio
     // `credential`, `listen`, and the keepalive cadence are this module's, not
     // `node:net`'s: they are named here so the rest is exactly a bind.
     const {
+      allowedHosts: _allowedHosts,
       credential: _credential,
       heartbeatMillis: _cadence,
       listen: _listen,
@@ -137,9 +139,8 @@ export const listenOptions = (options: ServerOptions): Effect.Effect<ListenOptio
  */
 export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.ControlAuth> =>
   options.credential === undefined || options.credential === ""
-    // No-credential mode needs both the loopback bind and the ingress
-    // Host/Origin checks: a loopback socket alone does not stop a browser
-    // from handing the local operator's authority to a foreign web page.
+    // The credential-free local operator requires both the loopback bind and
+    // the ingress Host/Origin checks that exclude browser-originated attacks.
     // eslint-disable-next-line no-restricted-syntax -- loopback-only bind, see above
     ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
     : ControlRpcs.layerBearerAuth({
@@ -150,10 +151,15 @@ export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.Contr
 /** Authenticates protected HTTP paths before any request body is read. */
 const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions => {
   const maxRequestBodyBytes = options.maxRequestBodyBytes
+  const host = options.host ?? "127.0.0.1"
+  const allowedHosts = ["127.0.0.1", "localhost", "[::1]", ...options.allowedHosts ?? []]
+  const bindAuthority = URL.parse(`http://${host.includes(":") ? `[${host}]` : host}`)
+  if (host !== "0.0.0.0" && host !== "::" && bindAuthority !== null) allowedHosts.push(bindAuthority.hostname)
   if (options.credential === undefined || options.credential === "") {
     return {
       loopbackOnly: true,
-      ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes })
+      ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
+    allowedHosts
     }
   }
   const authenticator = ControlRpcs.bearerAuthenticator({
@@ -161,6 +167,7 @@ const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions =>
     principal: { id: "gateway", kind: "bearer" }
   })
   return {
+    allowedHosts,
     ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
     authorize: (headers) =>
       authenticator.authenticate(headers).pipe(

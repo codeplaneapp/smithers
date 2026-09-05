@@ -91,7 +91,8 @@ const submitErrors = Schema.Union([
   ControlError.InvalidInput,
   ControlError.Unauthorized,
   ControlError.PersistenceError,
-  ControlError.Unavailable
+  ControlError.Unavailable,
+  ControlError.Unauthorized
 ])
 
 /**

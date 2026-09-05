@@ -1,6 +1,6 @@
 ---
 title: "Submit an approval from a client"
-description: "Read a pending gate from the approvals projection, submit the decision with Approval.Submit, and handle the eight failures the mutation can answer with."
+description: "Read a pending gate, submit Approval.Submit with independent approval authority, and handle its typed refusals."
 sidebar:
   order: 4
 ---
@@ -11,7 +11,7 @@ mounted unchanged on `/rpc`, so there is exactly one wire definition of `Plan`,
 `Run`, `Approve`, `Deny`, `Cancel`, `Signal`, `Steer`, `Resume`, `List`, and
 `Watch`.
 
-This one exists because a decision is a composite act a product client cannot
+This one exists because a decision is a composite act a client cannot
 assemble safely on its own: the grant has to be recorded and the parked run
 delegated to resume, atomically. Control owns that as a single domain command.
 The gateway is a transport adapter over it and composes no second mutation.
@@ -93,6 +93,14 @@ authenticated and passes it through, exactly as `ControlServer` stamps it on
 payload, so it is answerable to the same operator. A decision journaled under
 the composition's default operator would name the wrong one.
 
+Authentication is not approval authority. Control checks its host-owned
+`ApprovalAuthority` before mutation or receipt replay, and again at resolution.
+A shared bearer authenticates `gateway/bearer`, which is not an approver by
+default. The host must explicitly delegate that identity and the requested
+scope, or an authorized local operator must decide the gate. Both `/rpc` and
+`/projections`, over HTTP and WebSocket, enforce the same policy. Supplying a
+principal in the payload cannot override the authenticated actor.
+
 ## The failures
 
 `Approval.Submit` answers with exactly the union `Control.approve` and
@@ -102,6 +110,7 @@ ever reach.
 
 | Failure              | Means                                                    | What to do                                                   |
 | -------------------- | -------------------------------------------------------- | ------------------------------------------------------------ |
+| `Unauthorized`       | the caller lacks approval authority for this target/scope | ask an authorized operator; do not keep retrying unchanged |
 | `PlanDigestMismatch` | the plan changed since the gate was published            | re-read the gate and show the new plan before deciding again |
 | `EnvelopeMismatch`   | the capability envelope is not the one that was approved | re-read the gate; do not widen the envelope client-side      |
 | `AlreadyResolved`    | someone already decided this gate                        | refresh the row; the decision stands                         |

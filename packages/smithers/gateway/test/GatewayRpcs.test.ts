@@ -14,6 +14,7 @@
  *   itself listed, carrying the parent it came from.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as ApprovalAuthority from "@smthrs/control/ApprovalAuthority"
 import { Control } from "@smthrs/control/Control"
 import { layerNoopAuth } from "@smthrs/control/ControlRpcs"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
@@ -52,7 +53,20 @@ const launch = Effect.gen(function*() {
 
 /** The gateway's handlers over the real stack, reachable as an RPC client. */
 const served = Layer.merge(GatewayServer.layerHandlers, layerNoopAuth(principal)).pipe(
-  Layer.provideMerge(stack())
+  Layer.provideMerge(stack({
+    approvalAuthority: Effect.runSync(ApprovalAuthority.make([
+      {
+        principal: { id: "local", kind: "operator" },
+        scopes: ["once", "run", "remembered"],
+        targets: ["Plan", "Node"]
+      },
+      {
+        principal: { id: principal.id, kind: principal.kind },
+        scopes: ["once", "run", "remembered"],
+        targets: ["Plan", "Node"]
+      }
+    ]))
+  }))
 )
 
 const test = <E>(title: string, body: () => Effect.Effect<void, E, Scope.Scope>) =>

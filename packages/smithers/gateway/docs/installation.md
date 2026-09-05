@@ -8,23 +8,38 @@ sidebar:
 ## Install
 
 ```bash
-pnpm add @smthrs/gateway
+pnpm add @smthrs/gateway@1.0.0-rc.0
 ```
 
-`npm install @smthrs/gateway` and `bun add @smthrs/gateway` work the same way.
+`npm install` and `bun add` take the same argument.
+
+Name the version. These pages describe 1.0.0-rc.0, and until that release
+candidate reaches the registry the unqualified package name still resolves to
+the 0.x line, whose exports and wire format these pages do not describe. A
+release candidate publishes under the `next` dist-tag rather than `latest`, so
+`@next` names the newest one once it is there.
 
 ## Requirements
 
 - Node.js 22.19.0 or later. The Node host uses `node:http` and
   `@effect/platform-node`, so it does not run in a browser or in a Worker.
-- One copy of `effect` in the resolved tree. The package depends on
-  `effect@4.0.0-rc.108`, and a second copy makes a `Layer` built against one
-  fail to satisfy a requirement declared against the other.
+- One copy of `effect` in the resolved tree. A second copy makes a `Layer`
+  built against one fail to satisfy a requirement declared against the other.
 
-The package pulls in [`@smthrs/control`](/api/control),
-[`@smthrs/sync`](/api/sync), [`@smthrs/run-store`](/api/run-store), and
-`@effect/platform-node` itself. You do not install them separately to compile
-against the API.
+`effect` is a required peer pinned to `4.0.0-rc.112`.
+`@effect/platform-node` is an optional peer at the same exact version, needed
+by `node/NodeGateway`. The root and protocol subpaths do not install the Node
+adapter. A Node gateway host selects it explicitly:
+
+```bash
+pnpm add effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
+```
+
+Three packages install with it as ordinary dependencies:
+[`@smthrs/control`](/api/control), [`@smthrs/sync`](/api/smithers-sync), and
+[`@smthrs/run-store`](/api/run-store). You do not name them separately to
+compile against this package's API. The guides that compose a full host or a
+test stack import more than that, and each says which packages it adds.
 
 ## Import forms
 
@@ -76,8 +91,7 @@ The full composition, with the storage underneath it, is in
 ## Running without composing anything
 
 [`smthrs serve`](/cli/serve) hosts this exact assembly for a project on disk.
-If you want a gateway rather than a library, install the CLI instead. It is
-published under the prerelease `next` dist-tag:
+If you want a gateway rather than a library, install the CLI instead:
 
 ```bash
 npm install --global @smthrs/cli@next

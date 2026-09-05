@@ -7,7 +7,7 @@ sidebar:
 
 `Projection.Snapshot` answers every row a selector currently projects, plus the
 cursor they were read at. It is the request/response half of the read path, and
-it is what a relay behind a Worker route uses, because a stream belongs on a
+it is what a relay in front of a gateway uses, because a stream belongs on a
 socket rather than in a buffered response.
 
 ## Pick a selector

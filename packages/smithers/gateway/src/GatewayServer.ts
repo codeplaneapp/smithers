@@ -354,6 +354,8 @@ export const defaultMaxRequestBodyBytes = 1024 * 1024
  * @since 1.0.0
  */
 export interface IngressOptions {
+  /** Accepted Host header names, without ports. Defaults to loopback names. */
+  readonly allowedHosts?: ReadonlyArray<string> | undefined
   readonly maxRequestBodyBytes?: number | undefined
   /** Confine requests to loopback Host values and browser origins. */
   readonly loopbackOnly?: boolean | undefined
@@ -363,6 +365,28 @@ export interface IngressOptions {
 }
 
 const encodeGatewayError = Schema.encodeUnknownSync(GatewayError)
+
+/** Host parsing stays strict so URL normalization cannot admit a rebinding name. */
+const requestAuthority = (host: string | undefined): URL | undefined => {
+  if (host === undefined || !/^(?:[a-zA-Z0-9.-]+|\[[a-fA-F0-9:]+\])(?::[0-9]+)?$/.test(host)) return undefined
+  const parsed = URL.parse(`http://${host}`)
+  return parsed === null ? undefined : parsed
+}
+
+const browserRequestAllowed = (
+  headers: Readonly<Record<string, string>>,
+  allowedHosts: ReadonlyArray<string>
+): boolean => {
+  const authority = requestAuthority(headers.host)
+  if (authority === undefined || !allowedHosts.includes(authority.hostname)) return false
+  const origin = headers.origin
+  // CLI clients do not send Origin. Browsers must prove they came from this
+  // exact authority, including the port, on HTTP requests AND WS upgrades.
+  if (origin === undefined) return true
+  const parsed = URL.parse(origin)
+  return parsed !== null && (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+    parsed.origin === origin && parsed.host === authority.host
+}
 
 /** One refusal on the wire: the typed error, under the status it answers. */
 const refuse = (error: GatewayError, status: number) =>
@@ -517,12 +541,19 @@ export const layerIngress = (options: IngressOptions = {}) => {
   const refusal = settingRefusal("The gateway request body limit", options.maxRequestBodyBytes)
   if (refusal !== undefined) return Layer.effectDiscard(Effect.fail(refusal))
   const maxBytes = options.maxRequestBodyBytes ?? defaultMaxRequestBodyBytes
+  const allowedHosts = options.allowedHosts ?? ["127.0.0.1", "localhost", "[::1]"]
   return HttpRouter.middleware(
     Effect.gen(function*() {
       const serialization = yield* RpcSerialization.RpcSerialization
       return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
+          if (!browserRequestAllowed(request.headers, allowedHosts)) {
+            return refuse(
+              new GatewayError({ code: "unauthorized", message: "Gateway Host or Origin is not allowed" }),
+              403
+            )
+          }
           const path = routedPath(request.url)
           if (options.loopbackOnly === true) {
             if (!acceptsLoopbackHost(request.headers.host)) return refuse(invalidHostRequest(), 421)

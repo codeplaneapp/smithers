@@ -171,9 +171,9 @@ be cut by a relay, so the server emits one every 30 seconds.
 
 One process served four mounts on one socket. `/health` answered an identity
 question with no credential. `/projections` answered a fold over the control
-plane's own events, framed exactly the way the product relay frames it. The
-socket turned that same fold into a snapshot plus a live tail, at a cursor a
-client can resume from.
+plane's own events, framed exactly the way a relay forwards them to a browser.
+The socket turned that same fold into a snapshot plus a live tail, at a cursor
+a client can resume from.
 
 The control plane was there the whole time, on `/rpc`, under the same
 credential rule. That mount is [`@smthrs/control`](https://control.smithers.sh/reference/api/)'s contract

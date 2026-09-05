@@ -44,6 +44,9 @@ export const gateway = (
   )
 ```
 
+The journal is the host's own, so [`@smthrs/journal`](/api/journal) is a
+dependency you add rather than one this package installs for you.
+
 Those three provisions discharge every gateway input except `Control`, which
 stays a requirement on purpose: a host should serve the same control plane its
 own code talks to rather than opening a second one over the same database.

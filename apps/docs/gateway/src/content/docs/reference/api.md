@@ -5,7 +5,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/gat
 ---
 
 The gateway requires `effect`, `@effect/platform-node`, and
-`@effect/platform-node-shared` as exact `4.0.0-rc.108` peers. The shared
+`@effect/platform-node-shared` as exact `4.0.0-rc.112` peers. The shared
 platform pin keeps npm from selecting a later release candidate under the
 Node platform's transitive range. Use the same Effect version in the host.
 
@@ -16,7 +16,7 @@ A UI depends on this package and on [`@smthrs/control`](https://control.smithers
 depends on [`@smthrs/engine-store`](https://engine-store.smithers.sh/reference/api/), and it never reads a
 store table: a projection is the contract, and a store row is an implementation
 detail. [`smthrs serve`](https://smithers.sh/docs/reference/cli/serve/) composes the assembly with
-`@smthrs/control` and [`@smthrs/sync`](https://sync.smithers.sh/reference/api/) to host it.
+`@smthrs/control` and [`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/) to host it.
 
 The model behind these signatures is in [Projections](/concepts/projections/),
 [Subscriptions and cursors](/concepts/subscriptions/), and
@@ -336,15 +336,15 @@ A candidate names a run by its `@smthrs/control` `RunSummary` rather than by a
 store row, which keeps the promise the rest of the package makes: a projection
 is the contract and a store row is an implementation detail.
 
-This release ships `make`, `makeNoop`, and `layerNoop` only, and no production
-host installs it. Recovery is a reclaim rather than a supervisor: a running
-engine process with the flow registered takes over a run whose owner stopped
-renewing its heartbeat. See
-[Recovery](/troubleshooting/#recovery).
+This release ships `make`, `makeNoop`, and `layerNoop` only. Nothing in the
+package implements the seam, so unless a host passes its own `Service` the port
+does nothing. Recovery is a reclaim rather than a supervisor: a running engine
+process with the flow registered takes over a run whose owner stopped renewing
+its heartbeat. See [Recovery](/troubleshooting/#recovery).
 
 ## `Sync`
 
-The root entry re-exports [`@smthrs/sync`](https://sync.smithers.sh/reference/api/) whole, so a gateway host
+The root entry re-exports [`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/) whole, so a gateway host
 gets the read-only journal replication protocol from the same import:
 `SyncClient`, `SyncServer`, `SyncProtocol`, `SyncRpcs`, `SyncError`,
 `RunCatalog`, and the rest of that package's namespaces.

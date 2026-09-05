@@ -23,10 +23,12 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeSocket from "@effect/platform-node/NodeSocket"
 import { describe, expect, it } from "@effect/vitest"
+import * as ApprovalAuthority from "@smthrs/control/ApprovalAuthority"
 import { Control } from "@smthrs/control/Control"
 import type { Service as ControlService } from "@smthrs/control/Control"
 import * as ControlClient from "@smthrs/control/ControlClient"
 import { Unavailable } from "@smthrs/control/ControlError"
+import { ControlRuntime } from "@smthrs/control/ControlRuntime"
 import type { ApprovalPayload, PlanCard } from "@smthrs/control/ControlSchema"
 import { SyncAuth as SyncAuthTag } from "@smthrs/sync/SyncRpcs"
 import * as SyncServer from "@smthrs/sync/SyncServer"
@@ -49,8 +51,15 @@ const health: GatewayServer.Health = {
 }
 
 /** The gateway on an ephemeral loopback port over a real control plane. */
-const served = (options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: 0 }) =>
-  NodeGateway.layer(health, options).pipe(Layer.provideMerge(stack()))
+const served = (
+  options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: 0 },
+  approvalAuthority?: ApprovalAuthority.Service
+) => NodeGateway.layer(health, options).pipe(Layer.provideMerge(stack({ approvalAuthority })))
+
+const delegatedBearer = Effect.runSync(ApprovalAuthority.make([
+  { principal: { id: "local", kind: "operator" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] },
+  { principal: { id: "gateway", kind: "bearer" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] }
+]))
 
 const baseUrl = Effect.map(HttpServer.HttpServer, (server) => {
   if (server.address._tag !== "TcpAddress") throw new Error("expected a TCP gateway")
@@ -92,13 +101,14 @@ const exactBodyBytes = new TextEncoder().encode(exactBody).byteLength
 const raw = (
   target: string,
   head: ReadonlyArray<string>,
-  body = ""
+  body = "",
+  host?: string
 ): Promise<{ readonly status: number; readonly body: string }> => {
   const url = new URL(target)
   return new Promise((resolve, reject) => {
     let received = ""
     const socket = connect({ host: url.hostname, port: Number(url.port) }, () => {
-      const requestHead = head.some((line) => /^host:/i.test(line)) ? head : [...head, `Host: ${url.host}`]
+      const requestHead = head.some((line) => /^host:/i.test(line)) ? head : [...head, `Host: ${host ?? url.host}`]
       socket.write(`${[...requestHead, "", ""].join("\r\n")}${body}`)
     })
     const answer = () => {
@@ -265,6 +275,81 @@ const client = (url: string, credential?: string | undefined) =>
     ])
   )
 
+describe("approval authority across every served mutation mount", () => {
+  const delegatedOnce = Effect.runSync(ApprovalAuthority.make([
+    { principal: { id: "gateway", kind: "bearer" }, scopes: ["once"], targets: ["Plan"] }
+  ]))
+  for (const delegated of [false, true]) {
+    for (const mount of ["rpc", "projections"]) {
+      for (const protocol of ["http", "ws"]) {
+        for (const decision of ["approve", "deny"] as const) {
+          for (const scope of ["once", "run", "remembered"] as const) {
+            test(`${mount}/${protocol}: ${delegated ? "delegated" : "nondelegated"} bearer ${decision}/${scope}`, () =>
+              Effect.gen(function*() {
+                const url = yield* baseUrl
+                const control = yield* Control
+                const runtime = yield* ControlRuntime
+                const card = yield* control.plan({ flowId: "system/test", input: {} })
+                const before = yield* runtime.lookupApproval(card.approval.target)
+                const payload = {
+                  ...card.approval,
+                  scope,
+                  ...(mount === "projections" ? { decision } : {}),
+                  principal: { id: "local", kind: "operator", stampedAt: 0 }
+                }
+                const request = JSON.stringify({
+                  _tag: "Request",
+                  id: 1,
+                  tag: mount === "projections" ? "Approval.Submit" : decision === "approve" ? "Approve" : "Deny",
+                  payload,
+                  headers: []
+                }) + "\n"
+                const frames = protocol === "ws"
+                  ? yield* Effect.promise(() => socketExchange(`${url}/${mount}/ws`, "edge-secret", request))
+                  : [
+                    yield* Effect.promise(async () => {
+                      const response = await fetch(`${url}/${mount}`, {
+                        method: "POST",
+                        body: request,
+                        headers: { authorization: "Bearer edge-secret", "content-type": "application/json" }
+                      })
+                      expect(response.status).toBe(200)
+                      return response.text()
+                    })
+                  ]
+                const line = frames.flatMap((frame) => frame.split("\n")).find((line) => line.includes("\"Exit\""))
+                const reply = JSON.parse(line ?? "{}") as { exit?: { _tag: string; value?: unknown } }
+                const allowed = delegated && (decision === "deny" || scope === "once")
+                expect(reply.exit?._tag, JSON.stringify(reply)).toBe(allowed ? "Success" : "Failure")
+                if (!allowed) {
+                  expect(JSON.stringify(reply)).toContain("/control/Unauthorized")
+                  expect(yield* runtime.lookupApproval(card.approval.target)).toEqual(before)
+                  expect(yield* runtime.grants).toEqual([])
+                  expect((yield* runtime.getPlan(card.planId)).decision).toBe("pending")
+                } else {
+                  expect((yield* runtime.getPlan(card.planId)).decision).toBe(
+                    decision === "approve" ? "approved" : "denied"
+                  )
+                  expect((yield* runtime.grants).map((grant) => grant.scope)).toEqual(
+                    decision === "approve" ? ["once"] : []
+                  )
+                  const events = yield* Stream.runCollect(
+                    control.watch({ runId: `plan:${card.planId}`, follow: false })
+                  )
+                  expect(events.find((event) => event.kind.startsWith("control.approval."))?.payload)
+                    .toMatchObject({ principal: { id: "gateway", kind: "bearer" } })
+                }
+              }).pipe(Effect.provide(served(
+                { host: "127.0.0.1", port: 0, credential: "edge-secret" },
+                delegated ? delegatedOnce : ApprovalAuthority.local
+              ))))
+          }
+        }
+      }
+    }
+  }
+})
+
 describe("the RPC body a mount will act on", () => {
   it("accepts a framed request message and refuses a body that carries none", () => {
     const ndjson = RpcSerialization.ndjson
@@ -399,13 +484,77 @@ it.effect("leaves an invalid percent escape as an unknown route", () =>
     ),
     ({ handler }) =>
       Effect.gen(function*() {
-        const response = yield* Effect.promise(() => handler(new Request("http://gateway.invalid/%ZZ")))
+        const response = yield* Effect.promise(() =>
+          handler(new Request("http://localhost/%ZZ", { headers: { host: "localhost" } }))
+        )
         expect(response.status).toBe(404)
       }),
     ({ dispose }) => Effect.promise(dispose)
   ))
 
 describe("the assembled gateway over a real loopback bind", () => {
+  test("blocks browser HTTP and WebSocket attacks before any RPC dispatch", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      for (const path of ["/rpc", "/projections", "/sync", "/%72pc/"]) {
+        for (const origin of ["https://attacker.example", "null", "http://localhost:1", `${url}/path`]) {
+          const response = yield* Effect.promise(() =>
+            fetch(`${url}${path}`, {
+              method: "POST",
+              headers: { origin, "content-type": "text/plain" },
+              body: exactBody
+            })
+          )
+          expect(response.status).toBe(403)
+        }
+      }
+      for (const path of ["/rpc/ws", "/projections/ws", "/sync/ws"]) {
+        const upgrade = [
+          `GET ${path} HTTP/1.1`,
+          "Connection: Upgrade",
+          "Upgrade: websocket",
+          "Sec-WebSocket-Version: 13",
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+        ]
+        for (const origin of ["https://attacker.example", "null"]) {
+          expect((yield* Effect.promise(() => raw(url, [...upgrade, `Origin: ${origin}`]))).status).toBe(403)
+        }
+        expect(
+          (yield* Effect.promise(() => raw(url, [...upgrade, "Origin: http://rebind.example"], "", "rebind.example")))
+            .status
+        ).toBe(403)
+        expect((yield* Effect.promise(() => raw(url, [...upgrade, `Origin: ${url}`]))).status).toBe(101)
+        expect((yield* Effect.promise(() => raw(url, upgrade))).status).toBe(101)
+      }
+      // DNS rebinding and forwarded-header spoofing must fail even on reads.
+      for (
+        const host of [
+          "rebind.example",
+          "localhost.attacker.example",
+          "localhost@attacker.example",
+          "localhost:99999",
+          "[1234]"
+        ]
+      ) {
+        expect(
+          (yield* Effect.promise(() => raw(url, ["GET /health HTTP/1.1", "X-Forwarded-Host: localhost"], "", host)))
+            .status
+        ).toBe(403)
+      }
+      expect((yield* Effect.promise(() => fetch(`${url}/health`, { headers: { origin: url } }))).status).toBe(200)
+    }).pipe(Effect.provide(served())))
+
+  test("accepts explicitly configured network hosts but still rejects cross-origin requests", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      expect((yield* Effect.promise(() => raw(url, ["GET /health HTTP/1.1"], "", "gateway.example"))).status).toBe(200)
+      expect(
+        (yield* Effect.promise(() =>
+          raw(url, ["GET /health HTTP/1.1", "Origin: https://attacker.example"], "", "gateway.example")
+        )).status
+      ).toBe(403)
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, allowedHosts: ["gateway.example"] }))))
+
   test("answers GET /health with the workspace identity and the package version", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
@@ -556,7 +705,7 @@ describe("the assembled gateway over a real loopback bind", () => {
       }
     }).pipe(Effect.provide(served())))
 
-  test("refuses fixed-length and chunked RPC bodies above the configured limit", () =>
+  test("returns 413 for declared overflow and safely closes streaming overflow", () =>
     Effect.gen(function*() {
       const url = yield* baseUrl
       const fixed = yield* Effect.promise(() =>
@@ -574,26 +723,40 @@ describe("the assembled gateway over a real loopback bind", () => {
           controller.close()
         }
       })
-      const chunked = yield* Effect.promise(() =>
-        fetch(
-          `${url}/rpc`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: chunkedBody,
-            duplex: "half"
-          } as RequestInit & { readonly duplex: "half" }
-        )
-      )
+      const chunked = yield* Effect.promise(async () => {
+        try {
+          return {
+            _tag: "Response" as const,
+            response: await fetch(
+              `${url}/rpc`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: chunkedBody,
+                duplex: "half"
+              } as RequestInit & { readonly duplex: "half" }
+            )
+          }
+        } catch (error) {
+          return { _tag: "Closed" as const, error }
+        }
+      })
 
       expect(fixed.status).toBe(413)
-      expect(chunked.status).toBe(413)
       expect(yield* Effect.promise(() => fixed.json() as Promise<unknown>)).toMatchObject({
         code: "request_too_large"
       })
-      expect(yield* Effect.promise(() => chunked.json() as Promise<unknown>)).toMatchObject({
-        code: "request_too_large"
-      })
+      if (chunked._tag === "Response") {
+        expect(chunked.response.status).toBe(413)
+        expect(yield* Effect.promise(() => chunked.response.json() as Promise<unknown>)).toMatchObject({
+          code: "request_too_large"
+        })
+      } else {
+        // Effect's Node stream adapter destroys an over-limit source rather
+        // than draining attacker-controlled bytes. Node fetch reports that
+        // intentional hard close as UND_ERR_SOCKET.
+        expect((chunked.error as { readonly cause?: { readonly code?: unknown } }).cause?.code).toBe("UND_ERR_SOCKET")
+      }
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, maxRequestBodyBytes: 64 }))))
 
   test("admits a body at exactly the limit and never trusts a declared length", () =>
@@ -850,7 +1013,7 @@ describe("the assembled gateway over a real loopback bind", () => {
         .toMatchObject({ id: "gateway", kind: "bearer" })
       if (listed._tag !== "runs") return
       expect(listed.items[0]?.cancellation?.principal).toMatchObject({ id: "gateway", kind: "bearer" })
-    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }))))
+    }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, credential: "edge-secret" }, delegatedBearer))))
 
   test("serves a projection snapshot over POST /projections, framed on the wire", () =>
     Effect.gen(function*() {
@@ -1210,6 +1373,31 @@ describe("gateway bind policy", () => {
   it("accepts a positive cadence and body limit", () => {
     expect(NodeGateway.bindRefusal({ port: 0, heartbeatMillis: 25, maxRequestBodyBytes: 64 })).toBeUndefined()
   })
+
+  for (const host of [undefined, "::1", "0.0.0.0", "::"] as const) {
+    test(`serves health through the ingress authority for bind ${host ?? "default"}`, () =>
+      Effect.gen(function*() {
+        const server = yield* HttpServer.HttpServer
+        if (server.address._tag !== "TcpAddress") return yield* Effect.die("expected TCP")
+        const hostname = host === "::1" || host === "::" ? "[::1]" : "127.0.0.1"
+        const port = server.address.port
+        const response = yield* Effect.promise(() => fetch(`http://${hostname}:${port}/health`))
+        expect(response.status).toBe(200)
+        expect(yield* Effect.promise(() => response.json())).toEqual(health)
+      }).pipe(
+        Effect.provide(
+          served({ port: 0, ...(host === undefined ? {} : { host }), listen: true, credential: "test-credential" })
+        )
+      ))
+  }
+
+  it.effect("rejects an unparseable configured bind as a typed bind failure", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(
+        Layer.build(served({ host: "invalid:host", port: 0, listen: true, credential: "test-credential" }))
+      )
+      expect(error).toMatchObject({ code: "bind_failed" })
+    }).pipe(Effect.scoped))
 
   it.effect("defaults a bind with no host to loopback", () =>
     Effect.gen(function*() {

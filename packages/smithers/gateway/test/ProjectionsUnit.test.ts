@@ -308,6 +308,48 @@ describe("Projections resource bounds", () => {
       expect(produced).toBe(Projections.maxEventsPerRun + 1)
     }))
 
+  for (const offset of [-1, 0, 1]) {
+    for (const prefix of ["", "café😀\\\"\n"]) {
+      it.effect(`checks complete UTF-8 event and row encodings at N${offset >= 0 ? "+" : ""}${offset} (${JSON.stringify(prefix)})`, () =>
+        Effect.gen(function*() {
+          const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+          const target = Projections.maxProjectionBytes + offset
+          // Include two members: array delimiters, comma, escaped characters and
+          // multibyte text all contribute to the independently measured budget.
+          const history = [event(1, "control.test", prefix), event(2, "control.test", "")]
+          history[1] = event(2, "control.test", "x".repeat(target - bytes(history)))
+          const rows = [{ ...run, waitingReason: prefix }, { ...run, runId: "run-2", waitingReason: "" }]
+          const baseline = yield* make(control({ list: () => Effect.succeed({ _tag: "runs", items: rows }) }))
+            .snapshot({ _tag: "workspace-runs" })
+          const padding = "x".repeat(target - bytes(baseline.rows))
+          rows[1] = { ...rows[1]!, waitingReason: padding }
+          const expectedRows = [baseline.rows[0], { ...baseline.rows[1] as object, waitingReason: padding }]
+          expect(bytes(history)).toBe(target)
+          expect(bytes(expectedRows)).toBe(target)
+          const eventsProjection = make(control({
+            list: () => Effect.succeed({ _tag: "runs", items: [run] }),
+            watch: () => Stream.fromIterable(history)
+          }))
+          const rowsProjection = make(control({ list: () => Effect.succeed({ _tag: "runs", items: rows }) }))
+          if (offset <= 0) {
+            expect((yield* eventsProjection.snapshot({ _tag: "run-events", runId: run.runId })).rows).toEqual(history)
+            expect((yield* rowsProjection.snapshot({ _tag: "workspace-runs" })).rows).toEqual(expectedRows)
+          } else {
+            expect(yield* Effect.flip(eventsProjection.snapshot({ _tag: "run-events", runId: run.runId })))
+              .toMatchObject({
+                code: "resource_limit",
+                message: `Run event history exceeds ${Projections.maxProjectionBytes} encoded bytes`
+              })
+            expect(yield* Effect.flip(rowsProjection.snapshot({ _tag: "workspace-runs" })))
+              .toMatchObject({
+                code: "resource_limit",
+                message: `Projection rows exceed ${Projections.maxProjectionBytes} encoded bytes`
+              })
+          }
+        }))
+    }
+  }
+
   it.effect("bounds encoded event histories and projected row sets", () =>
     Effect.gen(function*() {
       const oversizedEvents = make(control({

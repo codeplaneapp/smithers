@@ -11,6 +11,7 @@
  * with production.
  */
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import type * as ApprovalAuthority from "@smthrs/control/ApprovalAuthority"
 import type * as ControlError from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import * as ControlLive from "@smthrs/control/ControlLive"
@@ -60,7 +61,10 @@ export const storage = (filename: string) =>
  *
  * @param options the acceptance port to launch runs through
  */
-export const stack = (options: { readonly executor?: ControlExecutor.Service | undefined } = {}) =>
+export const stack = (options: {
+  readonly executor?: ControlExecutor.Service | undefined
+  readonly approvalAuthority?: ApprovalAuthority.Service | undefined
+} = {}) =>
   Layer.unwrap(
     Effect.map(databaseFile, (filename) =>
       Layer.mergeAll(
@@ -72,7 +76,7 @@ export const stack = (options: { readonly executor?: ControlExecutor.Service | u
         Layer.provideMerge(ControlLive.layer),
         Layer.provideMerge(
           Layer.mergeAll(
-            SqlControlRuntime.layer({}).pipe(Layer.orDie),
+            SqlControlRuntime.layer({ approvalAuthority: options.approvalAuthority }).pipe(Layer.orDie),
             NotificationQueue.layer,
             ControlExecutor.layer(options.executor ?? ControlExecutor.makeNoop()),
             Registry.layerNoop()

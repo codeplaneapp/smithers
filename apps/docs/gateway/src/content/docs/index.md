@@ -1,72 +1,110 @@
 ---
 title: "@smthrs/gateway"
-description: "The workspace gateway: one HTTP surface carrying the control plane, the served projections, the journal read path, and a health probe, plus the wire rows every client decodes."
+description: "One HTTP surface over a Smithers workspace: the control plane, live projections of every run, the journal sync read path, and a health probe, served on one socket that any client can read."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/gateway/docs/README.md"
 ---
 
-`@smthrs/gateway` is the HTTP surface a workspace serves to everything that is
-not the process running its flows: a product UI in a browser, a second
-terminal, a relay, a supervisor deciding whether this process is still the
-right one.
+`@smthrs/gateway` puts a Smithers workspace on a socket. One HTTP server carries
+four things: the control plane that starts, approves, steers, and cancels runs;
+read-only projections of what those runs are doing; the journal sync read path a
+follower replicates from; and an unauthenticated health probe that answers which
+workspace this process belongs to.
 
-It is two halves that ship together.
+You install it when you want a workspace readable and controllable from outside
+the process that owns it: a dashboard, a browser relay, a CI job, another agent,
+or your own service.
 
-The **server** is one application layer. `GatewayServer.layer` mounts the
-control plane, the served projections, the journal read path, and a health
-probe on one router; `NodeGateway.layer` binds that router to a socket under a
-bind policy that fails closed. Nothing about the assembly is optional: the
-mounts are a fixed set, and a client that reaches one reaches all of them under
-one credential.
+## The problem it solves
 
-The **read model** is the other half. A client never reads a database column.
-It reads a _projection_: a row folded from the ordered control events
-[`@smthrs/control`](https://control.smithers.sh/reference/api/) already publishes. `GatewayProjection` holds
-the folds, `GatewaySchema` holds the wire schemas, and `Projections` serves
-them as snapshots and followed deltas. The gateway never opens the engine
-database, so a projection read through a relay is the same projection a local
-reader computes.
+An agent run that takes hours outlives the terminal that started it, and the
+people who need to see it are not sitting at that terminal. Handing them the
+database is the wrong answer: a reader that opens the engine's tables couples
+itself to storage that changes, and it can read things no client should see.
 
-## What it mounts
+This package answers with a contract instead, and holds three promises:
 
-| Path                | Protocol           | Serves                                          |
-| ------------------- | ------------------ | ----------------------------------------------- |
-| `POST /rpc`         | RPC over HTTP      | `@smthrs/control` `ControlRpcs`                 |
-| `/rpc/ws`           | RPC over WebSocket | `ControlRpcs`, including a kept-alive `Watch`   |
-| `POST /projections` | RPC over HTTP      | `GatewayRpcs`                                   |
-| `/projections/ws`   | RPC over WebSocket | `GatewayRpcs`, including `Projection.Subscribe` |
-| `POST /sync`        | RPC over HTTP      | `@smthrs/sync` `SyncRpcs`                       |
-| `/sync/ws`          | RPC over WebSocket | `SyncRpcs`                                      |
-| `GET /health`       | JSON               | the workspace identity, unauthenticated         |
+- **A row is a fold, not a table.** Every served row is computed from the
+  ordered control events a run already publishes. The gateway never opens the
+  engine database, so a projection cannot drift by reading a column the control
+  plane does not expose.
+- **A remote reader and a local reader see the same thing.** The rows a browser
+  receives through a relay are the rows a local process computes from the same
+  events, because there is one code path and no privileged one.
+- **A network bind fails closed.** Loopback needs no credential. Anything
+  reachable from another machine needs both an explicit opt-in and a bearer
+  credential, or the bind is refused before it serves.
 
-## Who uses this package
+Reach for it when you are writing the client, the host, or the relay. Reach for
+the command line instead when you want to drive runs from a shell.
 
-Hosts compose `NodeGateway.layer` to serve a workspace. [`smthrs serve`](https://smithers.sh/docs/reference/cli/serve/)
-is the shipped host, and [`@smthrs/cli`](https://cli.smithers.sh/reference/api/) `NodeControl.layerGateway`
-is the composition it uses.
+## How it relates to the smthrs CLI
 
-Clients decode the rows. A browser, a relay, or another CLI reads
-`GatewaySchema.ProjectionSnapshot` and `GatewaySchema.GatewayFrame` and submits
-approvals back with the payload the projection published.
+[`@smthrs/cli`](https://cli.smithers.sh/reference/api/) is the `smthrs` command line, and it is the top-level
+package the rest of Smithers sits under. Start there if you are new.
+
+[`smthrs serve`](https://smithers.sh/docs/reference/cli/serve/) is a host over this package: it resolves a project
+on disk, builds the control plane and the journal over that project's database,
+and hands the assembly here to bind and serve. Every mount you read in these
+pages is the surface that one command puts on a port, which is why a client
+written against this contract works against a gateway the CLI serves and against
+one you host yourself.
+
+The dependency runs one way. `@smthrs/cli` depends on `@smthrs/gateway`; this
+package knows nothing about a terminal, a project directory, or a database file.
+Install [`@smthrs/cli`](https://cli.smithers.sh/reference/api/) when you want a gateway without writing code.
+Install `@smthrs/gateway` when you are writing a client against the wire, or
+embedding the surface in a process of your own.
 
 ## Install
 
 ```bash
-pnpm add @smthrs/gateway
+pnpm add @smthrs/gateway@1.0.0-rc.0
 ```
 
-For the services a host must also supply, see [Installation](/installation/).
+Name the version: these pages describe 1.0.0-rc.0, and until that release
+candidate reaches the registry the unqualified package name still resolves to
+the 0.x line. The package needs Node.js 22.19.0 or later. For the peers and the
+services a running composition supplies, see [Installation](/installation/).
 
-## The smallest real host
+## The smallest real example
+
+The `smthrs` executable comes from [`@smthrs/cli`](https://cli.smithers.sh/reference/api/), not from this
+package. Install it, then serve a project you already have runs in:
+
+```bash
+npm install --global @smthrs/cli@1.0.0-rc.0
+smthrs serve
+```
+
+Then, from anywhere that can reach the port, ask the workspace what its runs
+did. The read path speaks RPC over newline-delimited JSON, so one request is one
+line:
+
+```bash
+curl -s http://127.0.0.1:3000/projections \
+  -H 'content-type: application/json' \
+  --data-binary '{"_tag":"Request","id":1,"tag":"Projection.Snapshot","payload":{"selector":{"_tag":"workspace-runs"}},"headers":[]}
+' | head -1 | jq -r '.exit.value.rows[] | "\(.runId)  \(.verdict)"'
+```
+
+```text
+run-1  completed — shipped
+run-2  waiting-approval — asks: Write to src/index.ts?
+run-3  failed — could not resolve seat anthropic:claude-sonnet-4-5
+```
+
+No client library, no schema of your own, and nothing that knows what a table
+looks like. The same request on `/projections/ws` answers a snapshot and then
+keeps sending, so a view follows a run instead of polling it.
+
+The folds behind those rows are exported, so a program holding a run's control
+events computes the identical row with no gateway at all:
 
 ```ts
-import * as NodeGateway from "@smthrs/gateway/node/NodeGateway"
+import * as GatewayProjection from "@smthrs/gateway/GatewayProjection"
 
-// The caller supplies what the mounts read through: Control, Projections,
-// SyncServer, and the SyncAuth middleware.
-const gateway = NodeGateway.layer(
-  { workspaceHash: "8f4b2c1d90a37e56", gatewayId: "cli-4821", protocolVersion: "1", version: "1.0.0-rc.0" },
-  { host: "127.0.0.1", port: 7331 }
-)
+const row = GatewayProjection.runSummary(run, events)
+// row.verdict is the single line a run card leads with.
 ```
 
 That bind is loopback, so it needs no credential and no opt-in. Its requests
@@ -81,41 +119,44 @@ For a gateway you can probe and read within a minute, start with the
 
 ## The package at a glance
 
-The root entry point exports these namespaces, and each local one is also
+The root entry point exports one namespace per module, and each is also
 importable from `@smthrs/gateway/<Module>`:
 
-| Namespace                   | What it is                                                                                         |
-| --------------------------- | -------------------------------------------------------------------------------------------------- |
-| `GatewayServer`             | The whole HTTP surface as one application layer: mounts, ingress guard, and the `Watch` keepalive. |
-| `node/NodeGateway`          | The Node host: bind policy, credential policy, and the socket.                                     |
-| `Projections`               | The served read path, as bounded snapshots and followed deltas.                                    |
-| `GatewayProjection`         | The wire rows and the pure folds that compute them from control events.                            |
-| `GatewaySchema`             | The wire schemas: selectors, cursors, snapshots, and subscription frames.                          |
-| `GatewayRpcs`               | The served read procedures and the one composite approval mutation.                                |
-| `Diagnosis`                 | What happened to a run, folded and rendered from that run's own events.                            |
-| `GatewayError`              | The nine-code failure vocabulary every gateway operation answers in.                               |
-| `SuperviseRuntime`          | The host seam a supervisor would implement. Declared, not installed.                               |
-| `Sync`                      | `@smthrs/sync` whole, so a host gets the journal read path from one import.                        |
-| `test/TestSuperviseRuntime` | A controllable supervision runtime for tests.                                                      |
+| Namespace                   | What it is                                                                                                      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `GatewayServer`             | The whole HTTP surface as one application layer: seven mounts, the ingress guard, and the keepalives.           |
+| `node/NodeGateway`          | The Node host that binds that surface to a socket under the bind and credential policy.                         |
+| `Projections`               | The served read path: a snapshot of any selector, or a snapshot followed by a live tail.                        |
+| `GatewaySchema`             | The wire vocabulary: selectors, cursors, snapshots, and the five subscription frames.                           |
+| `GatewayProjection`         | The served row types and the pure folds that compute them from control events.                                  |
+| `GatewayRpcs`               | The remote procedures this package adds: the read path, and the composite approval mutation.                    |
+| `Diagnosis`                 | What happened to a run, folded from its own events and rendered as a verdict line and a card.                   |
+| `GatewayError`              | Every stable failure code the gateway answers with, from a refused bind to a refused read.                      |
+| `SuperviseRuntime`          | The host seam a supervisor implements to discover and resume abandoned work.                                    |
+| `Sync`                      | [`@smthrs/sync`](https://smithers-sync.smithers.sh/reference/api/) re-exported whole, so a host mounts the journal read path from one import. |
+| `test/TestSuperviseRuntime` | A controllable supervision runtime for tests.                                                                   |
 
-Every export of every namespace, with signatures, is on the
-[API reference](/reference/api/).
+Every export, with its signature, is on the [API reference](/reference/api/).
 
 ## Where to go next
 
-- [Installation](/installation/): requirements, import forms, and the four
-  services a host supplies.
-- [Quickstart](/quickstart/): serve a workspace, probe it, and read a
-  projection off the wire.
+- [Installation](/installation/): requirements, the public import forms, and
+  the four services a host supplies.
+- [Quickstart](/quickstart/): serve a workspace, probe its identity, read a
+  snapshot off the wire, and follow one run live.
 - Concepts: [projections](/concepts/projections/),
   [subscriptions and cursors](/concepts/subscriptions/), and
   [the trust boundary](/concepts/trust-boundary/).
-- Guides: [host the gateway](/guides/host-the-gateway/),
-  [read a projection](/guides/read-a-projection/),
-  [follow a run](/guides/follow-a-run/),
-  [submit an approval](/guides/submit-an-approval/),
+- Guides: [host the gateway in your own process](/guides/host-the-gateway/),
+  [read a projection over HTTP](/guides/read-a-projection/),
+  [follow a run over a WebSocket](/guides/follow-a-run/),
+  [submit an approval from a client](/guides/submit-an-approval/),
   [serve beyond loopback](/guides/serve-beyond-loopback/),
-  [diagnose a run](/guides/diagnose-a-run/), and
+  [diagnose what happened to a run](/guides/diagnose-a-run/), and
   [test against a real gateway](/guides/testing/).
-- [Troubleshooting](/troubleshooting/): the refusals this package answers
-  with, what causes each, and what to change.
+- [Troubleshooting](/troubleshooting/): every refusal this package answers
+  with, what causes it, and what to change.
+- [`@smthrs/control`](https://control.smithers.sh/reference/api/): the control plane these projections fold,
+  and the contract `/rpc` mounts unchanged.
+- [`@smthrs/cli`](https://cli.smithers.sh/reference/api/): the `smthrs` command line that hosts this gateway,
+  and the package the rest of Smithers sits under.
