@@ -1,4 +1,9 @@
 /** @jsxImportSource react */
+/**
+ * Pins marker semantics and the shimmer's theme token palette.
+ *
+ * @since 0.1.0
+ */
 import { afterEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Marker, Shimmer } from "../src/index";
@@ -81,6 +86,12 @@ describe("Shimmer and scroll fade CSS", () => {
     host.innerHTML = renderToStaticMarkup(<Shimmer>Dark live text</Shimmer>);
     document.body.appendChild(host);
     const shimmer = host.querySelector<HTMLElement>('[data-slot="shimmer"]')!;
+    const theme = getComputedStyle(document.documentElement);
+    expect(theme.getPropertyValue("--text").trim()).toBe("#d6deeb");
+    expect(theme.getPropertyValue("--text-muted").trim()).toBe("#94a0ae");
+    expect(chatScrollerCss).toContain(
+      "linear-gradient(90deg, var(--text-muted, #676676) 35%, var(--text, #403f53) 50%, var(--text-muted, #676676) 65%)",
+    );
     expect(getComputedStyle(shimmer).backgroundImage).toContain(
       "linear-gradient(90deg, #94a0ae 35%, #d6deeb 50%, #94a0ae 65%)",
     );
