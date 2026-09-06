@@ -189,7 +189,7 @@ export const DETECTORS: ReadonlyArray<Detector> = [
     binary: "claude",
     launch: ["claude"],
     /* `claude --help`: "--model <model> … an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g. 'claude-fable-5')". */
-    models: { flag: ["--model"], suggestions: ["claude-fable-5", "fable", "opus", "sonnet"] },
+    models: { flag: ["--model"], suggestions: ["claude-fable-5-1", "claude-fable-5", "fable", "opus", "sonnet"] },
     signal: (host) => {
       const state = readJson(host, join(host.home, ".claude.json"))
       const oauth = state?.oauthAccount

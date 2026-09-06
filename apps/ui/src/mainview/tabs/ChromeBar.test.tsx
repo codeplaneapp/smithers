@@ -215,7 +215,7 @@ describe("the + menu", () => {
     expect(items.at(-1)?.textContent).toBe("New agent…")
     expect(host.querySelector("[data-testid=tab-add-agents]")?.textContent).toBe("Agents")
     // Six role rows sit between Terminal and the first raw harness.
-    expect(items[1]?.textContent).toContain("Orchestrator · Fable 5")
+    expect(items[1]?.textContent).toContain("Orchestrator · Fable 5.1")
     expect(items[7]?.textContent).toContain("Claude Code")
     // The explainer's harness (OpenCode · Kimi) is absent from this fixture: disabled, with the reason.
     expect(items[2]?.disabled).toBe(true)

@@ -140,9 +140,24 @@ describe("the agents routes", () => {
     expect(response.status).toBe(200)
     const body = AgentsResponseSchema.parse(await response.json())
     expect(body.agents.map((agent) => agent.id)).toEqual([...AGENT_ROLE_IDS])
+    expect(body.agents.find((agent) => agent.id === "orchestrator")?.model).toEqual({
+      provider: "anthropic", id: "claude-fable-5-1", label: "Fable 5.1"
+    })
     for (const agent of body.agents) {
       expect(agent.builtin).toBe(true)
       expect("launch" in agent).toBe(false)
+    }
+  })
+
+  test("a saved Fable 5 orchestrator is not silently upgraded when the store reopens", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "smithers-fable-"))
+    try {
+      const store = createAgentStore({ stateDir: dir })
+      const model = { provider: "anthropic", id: "claude-fable-5", label: "Fable 5" }
+      await store.put("orchestrator", { label: "Orchestrator", purpose: "Keep the selected model.", harness: "claude", model })
+      expect((await createAgentStore({ stateDir: dir }).get("orchestrator"))?.model).toEqual(model)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
     }
   })
 

@@ -23,7 +23,7 @@ import { HARNESS_IDS } from "./LocalApp.ts"
  * verified model flag and the guarded model id.
  *
  * Model ids and CLI flags are verified against the installed binaries:
- *  - `claude --model <model>` accepts a full model name ("claude-fable-5").
+ *  - `claude --model <model>` accepts a full model name ("claude-fable-5-1").
  *  - `codex -m <MODEL>` ("gpt-5.6-sol", "gpt-5.6-luna"; the same ids
  *    packages/smithers/agent/model/src/DeferredTools.ts lists for the GPT-5.6 family).
  *  - `opencode --model provider/model`: `opencode models kimi-for-coding`
@@ -101,7 +101,7 @@ export const AgentRoleModelSchema = z.object({
   provider: z.string(),
   /** The id the harness's model flag takes, verbatim. */
   id: ModelIdSchema,
-  /** The label the menus show ("Fable 5"). */
+  /** The label the menus show ("Fable 5.1"). */
   label: z.string()
 })
 /**
@@ -154,7 +154,7 @@ export const AGENT_ROLES: ReadonlyArray<AgentRole> = [
     id: "orchestrator",
     label: "Orchestrator",
     purpose: "The smartest agent: plans, writes workflows frame by frame, and delegates most work to the other roles.",
-    model: { provider: "anthropic", id: "claude-fable-5", label: "Fable 5" },
+    model: { provider: "anthropic", id: "claude-fable-5-1", label: "Fable 5.1" },
     harness: "claude",
     delegates: true
   }),

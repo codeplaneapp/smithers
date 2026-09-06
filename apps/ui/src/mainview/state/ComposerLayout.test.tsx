@@ -388,7 +388,7 @@ describe("the composer's + menu and surface pill", () => {
       "Add files…",
       "New connector…",
       // The named roles (AgentRoles.ts): only the orchestrator's harness is installed in this fixture.
-      "Orchestrator · Fable 5will@example.com",
+      "Orchestrator · Fable 5.1will@example.com",
       "Explainer · Kimi K3opencode-kimi is not installed",
       "Implementation · GPT-5.6 Solcodex is not installed",
       "Trivial implementation · GPT-5.6 Lunacodex is not installed",

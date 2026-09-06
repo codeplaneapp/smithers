@@ -43,7 +43,7 @@ describe("the agent role registry", () => {
       expect("launch" in role).toBe(false)
     }
     expect(agentRole("orchestrator")).toMatchObject({
-      model: { id: "claude-fable-5" },
+      model: { id: "claude-fable-5-1", label: "Fable 5.1" },
       harness: "claude",
       delegates: true
     })
@@ -98,11 +98,11 @@ describe("the agent role registry", () => {
   })
 
   test("the launch argv is composed per harness: binary, model flag, model id, then the task as the first prompt", () => {
-    expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE)).toEqual(["claude", "--model", "claude-fable-5"])
+    expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE)).toEqual(["claude", "--model", "claude-fable-5-1"])
     expect(roleLaunchArgv(agentRole("orchestrator"), CLAUDE, " plan it ")).toEqual([
       "claude",
       "--model",
-      "claude-fable-5",
+      "claude-fable-5-1",
       "plan it"
     ])
     expect(roleLaunchArgv(agentRole("implementation"), CODEX, "add a retry")).toEqual([
@@ -121,6 +121,15 @@ describe("the agent role registry", () => {
       "why did this fail"
     ])
     expect(roleLaunchArgv(agentRole("ui"), OPENCODE, "   ")).toEqual(["opencode", "--model", "kimi-for-coding/k3"])
+  })
+
+  test("an explicit Fable 5 selection remains valid and launches unchanged", () => {
+    const role = {
+      ...agentRole("orchestrator"),
+      model: { provider: "anthropic", id: "claude-fable-5", label: "Fable 5" }
+    }
+    expect(AgentRoleSchema.safeParse(role).success).toBe(true)
+    expect(roleLaunchArgv(role, CLAUDE)).toEqual(["claude", "--model", "claude-fable-5"])
   })
 
   test("renderer input never reaches argv verbatim: a model id that is a flag is refused at composition", () => {

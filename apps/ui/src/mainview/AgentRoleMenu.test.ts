@@ -30,7 +30,7 @@ describe("the roles as the + menus list them", () => {
       "ui",
       "fast-ui"
     ])
-    expect(byId.orchestrator).toMatchObject({ title: "Orchestrator · Fable 5", available: true, account: "will@example.com" })
+    expect(byId.orchestrator).toMatchObject({ title: "Orchestrator · Fable 5.1", available: true, account: "will@example.com" })
     expect(byId.implementation).toMatchObject({ available: true, account: "OPENAI_API_KEY" })
     expect(byId["trivial-implementation"]).toMatchObject({ available: true })
     expect(byId.explainer).toMatchObject({ available: false, reason: "OpenCode · Kimi has no credential for Kimi K3" })

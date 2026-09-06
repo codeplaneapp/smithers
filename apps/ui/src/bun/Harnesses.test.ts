@@ -106,7 +106,7 @@ describe("the table", () => {
       status: "unavailable",
       account: null,
       launch: { argv: ["claude"] },
-      models: { suggestions: ["claude-fable-5", "fable", "opus", "sonnet"], listable: false }
+      models: { suggestions: ["claude-fable-5-1", "claude-fable-5", "fable", "opus", "sonnet"], listable: false }
     })
     expect(h.probed).toEqual([])
   })

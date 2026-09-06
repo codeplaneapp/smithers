@@ -1,4 +1,5 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
+import { agentRole } from "@smthrs/rpc/AgentRoles"
 import { afterAll, describe, expect, test } from "bun:test"
 import { flushSync } from "react-dom"
 import { createRoot } from "react-dom/client"
@@ -32,7 +33,7 @@ const orchestrator: AgentsCard["payload"]["agents"][number] = {
   purpose: "Plans and delegates.",
   harness: "claude",
   harnessName: "Claude Code",
-  model: { provider: "anthropic", id: "claude-fable-5", label: "Fable 5" },
+  model: agentRole("orchestrator").model,
   builtin: true,
   available: true,
   reason: "",
@@ -88,7 +89,7 @@ describe("the Agents card", () => {
     const rows = [...host.querySelectorAll<HTMLElement>("[data-agent]")]
     expect(rows.map((row) => row.dataset.agent)).toEqual(["orchestrator", "reviewer", "docs-writer"])
     expect(rows[0]?.textContent).toContain("Orchestrator")
-    expect(rows[0]?.textContent).toContain("Claude Code · claude-fable-5 · ● will@example.com")
+    expect(rows[0]?.textContent).toContain("Claude Code · claude-fable-5-1 · ● will@example.com")
     expect(rows[1]?.textContent).toContain("Reviewer (mine)")
     expect(rows[2]?.textContent).toContain("○ OpenCode · Kimi has no credential for Kimi K3")
     // A built-in offers Launch and Edit, never Remove; a custom one offers Remove too; an unavailable one offers no Launch.
