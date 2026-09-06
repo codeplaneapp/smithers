@@ -28828,6 +28828,12 @@ are Effect Schema classes or structs, so a request encodes to plain JSON. The
 field declaration order of `ModelRequest` is load-bearing: it is the stable
 serialization order a sealed model step keys on.
 
+`AssistantMessage` also carries optional `observedModelId`, accepted by
+`Message.assistant` in its options. This is the model identity reported by the
+provider for that response, not `ModelRequest.modelId` (the requested model).
+An absent value means unknown; never fill it from a seat, role, harness,
+requested model, or assistant prose.
+
 | Export                 | Kind     | Behavior                                                                                                                                                                                                                                                      |
 | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ModelRequest`         | class    | Fields: `modelId`, `system`, `messages`, `tools`, `params`, optional `toolChoice`. `ModelRequest.make(input)` accepts a plain object.                                                                                                                         |
@@ -28854,6 +28860,10 @@ serialization order a sealed model step keys on.
 The normalized events one model call emits. Every protocol lowers its own
 wire vocabulary into these, so a consumer reads one stream shape whichever
 provider answered.
+
+`Settle` accepts optional `observedModelId`. `settledMessage` preserves the
+first settlement's value on its `AssistantMessage`, including through schema
+encoding and replay. Old events without the field continue to mean unknown.
 
 | Export                                            | Kind       | Behavior                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -29128,6 +29138,13 @@ reasoning items on the ChatGPT protocol, where item references would fail.
 `response.completed` settles `"stop"` or `"tool-calls"`; `response.incomplete`
 settles `"content-filter"` when its reason is `content_filter` and `"length"`
 otherwise.
+
+Both Responses protocols retain a non-empty `response.completed.response.model`
+as `observedModelId`. A model named only by `response.created` is not treated as
+confirmation that it served the completed response. Missing, empty, or non-string
+terminal model fields remain unknown. Incomplete/interrupted responses and other
+protocols do not currently populate this field. This metadata does not select
+the next request's model or change token accounting.
 
 ## `OpenAIChatCompletions`
 

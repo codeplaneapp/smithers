@@ -274,6 +274,8 @@ export class AssistantMessage extends Schema.Class<AssistantMessage>("flows/mode
   content: Schema.Array(AssistantContentPart),
   stopReason: StopReason,
   responseId: Schema.optional(Schema.String),
+  /** Provider-reported model identity for this response. Absent means unknown, not the requested model. */
+  observedModelId: Schema.optional(Schema.String),
   /**
    * Stored OpenAI reasoning item ids that must be replayed as item references
    * rather than as the reasoning text they stand for.
@@ -312,6 +314,7 @@ export const Message = Object.assign(
       options: {
         readonly stopReason?: StopReason | undefined
         readonly responseId?: string | undefined
+        readonly observedModelId?: string | undefined
         readonly itemIds?: ReadonlyArray<string> | undefined
       } = {}
     ): AssistantMessage =>
@@ -320,6 +323,7 @@ export const Message = Object.assign(
         content: contentParts(content),
         stopReason: options.stopReason ?? "unknown",
         responseId: options.responseId,
+        observedModelId: options.observedModelId,
         itemIds: options.itemIds
       }),
     tool: (content: ToolResultPart | ReadonlyArray<ToolResultPart>): ToolMessage =>

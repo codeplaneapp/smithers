@@ -302,6 +302,8 @@ export const Settle = Schema.Struct({
   type: Schema.Literal("settle"),
   stopReason: StopReason,
   responseId: Schema.optional(Schema.String),
+  /** Model identity reported by the provider for this completed response, never inferred from the request. */
+  observedModelId: Schema.optional(Schema.String),
   /**
    * Stored provider reasoning items required for replay-safe continuation: a
    * provider that keeps reasoning server side answers the next request with
@@ -398,6 +400,7 @@ export function settledMessage(
   let stopReason: StopReason = "aborted"
   let didSettle = false
   let responseId: string | undefined
+  let observedModelId: string | undefined
   let itemIds: ReadonlyArray<string> | undefined
 
   const part = (id: string, initial: AssistantMessage["content"][number]): number => {
@@ -471,6 +474,7 @@ export function settledMessage(
         if (!didSettle) {
           stopReason = event.stopReason
           responseId = event.responseId
+          observedModelId = event.observedModelId
           itemIds = event.itemIds
           didSettle = true
         }
@@ -483,6 +487,7 @@ export function settledMessage(
       content: parts,
       stopReason,
       responseId,
+      observedModelId,
       itemIds
     }),
     usage

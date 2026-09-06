@@ -424,7 +424,8 @@ const providerError = (
 
 const settle = (
   state: State,
-  stopReason: StopReason
+  stopReason: StopReason,
+  observedModelId?: string
 ): { readonly state: State; readonly events: ReadonlyArray<ModelEvent.ModelEvent> } =>
   state.settled
     ? { state, events: [] }
@@ -435,6 +436,7 @@ const settle = (
           type: "settle",
           stopReason,
           responseId: state.responseId,
+          ...(observedModelId ? { observedModelId } : {}),
           ...(state.itemIds.length === 0 ? {} : { itemIds: state.itemIds })
         })
       ]
@@ -669,7 +671,11 @@ const stepEvent = (
       ...current,
       responseId: string(response?.id) ?? current.responseId
     }
-    const terminal = settle(completed, Object.keys(completed.toolNames).length === 0 ? "stop" : "tool-calls")
+    const terminal = settle(
+      completed,
+      Object.keys(completed.toolNames).length === 0 ? "stop" : "tool-calls",
+      string(response?.model)
+    )
     return { state: terminal.state, events: [...events, ...terminal.events] }
   }
   if (type === "response.incomplete") {

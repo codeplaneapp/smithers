@@ -139,11 +139,16 @@ describe("ModelEvent", () => {
 
   it("keeps the first settle and ignores a duplicate one", () => {
     const settled = Events.settledMessage([
-      { type: "settle", stopReason: "stop", responseId: "first", itemIds: ["one"] },
-      { type: "settle", stopReason: "length", responseId: "second", itemIds: ["two"] }
+      { type: "settle", stopReason: "stop", responseId: "first", observedModelId: "first-model", itemIds: ["one"] },
+      { type: "settle", stopReason: "length", responseId: "second", observedModelId: "second-model", itemIds: ["two"] }
     ])
 
-    expect(settled.message).toMatchObject({ stopReason: "stop", responseId: "first", itemIds: ["one"] })
+    expect(settled.message).toMatchObject({
+      stopReason: "stop",
+      responseId: "first",
+      observedModelId: "first-model",
+      itemIds: ["one"]
+    })
   })
 
   it("keeps a later usage report's fields without erasing earlier ones", () => {
