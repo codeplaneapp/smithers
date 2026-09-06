@@ -115,13 +115,18 @@ describe("PTY admission and manager lifetime", () => {
     })
     const started = await owner.create(input())
     if (started.status !== "ok") throw new Error(started.message)
-    owner.write(started.session.sessionId, "trap '' HUP; echo ready-for-kill\n")
+    // dash can print its initial prompt immediately before the first command's
+    // output. Delimit the acknowledgement ourselves, without accepting the
+    // terminal's echo of the input as proof that the HUP trap was installed.
+    expect(owner.write(started.session.sessionId, "trap '' HUP; printf '\\n%s\\n' ready-for-kill\n")).toBe(true)
     const deadline = Date.now() + 2000
     while (!/(?:^|\r?\n)ready-for-kill\r?\n/.test(output)) {
-      if (Date.now() > deadline) throw new Error("fixture shell did not become ready")
+      if (Date.now() > deadline) throw new Error(`fixture shell did not become ready: ${JSON.stringify(output)}`)
       await Bun.sleep(5)
     }
     const closing = owner.kill(started.session.sessionId)
+    expect(owner.get(started.session.sessionId)).toBeUndefined()
+    expect(() => process.kill(started.session.pid, 0)).not.toThrow()
     expect(await owner.create(input())).toMatchObject({ status: "error", code: "capacity_reached" })
     await closing
     expect((await owner.create(input())).status).toBe("ok")
