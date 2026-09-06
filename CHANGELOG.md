@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1546 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1547 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -1071,6 +1071,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- correct release-candidate quickstart dependencies ([5352cb2ba2](https://github.com/smithersai/smithers/commit/5352cb2ba2897ba354e7d02e7237fcaa61e4343c))
 - **flow:** describe the fresh execution-ID default and the derived opt-in ([b5a900ba05](https://github.com/smithersai/smithers/commit/b5a900ba05c93c75429a974064b2c84199be4c59))
 - **readme:** link the API cheat sheet to its source file ([48e2710dea](https://github.com/smithersai/smithers/commit/48e2710dea0c30d59b591b70ba2e6140988c51a0))
 - **repo:** integrate contributor guidance and review evidence ([f49a676289](https://github.com/smithersai/smithers/commit/f49a67628962ae18784cd04e732ed313537592b8))
