@@ -15,7 +15,13 @@ it("reaps the process group a killed host left running", async () => {
 
   // The killed host really did leave a live process group behind: without that
   // the reaping below would be a statement about nothing.
-  expect(summary).toHaveProperty("hostStderr", "")
+  // Node 22 reports its SQLite runtime status on stderr even when this host
+  // starts successfully. Permit only that exact warning; every other byte
+  // remains a failed diagnostic assertion.
+  expect(summary.hostStderr.replace(
+    /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\r?\n\(Use \x60node --trace-warnings \.\.\.\x60 to show where the warning was created\)\r?\n$/,
+    ""
+  )).toBe("")
   expect(summary.orphaned).toBe(true)
   expect(summary.survivedTheReaper).toBe(false)
   // Recorded by the dead host, retired by the live one, both on the journal run

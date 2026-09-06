@@ -56,7 +56,7 @@ const hostProgram = join(dirname(fileURLToPath(import.meta.url)), "37-host-conta
  * @category models
  */
 export interface Summary {
-  /** Diagnostics from the host before it was killed; empty on successful startup. */
+  /** Diagnostics from the host before it was killed, including Node runtime warnings. */
   readonly hostStderr: string
   /** The process group the killed host started. */
   readonly pgid: number

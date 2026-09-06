@@ -27,5 +27,5 @@ probe can run before that directory exists.
 
 The companion `src/37-host-containment-host.ts` prints its process group id only
 after recording the child durably. Startup failures print the Effect cause to
-stderr and exit with status 1. The example summary includes `hostStderr`, which
-is empty on successful startup.
+stderr and exit with status 1. The example summary preserves `hostStderr`,
+including Node runtime warnings such as Node 22's SQLite experimental notice.
