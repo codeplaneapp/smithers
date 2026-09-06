@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1537 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1540 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -341,6 +341,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **docs:** use a dedicated Worker for the main site ([cc731a360a](https://github.com/smithersai/smithers/commit/cc731a360a54cb7122de7fe8bfa23ea723ca909c))
 - **docs:** enforce support claims and run tutorial gates from the workspace root ([1da4d100d4](https://github.com/smithersai/smithers/commit/1da4d100d4d9e1e44b9a2b73629ed9e4e1304a99))
 - **platform-node:** preserve output across native startup and exit races ([ef26dc11f6](https://github.com/smithersai/smithers/commit/ef26dc11f6b69f720b283a9c7bd5352bfdd8e8c9))
 - **platform:** preserve browser imports and crash-recovery contracts ([d5829166b8](https://github.com/smithersai/smithers/commit/d5829166b8698e67155a47f0a76090e428af566e))
@@ -1417,6 +1418,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(release):** verify contained consumers and order inventory after builds ([2f436a502d](https://github.com/smithersai/smithers/commit/2f436a502d0df82a2fe4d5f8535741d48bfbcaad))
+- **test:** make process fault and restart checks deterministic ([987a6a4c2f](https://github.com/smithersai/smithers/commit/987a6a4c2f0df17b248a38c84c14ca0a7be593b5))
 - **test(ui):** cover a failed target settling the graph and attach run journals on failure ([88458e337d](https://github.com/smithersai/smithers/commit/88458e337d27934c744de3c47d89fcbde29aad73))
 - **test(platform-bun):** give the host contracts 30 s test and hook budgets ([a8c0889cc4](https://github.com/smithersai/smithers/commit/a8c0889cc465fa9341d38a904e3ebd121cef571a))
 - **test(model):** run each default-ceiling boundary as its own case ([c80c635cb0](https://github.com/smithersai/smithers/commit/c80c635cb06d51dff162cfc0343e89be5bbcbd88))
