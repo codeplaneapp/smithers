@@ -1,0 +1,30 @@
+name: Release npm authentication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Verify the first-publication npm credential
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.19.0
+          registry-url: https://registry.npmjs.org
+      # New package names cannot use trusted publishing until they exist.
+      # Check the fallback token early without publishing or printing it.
+      - name: Verify npm login
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is required for the first publication of new package names." >&2
+            exit 1
+          fi
+          npm whoami --registry https://registry.npmjs.org --loglevel error
+        shell: bash
