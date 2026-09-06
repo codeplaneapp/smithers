@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { execFileSync, spawn } from "node:child_process"
 import { createRequire } from "node:module"
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { copyFile, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -212,18 +212,36 @@ export const runTemplateReplay = async (consumer, profile) => {
   assert.equal(manifest.name, "generated-app", "the installed scaffolder must replace the template name")
   assert.deepEqual({ ...manifest.dependencies, ...manifest.devDependencies }, profile.dependencies,
     "generated app dependencies differ from the selected packed template")
-  // The app and its installed CLI must resolve the same targets declaration
-  // package. Their shared, isolated install contains exactly the app's deps.
-  const appRequire = createRequire(manifestPath)
+  // The generated app gets the exact dependency tree already installed from
+  // its packed manifest. Move that tree for this probe so its graph command
+  // resolves the app's own .bin directory; no parent or source checkout CLI
+  // supplies a second declaration package or a missing executable.
   const consumerRequire = createRequire(join(consumer, "package.json"))
-  for (const name of Object.keys(profile.dependencies).filter((name) => name.startsWith("@smthrs/"))) {
-    assert.equal(realpathSync(appRequire.resolve(name + "/package.json")),
-      realpathSync(consumerRequire.resolve(name + "/package.json")), `${name}: generated app resolution differs`)
+  const modules = realpathSync(join(consumer, "node_modules"))
+  const appModules = join(realpathSync(app), "node_modules")
+  const expected = Object.fromEntries(Object.keys(profile.dependencies).filter((name) => name.startsWith("@smthrs/"))
+    .map((name) => [name, relative(modules, realpathSync(consumerRequire.resolve(name + "/package.json")))]))
+  await rename(modules, appModules)
+  try {
+    for (const filename of ["package-lock.json", "pnpm-lock.yaml", ".npmrc"]) {
+      if (existsSync(join(consumer, filename))) await copyFile(join(consumer, filename), join(app, filename))
+    }
+    const appRequire = createRequire(manifestPath)
+    for (const [name, path] of Object.entries(expected)) {
+      assert.equal(realpathSync(appRequire.resolve(name + "/package.json")),
+        realpathSync(join(appModules, path)), `${name}: generated app resolution differs`)
+    }
+    await successful("git", ["init", "--quiet"], app)
+    await successful("git", ["add", "."], app)
+    await successful(join(appModules, ".bin/smithers-build"), ["lint", "//:routes"], app)
+    console.log("template graph ok: installed app's routes target")
+    await successful(join(appModules, ".bin/vitest"), [
+      "run", "--config", join(app, "vitest.config.ts"), "--root", app, "--maxWorkers=1"
+    ], app, { env: { ...process.env, SMTHRS_RECORD: "0" } })
+    console.log("template replay ok: installed scaffold and generated app's recorded flow")
+  } finally {
+    await rename(appModules, modules)
   }
-  await successful(join(consumer, "node_modules/.bin/vitest"), [
-    "run", "--config", join(app, "vitest.config.ts"), "--root", app, "--maxWorkers=1"
-  ], app, { env: { ...process.env, SMTHRS_RECORD: "0" } })
-  console.log("template replay ok: installed scaffold and generated app's recorded flow")
   return app
 }
 

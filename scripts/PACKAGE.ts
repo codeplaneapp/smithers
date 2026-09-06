@@ -114,7 +114,13 @@ const releaseRehearsal = Smithers.NodeTest({
     Smithers.file("//scripts/release-process.test.mjs"),
     Smithers.file("//scripts/release-graph.test.mjs")
   ]),
-  srcs: [...sources, Smithers.file("//.github/workflows/release.yml"), Smithers.file("//.github/workflows/ci.yml")],
+  srcs: [
+    ...sources,
+    Smithers.file("//.github/workflows/release.yml"),
+    Smithers.file("//.github/workflows/ci.yml"),
+    Smithers.file("//packages/smithers/build/build-cli/src/CreateApp.ts"),
+    Smithers.file("//packages/smithers/create-app/template/default/vitest.config.ts")
+  ],
   deps: []
 })
 

@@ -28,8 +28,18 @@ pnpm dev        # vite, with workerd in the loop
 
 `routes.gen.ts` and `routes.ui.gen.ts` are generated. Run `pnpm routes` after
 adding a page, a pane, a flow, or a layer file. `vite` regenerates them while
-it runs, `pnpm routes:check` exits 1 on drift, and `smithers-build lint
-'//:routes'` is the form the build graph runs.
+it runs, and `pnpm routes:check` exits 1 on drift.
+
+The build graph reads the workspace's Git index. Initialize the repository and
+stage the generated app before running its routes target:
+
+```sh
+git init
+git add .
+pnpm exec smithers-build lint '//:routes'
+```
+
+Install bubblewrap on Linux. macOS uses its built-in seatbelt confinement.
 
 ## Installing
 
