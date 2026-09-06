@@ -76,29 +76,38 @@ export const publishCandidate = async (directory, candidate, options) => {
 /** Keep registry throttling and detached-tag publication behind the verified candidate boundary. */
 export const registryPublisher = ({ run = execFileSync, pause = (seconds) => execFileSync("sleep", [String(seconds)]) } = {}) => {
   const retryDelays = [10, 30, 60]
-  const invoke = (args, allowMissing) => {
+  const invoke = (args, allowMissing, recovered) => {
     for (let attempt = 0;; attempt++) {
       try {
         return run("pnpm", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 180_000 })
       } catch (error) {
-        const diagnostic = `${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`
+        const diagnostic = `${error.code ?? ""}\n${error.stdout ?? ""}\n${error.stderr ?? ""}\n${error.message ?? ""}`
         if (allowMissing && /\bE?404\b/.test(diagnostic)) return undefined
-        if (!/\bE?(?:429|5[0-9][0-9])\b/.test(diagnostic) || attempt >= retryDelays.length) throw error
+        const transient = /\b(?:ERR_PNPM_FETCH_|E)?(?:429|5[0-9][0-9])\b/.test(diagnostic) ||
+          /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH)\b|socket hang up/i.test(diagnostic)
+        if (!transient) throw error
+        // A disconnected publish may already have reached the registry. Only
+        // an exact integrity match turns its lost acknowledgement into success.
+        if (recovered?.()) return undefined
+        if (attempt >= retryDelays.length) throw error
         pause(retryDelays[attempt])
       }
     }
   }
-  return {
-    pause,
-    readRegistry: (spec) => {
-      const output = invoke(["view", spec, "dist.integrity", "--json"], true)
-      if (output === undefined) return undefined
-      const value = JSON.parse(output)
-      if (typeof value !== "string" || !value.startsWith("sha512-")) throw new Error(`Registry returned no verifiable integrity for ${spec}`)
-      return value
-    },
-    publish: (tarball, entry) => invoke(["publish", tarball, "--provenance", "--access", "public", "--tag", entry.version.includes("-") ? "next" : "latest", "--no-git-checks"], false)
+  const readRegistry = (spec) => {
+    const output = invoke(["view", spec, "dist.integrity", "--json"], true)
+    if (output === undefined) return undefined
+    const value = JSON.parse(output)
+    if (typeof value !== "string" || !value.startsWith("sha512-")) throw new Error(`Registry returned no verifiable integrity for ${spec}`)
+    return value
   }
+  return { pause, readRegistry, publish: (tarball, entry) =>
+    invoke(["publish", tarball, "--provenance", "--access", "public", "--tag", entry.version.includes("-") ? "next" : "latest", "--no-git-checks"], false, () => {
+      const existing = readRegistry(`${entry.name}@${entry.version}`)
+      if (existing === undefined) return false
+      if (existing !== entry.integrity) throw new Error(`Registry integrity mismatch or unavailable: ${entry.name}`)
+      return true
+    }) }
 }
 
 export const registryIntegrity = (spec) => registryPublisher().readRegistry(spec)

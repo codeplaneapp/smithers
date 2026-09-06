@@ -12,6 +12,8 @@ const fixture = (responses) => {
       calls.push(args)
       const response = responses[args[0]].shift()
       assert.notEqual(response, undefined, `Unexpected registry call: ${args.join(" ")}`)
+      if (response instanceof Error) throw response
+      if (typeof response === "string" && response.startsWith("sha512-")) return JSON.stringify(response)
       if (response !== 200) throw Object.assign(new Error(`E${response}`), { stdout: `E${response}` })
       return '"sha512-verified"'
     },
@@ -51,11 +53,47 @@ test("an exhausted or unauthorized precheck fails closed", () => {
 
 test("publication retries use all three delays and stop after exhaustion", () => {
   for (const last of [200, 503]) {
-    const { adapter, calls } = fixture({ view: [], publish: [503, 503, 503, last] })
-    const publish = () => adapter.publish("kernel.tgz", { version: "1.0.0-rc.0" })
+    const { adapter, calls } = fixture({ view: [404, 404, 404, 404], publish: [503, 503, 503, last] })
+    const publish = () => adapter.publish("kernel.tgz", { name: "@smthrs/kernel", version: "1.0.0-rc.0", integrity: "sha512-verified" })
     if (last === 200) publish()
     else assert.throws(publish)
     assert.equal(calls.filter(([command]) => command === "publish").length, 4)
     assert.deepEqual(calls.filter(([command]) => command === "sleep"), [["sleep", "10"], ["sleep", "30"], ["sleep", "60"]])
+  }
+})
+
+test("registry socket, timeout and temporary DNS failures use bounded retries", () => {
+  for (const code of ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ESOCKETTIMEDOUT", "EAI_AGAIN", "EPIPE", "ENETUNREACH", "EHOSTUNREACH"]) {
+    const error = Object.assign(new Error("registry transport failed"), { code })
+    const { adapter, calls } = fixture({ view: [error, error, error, 200], publish: [] })
+    assert.equal(adapter.readRegistry("@smthrs/kernel@1.0.0-rc.0"), "sha512-verified")
+    assert.deepEqual(calls.filter(([command]) => command === "sleep"), [["sleep", "10"], ["sleep", "30"], ["sleep", "60"]])
+  }
+  const error = new Error("socket hang up")
+  const { adapter, calls } = fixture({ view: [error, error, error, error], publish: [] })
+  assert.throws(() => adapter.readRegistry("@smthrs/kernel@1.0.0-rc.0"), /socket hang up/)
+  assert.equal(calls.filter(([command]) => command === "view").length, 4)
+})
+
+test("a lost publication acknowledgement checks exact registry bytes before retrying", () => {
+  const entry = { name: "@smthrs/kernel", version: "1.0.0-rc.0", integrity: "sha512-verified" }
+  const error = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" })
+  for (const present of [false, true]) {
+    const { adapter, calls } = fixture({ view: [present ? 200 : 404], publish: [error, 200] })
+    adapter.publish("kernel.tgz", entry)
+    assert.deepEqual(calls.map(([command]) => command), present ? ["publish", "view"] : ["publish", "view", "sleep", "publish"])
+    assert.deepEqual(calls[1], ["view", "@smthrs/kernel@1.0.0-rc.0", "dist.integrity", "--json"])
+  }
+  const { adapter, calls } = fixture({ view: ["sha512-other"], publish: [error] })
+  assert.throws(() => adapter.publish("kernel.tgz", entry), /Registry integrity mismatch/)
+  assert.deepEqual(calls.map(([command]) => command), ["publish", "view"])
+})
+
+test("credentials, TLS trust failures and other permanent errors never retry", () => {
+  for (const error of [new Error("E401"), new Error("E403"), Object.assign(new Error("certificate rejected"), { code: "CERT_HAS_EXPIRED" }), new Error("unknown registry failure")]) {
+    const { adapter, calls } = fixture({ view: [error], publish: [error] })
+    assert.throws(() => adapter.readRegistry("@smthrs/kernel@1.0.0-rc.0"), (cause) => cause === error)
+    assert.throws(() => adapter.publish("kernel.tgz", { name: "@smthrs/kernel", version: "1.0.0-rc.0", integrity: "sha512-verified" }), (cause) => cause === error)
+    assert.deepEqual(calls.map(([command]) => command), ["view", "publish"])
   }
 })
