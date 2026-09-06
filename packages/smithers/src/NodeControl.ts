@@ -1142,6 +1142,15 @@ export const layerExecutor = (
     registration
   ).pipe(
     Layer.provide([platform, NodeCrypto.layer, NodeJj.layerAt(workspaceRoot)]),
+    Layer.tap(() =>
+      Effect.sync(() => {
+        if (process.platform === "win32") return
+        const file = executionDatabasePath(root)
+        for (const sqliteFile of [file, `${file}-wal`, `${file}-shm`]) {
+          if (existsSync(sqliteFile)) chmodSync(sqliteFile, 0o600)
+        }
+      })
+    ),
     // Failure to open or migrate the local execution engine is a startup
     // defect, just like the control database above: no command can execute
     // honestly without this composition.

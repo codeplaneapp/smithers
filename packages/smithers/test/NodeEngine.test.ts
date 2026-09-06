@@ -51,6 +51,27 @@ const withEngine = <A, E>(
   )
 
 describe("NodeControl.engineDurable", () => {
+  it.skipIf(process.platform === "win32")(
+    "restricts the execution database as well as the control database",
+    async () => {
+      const isolated = await mkdtemp(join(tmpdir(), "flows-cli-execution-permissions-"))
+      try {
+        const modes = await Effect.runPromise(
+          Effect.gen(function*() {
+            yield* Control.Control
+            const databases = [NodeControl.databasePath(isolated), NodeControl.executionDatabasePath(isolated)]
+            return databases.flatMap((file) => [file, `${file}-wal`, `${file}-shm`])
+              .filter(existsSync).map((file) => [file, statSync(file).mode & 0o777] as const)
+          }).pipe(Effect.provide(NodeControl.layer({ root: isolated })), Effect.scoped)
+        )
+        expect(modes.map(([file]) => file)).toContain(NodeControl.executionDatabasePath(isolated))
+        for (const [file, mode] of modes) expect([file, mode]).toEqual([file, 0o600])
+      } finally {
+        await rm(isolated, { recursive: true, force: true })
+      }
+    }
+  )
+
   it.skipIf(process.platform === "win32").each([false, true])(
     "restricts new and existing state (existing: %s)",
     async (existing) => {
