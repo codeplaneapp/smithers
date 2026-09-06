@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1544 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1546 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -341,6 +341,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **build:** retain one-shot launcher version in cache identity ([062643ffd3](https://github.com/smithersai/smithers/commit/062643ffd340f944c2fcaa4e1cf8d8dc90cf2be2))
 - **build:** honor and verify declared workspace toolchains ([461c19fadc](https://github.com/smithersai/smithers/commit/461c19fadc2dae0f6f9b1383a56f24fab4a9c3e3))
 - **ci:** retain failure summaries and run UI checks early ([fd47a04159](https://github.com/smithersai/smithers/commit/fd47a0415921afdb502c26bc89c22540d417b604))
 - **ui:** prepare the Electrobun SDK before typechecking ([a78dda3918](https://github.com/smithersai/smithers/commit/a78dda3918d086b5d54a1b7b2acf0f934879be24))
@@ -1421,6 +1422,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(release):** complete toolchain fixtures and bound durable history ([b434bf4e0b](https://github.com/smithersai/smithers/commit/b434bf4e0b716ac185b2f6051bbc9f27b48fce55))
 - **test(ui):** delimit PTY readiness across interactive shells ([9198508262](https://github.com/smithersai/smithers/commit/9198508262017a2d5fe724c2aeddf5270ccf90bc))
 - **test(release):** verify contained consumers and order inventory after builds ([2f436a502d](https://github.com/smithersai/smithers/commit/2f436a502d0df82a2fe4d5f8535741d48bfbcaad))
 - **test:** make process fault and restart checks deterministic ([987a6a4c2f](https://github.com/smithersai/smithers/commit/987a6a4c2f0df17b248a38c84c14ca0a7be593b5))
