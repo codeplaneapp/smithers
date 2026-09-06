@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro"
 import RepoRequests from "../components/RepoRequests.astro"
+import AvailableRepos from "../components/AvailableRepos.astro"
 import project from "../data/project.json"
 
 const title = "Smithers"
@@ -30,6 +31,7 @@ const prompt =
     </div>
   </main>
   <RepoRequests />
+  <AvailableRepos />
   <script>
     const shell = document.getElementById("copy-shell")
     const btn = document.getElementById("copy-prompt")

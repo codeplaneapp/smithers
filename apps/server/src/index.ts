@@ -44,6 +44,9 @@ import {
 import type { GatewaySessionNamespace } from "./gateway"
 import { spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
+import { PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
+import { handlePublicRepos } from "./publicRepos"
+import { isPublicRepositoryRead, readPublicRepository } from "./publicRepositoryReads"
 
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
@@ -2229,7 +2232,18 @@ const platformProxyMatch = (pathname: string, method: string): boolean =>
   )
 
 const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
+  const publicRead = isPublicRepositoryRead(request.method, url.pathname)
+  const publicAnswer = async () => {
+    const response = await readPublicRepository(url, env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL)
+    return response.ok ? response : json(response.status, {
+      status: "error", message: platformFailureMessage(response.status, await response.text())
+    })
+  }
+  if (publicRead && !request.headers.has("cookie")) return withIsolationHeaders(await publicAnswer())
   const gate = await requireTurnSession(request, env)
+  if (publicRead && (gate === undefined || (gate instanceof Response && (gate.status === 401 || gate.status === 403)))) {
+    return withIsolationHeaders(await publicAnswer())
+  }
   if (gate instanceof Response) return gate
   if (gate === undefined) {
     // No identity seam on this deployment (local dev/stub): the honest state,
@@ -2303,6 +2317,7 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
   // Status and body pass through; upstream headers do not (no set-cookie, no
   // upstream CORS) — only the content type survives.
   const out = new Headers()
+  out.set("cache-control", "private, no-store")
   const upstreamType = upstream.headers.get("content-type")
   if (upstreamType !== null) out.set("content-type", upstreamType)
   return new Response(upstream.body, { status: upstream.status, headers: out })
@@ -2346,6 +2361,9 @@ const handleCloudProxy = async (request: Request, env: WorkerEnv, url: URL): Pro
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url)
+    // This one curated, read-only catalog is public to the marketing site.
+    // Every authenticated API continues through the same-origin guard below.
+    if (url.pathname === PUBLIC_REPOS_PATH) return handlePublicRepos(request)
     // Retired mounts never forward, even on WebSocket upgrade or when legacy
     // deployment credentials are still configured.
     const retiredGatewayRoute = isRetiredGatewayRoute(url.pathname)

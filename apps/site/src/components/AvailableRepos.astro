@@ -1,0 +1,106 @@
+---
+import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
+
+const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://canary.smithers.sh${PUBLIC_REPOS_PATH}`
+---
+
+<section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
+  <h2 id="available-title">Available repos <span class="count">{AVAILABLE_REPOS.length}</span></h2>
+  <div class="repo-grid">
+    {AVAILABLE_REPOS.map((repo, index) => (
+      <article class="repo-card" data-repo={repo.name} aria-labelledby={`repo-title-${index}`}>
+        <div class="card-art" aria-hidden="true">
+          <span class="card-number">{String(index + 1).padStart(2, "0")}</span>
+          <div class="grid-floor"></div>
+          <div class="pixel-emblem">
+            <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3 2h10v3H6v2h7v7H3v-3h7V9H3Z" /></svg>
+          </div>
+          <span class="spark spark-one"></span><span class="spark spark-two"></span><span class="spark spark-three"></span>
+        </div>
+        <div class="card-body">
+          <h3 id={`repo-title-${index}`}>{repo.title}</h3>
+          <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
+          <dl class="stats" aria-busy="true" data-stats>
+            <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
+            <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>
+            <div><dt>Issues + PRs</dt><dd data-stat="openIssuesAndPulls">—</dd></div>
+          </dl>
+          <div class="card-footer">
+            <span class="repo-meta" data-meta></span>
+            <span class="stats-status" data-stats-status role="status">Loading stats…</span>
+          </div>
+        </div>
+      </article>
+    ))}
+  </div>
+</section>
+
+<style>
+  .available { max-width: 1040px; margin-top: 0; margin-bottom: 4rem; }
+  h2 { display: flex; align-items: center; gap: .75rem; margin: 0 0 1.5rem; font-size: 1.15rem; font-weight: 600; letter-spacing: -.02em; }
+  .count { display: grid; place-items: center; min-width: 1.6rem; height: 1.6rem; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text-muted); font: .78rem var(--font-mono); }
+  .repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 1.5rem; }
+  .repo-card { position: relative; max-width: 380px; padding: 6px; color: #f7f0ff; background: #6f4b94; box-shadow: 4px 4px 0 #30223d; clip-path: polygon(8px 0, calc(100% - 8px) 0, calc(100% - 8px) 4px, 100% 4px, 100% calc(100% - 8px), calc(100% - 4px) calc(100% - 8px), calc(100% - 4px) 100%, 8px 100%, 8px calc(100% - 4px), 0 calc(100% - 4px), 0 8px, 8px 8px); }
+  .card-art { position: relative; display: grid; place-items: center; height: 190px; overflow: hidden; border: 1px solid #8664a1; background: radial-gradient(ellipse at 50% 60%, #674391, #251b3a 70%); }
+  .card-art::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(transparent 0 3px, #100b1e1f 3px 4px); }
+  .card-number { position: absolute; top: 14px; left: 16px; z-index: 1; font: .7rem var(--font-mono); letter-spacing: .12em; color: #d2bae6; }
+  .grid-floor { position: absolute; width: 160%; height: 150px; bottom: -76px; transform: perspective(100px) rotateX(40deg); background-image: linear-gradient(#b084d34d 1px, transparent 1px), linear-gradient(90deg, #b084d34d 1px, transparent 1px); background-size: 25px 25px; mask-image: linear-gradient(transparent, #000); }
+  .pixel-emblem { position: relative; width: 78px; height: 78px; display: grid; place-items: center; color: #f5e9ff; background: #9851c8; border: 4px solid #dfb5ff; box-shadow: 4px 0 0 #331745, -4px 0 0 #331745, 0 4px 0 #331745, 0 -4px 0 #331745, 0 12px 0 -4px #100b1e66, inset -5px -5px 0 #733697, inset 5px 5px 0 #ba78e0; transform: translateY(-3px); }
+  .pixel-emblem svg { width: 49px; height: 49px; shape-rendering: crispEdges; filter: drop-shadow(2px 2px 0 #683183); }
+  .spark { position: absolute; width: 4px; height: 4px; background: #e3c4ff; box-shadow: 4px 0 #e3c4ff, -4px 0 #e3c4ff, 0 4px #e3c4ff, 0 -4px #e3c4ff; }
+  .spark-one { top: 46px; right: 64px; }
+  .spark-two { bottom: 53px; left: 57px; transform: scale(.65); }
+  .spark-three { bottom: 37px; right: 39px; transform: scale(.45); }
+  .card-body { padding: 1.35rem 1.2rem .85rem; border: 1px solid #8664a1; border-top: 0; background: #20182e; }
+  h3 { font-size: 1.6rem; letter-spacing: -.04em; margin: 0 0 .3rem; }
+  .repo-name { display: inline-flex; gap: .6rem; color: #d5bae9; font: .73rem/1.7 var(--font-mono); overflow-wrap: anywhere; }
+  .repo-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
+  .repo-name:focus-visible { outline-color: #dfb5ff; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr 1.2fr; margin: 1.35rem 0 0; padding: 1rem 0; border-top: 1px solid #594169; border-bottom: 1px solid #594169; }
+  .stats > div + div { border-left: 1px solid #594169; padding-left: .9rem; }
+  dt { font: .6rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; color: #c8b7d7; }
+  dd { margin: .35rem 0 0; font: 600 1.3rem/1.3 var(--font-mono); font-variant-numeric: tabular-nums; color: #f7ebff; }
+  .card-footer { display: flex; align-items: center; flex-wrap: wrap; min-height: 2.1rem; padding-top: .7rem; gap: .4rem; color: #c8b7d7; font: .65rem/1.4 var(--font-mono); }
+  .stats-status:empty { display: none; }
+  @media (prefers-color-scheme: dark) { .repo-card { background: #9670b5; } }
+</style>
+
+<script>
+  import type { PublicRepoCatalog } from "../../../server/src/publicRepoCatalog"
+
+  const root = document.querySelector<HTMLElement>("[data-available-repos]")
+  const number = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
+  const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+
+  if (root) {
+    const cards = [...root.querySelectorAll<HTMLElement>("[data-repo]")]
+    const showUnavailable = () => {
+      for (const card of cards) {
+        card.querySelector("[data-stats]")?.setAttribute("aria-busy", "false")
+        card.querySelector<HTMLElement>("[data-stats-status]")!.textContent = "Stats unavailable"
+      }
+    }
+    void (async () => {
+      try {
+        const response = await fetch(root.dataset.endpoint!, { credentials: "omit", signal: AbortSignal.timeout(15_000) })
+        if (!response.ok) throw new Error()
+        const data = await response.json() as PublicRepoCatalog
+        if (!Array.isArray(data.repos)) throw new Error()
+        showUnavailable()
+        for (const card of cards) {
+          const stats = data.repos.find((repo) => repo.name === card.dataset.repo)?.stats
+          if (!stats || !validCount(stats.stars) || !validCount(stats.forks) || !validCount(stats.openIssuesAndPulls)) continue
+          for (const key of ["stars", "forks", "openIssuesAndPulls"] as const) {
+            const value = card.querySelector<HTMLElement>(`[data-stat="${key}"]`)!
+            value.textContent = number.format(stats[key])
+            value.title = stats[key].toLocaleString("en")
+          }
+          card.querySelector<HTMLElement>("[data-meta]")!.textContent = [stats.language, stats.license].filter((value) => typeof value === "string" && value).join(" · ")
+          card.querySelector<HTMLElement>("[data-stats-status]")!.textContent = ""
+        }
+      } catch {
+        showUnavailable()
+      }
+    })()
+  }
+</script>

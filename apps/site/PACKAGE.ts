@@ -81,6 +81,7 @@ const sources = [
   Smithers.glob("//apps/site/src/**/*"),
   Smithers.glob("//apps/site/scripts/**/*"),
   Smithers.glob("//apps/site/public/**/*"),
+  Smithers.file("//apps/server/src/publicRepoCatalog.ts"),
   Smithers.file("//apps/site/astro.config.mjs"),
   Smithers.file("//apps/site/package.json")
 ]

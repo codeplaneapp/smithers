@@ -2112,9 +2112,9 @@ describe("the browser tool route (§2d)", () => {
    * honest 503, never the canonical 404 — and anything off the allowlist
    * stays the canonical 404.
    */
-  test("platform-proxy paths answer the honest no-identity 503, never the canonical 404", async () => {
+  test("account and write proxy paths answer the honest no-identity 503, never the canonical 404", async () => {
     const paths: ReadonlyArray<readonly [string, string]> = [
-      ["GET", "/api/repos/will/flows/issues?state=open"],
+      ["POST", "/api/repos/will/flows/issues"],
       ["POST", "/api/github/import"],
       ["GET", "/api/user/repos"],
       ["GET", "/api/user/byok-keys"],
@@ -2375,11 +2375,12 @@ describe("the browser tool route (§2d)", () => {
     }) as unknown as typeof fetch
     try {
       const response = await worker.fetch(
-        new Request("https://mvp.test/api/repos/will/flows/issues?state=open"),
+        new Request("https://mvp.test/api/repos/will/flows/issues?state=open", { headers: { cookie: "smithers_session=sealed" } }),
         env
       )
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual([{ number: 7, title: "A bug", state: "open" }])
+      expect(response.headers.get("cache-control")).toBe("private, no-store")
       expect(seen).toHaveLength(1)
       expect(seen[0]?.url).toBe("https://cloud.test/api/repos/will/flows/issues?state=open")
       expect(seen[0]?.auth).toBe("Bearer cloud-token-1")
