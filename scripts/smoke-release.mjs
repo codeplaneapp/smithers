@@ -195,13 +195,17 @@ try {
       join(repoRoot, "packages/smithers/test/faults/fixtures", source)
     ))
   }
-  for (const fixture of ["release-public-api.mjs", "release-history-workspace.mjs", "release-cli-containment.mjs"]) {
+  await writeFile(join(smokeRoot, "consumer-boundary.mjs"), await readFile(
+    join(repoRoot, "scripts/fixtures/installed-consumer/consumer-boundary.mjs")
+  ))
+  for (const fixture of ["release-public-api.mjs", "release-history-workspace.mjs", "installed-consumer/release-cli-containment.mjs"]) {
+    const filename = fixture.split("/").at(-1)
     await writeFile(
-      join(smokeRoot, fixture),
+      join(smokeRoot, filename),
       await readFile(join(repoRoot, "scripts/fixtures", fixture))
     )
     for (const mode of ["esm", "cjs"]) {
-      await run(process.execPath, [fixture, mode], smokeRoot)
+      await run(process.execPath, [filename, mode], smokeRoot)
     }
   }
 
@@ -219,7 +223,7 @@ try {
 
   // Import-only checks cannot catch a guest runner path erased by a CJS build.
   // Execute a real sandboxed flow through both published module conditions.
-  for (const filename of ["consumer-boundary.mjs", "release-sandbox-entry.mjs", "release-sandbox-smoke.mjs"]) {
+  for (const filename of ["release-sandbox-entry.mjs", "release-sandbox-smoke.mjs"]) {
     await writeFile(join(smokeRoot, filename), await readFile(join(repoRoot, "scripts/fixtures/installed-consumer", filename)))
   }
   await run(process.execPath, ["release-sandbox-smoke.mjs"], smokeRoot)

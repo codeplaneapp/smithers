@@ -5,10 +5,12 @@
   "description": "Source contract for programs copied into isolated packed consumers; never executed from this directory",
   "dependencies": {
     "@effect/platform-node": "4.0.0-rc.112",
+    "@smthrs/cli": "*",
     "@smthrs/create-app": "*",
     "@smthrs/flow": "*",
     "@smthrs/flows": "*",
     "@smthrs/gateway": "*",
+    "@smthrs/kernel": "*",
     "@smthrs/migrate": "*",
     "@smthrs/observability": "*",
     "@smthrs/plan": "*",

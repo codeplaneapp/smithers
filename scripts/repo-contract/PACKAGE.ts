@@ -157,11 +157,16 @@ const cliVerbs = Smithers.NodeTest({
   srcs: [sources],
   deps: []
 })
-/** Actual planner selection, runtime policy, sentinels and cache behavior. */
+/**
+ * Actual planner selection, runtime policy, sentinels and cache behavior.
+ * Finish the script graph's in-tree builds before starting fresh discovery:
+ * replacing a dist directory during its confined read correctly refuses it.
+ * These are execution dependencies, so clean checkouts need no existing dist.
+ */
 const ciInventory = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//scripts/repo-contract/ci-inventory.test.mjs")]),
   srcs: [sources, Smithers.file("//scripts/ci-inventory.mjs")],
-  deps: []
+  deps: [Smithers.Target.subtree("//packages/...", "lib"), sitePackage.build]
 })
 
 export const Package = Smithers.Package({

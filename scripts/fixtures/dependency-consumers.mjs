@@ -24,7 +24,8 @@ export const candidateVersion = (entries) => {
 // Otherwise a different pnpm on a Node-version PATH can change command support.
 export const releasePackageManager = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8")).packageManager
 const runners = ["vitest", "@effect/vitest", "@smthrs/testing"]
-const nodeAdapters = ["@smthrs/platform-node", "@effect/platform-node", "@effect/platform-node-shared", "@effect/sql-sqlite-node"]
+const nodeRuntime = ["@smthrs/platform-node", "@effect/platform-node", "@effect/platform-node-shared"]
+const nodeAdapters = [...nodeRuntime, "@effect/sql-sqlite-node"]
 const telemetryAdapters = [
   "@opentelemetry/exporter-logs-otlp-http", "@opentelemetry/exporter-metrics-otlp-http",
   "@opentelemetry/exporter-trace-otlp-http", "@opentelemetry/sdk-trace-base",
@@ -36,12 +37,23 @@ const absentByDefault = [...runners, ...nodeAdapters, ...telemetryAdapters, ...b
 // Explicit policy expectations; never derived from the manifest being tested.
 export const minimalProfiles = (entries) => {
   const firstParty = candidateVersion(entries)
-  return ["database", "gateway", "observability", "flows", "create-app"].map((name) => ({
-    name: name + "-default",
-    dependencies: { ["@smthrs/" + name]: firstParty, effect },
-    absent: absentByDefault,
-    imports: ["@smthrs/" + name]
-  }))
+  return [
+    ...["database", "gateway", "observability", "flows"].map((name) => ({
+      name: name + "-default",
+      dependencies: { ["@smthrs/" + name]: firstParty, effect },
+      absent: absentByDefault,
+      imports: ["@smthrs/" + name]
+    })),
+    {
+      // CreateApp's target rules execute through the shared Node supervisor.
+      // Its required runtime does not select SQLite, other hosts or app/test peers.
+      name: "create-app-default",
+      dependencies: { "@smthrs/create-app": firstParty, effect },
+      required: nodeRuntime,
+      absent: [...runners, "@effect/sql-sqlite-node", ...telemetryAdapters, ...browserAdapters, "react", "tsx", "vite"],
+      imports: ["@smthrs/create-app", "@smthrs/create-app/package"]
+    }
+  ]
 }
 
 export const adapterProfiles = (entries) => {

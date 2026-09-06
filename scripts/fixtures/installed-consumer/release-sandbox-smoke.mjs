@@ -1,6 +1,7 @@
-import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox } from "@smthrs/sandbox"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
@@ -14,25 +15,30 @@ assertInstalledConsumer(import.meta.url)
 
 const root = await mkdtemp(join(tmpdir(), "smithers-release-sandbox-"))
 try {
-  const platform = Layer.provideMerge(NodeChildProcessSpawner.layer, Layer.merge(NodeFileSystem.layer, Path.layer))
-  const provider = await Effect.runPromise(Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem
-    const spawner = yield* ChildProcessSpawner
-    return DirectorySandbox.make({ fs, spawner, root })
-  }).pipe(Effect.provide(platform)))
-  for (const [format, sandbox] of [
+  const platform = NodeHost.layerContained().pipe(
+    Layer.provide(ProcessLedger.layerMemory({ hostId: "release-sandbox-smoke", ownerPid: process.pid }))
+  )
+  const formats = [
     ["esm", await import("@smthrs/flows/SandboxedFlow")],
     ["cjs", createRequire(import.meta.url)("@smthrs/flows/SandboxedFlow")]
-  ]) {
-    const result = await Effect.runPromise(sandbox.execute(Echo, { value: `release-${format}` }, {
-      provider,
-      session: `release-${format}`,
-      entry: new URL("./release-sandbox-entry.mjs", import.meta.url)
-    }))
-    assert.equal(result.output, `release-${format}`)
-    assert.deepEqual(result.diff, [])
-    console.log(`sandbox smoke ok: ${format} bundles and executes its packaged guest runner`)
-  }
+  ]
+  // Keep the contained host and its ledger alive until both guest executions
+  // and their session cleanup have completed.
+  await Effect.runPromise(Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const spawner = yield* ChildProcessSpawner
+    const provider = DirectorySandbox.make({ fs, spawner, root })
+    for (const [format, sandbox] of formats) {
+      const result = yield* sandbox.execute(Echo, { value: `release-${format}` }, {
+        provider,
+        session: `release-${format}`,
+        entry: new URL("./release-sandbox-entry.mjs", import.meta.url)
+      })
+      assert.equal(result.output, `release-${format}`)
+      assert.deepEqual(result.diff, [])
+      console.log(`sandbox smoke ok: ${format} bundles and executes its packaged guest runner`)
+    }
+  }).pipe(Effect.provide(platform), Effect.scoped))
 } finally {
   await rm(root, { recursive: true, force: true })
 }
