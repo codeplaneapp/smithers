@@ -1,0 +1,327 @@
+import * as ChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
+import { Clock, Deferred, Effect, Exit, Fiber, Redacted, Schema, Scope, Sink, Stream } from "effect"
+import * as PlatformError from "effect/PlatformError"
+import { TestClock } from "effect/testing"
+import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
+import { describe, expect, it } from "vitest"
+import * as Diagnostics from "../src/Diagnostics.ts"
+import * as StdioTransport from "../src/internal/StdioTransport.ts"
+import { McpError } from "../src/McpError.ts"
+
+const secret = "synthetic-private-value-DO-NOT-PUBLISH"
+const diagnosticBytes = new TextEncoder().encode(`API_TOKEN=${secret}\n`)
+type HandleOptions = Parameters<typeof makeHandle>[0]
+
+const connect = (overrides: Partial<HandleOptions>, released: () => void = () => {}) =>
+  StdioTransport.connect({
+    server: "terminal-drain",
+    command: "fixture",
+    args: [],
+    // Remove the credential prefix, so only the private observer may see
+    // the now-unrecognizable tail. Error redaction must not depend on it.
+    maxStderrBytes: secret.length + 1,
+    queueCapacity: 1,
+    requestTimeoutMs: 1_000
+  }).pipe(Effect.provideService(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.makeNoop({
+      spawn: () =>
+        Effect.acquireRelease(
+          Effect.succeed(makeHandle({
+            pid: ProcessId(1),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.drain,
+            stdout: Stream.never,
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            unref: Effect.succeed(Effect.void),
+            ...overrides
+          })),
+          () => Effect.sync(released)
+        )
+    })
+  ))
+
+const assertPrivate = (error: McpError, events: ReadonlyArray<Diagnostics.Event>) => {
+  expect(error).toBeInstanceOf(McpError)
+  expect(error.code).toBe("connection_closed")
+  const encoded = Schema.encodeSync(McpError)(error)
+  for (const display of [String(error), JSON.stringify(error), JSON.stringify(encoded), JSON.stringify(events)]) {
+    expect(display).not.toContain(secret)
+    expect(display).not.toContain("API_TOKEN=")
+  }
+}
+
+const assertDiagnostic = (error: McpError, events: ReadonlyArray<Diagnostics.Event>) => {
+  assertPrivate(error, events)
+  expect(error.message).toContain("(stderr diagnostic withheld)")
+  expect(events).toHaveLength(1)
+  expect(events[0]!.source).toBe("stderr")
+  expect(Redacted.value(events[0]!.detail)).toBe(secret)
+}
+
+describe("terminal stderr drainage", () => {
+  it("retains stderr consumed before exit without spending the drain budget", async () => {
+    const events: Array<Diagnostics.Event> = []
+    const error = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const consumed = yield* Deferred.make<void>()
+        const transport = yield* connect({
+          stderr: Stream.succeed(diagnosticBytes).pipe(Stream.ensuring(Deferred.succeed(consumed, undefined))),
+          // Completion of the finite stream is a happens-after signal for
+          // runForEach retaining its final chunk, rather than a timed guess.
+          exitCode: Deferred.await(consumed).pipe(Effect.as(ExitCode(1)))
+        })
+        const pending = yield* Effect.forkChild(Effect.flip(transport.request("call")), { startImmediately: true })
+        const result = yield* Fiber.join(pending)
+        expect(yield* Clock.currentTimeMillis).toBe(0)
+        return result
+      })).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Diagnostics.layer((event) => events.push(event)))
+      )
+    )
+    assertDiagnostic(error, events)
+  })
+
+  it.each(["exit", "stdout"] as const)(
+    "drains delayed stderr after %s before settling old and new traffic",
+    async (signal) => {
+      const events: Array<Diagnostics.Event> = []
+      const errors = await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const written = yield* Deferred.make<void>()
+          const terminal = yield* Deferred.make<void>()
+          const releaseStderr = yield* Deferred.make<void>()
+          const transport = yield* connect({
+            stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined)),
+            stderr: Stream.fromEffect(Deferred.await(releaseStderr).pipe(Effect.as(diagnosticBytes))),
+            ...(signal === "exit"
+              ? { exitCode: Deferred.await(terminal).pipe(Effect.as(ExitCode(1))) }
+              : { stdout: Stream.fromEffect(Deferred.await(terminal)).pipe(Stream.drain) })
+          })
+          const pending = yield* Effect.forkChild(Effect.flip(transport.request("first")), { startImmediately: true })
+          yield* Deferred.await(written)
+          yield* Deferred.succeed(terminal, undefined)
+          // Let every fiber reach suspension. The terminal signal is already
+          // visible; stderr is deliberately still unavailable.
+          yield* TestClock.adjust(1)
+          expect(pending.pollUnsafe()).toBeUndefined()
+          const later = yield* Effect.forkChild(Effect.flip(transport.request("later")), { startImmediately: true })
+          const notification = yield* Effect.forkChild(Effect.flip(transport.notify("later")), {
+            startImmediately: true
+          })
+          expect(later.pollUnsafe()).toBeUndefined()
+          expect(notification.pollUnsafe()).toBeUndefined()
+          yield* Deferred.succeed(releaseStderr, undefined)
+          return yield* Effect.all([Fiber.join(pending), Fiber.join(later), Fiber.join(notification)])
+        })).pipe(
+          Effect.provide(TestClock.layer()),
+          Effect.provide(Diagnostics.layer((event) => events.push(event)))
+        )
+      )
+      expect(errors.every((error) => error === errors[0])).toBe(true)
+      assertDiagnostic(errors[0]!, events)
+    }
+  )
+
+  it.each(["empty", "partial"] as const)(
+    "bounds an indefinitely open %s stderr stream across duplicate terminal signals",
+    async (tail) => {
+      const events: Array<Diagnostics.Event> = []
+      let released = false
+      let stderrFinalized = false
+      const errors = await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const written = yield* Deferred.make<void>()
+          const exited = yield* Deferred.make<ExitCode>()
+          const stdoutClosed = yield* Deferred.make<void>()
+          const transport = yield* connect({
+            stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined)),
+            exitCode: Deferred.await(exited),
+            stdout: Stream.fromEffect(Deferred.await(stdoutClosed)).pipe(Stream.drain),
+            stderr: (tail === "partial" ? Stream.concat(Stream.succeed(diagnosticBytes), Stream.never) : Stream.never)
+              .pipe(
+                Stream.ensuring(Effect.sync(() => {
+                  stderrFinalized = true
+                }))
+              )
+          }, () => {
+            released = true
+          })
+          const first = yield* Effect.forkChild(Effect.flip(transport.request("first")), { startImmediately: true })
+          yield* Deferred.await(written)
+          yield* Deferred.succeed(exited, ExitCode(1))
+          yield* TestClock.adjust(200)
+          expect(first.pollUnsafe()).toBeUndefined()
+          yield* Deferred.succeed(stdoutClosed, undefined)
+          const later = yield* Effect.forkChild(Effect.flip(transport.request("later")), { startImmediately: true })
+          yield* TestClock.adjust(49)
+          expect(first.pollUnsafe()).toBeUndefined()
+          expect(later.pollUnsafe()).toBeUndefined()
+          yield* TestClock.adjust(1)
+          const result = yield* Effect.all([Fiber.join(first), Fiber.join(later)])
+          // The timeout cancels only the waiter, not the scoped stderr reader.
+          expect(stderrFinalized).toBe(false)
+          expect(yield* Clock.currentTimeMillis).toBe(250)
+          return result
+        })).pipe(
+          Effect.provide(TestClock.layer()),
+          Effect.provide(Diagnostics.layer((event) => events.push(event)))
+        )
+      )
+      expect(released).toBe(true)
+      expect(stderrFinalized).toBe(true)
+      expect(errors[1]).toBe(errors[0])
+      if (tail === "partial") assertDiagnostic(errors[0]!, events)
+      else {
+        assertPrivate(errors[0]!, events)
+        expect(events).toHaveLength(0)
+      }
+    }
+  )
+
+  it("keeps an offer blocked by backpressure behind the same terminal drain", async () => {
+    const events: Array<Diagnostics.Event> = []
+    const errors = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const written = yield* Deferred.make<void>()
+        const exited = yield* Deferred.make<ExitCode>()
+        const releaseStderr = yield* Deferred.make<void>()
+        const transport = yield* connect({
+          stdin: Sink.forEach((_chunk: Uint8Array) =>
+            Deferred.succeed(written, undefined).pipe(Effect.andThen(Effect.never))
+          ),
+          exitCode: Deferred.await(exited),
+          stderr: Stream.fromEffect(Deferred.await(releaseStderr).pipe(Effect.as(diagnosticBytes)))
+        })
+        yield* transport.notify("occupy-writer")
+        yield* Deferred.await(written)
+        yield* transport.notify("occupy-queue")
+        const blocked = yield* Effect.forkChild(Effect.flip(transport.request("blocked")), { startImmediately: true })
+        yield* Deferred.succeed(exited, ExitCode(1))
+        yield* TestClock.adjust(1)
+        expect(blocked.pollUnsafe()).toBeUndefined()
+        yield* Deferred.succeed(releaseStderr, undefined)
+        const blockedError = yield* Fiber.join(blocked)
+        const laterError = yield* Effect.flip(transport.request("later"))
+        return { blockedError, laterError }
+      })).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Diagnostics.layer((event) => events.push(event)))
+      )
+    )
+    expect(errors.blockedError).toBe(errors.laterError)
+    assertDiagnostic(errors.blockedError, events)
+  })
+
+  it("settles all terminal waiters when scope closure interrupts an active drain", async () => {
+    const events: Array<Diagnostics.Event> = []
+    let released = false
+    let stderrFinalized = false
+    const errors = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const connectionScope = yield* Scope.make()
+        yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
+        const written = yield* Deferred.make<void>()
+        const exited = yield* Deferred.make<ExitCode>()
+        const transport = yield* connect({
+          stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined)),
+          exitCode: Deferred.await(exited),
+          stderr: Stream.never.pipe(Stream.ensuring(Effect.sync(() => {
+            stderrFinalized = true
+          })))
+        }, () => {
+          released = true
+        }).pipe(Scope.provide(connectionScope))
+        // These callers live outside the connection scope. Closing it must
+        // settle them with a typed failure, not merely interrupt the callers.
+        const pending = yield* Effect.forkChild(Effect.flip(transport.request("first")), { startImmediately: true })
+        yield* Deferred.await(written)
+        yield* Deferred.succeed(exited, ExitCode(1))
+        yield* TestClock.adjust(10)
+        const later = yield* Effect.forkChild(Effect.flip(transport.request("later")), { startImmediately: true })
+        const notification = yield* Effect.forkChild(Effect.flip(transport.notify("later")), { startImmediately: true })
+        expect(pending.pollUnsafe()).toBeUndefined()
+        expect(later.pollUnsafe()).toBeUndefined()
+        expect(notification.pollUnsafe()).toBeUndefined()
+        yield* Scope.close(connectionScope, Exit.void)
+        expect(yield* Clock.currentTimeMillis).toBe(10)
+        const afterwards = yield* Effect.flip(transport.request("after-close"))
+        return [yield* Fiber.join(pending), yield* Fiber.join(later), yield* Fiber.join(notification), afterwards]
+      })).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Diagnostics.layer((event) => events.push(event)))
+      )
+    )
+    expect(released).toBe(true)
+    expect(stderrFinalized).toBe(true)
+    expect(errors.every((error) => error === errors[0])).toBe(true)
+    assertPrivate(errors[0]!, events)
+  })
+
+  it("preserves a shorter request deadline and skips drainage during its scope cleanup", async () => {
+    let released = false
+    const outcome = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const written = yield* Deferred.make<void>()
+        const exited = yield* Deferred.make<ExitCode>()
+        const result = yield* Effect.forkChild(
+          Effect.scoped(Effect.gen(function*() {
+            const transport = yield* connect({
+              stdin: Sink.forEach((_chunk: Uint8Array) => Deferred.succeed(written, undefined)),
+              exitCode: Deferred.await(exited),
+              stderr: Stream.never
+            }, () => {
+              released = true
+            })
+            return yield* Effect.flip(transport.request("deadline", undefined, 10))
+          })),
+          { startImmediately: true }
+        )
+        yield* Deferred.await(written)
+        yield* Deferred.succeed(exited, ExitCode(1))
+        yield* TestClock.adjust(9)
+        expect(result.pollUnsafe()).toBeUndefined()
+        yield* TestClock.adjust(1)
+        const error = yield* Fiber.join(result)
+        return { error, time: yield* Clock.currentTimeMillis }
+      })).pipe(Effect.provide(TestClock.layer()))
+    )
+    expect(outcome.error).toMatchObject({ code: "timeout", message: expect.stringContaining("within 10ms") })
+    expect(outcome.time).toBe(10)
+    expect(released).toBe(true)
+  })
+
+  it("treats a failed stderr reader as finished without replacing the terminal error", async () => {
+    const events: Array<Diagnostics.Event> = []
+    const error = await Effect.runPromise(
+      Effect.scoped(Effect.gen(function*() {
+        const failed = yield* Deferred.make<void>()
+        const transport = yield* connect({
+          stderr: Stream.concat(
+            Stream.succeed(diagnosticBytes),
+            Stream.fail(PlatformError.systemError({
+              _tag: "Unknown",
+              module: "ChildProcess",
+              method: "stderr",
+              description: secret
+            }))
+          ).pipe(Stream.ensuring(Deferred.succeed(failed, undefined))),
+          exitCode: Deferred.await(failed).pipe(Effect.as(ExitCode(1)))
+        })
+        const result = yield* Effect.flip(transport.request("call"))
+        expect(yield* Clock.currentTimeMillis).toBe(0)
+        return result
+      })).pipe(
+        Effect.provide(TestClock.layer()),
+        Effect.provide(Diagnostics.layer((event) => events.push(event)))
+      )
+    )
+    assertDiagnostic(error, events)
+  })
+})

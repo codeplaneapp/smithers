@@ -926,21 +926,23 @@ describe("McpClient against a real MCP server", () => {
 
   it("keeps a startup stderr diagnostic out of the ordinary error", async () => {
     const error = await execute(Effect.scoped(Effect.flip(
-      connectNode("stderr-exit", [], { handshakeTimeoutMs: 2_000 })
+      connectNode("stderr-exit", [], { handshakeTimeoutMs: McpClient.defaultHandshakeTimeoutMs })
     )))
 
     expect(error.code).toBe("connection_closed")
     expect(error.server).toBe("stderr-exit")
-    expect(error.message).toBe(
-      "MCP server \"stderr-exit\" stdout closed (stderr diagnostic withheld)"
+    expect(error.message).toMatch(
+      /^MCP server "stderr-exit" (?:stdout closed|stdin closed|exited with code 17) \(stderr diagnostic withheld\)$/
     )
   })
 
   it("redacts credentials split across stderr chunks on a handshake timeout", async () => {
     const diagnostics: Array<Diagnostics.Event> = []
-    const error = await execute(Effect.scoped(Effect.flip(
-      connectNode("stderr-timeout", [], { handshakeTimeoutMs: 1_000 })
-    )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event)))))
+    const error = await execute(
+      Effect.scoped(Effect.flip(
+        connectNode("stderr-timeout", [], { handshakeTimeoutMs: 1_000 })
+      )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event))))
+    )
     expect(error.code).toBe("timeout")
     expect(error.message).toContain("stderr diagnostic withheld")
     const detail = Redacted.value(diagnostics.find((event) => event.source === "stderr")!.detail)
@@ -952,9 +954,14 @@ describe("McpClient against a real MCP server", () => {
 
   it("caps diagnostics after redaction expands a short credential", async () => {
     const diagnostics: Array<Diagnostics.Event> = []
-    const error = await execute(Effect.scoped(Effect.flip(
-      connectNode("stderr-short-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 7 })
-    )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event)))))
+    const error = await execute(
+      Effect.scoped(Effect.flip(
+        connectNode("stderr-short-exit", [], {
+          handshakeTimeoutMs: McpClient.defaultHandshakeTimeoutMs,
+          maxStderrBytes: 7
+        })
+      )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event))))
+    )
     expect(error.message).toContain("stderr diagnostic withheld")
     const detail = Redacted.value(diagnostics.find((event) => event.source === "stderr")!.detail)
     expect(detail).toBe("token=[")
@@ -965,14 +972,17 @@ describe("McpClient against a real MCP server", () => {
     const diagnostics: Array<Diagnostics.Event> = []
     const error = await execute(
       Effect.scoped(Effect.flip(
-        connectNode("stderr-tail-exit", [], { handshakeTimeoutMs: 2_000, maxStderrBytes: 26 })
+        connectNode("stderr-tail-exit", [], {
+          handshakeTimeoutMs: McpClient.defaultHandshakeTimeoutMs,
+          maxStderrBytes: 26
+        })
       )).pipe(Effect.provide(Diagnostics.layer((event) => diagnostics.push(event))))
     )
 
     expect(error.code).toBe("connection_closed")
     expect(error.server).toBe("stderr-tail-exit")
-    expect(error.message).toBe(
-      "MCP server \"stderr-tail-exit\" stdout closed (stderr diagnostic withheld)"
+    expect(error.message).toMatch(
+      /^MCP server "stderr-tail-exit" (?:stdout closed|stdin closed|exited with code 18) \(stderr diagnostic withheld\)$/
     )
     const detail = diagnostics.find((event) => event.source === "stderr")!
     expect(Redacted.value(detail.detail)).toBe("KEEP-THIS-TAIL-1234567890")

@@ -2,7 +2,7 @@
  * Alchemy 2 stack for the static smithers.sh site.
  *
  * The physical Worker name matches wrangler.jsonc. For an existing Worker,
- * review `pnpm exec alchemy plan --adopt` before the first Alchemy deployment.
+ * review `pnpm exec alchemy deploy --dry-run --adopt` before the first deployment.
  * The CLI evaluates this default-exported stack; importing it deploys nothing.
  * See apps/docs/README.md for state migration and package-site deployment.
  */

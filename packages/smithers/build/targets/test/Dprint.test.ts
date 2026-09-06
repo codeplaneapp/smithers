@@ -20,5 +20,4 @@ describe("Dprint", () => {
     expect(metadata.cacheable).toBe(false)
     expect(metadata.inputs).toHaveLength(2)
   })
-
 })

@@ -37,9 +37,18 @@ if (mode === "stderr") {
 `
 
 describe("MCP diagnostic privacy", () => {
-  it.each(["stderr", "version", "duplicate", "cursor", "schema", "remote"])(
+  it.each(
+    [
+      ["stderr", "connection_closed"],
+      ["version", "protocol_error"],
+      ["duplicate", "invalid_response"],
+      ["cursor", "invalid_response"],
+      ["schema", "invalid_response"],
+      ["remote", "tool_failed"]
+    ] as const
+  )(
     "does not expose %s details through a typed/encoded error or ordinary observer serialization",
-    async (mode) => {
+    async (mode, expectedCode) => {
       const events: Array<Diagnostics.Event> = []
       const error = await Effect.runPromise(Effect.scoped(
         Effect.gen(function*() {
@@ -52,8 +61,8 @@ describe("MCP diagnostic privacy", () => {
               // Truncation can remove the credential prefix. The remainder must
               // still never be attached to an outward error.
               maxStderrBytes: secret.length + 1,
-              handshakeTimeoutMs: 2_000,
-              requestTimeoutMs: 2_000
+              handshakeTimeoutMs: McpClient.defaultHandshakeTimeoutMs,
+              requestTimeoutMs: McpClient.defaultHandshakeTimeoutMs
             })
             return yield* client.callTool("probe", {})
           }))
@@ -61,6 +70,7 @@ describe("MCP diagnostic privacy", () => {
       ))
       expect(error).toBeInstanceOf(McpError)
       const encoded = Schema.encodeSync(McpError)(error)
+      expect(error.code, JSON.stringify(encoded)).toBe(expectedCode)
       for (const display of [String(error), JSON.stringify(error), JSON.stringify(encoded), JSON.stringify(events)]) {
         expect(display).not.toContain(secret)
         expect(display).not.toContain("short-private-pin")

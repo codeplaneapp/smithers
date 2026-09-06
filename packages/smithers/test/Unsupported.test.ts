@@ -118,6 +118,39 @@ describe("the refusal `bin.ts` answers before the control plane boots", () => {
       expect(Unsupported.refusal(args)).toBeUndefined()
     }
   })
+
+  it.each([
+    ["init", "change", "--global"],
+    ["init", "--global"],
+    ["init", "change", "--root", "/tmp/project", "--global"],
+    ["--root=/tmp/project", "init", "change", "--global=true"],
+    ["--audience", "human", "init", "change", "--global", "--json"]
+  ])("refuses the removed initializer before boot: %j", async (...args) => {
+    const early = Unsupported.refusal(args)
+    const parsed = await failure(args)
+    expect(early).toBeInstanceOf(CliError.UnsupportedError)
+    expect(early!.message).toBe((parsed as CliError.UnsupportedError).message)
+  })
+
+  it("leaves ambiguous or malformed initializer arguments to the parser", () => {
+    for (
+      const args of [
+        ["init", "change"],
+        ["init", "--global", "false"],
+        ["init", "--global=false"],
+        ["init", "--global", "--no-global"],
+        ["init", "--", "--global"],
+        ["init", "change", "--root", "--global"],
+        ["init", "change", "--root=--global"],
+        ["--audience", "invalid", "init", "--global"],
+        ["--global", "init"],
+        ["init", "change", "--global", "--help"],
+        ["init", "change", "--global", "--global"],
+        ["init", "one", "two", "--global"],
+        ["init", "--unknown", "--global"]
+      ]
+    ) expect(Unsupported.refusal(args)).toBeUndefined()
+  })
 })
 
 describe("every removed flag", () => {

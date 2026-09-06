@@ -429,7 +429,9 @@ const ci = Smithers.GithubCiGen({
         foundry,
         docker: dockerImageStore
       }),
-      steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/..." }]
+      // Match the workspace gate's bound: each suite also runs Vitest workers,
+      // so host-sized package concurrency multiplies process and memory load.
+      steps: [{ name: "Package test targets", verb: Smithers.Verb.Test, pattern: "//packages/...", parallelism: 2 }]
     },
     {
       // The model reviews, and the only job that plans them. `LlmLint`

@@ -422,7 +422,7 @@ jobs:
           fi
         shell: bash
       - name: Package test targets
-        run: pnpm exec smthrs test '//packages/...' --verbose
+        run: pnpm exec smthrs test '//packages/...' --jobs 2 --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"

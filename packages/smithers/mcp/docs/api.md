@@ -273,6 +273,10 @@ retention and must never forward that value to agents, journals, traces, or
 routine logs. The callback is synchronous: it must not block or retain an
 unbounded event history. Callback and serialization exceptions are isolated
 from the MCP connection. Diagnostic delivery is best effort, not an audit log.
+On process or stdio closure, pending requests wait up to 250 ms for the stderr
+reader to finish before receiving the terminal error. Request deadlines and
+scope interruption can end that wait sooner. A pipe held open beyond that
+budget contributes only the tail already read; it cannot hold shutdown open.
 The separate `maxStderrBytes` limit applies before the observer sees a stderr
 tail, so `truncated: false` does not imply the entire child output is present.
 

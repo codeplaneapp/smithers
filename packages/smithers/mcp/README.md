@@ -92,6 +92,7 @@ Full documentation is at [mcp.smithers.sh](https://mcp.smithers.sh):
   of `Diagnostics`, `McpClient`, `McpError`, and `McpFlows`.
 - [Troubleshooting](https://mcp.smithers.sh/troubleshooting/): every failure
   this package reports, with its cause and fix.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).

@@ -33,8 +33,10 @@ site so the public endpoint is present when the card loads.
 Anonymous GETs to the app's repository metadata, contents, topics, stargazers,
 bookmarks, changes, issues, labels, and Git object read routes now reach the
 Cloud backend without an identity-service round trip. Both `/api/repos/...`
-and `/api/cloud/api/repos/...` use this path. Successful answers are cached
-for 60 seconds; upstream refusals and errors are not cached.
+and `/api/cloud/api/repos/...` use this path. Every read checks the Cloud
+backend, so a repository becoming private takes effect on the next request.
+These mutable documents and their refusals use `private, no-store`; upstream
+`Vary` headers are preserved. Only the separate curated catalog is cached.
 
 Requests carrying a session use the existing authenticated path, preserving
 access to private repositories. An expired or non-allowlisted session falls

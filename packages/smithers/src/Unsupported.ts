@@ -274,6 +274,44 @@ export const verbError = (verb: RemovedVerb, subcommand?: string | undefined): C
  */
 const survivingParents = new Set(["gateway", "workflow"])
 
+// Recognize the removed initializer before opening local state. Only consume
+// flags with an unambiguous arity; unfamiliar options and boolean values stay
+// with the real parser, as do help, malformed input and arguments after `--`.
+const initGlobalRefusal = (args: ReadonlyArray<string>): CliError.UnsupportedError | undefined => {
+  const seen = new Set<string>()
+  let command: string | undefined
+  let names = 0
+  let global = false
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index]!
+    if (!argument.startsWith("-")) {
+      if (command === undefined) {
+        if (argument !== "init") return undefined
+        command = argument
+      } else if (++names > 1) return undefined
+      continue
+    }
+    const [flag, inline] = argument.split(/=(.*)/s)
+    if (seen.has(flag!)) return undefined
+    seen.add(flag!)
+    if (flag === "--root" || flag === "--audience") {
+      const value = inline ?? args[++index]
+      if (value === undefined || value.length === 0 || value.startsWith("-")) return undefined
+      if (flag === "--audience" && !["auto", "human", "agent"].includes(value)) return undefined
+    } else if (
+      argument === "--global=true" ||
+      argument === "--global" && (args[index + 1] === undefined || args[index + 1]!.startsWith("--"))
+    ) {
+      if (command !== "init") return undefined
+      global = true
+    } else if (
+      !["--json", "--quiet", "--silent", "--verbose"].includes(argument) ||
+      args[index + 1] !== undefined && !args[index + 1]!.startsWith("--")
+    ) return undefined
+  }
+  return global ? flagError(findFlag("init", "global")) : undefined
+}
+
 /**
  * The refusal an argument vector earns before anything boots, or `undefined`.
  *
@@ -286,7 +324,8 @@ const survivingParents = new Set(["gateway", "workflow"])
  *
  * The scan is deliberately narrow, the way `bin.ts` reads `--help` and
  * `--version`: it fires only for `smthrs <verb> [<positional>...]`, and any
- * flag anywhere in the vector sends the invocation down the ordinary path.
+ * flag anywhere in the vector sends the invocation down the ordinary path,
+ * except the removed initializer with known root and presentation options.
  * A flag can take a value, a value can be spelled like a verb, and the
  * registered hidden commands in `Command.ts` are still the authority for every
  * shape this one declines to read. Missing a refusal here costs the old
@@ -296,6 +335,8 @@ const survivingParents = new Set(["gateway", "workflow"])
  * @since 1.0.0
  */
 export const refusal = (args: ReadonlyArray<string>): CliError.UnsupportedError | undefined => {
+  const initializer = initGlobalRefusal(args)
+  if (initializer !== undefined) return initializer
   const [name, ...rest] = args
   if (name === undefined || name.startsWith("-")) return undefined
   if (rest.some((argument) => argument.startsWith("-"))) return undefined

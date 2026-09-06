@@ -215,6 +215,8 @@ Do not modify files or run commands.
 
 The `model:` field selects the provider and model. `init` chooses it from the first available provider credential; if none is set, the generated comment names the key required by its default model. Set that credential in your shell, or change `model:` to a seat you can use. The [init reference](/docs/reference/cli/init/) lists the selection order. A model call uses that provider's account and usage limits.
 
+The starter declares file-read, file-write, and process-spawn capabilities for editing and testing. For this read-only task, replace its `capabilities:` line with `capabilities: ["fs:read:**"]`. Review that declaration whenever you change the task; the flow name comes from its directory, so no `name:` field is needed.
+
 Check the configuration and flow discovery:
 
 ```bash
@@ -1506,7 +1508,6 @@ The scaffold creates `flows/reviewer/flow.mdx`, the `.flows/` state directory, a
 
 ```md
 ---
-name: "reviewer"
 description: Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.
 capabilities: ["fs:read:**", "proc:spawn:*"]
 model: anthropic:claude-sonnet-4-5
@@ -1539,7 +1540,7 @@ Keep the `model:` line `smthrs init` wrote for you: it chose the seat from the f
 ```text
 You should see: init reports the flow file it created, the project's state
 directory, and the seat it wrote. After your edit, the flow declares the
-review's name, description, capabilities, and model, with its instructions
+review's description, capabilities, and model, with its instructions
 organized under headings.
 ```
 
@@ -2593,7 +2594,6 @@ A real flow's frontmatter declares the run:
 
 ```md
 ---
-name: "review"
 description: Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.
 capabilities: ["fs:read:**", "proc:spawn:*"]
 model: openai:gpt-5.6-sol
@@ -2609,9 +2609,9 @@ The keys:
 | --- | --- |
 | `description` | Required. Discovery refuses a markdown flow whose description is missing or empty, and warns past 1024 characters. |
 | `model` | The seat the flow runs on, `<provider>:<model>`. Change the line to run somewhere else. |
-| `capabilities` | A string array bounding what the agent may do. Omit it and the flow runs under the conservative wildcard `["*"]`, with a discovery warning. |
+| `capabilities` | A string array bounding what the agent may do. The starter explicitly requests file reads, file writes, and process spawning; narrow that list for the task. Omitting it grants the wildcard `["*"]`, with a discovery warning. |
 | `budget` | Optional `tokens` and `milliseconds` ceilings, each a positive safe integer. A malformed budget is ignored with a warning rather than tightened. |
-| `name` | What `smthrs init` writes. Project flows are named by directory path, so discovery ignores this line with a warning; rename the directory to rename the flow. |
+| `name` | Unnecessary for project flows, which are named by directory path. Discovery ignores this line with a warning; rename the directory to rename the flow. |
 
 [The flow.mdx reference](/docs/reference/flow-mdx/) has the full key table.
 
@@ -2817,7 +2817,7 @@ Hello, Ada.
 
 ## Choose identity and persistence
 
-The explicit `executionId` identifies this invocation. Without one, Smithers first checks the flow's declared idempotency key, then uses the host's execution-ID source. The default derives an ID from the flow tag and encoded payload. See [Execution IDs and ownership](/docs/concepts/ownership/) before using equal payloads for independent requests.
+The explicit `executionId` identifies this invocation. Without one, Smithers first checks the flow's declared idempotency key, then uses the host's execution-ID source. The default mints a fresh UUID, so equal inputs start independent executions. Retain the returned ID to resume that work, or opt into `Flow.layerExecutionIds(Flow.derived)` to identify work by its flow tag and encoded payload. See [Execution IDs and ownership](/docs/concepts/ownership/).
 
 The in-memory engine loses its state when the process exits. To resume after a restart, compose a durable engine over persistent SQLite state. The [first flow tutorial](/docs/tutorials/first-flow/#6-run-durably-over-sqlite) supplies that complete host setup.
 
@@ -3183,8 +3183,8 @@ The declared seat lives in the flow source. A markdown flow carries it on the `m
 
 ```md
 ---
-name: "reviewer"
 description: Reviews the uncommitted change in this repository.
+capabilities: ["fs:read:**"]
 model: anthropic:claude-sonnet-4-5
 ---
 ```
@@ -3278,12 +3278,13 @@ The line lists every key the resolver can see, notes any that are exported but e
 # Set quotas, budgets, and corrections for agents
 https://smithers.sh/docs/guides/agent-policies/
 
-Declare a token and latency budget on a flow, let provider quota refusals park the run instead of failing it, and bound the re-prompts a structured-output step may spend.
+Declare a token and latency budget on a markdown flow. In a module composition, use `AgentAction` to park through quota windows and bound the re-prompts a structured-output step may spend.
 
 ## Before you start
 
 - The Smithers CLI and a project with an agent flow. [Build your first agent flow](/docs/tutorials/first-agent-flow/) produces one.
 - A provider credential for the flow's seat. [Configure model seats](/docs/guides/model-seats/) covers the keys.
+- For durable quota waits and schema corrections, an application host composing `AgentAction` on the durable engine. [Schema-enforced agent outputs](/docs/tutorials/agent-outputs/) shows that composition.
 
 ## 1. Declare a budget on the flow
 
@@ -3291,8 +3292,8 @@ Add a `budget` block to the frontmatter of `flows/<name>/flow.mdx`:
 
 ```md
 ---
-name: "reviewer"
 description: Reviews the uncommitted change in this repository.
+capabilities: ["fs:read:**"]
 model: anthropic:claude-sonnet-4-5
 budget:
   tokens: 120000
@@ -3322,29 +3323,28 @@ const budget = Budget.layer({ tokens: { max: 120000, onExceeded: "warn" } })
 
 To give up token and latency ceilings in writing, bind `Budget.layerUnbounded()`.
 
-## 2. Let quota refusals park the run
+## 2. Park a composed agent action through quota windows
 
-The CLI composes the default quota policy, so a provider capacity refusal parks the run instead of failing the step. The policy treats `rate_limited`, `quota_exceeded`, and `provider_internal` failures, plus any refusal carrying HTTP 429, 503, 504, or 529, as a wait, and takes the wake time from what the provider said: `resetAtEpochMillis`, then `retryAfterMillis`, then a delay parsed from the message text, then a default. A wait past the policy's maximum propagates as the original error, because a run parked for a day reads like a run that hung.
+The CLI's markdown executor currently reports a terminal provider refusal as a failed run; supplying its quota classifier does not install a durable retry loop. Inspect the failure with `smthrs runs show <run-id>` and correct the provider or account condition before starting another run.
 
-The park is durable. The decision is a recorded step, so a replay waits out the deadline the first pass chose rather than computing a fresh one, and the retried call is another attempt of the same step, not a replay of the refused one. One step takes at most eight quota waits by default; a composition changes the bound with the host's `maxQuotaParks`.
+Durable quota parking is implemented by `AgentAction` in a module composition. Provide `QuotaPolicy.layerDefault()` to that host. It classifies `rate_limited` and `quota_exceeded`, plus refusals carrying HTTP 429 or 529. `provider_internal`, HTTP 503, and HTTP 504 alone do not qualify. The wake time comes from `resetAtEpochMillis`, then `retryAfterMillis`, then a delay parsed from the message, then the default 60 seconds. A wait beyond the default one-hour maximum propagates the original error.
 
-While parked, the run waits with reason `quota`:
+The decision is a recorded step, so reopening the same durable execution waits out the recorded deadline. The retried call is another attempt of the step. One ask takes at most eight quota waits by default; the host can change `maxQuotaParks`. These options customize the classifier:
 
-```bash
-smthrs runs list --status parked
+```ts
+import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
+
+const quota = QuotaPolicy.layerDefault({
+  defaultWaitMillis: 60000,
+  maxWaitMillis: 3600000
+})
 ```
 
-When the executor that owns the run has stopped, re-drive it and the replay waits out the recorded deadline:
-
-```bash
-smthrs runs resume <run-id>
-```
-
-To fail fast on capacity refusals instead of parking, a composition opts out in writing with `QuotaPolicy.layerUnclassified()`.
+Provide this layer alongside the engine and budget when registering the agent action. To keep capacity refusals as failures, provide `QuotaPolicy.layerUnclassified()` instead. [Example 39](/docs/examples/39-agent-policies/) includes the complete registration and restart path.
 
 ## 3. Spend corrections on schema misses
 
-A model-backed step declares its answer shape with `output`, and the runtime enforces that schema against the run's final answer. A decode miss spends one correction slot on a re-prompt that repeats the task verbatim with the validation issues appended:
+A module's `AgentAction` declares its answer shape with `output`, and the runtime enforces that schema against the run's final answer. A decode miss spends one correction slot on a re-prompt that repeats the task verbatim with the validation issues appended:
 
 ```ts
 import * as AgentAction from "@smthrs/agent/AgentAction"
@@ -3371,16 +3371,16 @@ Every rejection is journaled with the action, the attempt, the budget, and diges
 
 ## Verify it worked
 
-Run the flow and read its trail back:
+Run the markdown flow to check its declared budget and read its trail back:
 
 ```bash
 smthrs flow start reviewer
 smthrs runs logs <run-id>
 ```
 
-- A quota park shows as a run with waiting reason `quota` in `smthrs runs list --status parked`, and the transcript shows the run waiting for its wake time. The provider is not re-called for the wait: a replayed park replays the recorded decision.
-- A spent correction shows in the transcript as a re-prompt after the schema miss, and the settled answer still decodes against the declared schema.
 - A budget in `warn` mode leaves budget-warning records in the journal and the run keeps going; in `fail` mode the step that would cross the ceiling fails.
+- In an `AgentAction` composition, a quota park writes `flows.agent.quota-parked.v1` and the engine records a wait with reason `quota`. Reopening the same execution reuses its recorded deadline.
+- A composed action's spent correction produces a rejection record and a re-prompt after the schema miss; the settled answer still decodes against its declared schema.
 
 [Example 39](/docs/examples/39-agent-policies/) drives one step through all three policies on the durable engine across a process kill: the provider refuses with HTTP 429 and `retry-after`, the run parks, a second engine over the same file waits out the recorded deadline, spends a correction, and finishes. The assertions check three provider calls in all, one before the restart, one park decision, one correction.
 
@@ -5554,9 +5554,9 @@ Smithers selects an ID in this order:
 | 2 | The flow's `idempotencyKey`, combined with its tag | The declaration supplies an identity. |
 | 3 | `CurrentExecutionIds` | Neither explicit source is present. |
 
-The default `CurrentExecutionIds` source derives an ID from the flow tag and encoded payload. Equal tags and payloads resolve to the same execution. This makes repeating an invocation useful for resuming work.
+The default `CurrentExecutionIds` source, `fresh`, creates a cryptographic UUID for each unkeyed invocation. Equal tags and payloads start independent executions. Keep the returned ID when you need to resume that work after a crash.
 
-When equal payloads represent independent requests, give each request its own `executionId`, or install a host-wide source with `layerExecutionIds`. For example, two users asking for the same report may need separate executions even though their input is identical.
+When equal tags and payloads deliberately identify the same work, opt into `Flow.layerExecutionIds(Flow.derived)`, or declare an `idempotencyKey` on the flow. The derived source hashes the flow tag and encoded payload, so repeating that invocation reattaches to its execution. A custom source can be installed with `layerExecutionIds`.
 
 An explicit ID and a declared idempotency key take precedence over the host-wide source. Reuse the ID to resume the same work; choose a new ID to start unrelated work.
 
@@ -5586,7 +5586,7 @@ A PID is meaningful only on its own host. Use a same-host PID probe for local pr
 
 Lease operations also check clock skew and preserve monotonic heartbeats. Keep the lease clock and lifecycle clock consistent in a custom host composition. The [run-store reference](/docs/reference/api/run-store/) documents the claim protocol, refusal results, and timing options.
 
-If identity derivation cannot encode the payload, it raises `ExecutionIdRequired`. Validate inputs before precomputing an ID; `Flow.execute` reports payload schema failures through its typed error channel.
+If the opt-in derived source cannot encode the payload canonically, it raises the defect `ExecutionIdRequired`. Validate inputs before precomputing an ID; `Flow.execute` reports payload schema failures through its typed error channel.
 
 For the progress an owner resumes, see [Durable execution](/docs/concepts/durable-execution/). For current status, see [Inspect runs](/docs/guides/inspecting-runs/).
 
@@ -6054,7 +6054,7 @@ Effect is not an interchangeable detail. The pin is a hard requirement of the pr
 
 ## Where Smithers diverges from upstream
 
-Smithers vendors Effect's workflow surface and extends it with explicit execution IDs, content-derived step keys, and a separate policy for infrastructure interruptions. By default, an invocation without an explicit ID derives one from its tag and payload. Supply an ID when equal inputs need independent executions. [Execution IDs and ownership](/docs/concepts/ownership/) and [Retries and interruption](/docs/concepts/retries/) describe these contracts.
+Smithers vendors Effect's workflow surface and extends it with explicit execution IDs, content-derived step keys, and a separate policy for infrastructure interruptions. By default, an invocation without an explicit ID or declared idempotency key receives a fresh UUID. Retain that ID to resume the work, or opt into the derived source when equal inputs should identify one execution. [Execution IDs and ownership](/docs/concepts/ownership/) and [Retries and interruption](/docs/concepts/retries/) describe these contracts.
 
 ## Related
 
@@ -26511,6 +26511,10 @@ retention and must never forward that value to agents, journals, traces, or
 routine logs. The callback is synchronous: it must not block or retain an
 unbounded event history. Callback and serialization exceptions are isolated
 from the MCP connection. Diagnostic delivery is best effort, not an audit log.
+On process or stdio closure, pending requests wait up to 250 ms for the stderr
+reader to finish before receiving the terminal error. Request deadlines and
+scope interruption can end that wait sooner. A pipe held open beyond that
+budget contributes only the tail already read; it cannot hold shutdown open.
 The separate `maxStderrBytes` limit applies before the observer sees a stderr
 tail, so `truncated: false` does not imply the entire child output is present.
 
@@ -40361,7 +40365,7 @@ The parser accepts exactly these keys, in the order the run reads them.
 | `name` | string | no | the directory path below `flows/` | A project's flows take their id from the directory path, so a `name` key is ignored with a `name_field_ignored` discovery warning. |
 | `description` | string | yes | none | One line describing the flow. A flow with a missing or empty description is not discovered; one over 1024 characters earns an `invalid_description` warning. |
 | `model` | string | no | none | The model seat the flow runs on, for example `openai:gpt-5.6-sol`. An empty value reads as absent, and `smthrs up` cannot launch a prompt flow that declares no seat. |
-| `capabilities` | string array | no | `["*"]` | The capability patterns that bound what the run may do. A space-separated string is accepted with a warning; a malformed value falls back to the conservative wildcard with a warning. |
+| `capabilities` | string array | no | `["*"]` | The capability patterns that bound what the run may do. A space-separated string is accepted with a warning; an absent or malformed value grants the all-action wildcard with a warning. Declare only the patterns the task requires. |
 | `budget` | object | no | none (unbounded) | The ceilings a control plane approves for one run: `tokens` and `milliseconds`, each a positive safe integer. An absent key is no ceiling, not zero; a malformed budget is dropped with a warning rather than tightened. |
 | `flows` | string array | no | none | Flow ids this flow may delegate to. A space-separated string is also accepted. When both spellings are present, `flows` wins over `allowed-tools`. |
 | `allowed-tools` | string or string array | no | none | The Agent Skills spelling of `flows`. |
@@ -40396,7 +40400,7 @@ budget:
 
 ## The body
 
-The markdown below the closing `---` fence is the prompt the agent is handed, and every line of it is an instruction. `##` sections read as phases: each heading is a step the agent performs in order, and the text under it is the instruction for that step. Arguments passed at launch are appended after the body.
+The markdown below the closing `---` fence is the prompt the agent is handed, and every line of it is an instruction. Headings organize that prompt; they do not create separate durable steps or enforce execution order. Arguments passed at launch are appended after the body.
 
 ## See also
 
@@ -41408,6 +41412,8 @@ The scaffolded flow declares a `model:` seat chosen from the first provider cred
 - `CEREBRAS_API_KEY` resolves `cerebras:gpt-oss-120b`.
 
 With no credential set, the scaffold still declares the default (`anthropic:claude-sonnet-4-5`), and the frontmatter comment names the key to set. A scaffold without a `model:` line would not be launchable at all.
+
+The starter requests `fs:read:**`, `fs:write:**`, and `proc:spawn:*` for its file-editing and test-running instructions. Narrow these capabilities before running a smaller task; process spawning permits shell commands. Its directory supplies the flow name, so the frontmatter contains no ignored `name:` key.
 
 ## Arguments
 
@@ -51376,7 +51382,7 @@ const hostProgram = join(dirname(fileURLToPath(import.meta.url)), "37-host-conta
  * @category models
  */
 export interface Summary {
-  /** Diagnostics from the host before it was killed; empty on successful startup. */
+  /** Diagnostics from the host before it was killed, including Node runtime warnings. */
   readonly hostStderr: string
   /** The process group the killed host started. */
   readonly pgid: number

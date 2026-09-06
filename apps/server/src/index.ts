@@ -2235,9 +2235,14 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
   const publicRead = isPublicRepositoryRead(request.method, url.pathname)
   const publicAnswer = async () => {
     const response = await readPublicRepository(url, env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL)
-    return response.ok ? response : json(response.status, {
-      status: "error", message: platformFailureMessage(response.status, await response.text())
+    if (response.ok) return response
+    const failure = json(response.status, {
+      status: "error", message: platformFailureMessage(response.status, await response.text().catch(() => ""))
     })
+    failure.headers.set("cache-control", "private, no-store")
+    const vary = response.headers.get("vary")
+    if (vary !== null) failure.headers.set("vary", vary)
+    return failure
   }
   if (publicRead && !request.headers.has("cookie")) return withIsolationHeaders(await publicAnswer())
   const gate = await requireTurnSession(request, env)

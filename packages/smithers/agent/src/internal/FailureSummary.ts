@@ -1,4 +1,13 @@
-/** The innermost typed sentence from the engine's JSON-safe failure value. */
+/**
+ * Bounded diagnostic headlines for durable agent failure records.
+ * @since 1.0.0
+ */
+
+/**
+ * The innermost typed sentence from the engine's JSON-safe failure value.
+ * @category getters
+ * @since 1.0.0
+ */
 export const failureSummary = (failure: unknown): string | undefined => {
   let current = failure
   let summary: string | undefined

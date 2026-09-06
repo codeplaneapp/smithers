@@ -1659,7 +1659,7 @@ describe("StdioTransport limits and terminal state", () => {
   })
 
   it("wakes a blocked enqueue when the process exits", async () => {
-    const error = await execute(Effect.scoped(Effect.gen(function*() {
+    const errors = await execute(Effect.scoped(Effect.gen(function*() {
       const writerStarted = yield* Deferred.make<void>()
       const exit = yield* Deferred.make<ExitCode>()
       const spawner = fakeProcess({
@@ -1685,12 +1685,14 @@ describe("StdioTransport limits and terminal state", () => {
       const blocked = yield* Effect.forkChild(transport.notify("third"), { startImmediately: true })
       yield* Effect.sleep("10 millis")
       yield* Deferred.succeed(exit, ExitCode(0))
-      return yield* Effect.flip(Fiber.join(blocked))
+      const blockedError = yield* Effect.flip(Fiber.join(blocked))
+      const laterError = yield* Effect.flip(transport.request("later"))
+      return { blockedError, laterError }
     })))
 
-    expect(error).toMatchObject({
+    expect(errors.blockedError).toBe(errors.laterError)
+    expect(errors.blockedError).toMatchObject({
       code: "connection_closed",
-      message: expect.stringContaining("outbound queue closed"),
       server: "blocked-enqueue"
     })
   })

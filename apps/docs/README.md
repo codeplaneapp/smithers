@@ -1,8 +1,10 @@
 # Package documentation sites
 
-One Astro Starlight site per published package, each on its own subdomain:
-`@smthrs/flow` documents at `flow.smithers.sh`, `@smthrs/agent` at
-`agent.smithers.sh`, and so on for every entry in `shared/manifest.mjs`.
+The 48 entries in `shared/manifest.mjs` each have an Astro Starlight site on
+their own subdomain: `@smthrs/flow` documents at `flow.smithers.sh`,
+`@smthrs/agent` at `agent.smithers.sh`, and so on. The main site in `apps/site`
+is separate. This fleet has no standalone build, build-cli, or targets site;
+their aggregate API pages are on smithers.sh under `/docs/reference/api/`.
 
 **Do not edit anything in this directory by hand.** Every site here is
 generated, and every page in it is stitched from the package it documents.
@@ -93,7 +95,7 @@ the existing Worker name, and review an adoption plan before deploying:
 cd apps/docs/flow
 export FLOW_WORKER_NAME="existing-worker-name"
 # Configure CLOUDFLARE_API_TOKEN through your usual secret mechanism.
-pnpm exec alchemy plan --adopt
+pnpm exec alchemy deploy --dry-run --adopt
 pnpm run deploy --adopt
 ```
 
@@ -115,12 +117,12 @@ Run `node --test apps/site/scripts/deployment.test.mjs` for offline import and
 type checks against the declared Alchemy dependency. These checks do not
 exercise credentials, Cloudflare APIs, or an actual deployment.
 
-## One slug is not its package name
+## Slugs come from the manifest
 
-`@smthrs/build` documents at `smithers-build.smithers.sh`, not
-`build.smithers.sh`: that hostname belongs to the build remote cache in
-production. The manifest is the authority on every slug; nothing derives a
-hostname from a package name.
+`@smthrs/patterns` documents at `smithers-patterns.smithers.sh`, and
+`@smthrs/sync` at `smithers-sync.smithers.sh`. The manifest is the authority
+on every deployed slug; nothing derives a hostname from a package name or
+adds a site for a package absent from that roster.
 
 ## Relationship to smithers.sh
 

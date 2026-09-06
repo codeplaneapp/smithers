@@ -19,7 +19,11 @@
 import * as Redaction from "@smthrs/journal/Redaction"
 import { stripVTControlCharacters } from "node:util"
 
-/** The most specific recorded cause, including older nested Error stacks. */
+/**
+ * The most specific recorded cause, including older nested Error stacks.
+ * @category getters
+ * @since 1.0.0
+ */
 export const causeLine = (cause: string): string => {
   const safe = String(Redaction.redact(stripVTControlCharacters(cause)))
   let line = safe.split(/\r?\n/, 1)[0] ?? ""

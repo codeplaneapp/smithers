@@ -108,7 +108,6 @@ A generated-output target: check by default, `--write` applies. The attrs declar
 
 The workspace agent roster, and the reference surface a package names one agent through. Calling it validates the record: a key that is not a legal reference name raises `Error`, and a value that is not an agent declaration raises `TypeError`. Property access such as `Smithers.Agents.docsWriter` mints a fresh inert `Reference.AgentRef`, whose name is checked against the workspace declaration at index time, so an unknown agent name is a graph-load error rather than a silent miss.
 
-
 ### `Smithers.Filegroup`
 
 - **Signature:** `Filegroup(attrs: Filegroup.Attrs): Target`

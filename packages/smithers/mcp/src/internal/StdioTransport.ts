@@ -17,7 +17,7 @@
  */
 import * as Redaction from "@smthrs/journal/Redaction"
 import * as ChildProcessEnvironment from "@smthrs/kernel/ChildProcessEnvironment"
-import { Deferred, Effect, HashMap, Option, Queue, Ref, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, HashMap, Option, Queue, Ref, Stream } from "effect"
 import type { Scope } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -120,6 +120,10 @@ const protocol = (server: string, message: string): McpError =>
 
 const diagnosticErrorCodes: ReadonlySet<string> = new Set(["spawn_failed", "timeout", "connection_closed"])
 const cancellationReason = "request no longer awaited"
+// Exit and stdout EOF can precede the parent's final stderr read. Await the
+// actual drainer, with a finite fallback for a child/descendant holding its
+// stderr pipe open. Caller interruption never has to wait out this budget.
+const terminalStderrDrainMs = 250
 
 type Pending = {
   readonly deferred: Deferred.Deferred<unknown, McpError>
@@ -131,7 +135,7 @@ type ConnectionState = {
   readonly pending: HashMap.HashMap<number, Pending>
 } | {
   readonly _tag: "Closed"
-  readonly error: McpError
+  readonly error: Deferred.Deferred<McpError>
 }
 
 const positiveInteger = (value: number): boolean => Number.isSafeInteger(value) && value > 0
@@ -249,7 +253,7 @@ export const connect = (
     )
 
     const stderrTail = yield* Ref.make<Uint8Array>(new Uint8Array())
-    yield* handle.stderr.pipe(
+    const stderrDrainer = yield* handle.stderr.pipe(
       Stream.runForEach((chunk) =>
         Ref.update(stderrTail, (current) => {
           const tail = chunk.byteLength >= maxStderrBytes
@@ -277,17 +281,18 @@ export const connect = (
         })
         if (rendered !== "") diagnostic("stderr", rendered)
         return rendered === ""
-        ? error
-        : new McpError({
-          code: error.code,
-          message: `${error.message} (stderr diagnostic withheld)`,
-          server: error.server
-        })
+          ? error
+          : new McpError({
+            code: error.code,
+            message: `${error.message} (stderr diagnostic withheld)`,
+            server: error.server
+          })
       })
     }
 
     const nextId = yield* Ref.make(0)
     const outbound = yield* Queue.bounded<Uint8Array>(queueCapacity)
+    const terminalError = yield* Deferred.make<McpError>()
     const state = yield* Ref.make<ConnectionState>({ _tag: "Open", pending: HashMap.empty() })
 
     // Define these before starting the reader: a server can send a request
@@ -296,7 +301,7 @@ export const connect = (
       Effect.flatMap(Queue.offer(outbound, frame), (offered) =>
         offered
           ? Effect.void
-          : Effect.flatMap(withStderr(closed(options.server, "outbound queue closed")), Effect.fail))
+          : Effect.flatMap(Deferred.await(terminalError), Effect.fail))
 
     const frameOf = (method: string, message: Rpc.OutboundMessage): Effect.Effect<Uint8Array, McpError> =>
       Effect.try({
@@ -316,33 +321,44 @@ export const connect = (
       )
 
     /** Closes once, fails every waiter, and rejects all future traffic. */
-    const closeWith = (baseError: McpError) =>
+    const closeWith = (baseError: McpError, drainStderr = true) =>
       Effect.uninterruptible(Effect.gen(function*() {
-        const error = yield* withStderr(baseError)
         const waiters = yield* Ref.modify(state, (current) =>
           current._tag === "Closed"
             ? [undefined, current] as const
-            : [Array.from(HashMap.values(current.pending)), { _tag: "Closed", error }] as const)
+            : [Array.from(HashMap.values(current.pending)), { _tag: "Closed", error: terminalError }] as const)
         if (waiters === undefined) return
-        // Wake blocked offers first, then settle every registered request.
-        // No caller can leave the connection scope before this cleanup has
-        // completed because the request deferreds are the terminal signal.
+        // Stop admission immediately. Pending requests and blocked/new offers
+        // share the terminal result, so none can tear down the stderr reader
+        // merely because a different process signal won the close race.
         yield* Queue.shutdown(outbound)
-        yield* Effect.forEach(waiters, (pending) => Deferred.fail(pending.deferred, error), {
-          discard: true
-        })
+        yield* (drainStderr && diagnosticErrorCodes.has(baseError.code)
+          ? Fiber.await(stderrDrainer).pipe(
+            Effect.asVoid,
+            Effect.timeoutOrElse({ duration: terminalStderrDrainMs, orElse: () => Effect.void }),
+            Effect.interruptible
+          )
+          : Effect.void).pipe(Effect.ensuring(Effect.gen(function*() {
+            // Even interruption while draining settles every waiter. Awaiting
+            // the drainer's fiber does not interrupt that fiber on timeout.
+            const error = yield* withStderr(baseError)
+            yield* Deferred.succeed(terminalError, error)
+            yield* Effect.forEach(waiters, (pending) => Deferred.fail(pending.deferred, error), {
+              discard: true
+            })
+          })))
       }))
 
     // Scope closure tears down the child, so no remote process remains to
     // receive per-request cancellations from this connection finalizer.
-    yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed")))
+    yield* Effect.addFinalizer(() => closeWith(closed(options.server, "connection scope closed"), false))
 
     // Writer: drains outbound frames into the process's stdin for the life of
     // the connection scope. A write failure is the same "connection is gone"
     // fact the reader loop reports, so it collapses pending requests too.
     yield* Stream.fromQueue(outbound).pipe(
       Stream.run(handle.stdin),
-      Effect.ensuring(closeWith(closed(options.server, "stdin closed"))),
+      Effect.onExit((exit) => closeWith(closed(options.server, "stdin closed"), !Exit.hasInterrupts(exit))),
       Effect.forkScoped
     )
 
@@ -452,7 +468,7 @@ export const connect = (
                 ...current,
                 pending: HashMap.set(current.pending, id, { deferred, method })
               }] as const)
-          if (registration !== undefined) return yield* Effect.fail(registration)
+          if (registration !== undefined) return yield* Effect.flatMap(Deferred.await(registration), Effect.fail)
           yield* enqueue(frame)
           sent = true
           return yield* Deferred.await(deferred)
@@ -487,7 +503,7 @@ export const connect = (
       }
       return Effect.gen(function*() {
         const current = yield* Ref.get(state)
-        if (current._tag === "Closed") return yield* Effect.fail(current.error)
+        if (current._tag === "Closed") return yield* Effect.flatMap(Deferred.await(current.error), Effect.fail)
         const frame = yield* frameOf(method, { jsonrpc: "2.0", method, params })
         yield* enqueue(frame)
       }).pipe(

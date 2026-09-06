@@ -59,8 +59,8 @@ export const Workspace = S.Workspace("example", {
 ```
 
 ```ts
-import { packageTargets } from "./package-targets.ts"
 import { Smithers } from "@smthrs/targets"
+import { packageTargets } from "./package-targets.ts"
 import { packageTargets } from "./package-targets.ts"
 
 // PACKAGE.ts: no manager, no runtime.
@@ -246,19 +246,24 @@ with a different argv.
 
 ## Contributing to the documentation
 
-`docs/` is the source of the public site at https://targets.smithers.sh; the
-copy under `apps/docs/targets/src/content/docs/` is a synced cache, and CI
-fails on drift. Edit the colocated page, then run:
+The pages in `docs/reference/` feed the main site's
+[@smthrs/targets API reference](https://smithers.sh/docs/reference/api/targets/)
+and target-rule reference. `apps/site/scripts/ingest-reference.mjs` writes
+their cached copies under `apps/site/src/content/docs/docs/reference/`, and
+CI checks that they match. There is no `@smithers/docs-targets` workspace.
+Edit the colocated page, then run these commands from the repository root:
 
 ```bash
-pnpm exec dprint fmt 'docs/**/*.md' 'README.md'
-pnpm --filter @smithers/docs-targets sync:docs
-pnpm --filter @smithers/docs-targets build
+pnpm --filter @smthrs/targets exec dprint fmt 'docs/**/*.md' README.md
+node apps/site/scripts/ingest-reference.mjs
+node apps/site/scripts/generate-llms.mjs
+pnpm --filter @smithers/site run build
 ```
 
-`apps/docs/shared/AUTHORING.md` is the page contract: frontmatter `title` and
-`description` on every page, no `#` heading in the body, no em or en dash
-outside code fences, and a language on every fence.
+`apps/site/prompts/reference-style.md` is the reference-page contract.
+Keep the source page's `area` and any `slug` fields, which select its route;
+the ingest script uses them to choose the generated path and adds the site's
+navigation fields.
 
 `docs/rules.md` is hand maintained. No gate compares it to `src/`, so adding a
 rule, changing its `kinds`, or making it cacheable is also an edit to that

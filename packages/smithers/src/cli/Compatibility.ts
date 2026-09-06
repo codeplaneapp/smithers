@@ -65,7 +65,11 @@ export const legacyArguments = (args: ReadonlyArray<string>): Array<string> | un
   return undefined
 }
 
-/** Modern log formatting and pagination use the canonical streaming command. */
+/**
+ * Modern log formatting and pagination use the canonical streaming command.
+ * @category parsing
+ * @since 1.0.0
+ */
 export const formattedLogArguments = (args: ReadonlyArray<string>): Array<string> | undefined => {
   let index = 0
   while (index < args.length && args[index]!.startsWith("-")) {

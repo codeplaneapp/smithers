@@ -20,8 +20,8 @@
 import { Context, Layer } from "effect"
 import { existsSync, statSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
-import * as Environment from "./Environment.ts"
 import * as CliError from "./CliError.ts"
+import * as Environment from "./Environment.ts"
 
 /**
  * Directory and file names that mark a Smithers 0.x project.
