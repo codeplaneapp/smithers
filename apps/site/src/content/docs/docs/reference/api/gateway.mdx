@@ -94,15 +94,16 @@ procedure does, including the principal it stamps on mutations.
 
 The Node host: bind policy, credential policy, and the socket.
 
-| Export                 | Signature                                                                                                                               | Meaning                                                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ServerOptions`        | `ListenOptions & { listen?: boolean; credential?: string; heartbeatMillis?: number; maxRequestBodyBytes?: number }`                     | Where the gateway binds, and whether a non-loopback bind was asked for.                                       |
-| `defaultServerOptions` | `ServerOptions`                                                                                                                         | `{ host: "127.0.0.1", port: 7331 }`: loopback, no credential.                                                 |
-| `isLoopbackHost`       | `(host: string) => boolean`                                                                                                             | True for `127.0.0.1`, `::1`, and `localhost`, and nothing else.                                               |
-| `bindRefusal`          | `(options: ServerOptions) => GatewayError \| undefined`                                                                                 | The typed `bind_failed` refusal a requested bind earns, or `undefined` when it is allowed.                    |
-| `listenOptions`        | `(options: ServerOptions) => Effect<ListenOptions, GatewayError>`                                                                       | The admitted `node:net` options, with this module's own fields removed, or that refusal in the error channel. |
-| `layerAuth`            | `(options: ServerOptions) => Layer<ControlRpcs.ControlAuth>`                                                                            | Bearer authentication when a credential is configured, and the loopback-only local operator when none is.     |
-| `layer`                | `(health: GatewayServer.Health, options?: ServerOptions) => Layer<..., GatewayError, Control \| SyncAuth \| SyncServer \| Projections>` | The assembled gateway on a Node HTTP server.                                                                  |
+| Export                 | Signature                                                                                                                                             | Meaning                                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ServerOptions`        | `ListenOptions & { allowedHosts?: readonly string[]; listen?: boolean; credential?: string; heartbeatMillis?: number; maxRequestBodyBytes?: number }` | Bind address, explicitly admitted Host names, authentication, and request limits.                             |
+| `defaultServerOptions` | `ServerOptions`                                                                                                                                       | `{ host: "127.0.0.1", port: 7331 }`: loopback, no credential.                                                 |
+| `isLoopbackHost`       | `(host: string) => boolean`                                                                                                                           | True for `127.0.0.1`, `::1`, and `localhost`, and nothing else.                                               |
+| `bindRefusal`          | `(options: ServerOptions) => GatewayError \| undefined`                                                                                               | The typed `bind_failed` refusal a requested bind earns, or `undefined` when it is allowed.                    |
+| `listenOptions`        | `(options: ServerOptions) => Effect<ListenOptions, GatewayError>`                                                                                     | The admitted `node:net` options, with this module's own fields removed, or that refusal in the error channel. |
+| `layerAuth`            | `(options: ServerOptions) => Layer<ControlRpcs.ControlAuth>`                                                                                          | Bearer authentication when a credential is configured, and the loopback-only local operator when none is.     |
+| `bearerPrincipal`      | `Readonly<{ id: string; kind: string }>`                                                                                                              | The frozen `{ id: "gateway", kind: "bearer" }` identity stamped by shared-bearer authentication.              |
+| `layer`                | `(health: GatewayServer.Health, options?: ServerOptions) => Layer<..., GatewayError, Control \| SyncAuth \| SyncServer \| Projections>`               | The assembled gateway on a Node HTTP server.                                                                  |
 
 `layer` supplies the bind policy, the shared-credential authentication both RPC
 mounts run under, and newline-delimited JSON as the wire serialization. The
@@ -120,8 +121,11 @@ Two rules decide whether a bind is allowed, and both fail closed.
 2. A non-loopback bind requires a bearer credential.
 
 A loopback bind with no credential is allowed and is the local default. One
-shared bearer authenticates every mount and binds one principal: there are no
-users, no roles, no per-run ownership, and no scopes. See
+shared bearer authenticates every mount as `bearerPrincipal`. This does not
+grant approval authority. The owning Control runtime must explicitly delegate
+the allowed approval target kinds and scopes through `ApprovalAuthority`;
+without that delegation, bearer approve and deny requests are unauthorized.
+Every holder of the shared credential has the same delegated authority. See
 [Serve beyond loopback](https://gateway.smithers.sh/guides/serve-beyond-loopback/).
 
 Without that bearer, `NodeGateway.layer` enables `loopbackOnly`: every request

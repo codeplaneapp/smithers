@@ -80,6 +80,17 @@ describe("PlanCard.digest golden vectors", () => {
     expect(second.digest).not.toBe(first.digest)
   })
 
+  it("persists executable identity and binds it into the approval independently of the envelope", async () => {
+    const original = await cardFor({ ...bare, executionDigest: "a".repeat(64) })
+    const unchanged = await cardFor({ ...bare, planId: "another-plan", executionDigest: "a".repeat(64) })
+    const changed = await cardFor({ ...bare, executionDigest: "b".repeat(64) })
+    expect(original.executionDigest).toBe("a".repeat(64))
+    expect(unchanged.digest).toBe(original.digest)
+    expect(changed.digest).not.toBe(original.digest)
+    expect(changed.envelope).toEqual(original.envelope)
+    expect(changed.approval.target.digest).toBe(changed.digest)
+  })
+
   it("separates plans that differ only in flow, envelope, deploy class, or persisted graph", async () => {
     const base = await cardFor(bare)
     const variants = await Promise.all([

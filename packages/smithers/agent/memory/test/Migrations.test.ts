@@ -1,14 +1,13 @@
-import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as TestDatabase from "@smthrs/database/test/TestDatabase"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { readdirSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import * as Sql from "../src/internal/Sql.ts"
 import * as MemoryStore from "../src/MemoryStore.ts"
+import * as Migrations from "../src/Migrations.ts"
 import * as TestMemory from "../src/test/TestMemory.ts"
 
 const migrationsDirectory = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "migrations")
@@ -118,12 +117,92 @@ const describeSchema = Effect.gen(function*() {
 })
 
 describe("memory migrations", () => {
-  it("mirrors every checked-in migration file in Sql.migrate", async () => {
-    const fromMigrate = await Effect.runPromise(
+  it("upgrades the legacy global message key without losing rows", async () => {
+    const result = await Effect.runPromise(
       Effect.gen(function*() {
         const sql = yield* Effect.service(SqlClient.SqlClient)
-        const writer = yield* DurableWriter.DurableWriter
-        yield* Sql.migrate({ sql, write: writer.write })
+        yield* sql`CREATE TABLE memory_threads (
+          thread_id TEXT PRIMARY KEY,
+          namespace_kind TEXT NOT NULL,
+          namespace_id TEXT NOT NULL,
+          title TEXT,
+          metadata_json TEXT,
+          created_at_ms INTEGER NOT NULL,
+          updated_at_ms INTEGER NOT NULL
+        )`
+        yield* sql`CREATE TABLE memory_messages (
+          id TEXT PRIMARY KEY CHECK (length(id) > 0),
+          thread_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          text TEXT NOT NULL,
+          at_ms INTEGER NOT NULL,
+          FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
+        )`
+        yield* sql`CREATE INDEX memory_messages_thread_order_idx
+          ON memory_messages (thread_id, at_ms, id)`
+        yield* sql`INSERT INTO memory_threads (
+          thread_id, namespace_kind, namespace_id, created_at_ms, updated_at_ms
+        ) VALUES ('legacy-thread', 'global', 'history', 1, 1)`
+        yield* sql`INSERT INTO memory_messages (id, thread_id, role, text, at_ms)
+          VALUES ('shared', 'legacy-thread', 'user', 'legacy', 1)`
+        const store = yield* MemoryStore.make
+        yield* store.appendMessage({ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 })
+        const table = yield* sql<{ readonly sql: string }>`SELECT sql FROM sqlite_master
+          WHERE type = 'table' AND name = 'memory_messages'`
+        return {
+          definition: table[0]?.sql,
+          messages: yield* Effect.all([
+            store.listMessages({ threadId: "legacy-thread" }),
+            store.listMessages({ threadId: "new-thread" })
+          ])
+        }
+      }).pipe(Effect.provide(TestDatabase.layer), Effect.provide(testCrypto))
+    )
+
+    expect(result.definition).toMatch(/PRIMARY KEY\s*\(\s*thread_id\s*,\s*id\s*\)/iu)
+    expect(result.messages).toEqual([
+      [{ threadId: "legacy-thread", id: "shared", role: "user", text: "legacy", at: 1 }],
+      [{ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 }]
+    ])
+  })
+
+  it("records the completed memory schema exactly once", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const first = yield* Migrations.run
+        const second = yield* Migrations.run
+        const sql = yield* SqlClient.SqlClient
+        const recorded = yield* sql`SELECT migration_id, name FROM flows_migrations ORDER BY migration_id`
+        return { first, second, recorded }
+      }).pipe(Effect.provide(TestDatabase.layer))
+    )
+    expect(result.first).toEqual([[7001, "memory_initial"]])
+    expect(result.second).toEqual([])
+    expect(result.recorded).toEqual([{ migration_id: 7001, name: "memory_initial" }])
+  })
+
+  it("rolls back partial schema creation without recording a failed migration", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        // A conflicting table makes index creation fail after memory_facts was
+        // created. Both the new table and the migration identity must roll back.
+        yield* sql`CREATE TABLE memory_facts_expiry_idx (id INTEGER)`
+        const failure = yield* Effect.exit(Migrations.run)
+        const facts = yield* sql`SELECT name FROM sqlite_master WHERE name = 'memory_facts'`
+        const recorded = yield* sql`SELECT migration_id FROM flows_migrations`
+        return { failure, facts, recorded }
+      }).pipe(Effect.provide(TestDatabase.layer))
+    )
+    expect(Exit.isFailure(result.failure)).toBe(true)
+    expect(result.facts).toEqual([])
+    expect(result.recorded).toEqual([])
+  })
+
+  it("mirrors every checked-in migration file in the registered migration", async () => {
+    const fromMigrate = await Effect.runPromise(
+      Effect.gen(function*() {
+        yield* Migrations.run
         return yield* describeSchema
       }).pipe(Effect.provide(TestDatabase.layer))
     )
@@ -193,8 +272,8 @@ describe("memory migrations", () => {
           limit: 10
         })
 
-        // A second incarnation over the same database, exactly what a resumed
-        // process builds. Its migration must not drop rows or reset search.
+        // Rebuilding the service on one connection must not reset rows or
+        // search. DurableMemory.test.ts separately exercises process restart.
         const second = yield* MemoryStore.make
         const facts = yield* second.listFacts({ namespace: { kind: "flow", id: "reopen" } })
         const after = yield* second.searchFts({

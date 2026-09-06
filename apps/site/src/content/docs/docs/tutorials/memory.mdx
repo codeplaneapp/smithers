@@ -19,7 +19,7 @@ A memory policy decides which namespace a flow tree reads and writes, whether re
 - The libraries:
 
 ```bash
-pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/memory@next @smthrs/harness@next @smthrs/model@next @smthrs/registry@next @smthrs/database@next @smthrs/platform-node@next
+pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/memory@next @smthrs/harness@next @smthrs/model@next @smthrs/registry@next @smthrs/database@next @smthrs/platform-node@next @smthrs/control@next @smthrs/time-travel@next
 ```
 
 You need no provider key: the seat resolves to a scripted model, so the runs are deterministic. Point `SeatResolver` at a provider route and nothing above it changes.
@@ -41,12 +41,15 @@ import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { DurableWriter } from "@smthrs/database"
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as ControlMigrations from "@smthrs/control/Migrations"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as MemoryFlows from "@smthrs/memory/Flows"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import * as MemoryMigrations from "@smthrs/memory/Migrations"
 import * as Recall from "@smthrs/memory/Recall"
 import * as RecallFts from "@smthrs/memory/RecallFts"
 import * as WithMemory from "@smthrs/memory/WithMemory"
@@ -54,6 +57,7 @@ import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
 import * as Registry from "@smthrs/registry/Registry"
+import * as TimeTravelMigrations from "@smthrs/time-travel/Migrations"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -117,7 +121,7 @@ const Keep = Flow.make("notes/Keep", {
 const facts: ReadonlyArray<{ readonly key: string; readonly text: string }> = [
   { key: "changelog-format", text: "Release notes group entries by package, newest first." },
   { key: "release-cadence", text: "Release notes ship with every tagged release, never between." },
-  { key: "review-owner", text: "The docs owner reviews the notes before the tag is pushed." }
+  { key: "review-owner", text: "The docs owner reviews release notes before the tag is pushed." }
 ]
 
 const prepared: Route.PreparedRequest = {
@@ -190,9 +194,17 @@ const seats = SeatResolver.layer({
 })
 
 // The memory store and the FTS recall service, over the project's control
-// database.
+// database. Apply its complete schema before building memory: migration IDs
+// share one ordered ledger, so memory's later block must not skip control.
 const database = Layer.provideMerge(
-  DurableWriter.layer(),
+  Layer.mergeAll(
+    DurableWriter.layer(),
+    DatabaseMigrations.layer([
+      ...TimeTravelMigrations.sets,
+      ControlMigrations.set,
+      MemoryMigrations.set
+    ])
+  ),
   NodeDatabase.layer({ filename: ".flows/control.db" })
 )
 

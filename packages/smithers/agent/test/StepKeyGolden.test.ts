@@ -5,16 +5,14 @@
  * RELATION between keys — two calls agree, two runs differ, a park replays —
  * and a relation survives a change that moves every key at once. Rewriting the
  * material a sealed model call hashes, or the composition token folded into a
- * cell call, invalidates every step recorded by every released host and pays
- * for one provider call again per boundary, silently, because the relational
- * assertions all still hold.
+ * cell call, makes previously recorded steps miss even while the relational
+ * assertions all still hold. A live model host would dispatch those calls again.
  *
- * So these cases pin the exact strings. A failure here is never a bug on its
- * own: it says the identity moved, and the change is releasable only once the
- * move is deliberate and recorded in CHANGELOG.md as a cache-invalidation
- * event — which is exactly how the rename from
- * `flows/engine-harness/composition/v1` to `flows/agent/composition/v1` was
- * released.
+ * So these cases pin the exact strings. A failure needs its key material
+ * investigated before the fixture changes. This 1.0 rewrite has not been
+ * released; these vectors establish the baseline for its first release.
+ * Deliberate future identity changes belong in CHANGELOG.md so hosts can
+ * account for cache invalidation.
  *
  * Each key is read back through `Action.CurrentInvocationKey` inside the
  * dispatched activity, so what is pinned is the identity the ENGINE carried,
@@ -192,14 +190,15 @@ describe("the sealed model step key", () => {
       }
     }))
 
-    // Changing this literal is a CACHE-INVALIDATION EVENT: every sealed model
-    // step every released host recorded misses, and each one pays the provider
-    // again. Record the move in CHANGELOG.md before changing it. The material
-    // behind it is the prepared wire request (route, protocol, method, url,
+    // The prior unreleased literal was stale: isolated a49b68ef7d HEAD sources
+    // and the release fixes produce byte-identical canonical key material with
+    // the pinned Effect rc.112. Only this fixture was corrected; no runtime
+    // schema changed. Investigate and document any future move. The material
+    // includes the prepared wire request (route, protocol, method, url,
     // public headers, canonical body bytes), the harness's declared key
     // material, and — because this port declares `capabilities` — the cache
     // environment carrying the composition token.
-    expect(observed.host).toBe("key1_7c2a7296d4c4d5706b4509987f48c0478818d7f74496bba9c62c57949403a85e")
+    expect(observed.host).toBe("key1_b5b3584a4ab3f2df73c684edccbb962e95e5497a4c33ac14d7f6601a4b3b043f")
     // Sealed means content-addressed: the same declaration through a second
     // port of the same composition is one recorded answer, not two calls.
     expect(observed.again).toBe(observed.host)

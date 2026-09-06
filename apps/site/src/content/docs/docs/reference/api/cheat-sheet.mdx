@@ -1136,13 +1136,15 @@ const changesetsPublish = S.Changesets.Publish({
 
 ## CI toolchains and workflow generation
 
+`CiToolchain.Node` accepts an optional `npmRelease` pin. The generated job installs that npm version after setting up Node; omitting it keeps Node's bundled npm. The release tarball rehearsal requires npm 11.16.0, so its toolchain declares that pin explicitly.
+
 ```ts
 import { Smithers as S } from "@smthrs/targets"
 
 const test = S.Shell.Test({ shell: "pnpm test" })
 const lint = S.Shell.Test({ shell: "pnpm lint" })
 
-const node = S.CiToolchain.Node({ release: "22.19.0" })
+const node = S.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
 const bun = S.CiToolchain.Bun({ release: "1.4.1" })
 const ripgrep = S.CiToolchain.Ripgrep({ release: "14.1.1" })
 const apt = S.CiToolchain.Apt({ packages: ["libssl-dev", "pkg-config"] })

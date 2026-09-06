@@ -522,7 +522,7 @@ describe("the assembled gateway over a real loopback bind", () => {
         expect(
           (yield* Effect.promise(() => raw(url, [...upgrade, "Origin: http://rebind.example"], "", "rebind.example")))
             .status
-        ).toBe(403)
+        ).toBe(421)
         expect((yield* Effect.promise(() => raw(url, [...upgrade, `Origin: ${url}`]))).status).toBe(101)
         expect((yield* Effect.promise(() => raw(url, upgrade))).status).toBe(101)
       }
@@ -539,7 +539,7 @@ describe("the assembled gateway over a real loopback bind", () => {
         expect(
           (yield* Effect.promise(() => raw(url, ["GET /health HTTP/1.1", "X-Forwarded-Host: localhost"], "", host)))
             .status
-        ).toBe(403)
+        ).toBe(421)
       }
       expect((yield* Effect.promise(() => fetch(`${url}/health`, { headers: { origin: url } }))).status).toBe(200)
     }).pipe(Effect.provide(served())))
@@ -553,6 +553,19 @@ describe("the assembled gateway over a real loopback bind", () => {
           raw(url, ["GET /health HTTP/1.1", "Origin: https://attacker.example"], "", "gateway.example")
         )).status
       ).toBe(403)
+    }).pipe(Effect.provide(served({
+      host: "127.0.0.1",
+      port: 0,
+      allowedHosts: ["gateway.example"],
+      credential: "explicit-network-host-test"
+    }))))
+
+  test("keeps an explicitly allowed network Host closed without a credential", () =>
+    Effect.gen(function*() {
+      const url = yield* baseUrl
+      const response = yield* Effect.promise(() => raw(url, ["GET /health HTTP/1.1"], "", "gateway.example"))
+      expect(response.status).toBe(421)
+      expect(JSON.parse(response.body)).toMatchObject({ code: "invalid_host" })
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, allowedHosts: ["gateway.example"] }))))
 
   test("answers GET /health with the workspace identity and the package version", () =>
@@ -595,7 +608,7 @@ describe("the assembled gateway over a real loopback bind", () => {
       expect(JSON.parse(hostileHttp.body)).toEqual({
         _tag: "flows/gateway/GatewayError",
         code: "invalid_origin",
-        message: "This local gateway accepts only loopback browser origins"
+        message: "The browser Origin must match an allowed gateway Host"
       })
 
       const hostileUpgrade = yield* Effect.promise(() => upgradeRpc(["Origin: https://evil.example"]))
@@ -626,7 +639,7 @@ describe("the assembled gateway over a real loopback bind", () => {
       expect(JSON.parse(foreignHost.body)).toEqual({
         _tag: "flows/gateway/GatewayError",
         code: "invalid_host",
-        message: "This local gateway accepts only loopback Host values"
+        message: "This gateway does not allow the supplied Host value"
       })
 
       for (const host of ["gateway.example", "localhost.evil.example", "localhost@evil.example", "localhost:65536"]) {
@@ -649,8 +662,9 @@ describe("the assembled gateway over a real loopback bind", () => {
           "https://[::1]"
         ]
       ) {
-        expect([origin, (yield* Effect.promise(() => postRpc([`Origin: ${origin}`]))).status]).toEqual([origin, 200])
-        expect([origin, (yield* Effect.promise(() => upgradeRpc([`Origin: ${origin}`]))).status]).toEqual([origin, 101])
+        const headers = [`Host: ${new URL(origin).host}`, `Origin: ${origin}`]
+        expect([origin, (yield* Effect.promise(() => postRpc(headers))).status]).toEqual([origin, 200])
+        expect([origin, (yield* Effect.promise(() => upgradeRpc(headers))).status]).toEqual([origin, 101])
       }
       expect((yield* Effect.promise(() => postRpc([]))).status).toBe(200)
       expect((yield* Effect.promise(() => upgradeRpc([]))).status).toBe(101)

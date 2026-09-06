@@ -34,13 +34,13 @@
   charged under a distinct invocation receipt. It survives journal recovery
   without giving a later provider retry a paid sealed-step marker. Partial
   failed text is still discarded; cumulative counters count once per attempt.
-- **Sealed model cache identity changes:** the model action's encoded failure
-  contract now includes infrastructure failures from receipt allocation and
-  usage persistence. This changes the schema-bearing activity key (the pinned
-  golden request moves from `key1_bd674ce5…` to `key1_7c2a7296…`); prior model
-  action keys will not be reused. Do not roll unfinished runs onto this change
-  assuming cache continuity. The release-wide unfinished-run migration policy
-  remains a prerequisite for that deployment.
+- The model action's encoded failure contract includes infrastructure failures
+  from receipt allocation and usage persistence. Corrected its stale unreleased
+  golden to `key1_b5b3584a…`: review baseline `a49b68ef7d` and the release fixes
+  produce byte-identical canonical preimages under Effect `4.0.0-rc.112`, with
+  the cell-call golden unchanged. This is a fixture correction for the first
+  release, with no runtime or schema alteration. Schema representation is key
+  material, so future dependency upgrades must verify these vectors as well.
 
 ## [1.0.0-rc.0] - 2026-09-01
 

@@ -98,6 +98,26 @@ const nodeTarget = (runId: string) => ({
 })
 
 describe("SqlControlRuntime against a rewritten row", () => {
+  it("refuses unavailable flow catalogs without storing a plan and recovers on the next read", async () => {
+    let unavailable = true
+    const failure = new PersistenceError({ operation: "load flows", message: "Registry unavailable" })
+    const observed = await withRuntime((runtime) =>
+      Effect.gen(function*() {
+        const planFailure = yield* Effect.flip(runtime.plan({ flowId: "system/test", input: {} }))
+        const listFailure = yield* Effect.flip(runtime.listFlows)
+        unavailable = false
+        const listed = yield* runtime.listFlows
+        const planned = yield* runtime.plan({ flowId: "system/test", input: {} })
+        return { planFailure, listFailure, listed, planned }
+      }), {
+      loadFlows: () => unavailable ? Effect.fail(failure) : Effect.succeed(flows)
+    })
+    expect(observed.planFailure).toBe(failure)
+    expect(observed.listFailure).toBe(failure)
+    expect(observed.listed).toEqual([{ flowId: "system/test", description: "Reserved test system flow" }])
+    expect(observed.planned.card.planId).toBe("plan-1")
+  })
+
   it("refuses a token whose stored target no longer matches the identity columns", async () => {
     // The composite columns select the token; the JSON beside them is what the
     // decision is made against. A process that rewrote only the blob could

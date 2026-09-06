@@ -65,7 +65,11 @@ const descriptorOf = (seat: Option.Option<string>): Descriptor.FlowDescriptor =>
   new Descriptor.FlowDescriptor({
     name: flowId,
     description: "The notes agent.",
-    body: new Descriptor.BodyRefMarkdown({ path: "/flows/agents/notes/flow.md", baseDirectory: "/flows/agents/notes" }),
+    body: new Descriptor.BodyRefMarkdown({
+      path: "/flows/agents/notes/flow.md",
+      baseDirectory: "/flows/agents/notes",
+      contentDigest: "a".repeat(64)
+    }),
     input: new Descriptor.SchemaRefNone(),
     output: new Descriptor.SchemaRefNone(),
     model: seat,
@@ -99,6 +103,7 @@ const launchInput: ControlExecutor.Launch = {
       planId,
       flowId,
       digest: "plan-digest",
+      executionDigest: Descriptor.executionDigest(seated),
       inputSummary: "{}",
       envelope,
       deployClass: false,
@@ -561,6 +566,27 @@ describe("the executor's status fence", () => {
 })
 
 describe("the executor's registry seam", () => {
+  it("refuses an approved prompt plan without a measured execution identity before starting the agent", async () => {
+    const record = recorder()
+    let agentCalls = 0
+    const failure = await withExecutor(record, {
+      agent: Agent.makeNoop({
+        run: () => {
+          agentCalls++
+          return Stream.empty
+        }
+      })
+    }, (executor) =>
+      Effect.flip(executor.launch({
+        ...launchInput,
+        plan: { ...launchInput.plan, card: { ...launchInput.plan.card, executionDigest: undefined } }
+      })))
+    expect(failure).toBeInstanceOf(LaunchFailed)
+    expect((failure as LaunchFailed).message).toContain("create and approve a new plan")
+    expect(agentCalls).toBe(0)
+    expect(record.statuses).toEqual([])
+  })
+
   it("refuses a launch whose discovered body cannot be loaded", async () => {
     const record = recorder()
     const failure = await withExecutor(
@@ -595,7 +621,7 @@ describe("the executor's registry seam", () => {
 
     expect(result.acceptance).toBe("accepted")
     expect(result.status).toBe("failed")
-    expect(causeOf(record)).toContain("declares no model seat")
+    expect(causeOf(record)).toContain("changed or has no approved executable identity")
   })
 
   it("fails the run when the flow's body becomes a module between the launch and the body", async () => {
@@ -637,7 +663,14 @@ describe("the executor's registry seam", () => {
     const failure = await withExecutor(
       record,
       { registry: { getOption: () => Effect.succeed(Option.some(descriptorOf(Option.none()))) } },
-      (executor) => Effect.flip(executor.launch(launchInput))
+      (executor) =>
+        Effect.flip(executor.launch({
+          ...launchInput,
+          plan: {
+            ...launchInput.plan,
+            card: { ...launchInput.plan.card, executionDigest: Descriptor.executionDigest(descriptorOf(Option.none())) }
+          }
+        }))
     )
 
     expect(failure.message).toContain("declares no model seat")

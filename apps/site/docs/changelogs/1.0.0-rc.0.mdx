@@ -1,282 +1,67 @@
 ---
 title: "1.0.0-rc.0"
-description: "Smithers 1.0.0-rc.0 replaces the 0.x JSX workflow engine with a durable Effect engine and a source migration path."
+description: "Unreleased notes for the Smithers 1.0 rewrite: typed flows, durable execution, target caching, and source migration."
 ---
 
-Status: release candidate. Prepared, not published. Publishing is a manual
-maintainer action.
+Status: unreleased. These notes describe the current 1.0 rewrite. They do not certify a published artifact or announce a completed release rehearsal.
 
-Smithers 1.0.0-rc.0 replaces the 0.x JSX workflow engine with a durable
-Effect engine: a flow is a typed Effect program, its side effects are
-journaled as they happen, and the next process reads the journal and
-continues from the record.
-
-This is a clean break. There is no JSX authoring API, no React reconciler, no
-0.x source compatibility, and no way to load or resume a 0.x run database. A
-0.x project migrates its source with `smithers migrate` and starts its runs
-again.
+Smithers 1.0 replaces the 0.x JSX workflow engine with typed flows and actions over Effect, a durable SQLite engine, and a target graph for builds and tests. A run records its work so a later process can continue from persisted state.
 
 ## Install
+
+Use the [installation guide](/docs/installation/) for the source-checkout route while the rewrite is unreleased. The configured candidate release channel is `next`:
 
 ```sh
 npm install --global @smthrs/cli@next
 ```
 
-The candidate publishes to the `next` dist-tag. `latest` still resolves the 0.x
-line, so an existing `npm install smthrs` is not pulled onto this release.
+That registry command applies once a candidate is published. The CLI requires Node.js `^22.19.0 || >=24.11.0`. Effect and its platform packages are pinned to exactly `4.0.0-rc.112`; use the same physical Effect instance throughout a composition. Install the CLI locally beside target declaration dependencies when running target commands in a project.
 
-Requires Node.js 22.19.0 or later. Every published package pins `effect` and
-the `@effect/*` packages to exactly `4.0.0-rc.112`; install that exact
-version, because two Effect instances in one process are not interoperable.
+## Authoring and execution
 
-## Read this before upgrading
+- `Flow.make`, `Action.make`, `Interpreter.layer`, and Effect replace JSX workflow components. Action declarations and their implementations are separate.
+- Markdown agent flows run through `smthrs up` with a configured model seat. TypeScript module flows can be discovered and planned by the CLI, but execution remains `pending` until a host registers the flow, provides its action layers, and drives it. See [module flows](/docs/guides/module-flows/).
+- `WORKSPACE.ts` and `PACKAGE.ts` declare the target graph. `smthrs test`, `build`, and `lint` select targets; declared inputs and execution identities control caching. [The first-target tutorial](/docs/tutorials/first-target/) exercises a cache hit and input invalidation.
+- The agent runtime evaluates model-authored cells in QuickJS with declared flow tools and budgets. Typed output schemas validate values before downstream steps consume them.
 
-A release candidate is not a preview of unfinished work. Every exclusion
-below is enforced: the command is gone, the export is removed, or the call
-fails with a typed error. Nothing here half-works. What it does mean is that
-the public surface may still change before 1.0.0 final, and that each
-candidate declares one exact Effect version, so a changed pin is a breaking
-change listed in that candidate's notes.
+## Durable state and control
 
-Three things to check before you start:
+SQLite on Node.js is the supported durable runtime. The control plane uses `.flows/control.db`, the engine uses `.flows/engine.db`, and artifacts live under `.flows/objects/`. Services sharing a database must initialize their complete ordered migration set before opening later schema blocks. Internal pre-release schemas and 0.x run databases carry no compatibility promise.
 
-1. Your 0.x runs are finished, archived, or discarded. rc.0 will not load
-   them, and `smithers migrate` refuses to transform a project while a
-   non-terminal 0.x run exists.
-2. Your database is SQLite. A project that ran 0.x on PGlite or PostgreSQL
-   has no data path forward.
-3. You are on Node.js, not Bun, for anything durable.
+| Feature | Current surface |
+| --- | --- |
+| Durable waits | Deferred values, timers, signals, and human tasks survive engine restarts. |
+| Retry and ownership | Retry bounds are recorded with attempts. Claims, leases, and same-host process probes prevent a live peer's run from being stolen. |
+| Run control | `cancel`, `steer`, `signal`, `approve`, `deny`, and `run --resume`, subject to the host's authorization policy. |
+| Execution history | `smthrs runs inspect`, `replay`, `fork`, and `rewind`, plus the `@smthrs/time-travel` library. Replay reads history without dispatching actions. Forks may repeat external effects; eligible sealed results require an explicitly shared cache environment. |
+| Compensable writes | A real snapshot boundary is required. Host snapshots do not provide generic rollback for external services. |
+| Memory | Structured facts and FTS recall over SQLite; namespaces and memory policy determine visibility. |
+| Backup | `@smthrs/engine-store/DisasterRecovery`; source checkout script `packages/smithers/flows/engine-store/scripts/flows-backup.mjs backup\|verify\|restore`. |
+
+See the [support matrix](/docs/reference/support-matrix/) for runtime ranges, tested toolchain pins, platform boundaries, storage, and hosting requirements. Bun has a limited non-durable package scope. Browser bundling does not establish durable browser, Deno, or edge execution. Windows is unsupported; macOS CI is advisory.
+
+## Hosting and credentials
+
+The control plane is unauthenticated on loopback by default. Configure authentication and TLS termination before exposing it to other machines. `ControlClient.credential` applies to HTTP; a browser WebSocket watch does not carry that credential. Gateway authorization is a host composition choice. See [serving beyond loopback](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/docs/guides/serve-beyond-loopback.md) and the [support matrix](/docs/reference/support-matrix/#network-and-hosting).
+
+Journal and logger redaction recognize credential fields and known token shapes. Arbitrary secrets can still enter executable state or raw child-process output; output schemas and host integrations must handle those values deliberately.
+
+## Package inventory
+
+The release roster contains 49 packages. `node scripts/pack-release.mjs --names` prints the authoritative set in publication order. [The manifest inventory](/docs/reference/support-matrix/#published-node-engine-ranges) records each package's Node requirement. `@smthrs/flows` is the curated aggregate, `@smthrs/cli` provides both `smthrs` and `smithers`, and `@smthrs/targets` provides target declarations.
+
+Published export maps define the public API. `internal/` subpaths are excluded. The unscoped `smthrs` package is a migration notice, not the 1.0 authoring facade.
 
 ## Compatibility promise
 
-This paragraph is frozen in the release contract, section 11. `check-docs`
-asserts it byte for byte in the README, the migration guide, and the
-compatibility policy, because an approximate promise is a different promise.
-
 > Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. It provides no JSX workflow API, no `smthrs/jsx-runtime` or `smthrs/jsx-dev-runtime`, no React reconciler, no `<Workflow>`, `<Task>`, `<Sequence>`, `<Parallel>`, `<Loop>`, `<Ralph>`, `<Branch>`, `<Approval>`, `<Signal>`, `<Timer>`, `<Subflow>`, `<Worktree>`, or `<Saga>` components, no `createSmithers`, `runWorkflow`, `renderFrame`, or `SmithersCtx`, no `smthrs` facade, no 0.x CLI verbs beyond those listed in the 1.0 command table, no 0.x gateway protocol, and no ability to load, resume, or migrate 0.x run databases. No shim, adapter, or compatibility layer will be published. Flows are written against `@smthrs/flow` (`Flow`, `Action`, durable waits, `RetryPolicy`), `@smthrs/engine`, `@smthrs/control`, and Effect `4.0.0-rc.112`, and run on Node.js 22.19.0 or later with local SQLite. Existing 0.x projects migrate their source with the `migrate-smithers-v1` workflow (`smithers migrate`), which rewrites workflows, imports, configuration, scripts, and docs and reports every construct it could not translate. Runtime behavior between 0.x and 1.0 is not equivalent and is not intended to be.
 
-## Supported runtimes
+## Migrating source
 
-See the [RC support matrix](/docs/reference/support-matrix/) for the authoritative runtime, platform, storage, hosting, and evidence boundaries. It lists every published Node engine range, current CI pins, the Bun package scope, and the advisory platform rows.
+Finish or archive 0.x runs with the old CLI, then use `smthrs migrate` to plan the source conversion. `--apply --seat <provider:model>` executes it after the migration gates pass. Read the generated report and run the project's own checks. Verify migrated module flows through their application host; discovery alone does not prove execution. The [migration guide](/docs/migration/1.0/) lists removed commands, unsafe constructs, and run-state refusals.
 
-## Supported databases
+## Release validation
 
-SQLite only.
+Before publishing, run the required checks and the tarball consumer rehearsal on the exact candidate commit. Record the commit, runtimes, commands, and results with the release evidence. Earlier review transcripts and internal development runs are historical evidence; they do not certify a later candidate.
 
-| Item | Contract |
-| --- | --- |
-| Driver | `@effect/sql-sqlite-node` `4.0.0-rc.112` over Node.js `node:sqlite`; WAL on; `busy_timeout` 5 s; a `SQLITE_BUSY` open-retry ladder |
-| Control-plane file | `<project>/.flows/control.db` |
-| Engine file | `<project>/.flows/engine.db` |
-| Artifacts | `<project>/.flows/objects/` |
-| Migrations | one `flows_migrations` table per file; `MigrationSet {namespace, idOffset, migrations}`; `rejectSkipped` refuses a set at or below the applied high-water mark that was never applied |
-| Backup | `@smthrs/engine-store/DisasterRecovery`, driven by `scripts/flows-backup.mjs backup\|verify\|restore` |
-| PostgreSQL | Unsupported. `SMITHERS_BACKEND=postgres` and `--backend postgres` exit 1 with `unsupported_database`. |
-| PGlite | Unsupported, the same way. |
-| 0.x `smithers.db` | Refused. `NodeDatabase.layer` raises `unsupported_database_file` for a file that has tables and no `flows_migrations` table. |
-
-See the [RC support matrix](/docs/reference/support-matrix/#storage) for storage and schema-compatibility limits.
-
-## Published packages
-
-| Item | Count |
-| --- | --- |
-| Published packages | 40 |
-
-The set is frozen in release contract section 3.1 and printed in publication
-order by `node scripts/pack-release.mjs --names`. `@smthrs/flows` is the
-curated aggregate, `@smthrs/cli` owns the `smithers` binary, and the unscoped
-`smthrs` name publishes a migration notice whose only module throws on
-import.
-
-The wildcard export is the contract: every module a package ships under
-`src/` other than `internal/` is public API at 1.0.0-rc.0, and a later
-candidate that removes or renames one lists it as a breaking change.
-`internal/` carries no promise and is mapped to `null` in both export maps.
-
-## Run control
-
-| Feature | Ships in rc.0 |
-| --- | --- |
-| Cancel | `smithers cancel`, `Control.cancel`, and the `Cancel` RPC record the request durably on the engine row whichever process owns the run, then interrupt a local fiber. The cascade reaches linked children within one heartbeat tick. Cancelling a terminal run returns a `Terminal` receipt and writes no event. |
-| Signals | `smithers signal <run-id> <json>` persists the message, journals `control.signal.delivered`, and completes the matching `WaitFor` deferred by name. A run parked on `WaitFor` wakes within one heartbeat tick. |
-| Approvals | Plan-level approval for `deployClass` flows and node-level `ask` approvals park the run as `waiting-approval`. `approve` and `deny` take the serialized payload with scope `once`, `run`, or `remembered`, and the server stamps the principal. Approving a `Node` target resumes the run server-side. |
-| Steer | `Control.steer` and the `steer` verb, attributed to the acting principal. |
-| Retry bounds | An action's `RetryPolicy` `maxAttempts` and `expirationMs` survive park, resume, and process death. A pruned attempt row restarts the `expirationMs` budget from the current clock with a logged warning. |
-| Resume and ownership | `run --resume` is join-or-claim; a live peer's run returns `ClaimLost`. Heartbeat 1 s, stale after 30 s with 10 s skew. On a Node host the default liveness check probes the recorded process id and refuses a takeover while that process exists; every other host answers from the lease. |
-| Time travel | Library API only: `TimeTravel.inspect`, `replay`, `fork`, and `rewind` from `@smthrs/time-travel`. Not composed into the CLI, and no MCP tool. |
-| Retention | `smithers gc`. Journal compaction stays opt-in. |
-| Sync bounds | Bounded workspace subscriptions and a real credit window in `SyncClient`. The server is loopback-only by default. |
-| Process containment | Cancelling a run kills the process group of every child the kernel spawned, including one that ignores `SIGTERM`. No `PPID 1` orphan survives a cancel. A hard-killed engine process is covered by the next incarnation of the same host. |
-
-## Known limitations
-
-These paragraphs are the release contract's own wording, section 7, quoted
-verbatim. The same paragraphs are assembled with their enforcement points on
-known limitations.
-
-### Databases
-
-> **Databases.** Smithers 1.0.0-rc.0 stores run state in local SQLite only (`@effect/sql-sqlite-node` over Node.js `node:sqlite`). PostgreSQL and PGlite are not supported: no client layer or migration ladder ships, `SMITHERS_BACKEND=pglite|postgres` and `--backend pglite|postgres` exit with `unsupported_database`, and the 0.x `smithers migrate --to` database move is removed. Projects that ran 0.x on PGlite or PostgreSQL must finish or discard their runs on 0.x; there is no import path.
-
-### 0.x run data
-
-> **0.x run data.** 1.0.0-rc.0 does not load, resume, or migrate 0.x run databases (`smithers.db`) or `.smithers/executions` state; `smithers migrate` opens `smithers.db` read-only only to list non-terminal runs before refusing. Finish, archive, or discard 0.x runs with the 0.x CLI, then run `smithers migrate` to convert the project's source. A 0.x database is an archive-only file; no read-only history importer ships in this candidate.
-
-### Hijack
-
-> **Hijack.** `smithers hijack`, `smithers steer --takeover`, the `/v1/pty/hijack` gateway endpoint, and the `hijackRun` RPC are removed. Runs are controlled through `steer`, `signal`, `approve`, `deny`, and `cancel`.
-
-### Pause
-
-> **Pause.** `smithers pause` and the `Pause` control RPC are not available in 1.0.0-rc.0. A run stops on `cancel` or parks on an approval request (`waiting-approval`) and resumes with `smithers run --resume`. Control requests record the acting principal in the control-plane event journaled inside the mutation's own transaction (`control.approval.*`, `control.run.cancel-requested`), and `RunSummary.cancellation` reports who asked, when, and whether the source was control, the engine, or a cascade. The engine run row itself records no actor.
-
-### Continue-as-new
-
-> **Continue-as-new.** Continue-as-new is expressed as trampoline handoff rounds (`Flow.Handoff`, `maxRounds`); each round settles `completed` with `lineage_id` and `round_ordinal`. There is no `Continued` terminal status, and the 0.x `<ContinueAsNew>` component has no replacement.
-
-### Checkpoints and worktree lanes
-
-> **Checkpoints and worktree lanes.** In 1.0.0-rc.0 a checkpoint is a pinned git tree taken by a cell call (`ctx.checkpoint()`, `ctx.base`). Worktree lanes, snapshot hooks, and the `replay`, `snapshots`, `restore`, `snapshot-hook`, `revert`, `rewind`, `retry-task`, `timetravel`, `fork`, `tree`, `graph`, `timeline`, `diff`, and `worktrees` commands are removed. Time-travel replay, fork, and rewind exist as the `@smthrs/time-travel` library API and are not composed into the CLI.
-
-### Declared runbook skips
-
-> **Declared runbook skips.** `Runbook.run` supports both denial policies. `Runbook.make` supports `onDeny: "fail"` only and refuses `onDeny: "skip"` with a `PatternError`: an approval denial and a step's own failure share one error channel, so the recovery arm that would express a declared skip would also declare that the runbook continues past a failed critical step. Declare the runbook with `onDeny: "fail"` and call `Runbook.run` to skip a denied step at run time.
-
-### Provider quota
-
-> **Provider quota.** A provider refusal that names a reset instant, a retry-after delay, or a delay in its message text parks the run under the `quota` waiting reason until that instant and resumes it there. The park is a sealed durable step (`agent/quota-park`), it journals `flows.agent.quota-parked.v1` with the wake time and where the deadline came from, and waiting does not consume the action's retry budget. The classifier is required rather than defaulted: a composition binds `QuotaPolicy.layerDefault()` to park, or `QuotaPolicy.layerUnclassified()` to say in writing that it wants no parking, and binding neither is a type error. Opting out gives up the park, not the recording floor. The recorder fails every capacity refusal it normalizes, `rate_limited`, `quota_exceeded`, `provider_internal`, and any refusal carrying HTTP 429, 503, 504, or 529, and never writes one as the sealed step's durable value, whichever classifier is composed. A refusal that names no deadline, or one past the configured ceiling, still fails the call with `quota_exceeded`. Waking a quota park is bound to the process that owns the run: the driver's sweep wakes released and cancel-requested rows only, so a run parked for quota by a process that then died waits for its lease to expire before another process takes it over. The 0.x multi-account fallback seat pool (`smithers agents`, `fallbackAgents`) moved to the plugins repository; core resolves seats from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, and `SMITHERS_OPENAI_AUTH=chatgpt`.
-
-### Wake and supervision
-
-> **Wake and supervision.** Wakes published from another process land through the 1-second heartbeat sweep and cancel poll, not an event bus; in-process wakes use `WakeBus`. No supervisor process launches or resumes an abandoned run. Recovery is a reclaim rather than a supervisor: a run becomes reclaimable once the heartbeat its owner stopped renewing is older than 30 seconds, and any running `smithers` process with the flow registered takes it over. On a Node host the takeover asks the operating system first: the default liveness check probes the recorded process id on this machine and refuses the reclaim while that process still exists, so a stalled but living owner keeps its runs, and an owner recorded on another host is left to the expired lease, which the run store verifies for itself. A host with no process table to ask, such as a browser composition, answers from that lease alone. Nothing outside such a process watches for dead owners. The 0.x `smithers supervise` command is removed.
-
-### Gateway
-
-> **Gateway.** The 0.x gateway (`POST /v1/rpc/<method>`, WebSocket `/`, SSE `/v1/api/stream`, 44 methods) is replaced by `smithers serve`: control RPC at `/rpc` and `/rpc/ws`, journal sync at `/sync` and `/sync/ws`, UI projections at `/projections/ws`, and `GET /health`. No 0.x method name or path is served, and there is no compatibility projection. Bearer-token authentication binds one principal; there are no users, roles, or per-run ownership.
-
-### UI
-
-> **UI.** The product UI is the Electrobun application in `apps/ui`. The 0.x web monitor (`smithers monitor`, `smithers ui --app`), workflow `<UI>` dashboards, and the terminal monitor (`smithers up --interactive`, `smithers-mon`) are not part of 1.0.0-rc.0; the 0.x UI packages (`gateway-react`, `gateway-ui`, `ui-core`, `tui`, `tui-ui`) are deleted and `@smthrs/gateway-client` is superseded by the `@smthrs/control` and `@smthrs/sync` clients, and a run monitor on the new projections is new work.
-
-### Runtimes
-
-> **Runtimes.** Node.js with local SQLite is the only supported durable target. Bun support is limited to the non-durable package scope; opening a durable database under Bun fails with `unsupported_runtime`. Browsers have bundle coverage only. Windows, Deno, and edge runtimes are unsupported. See the [RC support matrix](/docs/reference/support-matrix/) for exact versions and evidence limits.
-
-### Triggers, evaluation, and integrations
-
-> **Triggers, evaluation, and integrations.** `smithers cron`, `smithers listeners`, `smithers eval`, `smithers optimize`, `smithers scores`, `smithers observability`, and `smithers openapi` are removed from the CLI. `@smthrs/triggers`, `@smthrs/evals`, and `@smthrs/scorers` are not published. The GitHub, Linear, and Telegram clients, OAuth PKCE helpers, webhook verification, cursor handling, and error classification are rebuilt as the private workspace package `@smthrs/integrations` on the action, notification, and trigger APIs; GitHub and Linear are the real integrations the release smoke exercises; webhook ingress ships as library code only (the GitHub and Linear webhook sources and the GitHub listener registry bind to `@smthrs/control` `WebhookChannel` with the constant-time signature check; no `smithers listeners` verb and no gateway-level webhook configuration exists, and the old gateway HMAC e2e binding is re-pinned as a `WebhookChannel` test); the JSX integration components are gone. Vendor adapters (Hermes, OpenClaw, herdr, Claude Code and Codex subprocess agents, cloud hosts) live in the plugins repository; the cloud-host adapters there are re-ported onto the current kernel seams before they are usable.
-
-### Diff review
-
-> **Diff review.** Settled diff bundles are applied to the host without a human review gate; the 0.x `smithers diff` and review-mode commands are removed.
-
-### Durable interruptUnsafe
-
-> **Durable interruptUnsafe.** The durable engine has one cancellation path, `interrupt`, which is durable and cascades to linked children. `FlowRuntime.interruptUnsafe` on the durable engine fails with `unsafe_interrupt_unsupported` instead of forcing cancellation without cleanup.
-
-### Detached child flows
-
-> **Detached child flows.** A host that composes `EngineChildren` runs detached children as real runs: `agent/spawn` starts a separate run with its own row, claim, and journal, linked to the caller through the engine's parent-edge table and recorded as detaching on parent exit, so it outlives the run that started it; `agent/send` steers it through the control plane; `agent/await` reads its settled result from the run store, from a different process or a later incarnation. A composition that supplies no child port refuses all three with `ChildError` code `unsupported`. `agent/await` polls the child's run row on an interval rather than parking the caller, so a cell that awaits a long child holds its round open for the length of the wait.
-
-### Plan admission and repair
-
-> **Plan admission and repair.** A model-authored plan is admitted against a declared envelope: a plan past its depth, fanout, or fuel budget is refused with `depth_exceeded`, `fanout_exceeded`, or `fuel_exhausted` before anything runs. Linked child runs are not counted against those caps, so a plan that spawns children can exceed an envelope its own steps stayed inside. Failure handling is retry; there is no self-healing repair primitive.
-
-### Hard-killed engine processes
-
-> **Hard-killed engine processes.** Cooperative cancellation (`smithers cancel`) kills the process group of every child the engine spawned. If the engine process itself is hard-killed, the groups it spawned keep running until the next incarnation of the same host starts: every spawn is journaled as an ownerless durable record, and on start the reaper signals each group a previous incarnation abandoned. It refuses any record whose number the operating system has moved on from, so only a process that answers `ESRCH` counts as dead and the recorded start time must still match. A host that never restarts reaps nothing, and reaping a remote sandbox's processes requires that provider's optional `kill`.
-
-### Credential redaction in logs
-
-> **Credential redaction in logs.** Credentials are redacted on the way into the journal and on the way out to a log stream, under one rule set applied in one place. The rules are `@smthrs/journal` `Redaction`: structurally by field name (`isSensitiveKey`, matching any name ending in `authorization`, `cookie`, `apikey`, `token`, `password`, or `secret` once case and separators are folded), and textually by the ten `defaultRules`, applied to a field's NAME as well as its value, since a credential reaches an operator as a log annotation key and an OTLP span attribute name just as readily as it reaches one as a value. A name carrying a credential becomes the placeholder outright rather than being rewritten in place, because a partial rewrite changes what the name reads as and redaction would stop being a fixed point; two such names collapse into one and the later member wins (`url-credentials`, a password in a URL's userinfo; `bearer-token`, an `Authorization` bearer value; `api-key`, provider keys shaped `sk-`/`pk-`; `github-token` and `github-fine-grained-token`; `aws-access-key`; `slack-token`; `google-api-key`; `assignment`, a `key=value` pair whose key ends in `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, or `CREDENTIAL`; and `embedded-json-credential`, those same key shapes inside already-encoded JSON). The rules run in that order and the first one to claim a span keeps it, so a value written as `Bearer sk-…` reads back as `Bearer [REDACTED_TOKEN]` under the wider rule rather than under the provider-key marker. The journal applies them before any row is committed, and `e2e/faults/case22-secret-never-in-journal.test.ts` proves that half by reading the SQLite file rather than an API that could redact on the way out. `@smthrs/journal` `RedactedLogger` applies the same rules to log output: `RedactedLogger.layer()` replaces the installed logger set with redacting wrappers of the same loggers, so an operator keeps the format they had, and it is installed twice, by `packages/cli/src/bin.ts` over every CLI command and by `packages/flows/src/NodeRuntime.ts` beneath the durable engine, which covers the pretty logger, `Logger.LogToStderr` under `--json`, an action's own `Effect.logInfo`, the harness and agent session, and the `.flows/logs/<runId>.log` stream of a detached `smithers up -d`. The wrapper redacts the log event itself, meaning the message, the cause, and the log annotations, as well as the fiber's console, so a logger that reads the event rather than rendering it through the console is covered on the same rules: `Logger.tracerLogger` is in Effect's default logger set, publishes the message as a span event name and `Cause.pretty` of the cause as the span's `effect.cause` attribute, and never reads the console, so an OTLP collector receives the redacted text. Wrapping is idempotent, so a detached `smithers run` that is both at once pays the rules once. Each rule is a character-class scan with no nested quantifier and no alternation inside a repetition, and `url-credentials` caps its scheme at 30 characters so no start position rescans the tail, so none of them backtracks catastrophically, and the walk visits each value once. Cost tracks the number of values in a line rather than its rendered length, so a large container costs what its entries cost, and a proxy is a container that reports whatever it chooses: one that answers `getPrototypeOf` with something other than its target's prototype is walked as the object it claims to be and costs what it reports. Redaction is an observability concern, so it is deliberately not applied to executable durable state (`flows_runs.state_json`, attempt checkpoints, outcomes, cache results), because a placeholder there resumes the flow with the wrong data; a value that must never reach durable state is a `Redacted` field in the caller's own schema. Redacting a log line costs fidelity in how a value is rendered, and the trade is deliberate, because a log line must never be the thing that ends the run it describes. An `Error` is rebuilt as a plain `Error` and its class is not preserved. The copy carries the name, the message, the stack, and the error's own named members, each read once and put through the rules, and a member whose NAME matches becomes the placeholder the way an object key does. Nothing else crosses. An earlier revision built the copy on the original's prototype so a tagged error stayed an instance of its own class, and a prototype is an unbounded leak surface that an own-key walk never looks at: an inherited `name`, `cause`, `toJSON`, `Symbol.toStringTag`, or `nodejs.util.inspect.custom` each carried a credential to an OTLP span attribute or to the operator's terminal in clear, one per review round. A symbol-keyed member does not cross either, because a symbol's description is text no walk can rewrite in place, and neither do the members a renderer calls rather than prints, `constructor`, `toString`, `valueOf`, and `toJSON`, because a redacted string under a name the language calls throws from inside the renderer. So a renderer that special-cases `instanceof MyError` sees a plain `Error`, and a host error whose accessors are backed by internal slots a copy does not have, such as the `DOMException` an `AbortSignal` carries as its reason, has no copy left to impersonate it. A `Date`, a `Map`, a `Set`, a `URL`, a class instance or a host object is rebuilt from its plain data by the same rules the journal applies, and reaches the operator in that plain form rather than as itself. A function, a class object and a symbol carry text no property walk can rewrite in place, a body, a name, a description, so they render as the constant markers `[Function]` and `[Symbol]` rather than being printed. A binary view is named by its type and byte length under the `[Binary]` key, and that name goes through the rules too, because a class name is caller data. Rebuilding a view from its entries wrote one key per byte, and handing it back untouched put a credential a caller had set on it into a journal row in clear, so the bytes are named and the members are walked. That walk is bounded twice, because neither bound holds on its own. The size is read from the value's own internal slot, through the `byteLength` accessor that `%TypedArray%.prototype`, `DataView.prototype`, and `ArrayBuffer.prototype` define, rather than from a `byteLength` property, which a caller can shadow: a pooled chunk reporting the bytes it has used rather than the bytes it holds is an ordinary pattern, and a 4 MB chunk reporting 12 walked one property per byte anyway. A value that answers no such accessor, which includes a proxy over a view, is named and never enumerated at all. Above 65,536 bytes only the bytes are named, because enumerating a view's own properties materialises one pair per byte, so the walk would cost the buffer's size even though the rendering does not. Below it the members are counted as they are walked and the walk stops after 65,536 of them, because the size bounds a view's bytes and not the properties a caller hangs on it. A proxy reaches this branch by its prototype chain rather than by `ArrayBuffer.isView`, which reads an internal slot a proxy does not have: a proxied 2 MB view fell through to the object branch and was rebuilt one key per byte, 2,000 ms and 22.9 million characters for one logged value. Traversal accepts at most `Redaction.maxDepth`, 256, container edges from a redaction root. The journal REFUSES a payload past that bound, because a durable row quietly truncated to a marker is worse than a refused write. A logger asks for the other policy through `Redaction.Options.onTooDeep` set to `"name"`, which renders the deeper value as `[Deep]`: a throw inside the walk is caught one frame up and replaces every argument on the line with `[Unrenderable]`, so one deep member would cost the operator the whole line. An `Error`'s own members stop at 200 levels under the same marker. A caller's own string `[Deep]` is indistinguishable from that marker. A value that defeats the rules entirely, such as a revoked proxy or a throwing getter, renders as `[Unrenderable]`, and so does every argument of a line whose renderer refuses it. None of these is a redaction gap: each is a redacted form, never the value itself, and no fallback prints text the rules have not seen. An earlier revision kept each value's own class by rebuilding it on its own prototype; three rounds of review found three ways that could kill the run being logged, because a host class keeps state a property walk cannot see, and one fallback printed a value's own rendering in clear. A narrower revision kept the class of an `Error` alone, and four more rounds found four things its prototype handed to a renderer that no own-key walk ever saw. Fidelity here is cosmetic and was not worth either. Two limits remain. The rules recognise credential shapes, not arbitrary strings: a secret that matches no rule and sits under no credential-named field is not detected. And a child process that writes to its own stderr without going through the logger, such as a spawned agent binary, is that process's own output and is not rewritten.
-
-### Effect
-
-> **Effect.** Every published package pins `effect` and the `@effect/*` packages to exactly `4.0.0-rc.112`. Install the same exact version; two Effect instances in one process are not interoperable. Each candidate declares one exact Effect version; a changed pin is a breaking change listed in that candidate's notes.
-
-### Source migration
-
-> **Source migration.** See §11 for the compatibility promise paragraph.
-
-Section 11 is quoted in full under [compatibility promise](#compatibility-promise)
-above.
-
-## Deferred parity items
-
-The parity audit (`feature-parity-audit.md`, 2026-08-28) tracked
-99 items across 95 features of Smithers 0.x. Sixty-nine reached parity: 33
-before the parity round and 36 closed by it. The rest are below.
-
-Deferred for rc.0, each enforced rather than approximated:
-
-| 0.x feature | rc.0 state | Enforcement |
-| --- | --- | --- |
-| Continue as new | The trampoline (`Flow.Handoff` with `maxRounds`, `lineage_id`, `round_ordinal`) is the mechanism. `RunStatus` gains no `continued` value and a handed-off round settles `completed`. | X-04 |
-| Workspace checkpoints | The checkpoint, restore, revert, `replay`, and worktree-lane verbs are removed. Time-travel fork and rewind over stored state, plus `StepBoundary`, are the supported scope. | X-06, X-19 |
-| Postgres and PGlite storage | SQLite only. A non-SQLite backend fails clearly at configuration time instead of failing late. | X-01 |
-| Prompt optimization | `@smthrs/evals` stays private and no candidate-search API ships. | X-09 |
-| OpenAPI tools | The `smithers openapi` verb is removed and no spec-driven flow surface ships. `@smthrs/std` keeps `Fetch`, `HttpPost`, and `WebFetch` over the kernel HTTP client. | X-09 |
-| Runtime portability | The Bun durable engine stays unsupported and `NodeDatabase.layer` refuses to open a durable database under Bun. Edge and serverless claims are limited to browser-bundleable APIs; the Cloudflare and Vercel adapters are experimental in the plugins repository. | X-18 |
-| Herdr supervision and hijack | The hijack verbs and symbols are removed rather than ported. No `RunControl` hook ships. | X-02, X-10 |
-
-Partial, with the residual named:
-
-| Feature | What ships | What does not |
-| --- | --- | --- |
-| Child cancellation and process containment | `ProcessLedger`, `ContainedSpawner`, `ProcessReaper`, `NodeHost.layerContained`, and an optional remote `Provider.kill`. Cooperative cancellation kills every spawned process group. | A host that never restarts reaps nothing after a hard kill, and reaping a remote sandbox's processes needs that provider's optional `kill`. |
-| Provider quota | Classification, the durable `agent/quota-park` step, and resume at the deadline. | No cross-process quota wake sweep. A run parked for quota by a process that then died waits for its lease to expire. |
-| Detached child flows | `agent/spawn`, `agent/send`, and `agent/await` over the run store and control plane, for a host that composes `EngineChildren`. | `agent/await` polls the child's run row rather than parking the caller, so a cell awaiting a long child holds its round open. |
-| Plan admission and repair | A model-authored plan is refused past its depth, fanout, or fuel envelope before anything runs. | Linked child runs are not counted against those caps, and there is no self-healing repair primitive. |
-| Cross-process wake | The 1-second heartbeat sweep and cancel poll. | No event-driven cross-process feed. |
-
-Owned elsewhere: usage metering and quotas, and hosted tenancy and billing, are
-Plue-owned and are not engine features.
-
-## Upgrading a 0.x project
-
-```sh
-bunx smthrs@0.35.0 ps          # finish, archive, or discard every 0.x run
-npx @smthrs/migrate            # plan; writes .smithers-migrate/report.md
-npx @smthrs/migrate --apply --seat anthropic:<model>
-```
-
-`smithers migrate` runs the same `migrate-smithers-v1` flow from inside a 1.0
-project. The tool rewrites workflows, imports, configuration, scripts, and
-docs, verifies each unit with your project's own commands, and reports every
-construct it refused to translate rather than imitating it.
-
-The complete guide is [migrating from Smithers 0.x](/docs/migration/1.0/),
-which prints the exact refusal sentence for every removed verb. The full
-inventory of removed APIs, exports, and protocol surfaces is
-`removed-apis.md`.
-
-## What this candidate was validated against
-
-Phase 7 ran every gate from a clean checkout with real backends and real
-persisted data. The verdicts and their evidence are in
-`verification-evidence.md`. Sixteen of
-seventeen gates pass, all at one commit, `cd14388ed7`.
-
-The manual smoke ran all eight items end to end against two real SQLite files,
-a real model seat, a real gateway, the built UI in headless Chrome, and the
-real GitHub and Linear APIs, and every run row ended terminal with
-`finished_at_ms` set. The Plue cutover passes every item that runs without the
-published registry. The full recursive test fan-out is `2 fails, 61 passes`
-over 63 projects and 14,649 tests, and the five failing tests all need live
-external state.
-
-One gate fails, `docs-generation-links`, on three findings. Two are code
-defects with finished fix lanes staged on `land/wave-7`: every removed-verb
-refusal opens `.flows/engine.db` and `.flows/control.db` before it prints,
-which makes the concurrent docs-removal test contend on two SQLite files; and
-the built site serves vocs' own 1.43 MB `llms-full.txt`, which still carries
-JSX examples from the 0.x changelogs, instead of the curated 957 KB bundle
-`check-llms` guards. The third is that
-`https://github.com/smithersai/plugins`, linked from five pages, does not
-exist yet. Re-run the gate after the lanes land, and create the plugins
-repository or change the links, before publishing.
-
-## Publishing
-
-Not published. Publishing is a manual maintainer action.
+Publication, tagging, and deployment remain explicit maintainer operations.

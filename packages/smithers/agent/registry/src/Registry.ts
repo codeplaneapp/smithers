@@ -10,7 +10,14 @@
 import * as Digest from "@smthrs/core/Digest"
 import { Context, Effect, Layer, Option, Path, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import { DiscoveryWarning, type FlowBody, FlowBodyModule, FlowDescriptor, type Source } from "./Descriptor.ts"
+import {
+  DiscoveryWarning,
+  executionDigest,
+  type FlowBody,
+  FlowBodyModule,
+  FlowDescriptor,
+  type Source
+} from "./Descriptor.ts"
 import { Discovery } from "./Discovery.ts"
 import * as MarkdownFlow from "./MarkdownFlow.ts"
 import * as Pack from "./Pack.ts"
@@ -75,8 +82,11 @@ export interface Registry {
   readonly get: (name: string) => Effect.Effect<FlowDescriptor, RegistryError>
   /** Looks up a descriptor by name without failing when it is absent. */
   readonly getOption: (name: string) => Effect.Effect<Option.Option<FlowDescriptor>>
-  /** Loads a flow body on demand. */
-  readonly loadBody: (name: string) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
+  /** Loads one snapshot's body, optionally requiring the reviewed executable identity. */
+  readonly loadBody: (
+    name: string,
+    expectedExecutionDigest?: string | undefined
+  ) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
   /** Runs a markdown flow with its fixed decoded `{ args: string }` input. */
   readonly runPrompt: (
     name: string,
@@ -326,8 +336,19 @@ const fromRef = (
   })
 
   const loadBody = Effect.fn("Registry.loadBody")(
-    function*(name: string): Effect.fn.Return<FlowBody, RegistryError | DiscoveryError> {
+    function*(
+      name: string,
+      expectedExecutionDigest?: string
+    ): Effect.fn.Return<FlowBody, RegistryError | DiscoveryError> {
       const descriptor = yield* get(name)
+      if (expectedExecutionDigest !== undefined && executionDigest(descriptor) !== expectedExecutionDigest) {
+        return yield* registryError({
+          code: "execution_changed",
+          method: "loadBody",
+          path: descriptor.body.path,
+          description: `flow "${name}" changed after planning; create and approve a new plan before running it`
+        })
+      }
       if (descriptor.body._tag === "Module") {
         return new FlowBodyModule({ path: descriptor.body.path })
       }

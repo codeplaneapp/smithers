@@ -300,6 +300,10 @@ const parseExpression = (tokens, state, contexts) => {
     }
     if (token.value === "!") return !truthy(parsePrimary())
     if (token.type === "string") return token.value
+    if (token.value === "always" && tokens[state.index]?.value === "(" && tokens[state.index + 1]?.value === ")") {
+      state.index += 2
+      return true
+    }
     if (token.value === "true") return true
     if (token.value === "false") return false
     if (token.value === "null") return null
@@ -546,11 +550,12 @@ export const main = async (argv) => {
         continue
       }
     }
-    if (failed && !options.keepGoing) {
+    const diagnostic = String(step.if).replaceAll(/\$\{\{|\}\}/g, "").trim() === "always()"
+    if (failed && !options.keepGoing && !diagnostic) {
       announce("skipped", "an earlier step failed")
       continue
     }
-    const stepEnv = { ...process.env, ...contexts.env, GITHUB_ENV: githubEnvFile }
+    const stepEnv = { ...process.env, ...contexts.env, GITHUB_ENV: githubEnvFile, RUNNER_TEMP: runnerTemp }
     for (const [key, value] of Object.entries(step.env ?? {})) {
       stepEnv[key] = interpolate(value, contexts)
     }

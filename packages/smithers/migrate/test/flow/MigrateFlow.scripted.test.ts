@@ -15,6 +15,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
+import * as Checkpoint from "@smthrs/migrate/flow/Checkpoint"
 import * as Command from "@smthrs/migrate/flow/Command"
 import * as Layers from "@smthrs/migrate/flow/Layers"
 import * as Lock from "@smthrs/migrate/flow/Lock"
@@ -352,10 +353,12 @@ describe("apply over a single-file JSX project", () => {
       // install legitimately rewrites.
       expect(outside?.map((entry) => entry.file)).toEqual(["src/pnpm-lock.yaml"])
       expect(existsSync(join(root, "src", "pnpm-lock.yaml"))).toBe(false)
+    }))
 
-      // The other arm, on its own tree: the root lockfile alone is exempt from
-      // the refusal and not from the record, so the unit migrates and its
-      // report still says the lockfile changed.
+  it.effect("allows a root lockfile write while retaining it in the unit's changed-file report", () =>
+    Effect.gen(function*() {
+      // This independent successful apply has its own finite test budget.
+      // The root lockfile is exempt from refusal and retained in the report.
       const installed = copyFixture("jsx-single")
       committed(installed)
       const installing = (_root: string, written: Array<string>): Layers.Script => (asked) => {
@@ -728,7 +731,49 @@ describe("apply over a project that still holds run state", () => {
     }))
 })
 
-describe("apply under the report-directory lock", () => {
+describe("apply under the canonical project's lock", () => {
+  // Each recovery journey performs up to three refused launches and one
+  // complete apply through real filesystem/process services. Its finite
+  // budget covers all four attempts; individual apply tests retain 60 s.
+  for (const originalReport of [".smithers-migrate", "audit/original"]) {
+    it.effect(
+      `preserves the pending checkpoint in ${originalReport} through retries and resumes after recovery`,
+      () =>
+        Effect.gen(function*() {
+          const root = copyFixture("jsx-single")
+          committed(root)
+          const source = join(root, "simple-workflow.jsx")
+          const original = readFileSync(source, "utf8")
+          const held = yield* Lock.acquire({ root, reportDir: originalReport }).pipe(Effect.provide(NodeServices.layer))
+          const backupDir = join(root, originalReport, "backup")
+          const checkpoint = yield* Checkpoint.take({
+            root,
+            unit: "workflow:simple-workflow",
+            files: ["simple-workflow.jsx"],
+            backupDir,
+            allowNoVcs: false,
+            treeExclude: [originalReport, ".smithers-migrate"]
+          }).pipe(Effect.provide(NodeServices.layer))
+          writeFileSync(source, `${original}\n// interrupted conversion\n`)
+          yield* Lock.release(held).pipe(Effect.provide(NodeServices.layer))
+          const before = hashTree(root)
+          for (const retryReport of new Set([originalReport, ".smithers-migrate", "audit/retry"])) {
+            const refused = yield* Effect.flip(apply(root, { reportDir: retryReport }))
+            expect(refused.code).toBe("checkpoint-failed")
+            expect(refused.message).toContain(`${originalReport}/pending-unit.json`)
+            expect(hashTree(root)).toEqual(before)
+          }
+          yield* Checkpoint.restore(root, checkpoint, ["simple-workflow.jsx"]).pipe(Effect.provide(NodeServices.layer))
+          expect(readFileSync(source, "utf8")).toBe(original)
+          yield* Checkpoint.clearPending(backupDir, checkpoint).pipe(Effect.provide(NodeServices.layer))
+          const { report } = yield* apply(root, { reportDir: originalReport })
+          expect(report.units.every((unit) => unit.status === "migrated")).toBe(true)
+          expect(existsSync(join(root, originalReport, "pending-unit.json"))).toBe(false)
+        }),
+      180_000
+    )
+  }
+
   it.effect("refuses to start while another apply holds the lock, and leaves the project alone", () =>
     Effect.gen(function*() {
       const root = copyFixture("jsx-single")
@@ -739,13 +784,14 @@ describe("apply under the report-directory lock", () => {
         Effect.provide(NodeServices.layer)
       )
 
-      const failure = yield* Effect.flip(apply(root))
+      const failure = yield* Effect.flip(apply(root, { reportDir: "audit" }))
 
       expect(failure.code).toBe("apply-in-progress")
       expect(failure.message).toContain(`pid ${process.pid}`)
       // Nothing ran: no pending marker, no backups, the source untouched.
       expect(existsSync(join(root, ".smithers-migrate", "pending-unit.json"))).toBe(false)
       expect(existsSync(join(root, ".smithers-migrate", "backup"))).toBe(false)
+      expect(existsSync(join(root, "audit"))).toBe(false)
       expect(existsSync(join(root, "simple-workflow.jsx"))).toBe(true)
 
       yield* Lock.release(held).pipe(Effect.provide(NodeServices.layer))
@@ -760,16 +806,18 @@ describe("apply under the report-directory lock", () => {
       mkdirSync(join(root, ".smithers-migrate"), { recursive: true })
       writeFileSync(
         join(root, ".smithers-migrate", "apply.lock"),
-        `${JSON.stringify({ pid, startedAt: "2026-01-01T00:00:00.000Z", root })}\n`
+        `${JSON.stringify({ pid, startedAt: "2026-01-01T00:00:00.000Z", root, reportDir: "previous-report" })}\n`
       )
 
-      const { report } = yield* apply(root)
+      const { report } = yield* apply(root, { reportDir: "audit" })
 
       expect(report.units.every((unit) => unit.status === "migrated")).toBe(true)
       const note = report.followUps.find((entry) => entry.severity === "info" && entry.text.includes(String(pid)))
       expect(note?.text).toContain("took over the lock")
+      expect(note?.text).toContain("previous-report/pending-unit.json")
       // The report on disk carries the note, and the run gave the lock back.
-      expect(readFileSync(join(root, ".smithers-migrate", "report.json"), "utf8")).toContain("took over the lock")
+      expect(readFileSync(join(root, "audit", "report.json"), "utf8")).toContain("took over the lock")
       expect(existsSync(join(root, ".smithers-migrate", "apply.lock"))).toBe(false)
+      expect(existsSync(join(root, ".smithers-migrate", "apply.lock.sqlite"))).toBe(true)
     }))
 })

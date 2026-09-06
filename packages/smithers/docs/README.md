@@ -18,10 +18,10 @@ that run in two SQLite files beside your project, so the run is a durable record
 rather than terminal scrollback. `smthrs` is how you talk to it: start runs,
 list them, follow their events, approve what they ask for, and cancel them.
 
-The same commands answer the same way whether the state is on your disk or on
-another machine. Every handler talks to the control plane and to nothing else,
-so adding `--remote https://host:3000` moves a working script to a hosted
-control plane without changing a line of it.
+Flow control, run management, and approvals can use a hosted control plane with
+`--remote https://host:3000`. Target execution and local operator commands use
+the selected workspace; history, memory, triggers, credentials, integrations,
+and evaluations refuse remote access.
 
 Four callers use it. You run flows from a shell. Scripts and CI jobs call it
 with `--json` and branch on its exit codes. Agents drive the same control plane

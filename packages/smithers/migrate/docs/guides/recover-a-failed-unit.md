@@ -69,6 +69,19 @@ failure is the command itself, see
 
 ## Rerun one unit
 
+If a process died before the unit settled, a retry refuses with
+`checkpoint-failed` and names the original `pending-unit.json`. This refusal
+happens before any backup is replaced, including when you choose a different
+`--report-dir`. A handled failure that could not settle its recovery record
+uses the same protection.
+
+Open that file and inspect its checkpoint and restore instruction. Restore
+the checkpoint and verify the project, then remove only that resolved
+`pending-unit.json` before retrying. Keep the checkpoint backups until
+recovery is complete. Leave `.smithers-migrate/apply.lock.sqlite` in place;
+the next apply uses it to serialize ownership and clears the old diagnostic
+owner record after a successful release.
+
 ```bash
 npx @smthrs/migrate --apply --seat anthropic:<model> --unit workflow:pipelines/ci-fast
 ```

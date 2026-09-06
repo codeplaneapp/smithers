@@ -29,6 +29,8 @@ import * as RunState from "../RunState.ts"
 import type * as Scan from "../Scan.ts"
 import type * as Units from "../Units.ts"
 import type * as Contract from "./Contract.ts"
+import * as Gate from "./Gate.ts"
+import * as VcsInternal from "./internal/Vcs.ts"
 import * as Layers from "./Layers.ts"
 import * as Lock from "./Lock.ts"
 import * as MigrateFlow from "./MigrateFlow.ts"
@@ -52,8 +54,9 @@ export const MigrateOptions = Options.MigrateOptions
 export type MigrateOptions = Options.MigrateOptions
 
 /**
- * The name the control plane knows this flow by, so
- * `smthrs flow start system/migrate` reaches the same execution the CLI verb does.
+ * Integration label for a host exposing migration through its control plane.
+ * The package does not install a CLI route for this label. The bundled entry
+ * points are `smthrs migrate`, `smithers-migrate`, and {@link runNode}.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -183,7 +186,7 @@ export const run = (
 /**
  * Notes a taken-over lock in the report and rewrites it, so the audit trail
  * names the run this one replaced. The lock file said when the earlier run
- * started; the pending marker beside it says which unit it reached.
+ * started and which report directory holds its pending recovery marker.
  */
 const noteReclaimedLock = (
   options: MigrateOptions,
@@ -198,8 +201,8 @@ const noteReclaimedLock = (
         {
           severity: "info" as const,
           text:
-            `this run took over the lock of an earlier apply (pid ${reclaimed.pid}, started ${reclaimed.startedAt}) whose process is gone; if it stopped mid-unit, ${
-              Options.reportDir(options)
+            `this run took over the lock of an earlier apply (pid ${reclaimed.pid}, started ${reclaimed.startedAt}) whose operating-system lock was released; if it stopped mid-unit, ${
+              reclaimed.reportDir ?? Options.defaultReportDir
             }/pending-unit.json holds its recovery record`
         }
       ]
@@ -215,7 +218,7 @@ const noteReclaimedLock = (
  * process and run in another: the survey is the plan, and the flow's own seal
  * step is what refuses it if the project has moved on since.
  *
- * An apply runs under the report directory's lock, so a second apply over the
+ * An apply runs under the canonical project's lock, so a second apply over the
  * same project refuses instead of sharing the backups and the pending marker
  * with the first. A lock whose owner died is taken over, and the takeover is
  * noted in the report the run writes: the earlier run may have stopped
@@ -242,6 +245,18 @@ export const launch = (
       )
     )
     if (options.mode !== "apply") return yield* execute
+    // A refusal already established by the read-only survey must leave no
+    // lock state behind. The flow repeats these gates under the lock, so this
+    // early check never authorizes a tree that changed after the survey.
+    yield* Gate.evaluate(surveyed.scan, options)
+    if (surveyed.outlines.length > 0) {
+      yield* VcsInternal.requireCheckpoint(
+        options.root,
+        `${options.root}/${Options.reportDir(options)}/backup`,
+        options.allowNoVcs === true
+      )
+    }
+    yield* MigrateFlow.validateSeal({ options, seal: surveyed.seal })
     return yield* Effect.acquireUseRelease(
       Lock.acquire({ root: options.root, reportDir: Options.reportDir(options) }),
       (lock) =>
@@ -287,9 +302,11 @@ export const layerNode = (config: {
 /**
  * The migration's own registrations, for a host that already has an engine.
  *
- * A durable host — `@smthrs/flows`' `NodeRuntime` — takes this as its
- * `registerFlows` layer, and then `smthrs flow start system/migrate` starts
- * the same flow under the same journal as everything else.
+ * A host such as `@smthrs/flows`' `NodeRuntime` can compose this as its
+ * `registerFlows` layer after supplying {@link Requirements}. It does not
+ * create a control-plane route. Invoke {@link launch} with a survey so the
+ * enriched payload and apply lock surround the execution; directly executing
+ * the underlying flow bypasses that lock.
  *
  * @category layers
  * @since 1.0.0-rc.0

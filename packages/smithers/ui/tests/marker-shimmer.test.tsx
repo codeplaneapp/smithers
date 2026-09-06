@@ -92,7 +92,14 @@ describe("Shimmer and scroll fade CSS", () => {
     expect(chatScrollerCss).toContain(
       "linear-gradient(90deg, var(--text-muted, #676676) 35%, var(--text, #403f53) 50%, var(--text-muted, #676676) 65%)",
     );
-    expect(getComputedStyle(shimmer).backgroundImage).toContain(
+    // Happy DOM only resolves the first custom property in a gradient. Resolve
+    // its remaining references against the actual theme, keeping the applied
+    // recipe and every color stop under assertion.
+    const gradient = getComputedStyle(shimmer).backgroundImage.replace(
+      /var\((--[\w-]+),\s*([^)]+)\)/g,
+      (_reference, name: string, fallback: string) => theme.getPropertyValue(name).trim() || fallback,
+    );
+    expect(gradient).toBe(
       "linear-gradient(90deg, #94a0ae 35%, #d6deeb 50%, #94a0ae 65%)",
     );
     host.remove();

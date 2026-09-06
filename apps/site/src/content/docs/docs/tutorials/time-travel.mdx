@@ -132,6 +132,8 @@ export const Ship = Flow.make("release/Ship", {
 import { NodeRuntime } from "@effect/platform-node"
 import { Action, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { engineLayer } from "./engine.ts"
 import { Publish, Ship, Tag } from "./release.ts"
 
@@ -189,8 +191,15 @@ ship-1 is finished, and its journal is the history the next part forks.
 A position is a run id plus a frame `{ lineageId, seq }`. A lineage id is an opaque versioned encoding the engine mints for the run, so build it with the `FlowEngine.Lineage.root` constructor rather than spelling one out. The frame below is the committed entry right before the publish step's attempt-started record, so the fork inherits the tag and not the publish. A fork refuses a live parent; this parent is finished.
 
 ```ts title="fork.ts"
+import { NodeRuntime } from "@effect/platform-node"
 import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import { Journal, type JournalEvent } from "@smthrs/journal"
 import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { engineLayer } from "./engine.ts"
+import { Publish, Ship, Tag } from "./release.ts"
 
 let tagDispatches = 0
 
@@ -276,7 +285,14 @@ step ran in the copy under its own implementation.
 Rewind is the mutating half of the service, and it refuses a live run. The run below parks at a durable deferred, which releases ownership and leaves it suspended: the state a rewind can claim. The `inspect` call folds committed journal entries up to a frame through a pure reducer; it reads and never executes, so you can derive the same view before and after the trim.
 
 ```ts title="rewind.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
+import { Journal, type JournalEvent } from "@smthrs/journal"
+import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { durableEngine } from "./engine.ts"
 

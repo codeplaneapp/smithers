@@ -102,6 +102,28 @@ describe("Checkpoint.detectVcs", () => {
 })
 
 describe("Checkpoint.take on git", () => {
+  it.effect("refuses to overwrite an unresolved checkpoint before changing any backup bytes", () =>
+    Effect.gen(function*() {
+      const root = gitProject("pending-retry")
+      const requested = payload(root, ["workflow.jsx"])
+      const first = yield* Checkpoint.take(requested)
+      const marker = join(root, ".smithers-migrate", "pending-unit.json")
+      const markerBytes = readFileSync(marker)
+      const backupBytes = readFileSync(join(first.backup, "workflow.jsx"))
+      const treeBytes = readFileSync(first.tree)
+      write(root, "workflow.jsx", "half migrated\n")
+      const refused = yield* Effect.flip(Checkpoint.take(requested))
+      expect(refused.code).toBe("checkpoint-failed")
+      expect(refused.message).toContain(marker)
+      expect(readFileSync(marker)).toEqual(markerBytes)
+      expect(readFileSync(join(first.backup, "workflow.jsx"))).toEqual(backupBytes)
+      expect(readFileSync(first.tree)).toEqual(treeBytes)
+      yield* Checkpoint.restore(root, first, ["workflow.jsx"])
+      expect(readFileSync(join(root, "workflow.jsx"), "utf8")).toBe("old workflow\n")
+      yield* Checkpoint.clearPending(requested.backupDir, first)
+      yield* Checkpoint.take(requested)
+    }).pipe(Effect.provide(platform)))
+
   it.effect("leaves a recovery instruction before any transform can start", () =>
     Effect.gen(function*() {
       const root = gitProject("pending")

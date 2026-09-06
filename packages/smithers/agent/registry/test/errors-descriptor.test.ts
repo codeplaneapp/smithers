@@ -62,6 +62,28 @@ describe("FlowDescriptor", () => {
     expect(Option.getOrThrow(decoded.placement)).toBe("sandbox")
     expect(decoded).toEqual(descriptor)
     expect(() => JSON.stringify(encoded)).not.toThrow()
+    expect(Descriptor.executionDigest(descriptor)).toBeUndefined()
+    const measured = new Descriptor.FlowDescriptor({
+      ...descriptor,
+      body: new Descriptor.BodyRefMarkdown({
+        path: descriptor.body.path,
+        baseDirectory: "/project/flows/review/read-pr",
+        contentDigest: "a".repeat(64)
+      })
+    })
+    const identity = Descriptor.executionDigest(measured)
+    expect(identity).toMatch(/^[0-9a-f]{64}$/)
+    expect(Descriptor.executionDigest(
+      Schema.decodeUnknownSync(Descriptor.FlowDescriptor)(
+        Schema.encodeSync(Descriptor.FlowDescriptor)(measured)
+      )
+    )).toBe(identity)
+    expect(Descriptor.executionDigest(new Descriptor.FlowDescriptor({ ...measured, model: Option.some("other") })))
+      .not.toBe(identity)
+    expect(
+      Descriptor.executionDigest(new Descriptor.FlowDescriptor({ ...measured, frontmatter: { temperature: 0.2 } }))
+    )
+      .not.toBe(identity)
   })
 
   it("retains tagged body and schema reference variants", () => {

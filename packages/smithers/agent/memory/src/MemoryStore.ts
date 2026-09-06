@@ -17,6 +17,7 @@ import { resolveNamespace } from "./internal/Bank.ts"
 import * as Sql from "./internal/Sql.ts"
 import { canonicalJson, compareText, literalFtsQuery, retainedTags, searchableText } from "./internal/Text.ts"
 import { MemoryError } from "./MemoryError.ts"
+import * as Migrations from "./Migrations.ts"
 import * as Namespace from "./Namespace.ts"
 
 /**
@@ -713,7 +714,7 @@ export const make: Effect.Effect<Service, MemoryError, Crypto.Crypto | DurableWr
     const writer = yield* DurableWriter
     const crypto = yield* Crypto.Crypto
     const database: Sql.DatabaseService = { sql, write: writer.write }
-    yield* Sql.migrate(database).pipe(Effect.mapError(storeError("memory migration failed")))
+    yield* Migrations.run.pipe(Effect.mapError(storeError("memory migration failed")))
 
     const readFacts = (
       input: ListFactsInput & { readonly keys?: ReadonlyArray<string> | undefined },

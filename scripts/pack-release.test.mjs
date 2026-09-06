@@ -23,6 +23,7 @@ import {
 } from "./pack-release.mjs"
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
+const releaseVersion = JSON.parse(readFileSync(join(repoRoot, "packages/smithers/package.json"), "utf8")).version
 const workflow = (name) => readFileSync(join(repoRoot, ".github", "workflows", name), "utf8")
 
 /**
@@ -181,14 +182,14 @@ test("the packed set is exactly the 49 names the RC contract publishes", () => {
   assert.ok(publishedPackages.includes("smthrs"), "the unscoped deprecation notice publishes with the RC")
 })
 
-test("every packed manifest carries the RC version and the next dist-tag", () => {
+test("every packed manifest carries the candidate version and the safe default dist-tag", () => {
   // A prerelease published to `latest` would upgrade every `smthrs`-adjacent
   // install that tracks the tag, so the tag is pinned per manifest as well as
   // on the publish command (the release runbook in Smithers-Ops).
   const manifests = readWorkspaceManifests()
   for (const directory of workspaces) {
     const manifest = manifests.get(directory)
-    assert.equal(manifest.version, "1.0.0-rc.0", `${manifest.name} version`)
+    assert.equal(manifest.version, releaseVersion, `${manifest.name} version`)
     assert.equal(manifest.publishConfig.tag, "next", `${manifest.name} publishConfig.tag`)
     assert.equal(manifest.publishConfig.access, "public", `${manifest.name} publishConfig.access`)
     assert.equal(manifest.publishConfig.provenance, true, `${manifest.name} publishConfig.provenance`)
@@ -416,8 +417,8 @@ test("published adapters remain optional while executable SQLite and Bun host pr
   const optional = {
     "@smthrs/database": { "@effect/sql-sqlite-node": "4.0.0-rc.112" },
     "@smthrs/gateway": { "@effect/platform-node": "4.0.0-rc.112" },
-    "@smthrs/flows": { "@smthrs/platform-node": "1.0.0-rc.0" },
-    "@smthrs/create-app": { "@smthrs/testing": "1.0.0-rc.0" },
+    "@smthrs/flows": { "@smthrs/platform-node": releaseVersion },
+    "@smthrs/create-app": { "@smthrs/testing": releaseVersion },
     "@smthrs/observability": {
       "@opentelemetry/exporter-logs-otlp-http": "0.222.0", "@opentelemetry/exporter-metrics-otlp-http": "0.222.0",
       "@opentelemetry/exporter-trace-otlp-http": "0.222.0", "@opentelemetry/sdk-trace-base": "2.11.0",
@@ -435,7 +436,7 @@ test("published adapters remain optional while executable SQLite and Bun host pr
   }
   for (const [name, peer, version] of [
     ["@smthrs/cli", "@effect/sql-sqlite-node", "4.0.0-rc.112"],
-    ["@smthrs/platform-bun", "@smthrs/platform-node", "1.0.0-rc.0"],
+    ["@smthrs/platform-bun", "@smthrs/platform-node", releaseVersion],
     ["@smthrs/platform-bun", "@effect/platform-node", "4.0.0-rc.112"]
   ]) {
     assert.equal(byName.get(name).peerDependencies[peer], version)
@@ -451,9 +452,9 @@ test("runtime evaluation owns scorers while testing delegates to the same pure g
   const evals = manifests.get("packages/smithers/agent/evals")
   const testing = manifests.get("packages/testing")
   assert.equal(evals.dependencies["@smthrs/testing"], undefined)
-  assert.equal(evals.devDependencies["@smthrs/testing"], "1.0.0-rc.0")
-  assert.equal(evals.dependencies["@smthrs/scorers"], "1.0.0-rc.0")
-  assert.equal(testing.dependencies["@smthrs/scorers"], "1.0.0-rc.0")
+  assert.equal(evals.devDependencies["@smthrs/testing"], releaseVersion)
+  assert.equal(evals.dependencies["@smthrs/scorers"], releaseVersion)
+  assert.equal(testing.dependencies["@smthrs/scorers"], releaseVersion)
 })
 
 test("the Effect checker refuses ranges and mismatched RCs in every dependency field", () => {

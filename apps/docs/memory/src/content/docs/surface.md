@@ -23,6 +23,7 @@ import * as Flows2 from "@smthrs/memory/Flows" // the same module, subpath form
 | `MemoryError`      | `@smthrs/memory/MemoryError`      | Stable memory failures                                                            |
 | `MemoryStore`      | `@smthrs/memory/MemoryStore`      | Authoritative SQL memory contract store                                           |
 | `MemoryTrellis`    | `@smthrs/memory/MemoryTrellis`    | A Trellis whose generated work inherits one memory policy                         |
+| `Migrations`       | `@smthrs/memory/Migrations`       | Registered memory schema for standalone and shared database composition           |
 | `Namespace`        | `@smthrs/memory/Namespace`        | Structured memory namespaces and tag-group matching                               |
 | `Recall`           | `@smthrs/memory/Recall`           | The replaceable memory-recall seam                                                |
 | `RecallFts`        | `@smthrs/memory/RecallFts`        | SQLite FTS5 recall binding                                                        |

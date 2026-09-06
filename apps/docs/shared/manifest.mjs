@@ -85,7 +85,7 @@ const readDescription = (dir) => {
 const domainEnv = (slug) => `${slug.toUpperCase().replace(/-/g, "_")}_SITE_DOMAIN`
 
 /**
- * The 53 site entries, in manifest order. `title` is the package's npm name,
+ * The site entries, in manifest order. `title` is the package's npm name,
  * which is also the index page's fallback title; `siteDir` is absolute;
  * `envDomain` names the deploy-domain override (PLATFORM_NODE_SITE_DOMAIN for
  * platform-node).

@@ -127,6 +127,8 @@ export interface ServeProcess {
 export interface ServeOptions {
   /** Overrides the generated bearer credential. */
   readonly credential?: string | undefined
+  /** Exercises the CLI's documented environment fallback instead of its flag. */
+  readonly credentialSource?: "flag" | "environment" | undefined
   /** How long the verb gets to bind and mount its routes. */
   readonly timeoutMs?: number | undefined
 }
@@ -141,8 +143,13 @@ export const startServe = async (root: string, options: ServeOptions = {}): Prom
   const token = options.credential ?? `e2e-${randomUUID()}`
   const timeoutMs = options.timeoutMs ?? 120_000
   const port = await freePort()
-  const argv = [smithersBin, "serve", "--root", root, "--port", String(port), "--credential", token]
-  const process_ = spawn(process.execPath, argv, { stdio: ["ignore", "pipe", "pipe"], cwd: root })
+  const argv = [smithersBin, "serve", "--root", root, "--port", String(port)]
+  if (options.credentialSource !== "environment") argv.push("--credential", token)
+  const process_ = spawn(process.execPath, argv, {
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: root,
+    env: { ...process.env, SMITHERS_API_KEY: options.credentialSource === "environment" ? token : undefined }
+  })
   const pid = process_.pid
   if (pid === undefined) throw new Error("smthrs serve has no pid")
 

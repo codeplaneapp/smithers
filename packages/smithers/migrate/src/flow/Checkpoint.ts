@@ -28,7 +28,6 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
-import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { createHash } from "node:crypto"
@@ -36,6 +35,8 @@ import * as Fs from "../internal/Fs.ts"
 import { io, make, MigrateError } from "../MigrateError.ts"
 import type * as Report from "../Report.ts"
 import * as Exec from "./internal/Exec.ts"
+import * as Pending from "./internal/Pending.ts"
+import * as VcsInternal from "./internal/Vcs.ts"
 
 /**
  * Which version control the project is under.
@@ -169,13 +170,6 @@ export const action = Action.make("smithers/migrate-v1/Checkpoint", {
 
 const optionalNotFound = Fs.optionalNotFound
 
-const isDirectory = (target: string) =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const info = yield* optionalNotFound(fs.stat(target))
-    return Option.isSome(info) && info.value.type === "Directory"
-  })
-
 /**
  * Which version control a project root is under, preferring jj when a checkout
  * is colocated.
@@ -183,15 +177,7 @@ const isDirectory = (target: string) =>
  * @category checks
  * @since 1.0.0-rc.0
  */
-export const detectVcs = (
-  root: string
-): Effect.Effect<Vcs, PlatformError.PlatformError, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function*() {
-    const path = yield* Path.Path
-    if (yield* isDirectory(path.join(root, ".jj"))) return "jj" as const
-    if (yield* isDirectory(path.join(root, ".git"))) return "git" as const
-    return "none" as const
-  })
+export const detectVcs: typeof VcsInternal.detect = VcsInternal.detect
 
 const absolute = (path: Path.Path, root: string, file: string): string => path.join(root, ...file.split("/"))
 
@@ -566,15 +552,10 @@ export const take = (payload: {
   Effect.gen(function*() {
     const path = yield* Path.Path
     const takenAt = yield* Clock.currentTimeMillis
-    const vcs = yield* detectVcs(payload.root).pipe(
-      Effect.mapError(io(`could not inspect version control under "${payload.root}"`))
-    )
-    if (vcs === "none" && !payload.allowNoVcs) {
-      return yield* Effect.fail(make(
-        "no-vcs",
-        `"${payload.root}" is under no version control, so a migration would have no way back. Initialize jj or git, or rerun with --allow-no-vcs to accept a file copy under ${payload.backupDir} as the only checkpoint.`
-      ))
-    }
+    // Public callers receive the same protection as Command's project lock:
+    // never replace the original backups while recovery is still pending.
+    yield* Pending.assertClear(path.dirname(payload.backupDir))
+    const vcs = yield* VcsInternal.requireCheckpoint(payload.root, payload.backupDir, payload.allowNoVcs)
     const directory = path.join(payload.backupDir, ...payload.unit.split(/[:/]/))
     const entries = yield* backup(payload.root, payload.files, directory)
     const files = entries.filter((entry) => entry.state === "file").map((entry) => entry.path)

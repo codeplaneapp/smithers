@@ -96,8 +96,16 @@ A markdown flow hands the whole task to one agent. A module flow declares each s
 Install the libraries:
 
 ```bash
-pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/capability@next @smthrs/model@next @smthrs/registry@next @smthrs/platform-node@next
+pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/capability@next @smthrs/model@next @smthrs/registry@next @smthrs/platform-node@next @smthrs/jj@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
+
+This part also needs Jujutsu (`jj`) on your PATH. Initialize a separate repository for the files the tools will edit:
+
+```bash
+jj git init sandbox-work
+```
+
+The write tool is compensable: the engine requires a snapshot boundary so a retry can restore the files it changed. This example binds a real Jujutsu snapshot service to `sandbox-work`. The scripted model only reads and writes the two paths inside that repository. A host serving arbitrary model requests should also restrict filesystem capabilities to its workspace; see [capabilities](/docs/guides/capabilities/).
 
 Write `sandbox.ts`. The step counts the lines in a source file and writes the count to a target file, using the standard file tools:
 
@@ -115,6 +123,8 @@ import * as StandardFlows from "@smthrs/agent/StandardFlows"
 import * as Capability from "@smthrs/capability/Capability"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { Jj, type ChangeId } from "@smthrs/jj"
+import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
@@ -203,6 +213,21 @@ const root = join(process.cwd(), "sandbox-work")
 const source = join(root, "notes.md")
 const target = join(root, "line-count.txt")
 
+const snapshots = Layer.effect(
+  FlowEngine.SnapshotBoundary,
+  Effect.map(Jj, (jj) => FlowEngine.SnapshotBoundary.of({
+    snapshot: () => jj.snapshot().pipe(
+      Effect.map((snapshot) => snapshot.changeId),
+      Effect.orDie
+    ),
+    restore: (snapshot) => jj.restore(snapshot as ChangeId).pipe(Effect.orDie),
+    diff: (snapshot) => jj.snapshot().pipe(
+      Effect.flatMap((current) => jj.diff(snapshot as ChangeId, current.changeId)),
+      Effect.orDie
+    )
+  }))
+).pipe(Layer.provide(NodeJj.layerAt(root)))
+
 const program = Effect.gen(function*() {
   yield* Effect.sync(() => {
     mkdirSync(root, { recursive: true })
@@ -250,6 +275,7 @@ const program = Effect.gen(function*() {
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(snapshots),
     Layer.provideMerge(NodeCrypto.layer)
   )
 
@@ -263,6 +289,7 @@ const program = Effect.gen(function*() {
 const main = program.pipe(
   Effect.provide(Layer.mergeAll(NodeFileSystem.layer, Path.layer, NodeCrypto.layer)),
   Effect.tap((summary) => Effect.sync(() => console.log(JSON.stringify(summary, null, 2)))),
+  Effect.scoped,
   Effect.orDie
 )
 

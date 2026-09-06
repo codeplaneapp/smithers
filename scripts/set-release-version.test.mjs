@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { mismatches, readManifests, retarget, retargetSource, sourceMismatches, versionedSources } from "./set-release-version.mjs"
+import { mismatches, readManifests, readVersionedManifests, retarget, retargetSource, sourceMismatches, versionedSources, versionedTemplates } from "./set-release-version.mjs"
 
 const workspaceNames = new Set(["@smthrs/kernel", "@smthrs/flows"])
 
@@ -47,6 +47,21 @@ test("retarget preserves private versions while updating exact workspace ranges"
   assert.equal(retargeted.devDependencies["@smthrs/kernel"], "workspace:*")
 })
 
+test("a private shipped template requires registry versions even for a workspace protocol", () => {
+  const manifest = { ...example, private: true, version: "0.0.0" }
+  const updated = retarget(manifest, "1.0.0", workspaceNames, { registryDependencies: true })
+  assert.equal(updated.version, "0.0.0")
+  assert.equal(updated.devDependencies["@smthrs/kernel"], "1.0.0")
+  const entries = [
+    { directory: "template", manifest, registryDependencies: true },
+    { directory: "kernel", manifest: { name: "@smthrs/kernel", version: "1.0.0" } }
+  ]
+  assert.deepEqual(mismatches(entries, "1.0.0"), [
+    "template: dependencies.@smthrs/kernel is 0.1.0, expected 1.0.0",
+    "template: devDependencies.@smthrs/kernel is workspace:*, expected 1.0.0"
+  ])
+})
+
 test("mismatches names the version and every stale internal range", () => {
   const entries = [
     { directory: "packages/smithers/flows", manifest: example },
@@ -65,10 +80,13 @@ test("mismatches names the version and every stale internal range", () => {
 })
 
 test("this workspace is internally coherent at its current version", () => {
-  const entries = readManifests()
+  const entries = readVersionedManifests()
   const version = entries.find(({ directory }) => directory === "packages/smithers/flows").manifest.version
 
   assert.deepEqual(mismatches(entries, version), [])
+  for (const path of versionedTemplates) {
+    assert.equal(entries.find((entry) => entry.directory === path)?.registryDependencies, true)
+  }
 })
 
 test("workspace discovery follows every pnpm-workspace package glob", () => {
@@ -109,11 +127,11 @@ test("retargetSource refuses a file that no longer carries the declaration", () 
 })
 
 test("sourceMismatches names a literal the manifests left behind", () => {
-  assert.deepEqual(sourceMismatches("9.9.9"), [
-    "packages/smithers/flows/observability/src/Otlp.ts: defaultServiceVersion is 1.0.0-rc.0, expected 9.9.9",
-    "packages/smithers/migrate/src/flow/Cli.ts: version is 1.0.0-rc.0, expected 9.9.9",
-    "packages/smithers/migrate/src/Report.ts: tool.version is 1.0.0-rc.0, expected 9.9.9"
-  ])
+  const manifests = readManifests()
+  assert.deepEqual(sourceMismatches("9.9.9"), versionedSources.map(({ path, declaration }) => {
+    const version = manifests.find((entry) => entry.directory === path.split("/src/")[0]).manifest.version
+    return `${path}: ${declaration} is ${version}, expected 9.9.9`
+  }))
 })
 
 test("every versioned source agrees with the version its own package declares", () => {

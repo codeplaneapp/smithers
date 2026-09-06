@@ -28,15 +28,28 @@ export const redactor = (
   sensitiveNames: ReadonlyArray<string> = []
 ): (text: string) => string => {
   const sensitive = new Set(sensitiveNames)
-  const values = Object.entries(environment)
-    .filter(([name, value]) =>
-      value !== undefined && value !== "" && (sensitive.has(name) || Redaction.isSensitiveKey(name))
+  // These are documented process/mode switches, despite their credential-like
+  // suffixes. An explicit sensitiveNames entry still overrides this list.
+  const publicConfiguration = new Set(["CLAUDE_CODE_CHILD_SESSION", "SMITHERS_OPENAI_AUTH"])
+  const values = [
+    ...new Set(
+      Object.entries(environment)
+        .filter(([name, value]) =>
+          value !== undefined && value !== "" &&
+          (sensitive.has(name) || (!publicConfiguration.has(name) && Redaction.isSensitiveKey(name)))
+        )
+        .flatMap(([, value]) => [value!, ...value!.split(/\r?\n/).filter((part) => part !== "")])
     )
-    .flatMap(([, value]) => [value!, ...value!.split(/\r?\n/).filter((part) => part !== "")])
+  ]
     .sort((left, right) => right.length - left.length)
+  // Replace once so a short real secret cannot rewrite another secret's
+  // replacement marker. Short credentials remain protected, even in tokens.
+  const known = values.length === 0
+    ? undefined
+    : new RegExp(values.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g")
   return (text) => {
     let clean = stripVTControlCharacters(text).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "")
-    for (const value of values) clean = clean.replaceAll(value, "[REDACTED]")
+    if (known !== undefined) clean = clean.replace(known, "[REDACTED]")
     return String(Redaction.redact(clean))
   }
 }

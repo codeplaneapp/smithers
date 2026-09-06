@@ -171,7 +171,7 @@ export const maximumTimeoutMinutes = 360
  * red without failing the pipeline: a literal `continue-on-error: true` on the
  * whole job, which makes every platform advisory at once, and an expression
  * reading the matrix context, whose value each row supplies for itself. This
- * generator emits no per-row `if:` key (its only `if:` is the whole-job guard
+ * generator emits no per-row `if:` key (cache publication uses a whole-job guard
  * on a {@link Job.publishesToCache} job), so a per-platform allowance has to be
  * the second one: the advisory bit is carried in an `include:` row beside the
  * runner label, and the job renders `continue-on-error: ${{ matrix.advisory }}`
@@ -559,6 +559,8 @@ const mapping = (
  */
 interface RenderedStep {
   readonly name?: string
+  /** Diagnostic collection/upload must survive a failed required gate. */
+  readonly always?: true
   readonly uses?: string
   readonly run?: string
   /** The shell that runs `run`. Unset, GitHub picks bash on Linux and macOS and pwsh on Windows. */
@@ -571,6 +573,7 @@ const renderStep = (step: RenderedStep, indent: string): ReadonlyArray<string> =
   const lines: Array<string> = []
   const fields: Array<string> = []
   if (step.name !== undefined) fields.push(`name: ${scalar(step.name)}`)
+  if (step.always === true) fields.push("if: always()")
   if (step.uses !== undefined) fields.push(`uses: ${scalar(step.uses)}`)
   if (step.run !== undefined) {
     fields.push(step.run.includes("\n") ? "run: |" : `run: ${scalar(step.run)}`)
@@ -752,13 +755,23 @@ const shellWord = (value: string): string => `'${value.replaceAll("'", "'\\''")}
 const runtimeSteps = (setup: CiToolchain.RuntimeSetup): ReadonlyArray<RenderedStep> => {
   switch (setup.name) {
     case "node":
-      return [{
-        uses: actions.setupNode,
-        with: {
-          "node-version": setup.release,
-          ...(setup.cachePackageStore ? { cache: "pnpm" } : {})
-        }
-      }]
+      return [
+        {
+          uses: actions.setupNode,
+          with: {
+            "node-version": setup.release,
+            ...(setup.cachePackageStore ? { cache: "pnpm" } : {})
+          }
+        },
+        ...(setup.npmRelease === undefined ? [] : [{
+          name: "Install certified npm",
+          shell: "bash",
+          run: [
+            `npm install --global ${shellWord(`npm@${setup.npmRelease}`)} --ignore-scripts --no-audit --no-fund`,
+            `test "$(npm --version)" = ${shellWord(setup.npmRelease)}`
+          ].join("\n")
+        }])
+      ]
     case "bun":
       return [{ uses: actions.setupBun, with: { "bun-version": setup.release } }]
   }
@@ -822,7 +835,7 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
     })
   }
   if (needs.docker !== undefined) {
-    // The generator emits no `if:` key, so the step decides for itself: a
+    // This toolchain step has no `if:` key, so its script detects the runner: a
     // runner with no docker daemon, or one whose daemon already reports the
     // containerd snapshotter (`docker info` names the storage driver
     // `overlayfs` then, `overlay2` otherwise), runs nothing. The existing
@@ -885,7 +898,7 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
     })
   }
   if (needs.apt !== undefined) {
-    // The generator emits no `if:` key, so the step decides for itself: a
+    // This toolchain step has no `if:` key, so its script detects the runner: a
     // runner without apt-get (macOS, Windows) runs nothing and stays green.
     // That needs the script to reach a POSIX shell: GitHub runs `run:` under
     // pwsh on Windows, which rejects `if command -v` as a parse error before
@@ -942,11 +955,9 @@ export const toolchainSteps = (attrs: Attrs, job: Job): ReadonlyArray<RenderedSt
 /**
  * The steps a job's declared artifact upload renders to.
  *
- * Collection is unconditional and best-effort, and the upload ignores an empty
- * collection, so a green run produces the same result an `if: failure()` would
- * without putting a step condition in the file. The generated workflow carries
- * no `if:` key at all, so nobody has to adjudicate in review which conditions
- * are load-bearing.
+ * Only these diagnostic steps use `always()`: GitHub otherwise skips them
+ * after the failure they need to explain. Required gates retain their normal
+ * failure semantics, and uploading an empty diagnostic collection is allowed.
  *
  * @category rendering
  * @since 0.1.0
@@ -976,9 +987,10 @@ export const artifactSteps = (upload: CiToolchain.ArtifactUpload): ReadonlyArray
     return `for f in ${from}; do if [ -e "$f" ]; then cp -R -- "$f" ${destination}; fi; done`
   })
   return [
-    { name: `Collect ${upload.artifact}`, run: [`mkdir -p ${root}`, ...copies].join("\n") },
+    { name: `Collect ${upload.artifact}`, always: true, run: [`mkdir -p ${root}`, ...copies].join("\n") },
     {
       name: `Upload ${upload.artifact}`,
+      always: true,
       uses: actions.uploadArtifact,
       with: {
         name: artifact,

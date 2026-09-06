@@ -17,7 +17,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import test from "node:test"
 import { dirtyPaths, nextCommands, parseArguments, releaseMessage, releaseTag, steps } from "./cut-release.mjs"
-import { versionedSources } from "./set-release-version.mjs"
+import { versionedSources, versionedTemplates } from "./set-release-version.mjs"
 
 const scriptsDirectory = resolve(import.meta.dirname)
 
@@ -74,6 +74,11 @@ const seed = () => {
   )
   write(root, "packages/kernel/package.json", json({ name: "@smthrs/kernel", version: "0.1.0" }))
   write(root, "packages/private/package.json", json({ name: "@smthrs/tooling", private: true, version: "0.0.0" }))
+  for (const path of versionedTemplates) {
+    write(root, path, json({ name: "__APP_NAME__", private: true, version: "0.0.0",
+      dependencies: { "@smthrs/kernel": "0.1.0", effect: "4.0.0-rc.112" },
+      devDependencies: { "@smthrs/cli": "workspace:*" } }))
+  }
   write(root, versionedSources[0].path, "export const defaultServiceVersion = \"0.1.0\"\n")
   write(root, versionedSources[1].path, "export const version = \"0.1.0\"\n")
   write(
@@ -162,6 +167,11 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
     assert.equal(manifest(root, "packages/smithers/package.json").dependencies.effect, "4.0.0-rc.112")
     assert.equal(manifest(root, "packages/kernel/package.json").version, "0.2.0")
     assert.equal(manifest(root, "packages/private/package.json").version, "0.0.0", "a private manifest is not bumped")
+    for (const path of versionedTemplates) {
+      assert.deepEqual(manifest(root, path), { name: "__APP_NAME__", private: true, version: "0.0.0",
+        dependencies: { "@smthrs/kernel": "0.2.0", effect: "4.0.0-rc.112" },
+        devDependencies: { "@smthrs/cli": "0.2.0" } })
+    }
     assert.match(readFileSync(join(root, versionedSources[0].path), "utf8"), /"0\.2\.0"/)
 
     const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8")
@@ -176,6 +186,12 @@ test("a cut bumps every manifest, retargets internal ranges, and writes the sect
     assert.match(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"), /0\.2\.0/)
     assert.match(readFileSync(join(root, "bun.lock"), "utf8"), /0\.2\.0/)
     assert.deepEqual(git(root, ["tag"]), "v0.1.0", "a cut without --commit tags nothing")
+    const templatePath = versionedTemplates[0]
+    const staleTemplate = manifest(root, templatePath)
+    staleTemplate.dependencies["@smthrs/kernel"] = "0.1.0"
+    write(root, templatePath, json(staleTemplate))
+    assert.throws(() => execFileSync(process.execPath, ["scripts/set-release-version.mjs", "--check", "0.2.0"],
+      { cwd: root, stdio: "pipe" }), (error) => error.status === 1 && /template\/default\/package\.json/.test(String(error.stderr)))
   })
 })
 

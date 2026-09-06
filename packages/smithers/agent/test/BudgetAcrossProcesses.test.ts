@@ -68,7 +68,8 @@ const agentDescriptor = new Descriptor.FlowDescriptor({
   description: "The agent whose latency budget crosses a process boundary.",
   body: new Descriptor.BodyRefMarkdown({
     path: "/flows/agents/budget-parker/flow.md",
-    baseDirectory: "/flows/agents/budget-parker"
+    baseDirectory: "/flows/agents/budget-parker",
+    contentDigest: "a".repeat(64)
   }),
   input: new Descriptor.SchemaRefNone(),
   output: new Descriptor.SchemaRefNone(),
@@ -102,6 +103,7 @@ const registryLayer = Layer.succeed(Registry.Registry)(
 const controlFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
   {
     flowId: "agents/budget-parker",
+    executionDigest: Descriptor.executionDigest(agentDescriptor),
     description: "The agent whose latency budget crosses a process boundary.",
     deployClass: false,
     envelope

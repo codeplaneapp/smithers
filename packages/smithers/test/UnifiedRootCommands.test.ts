@@ -1,8 +1,10 @@
 import * as Audience from "@smthrs/build-cli/Audience"
 import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
 import { Effect } from "effect"
-import { resolve } from "node:path"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { makeCli } from "../src/Cli.ts"
 import * as Suggest from "../src/Suggest.ts"
 
@@ -27,6 +29,9 @@ vi.mock("../src/Suggest.ts", async (load) => ({
   run: ports.suggest,
   isDirectory: ports.isDirectory
 }))
+
+const directory = mkdtempSync(join(tmpdir(), "smithers-root-commands-"))
+afterAll(() => rmSync(directory, { recursive: true, force: true }))
 
 beforeEach(() => {
   ports.invoke.mockReset().mockResolvedValue({ result: "invoked" })
@@ -154,7 +159,7 @@ describe("unified root command dispatch", () => {
     const result = await invoke([
       "gc",
       "--root",
-      "/fixture",
+      directory,
       "--older-than",
       "12h",
       ...(dryRun ? ["--dry-run"] : []),
@@ -179,7 +184,7 @@ describe("unified root command dispatch", () => {
       "migrate",
       "/source",
       "--root",
-      "/workspace",
+      directory,
       "--scan",
       "--allow-no-vcs",
       "--max-repair-rounds",
@@ -209,7 +214,7 @@ describe("unified root command dispatch", () => {
     expect(args).toContain("tsc -p test")
     expect(args).not.toContain("--root")
     expect(args).not.toContain("--apply")
-    expect(ports.invoke.mock.calls[0]![1]).toMatchObject({ root: "/workspace", scan: true })
+    expect(ports.invoke.mock.calls[0]![1]).toMatchObject({ root: directory, scan: true })
     expect(result.codes).not.toContain(1)
   })
 
@@ -268,11 +273,11 @@ describe("unified root command dispatch", () => {
   })
 
   it("leaves human suggestion output to the task and resolves an omitted path from root", async () => {
-    const result = await invoke(["suggest", "--root", "/fixture", "--audience", "human", "--silent"], {
+    const result = await invoke(["suggest", "--root", directory, "--audience", "human", "--silent"], {
       exit: undefined,
       stdout: { isTTY: true, columns: 80, write: () => {} }
     })
-    expect(ports.suggest.mock.calls[0]![0]).toMatchObject({ root: "/fixture", json: false, list: false })
+    expect(ports.suggest.mock.calls[0]![0]).toMatchObject({ root: directory, json: false, list: false })
     expect(result.stdout).not.toContain("documents")
   })
 })

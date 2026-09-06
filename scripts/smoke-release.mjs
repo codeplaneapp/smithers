@@ -99,6 +99,7 @@ try {
     join(smokeRoot, "package.json"),
     `${JSON.stringify({
       private: true,
+      smthrsReleaseConsumer: true,
       type: "module",
       packageManager: releasePackageManager,
       dependencies: {
@@ -218,8 +219,8 @@ try {
 
   // Import-only checks cannot catch a guest runner path erased by a CJS build.
   // Execute a real sandboxed flow through both published module conditions.
-  for (const filename of ["release-sandbox-entry.mjs", "release-sandbox-smoke.mjs"]) {
-    await writeFile(join(smokeRoot, filename), await readFile(join(repoRoot, "scripts/fixtures", filename)))
+  for (const filename of ["consumer-boundary.mjs", "release-sandbox-entry.mjs", "release-sandbox-smoke.mjs"]) {
+    await writeFile(join(smokeRoot, filename), await readFile(join(repoRoot, "scripts/fixtures/installed-consumer", filename)))
   }
   await run(process.execPath, ["release-sandbox-smoke.mjs"], smokeRoot)
 
@@ -297,7 +298,7 @@ try {
   // library's default install. Certify independent profiles on both managers
   // against these same candidate bytes before issuing the success receipt.
   await runConsumerMatrix(absolutePackDirectory, packManifest, {
-    profiles: [...minimalProfiles, ...adapterProfiles, ...migrationProfiles, templateProfile(absolutePackDirectory, packManifest)], runtime: true
+    profiles: [...minimalProfiles(packManifest), ...adapterProfiles(packManifest), ...migrationProfiles(packManifest), templateProfile(absolutePackDirectory, packManifest)], runtime: true
   })
   await recordSmokeSuccess(absolutePackDirectory, candidate)
   console.log(

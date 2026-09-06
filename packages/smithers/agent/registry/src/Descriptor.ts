@@ -10,6 +10,7 @@
  *
  * @since 0.1.0
  */
+import * as Digest from "@smthrs/core/Digest"
 import { Schema } from "effect"
 
 /**
@@ -461,6 +462,22 @@ export class FlowDescriptor extends Schema.Class<FlowDescriptor>("flows/registry
   frontmatter: Schema.Record(Schema.String, Schema.Json),
   provenance: Provenance
 }) {}
+
+/**
+ * The executable identity a host binds into a reviewed plan.
+ *
+ * Includes the complete source digest and all discovered metadata, so changing
+ * the model, parameters, body location, or authority cannot reuse an approval.
+ * A descriptor without measured source bytes has no executable identity; it
+ * may still be displayed, but a prompt executor must refuse to run it.
+ *
+ * @category hashing
+ * @since 1.0.0
+ */
+export const executionDigest = (descriptor: FlowDescriptor): string | undefined =>
+  descriptor.body.contentDigest === undefined
+    ? undefined
+    : Digest.digest(Digest.canonical(Schema.encodeSync(FlowDescriptor)(descriptor)))
 
 /**
  * The budget one descriptor declared, or {@link budgetUnbounded}.

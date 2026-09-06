@@ -119,9 +119,18 @@ describe("SchemaBridge", () => {
     }
     const declared = Schema.toJsonSchemaDocument(Input).schema as typeof advertised
 
-    // The projection publishes the flow's own JSON Schema, so `--schema`, the
-    // OpenAPI document, and the MCP tool list describe exactly what decodes.
-    expect(advertised.properties).toEqual(declared.properties)
+    // Zod may normalize a nullable union from `anyOf` to a `type` array. Both
+    // JSON Schema forms must retain the declared values and requirements.
+    expect(Object.keys(advertised.properties)).toEqual(Object.keys(declared.properties))
+    expect(advertised.properties.count).toEqual(declared.properties.count)
+    expect(advertised.properties.mode).toEqual(declared.properties.mode)
+    const published = z.fromJSONSchema(z.toJSONSchema(command.options!, { unrepresentable: "any" }))
+    for (const note of ["release note", null]) {
+      expect(published.safeParse({ count: 42, mode: "fast", note }).success).toBe(true)
+    }
+    for (const note of [42, true, {}, []]) {
+      expect(published.safeParse({ count: 42, mode: "fast", note }).success).toBe(false)
+    }
     expect(advertised.required).toEqual(declared.required)
 
     expect(
@@ -163,18 +172,24 @@ describe("SchemaBridge", () => {
       value: "slow",
       optional: true
     }
-  ])("preserves the declared $name schema and accepted inputs", async ({ field, optional, value }) => {
+  ])("preserves the declared $name values and requiredness", async ({ field, optional, value }) => {
     const Input = Schema.Struct({ choice: field })
     const command = await Effect.runPromise(SchemaBridge.toCommandSchema(moduleRef, Input))
     const advertised = z.toJSONSchema(command.options!, { unrepresentable: "any" })
     const declared = Schema.toJsonSchemaDocument(Input).schema
 
-    expect(advertised.properties).toEqual(declared.properties)
+    expect(Object.keys(advertised.properties!)).toEqual(Object.keys(declared.properties!))
     expect(advertised.required).toEqual(declared.required)
+    const published = z.fromJSONSchema(advertised)
     for (const choice of [value, null]) {
+      expect(published.safeParse({ choice }).success).toBe(true)
       expect(await Effect.runPromise(command.decode(command.assemble([], { choice })))).toEqual({ choice })
     }
-    expect((await failure(command.decode(command.assemble([], { choice: 42 })))).code).toBe("decode_failed")
+    for (const choice of [42, true, {}, [], ...(value === "note" ? [] : ["outside-enum"])]) {
+      expect(published.safeParse({ choice }).success).toBe(false)
+      expect((await failure(command.decode(command.assemble([], { choice })))).code).toBe("decode_failed")
+    }
+    expect(published.safeParse({}).success).toBe(optional)
     if (optional) {
       expect(await Effect.runPromise(command.decode(command.assemble([], {})))).toEqual({})
     } else {

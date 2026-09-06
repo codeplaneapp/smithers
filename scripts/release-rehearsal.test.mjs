@@ -102,6 +102,8 @@ test("evaluateExpression implements the GitHub operator subset", () => {
   assert.equal(evaluateExpression("!(env.DRY_RUN == 'true')", contexts), false)
   assert.equal(evaluateExpression("inputs.tag != '' && inputs.tag || 'fallback'", contexts), "fallback")
   assert.equal(evaluateExpression("inputs.missing", contexts), undefined)
+  assert.equal(evaluateExpression("always()", contexts), true)
+  assert.throws(() => evaluateExpression("always('argument')", contexts), /unsupported expression/)
   assert.throws(() => evaluateExpression("env.DRY_RUN =~ 'x'", contexts), /unsupported expression/)
 })
 
@@ -164,7 +166,7 @@ test("publication tolerates tag checkouts and bounded registry throttling", () =
 
 })
 
-test("current gates always run; only artifact preparation and publication select a path", () => {
+test("only candidate preparation and publication select a path; diagnostics survive failure", () => {
   const conditional = release.jobs.publish.steps
     .filter((candidate) => candidate.if !== undefined)
     .map((candidate) => candidate.name)
@@ -173,9 +175,23 @@ test("current gates always run; only artifact preparation and publication select
     "Build all workspaces from clean artifacts",
     "Pack and smoke-test release artifacts",
     "Restore and verify archived release candidate",
+    "Collect ci-test-tier-evidence",
+    "Upload ci-test-tier-evidence",
     "Publish packages in dependency order",
     "Report the skipped publication"
   ])
+  assert.equal(step("Collect ci-test-tier-evidence").if, "always()")
+  assert.equal(step("Upload ci-test-tier-evidence").if, "always()")
+  assert.equal(step("Archive tested release artifacts").if, undefined)
+})
+
+test("release builds the checked public graph and pins npm before smoke", () => {
+  assert.equal(step("Build all workspaces from clean artifacts").run, "node scripts/build-release.mjs")
+  const install = step("Install certified npm")
+  assert.match(install.run, /npm install --global 'npm@11\.16\.0' /)
+  assert.match(install.run, /npm --version/)
+  assert.equal(install.if, undefined)
+  assert.ok(release.jobs.publish.steps.indexOf(install) < release.jobs.publish.steps.indexOf(step("Workspace targets")))
 })
 
 test("archived retries restore an explicit immutable artifact without rebuilding or replacing smoke evidence", () => {
@@ -260,6 +276,47 @@ test("CI gates the server's checks and tests in the required test job", () => {
   const server = ci.jobs.test.steps.find((entry) => entry.name === "Server typecheck and tests")
   assert.equal(server?.run, "pnpm exec smthrs ci '//apps/server/...'")
   assert.equal(server?.if, undefined)
+})
+
+test("ordinary PR CI gates executable examples before workspace checks", () => {
+  const ci = parseWorkflow(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8"))
+  const steps = ci.jobs.test.steps
+  const examples = steps.find((entry) => entry.name === "Examples")
+  assert.equal(Object.hasOwn(ci.on, "pull_request"), true)
+  assert.equal(ci.jobs.test["continue-on-error"], undefined)
+  assert.equal(examples?.run, "pnpm exec smthrs ci '//examples/...'")
+  assert.equal(examples?.if, undefined)
+  assert.ok(steps.indexOf(examples) < steps.indexOf(steps.find((entry) => entry.name === "Workspace targets")))
+})
+
+test("a failed gate retains diagnostic files and failure status while skipping later gates", () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "release-failure-artifacts-")))
+  try {
+    mkdirSync(join(root, "scripts"))
+    cpSync(join(repoRoot, "scripts/release-rehearsal.mjs"), join(root, "scripts/release-rehearsal.mjs"))
+    writeFileSync(join(root, "workflow.yml"), [
+      "name: Fixture", "jobs:", "  publish:", "    steps:",
+      "      - name: Failing gate",
+      "        run: echo failure evidence > failed.log; exit 23",
+      "      - name: Later required gate",
+      "        run: exit 24",
+      "      - name: Collect diagnostics",
+      "        if: always()",
+      '        run: cp failed.log "$RUNNER_TEMP/evidence.log"'
+    ].join("\n"))
+    const result = spawnSync(process.execPath, [
+      join(root, "scripts/release-rehearsal.mjs"), "--workflow", "workflow.yml",
+      "--runner-temp", join(root, "runner"), "--transcript", join(root, "transcript.json")
+    ], { encoding: "utf8", timeout: 30_000 })
+    assert.equal(result.status, 1, result.stdout + result.stderr)
+    const transcript = JSON.parse(readFileSync(join(root, "transcript.json"), "utf8"))
+    assert.deepEqual(transcript.steps.map((entry) => [entry.status, entry.exitCode]), [
+      ["failed", 23], ["skipped", 0], ["passed", 0]
+    ])
+    assert.equal(readFileSync(join(root, "runner/evidence.log"), "utf8"), "failure evidence\n")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("release rebuilds and byte-compares the committed wasm before packing", () => {

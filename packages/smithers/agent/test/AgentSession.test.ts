@@ -67,7 +67,11 @@ const route: FlowEngineLike.RouteResolver = { prepare: () => Effect.succeed(prep
 const agentDescriptor = new Descriptor.FlowDescriptor({
   name: "agents/notes",
   description: "The notes agent.",
-  body: new Descriptor.BodyRefMarkdown({ path: "/flows/agents/notes/flow.md", baseDirectory: "/flows/agents/notes" }),
+  body: new Descriptor.BodyRefMarkdown({
+    path: "/flows/agents/notes/flow.md",
+    baseDirectory: "/flows/agents/notes",
+    contentDigest: "a".repeat(64)
+  }),
   input: new Descriptor.SchemaRefNone(),
   output: new Descriptor.SchemaRefNone(),
   model: Option.some("anthropic:test-model"),
@@ -136,6 +140,7 @@ const registryService = Registry.makeNoop({
 const memoryFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
   {
     flowId: "agents/notes",
+    executionDigest: Descriptor.executionDigest(agentDescriptor),
     description: "The notes agent.",
     deployClass: false,
     // One valid wildcard, one valid exact pattern, and three malformed
@@ -149,6 +154,7 @@ const memoryFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
   },
   {
     flowId: "agents/effort",
+    executionDigest: Descriptor.executionDigest(effortDescriptor),
     description: "The notes agent, with its own declared reasoning effort.",
     deployClass: false,
     envelope: { capabilities: [], flows: [], budget: {} }
@@ -161,6 +167,7 @@ const memoryFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
   },
   {
     flowId: "agents/seatless",
+    executionDigest: Descriptor.executionDigest(seatlessDescriptor),
     description: "A prompt flow with no model seat.",
     deployClass: false,
     envelope: { capabilities: [], flows: [], budget: {} }
@@ -374,7 +381,8 @@ interface Outcome {
 const drive = (
   gate: Deferred.Deferred<void>,
   decision: "approve" | "deny" = "approve",
-  legacy = false
+  legacy = false,
+  changedOnResume?: Descriptor.FlowDescriptor
 ): Effect.Effect<Outcome, unknown, Control.Control | ControlRuntime.ControlRuntime | Journal.Journal> =>
   Effect.gen(function*() {
     const control = yield* Control.Control
@@ -436,9 +444,10 @@ const drive = (
         })
       )
     }
+    if (changedOnResume !== undefined) descriptors.set(agentDescriptor.name, changedOnResume)
     yield* decision === "approve" ? control.approve(approval) : control.deny(approval)
     yield* control.resume({ runId, idempotencyKey: "resume:1" })
-    yield* awaitStatus(runtime, runId, legacy ? "failed" : "completed")
+    yield* awaitStatus(runtime, runId, legacy || changedOnResume !== undefined ? "failed" : "completed")
 
     const grants = yield* runtime.grants
     yield* journal.flush
@@ -550,6 +559,45 @@ const textOf = (request: ModelRequest.ModelRequest): string =>
     .join("\n")
 
 describe("AgentSession", () => {
+  for (
+    const [change, descriptor] of [
+      [
+        "prompt",
+        new Descriptor.FlowDescriptor({
+          ...agentDescriptor,
+          body: new Descriptor.BodyRefMarkdown({
+            path: agentDescriptor.body.path,
+            baseDirectory: agentDescriptor.path,
+            contentDigest: "b".repeat(64)
+          })
+        })
+      ],
+      ["model", new Descriptor.FlowDescriptor({ ...agentDescriptor, model: Option.some("openai:another-model") })],
+      ["parameters", new Descriptor.FlowDescriptor({ ...agentDescriptor, frontmatter: { effort: "high" } })]
+    ] as const
+  ) {
+    it(`refuses changed ${change} on resume before another model call or side effect`, async () => {
+      const captured: Array<Captured> = []
+      const notes: Array<string> = []
+      try {
+        const outcome = await Effect.runPromise(
+          Effect.gen(function*() {
+            const gate = yield* Deferred.make<void>()
+            return yield* drive(gate, "approve", false, descriptor).pipe(
+              Effect.provide(stack({ resolve: seat(capturing(captured)), notes, gate }))
+            )
+          }).pipe(Effect.scoped) as Effect.Effect<Outcome>
+        )
+        expect(captured).toHaveLength(2)
+        expect(notes).toEqual(["frame zero note"])
+        const failed = outcome.agentTrail.find((entry) => entry.eventType === "control.run.failed")
+        expect(JSON.stringify(failed?.payload)).toContain("create and approve a new plan")
+      } finally {
+        descriptors.set(agentDescriptor.name, agentDescriptor)
+      }
+    })
+  }
+
   it("refuses a pre-user-summary journal on resume before another live model call", { timeout: 30_000 }, async () => {
     const captured: Array<Captured> = []
     const notes: Array<string> = []
@@ -613,23 +661,23 @@ describe("AgentSession", () => {
     expect(outcome.child.runId).not.toBe(outcome.parent.runId)
   })
   it("waits through an accepted control row before driving the engine", async () => {
-  let reads = 0
-  await expect(Effect.runPromise(
-    AgentSession.waitForRunning(
-      () => Effect.sync(() => (reads++ === 0 ? "accepted" : "running")),
-      "run-wait",
-      1,
-      Effect.yieldNow
-    )
-  )).resolves.toBe(true)
-  expect(reads).toBe(2)
-  await expect(
-    Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("cancelled"), "run-cancelled", 1))
-  ).resolves.toBe(false)
-  await expect(
-    Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("accepted"), "run-stuck", 0))
-  ).rejects.toMatchObject({ code: "launch_failed", runId: "run-stuck" })
-})
+    let reads = 0
+    await expect(Effect.runPromise(
+      AgentSession.waitForRunning(
+        () => Effect.sync(() => (reads++ === 0 ? "accepted" : "running")),
+        "run-wait",
+        1,
+        Effect.yieldNow
+      )
+    )).resolves.toBe(true)
+    expect(reads).toBe(2)
+    await expect(
+      Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("cancelled"), "run-cancelled", 1))
+    ).resolves.toBe(false)
+    await expect(
+      Effect.runPromise(AgentSession.waitForRunning(() => Effect.succeed("accepted"), "run-stuck", 0))
+    ).rejects.toMatchObject({ code: "launch_failed", runId: "run-stuck" })
+  })
 
   it("waits for a parked execution publication before resuming it", async () => {
     let polls = 0

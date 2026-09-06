@@ -1,0 +1,135 @@
+/**
+ * The authoritative memory schema, including idempotent pre-release upgrades.
+ *
+ * @since 1.0.0
+ */
+import * as Effect from "effect/Effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
+
+const compositeMessagePrimaryKey = /PRIMARY\s+KEY\s*\(\s*thread_id\s*,\s*id\s*\)/iu
+
+/**
+ * Creates the schema mirrored by `src/migrations/*.sql`. The shared migrator
+ * runs this Effect and records its identity in the same transaction.
+ *
+ * @category migrations
+ * @since 1.0.0
+ */
+export const initial = Effect.gen(function*() {
+  const sql = yield* SqlClient.SqlClient
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_facts (
+    namespace_kind TEXT NOT NULL,
+    namespace_id TEXT NOT NULL,
+    fact_key TEXT NOT NULL,
+    value_json TEXT NOT NULL CHECK (json_valid(value_json)),
+    tags_json TEXT CHECK (tags_json IS NULL OR json_valid(tags_json)),
+    ttl_ms INTEGER,
+    provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (namespace_kind, namespace_id, fact_key),
+    CHECK (namespace_kind IN ('flow', 'agent', 'user', 'global')),
+    CHECK (length(namespace_id) > 0),
+    CHECK (length(fact_key) > 0),
+    CHECK (ttl_ms IS NULL OR ttl_ms >= 0)
+  )`
+  const factColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(memory_facts)`
+  if (!factColumns.some((column) => column.name === "tags_json")) {
+    yield* sql`ALTER TABLE memory_facts
+      ADD COLUMN tags_json TEXT CHECK (tags_json IS NULL OR json_valid(tags_json))`
+  }
+  yield* sql`CREATE INDEX IF NOT EXISTS memory_facts_expiry_idx
+    ON memory_facts (updated_at_ms, ttl_ms) WHERE ttl_ms IS NOT NULL`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_threads (
+    thread_id TEXT PRIMARY KEY CHECK (length(thread_id) > 0),
+    namespace_kind TEXT NOT NULL,
+    namespace_id TEXT NOT NULL,
+    title TEXT,
+    metadata_json TEXT CHECK (metadata_json IS NULL OR json_valid(metadata_json)),
+    created_at_ms INTEGER NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    CHECK (namespace_kind IN ('flow', 'agent', 'user', 'global')),
+    CHECK (length(namespace_id) > 0)
+  )`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_messages (
+    id TEXT NOT NULL CHECK (length(id) > 0),
+    thread_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    text TEXT NOT NULL,
+    at_ms INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, id),
+    FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
+  )`
+  const messageTables = yield* sql<{ readonly sql: string | null }>`SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'memory_messages'`
+  const messageDefinition = messageTables[0]?.sql
+  if (messageDefinition !== undefined && !compositeMessagePrimaryKey.test(messageDefinition ?? "")) {
+    yield* sql`CREATE TABLE memory_messages_v2 (
+      id TEXT NOT NULL CHECK (length(id) > 0),
+      thread_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      text TEXT NOT NULL,
+      at_ms INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, id),
+      FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
+    )`
+    yield* sql`INSERT INTO memory_messages_v2 (id, thread_id, role, text, at_ms)
+      SELECT id, thread_id, role, text, at_ms FROM memory_messages`
+    yield* sql`DROP TABLE memory_messages`
+    yield* sql`ALTER TABLE memory_messages_v2 RENAME TO memory_messages`
+  }
+  yield* sql`CREATE INDEX IF NOT EXISTS memory_messages_thread_order_idx
+    ON memory_messages (thread_id, at_ms, id)`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_notes (
+    id TEXT PRIMARY KEY CHECK (length(id) > 0),
+    namespace_kind TEXT NOT NULL,
+    namespace_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    tags_json TEXT NOT NULL CHECK (json_valid(tags_json)),
+    provenance_json TEXT NOT NULL CHECK (json_valid(provenance_json)),
+    status TEXT NOT NULL DEFAULT 'accepted',
+    created_at_ms INTEGER NOT NULL,
+    CHECK (namespace_kind IN ('flow', 'agent', 'user', 'global')),
+    CHECK (length(namespace_id) > 0),
+    CHECK (status IN ('pending', 'accepted', 'rejected'))
+  )`
+  yield* sql`CREATE INDEX IF NOT EXISTS memory_notes_namespace_order_idx
+    ON memory_notes (namespace_kind, namespace_id, created_at_ms, id)`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_note_supersedes (
+    superseder_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (superseder_id, target_id),
+    FOREIGN KEY (superseder_id) REFERENCES memory_notes (id),
+    FOREIGN KEY (target_id) REFERENCES memory_notes (id),
+    CHECK (superseder_id <> target_id)
+  )`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_fts_kinds (
+    namespace_kind TEXT PRIMARY KEY,
+    enabled_at_ms INTEGER NOT NULL,
+    CHECK (namespace_kind IN ('flow', 'agent', 'user', 'global'))
+  )`
+  yield* sql`CREATE TABLE IF NOT EXISTS memory_vectors (
+    record_kind TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    namespace_kind TEXT NOT NULL,
+    namespace_id TEXT NOT NULL,
+    embedding_model TEXT NOT NULL,
+    content_digest TEXT NOT NULL,
+    dimensions INTEGER NOT NULL,
+    vector_bytes BLOB NOT NULL,
+    updated_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (
+      namespace_kind, namespace_id, record_kind, record_id, embedding_model
+    ),
+    CHECK (record_kind IN ('fact', 'note')),
+    CHECK (namespace_kind IN ('flow', 'agent', 'user', 'global')),
+    CHECK (length(record_id) > 0),
+    CHECK (length(namespace_id) > 0),
+    CHECK (length(embedding_model) > 0),
+    CHECK (length(content_digest) > 0),
+    CHECK (dimensions > 0)
+  )`
+  yield* sql`CREATE INDEX IF NOT EXISTS memory_vectors_namespace_idx
+    ON memory_vectors (namespace_kind, namespace_id, embedding_model, updated_at_ms)`
+})

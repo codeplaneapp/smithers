@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest"
 import * as OutputStream from "../src/OutputStream.ts"
 
 describe("bounded live subprocess output", () => {
+  it("preserves counts and versions when credential-like names are public process switches", () => {
+    const redact = OutputStream.redactor({ CLAUDE_CODE_CHILD_SESSION: "1", SMITHERS_OPENAI_AUTH: "chatgpt" })
+    const message = "Found 1 error in v1.0.0; 10 tests passed using chatgpt"
+    expect(redact(message)).toBe(message)
+  })
+
+  it("protects short and explicitly designated secrets without rewriting replacement markers", () => {
+    const redact = OutputStream.redactor({ API_TOKEN: "private-value", SECRET: "A", OTHER_KEY: "a.b[0]" })
+    expect(redact("private-value A a.b[0]")).toBe("[REDACTED] [REDACTED] [REDACTED]")
+    expect(OutputStream.redactor({ CLAUDE_CODE_CHILD_SESSION: "1" }, ["CLAUDE_CODE_CHILD_SESSION"])("value 1"))
+      .toBe("value [REDACTED]")
+  })
+
   it("reassembles UTF-8 and split credentials before redacting", () => {
     const lines: Array<string> = []
     const observer = OutputStream.make({

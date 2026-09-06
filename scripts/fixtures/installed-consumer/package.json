@@ -1,0 +1,22 @@
+{
+  "name": "@smthrs/release-consumer-fixtures",
+  "private": true,
+  "type": "module",
+  "description": "Source contract for programs copied into isolated packed consumers; never executed from this directory",
+  "dependencies": {
+    "@effect/platform-node": "4.0.0-rc.112",
+    "@smthrs/create-app": "*",
+    "@smthrs/flow": "*",
+    "@smthrs/flows": "*",
+    "@smthrs/gateway": "*",
+    "@smthrs/migrate": "*",
+    "@smthrs/observability": "*",
+    "@smthrs/plan": "*",
+    "@smthrs/platform-bun": "*",
+    "@smthrs/platform-node": "*",
+    "@smthrs/sandbox": "*",
+    "@smthrs/testing": "*",
+    "effect": "4.0.0-rc.112",
+    "vitest": "4.1.9"
+  }
+}

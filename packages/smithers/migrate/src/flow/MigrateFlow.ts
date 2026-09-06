@@ -381,7 +381,37 @@ export const sealAction = Action.make("smithers/migrate-v1/Seal", {
 })
 
 /**
- * Checks the sealed plan against a fresh read of the project.
+ * Checks the sealed plan against a fresh read without changing artifacts.
+ *
+ * @category execution
+ * @since 1.0.0-rc.0
+ */
+export const validateSeal = (payload: {
+  readonly options: Options.MigrateOptions
+  readonly seal: PlanSeal
+}): Effect.Effect<
+  { readonly root: string; readonly digest: string },
+  MigrateError,
+  FileSystem.FileSystem | Path.Path
+> =>
+  Effect.gen(function*() {
+    const result = yield* scan(payload.options)
+    const current = yield* planSeal(result, payload.options)
+    if (current.digest !== payload.seal.digest) {
+      const changed = sealDifferences(payload.seal, current)
+      return yield* Effect.fail(make(
+        "stale-plan",
+        "The project has changed since this migration was planned, so the plan no longer describes it. Rerun the plan and apply that.",
+        changed.length === 0
+          ? "a unit outline, the run-state roots, or the layout changed"
+          : changed.join("\n")
+      ))
+    }
+    return { root: payload.options.root, digest: current.digest }
+  })
+
+/**
+ * Checks the sealed plan, then clears earlier unit artifacts under the lock.
  *
  * @category execution
  * @since 1.0.0-rc.0
@@ -397,23 +427,12 @@ export const seal = (payload: {
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const result = yield* scan(payload.options)
-    const current = yield* planSeal(result, payload.options)
-    if (current.digest !== payload.seal.digest) {
-      const changed = sealDifferences(payload.seal, current)
-      return yield* Effect.fail(make(
-        "stale-plan",
-        "The project has changed since this migration was planned, so the plan no longer describes it. Rerun the plan and apply that.",
-        changed.length === 0
-          ? "a unit outline, the run-state roots, or the layout changed"
-          : changed.join("\n")
-      ))
-    }
+    const validated = yield* validateSeal(payload)
     const artifacts = path.join(payload.options.root, ...Options.reportDir(payload.options).split("/"), "units")
     yield* fs.remove(artifacts, { recursive: true, force: true }).pipe(
       Effect.mapError(io(`could not clear the unit artifacts under "${artifacts}"`))
     )
-    return { root: payload.options.root, digest: current.digest }
+    return validated
   })
 
 /**
@@ -1311,7 +1330,7 @@ export const unit = Flow.make(unitTag, {
         // What the whole-tree manifest leaves out: the tool's own directory,
         // the 1.0 runtime state a migrated project writes, and the run-state
         // roots, which the digests and their own check already cover.
-        treeExclude: [Options.reportDir(options), ".flows"]
+        treeExclude: [Options.reportDir(options), Options.defaultReportDir, ".flows"]
       }),
       (checkpoint) => {
         const settleWith = (

@@ -53,7 +53,7 @@ import * as Permission from "@smthrs/capability/Permission"
 import { LaunchFailed, PersistenceError } from "@smthrs/control/ControlError"
 import * as ControlExecutor from "@smthrs/control/ControlExecutor"
 import { ControlRuntime } from "@smthrs/control/ControlRuntime"
-import type { ApprovalPayload, Envelope, RunStatus } from "@smthrs/control/ControlSchema"
+import type { ApprovalPayload, Envelope, PlanCard, RunStatus } from "@smthrs/control/ControlSchema"
 import * as Digest from "@smthrs/core/Digest"
 import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { DurableDeferred, Flow, FlowRuntime, WaitFor } from "@smthrs/flow"
@@ -72,6 +72,7 @@ import * as CanonicalJson from "@smthrs/model/CanonicalJson"
 import * as ModelRequest from "@smthrs/model/ModelRequest"
 import type { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
+import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Registry from "@smthrs/registry/Registry"
 import { Ownership, RunStore } from "@smthrs/run-store"
 import * as Cause from "effect/Cause"
@@ -91,7 +92,6 @@ import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
-import * as Seat from "./Seat.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
 import * as StandardFlows from "./StandardFlows.ts"
 
@@ -1447,6 +1447,38 @@ export const make = (
           writeStatus(runId, "failed", Cause.pretty(exit.cause))
         )
 
+    const approvedExecution = (
+      runId: string,
+      card: PlanCard,
+      descriptor: Descriptor.FlowDescriptor
+    ): Effect.Effect<{ readonly executionDigest: string; readonly seatId: string }, LaunchFailed> =>
+      Effect.suspend(() => {
+        const expected = card.executionDigest
+        if (expected === undefined || Descriptor.executionDigest(descriptor) !== expected) {
+          return Effect.fail(
+            new LaunchFailed({
+              runId,
+              message: `Flow ${card.flowId} changed or has no approved executable identity; ` +
+                "create and approve a new plan before running it",
+              cause: { flowId: card.flowId }
+            })
+          )
+        }
+        // Validate the same executable fields at launch and on every resume.
+        // An identified prompt without a seat cannot be run by another host.
+        if (Option.isNone(descriptor.model)) {
+          return Effect.fail(
+            new LaunchFailed({
+              runId,
+              message: `Flow ${card.flowId} declares no model seat: add a \`model:\` line to ` +
+                `its frontmatter, then run \`smithers doctor\` to see which provider keys this project has`,
+              cause: { flowId: card.flowId }
+            })
+          )
+        }
+        return Effect.succeed({ executionDigest: expected, seatId: descriptor.model.value })
+      })
+
     /** One agent run, executed as the whole of one durable flow execution. */
     const body = (
       payload: { readonly runId: string; readonly planId: string },
@@ -1469,13 +1501,10 @@ export const make = (
         const plan = yield* runtime.getPlan(payload.planId)
         const card = plan.card
         const descriptor = yield* registry.get(card.flowId)
+        const { executionDigest, seatId } = yield* approvedExecution(payload.runId, card, descriptor)
         // The launch already validated the seat and body; re-validation here
         // guards a registry that changed between acceptance and execution.
-        const seatId = yield* Effect.fromOption(
-          descriptor.model,
-          () => new Seat.SeatUnresolved({ seat: card.flowId, message: `Flow ${card.flowId} declares no model seat` })
-        )
-        const flowBody = yield* registry.loadBody(card.flowId)
+        const flowBody = yield* registry.loadBody(card.flowId, executionDigest)
         if (flowBody._tag !== "Prompt") {
           return yield* Effect.fail(
             new HarnessError.HarnessError({
@@ -2096,7 +2125,7 @@ export const make = (
           // nothing here runs it, and something else still might.
           return "pending" as const
         }
-        const flowBody = yield* registry.loadBody(flowId).pipe(
+        const flowBody = yield* registry.loadBody(flowId, input.plan.card.executionDigest).pipe(
           Effect.mapError(
             (cause) =>
               new LaunchFailed({
@@ -2114,22 +2143,10 @@ export const make = (
         if (flowBody._tag !== "Prompt") {
           return "pending" as const
         }
-        // A prompt flow with no seat is refused, not left pending. No agent
-        // host can ever run one, so `pending` promised a driver that was never
-        // coming: `smithers init hello && smithers up hello` exited 1 and left
-        // `run-1` at `accepted` under an owner with pid 0, which only
-        // `smithers cancel` could end (release rehearsal, D1).
-        if (Option.isNone(descriptor.value.model)) {
-          return yield* new LaunchFailed({
-            runId: input.run.runId,
-            message: `Flow ${flowId} declares no model seat: add a \`model:\` line to ` +
-              `its frontmatter, then run \`smithers doctor\` to see which provider keys this project has`,
-            cause: { flowId }
-          })
-        }
+        const { seatId } = yield* approvedExecution(input.run.runId, input.plan.card, descriptor.value)
         // Resolve the seat now, so a missing key refuses the launch as a
         // typed failure instead of failing the run after it was accepted.
-        yield* seats.resolve(descriptor.value.model.value).pipe(
+        yield* seats.resolve(seatId).pipe(
           Effect.mapError((error) =>
             new LaunchFailed({
               runId: input.run.runId,

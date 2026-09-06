@@ -59,6 +59,12 @@ export * as MemoryStore from "./MemoryStore.ts"
 export * as MemoryTrellis from "./MemoryTrellis.ts"
 
 /**
+ * @category migrations
+ * @since 1.0.0
+ */
+export * as Migrations from "./Migrations.ts"
+
+/**
  * @category models @since 0.1.0
  * @slop
  */

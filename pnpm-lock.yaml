@@ -1262,6 +1262,9 @@ importers:
       '@smthrs/capability':
         specifier: workspace:*
         version: link:../../packages/smithers/flows/capability
+      '@smthrs/control':
+        specifier: workspace:*
+        version: link:../../packages/smithers/control
       '@smthrs/database':
         specifier: workspace:*
         version: link:../../packages/smithers/flows/database
@@ -1280,6 +1283,9 @@ importers:
       '@smthrs/harness':
         specifier: workspace:*
         version: link:../../packages/smithers/agent/harness
+      '@smthrs/jj':
+        specifier: workspace:*
+        version: link:../../packages/smithers/flows/jj
       '@smthrs/journal':
         specifier: workspace:*
         version: link:../../packages/smithers/flows/journal

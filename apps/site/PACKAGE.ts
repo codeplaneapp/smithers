@@ -60,6 +60,7 @@ import { Package as migratePackage } from "../../packages/smithers/migrate/PACKA
 import { Package as notificationsPackage } from "../../packages/smithers/notifications/PACKAGE.ts"
 import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
 import { Package as testingPackage } from "../../packages/testing/PACKAGE.ts"
+import { sites as docsSites } from "../docs/shared/manifest.mjs"
 
 const cwd = "apps/site"
 
@@ -259,6 +260,31 @@ const docsTextTest = Smithers.Shell.Test({
   data: [Smithers.file("scripts/docs-text.mjs"), Smithers.file("scripts/docs-text.test.mjs")]
 })
 
+/** Execute exact tutorial files and validate deployment entry points offline. */
+const docsRuntimeTests = Smithers.Shell.Test({
+  shell: "node --test --test-concurrency=1 scripts/tutorials.test.mjs scripts/deployment.test.mjs",
+  data: [
+    Smithers.file("scripts/tutorials.test.mjs"),
+    Smithers.file("scripts/deployment.test.mjs"),
+    Smithers.glob("src/content/docs/docs/tutorials/*.mdx"),
+    Smithers.file("src/content/docs/docs/guides/child-flows.mdx"),
+    Smithers.file("alchemy.run.ts"),
+    Smithers.file("package.json"),
+    Smithers.file("//apps/docs/shared/alchemy-site.mjs"),
+    Smithers.file("//apps/docs/shared/alchemy-site.d.ts"),
+    Smithers.file("//apps/docs/shared/manifest.mjs"),
+    Smithers.file("//apps/docs/shared/package.json"),
+    ...docsSites.map((site) => Smithers.file(`//apps/docs/${site.slug}/alchemy.run.ts`)),
+    examplesPackage.docs,
+    cliPackage.docsSources,
+    flowPackage.docsSources,
+    enginePackage.docsSources,
+    agentPackage.lib,
+    flowsPackage.lib,
+    targetsPackage.lib
+  ]
+})
+
 const docsLint = Smithers.Shell.Test({
   script: Smithers.file("scripts/check-docs.mjs"),
   data: [
@@ -310,7 +336,7 @@ export const Package = Smithers.Package({
     referenceIngest,
     cliData,
     apiDocs,
-    docsLint, docsTextTest,
+    docsLint, docsTextTest, docsRuntimeTests,
     examplesPages, llms,
     ...tutorialCodeBlocks
   }

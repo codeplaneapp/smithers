@@ -288,6 +288,10 @@ export const rules = (options: {
     ...verificationCommands(options.commands).map((command) => allow("proc:spawn", command)),
     allow("net:*", "**"),
     allow("model:*", "**"),
+    // The permanent SQLite lock inode and diagnostic state are host-owned,
+    // including when reports are written to another directory.
+    deny("fs:*", `${root}/${Options.defaultReportDir}`),
+    deny("fs:*", `${root}/${Options.defaultReportDir}/**`),
     // Every filesystem action, not only writes. The contract forbids reading
     // run state too: a database, an execution log, or a subscription file
     // read into a model call has left the machine, and a prompt sentence is

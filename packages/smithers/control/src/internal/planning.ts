@@ -101,6 +101,7 @@ export interface PlanSource {
   readonly decodedInput: unknown
   readonly envelope: Envelope
   readonly deployClass: boolean
+  readonly executionDigest?: string | undefined
   /** The persisted plan value and cache verdicts produced by the host. */
   readonly handoff?: {
     readonly plan: PersistedPlan.Plan
@@ -130,6 +131,7 @@ export const planCard = (source: PlanSource) =>
       input: source.decodedInput,
       envelope: source.envelope,
       deployClass: source.deployClass,
+      ...(source.executionDigest === undefined ? {} : { executionDigest: source.executionDigest }),
       // The persisted plan digest covers keys, edges, effects, conflicts,
       // priorities, and generations. Hashing only node keys loses executable
       // graph changes whose content keys legitimately stay stable.
@@ -148,6 +150,7 @@ export const planCard = (source: PlanSource) =>
       inputSummary: canonical(source.decodedInput),
       envelope: source.envelope,
       deployClass: source.deployClass,
+      ...(source.executionDigest === undefined ? {} : { executionDigest: source.executionDigest }),
       ...(plan === undefined ? {} : { plan }),
       nodes,
       approval: {

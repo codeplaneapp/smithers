@@ -170,6 +170,17 @@ waits for the control plane's own `running` transition, writes
 `waiting-approval` when the execution parks, and writes the terminal status
 when it settles.
 
+Before starting a prompt, the session checks the plan's `executionDigest`
+against the registry descriptor and verifies the loaded source bytes. The
+same checks run on every drive or resume. An absent measured identity or a
+change to the prompt, model, parameters, or discovered metadata refuses the
+run; a refreshed registry needs a new plan and approval. A registry mismatch
+is retained as the typed cause of the launch failure.
+
+Module flows are discovered and planned but return `pending` from this agent
+executor. A host must register their flow and action implementations and drive
+them separately; `AgentSession` executes markdown prompt flows.
+
 ### AgentSession.Options
 
 | Field             | Type                                                                      | What it decides                                                                                                                                     |

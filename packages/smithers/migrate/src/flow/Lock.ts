@@ -1,21 +1,14 @@
 /**
- * The lock that keeps two `apply` runs from editing one project at once.
+ * One apply owner per canonical project, independent of the report layout.
  *
- * Everything an apply run writes — the backups, the pending marker, the unit
- * artifacts, the report — lives in one report directory, and nothing in it
- * was built for two writers: run A's rollback reads a tree diff that run B's
- * writes are part of, and deletes files B just made. The lock is one file in
- * that directory, created with exclusive-create semantics and held for the
- * whole run, so the second run refuses instead of sharing it.
+ * SQLite's transaction lock is the authority. Its file is permanent: unlinking
+ * it would let two processes lock different inodes at the same path. The JSON
+ * record carries diagnostics and the recovery directory, published atomically
+ * while the transaction is held. A crash releases the operating-system lock
+ * even if it happens before that record is written, and only the next
+ * transaction owner may reclaim it.
  *
- * A crashed run cannot remove its lock, so the file names its owner: the pid
- * and when it started. A later run that finds the lock asks the operating
- * system whether that pid is alive. Dead — and a lock that cannot be read
- * back at all — is taken over and the takeover is noted in the report; alive
- * is another run doing its job and this one exits 3, the same "parked: the
- * project is intact and there is a decision to make" answer a refused gate
- * gives.
- *
+ * @see https://www.sqlite.org/lockingv3.html
  * @since 1.0.0-rc.0
  */
 import * as Clock from "effect/Clock"
@@ -24,15 +17,17 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import { randomUUID } from "node:crypto"
+import { DatabaseSync } from "node:sqlite"
 import * as Fs from "../internal/Fs.ts"
 import { io, make, type MigrateError } from "../MigrateError.ts"
+import * as Pending from "./internal/Pending.ts"
+import * as Options from "./Options.ts"
 
 /**
- * Who holds the lock: the process, when it started, and over which project.
- *
- * `startedAt` is text rather than epoch milliseconds because the lock is a
- * file a person opens when something has gone wrong, and an ISO timestamp
- * answers "how long has this been stuck" without a calculator.
+ * Ownership diagnostics and the recovery directory. Older pre-release records
+ * may lack the token and report directory; neither an old pid nor a partial record decides
+ * whether the operating-system lock is held.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -40,7 +35,9 @@ import { io, make, type MigrateError } from "../MigrateError.ts"
 export const Record = Schema.Struct({
   pid: Schema.Number,
   startedAt: Schema.String,
-  root: Schema.String
+  root: Schema.String,
+  token: Schema.optional(Schema.String),
+  reportDir: Schema.optional(Schema.String)
 })
 
 /**
@@ -52,9 +49,8 @@ export const Record = Schema.Struct({
 export type Record = typeof Record.Type
 
 /**
- * A lock this process holds. The record is what release compares before it
- * removes anything: a lock is only ever removed by the run whose record it
- * carries.
+ * A lock this process holds. Release requires this exact acquired handle;
+ * reconstructing a record cannot release another owner's transaction.
  *
  * @category models
  * @since 1.0.0-rc.0
@@ -62,46 +58,40 @@ export type Record = typeof Record.Type
 export interface Held {
   readonly file: string
   readonly record: Record
-  /**
-   * The record of the stale lock this run took over, when it did. The caller
-   * notes it in the report: a lock whose owner died mid-run is evidence the
-   * project may be mid-unit, and the report is where that belongs.
-   */
+  /** The abandoned diagnostic record, for the next run's recovery report. */
   readonly reclaimed: Record | undefined
 }
 
+/** A live connection, kept private so callers cannot release its transaction. */
+interface Lease {
+  readonly database: DatabaseSync
+  readonly file: string
+  readonly token: string
+  readonly reportDirectory: string
+}
+const leases = new WeakMap<Held, Lease>()
+
 /**
- * The lock file of one report directory.
+ * The fixed project lock record. `reportDir` is retained for source
+ * compatibility; choosing another report directory never creates another lock.
+ * `acquire` resolves the project root before calling this path helper.
  *
  * @category combinators
  * @since 1.0.0-rc.0
  */
-export const file = (path: Path.Path, root: string, reportDir: string): string =>
-  path.join(root, ...reportDir.split("/"), "apply.lock")
+export const file = (path: Path.Path, root: string, _reportDir?: string): string =>
+  path.join(root, Options.defaultReportDir, "apply.lock")
 
-/**
- * Whether the pid a lock names is a live process. A pid the process cannot
- * signal because it belongs to another user is alive; a pid that does not
- * exist, or a value that was never a pid, is not.
- */
-const pidAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (cause) {
-    return (cause as { readonly code?: unknown }).code === "EPERM"
-  }
-}
-
-const refusal = (file: string, held: Record): MigrateError =>
+const refusal = (target: string, held: Record | undefined): MigrateError =>
   make(
     "apply-in-progress",
-    `another apply run already holds ${file} (pid ${held.pid}, started ${held.startedAt})`,
-    "wait for that run to finish; if it is gone, its lock is stale and the next run will take it over"
+    `another apply run already holds ${target}${
+      held === undefined ? " (owner record is being initialized)" : ` (pid ${held.pid}, started ${held.startedAt})`
+    }`,
+    "wait for that run to finish; the operating system releases its lock if the process exits"
   )
 
-/** The record a lock file holds, or `undefined` when it cannot be read back. */
+/** A missing or incomplete record never grants permission to enter. */
 const readRecord = (text: string): Record | undefined => {
   try {
     return Schema.decodeUnknownSync(Record)(JSON.parse(text))
@@ -110,15 +100,33 @@ const readRecord = (text: string): Record | undefined => {
   }
 }
 
+const read = (target: string) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const text = yield* Fs.optionalNotFound(fs.readFileString(target)).pipe(
+      Effect.mapError(io(`could not read the apply lock ${target}`))
+    )
+    return Option.isNone(text) ? undefined : readRecord(text.value)
+  })
+
+/** SQLite extended result codes retain BUSY (5) / LOCKED (6) in the low byte. */
+const busy = (cause: unknown): boolean => {
+  if (typeof cause !== "object" || cause === null || !("errcode" in cause)) return false
+  const code = cause.errcode
+  return typeof code === "number" && ((code & 0xff) === 5 || (code & 0xff) === 6)
+}
+
+/** Closing the connection rolls back the held transaction and releases its locks. */
+const close = (database: DatabaseSync): Effect.Effect<void> => Effect.try(() => database.close()).pipe(Effect.ignore)
+
 /**
- * Takes the apply lock of one report directory.
+ * Takes the canonical project's apply lock without waiting for another owner.
  *
- * Exclusive-create is the whole mutual exclusion: two runs that both reach
- * for the lock get exactly one success. A run that finds the file already
- * there reads who holds it — a live pid refuses with `apply-in-progress`,
- * while a dead one (or a record nothing can read back, which a crash halfway
- * through the write leaves) is removed and the create is retried, so the
- * takeover is itself exclusive.
+ * A reserved SQLite writer lock is exclusive across connections and processes.
+ * No database rows are needed: the transaction stays open until release, and
+ * the guard file is never removed. A contender can read diagnostic metadata,
+ * but only the transaction winner can change it. There is no read/unlink/retry
+ * takeover window and no timeout that can mistake a paused owner for a crash.
  *
  * @category execution
  * @since 1.0.0-rc.0
@@ -130,50 +138,75 @@ export const acquire = (options: {
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const target = file(path, options.root, options.reportDir)
-    const record: Record = {
-      pid: process.pid,
-      startedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
-      root: options.root
-    }
-    yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
-      Effect.mapError(io(`could not create ${path.dirname(target)}`))
+    const root = yield* fs.realPath(options.root).pipe(Effect.mapError(io(`could not resolve ${options.root}`)))
+    const target = file(path, root)
+    const directory = path.dirname(target)
+    yield* fs.makeDirectory(directory, { recursive: true }).pipe(
+      Effect.mapError(io(`could not create ${directory}`))
     )
-    const attempt = (reclaimed: Record | undefined): Effect.Effect<Held, MigrateError, FileSystem.FileSystem> =>
-      Effect.gen(function*() {
-        const created = yield* fs.writeFileString(target, `${JSON.stringify(record, null, 2)}\n`, { flag: "wx" }).pipe(
-          Effect.as(true),
-          Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.succeed(false)),
-          Effect.mapError(io(`could not take the apply lock ${target}`))
-        )
-        if (created) return { file: target, record, reclaimed }
-        const text = yield* Fs.optionalNotFound(fs.readFileString(target)).pipe(
-          Effect.mapError(io(`could not read the apply lock ${target}`))
-        )
-        // It vanished between the failed create and the read: whoever held it
-        // finished, so the create can simply run again.
-        if (Option.isNone(text)) return yield* attempt(reclaimed)
-        // A lock that cannot be read back names nobody, so there is no owner
-        // to wait for. It is taken over the same way a dead pid's is.
-        const held = readRecord(text.value)
-        if (held !== undefined && pidAlive(held.pid)) {
-          return yield* Effect.fail(refusal(target, held))
+    // A symlinked root is supported, but lock state must stay at its fixed
+    // location inside that root, where layout and rollback exclude it.
+    const realDirectory = yield* fs.realPath(directory).pipe(Effect.mapError(io(`could not resolve ${directory}`)))
+    if (realDirectory !== directory) {
+      return yield* Effect.fail(make("invalid-layout", `the apply lock directory must not be a symlink: ${directory}`))
+    }
+    const database = yield* Effect.try({
+      try: () => {
+        const connection = new DatabaseSync(`${target}.sqlite`)
+        try {
+          connection.exec("BEGIN IMMEDIATE")
+          return connection
+        } catch (cause) {
+          connection.close()
+          throw cause
         }
-        yield* fs.remove(target, { force: true }).pipe(
-          Effect.mapError(io(`could not take over the stale apply lock ${target}`))
-        )
-        return yield* attempt(held ?? reclaimed)
+      },
+      catch: (cause) => cause
+    }).pipe(Effect.catch((cause) =>
+      busy(cause)
+        ? Effect.flatMap(read(target), (held) => Effect.fail(refusal(target, held)))
+        : Effect.fail(io(`could not take the apply lock ${target}`)(cause))
+    ))
+    return yield* Effect.gen(function*() {
+      const reclaimed = yield* read(target)
+      // Check under the authority transaction, before changing the owner
+      // pointer. A crash/retry must retain the directory with the original
+      // checkpoint, even when the next invocation chooses another layout.
+      const reports = new Set([
+        options.reportDir,
+        reclaimed?.reportDir ?? Options.defaultReportDir,
+        Options.defaultReportDir
+      ])
+      for (const report of reports) {
+        const invalid = Options.relativePathIssue("reportDir", report)
+        if (invalid !== undefined) {
+          return yield* Effect.fail(make("invalid-layout", `cannot inspect migration recovery state: ${invalid}`))
+        }
+        yield* Pending.assertClear(path.join(root, report))
+      }
+      const token = randomUUID()
+      const record: Record = Object.freeze({
+        pid: process.pid,
+        startedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+        root,
+        token,
+        reportDir: options.reportDir
       })
-    return yield* attempt(undefined)
-  })
+      yield* Fs.writeAtomic(target, `${JSON.stringify(record, null, 2)}\n`).pipe(
+        Effect.mapError(io(`could not record the apply lock ${target}`))
+      )
+      const held: Held = Object.freeze({ file: target, record, reclaimed })
+      leases.set(held, { database, file: target, token, reportDirectory: path.join(root, options.reportDir) })
+      return held
+    }).pipe(Effect.onError(() => close(database)))
+  }).pipe(Effect.uninterruptible)
 
 /**
- * Gives the lock back. Only a lock still carrying this run's record is
- * removed: a file that has since been replaced belongs to another run, and
- * removing it would reopen the window the lock exists to close. Best effort
- * on purpose — a release that cannot complete leaves a stale lock, which the
- * next run takes over and notes, which is strictly better than masking the
- * failure the run itself ended with.
+ * Removes this handle's diagnostic record while its transaction is still
+ * held, then closes the connection. Repeated or reconstructed releases are
+ * no-ops. A changed record, or one pointing to an unresolved checkpoint, is
+ * preserved; the permanent guard file is never
+ * unlinked. Cleanup failures cannot mask the migration's own result.
  *
  * @category execution
  * @since 1.0.0-rc.0
@@ -181,16 +214,18 @@ export const acquire = (options: {
 export const release = (
   held: Held
 ): Effect.Effect<void, never, FileSystem.FileSystem | Path.Path> =>
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const text = yield* Fs.optionalNotFound(fs.readFileString(held.file)).pipe(
-      Effect.mapError(io(`could not read the apply lock ${held.file}`))
-    )
-    if (Option.isNone(text)) return
-    const current = readRecord(text.value)
-    if (current === undefined) return
-    if (current.pid !== held.record.pid || current.startedAt !== held.record.startedAt) return
-    yield* fs.remove(held.file, { force: true }).pipe(
-      Effect.mapError(io(`could not release the apply lock ${held.file}`))
-    )
-  }).pipe(Effect.orElseSucceed(() => undefined))
+  Effect.suspend(() => {
+    const lease = leases.get(held)
+    if (lease === undefined) return Effect.void
+    leases.delete(held)
+    return Effect.gen(function*() {
+      // If the unit failed before settling its checkpoint, retain the owner
+      // record as the durable pointer to its report directory. A later apply
+      // must recover there even when it selects a different report layout.
+      yield* Pending.assertClear(lease.reportDirectory)
+      const current = yield* read(lease.file)
+      if (current?.token !== lease.token) return
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.remove(lease.file, { force: true })
+    }).pipe(Effect.ensuring(close(lease.database)), Effect.ignore)
+  }).pipe(Effect.uninterruptible)

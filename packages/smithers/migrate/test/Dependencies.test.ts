@@ -110,13 +110,20 @@ describe("the scan surface's dependency boundary", () => {
     expect(Object.keys(manifest.optionalDependencies)).toContain("@smthrs/registry")
   })
 
-  it("shares one exact Effect runtime with the consuming project", () => {
-    expect(manifest.peerDependencies).toEqual({
-      "@effect/platform-node": "4.0.0-rc.108",
-      "@effect/platform-node-shared": "4.0.0-rc.108",
-      effect: "4.0.0-rc.108"
-    })
+  it("pins the standalone scanner runtime to the consuming project's Effect family", async () => {
+    const { EXPECTED_EFFECT_VERSION } = await import(
+      new URL("../../../../scripts/check-single-effect-version.mjs", import.meta.url).href
+    )
+    // The scanner can run before a project installs the flow runtime. Its own
+    // Effect and Node adapter are hard dependencies, sharing the checked-in
+    // family pin; only the adapter's shared platform contract remains a peer.
+    for (const name of ["effect", "@effect/platform-node"]) {
+      expect(manifest.dependencies[name]).toBe(EXPECTED_EFFECT_VERSION)
+      expect(manifest.devDependencies[name]).toBe(EXPECTED_EFFECT_VERSION)
+    }
+    expect(Object.keys(manifest.peerDependencies)).toEqual(["@effect/platform-node-shared"])
     for (const [name, version] of Object.entries(manifest.peerDependencies)) {
+      expect(version).toBe(EXPECTED_EFFECT_VERSION)
       expect(manifest.dependencies[name]).toBeUndefined()
       expect(manifest.devDependencies[name]).toBe(version)
     }

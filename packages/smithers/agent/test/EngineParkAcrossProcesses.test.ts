@@ -69,7 +69,11 @@ const envelope: ControlSchema.Envelope = { capabilities: [], flows: [], budget: 
 const agentDescriptor = new Descriptor.FlowDescriptor({
   name: "agents/parker",
   description: "The parking agent.",
-  body: new Descriptor.BodyRefMarkdown({ path: "/flows/agents/parker/flow.md", baseDirectory: "/flows/agents/parker" }),
+  body: new Descriptor.BodyRefMarkdown({
+    path: "/flows/agents/parker/flow.md",
+    baseDirectory: "/flows/agents/parker",
+    contentDigest: "a".repeat(64)
+  }),
   input: new Descriptor.SchemaRefNone(),
   output: new Descriptor.SchemaRefNone(),
   model: Option.some("anthropic:test-model"),
@@ -97,7 +101,13 @@ const registryLayer = Layer.succeed(Registry.Registry)(
 )
 
 const controlFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
-  { flowId: "agents/parker", description: "The parking agent.", deployClass: false, envelope }
+  {
+    flowId: "agents/parker",
+    executionDigest: Descriptor.executionDigest(agentDescriptor),
+    description: "The parking agent.",
+    deployClass: false,
+    envelope
+  }
 ]
 
 const noteFlow = CoreFlow.make({

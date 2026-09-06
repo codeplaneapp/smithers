@@ -1,11 +1,10 @@
-/** Options for {@link deployDocsSite}. */
-export interface DeployDocsSiteOptions {
-  /** The site slug: the app name `smithers-docs-<slug>` and the default domain. */
+import type * as Alchemy from "alchemy"
+
+/** Options for a package site's declarative Alchemy 2 stack. */
+export interface DocsSiteStackOptions {
+  /** The app name is smithers-docs-<slug>; the default domain is <slug>.smithers.sh. */
   readonly slug: string
 }
 
-/**
- * Deploys one docs site's Cloudflare Website and finalizes the Alchemy app.
- * Resolves to the deployed Website resource.
- */
-export declare function deployDocsSite(options: DeployDocsSiteOptions): Promise<unknown>
+/** Returns an unevaluated stack. The Alchemy CLI owns plan, deploy, and destroy. */
+export declare function makeDocsSiteStack(options: DocsSiteStackOptions): ReturnType<typeof Alchemy.Stack>

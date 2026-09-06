@@ -153,7 +153,7 @@ multiple of `idBlock` above every block composed into the same database:
 ```ts
 export const set: Migrations.MigrationSet = {
   namespace: "my-package",
-  idOffset: Migrations.idBlock * 7,
+  idOffset: Migrations.idBlock * 9,
   migrations: { "0001_initial": initial }
 }
 ```

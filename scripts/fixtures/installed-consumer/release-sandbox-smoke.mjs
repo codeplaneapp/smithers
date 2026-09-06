@@ -8,6 +8,9 @@ import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Echo } from "./release-sandbox-entry.mjs"
+import { assertInstalledConsumer } from "./consumer-boundary.mjs"
+
+assertInstalledConsumer(import.meta.url)
 
 const root = await mkdtemp(join(tmpdir(), "smithers-release-sandbox-"))
 try {

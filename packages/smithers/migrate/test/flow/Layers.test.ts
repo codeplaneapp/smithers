@@ -177,6 +177,17 @@ describe("Layers.rules over a real grant store", () => {
       expect(yield* permitted("fs:write", `${root}/.smithers/claude-mirror-subscriptions.json`)).toBe(false)
     }))
 
+  it.effect("keeps migration-owned lock state outside every agent filesystem grant", () =>
+    Effect.gen(function*() {
+      for (const action of ["fs:read", "fs:write"] as const) {
+        for (
+          const target of [".smithers-migrate", ".smithers-migrate/apply.lock", ".smithers-migrate/apply.lock.sqlite"]
+        ) {
+          expect([action, target, yield* permitted(action, `${root}/${target}`)]).toEqual([action, target, false])
+        }
+      }
+    }))
+
   it.effect("refuses to read, list, or stat run state too, because a read is a copy into the model", () =>
     Effect.gen(function*() {
       // The contract says "do not read", and a sentence is not an enforcement.

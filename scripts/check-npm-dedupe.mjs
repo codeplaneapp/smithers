@@ -205,7 +205,7 @@ export async function resolveConsumerProfiles() {
       return { name: manifest.name, version: manifest.version, filename };
     });
     return await runConsumerMatrix(directory, entries, {
-      profiles: [...minimalProfiles, adapterProfiles[0]]
+      profiles: [...minimalProfiles(entries), adapterProfiles(entries)[0]]
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });

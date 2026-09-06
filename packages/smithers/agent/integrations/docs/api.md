@@ -111,7 +111,11 @@ batch it acknowledges has been handled.
 ### Core.Migrations
 
 The cursor table's schema migrations. They run through
-[the database API](/api/database)'s migration ladder.
+[the database API](/api/database)'s migration ladder in block `8000`, after
+control (`6000`) and memory (`7000`). Compose `Core.Migrations.set` with the
+other sets installed in a shared control database, or use it on its own for
+a separate cursor database. The same composition can reopen the database
+without resetting its cursor.
 
 | Export  | Signature           | Notes                                                                |
 | ------- | ------------------- | -------------------------------------------------------------------- |

@@ -65,6 +65,18 @@ The discovered metadata for one flow, excluding its unloaded body content.
 does not use. `budget` is absent for a flow that declares none; read it through
 `budgetOf` rather than from the field.
 
+### Descriptor.executionDigest
+
+```ts
+const executionDigest: (descriptor: FlowDescriptor) => string | undefined
+```
+
+Hashes the descriptor's complete measured source identity and discovered
+metadata, including model, parameters, body location, and authority. Hosts
+include this identity in the approved plan. It returns `undefined` when the
+descriptor has no `body.contentDigest`: the descriptor may be displayed, but
+`AgentSession` refuses to execute a prompt without a measured, approved identity.
+
 ### Descriptor.SourceScan
 
 ```ts
@@ -140,9 +152,9 @@ demand. `baseDirectory` is the directory a markdown flow's own resource paths
 resolve against. `contentDigest` is the SHA-256 of the complete source bytes
 measured during discovery, as 64 lowercase hexadecimal characters. Every
 constructor supplies it. The field is optional only so a descriptor journaled
-by an older version, before the digest existed, still decodes. `Registry.loadBody` and
-`Executable.fromDescriptor` rehash against it and refuse `body_unavailable` on
-a mismatch.
+by an older version, before the digest existed, still decodes. `Registry.loadBody`
+rehashes markdown source, and `Executable.fromDescriptor` verifies module source
+before importing it; a mismatch is `body_unavailable`.
 
 ### Descriptor.FlowBody, FlowBodyPrompt, FlowBodyModule
 
@@ -475,7 +487,10 @@ interface Registry {
   readonly visible: () => Effect.Effect<ReadonlyArray<FlowDescriptor>>
   readonly get: (name: string) => Effect.Effect<FlowDescriptor, RegistryError>
   readonly getOption: (name: string) => Effect.Effect<Option.Option<FlowDescriptor>>
-  readonly loadBody: (name: string) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
+  readonly loadBody: (
+    name: string,
+    expectedExecutionDigest?: string
+  ) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
   readonly runPrompt: (
     name: string,
     input: MarkdownFlow.Input
@@ -487,16 +502,16 @@ interface Registry {
 const Registry: Context.Service<Registry, Registry>
 ```
 
-| Member      | What it answers                                                           |
-| ----------- | ------------------------------------------------------------------------- |
-| `list`      | Every descriptor, in deterministic first-found order.                     |
-| `visible`   | The descriptors whose `modelInvocable` is true.                           |
-| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                 |
-| `getOption` | One descriptor as an `Option`. It cannot fail.                            |
-| `loadBody`  | The body, read from disk and checked against the recorded digest.         |
-| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`. |
-| `refresh`   | Rescans every configured source and replaces the snapshot.                |
-| `warnings`  | Every discovery and collision diagnostic.                                 |
+| Member      | What it answers                                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`      | Every descriptor, in deterministic first-found order.                                                                                                   |
+| `visible`   | The descriptors whose `modelInvocable` is true.                                                                                                         |
+| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                                                                                               |
+| `getOption` | One descriptor as an `Option`. It cannot fail.                                                                                                          |
+| `loadBody`  | Returns the body locator or prompt, optionally checking the approved execution identity first. Markdown bytes are checked against the discovery digest. |
+| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`.                                                                               |
+| `refresh`   | Rescans every configured source and replaces the snapshot.                                                                                              |
+| `warnings`  | Every discovery and collision diagnostic.                                                                                                               |
 
 Reads observe one complete snapshot, so a `list` and the `get` after it never
 disagree. `refresh` replaces the snapshot only after every source succeeds, so
@@ -504,6 +519,12 @@ a failed rescan leaves the previous complete snapshot serving reads rather than
 emptying the catalog.
 
 `loadBody` and `runPrompt` are the only two members that touch the filesystem.
+
+Pass the plan's `executionDigest` to `loadBody` when loading an approved flow.
+A descriptor that no longer matches it fails with `execution_changed`, before
+body loading. A markdown file changed after discovery fails with
+`body_unavailable`. Refreshing the registry does not authorize the new work;
+create and approve a new plan.
 
 ### Registry.Config and Registry.PackConfig
 
@@ -1181,6 +1202,7 @@ class RegistryError {
     | "not_found"
     | "system_collision"
     | "body_unavailable"
+    | "execution_changed"
     | "not_prompt_flow"
     | "invalid_pack"
     | "incompatible_pack"

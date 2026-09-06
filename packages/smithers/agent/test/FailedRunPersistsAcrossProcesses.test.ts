@@ -67,7 +67,11 @@ const envelope: ControlSchema.Envelope = { capabilities: [], flows: [], budget: 
 const agentDescriptor = new Descriptor.FlowDescriptor({
   name: "agents/broke",
   description: "The agent whose seat has no credits.",
-  body: new Descriptor.BodyRefMarkdown({ path: "/flows/agents/broke/flow.md", baseDirectory: "/flows/agents/broke" }),
+  body: new Descriptor.BodyRefMarkdown({
+    path: "/flows/agents/broke/flow.md",
+    baseDirectory: "/flows/agents/broke",
+    contentDigest: "a".repeat(64)
+  }),
   input: new Descriptor.SchemaRefNone(),
   output: new Descriptor.SchemaRefNone(),
   model: Option.some("openai:test-model"),
@@ -95,7 +99,13 @@ const registryLayer = Layer.succeed(Registry.Registry)(
 )
 
 const controlFlows: ReadonlyArray<ControlRuntime.MemoryFlow> = [
-  { flowId: "agents/broke", description: "The agent whose seat has no credits.", deployClass: false, envelope }
+  {
+    flowId: "agents/broke",
+    executionDigest: Descriptor.executionDigest(agentDescriptor),
+    description: "The agent whose seat has no credits.",
+    deployClass: false,
+    envelope
+  }
 ]
 
 /** Every model call any composition in this file makes, in order. */

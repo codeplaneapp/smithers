@@ -176,6 +176,8 @@ export const reservedDirectories: ReadonlyArray<string> = [".flows", ".git", ".j
  */
 export const reportDirEntries: ReadonlyArray<string> = [
   "apply.lock",
+  "apply.lock.sqlite",
+  "apply.lock.sqlite-journal",
   "archive",
   "backup",
   "pending-unit.json",
@@ -248,6 +250,9 @@ export const layoutIssue = (options: {
   if (reportProblem !== undefined) return reportProblem
   const flowsProblem = relativePathIssue("layout.flowsDir", flows)
   if (flowsProblem !== undefined) return flowsProblem
+  if (under(flows, defaultReportDir)) {
+    return `layout.flowsDir ("${flows}") must not overlap the fixed migration state directory "${defaultReportDir}"`
+  }
   if (
     under(report.normalize("NFC"), flows.normalize("NFC")) || under(flows.normalize("NFC"), report.normalize("NFC"))
   ) {

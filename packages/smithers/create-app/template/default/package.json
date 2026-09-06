@@ -28,6 +28,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@smthrs/build-cli": "1.0.0-rc.0",
     "@cloudflare/vite-plugin": "^1.54.4",
     "@cloudflare/workers-types": "^5.20260904.1",
     "@types/node": "^26.4.1",

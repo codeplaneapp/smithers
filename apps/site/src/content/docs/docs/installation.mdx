@@ -45,6 +45,18 @@ npm install --global @smthrs/cli@next
 
 Release candidates publish to `next`, rather than `latest`. Check `smthrs --version` before following 1.0 instructions.
 
+### Install the CLI in a target workspace
+
+Global or source-checkout commands can initialize a project and operate its flows. Target commands load `WORKSPACE.ts` and `PACKAGE.ts`, whose imports must share the loader's physical Effect and Smithers packages. After publication, add the CLI and declarations to the project and use its local binary:
+
+```bash
+smthrs init hello
+pnpm add --save-dev @smthrs/cli@next @smthrs/targets@next
+pnpm exec smthrs targets
+```
+
+Matching versions in an independent global installation do not establish that shared runtime and can cause `declaration_dependency_mismatch`. Before publication, use the checkout's workspace dependencies. See [Run a target and hit the cache](/docs/tutorials/first-target/) for the complete example.
+
 ## Install the library
 
 The npm command below applies after publication. Until then, use the packages through the checkout workspace, as the programs under `examples/` do.

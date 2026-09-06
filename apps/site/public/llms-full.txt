@@ -95,6 +95,18 @@ npm install --global @smthrs/cli@next
 
 Release candidates publish to `next`, rather than `latest`. Check `smthrs --version` before following 1.0 instructions.
 
+### Install the CLI in a target workspace
+
+Global or source-checkout commands can initialize a project and operate its flows. Target commands load `WORKSPACE.ts` and `PACKAGE.ts`, whose imports must share the loader's physical Effect and Smithers packages. After publication, add the CLI and declarations to the project and use its local binary:
+
+```bash
+smthrs init hello
+pnpm add --save-dev @smthrs/cli@next @smthrs/targets@next
+pnpm exec smthrs targets
+```
+
+Matching versions in an independent global installation do not establish that shared runtime and can cause `declaration_dependency_mismatch`. Before publication, use the checkout's workspace dependencies. See [Run a target and hit the cache](/docs/tutorials/first-target/) for the complete example.
+
 ## Install the library
 
 The npm command below applies after publication. Until then, use the packages through the checkout workspace, as the programs under `examples/` do.
@@ -251,7 +263,7 @@ https://smithers.sh/docs/tutorials/first-target/
 
 Build a small target graph and observe its cache behavior. You will run a JavaScript program, reuse its result, and then change a declared input to make it run again. This tutorial does not call a model.
 
-You need the [Smithers CLI](/docs/installation/), Node.js 22.19.0 or later, pnpm, and Git.
+You need the [Smithers CLI](/docs/installation/), a supported Node.js version (`^22.19.0 || >=24.11.0`), pnpm, and Git.
 
 ## Create the workspace
 
@@ -262,11 +274,13 @@ You need the [Smithers CLI](/docs/installation/), Node.js 22.19.0 or later, pnpm
    cd cache-demo
    git init
    smthrs init cache-demo
-   pnpm add --save-dev @smthrs/targets@next
+   pnpm add --save-dev @smthrs/cli@next @smthrs/targets@next
    mkdir src
    ```
 
    `init` creates workspace and package declarations, plus a starter flow. This tutorial uses the target declarations; the starter flow does not run.
+
+   The global or source-checkout CLI is sufficient for `init`. After installing the workspace dependencies, use `pnpm exec smthrs` from this directory. Target declarations and the CLI must resolve the same physical copies of Effect and the Smithers declaration packages. A separately installed global CLI can fail with `declaration_dependency_mismatch` even when its versions match. Installing the CLI and targets together and selecting the local binary keeps that runtime shared.
 
 2. **Create an input file.**
 
@@ -295,7 +309,7 @@ You need the [Smithers CLI](/docs/installation/), Node.js 22.19.0 or later, pnpm
 Plan the test without executing its command:
 
 ```bash
-smthrs test '//:greeting' --plan
+pnpm exec smthrs test '//:greeting' --plan
 ```
 
 The plan includes the selected target, its dependencies, and cache information. If the target is missing, check that the root `PACKAGE.ts` exports `Package` and includes `greeting` in `targets`.
@@ -305,13 +319,13 @@ The plan includes the selected target, its dependencies, and cache information. 
 Run the test:
 
 ```bash
-smthrs test '//:greeting'
+pnpm exec smthrs test '//:greeting'
 ```
 
 The first run executes `node src/message.js` and records a successful result. Run the same command again:
 
 ```bash
-smthrs test '//:greeting'
+pnpm exec smthrs test '//:greeting'
 ```
 
 The second run reports a cache hit. The command does not need to execute because its declared inputs and execution environment have not changed.
@@ -327,8 +341,8 @@ console.log("Hello after an input change.")
 Run the target again. It executes because `sources` includes that file and `greeting` consumes `sources`. The changed file produces a different key for the work.
 
 ```bash
-smthrs test '//:greeting'
-smthrs explain '//:greeting'
+pnpm exec smthrs test '//:greeting'
+pnpm exec smthrs explain '//:greeting'
 ```
 
 `explain` shows the planned key and local cache decision. Use it when a hit or miss is unexpected.
@@ -371,7 +385,7 @@ Create a directory and install the flow and engine packages:
 ```bash
 mkdir first-flow && cd first-flow
 pnpm init
-pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/journal@next @smthrs/kernel@next @smthrs/run-store@next @smthrs/platform-node@next
+pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/journal@next @smthrs/kernel@next @smthrs/run-store@next @smthrs/platform-node@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 The `@next` suffix is required while 1.0 is a release candidate: `latest` still resolves the Smithers 0.x line. Effect is pinned to exactly `4.0.0-rc.112`.
@@ -476,15 +490,19 @@ Hello, Ada.
 The in-memory engine forgets everything at exit. To keep the run, swap the engine for `EngineStore.layer`, the durable engine that persists every action attempt and commits each lifecycle event in the same transaction as the state transition it describes. `NodeRuntime.layer` composes it over one SQLite file with the stores and sandbox it requires. Create `durable-layer.ts`:
 
 ```ts title="durable-layer.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Jj } from "@smthrs/kernel"
 import { Ownership } from "@smthrs/run-store"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { dirname } from "node:path"
 
-// The engine calls Jj for compensable snapshots. A stub that records
-// nothing keeps the wiring honest without requiring a jj binary.
+// This greeting changes no files. This stub lets the storage example run
+// without jj; it cannot roll back filesystem changes. For file-writing
+// actions, use a real Jj host, such as NodeRuntime.layerHost.
 const stubJj = Layer.succeed(
   Jj.Jj,
   Jj.make({
@@ -521,6 +539,8 @@ Keep this file; the later tutorials build their engines through it. Now create `
 ```ts title="run-durable.ts"
 import { Action, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { durableEngine } from "./durable-layer.ts"
 import { Greet, Greeting } from "./greeting.ts"
 
@@ -1178,6 +1198,8 @@ export const Ship = Flow.make("release/Ship", {
 import { NodeRuntime } from "@effect/platform-node"
 import { Action, Interpreter } from "@smthrs/flow"
 import { Journal, type JournalEvent } from "@smthrs/journal"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { engineLayer } from "./engine.ts"
 import { Publish, Ship, Tag } from "./release.ts"
 
@@ -1235,8 +1257,15 @@ ship-1 is finished, and its journal is the history the next part forks.
 A position is a run id plus a frame `{ lineageId, seq }`. A lineage id is an opaque versioned encoding the engine mints for the run, so build it with the `FlowEngine.Lineage.root` constructor rather than spelling one out. The frame below is the committed entry right before the publish step's attempt-started record, so the fork inherits the tag and not the publish. A fork refuses a live parent; this parent is finished.
 
 ```ts title="fork.ts"
+import { NodeRuntime } from "@effect/platform-node"
 import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import { Journal, type JournalEvent } from "@smthrs/journal"
 import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { engineLayer } from "./engine.ts"
+import { Publish, Ship, Tag } from "./release.ts"
 
 let tagDispatches = 0
 
@@ -1322,7 +1351,14 @@ step ran in the copy under its own implementation.
 Rewind is the mutating half of the service, and it refuses a live run. The run below parks at a durable deferred, which releases ownership and leaves it suspended: the state a rewind can claim. The `inspect` call folds committed journal entries up to a frame through a pure reducer; it reads and never executes, so you can derive the same view before and after the trim.
 
 ```ts title="rewind.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import { FlowEngine } from "@smthrs/engine"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
+import { Journal, type JournalEvent } from "@smthrs/journal"
+import { SqlTimeTravelStore, TimeTravel } from "@smthrs/time-travel"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { durableEngine } from "./engine.ts"
 
@@ -1537,8 +1573,16 @@ A markdown flow hands the whole task to one agent. A module flow declares each s
 Install the libraries:
 
 ```bash
-pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/capability@next @smthrs/model@next @smthrs/registry@next @smthrs/platform-node@next
+pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/capability@next @smthrs/model@next @smthrs/registry@next @smthrs/platform-node@next @smthrs/jj@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
+
+This part also needs Jujutsu (`jj`) on your PATH. Initialize a separate repository for the files the tools will edit:
+
+```bash
+jj git init sandbox-work
+```
+
+The write tool is compensable: the engine requires a snapshot boundary so a retry can restore the files it changed. This example binds a real Jujutsu snapshot service to `sandbox-work`. The scripted model only reads and writes the two paths inside that repository. A host serving arbitrary model requests should also restrict filesystem capabilities to its workspace; see [capabilities](/docs/guides/capabilities/).
 
 Write `sandbox.ts`. The step counts the lines in a source file and writes the count to a target file, using the standard file tools:
 
@@ -1556,6 +1600,8 @@ import * as StandardFlows from "@smthrs/agent/StandardFlows"
 import * as Capability from "@smthrs/capability/Capability"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { Jj, type ChangeId } from "@smthrs/jj"
+import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
@@ -1644,6 +1690,21 @@ const root = join(process.cwd(), "sandbox-work")
 const source = join(root, "notes.md")
 const target = join(root, "line-count.txt")
 
+const snapshots = Layer.effect(
+  FlowEngine.SnapshotBoundary,
+  Effect.map(Jj, (jj) => FlowEngine.SnapshotBoundary.of({
+    snapshot: () => jj.snapshot().pipe(
+      Effect.map((snapshot) => snapshot.changeId),
+      Effect.orDie
+    ),
+    restore: (snapshot) => jj.restore(snapshot as ChangeId).pipe(Effect.orDie),
+    diff: (snapshot) => jj.snapshot().pipe(
+      Effect.flatMap((current) => jj.diff(snapshot as ChangeId, current.changeId)),
+      Effect.orDie
+    )
+  }))
+).pipe(Layer.provide(NodeJj.layerAt(root)))
+
 const program = Effect.gen(function*() {
   yield* Effect.sync(() => {
     mkdirSync(root, { recursive: true })
@@ -1691,6 +1752,7 @@ const program = Effect.gen(function*() {
     Layer.provideMerge(Agent.layerDefaults),
     Layer.provideMerge(Action.layerImplementations),
     Layer.provideMerge(FlowEngine.layerMemory),
+    Layer.provideMerge(snapshots),
     Layer.provideMerge(NodeCrypto.layer)
   )
 
@@ -1704,6 +1766,7 @@ const program = Effect.gen(function*() {
 const main = program.pipe(
   Effect.provide(Layer.mergeAll(NodeFileSystem.layer, Path.layer, NodeCrypto.layer)),
   Effect.tap((summary) => Effect.sync(() => console.log(JSON.stringify(summary, null, 2)))),
+  Effect.scoped,
   Effect.orDie
 )
 
@@ -1733,15 +1796,13 @@ through the write tool, and every call ran inside the sandbox budget.
 # Pass typed outputs between agent steps
 https://smithers.sh/docs/tutorials/agent-outputs/
 
-In this tutorial you'll build a two-step research-then-write flow. The first step's answer must decode against a schema you declare, the second step reads the typed fields, and afterwards you record the run in your project and read both steps' outputs back. It takes about 15 minutes.
+In this tutorial you'll build a two-step research-then-write flow. The first step's answer must decode against a schema you declare, and the second reads its typed fields. You will run the chain in memory, then persist it over SQLite. It takes about 15 minutes and needs no provider key: the model responses are scripted.
 
-A declared `output` schema is rendered into the step's system teaching as JSON Schema, and the model's final answer is decoded by it with one correction re-prompt before the step fails, so a downstream step reads `research.summary` as a `string` instead of prose somebody has to parse. [Agent runtime](/docs/concepts/agent-runtime/) explains the loop this runs in.
+A declared `output` schema is rendered into the step's system teaching as JSON Schema. The model's final answer is decoded against it, with one correction re-prompt before the step fails. [Agent runtime](/docs/concepts/agent-runtime/) explains the loop.
 
 ## Before you begin
 
-- The project from [Build your first agent flow](/docs/tutorials/first-agent-flow/), with its library install.
-- Node.js 22.19.0 or later.
-- Two more packages for part 3's durable engine:
+Use the project from [Build your first agent flow](/docs/tutorials/first-agent-flow/), with its library install, and a supported Node.js version (`^22.19.0 || >=24.11.0`). Add the durable engine dependencies:
 
 ```bash
 pnpm add @smthrs/plan@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/kernel@next @smthrs/run-store@next
@@ -1749,21 +1810,16 @@ pnpm add @smthrs/plan@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/
 
 ## 1. Declare the research step's output schema
 
-A model call is an ordinary action, so `AgentAction.make` declares one the way `Action.make` declares any other. The difference is that the author does not write the implementation: a model call runs the cell loop, and that loop ships with the declaration as `.layer`.
+`AgentAction.make` declares a model-backed action. Its `.layer` provides the cell loop implementation. Create `research.ts` with the action, a single-step flow, and a shared scripted host. Importing this file does not start a run.
 
-Write `article.ts` with the research step, its schema, and the host composition:
-
-```ts title="article.ts"
-import { NodeRuntime } from "@effect/platform-node"
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+```ts title="research.ts"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
 import * as Budget from "@smthrs/agent/Budget"
 import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
-import { FlowEngine } from "@smthrs/engine"
-import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { Flow } from "@smthrs/flow"
 import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
@@ -1780,7 +1836,7 @@ const ResearchResult = Schema.Struct({
 })
 
 // The research step: a model call whose answer must be a ResearchResult.
-const Research = AgentAction.make("research/Research", {
+export const Research = AgentAction.make("research/Research", {
   payload: { topic: Schema.String },
   output: ResearchResult,
   seat: "anthropic:claude-sonnet-4-5",
@@ -1788,7 +1844,7 @@ const Research = AgentAction.make("research/Research", {
   prompt: ({ topic }) => `Research the topic "${topic}" and report what matters about it.`
 })
 
-const Brief = Flow.make("research/Brief", {
+export const Brief = Flow.make("research/Brief", {
   payload: { topic: Schema.String },
   success: ResearchResult,
   error: AgentAction.AgentFailure,
@@ -1837,7 +1893,7 @@ const scripted: Model.Model = Model.make({
 
 // The host: one registry and one sandbox budget, shared by every model-backed
 // action in the composition.
-const host = AgentAction.layerHost({
+export const host = AgentAction.layerHost({
   registry: Registry.makeNoop({
     list: () => Effect.succeed([]),
     visible: () => Effect.succeed([]),
@@ -1848,7 +1904,7 @@ const host = AgentAction.layerHost({
   maxFrames: 4
 })
 
-const seats = SeatResolver.layer({
+export const seats = SeatResolver.layer({
   resolve: (id) =>
     Effect.succeed(
       Seat.make({
@@ -1860,11 +1916,25 @@ const seats = SeatResolver.layer({
     )
 })
 
-const stack = Layer.mergeAll(Research.layer, Interpreter.layer(Brief)).pipe(
-  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
-  // This offline run has no approved plan envelope to derive a ceiling from.
+export const agentHost = Layer.mergeAll(host, seats, Agent.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
-  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(Agent.layerDefaults)
+)
+```
+
+Create a separate entry point that supplies the in-memory engine:
+
+```ts title="run-research.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Brief, Research } from "./research.ts"
+
+const stack = Layer.mergeAll(Research.layer, Interpreter.layer(Brief)).pipe(
+  Layer.provideMerge(agentHost),
   Layer.provideMerge(Action.layerImplementations),
   Layer.provideMerge(FlowEngine.layerMemory),
   Layer.provideMerge(NodeCrypto.layer)
@@ -1879,31 +1949,33 @@ const main = Brief.execute({ topic: "durable workflows" }, { executionId: "brief
 NodeRuntime.runMain(main)
 ```
 
-Run it:
-
 ```bash
-node article.ts
+node run-research.ts
 ```
 
 ```text
-You should see: the research step's answer as JSON with a summary string and
-a keyPoints array. The model's final answer was decoded against the declared
-schema, so the program holds research.summary as a string, not as text
-somebody has to parse.
+You should see: JSON with a summary string and a keyPoints array. The final
+answer decoded against ResearchResult before it reached the caller.
 ```
 
 ## 2. Chain the typed output into the writing step
 
-Add the writing step. Its payload is the research step's output, field for field:
+Create `article.ts`. `Node.bindPlanned` feeds the research result into `Write.call`; planning records the calls without executing them.
 
 ```ts title="article.ts"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import { Flow } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
+import * as Schema from "effect/Schema"
+import { Research } from "./research.ts"
+
 const ArticleResult = Schema.Struct({
   article: Schema.String,
   wordCount: Schema.Number
 })
 
 // The writing step, which consumes the first step's typed fields.
-const Write = AgentAction.make("research/Write", {
+export const Write = AgentAction.make("research/Write", {
   payload: {
     summary: Schema.String,
     keyPoints: Schema.Array(Schema.String)
@@ -1916,14 +1988,8 @@ const Write = AgentAction.make("research/Write", {
       keyPoints.map((point) => `- ${point}`).join("\n")
     }`
 })
-```
 
-Add a flow that chains the two steps; `Brief` stays as the single-step flow. Nothing executes at plan time: `Research.call` records one node, and `Node.bindPlanned` feeds its planned result into `Write.call`:
-
-```ts title="article.ts"
-import { Node } from "@smthrs/plan"
-
-const Article = Flow.make("research/Article", {
+export const Article = Flow.make("research/Article", {
   payload: { topic: Schema.String },
   success: ArticleResult,
   error: AgentAction.AgentFailure,
@@ -1934,9 +2000,26 @@ const Article = Flow.make("research/Article", {
 })
 ```
 
-Add `Write.layer` to the stack's first `Layer.mergeAll`, and change `main` to execute the chain:
+Register both actions and the new flow in `run-article.ts`:
 
-```ts fragment
+```ts title="run-article.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Research } from "./research.ts"
+
+import { Article, Write } from "./article.ts"
+
+const stack = Layer.mergeAll(Research.layer, Write.layer, Interpreter.layer(Article)).pipe(
+  Layer.provideMerge(agentHost),
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
 const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
   Effect.provide(stack),
   Effect.tap((article) => Effect.sync(() => console.log(JSON.stringify(article, null, 2)))),
@@ -1946,33 +2029,32 @@ const main = Article.execute({ topic: "durable workflows" }, { executionId: "art
 NodeRuntime.runMain(main)
 ```
 
-Run it:
-
 ```bash
-node article.ts
+node run-article.ts
 ```
 
 ```text
-You should see: the finished article as JSON with an article string and a
-wordCount number. The writing step received the research step's fields as
-typed values, and no step parsed model text.
+You should see: JSON with article and wordCount fields. The writing step
+received the research step's summary and keyPoints as typed values.
 ```
 
-## 3. Record the run and read both outputs
+## 3. Persist the chain over SQLite
 
-So far the runs lived in memory, and their outputs died with the process. To read a step's output afterwards, drive the same flow on the project's durable engine at `.flows/engine.db`, and then read the recorded outputs with `smthrs output`.
-
-Add the durable engine composition as `engine.ts`:
+Create `engine.ts` and `run-durable-article.ts`. The declarations and scripted host stay the same; the entry point supplies a durable engine and closes its database at the end of the run.
 
 ```ts title="engine.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Jj } from "@smthrs/kernel"
 import { Ownership } from "@smthrs/run-store"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { dirname } from "node:path"
 
-// A Jujutsu service that records nothing.
+// These scripted steps change no files. This stub provides no filesystem
+// rollback; file-writing actions need a real Jj host.
 const stubJj = Layer.succeed(
   Jj.Jj,
   Jj.make({
@@ -1999,18 +2081,20 @@ export const durableEngine = (filename: string, hostId: string) =>
   )
 ```
 
-In `article.ts`, swap the in-memory engine for the durable one in the stack, and scope the run so the database closes when it ends:
+```ts title="run-durable-article.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Research } from "./research.ts"
 
-```ts fragment
+import { Article, Write } from "./article.ts"
 import { durableEngine } from "./engine.ts"
 
-// In the stack, replace FlowEngine.layerMemory and NodeCrypto.layer with:
 const stack = Layer.mergeAll(Research.layer, Write.layer, Interpreter.layer(Article)).pipe(
-  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
-  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
-  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(agentHost),
   Layer.provideMerge(Action.layerImplementations),
-  Layer.provideMerge(durableEngine(".flows/engine.db", "article"))
+  Layer.provideMerge(durableEngine("article.sqlite", "article"))
 )
 
 const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
@@ -2023,17 +2107,19 @@ const main = Article.execute({ topic: "durable workflows" }, { executionId: "art
 NodeRuntime.runMain(main)
 ```
 
-Run it. The article prints from the program itself, and that is the only place to read this run: `smthrs output` projects node outputs from the control plane's run list in `.flows/control.db`, so it lists only runs launched through `smthrs up` or `smthrs run`. A run driven on the engine directly, as this program does, is not in that list, and `smthrs output article-1` answers `Run not found` with exit 2 (`packages/smithers/src/Command.ts`, `missingRun`). To read a run's node outputs from the CLI, launch the flow through the control plane instead. The [smthrs output reference](/docs/reference/cli/output/) covers the listing, the single-node read, and `--json`.
-
 ```bash
-node article.ts
+node run-durable-article.ts
+node run-durable-article.ts
 ```
 
 ```text
-You should see: the first command lists one entry per recorded node in the
-order the calls started, plus result for the run's final output. The second
-prints the node's outcome line followed by its recorded value.
+You should see: the same article JSON from each process. The second process
+reads the completed article-1 result from article.sqlite.
 ```
+
+To start a new durable run, choose another execution id. Keep `article.sqlite` to retain the recorded actions and their outcomes.
+
+This program drives the engine directly. `smthrs output` reads the control plane's run list and will not find `article-1`. To inspect node outputs through that command, launch a markdown agent flow through `smthrs up` or supply an application host that integrates module execution with the control plane. See [module flows](/docs/guides/module-flows/) and the [output reference](/docs/reference/cli/output/).
 
 ## Next steps
 
@@ -2056,7 +2142,7 @@ A memory policy decides which namespace a flow tree reads and writes, whether re
 - The libraries:
 
 ```bash
-pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/memory@next @smthrs/harness@next @smthrs/model@next @smthrs/registry@next @smthrs/database@next @smthrs/platform-node@next
+pnpm add @smthrs/agent@next @smthrs/flow@next @smthrs/engine@next @smthrs/memory@next @smthrs/harness@next @smthrs/model@next @smthrs/registry@next @smthrs/database@next @smthrs/platform-node@next @smthrs/control@next @smthrs/time-travel@next
 ```
 
 You need no provider key: the seat resolves to a scripted model, so the runs are deterministic. Point `SeatResolver` at a provider route and nothing above it changes.
@@ -2078,12 +2164,15 @@ import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
 import { DurableWriter } from "@smthrs/database"
+import * as DatabaseMigrations from "@smthrs/database/Migrations"
+import * as ControlMigrations from "@smthrs/control/Migrations"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as FlowBinding from "@smthrs/harness/FlowBinding"
 import * as MemoryFlows from "@smthrs/memory/Flows"
 import * as MemoryStore from "@smthrs/memory/MemoryStore"
+import * as MemoryMigrations from "@smthrs/memory/Migrations"
 import * as Recall from "@smthrs/memory/Recall"
 import * as RecallFts from "@smthrs/memory/RecallFts"
 import * as WithMemory from "@smthrs/memory/WithMemory"
@@ -2091,6 +2180,7 @@ import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
 import * as Registry from "@smthrs/registry/Registry"
+import * as TimeTravelMigrations from "@smthrs/time-travel/Migrations"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -2154,7 +2244,7 @@ const Keep = Flow.make("notes/Keep", {
 const facts: ReadonlyArray<{ readonly key: string; readonly text: string }> = [
   { key: "changelog-format", text: "Release notes group entries by package, newest first." },
   { key: "release-cadence", text: "Release notes ship with every tagged release, never between." },
-  { key: "review-owner", text: "The docs owner reviews the notes before the tag is pushed." }
+  { key: "review-owner", text: "The docs owner reviews release notes before the tag is pushed." }
 ]
 
 const prepared: Route.PreparedRequest = {
@@ -2227,9 +2317,17 @@ const seats = SeatResolver.layer({
 })
 
 // The memory store and the FTS recall service, over the project's control
-// database.
+// database. Apply its complete schema before building memory: migration IDs
+// share one ordered ledger, so memory's later block must not skip control.
 const database = Layer.provideMerge(
-  DurableWriter.layer(),
+  Layer.mergeAll(
+    DurableWriter.layer(),
+    DatabaseMigrations.layer([
+      ...TimeTravelMigrations.sets,
+      ControlMigrations.set,
+      MemoryMigrations.set
+    ])
+  ),
   NodeDatabase.layer({ filename: ".flows/control.db" })
 )
 
@@ -2848,6 +2946,8 @@ Review a flow's plan before launching it. If you already trust the plan and want
    ```
 
    The decision binds to the submitted payload. It does not launch a run. Do not edit the payload between approval and execution; changed work needs a new plan and approval.
+
+   For a discovered prompt flow, the plan also binds the measured prompt source and all discovered metadata, including model and parameters. The runtime checks that identity at launch and on resume. Editing the flow file or changing its model invalidates the old approval; refresh discovery, create a new plan, and review it again.
 
 4. **Execute the approved plan.**
 
@@ -3868,7 +3968,7 @@ Run one flow from inside another as a separate durable run, join the results, an
 ## Before you start
 
 - The packages: `pnpm add @smthrs/flow@next @smthrs/plan@next effect@4.0.0-rc.112`. The detached-children half also uses `@smthrs/agent@next`.
-- A durable engine composition. The examples below compose one over a local SQLite file.
+- The `durable-layer.ts` composition from [the first-flow tutorial](/docs/tutorials/first-flow/). The examples below use a local SQLite file.
 
 ## 1. Choose the boundary
 
@@ -3887,13 +3987,28 @@ The parent starts Compile and Notarize as separate child runs, waits for both re
 
 ## 2. Spawn two children and join their results
 
-`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. From example 20, where `Bundle`, `Sign`, and `Report` are the declared actions:
+`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. Create `children.ts` with the actions and the three flow declarations:
 
-```ts
-import { Action, Flow, Interpreter } from "@smthrs/flow"
+```ts title="children.ts"
+import { Action, Flow } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import type * as Planned from "@smthrs/plan/Planned"
 import * as Schema from "effect/Schema"
+
+export const Bundle = Action.make("examples/Bundle", {
+  payload: { target: Schema.String },
+  success: Schema.String
+})
+
+export const Sign = Action.make("examples/Sign", {
+  payload: { target: Schema.String },
+  success: Schema.String
+})
+
+export const Report = Action.make("examples/Report", {
+  payload: { bundle: Schema.String, signature: Schema.String },
+  success: Schema.String
+})
 
 export const Compile = Flow.make("examples/Compile", {
   payload: { target: Schema.String },
@@ -3911,18 +4026,64 @@ export const Release = Flow.make("examples/Release", {
   payload: { target: Schema.String },
   success: Schema.String,
   body: ({ target }: { readonly target: string }) =>
-    Node.andThen(
-      Node.all({
-        bundle: Compile.child({ target }),
-        signature: Notarize.child({ target })
-      }),
-      (results: Planned.Planned<{ readonly bundle: string; readonly signature: string }>) =>
+    Node.all({
+      bundle: Compile.child({ target }),
+      signature: Notarize.child({ target })
+    }).pipe(
+      Node.bindPlanned((results: Planned.Planned<{ readonly bundle: string; readonly signature: string }>) =>
         Report.call({ bundle: results.bundle, signature: results.signature })
+      )
     )
 })
 ```
 
 Register each flow with its own `Interpreter.layer`. Re-executing the parent under the same execution id observes each child's persisted result instead of starting a second child under the same id, so the children's bodies run once across both executions.
+
+Create `run-children.ts` to execute the parent twice:
+
+```ts title="run-children.ts"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { Bundle, Compile, Notarize, Release, Report, Sign } from "./children.ts"
+import { durableEngine } from "./durable-layer.ts"
+
+const dispatches = { bundle: 0, sign: 0, report: 0 }
+const stack = Layer.mergeAll(
+  Bundle.toLayer(({ target }) => Effect.sync(() => {
+    dispatches.bundle += 1
+    return `dist/${target}.js`
+  })),
+  Sign.toLayer(({ target }) => Effect.sync(() => {
+    dispatches.sign += 1
+    return `${target}.sig`
+  })),
+  Report.toLayer(({ bundle, signature }) => Effect.sync(() => {
+    dispatches.report += 1
+    return `${bundle} + ${signature}`
+  })),
+  Interpreter.layer(Release),
+  Interpreter.layer(Compile),
+  Interpreter.layer(Notarize)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(durableEngine("children.sqlite", "children-guide"))
+)
+
+const main = Effect.gen(function*() {
+  const first = yield* Release.execute({ target: "app" }, { executionId: "release-1" })
+  const second = yield* Release.execute({ target: "app" }, { executionId: "release-1" })
+  return { first, second, dispatches }
+}).pipe(Effect.provide(stack), Effect.scoped, Effect.orDie)
+
+Effect.runPromise(main).then((summary) => console.log(JSON.stringify(summary)))
+```
+
+```bash
+node run-children.ts
+```
+
+Both results are `dist/app.js + app.sig`, and each dispatch counter is 1.
 
 ## 3. Cancel a parent and watch the cascade reach its children
 
@@ -6013,17 +6174,17 @@ Choose a reference by package or rule. Each page links to its implementation and
 # RC support matrix
 https://smithers.sh/docs/reference/support-matrix/
 
-This is the support reference for 1.0.0-rc.0. Sources below are pinned to the reviewed tree. A declared engine range is an installation requirement, not evidence that every matching version was tested.
+This is the support reference for 1.0.0-rc.0. Sources below link to the current source declarations; release tags preserve the corresponding manifest inventory. A declared engine range is an installation requirement, not evidence that every matching version was tested.
 
 ## Runtimes
 
 | Runtime                | RC boundary                                                                                                                                                                                                                 | Source of truth                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Node.js                | The only supported durable runtime, with local SQLite. All 40 release packages declare exactly `engines.node: ">=22.19.0"`; no disagreements. CI and the release workflow pin `22.19.0`.                                    | [Manifest inventory](#published-node-engine-ranges); [CI toolchains](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts); [release workflow](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/.github/workflows/release.yml)                                                                                                                                                |
-| Node.js release smoke  | Reported runs: `22.19.0` and `24.18.0`. These versions are supplied by the release brief; no transcript of both runs is retained in this tree. The smoke checks tarball installation, imports, bundling, and typechecking.  | [smoke implementation and version output](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/smoke-release.mjs)                                                                                                                                                                                                                                                                                                    |
-| Bun                    | Non-durable package scope only, listed below. The adapter declares `engines.bun: ">=1.4.0"`; CI pins `1.4.1`. Durable stores refuse Bun with `unsupported_runtime`. This is not a claim that every application runs on Bun. | [adapter manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-bun/package.json); [CI toolchains](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts); [NodeDatabase runtime refusal](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/database/src/node/NodeDatabase.ts) |
-| Browsers               | bundle only. No durable flows, including when a caller supplies another SQL client.                                                                                                                                         | [browser bundle contract](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/browser-contract.mjs); [aggregate boundary](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/docs/concepts/aggregate-surface.md)                                                                                                                                          |
-| Deno and edge runtimes | Not supported. Browser bundling does not establish Deno, Cloudflare, or Vercel engine support.                                                                                                                              | [browser contract scope](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/browser-contract.mjs); [Node-only durable boundary](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/database/docs/concepts/sqlite-only.md)                                                                                                                                |
+| Node.js                | The only supported durable runtime, with local SQLite. Release packages declare either `>=22.19.0` or `^22.19.0 \|\| >=24.11.0`; the CLI and agent packages require the narrower range. CI and the release workflow pin `22.19.0`.                                    | [Manifest inventory](#published-node-engine-ranges); [CI toolchains](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts); [release workflow](https://github.com/smithersai/smithers/blob/main/.github/workflows/release.yml)                                                                                                                                                |
+| Node.js release smoke  | The rehearsal records the actual Node and npm versions and checks tarball installation, imports, bundling, and typechecking. Validate candidate artifacts on `22.19.0` and `24.18.0`; an engine range alone does not establish that both runs passed. | [smoke implementation and version output](https://github.com/smithersai/smithers/blob/main/scripts/smoke-release.mjs) |
+| Bun                    | Non-durable package scope only, listed below. The adapter declares `engines.bun: ">=1.4.0"`; CI pins `1.4.1`. Durable stores refuse Bun with `unsupported_runtime`. This is not a claim that every application runs on Bun. | [adapter manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-bun/package.json); [CI toolchains](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts); [NodeDatabase runtime refusal](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/src/node/NodeDatabase.ts) |
+| Browsers               | bundle only. No durable flows, including when a caller supplies another SQL client.                                                                                                                                         | [browser bundle contract](https://github.com/smithersai/smithers/blob/main/scripts/browser-contract.mjs); [aggregate boundary](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/docs/concepts/aggregate-surface.md)                                                                                                                                          |
+| Deno and edge runtimes | Not supported. Browser bundling does not establish Deno, Cloudflare, or Vercel engine support.                                                                                                                              | [browser contract scope](https://github.com/smithersai/smithers/blob/main/scripts/browser-contract.mjs); [Node-only durable boundary](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/docs/concepts/sqlite-only.md)                                                                                                                                |
 
 ### Bun package scope
 
@@ -6031,100 +6192,109 @@ These ten packages declare `bunTest` targets. The target uses Bun's package runn
 
 | Package                    | Source of truth                                                                                                                                            |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@smthrs/artifacts`        | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/artifacts/PACKAGE.ts)        |
-| `@smthrs/canonical`        | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/canonical/PACKAGE.ts)        |
-| `@smthrs/capability`       | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/capability/PACKAGE.ts)       |
-| `@smthrs/crypto`           | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/crypto/PACKAGE.ts)           |
-| `@smthrs/engine`           | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/engine/PACKAGE.ts)           |
-| `@smthrs/flow`             | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/flow/PACKAGE.ts)             |
-| `@smthrs/keys`             | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/keys/PACKAGE.ts)             |
-| `@smthrs/platform-browser` | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-browser/PACKAGE.ts) |
-| `@smthrs/platform-bun`     | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-bun/PACKAGE.ts)     |
-| `@smthrs/sandbox`          | [bunTest target](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/sandbox/PACKAGE.ts)          |
+| `@smthrs/artifacts`        | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/artifacts/PACKAGE.ts)        |
+| `@smthrs/canonical`        | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/canonical/PACKAGE.ts)        |
+| `@smthrs/capability`       | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/PACKAGE.ts)       |
+| `@smthrs/crypto`           | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/crypto/PACKAGE.ts)           |
+| `@smthrs/engine`           | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/PACKAGE.ts)           |
+| `@smthrs/flow`             | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/flow/PACKAGE.ts)             |
+| `@smthrs/keys`             | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/keys/PACKAGE.ts)             |
+| `@smthrs/platform-browser` | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-browser/PACKAGE.ts) |
+| `@smthrs/platform-bun`     | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-bun/PACKAGE.ts)     |
+| `@smthrs/sandbox`          | [bunTest target](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sandbox/PACKAGE.ts)          |
 
-[BunSuite command contract](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/build/targets/src/BunSuite.ts); [recorded Vitest shim limitation](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-bun/README.md).
+[BunSuite command contract](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/targets/src/BunSuite.ts); [recorded Vitest shim limitation](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-bun/README.md).
 
 ## Platforms
 
 | Platform | RC boundary                                                                                                                                            | Source of truth                                                                                                                                                                                                                                                                                                       |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Linux    | Required CI platform: `ubuntu-latest`, `advisory: false`.                                                                                              | [package matrix declaration](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts); [generated CI matrix](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/.github/workflows/ci.yml)                                                   |
-| macOS    | Development use; CI is advisory, not release-gating (`macos-latest`, `continue-on-error: true` through `matrix.advisory`). No architecture-wide claim. | [package matrix declaration](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts); [generated CI matrix](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/.github/workflows/ci.yml)                                                   |
-| Windows  | Unsupported. CI is advisory, not release-gating (`windows-latest`, `continue-on-error: true` through `matrix.advisory`).                               | [package matrix and Windows failure record](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts); [POSIX host requirement](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-node/docs/quickstart.md) |
+| Linux    | Required CI platform: `ubuntu-latest`, `advisory: false`.                                                                                              | [package matrix declaration](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts); [generated CI matrix](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml)                                                   |
+| macOS    | Development use; CI is advisory, not release-gating (`macos-latest`, `continue-on-error: true` through `matrix.advisory`). No architecture-wide claim. | [package matrix declaration](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts); [generated CI matrix](https://github.com/smithersai/smithers/blob/main/.github/workflows/ci.yml)                                                   |
+| Windows  | Unsupported. CI is advisory, not release-gating (`windows-latest`, `continue-on-error: true` through `matrix.advisory`).                               | [package matrix and Windows failure record](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts); [POSIX host requirement](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/docs/quickstart.md) |
 
 ## Storage
 
 | Boundary             | RC contract                                                                                                                                                                                                                                               | Source of truth                                                                                                                                                          |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Durable store        | Local SQLite only. PostgreSQL, PGlite, browser SQL, and other supplied SQL clients are not supported durable stores.                                                                                                                                      | [SQLite-only policy](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/database/docs/concepts/sqlite-only.md) |
-| Schema compatibility | Existing policy: "The repository is unreleased, so each package has one authoritative initial schema rather than compatibility migrations for obsolete internal versions." This is not a promise of compatibility with earlier internal database schemas. | [journal migration policy](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/journal/docs/api.md#migrations)  |
-| 0.x run databases    | No loading, resuming, or migration of 0.x run databases. Source migration starts new runs.                                                                                                                                                                | [Compatibility policy](/docs/migration/compatibility/); [frozen policy](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/README.md)  |
+| Durable store        | Local SQLite only. PostgreSQL, PGlite, browser SQL, and other supplied SQL clients are not supported durable stores.                                                                                                                                      | [SQLite-only policy](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/docs/concepts/sqlite-only.md) |
+| Schema compatibility | Existing policy: "The repository is unreleased, so each package has one authoritative initial schema rather than compatibility migrations for obsolete internal versions." This is not a promise of compatibility with earlier internal database schemas. | [journal migration policy](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/journal/docs/api.md#migrations)  |
+| 0.x run databases    | No loading, resuming, or migration of 0.x run databases. Source migration starts new runs.                                                                                                                                                                | [Compatibility policy](/docs/migration/compatibility/); [frozen policy](https://github.com/smithersai/smithers/blob/main/README.md)  |
 
 ## Network and hosting
 
 | Boundary                 | RC contract                                                                                                                                                                                                                                                                                          | Source of truth                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Gateway outside loopback | Requires explicit listen opt-in, bearer authentication, and TLS termination in front of the HTTP gateway. The Node gateway does not terminate TLS.                                                                                                                                                   | [network bind guide](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/gateway/docs/guides/serve-beyond-loopback.md); [HTTP server implementation](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/gateway/src/node/NodeGateway.ts)                                                                                                                           |
-| Remote watch             | `ControlClient.credential` applies to HTTP. The default WebSocket transport is unauthenticated; it does not forward that credential. Remote watch is supported only through an authenticated transport/proxy that supplies the bearer on upgrade. A browser uses the documented authenticated relay. | [ControlClient transports](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/control/src/ControlClient.ts); [WebSocket relay requirement](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/gateway/docs/guides/serve-beyond-loopback.md#what-the-credential-then-covers); [Worker relay authentication](/docs/reference/http-api/#worker-relay-authentication) |
-| Redaction                | Recognizes credential shapes and sensitive field names. It does not track secrets through arbitrary child output; a child's direct stderr bypasses the logger.                                                                                                                                       | [redaction evidence limits](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/repo-contract/fault-gaps.md); [journal redaction contract](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/journal/docs/api.md)                                                                                                                                                     |
+| Gateway outside loopback | Requires explicit listen opt-in, bearer authentication, and TLS termination in front of the HTTP gateway. The Node gateway does not terminate TLS.                                                                                                                                                   | [network bind guide](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/docs/guides/serve-beyond-loopback.md); [HTTP server implementation](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/src/node/NodeGateway.ts)                                                                                                                           |
+| Remote watch             | `ControlClient.credential` applies to HTTP. The default WebSocket transport is unauthenticated; it does not forward that credential. Remote watch is supported only through an authenticated transport/proxy that supplies the bearer on upgrade. A browser uses the documented authenticated relay. | [ControlClient transports](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/src/ControlClient.ts); [WebSocket relay requirement](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/docs/guides/serve-beyond-loopback.md#what-the-credential-then-covers); [Worker relay authentication](/docs/reference/http-api/#worker-relay-authentication) |
+| Redaction                | Recognizes credential shapes and sensitive field names. It does not track secrets through arbitrary child output; a child's direct stderr bypasses the logger.                                                                                                                                       | [redaction evidence limits](https://github.com/smithersai/smithers/blob/main/scripts/repo-contract/fault-gaps.md); [journal redaction contract](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/journal/docs/api.md)                                                                                                                                                     |
 
 ## Known limitations and evidence
 
 | Area               | Limit                                                                                                                                                                  | Source of truth                                                                                                                                                                                                                                                                                                        |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Global run listing | Loads the run population before paging. A page limit does not bound the underlying read or memory use. No scale claim. A named run has a separate direct lookup.       | [ControlLive list path](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/control/src/ControlLive.ts); [SQL listRuns](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/control/src/SqlControlRuntime.ts)    |
-| Fault tier         | Bounded cases: hosted-provider faults, timer races, and other gaps remain. Passing the required fault job does not cover every failure mode.                           | [fault coverage record](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/repo-contract/fault-gaps.md); [fault job](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/PACKAGE.ts)                                                        |
-| Soak               | The streaming case covers five subscribers and 500 events. No nightly soak runner is declared for the RC; hours-long growth and hosted soak are outside this evidence. | [case 16 and omitted soak tiers](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/repo-contract/fault-gaps.md)                                                                                                                                                             |
-| Production canary  | Disabled for this repository. The job is guarded on `smithersai/flows`; it is not an RC validation surface.                                                            | [canary job guard](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/.github/workflows/canary.yml)                                                                                                                                                                                  |
-| Provider first use | A funded first-use provider run is not part of the automated release-smoke evidence. Tarball import/typecheck success does not demonstrate a provider conversation.    | [smoke scope](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/smoke-release.mjs); [release checks](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/.github/workflows/release.yml)                                                    |
-| Project migration  | A realistic migrated project is not part of the automated release-smoke evidence. Migration fixtures and source rewrites do not establish that end-to-end result.      | [smoke scope](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/smoke-release.mjs); [migration verification guide](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/migrate/docs/guides/set-verification-commands.md) |
+| Global run listing | Loads the run population before paging. A page limit does not bound the underlying read or memory use. No scale claim. A named run has a separate direct lookup.       | [ControlLive list path](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/src/ControlLive.ts); [SQL listRuns](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/src/SqlControlRuntime.ts)    |
+| Fault tier         | Bounded cases: hosted-provider faults, timer races, and other gaps remain. Passing the required fault job does not cover every failure mode.                           | [fault coverage record](https://github.com/smithersai/smithers/blob/main/scripts/repo-contract/fault-gaps.md); [fault job](https://github.com/smithersai/smithers/blob/main/PACKAGE.ts)                                                        |
+| Soak               | The streaming case covers five subscribers and 500 events. No nightly soak runner is declared for the RC; hours-long growth and hosted soak are outside this evidence. | [case 16 and omitted soak tiers](https://github.com/smithersai/smithers/blob/main/scripts/repo-contract/fault-gaps.md)                                                                                                                                                             |
+| Production canary  | Disabled for this repository. The job is guarded on `smithersai/flows`; it is not an RC validation surface.                                                            | [canary job guard](https://github.com/smithersai/smithers/blob/main/.github/workflows/canary.yml)                                                                                                                                                                                  |
+| Provider first use | A funded first-use provider run is not part of the automated release-smoke evidence. Tarball import/typecheck success does not demonstrate a provider conversation.    | [smoke scope](https://github.com/smithersai/smithers/blob/main/scripts/smoke-release.mjs); [release checks](https://github.com/smithersai/smithers/blob/main/.github/workflows/release.yml)                                                    |
+| Project migration  | A realistic migrated project is not part of the automated release-smoke evidence. Migration fixtures and source rewrites do not establish that end-to-end result.      | [smoke scope](https://github.com/smithersai/smithers/blob/main/scripts/smoke-release.mjs); [migration verification guide](https://github.com/smithersai/smithers/blob/main/packages/smithers/migrate/docs/guides/set-verification-commands.md) |
 
 ## Published Node engine ranges
 
-The release roster comes from [readWorkspaceManifests and publishedPackages](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/scripts/pack-release.mjs). Every value below is the literal `engines.node` field.
+The release roster comes from [readWorkspaceManifests and publishedPackages](https://github.com/smithersai/smithers/blob/main/scripts/pack-release.mjs). Every value below is the literal `engines.node` field.
 
-| Published package          | `engines.node` | Source of truth                                                                                                                                        |
-| -------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@smthrs/agent`            | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/package.json)                  |
-| `@smthrs/artifacts`        | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/artifacts/package.json)        |
-| `@smthrs/canonical`        | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/canonical/package.json)        |
-| `@smthrs/capability`       | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/capability/package.json)       |
-| `@smthrs/cli`              | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/package.json)                        |
-| `@smthrs/control`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/control/package.json)                |
-| `@smthrs/core`             | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/core/package.json)             |
-| `@smthrs/crypto`           | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/crypto/package.json)           |
-| `@smthrs/database`         | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/database/package.json)         |
-| `@smthrs/engine`           | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/engine/package.json)           |
-| `@smthrs/engine-store`     | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/engine-store/package.json)     |
-| `@smthrs/flow`             | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/flow/package.json)             |
-| `@smthrs/flows`            | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/package.json)                  |
-| `@smthrs/gateway`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/gateway/package.json)                |
-| `@smthrs/harness`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/harness/package.json)          |
-| `@smthrs/jj`               | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/jj/package.json)               |
-| `@smthrs/journal`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/journal/package.json)          |
-| `@smthrs/kernel`           | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/kernel/package.json)           |
-| `@smthrs/keys`             | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/keys/package.json)             |
-| `@smthrs/mcp`              | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/mcp/package.json)                    |
-| `@smthrs/memory`           | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/memory/package.json)           |
-| `@smthrs/migrate`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/migrate/package.json)                |
-| `@smthrs/model`            | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/model/package.json)            |
-| `@smthrs/notifications`    | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/notifications/package.json)          |
-| `@smthrs/observability`    | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/observability/package.json)    |
-| `@smthrs/patterns`         | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/patterns/package.json)         |
-| `@smthrs/plan`             | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/plan/package.json)             |
-| `@smthrs/platform-browser` | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-browser/package.json) |
-| `@smthrs/platform-bun`     | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-bun/package.json)     |
-| `@smthrs/platform-node`    | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/platform-node/package.json)    |
-| `@smthrs/plugin`           | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/plugin/package.json)           |
-| `@smthrs/registry`         | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/registry/package.json)         |
-| `@smthrs/run-store`        | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/run-store/package.json)        |
-| `@smthrs/sandbox`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/sandbox/package.json)          |
-| `@smthrs/std`              | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/agent/std/package.json)              |
-| `@smthrs/step-cache`       | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/step-cache/package.json)       |
-| `@smthrs/sync`             | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/sync/package.json)             |
-| `@smthrs/testing`          | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/testing/package.json)                         |
-| `@smthrs/time-travel`      | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smithers/flows/time-travel/package.json)      |
-| `smthrs`                   | `>=22.19.0`    | [manifest](https://github.com/smithersai/smithers/blob/66e5adf76a06c9556a398bdfa299d28d27bb87a1/packages/smthrs-deprecation/package.json)              |
+| Published package | `engines.node` | Source of truth |
+| --- | --- | --- |
+| `@smthrs/agent` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/package.json) |
+| `@smthrs/artifacts` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/artifacts/package.json) |
+| `@smthrs/build` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/package.json) |
+| `@smthrs/build-cli` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/package.json) |
+| `@smthrs/canonical` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/canonical/package.json) |
+| `@smthrs/capability` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/package.json) |
+| `@smthrs/cli` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/package.json) |
+| `@smthrs/control` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/control/package.json) |
+| `@smthrs/core` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/core/package.json) |
+| `@smthrs/create-app` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/create-app/package.json) |
+| `@smthrs/crypto` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/crypto/package.json) |
+| `@smthrs/database` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/database/package.json) |
+| `@smthrs/engine` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine/package.json) |
+| `@smthrs/engine-store` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/engine-store/package.json) |
+| `@smthrs/errors` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/errors/package.json) |
+| `@smthrs/evals` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/evals/package.json) |
+| `@smthrs/flow` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/flow/package.json) |
+| `@smthrs/flows` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/package.json) |
+| `@smthrs/gateway` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/gateway/package.json) |
+| `@smthrs/harness` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/harness/package.json) |
+| `@smthrs/integrations` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/integrations/package.json) |
+| `@smthrs/jj` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/jj/package.json) |
+| `@smthrs/journal` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/journal/package.json) |
+| `@smthrs/kernel` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/kernel/package.json) |
+| `@smthrs/keys` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/keys/package.json) |
+| `@smthrs/mcp` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/mcp/package.json) |
+| `@smthrs/memory` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/memory/package.json) |
+| `@smthrs/migrate` | `^22.19.0 \|\| >=24.11.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/migrate/package.json) |
+| `@smthrs/model` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/model/package.json) |
+| `@smthrs/notifications` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/notifications/package.json) |
+| `@smthrs/observability` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/observability/package.json) |
+| `@smthrs/patterns` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/patterns/package.json) |
+| `@smthrs/plan` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/plan/package.json) |
+| `@smthrs/platform-browser` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-browser/package.json) |
+| `@smthrs/platform-bun` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-bun/package.json) |
+| `@smthrs/platform-node` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/package.json) |
+| `@smthrs/plugin` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/plugin/package.json) |
+| `@smthrs/registry` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/registry/package.json) |
+| `@smthrs/run-store` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/run-store/package.json) |
+| `@smthrs/sandbox` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sandbox/package.json) |
+| `@smthrs/scorers` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/scorers/package.json) |
+| `@smthrs/std` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/std/package.json) |
+| `@smthrs/step-cache` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/step-cache/package.json) |
+| `@smthrs/sync` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/sync/package.json) |
+| `@smthrs/targets` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/targets/package.json) |
+| `@smthrs/testing` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/testing/package.json) |
+| `@smthrs/time-travel` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/time-travel/package.json) |
+| `@smthrs/triggers` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smithers/agent/triggers/package.json) |
+| `smthrs` | `>=22.19.0` | [manifest](https://github.com/smithersai/smithers/blob/main/packages/smthrs-deprecation/package.json) |
 
 ---
 
@@ -7867,7 +8037,7 @@ Every failure the package defines is a `Schema.TaggedError` carrying a stable `c
 | `@smthrs/flow/ConcurrentKeylessDispatch`               | Two ordinal-keyed invocations of one allocation scope are in flight at once.                                         | `code`, `actionName`                                                    |
 | `@smthrs/flow/UncanonicalIdempotencyKey`               | A caller-declared object-form `idempotencyKey` carries material canonical serialization rejects.                     | `code`, `actionName`, `reason`, `path`, `message`                       |
 | `@smthrs/flow/DurableDeferred/TokenInvalid`            | A completion token does not parse, or names a different deferred than the surface it was submitted through.          | `code`, `message`                                                       |
-| `@smthrs/flow/ExecutionIdRequired`                     | Opt-in derivation could not canonicalize the payload.   | `code`, `flowName`                                                      |
+| `@smthrs/flow/ExecutionIdRequired`                     | Opt-in derivation could not canonicalize the payload.                                                                | `code`, `flowName`                                                      |
 | `@smthrs/flow/MaxRoundsExceeded`                       | A trampoline lineage opens a round past its flow's `maxRounds` budget.                                               | `code`, `flowName`, `lineageId`, `maxRounds`, `roundOrdinal`, `message` |
 | `@smthrs/flow/CancelRequestFailed`                     | `interrupt` cannot durably record its cancellation request, or a durable engine is asked for `interruptUnsafe`.      | `code`, `executionId`, `reason`                                         |
 | `@smthrs/flow/FlowCycleDetected`                       | Executing a flow would close a cycle in the persisted parent-execution chain.                                        | `code`, `path`                                                          |
@@ -9463,13 +9633,15 @@ const changesetsPublish = S.Changesets.Publish({
 
 ## CI toolchains and workflow generation
 
+`CiToolchain.Node` accepts an optional `npmRelease` pin. The generated job installs that npm version after setting up Node; omitting it keeps Node's bundled npm. The release tarball rehearsal requires npm 11.16.0, so its toolchain declares that pin explicitly.
+
 ```ts
 import { Smithers as S } from "@smthrs/targets"
 
 const test = S.Shell.Test({ shell: "pnpm test" })
 const lint = S.Shell.Test({ shell: "pnpm lint" })
 
-const node = S.CiToolchain.Node({ release: "22.19.0" })
+const node = S.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
 const bun = S.CiToolchain.Bun({ release: "1.4.1" })
 const ripgrep = S.CiToolchain.Ripgrep({ release: "14.1.1" })
 const apt = S.CiToolchain.Apt({ packages: ["libssl-dev", "pkg-config"] })
@@ -10493,6 +10665,17 @@ whose id is the control run id. Run-status writes stay fenced: the executor
 waits for the control plane's own `running` transition, writes
 `waiting-approval` when the execution parks, and writes the terminal status
 when it settles.
+
+Before starting a prompt, the session checks the plan's `executionDigest`
+against the registry descriptor and verifies the loaded source bytes. The
+same checks run on every drive or resume. An absent measured identity or a
+change to the prompt, model, parameters, or discovered metadata refuses the
+run; a refreshed registry needs a new plan and approval. A registry mismatch
+is retained as the typed cause of the launch failure.
+
+Module flows are discovered and planned but return `pending` from this agent
+executor. A host must register their flow and action implementations and drive
+them separately; `AgentSession` executes markdown prompt flows.
 
 ### AgentSession.Options
 
@@ -12698,6 +12881,29 @@ is the deferred computation a runtime executes.
 
 ## The CLI
 
+### Affected and Watch process lifetime
+
+`@smthrs/build-cli/Affected` exports `changedPaths(root, options)`, `select`,
+and `AffectedGitError`. Discovery options include `base`, optional `head` or
+`files`, and optional `signal`, `environment`, and `timeoutMs`. The timeout is
+per Git invocation, defaults to 60,000 milliseconds, and must be an integer
+from 1 through 86,400,000. Each output stream is limited to 16 MiB and decoded
+as strict UTF-8. Explicit files bypass Git. An already aborted signal refuses
+the call before discovery.
+
+`AffectedGitError` carries `_tag`, `code`, the exact Git `args`, and `cause`.
+Codes distinguish `timed_out`, `cancelled`, `nonzero_exit`, `process_failed`,
+`output_limit`, `cleanup_failed`, and `invalid_timeout`. Cleanup completes
+before timeout or cancellation is reported, adding up to five seconds of TERM
+grace and five seconds to verify disappearance after KILL. The CLI passes its
+runtime signal and environment through to discovery.
+
+`@smthrs/build-cli/Watch.run` resolves a cycle and invokes `cycleCompleted`
+only after its owned POSIX process group is gone. File changes, watcher errors,
+and the caller's signal all await that cleanup. Cleanup failure rejects the
+watch instead of starting another cycle. See [Commands](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/cli.md) for the
+platform and parent-crash limits.
+
 ### makeCli
 
 ```ts
@@ -13300,7 +13506,7 @@ https://smithers.sh/docs/reference/api/canonical/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/canonical/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/canonical/docs/api.md) · [package docs](https://canonical.smithers.sh)
 
-The package provides canonical serialization, its schema and errors, and an array-excluding record guard.
+The package provides canonical serialization, its schema and errors, bounded JSON admission, and an array-excluding record guard.
 
 ```ts
 import { Canonical, CanonicalError, canonicalize } from "@smthrs/canonical"
@@ -13470,12 +13676,36 @@ Each code, with its cause and its fix, is in
 
 `isRecord(value)` accepts non-null objects and excludes arrays. It preserves member types for typed JSON-like values. It does not read properties or validate their contents, and accepts class instances; use `canonicalize` or a schema when validating serialization. Import it from the package root or `@smthrs/canonical/Record`.
 
+## BoundedJson
+
+`BoundedJson.admit(input, limits)` copies inert JSON without calling getters or
+`toJSON`. A success carries `{ ok: true, value, bytes }`; a refusal carries
+`{ ok: false, code, complaint, path }`. `path` contains property names and array
+indices, so callers should bound it when displaying untrusted field names.
+
+The required limits are `maxDepth`, `maxNodes`, and `maxMembers` (per array or
+object). Optional `maxTotalMembers` bounds members across the whole tree.
+`maxBytes`, `maxStringBytes`, and `maxKeyBytes` bound the encoded JSON bytes,
+including quotes and escapes. The snapshot is deeply frozen; objects have null
+prototypes. Sparse arrays, accessors, enumerable symbols, non-plain objects,
+cycles, non-JSON values, and malformed Unicode are refused.
+
+`BoundedJson.encodedStringBytes(value, maximum?)` counts a JSON string's UTF-8
+bytes without allocating its encoded copy, or returns `undefined` for malformed
+or oversized text. It counts the short control escapes exactly.
+
+Import the namespace from the package root or `@smthrs/canonical/BoundedJson`.
+Admission is a separate boundary from canonical serialization and does not alter
+`canonicalize`'s handling of values or its output bytes.
+
 ---
 
 # @smthrs/capability
 https://smithers.sh/docs/reference/api/capability/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/capability/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/capability/docs/api.md) · [package docs](https://capability.smithers.sh)
+
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/)
 
 `@smthrs/capability` exports two modules from its root entry point, and each is
 also importable from `@smthrs/capability/<Module>`:
@@ -15158,6 +15388,7 @@ Where an invocation decides it is running.
 | `legacyNotice` | `(path: string) => string` | The one-line stderr notice. |
 | `ProjectRoot`, `MigrationRoot`, `LegacyState` | `Context.Reference` | The three answers, as services. |
 | `layer` | `(projectRoot, migrationRoot) => Layer` | Provides all three. The 0.x sample is taken while the layers are described, before anything creates `.flows/`. |
+| `assertRoot` | `(projectRoot: string) => void` | Throws `UsageError` if the selected root is not an accessible directory, before a command creates durable state. |
 
 ## Environment
 
@@ -15478,7 +15709,13 @@ schema constant and a type of the same name unless noted.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PlanNodeStatus` | `"cached" \| "run"`. The two outcomes a step key already decides: reuse the cached result, or run the step. A card reports nothing else.                                             |
 | `PlanNode`       | The persisted plan node's fields plus `status`. `key` is the step key [`@smthrs/plan`](/docs/reference/api/plan/) compiled, so a node named here and a node in the persisted plan are the same node. |
-| `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.                        |
+| `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, executionDigest?, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.      |
+
+`executionDigest` binds a discovery-based host's measured source and metadata
+to the approved card digest. It is optional for generic control-plane hosts,
+but `AgentSession` requires it for prompt execution and checks it again at
+launch and on every drive or resume. Changing prompt bytes, model, parameters,
+or other discovered metadata requires a new plan and approval.
 
 ### Runs
 
@@ -15653,17 +15890,17 @@ requested while one is being taken up is not lost with it.
 
 ### Models
 
-| Type             | Shape                                                                                                                                                                         |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                                    |
-| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget } & ApprovalDecision`; `_tag: "Pending"`, or `_tag: "Approved"` with principal/time/scope, or `_tag: "Denied"` with principal/time |
-| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                                             |
-| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                                          |
-| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                                |
-| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                   |
-| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                   |
-| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely.                |
-| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                       |
+| Type             | Shape                                                                                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                                                                                       |
+| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget } & ApprovalDecision`; `_tag: "Pending"`, or `_tag: "Approved"` with principal/time/scope, or `_tag: "Denied"` with principal/time                                                    |
+| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                                                                                                |
+| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                                                                                             |
+| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                                                                                   |
+| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                                                                      |
+| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                                                                      |
+| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; executionDigest?; decode?; plan? }`. The optional execution identity is included in the approved card; `decode` validates input and `plan` projects it into the keyed node graph. |
+| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                                                                          |
 
 `layerMemory` models the production fence and approval ordering seams but keeps
 everything in a `Map`. Nothing it decides survives the process.
@@ -15693,14 +15930,21 @@ does not require a grant scope because it grants nothing. See the
 The durable `ControlRuntime` over a SQL database and the fenced run store from
 [`@smthrs/run-store`](/docs/reference/api/run-store/).
 
-| Export           | Kind      | Signature                                                                                                                                       |
-| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                                             |
-| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }` |
-| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                                                   |
-| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                    |
-| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                              |
-| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                                                       |
+| Export           | Kind      | Signature                                                                                                                                                                                                                            |
+| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                                                                                                                                  |
+| `Options`        | interface | `{ flows?: ReadonlyArray<DurableFlow>; loadFlows?: () => Effect<ReadonlyArray<DurableFlow>, PersistenceError>; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }` |
+| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                                                                                                                                        |
+| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                                                                                                         |
+| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                                                                                                   |
+| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                                                                                                                                            |
+
+`loadFlows` replaces the static `flows` or default system catalog. It runs afresh
+for each `plan` and `listFlows` operation, and one plan uses one complete catalog
+snapshot. Loader failures remain typed `PersistenceError`s. A host using a
+refreshable registry can therefore plan from newly discovered or edited flows
+without restarting the runtime. Stored plans and approvals retain the execution
+identity they originally captured; refreshing the catalog does not rewrite them.
 
 Omitting `owner` mints one synthetic identity for this runtime only, so
 separately constructed runtimes cannot cross each other's fences. Hosts that
@@ -21641,15 +21885,16 @@ procedure does, including the principal it stamps on mutations.
 
 The Node host: bind policy, credential policy, and the socket.
 
-| Export                 | Signature                                                                                                                               | Meaning                                                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `ServerOptions`        | `ListenOptions & { listen?: boolean; credential?: string; heartbeatMillis?: number; maxRequestBodyBytes?: number }`                     | Where the gateway binds, and whether a non-loopback bind was asked for.                                       |
-| `defaultServerOptions` | `ServerOptions`                                                                                                                         | `{ host: "127.0.0.1", port: 7331 }`: loopback, no credential.                                                 |
-| `isLoopbackHost`       | `(host: string) => boolean`                                                                                                             | True for `127.0.0.1`, `::1`, and `localhost`, and nothing else.                                               |
-| `bindRefusal`          | `(options: ServerOptions) => GatewayError \| undefined`                                                                                 | The typed `bind_failed` refusal a requested bind earns, or `undefined` when it is allowed.                    |
-| `listenOptions`        | `(options: ServerOptions) => Effect<ListenOptions, GatewayError>`                                                                       | The admitted `node:net` options, with this module's own fields removed, or that refusal in the error channel. |
-| `layerAuth`            | `(options: ServerOptions) => Layer<ControlRpcs.ControlAuth>`                                                                            | Bearer authentication when a credential is configured, and the loopback-only local operator when none is.     |
-| `layer`                | `(health: GatewayServer.Health, options?: ServerOptions) => Layer<..., GatewayError, Control \| SyncAuth \| SyncServer \| Projections>` | The assembled gateway on a Node HTTP server.                                                                  |
+| Export                 | Signature                                                                                                                                             | Meaning                                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ServerOptions`        | `ListenOptions & { allowedHosts?: readonly string[]; listen?: boolean; credential?: string; heartbeatMillis?: number; maxRequestBodyBytes?: number }` | Bind address, explicitly admitted Host names, authentication, and request limits.                             |
+| `defaultServerOptions` | `ServerOptions`                                                                                                                                       | `{ host: "127.0.0.1", port: 7331 }`: loopback, no credential.                                                 |
+| `isLoopbackHost`       | `(host: string) => boolean`                                                                                                                           | True for `127.0.0.1`, `::1`, and `localhost`, and nothing else.                                               |
+| `bindRefusal`          | `(options: ServerOptions) => GatewayError \| undefined`                                                                                               | The typed `bind_failed` refusal a requested bind earns, or `undefined` when it is allowed.                    |
+| `listenOptions`        | `(options: ServerOptions) => Effect<ListenOptions, GatewayError>`                                                                                     | The admitted `node:net` options, with this module's own fields removed, or that refusal in the error channel. |
+| `layerAuth`            | `(options: ServerOptions) => Layer<ControlRpcs.ControlAuth>`                                                                                          | Bearer authentication when a credential is configured, and the loopback-only local operator when none is.     |
+| `bearerPrincipal`      | `Readonly<{ id: string; kind: string }>`                                                                                                              | The frozen `{ id: "gateway", kind: "bearer" }` identity stamped by shared-bearer authentication.              |
+| `layer`                | `(health: GatewayServer.Health, options?: ServerOptions) => Layer<..., GatewayError, Control \| SyncAuth \| SyncServer \| Projections>`               | The assembled gateway on a Node HTTP server.                                                                  |
 
 `layer` supplies the bind policy, the shared-credential authentication both RPC
 mounts run under, and newline-delimited JSON as the wire serialization. The
@@ -21667,8 +21912,11 @@ Two rules decide whether a bind is allowed, and both fail closed.
 2. A non-loopback bind requires a bearer credential.
 
 A loopback bind with no credential is allowed and is the local default. One
-shared bearer authenticates every mount and binds one principal: there are no
-users, no roles, no per-run ownership, and no scopes. See
+shared bearer authenticates every mount as `bearerPrincipal`. This does not
+grant approval authority. The owning Control runtime must explicitly delegate
+the allowed approval target kinds and scopes through `ApprovalAuthority`;
+without that delegation, bearer approve and deny requests are unauthorized.
+Every holder of the shared credential has the same delegated authority. See
 [Serve beyond loopback](https://gateway.smithers.sh/guides/serve-beyond-loopback/).
 
 Without that bearer, `NodeGateway.layer` enables `loopbackOnly`: every request
@@ -22385,13 +22633,19 @@ Valid current records retain their JSON representation, including failures
 whose code is absent. `CellValidation.Validation` likewise separates compiled
 source from rejection so the two cannot be supplied together.
 
-Value compatibility does not establish identical schema-derived step keys.
-The stricter result schema has a versioned representation identity. A host
-that includes result schemas in sealed keys must version its key contract and
-drain old writers before adopting it. Existing approvals and recorded keys
-remain bound to their original bytes; no decoder translates those identities.
-The current-record fixtures prove value decoding, not an in-place upgrade of
-every host's running execution.
+`Cell.CallResult` retains its historical encoded schema representation because
+the agent hashes that representation into sealed keys. The constructor and
+boundary decoder enforce the success/failure invariants; admission hardening
+does not re-key valid results. The agent pins the complete key material and
+tests a historical result through SQLite close, reopen and resume.
+
+Changing the valid wire contract still requires a version cutover and a newly
+planned run. Existing approvals and recorded keys remain bound to their
+original bytes; no decoder translates identities. Intermediate builds that
+added the `success-without-failure-code/v1` filter to the encoded schema derived
+different keys. Finish their executions on the same build before upgrading.
+See the agent's [persisted cell-call identity](https://agent.smithers.sh/concepts/engine-port/#persisted-cell-call-identity)
+for the retained algorithm and composition versions.
 
 **Checkpoints.** `Cell.baseCheckpoint` is `"base"`, the id naming the tree a
 run opened on, pinned for free and always present. `Cell.checkpoint(id)`
@@ -23050,7 +23304,11 @@ batch it acknowledges has been handled.
 ### Core.Migrations
 
 The cursor table's schema migrations. They run through
-[the database API](/docs/reference/api/database/)'s migration ladder.
+[the database API](/docs/reference/api/database/)'s migration ladder in block `8000`, after
+control (`6000`) and memory (`7000`). Compose `Core.Migrations.set` with the
+other sets installed in a shared control database, or use it on its own for
+a separate cursor database. The same composition can reopen the database
+without resetting its cursor.
 
 | Export  | Signature           | Notes                                                                |
 | ------- | ------------------- | -------------------------------------------------------------------- |
@@ -25981,7 +26239,7 @@ https://smithers.sh/docs/reference/api/mcp/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/mcp/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/mcp/docs/api.md) · [package docs](https://mcp.smithers.sh)
 
-> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/harness`](/docs/reference/api/harness/) · [`@smthrs/journal`](/docs/reference/api/journal/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/capability`](/docs/reference/api/capability/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/harness`](/docs/reference/api/harness/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/kernel`](/docs/reference/api/kernel/)
 
 `@smthrs/mcp` exports four modules from its root entry point, and each is also
 importable from `@smthrs/mcp/<Module>`:
@@ -26717,6 +26975,18 @@ The service tag is `MemoryStore`, `Context.Service` tag `flows/memory/MemoryStor
 | `Parts`       | interface               | `{ author, leaf }`: the scoped flows to hold when you drive the plan yourself with `Trellis.run`.           |
 | `parts`       | `(options) => Parts`    | Applies the policy to the author and the leaf without composing them.                                       |
 | `make`        | `(options) => Flow.Any` | Declares a trellis whose author, leaves, and memory flows all run under one policy. The graph is unchanged. |
+
+### `@smthrs/memory/Migrations`
+
+| Export  | Signature                                                                                 | Behavior                                                                                                                                                            |
+| ------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set`   | `DatabaseMigrations.MigrationSet`                                                         | Namespace `memory`, migration block `7000`; owns the authoritative memory schema and its indexes.                                                                   |
+| `run`   | `Effect<ReadonlyArray<readonly [number, string]>, MigrationError \| SqlError, SqlClient>` | Applies pending memory migrations and records their identities atomically in `flows_migrations`. Repeated calls return an empty list after the schema is installed. |
+| `layer` | `Layer<never, MigrationError \| SqlError, SqlClient>`                                     | Runs `run` during layer construction.                                                                                                                               |
+
+`MemoryStore.make` and `MemoryStore.layer` run these migrations automatically. A standalone store needs only its SQL client, durable writer, and Crypto service; the resulting database can be reopened by another process.
+
+When memory shares a database with the engine or control plane, compose all required lower migration sets before building memory. The CLI's shared control database installs `TimeTravelMigrations.sets`, `ControlMigrations.set`, and `MemoryMigrations.set` together. The database migration ladder rejects adding a previously absent lower block after memory has advanced the ledger; it does not assume those tables already exist. The [memory tutorial](https://smithers.sh/docs/tutorials/memory) shows that shared composition.
 
 ### `@smthrs/memory/Namespace`
 
@@ -28057,24 +28327,53 @@ always pass: they report the blockage instead of refusing on it. See
 
 What each of those exports defaults to, and what it refuses:
 
-| Export                                | Type                                                                              | Default                                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MigrateOptions`                      | `Schema`                                                                          | `mode` is required; everything else is optional. Decoding refuses any layout `layoutIssue` refuses.                                                                                                                                                                                                                                        |
-| `Mode`                                | `"scan" \| "plan" \| "apply"`                                                     | The CLI defaults to `plan`.                                                                                                                                                                                                                                                                                                                |
-| `reportDir`                           | `(options) => string`                                                             | `.smithers-migrate`                                                                                                                                                                                                                                                                                                                        |
-| `flowsDir`                            | `(options) => string`                                                             | `flows`                                                                                                                                                                                                                                                                                                                                    |
-| `maxRepairRounds`                     | `(options) => number`                                                             | `3`                                                                                                                                                                                                                                                                                                                                        |
-| `layoutIssue`                         | `(options) => string \| undefined`                                                | The root is absolute and normalized; each layout path is a plain relative path (no `.`, `..`, empty segment, NUL, backslash, or trailing slash, and not under `.flows`, `.git`, `.jj`, or `node_modules`); the two do not overlap.                                                                                                         |
-| `validateLayout`                      | `(options) => Effect`                                                             | What the text cannot show: the root is a directory, the deepest existing ancestor of each layout path resolves (symlinks followed) inside the resolved root, and an existing report directory holds only `reportDirEntries`.                                                                                                               |
-| `reservedDirectories`                 | `[".flows", ".git", ".jj", "node_modules"]`                                       | Names no layout path may be or live under.                                                                                                                                                                                                                                                                                                 |
-| `reportDirEntries`                    | `["archive", "backup", "pending-unit.json", "report.json", "report.md", "units"]` | Everything the tool writes at the top of the report directory.                                                                                                                                                                                                                                                                             |
-| `State`, `stateOf`, `scanEnvironment` | `Schema`, `(environment) => State \| undefined`, `(state) => environment`         | The three state paths a host derives from `SMITHERS_HOME`, `HOME`, and `TMPDIR`. `Command.optionsOf` puts them on the payload as `state`; the flow's scan and `Layers.layerNodeScanned` rebuild the scanners' environment from them, so global and gateway run state is found by the run itself. No other environment reaches the payload. |
+| Export                                | Type                                                                                                                                              | Default                                                                                                                                                                                                                                                                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MigrateOptions`                      | `Schema`                                                                                                                                          | `mode` is required; everything else is optional. Decoding refuses any layout `layoutIssue` refuses.                                                                                                                                                                                                                                        |
+| `Mode`                                | `"scan" \| "plan" \| "apply"`                                                                                                                     | The CLI defaults to `plan`.                                                                                                                                                                                                                                                                                                                |
+| `reportDir`                           | `(options) => string`                                                                                                                             | `.smithers-migrate`                                                                                                                                                                                                                                                                                                                        |
+| `flowsDir`                            | `(options) => string`                                                                                                                             | `flows`                                                                                                                                                                                                                                                                                                                                    |
+| `maxRepairRounds`                     | `(options) => number`                                                                                                                             | `3`                                                                                                                                                                                                                                                                                                                                        |
+| `layoutIssue`                         | `(options) => string \| undefined`                                                                                                                | The root is absolute and normalized; each layout path is a plain relative path (no `.`, `..`, empty segment, NUL, backslash, or trailing slash, and not under `.flows`, `.git`, `.jj`, or `node_modules`); the two do not overlap, and flows cannot live under the fixed `.smithers-migrate` lock directory.                               |
+| `validateLayout`                      | `(options) => Effect`                                                                                                                             | What the text cannot show: the root is a directory, the deepest existing ancestor of each layout path resolves (symlinks followed) inside the resolved root, and an existing report directory holds only `reportDirEntries`.                                                                                                               |
+| `reservedDirectories`                 | `[".flows", ".git", ".jj", "node_modules"]`                                                                                                       | Names no layout path may be or live under.                                                                                                                                                                                                                                                                                                 |
+| `reportDirEntries`                    | `["apply.lock", "apply.lock.sqlite", "apply.lock.sqlite-journal", "archive", "backup", "pending-unit.json", "report.json", "report.md", "units"]` | Everything the tool writes at the top of the report directory.                                                                                                                                                                                                                                                                             |
+| `State`, `stateOf`, `scanEnvironment` | `Schema`, `(environment) => State \| undefined`, `(state) => environment`                                                                         | The three state paths a host derives from `SMITHERS_HOME`, `HOME`, and `TMPDIR`. `Command.optionsOf` puts them on the payload as `state`; the flow's scan and `Layers.layerNodeScanned` rebuild the scanners' environment from them, so global and gateway run state is found by the run itself. No other environment reaches the payload. |
 
 `MigrateFlow.scan` runs `validateLayout` before the scan, skips the report
 directory during it, and refuses a report or flows directory that sits under
 a 0.x run-state root or holds one (`MigrateFlow.layoutConflict`) after it.
 `Command.survey` uses the same scan, so the survey and the flow's own scan
 step refuse the same layouts.
+
+## Lock
+
+Import from `@smthrs/migrate/flow/Lock`. Every apply acquires one lock for the
+canonical project root, independently of its report directory. The authority
+is a SQLite writer transaction held until release, on the permanent file
+`.smithers-migrate/apply.lock.sqlite`. The adjacent JSON owner record is
+diagnostic: an incomplete record never authorizes a competing apply.
+
+| Export    | Signature                                                                 | What it is                                                                                                                                                            |
+| --------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Record`  | Schema and type                                                           | `pid`, `startedAt`, `root`, plus `token` and `reportDir`. The last two are optional when decoding older pre-release diagnostics; newly acquired records include both. |
+| `Held`    | interface                                                                 | The acquired handle: `file`, `record`, and any abandoned `reclaimed` record. Release requires this exact handle.                                                      |
+| `file`    | `(path: Path, root: string, reportDir?: string) => string`                | The fixed JSON record path under `root`. `reportDir` is ignored; `acquire` resolves the root before using this helper.                                                |
+| `acquire` | `({ root, reportDir }) => Effect<Held, MigrateError, FileSystem \| Path>` | Takes the writer lock immediately or fails with `apply-in-progress`; it does not wait or infer liveness from a pid or timestamp.                                      |
+| `release` | `(held: Held) => Effect<void, never, FileSystem \| Path>`                 | Removes the matching owner record while holding the transaction, then closes its connection. Repeated or reconstructed releases do nothing.                           |
+
+Use `Effect.acquireUseRelease` around the entire apply, as `Command.launch`
+does. Process death releases the operating-system lock even during owner
+record initialization. Reclaimers serialize on that lock before replacing a
+record. Before publishing an owner record, acquisition refuses an unresolved
+`pending-unit.json` in the selected, default, or previous owner's report
+directory with `checkpoint-failed`. It preserves the original recovery
+pointer and backups across repeated retries. `Checkpoint.take` also checks
+before writing any backup. Release preserves a changed record or one whose
+checkpoint remains unresolved, and cleanup errors still close
+the transaction without masking the migration's result. The SQLite guard is
+never removed. See [apply-in-progress](https://migrate.smithers.sh/troubleshooting/#apply-in-progress)
+for the operator recovery steps.
 
 ## The migration flow
 
@@ -28106,7 +28405,7 @@ The same rules grant `proc:spawn` one command line at a time, for this project's
 
 ### What a unit is allowed to write
 
-The checkpoint records two things a unit is judged against and they are not the same. `Checkpoint.digest` covers the 0.x run-state paths, which must not change at all. `Checkpoint.tree` covers everything else in the project, minus `.git`, `.jj`, `node_modules`, the report directory, `.flows/`, and those run-state roots, and is written beside the unit's backup rather than carried in the journal, because a project has thousands of files and each one would otherwise cross it once per unit.
+The checkpoint records two things a unit is judged against and they are not the same. `Checkpoint.digest` covers the 0.x run-state paths, which must not change at all. `Checkpoint.tree` covers everything else in the project, minus `.git`, `.jj`, `node_modules`, the report directory, the fixed `.smithers-migrate/` lock directory, `.flows/`, and those run-state roots, and is written beside the unit's backup rather than carried in the journal, because a project has thousands of files and each one would otherwise cross it once per unit.
 
 The checkpoint copies every declared source and target aside and records, per path, whether it existed and what its bytes digested to; `Checkpoint.restore` and `Checkpoint.rollback` decide from that manifest alone. A target the operator already had at the path a unit writes comes back byte for byte, a path recorded absent is the only kind a rollback removes, a path the manifest never named is refused rather than guessed at, and a backup or a restored file whose digest no longer matches fails the restore instead of overwriting the tree. Absence is the platform's typed `NotFound` and nothing else: a permission error, a disk error, or a directory where a file was declared fails the checkpoint.
 
@@ -28124,7 +28423,7 @@ The final tree is then verified as the final tree. `Verify.run` runs again over 
 
 Each unit writes its outcome to `<reportDir>/units/<readable id>-<16 hex of sha256(id)>.json`, so two ids that read alike (`workflow:a/b`, `workflow:a-b`) never share a file, and the artifact carries the id inside. `WriteReport` reads one artifact per planned unit, refuses one that cannot be decoded or was written for a different unit, and records a unit with no artifact as `failed` with a `no recorded outcome` entry, so an apply that lost a unit exits 1 rather than 0.
 
-`Command.run` is the entry point the CLI verb, the `smithers-migrate` bin, and the durable control-plane launch share. `Command.registration` is the layer a durable host passes to `NodeRuntime`'s `registerFlows`, so `smthrs flow start system/migrate --data '<migration options>'` starts the same flow under the same journal.
+`Command.run` surveys and launches the migration; the CLI verb and `smithers-migrate` bin reach it through `Command.runNode`. That bundled Node composition uses an in-memory engine with filesystem checkpoint recovery. An application-owned durable host can compose `Command.registration` with the required services and invoke `Command.launch(options, surveyed)` to retain the enriched payload, plan seal, and apply lock. Registration does not install a `smthrs flow start system/migrate` route; `Command.flowId` is an integration label for hosts that expose their own route.
 
 ## Flow module exports
 
@@ -28272,25 +28571,26 @@ drives its implementation.
 `@smthrs/migrate/flow/MigrateFlow`. The graph, its actions, and every
 implementation.
 
-| Export                                                                                        | Signature                                                                                                    | What it is                                                     |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| `flow`                                                                                        | `Flow.Flow<"smithers/migrate-v1", ...>`                                                                      | The whole migration.                                           |
-| `unit`                                                                                        | `Flow.Flow<"smithers/migrate-v1/unit", ...>`                                                                 | One unit, as a child execution.                                |
-| `layer`                                                                                       | `Layer`                                                                                                      | Every action implementation the two flows need.                |
-| `tag`, `unitTag`                                                                              | `"smithers/migrate-v1"`, `"smithers/migrate-v1/unit"`                                                        | Their tags.                                                    |
-| `scan`                                                                                        | `(options: MigrateOptions) => Effect<ScanResult, MigrateError, ...>`                                         | The flow's own scan, layout checks included.                   |
-| `outlines`                                                                                    | `(result, options) => ReadonlyArray<Transform.UnitOutline>`                                                  | The units as the payload carries them.                         |
-| `runStateRoots`                                                                               | `(result: ScanResult) => ReadonlyArray<string>`                                                              | The directories the grant rules deny.                          |
-| `layoutConflict`                                                                              | `(result, options) => string \| undefined`                                                                   | A report or flows directory that sits under a run-state root.  |
-| `planSeal`, `PlanSeal`, `sealDifferences`                                                     | `(result, options) => Effect<PlanSeal, ...>`, `Schema.Struct`, `(planned, current) => ReadonlyArray<string>` | The plan's digest, and what changed since.                     |
-| `postconditions`                                                                              | `(root, outline) => Effect<ReadonlyArray<CheckResult>, MigrateError, ...>`                                   | Whether the tree is what this kind of unit exists to produce.  |
-| `UnitOutcome`                                                                                 | `Schema.Struct`                                                                                              | One unit's recorded result.                                    |
-| `unitArtifact`                                                                                | `(options: MigrateOptions, id: string) => string`                                                            | Where that result is written.                                  |
-| `readUnitReport`                                                                              | `(options, id) => Effect<UnitOutcome \| undefined, MigrateError, ...>`                                       | Reads one back, refusing an artifact written for another unit. |
-| `scanAction`, `gateAction`, `sealAction`, `finishAction`, `settleAction`, `writeReportAction` | `Action.Declared<...>`                                                                                       | The flow's own steps.                                          |
-| `scanLayer`, `gateLayer`, `sealLayer`, `finishLayer`, `settleLayer`, `writeReportLayer`       | `Layer`                                                                                                      | Their implementations.                                         |
-| `seal`, `finish`, `settle`, `writeReport`                                                     | `(payload) => Effect<...>`                                                                                   | The same work as plain functions.                              |
-| `Requires`, `UnitRequires`                                                                    | `type`                                                                                                       | The action requirements each flow carries.                     |
+| Export                                                                                        | Signature                                                                                                    | What it is                                                                                                                                                             |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flow`                                                                                        | `Flow.Flow<"smithers/migrate-v1", ...>`                                                                      | The whole migration.                                                                                                                                                   |
+| `unit`                                                                                        | `Flow.Flow<"smithers/migrate-v1/unit", ...>`                                                                 | One unit, as a child execution.                                                                                                                                        |
+| `layer`                                                                                       | `Layer`                                                                                                      | Every action implementation the two flows need.                                                                                                                        |
+| `tag`, `unitTag`                                                                              | `"smithers/migrate-v1"`, `"smithers/migrate-v1/unit"`                                                        | Their tags.                                                                                                                                                            |
+| `scan`                                                                                        | `(options: MigrateOptions) => Effect<ScanResult, MigrateError, ...>`                                         | The flow's own scan, layout checks included.                                                                                                                           |
+| `outlines`                                                                                    | `(result, options) => ReadonlyArray<Transform.UnitOutline>`                                                  | The units as the payload carries them.                                                                                                                                 |
+| `runStateRoots`                                                                               | `(result: ScanResult) => ReadonlyArray<string>`                                                              | The directories the grant rules deny.                                                                                                                                  |
+| `layoutConflict`                                                                              | `(result, options) => string \| undefined`                                                                   | A report or flows directory that sits under a run-state root.                                                                                                          |
+| `planSeal`, `PlanSeal`, `sealDifferences`                                                     | `(result, options) => Effect<PlanSeal, ...>`, `Schema.Struct`, `(planned, current) => ReadonlyArray<string>` | The plan's digest, and what changed since.                                                                                                                             |
+| `postconditions`                                                                              | `(root, outline) => Effect<ReadonlyArray<CheckResult>, MigrateError, ...>`                                   | Whether the tree is what this kind of unit exists to produce.                                                                                                          |
+| `UnitOutcome`                                                                                 | `Schema.Struct`                                                                                              | One unit's recorded result.                                                                                                                                            |
+| `unitArtifact`                                                                                | `(options: MigrateOptions, id: string) => string`                                                            | Where that result is written.                                                                                                                                          |
+| `readUnitReport`                                                                              | `(options, id) => Effect<UnitOutcome \| undefined, MigrateError, ...>`                                       | Reads one back, refusing an artifact written for another unit.                                                                                                         |
+| `scanAction`, `gateAction`, `sealAction`, `finishAction`, `settleAction`, `writeReportAction` | `Action.Declared<...>`                                                                                       | The flow's own steps.                                                                                                                                                  |
+| `scanLayer`, `gateLayer`, `sealLayer`, `finishLayer`, `settleLayer`, `writeReportLayer`       | `Layer`                                                                                                      | Their implementations.                                                                                                                                                 |
+| `seal`, `finish`, `settle`, `writeReport`                                                     | `(payload) => Effect<...>`                                                                                   | The same work as plain functions.                                                                                                                                      |
+| `validateSeal`                                                                                | `(payload) => Effect<{ root, digest }, MigrateError, FileSystem \| Path>`                                    | Reads and checks the approved seal without changing artifacts. `Command.launch` uses it before creating lock state; the flow repeats the check while holding the lock. |
+| `Requires`, `UnitRequires`                                                                    | `type`                                                                                                       | The action requirements each flow carries.                                                                                                                             |
 
 ### Layers
 
@@ -28318,23 +28618,23 @@ scripted composition to test a migration against.
 `@smthrs/migrate/flow/Command`. The entry point the CLI verb, the bin, and a
 durable host share.
 
-| Export                                              | Signature                                                                            | What it is                                                               |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `run`                                               | `(options: MigrateOptions) => Effect<MigrationReport, MigrateError, Requirements>`   | Survey, then launch.                                                     |
-| `runNode`                                           | `(options, config?) => Effect<MigrationReport, MigrateError>`                        | The same, on the bundled Node composition.                               |
-| `survey`                                            | `(options) => Effect<Survey, MigrateError, FileSystem \| Path>`                      | Reads the project without touching it.                                   |
-| `launch`                                            | `(options, surveyed: Survey) => Effect<MigrationReport, MigrateError, Requirements>` | Executes the flow over a survey taken earlier.                           |
-| `layerNode`                                         | `(config) => Layer`                                                                  | The composition `runNode` provides.                                      |
-| `registration`                                      | `typeof MigrateFlow.layer`                                                           | The `registerFlows` layer a durable host takes.                          |
-| `optionsOf`                                         | `(flags: Flags, cwd: string, environment?) => MigrateOptions`                        | Parsed flags as the flow's payload. `--scan` wins over `--apply`.        |
-| `commandsOf`                                        | `(result: ScanResult, options) => Contract.Commands`                                 | The verification commands this project implies.                          |
-| `render`                                            | `(report, format: "human" \| "json", reportDirectory?) => string`                    | The summary, or the whole document.                                      |
-| `exitCode`                                          | `(report: MigrationReport) => 0 \| 1 \| 3`                                           | The process status the report implies.                                   |
-| `reportDirectory`                                   | `(options: MigrateOptions) => string`                                                | Where this run wrote its report.                                         |
-| `executionId`                                       | `(options: MigrateOptions, generatedAt: string) => string`                           | The execution id one invocation takes.                                   |
-| `isMigrateError`                                    | `(error: unknown) => error is MigrateError`                                          | Decided by the class and its schema, never by a `_tag` string.           |
-| `flowId`                                            | `"system/migrate"`                                                                   | The name the control plane knows the flow by.                            |
-| `Survey`, `Flags`, `Requirements`, `MigrateOptions` | `interface` or `type`                                                                | The survey, the parsed flags, the services a run needs, and the payload. |
+| Export                                              | Signature                                                                            | What it is                                                                                                |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `run`                                               | `(options: MigrateOptions) => Effect<MigrationReport, MigrateError, Requirements>`   | Survey, then launch.                                                                                      |
+| `runNode`                                           | `(options, config?) => Effect<MigrationReport, MigrateError>`                        | The same, on the bundled Node composition.                                                                |
+| `survey`                                            | `(options) => Effect<Survey, MigrateError, FileSystem \| Path>`                      | Reads the project without touching it.                                                                    |
+| `launch`                                            | `(options, surveyed: Survey) => Effect<MigrationReport, MigrateError, Requirements>` | Executes the flow over a survey taken earlier.                                                            |
+| `layerNode`                                         | `(config) => Layer`                                                                  | The composition `runNode` provides.                                                                       |
+| `registration`                                      | `typeof MigrateFlow.layer`                                                           | Action implementations and flow registrations; launch through `Command.launch` to acquire the apply lock. |
+| `optionsOf`                                         | `(flags: Flags, cwd: string, environment?) => MigrateOptions`                        | Parsed flags as the flow's payload. `--scan` wins over `--apply`.                                         |
+| `commandsOf`                                        | `(result: ScanResult, options) => Contract.Commands`                                 | The verification commands this project implies.                                                           |
+| `render`                                            | `(report, format: "human" \| "json", reportDirectory?) => string`                    | The summary, or the whole document.                                                                       |
+| `exitCode`                                          | `(report: MigrationReport) => 0 \| 1 \| 3`                                           | The process status the report implies.                                                                    |
+| `reportDirectory`                                   | `(options: MigrateOptions) => string`                                                | Where this run wrote its report.                                                                          |
+| `executionId`                                       | `(options: MigrateOptions, generatedAt: string) => string`                           | The execution id one invocation takes.                                                                    |
+| `isMigrateError`                                    | `(error: unknown) => error is MigrateError`                                          | Decided by the class and its schema, never by a `_tag` string.                                            |
+| `flowId`                                            | `"system/migrate"`                                                                   | Integration label for an application-owned control-plane route.                                           |
+| `Survey`, `Flags`, `Requirements`, `MigrateOptions` | `interface` or `type`                                                                | The survey, the parsed flags, the services a run needs, and the payload.                                  |
 
 ### Cli
 
@@ -32778,6 +33078,18 @@ The discovered metadata for one flow, excluding its unloaded body content.
 does not use. `budget` is absent for a flow that declares none; read it through
 `budgetOf` rather than from the field.
 
+### Descriptor.executionDigest
+
+```ts
+const executionDigest: (descriptor: FlowDescriptor) => string | undefined
+```
+
+Hashes the descriptor's complete measured source identity and discovered
+metadata, including model, parameters, body location, and authority. Hosts
+include this identity in the approved plan. It returns `undefined` when the
+descriptor has no `body.contentDigest`: the descriptor may be displayed, but
+`AgentSession` refuses to execute a prompt without a measured, approved identity.
+
 ### Descriptor.SourceScan
 
 ```ts
@@ -32853,9 +33165,9 @@ demand. `baseDirectory` is the directory a markdown flow's own resource paths
 resolve against. `contentDigest` is the SHA-256 of the complete source bytes
 measured during discovery, as 64 lowercase hexadecimal characters. Every
 constructor supplies it. The field is optional only so a descriptor journaled
-by an older version, before the digest existed, still decodes. `Registry.loadBody` and
-`Executable.fromDescriptor` rehash against it and refuse `body_unavailable` on
-a mismatch.
+by an older version, before the digest existed, still decodes. `Registry.loadBody`
+rehashes markdown source, and `Executable.fromDescriptor` verifies module source
+before importing it; a mismatch is `body_unavailable`.
 
 ### Descriptor.FlowBody, FlowBodyPrompt, FlowBodyModule
 
@@ -33188,7 +33500,10 @@ interface Registry {
   readonly visible: () => Effect.Effect<ReadonlyArray<FlowDescriptor>>
   readonly get: (name: string) => Effect.Effect<FlowDescriptor, RegistryError>
   readonly getOption: (name: string) => Effect.Effect<Option.Option<FlowDescriptor>>
-  readonly loadBody: (name: string) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
+  readonly loadBody: (
+    name: string,
+    expectedExecutionDigest?: string
+  ) => Effect.Effect<FlowBody, RegistryError | DiscoveryError>
   readonly runPrompt: (
     name: string,
     input: MarkdownFlow.Input
@@ -33200,16 +33515,16 @@ interface Registry {
 const Registry: Context.Service<Registry, Registry>
 ```
 
-| Member      | What it answers                                                           |
-| ----------- | ------------------------------------------------------------------------- |
-| `list`      | Every descriptor, in deterministic first-found order.                     |
-| `visible`   | The descriptors whose `modelInvocable` is true.                           |
-| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                 |
-| `getOption` | One descriptor as an `Option`. It cannot fail.                            |
-| `loadBody`  | The body, read from disk and checked against the recorded digest.         |
-| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`. |
-| `refresh`   | Rescans every configured source and replaces the snapshot.                |
-| `warnings`  | Every discovery and collision diagnostic.                                 |
+| Member      | What it answers                                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`      | Every descriptor, in deterministic first-found order.                                                                                                   |
+| `visible`   | The descriptors whose `modelInvocable` is true.                                                                                                         |
+| `get`       | One descriptor, or `RegistryError { code: "not_found" }`.                                                                                               |
+| `getOption` | One descriptor as an `Option`. It cannot fail.                                                                                                          |
+| `loadBody`  | Returns the body locator or prompt, optionally checking the approved execution identity first. Markdown bytes are checked against the discovery digest. |
+| `runPrompt` | A markdown body rendered as a prompt. A module flow is `not_prompt_flow`.                                                                               |
+| `refresh`   | Rescans every configured source and replaces the snapshot.                                                                                              |
+| `warnings`  | Every discovery and collision diagnostic.                                                                                                               |
 
 Reads observe one complete snapshot, so a `list` and the `get` after it never
 disagree. `refresh` replaces the snapshot only after every source succeeds, so
@@ -33217,6 +33532,12 @@ a failed rescan leaves the previous complete snapshot serving reads rather than
 emptying the catalog.
 
 `loadBody` and `runPrompt` are the only two members that touch the filesystem.
+
+Pass the plan's `executionDigest` to `loadBody` when loading an approved flow.
+A descriptor that no longer matches it fails with `execution_changed`, before
+body loading. A markdown file changed after discovery fails with
+`body_unavailable`. Refreshing the registry does not authorize the new work;
+create and approve a new plan.
 
 ### Registry.Config and Registry.PackConfig
 
@@ -33894,6 +34215,7 @@ class RegistryError {
     | "not_found"
     | "system_collision"
     | "body_unavailable"
+    | "execution_changed"
     | "not_prompt_flow"
     | "invalid_pack"
     | "incompatible_pack"
@@ -33956,7 +34278,7 @@ https://smithers.sh/docs/reference/api/run-store/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/flows/run-store/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/run-store/docs/api.md) · [package docs](https://run-store.smithers.sh)
 
-> **Related APIs:** [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/observability`](/docs/reference/api/observability/)
+> **Related APIs:** [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/database`](/docs/reference/api/database/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/observability`](/docs/reference/api/observability/)
 
 `@smthrs/run-store` exports five namespaces from its root entry point, and each
 is also importable from `@smthrs/run-store/<Module>`:
@@ -43573,7 +43895,7 @@ Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. A 0.x proje
 | --- | --- |
 | `<Workflow>` and the other JSX components | A module flow at `flows/<name>/flow.ts`, built on `Flow.make(tag, { payload, success, error, body })`. The JSX root has no counterpart; the flow declaration is the root. |
 | Markdown agent steps (MDX prompts) | `flows/<name>/flow.mdx`, or a `prompt: (payload) => string` template on an agent action. `{props.x}` becomes `${payload.x}`. |
-| `createSmithers` and `runWorkflow` | `Flow.make(tag, { payload, success, error, body })` and `flow.execute(payload, { executionId })`. From the CLI, `smthrs up` plans, approves, and runs the flow on the `@smthrs/engine` runtime. |
+| `createSmithers` and `runWorkflow` | `Flow.make(tag, { payload, success, error, body })` and `flow.execute(payload, { executionId })`, run by a host that registers the flow and provides its action implementations and engine. The CLI discovers and plans module flows, but leaves their execution `pending` until a host drives them. `smthrs up` executes markdown agent flows directly. |
 | `.smithers/workflows/` | `flows/`. A workflow keeps its position: `.smithers/workflows/pipelines/ci-fast.tsx` becomes `flows/pipelines/ci-fast/flow.ts`. |
 | `smithers.config.ts` | No 1.0 equivalent. `repoCommands.test` seeds the migration's test command (override it with `--verify-test`), `backend` is recorded in the report, and the file is deleted after the final unit. |
 | `smithers` binary | Both spellings still work. `@smthrs/cli@next` installs `smthrs`, with `smithers` as an alias of the same executable. |
@@ -43669,6 +43991,7 @@ Three notes on the set:
 - Run the project's own checks the way the migration verified each unit: install, format, typecheck, and tests.
 - Run `smthrs doctor`. It reports registry, database, runtime, and provider readiness.
 - Run `smthrs ls`. It lists the flows discovered under the project, and the migrated flows should appear under their kept positions, such as `pipelines/ci-fast` for `.smithers/workflows/pipelines/ci-fast.tsx`. See [Flow discovery](/docs/guides/flow-discovery/).
+- Execute each migrated module flow through its application host, with its action layers registered. Discovery and a successful CLI plan do not establish that the flow executes: the CLI leaves module flows `pending`. [Module flows](/docs/guides/module-flows/) describes this boundary; [the durable flow tutorial](/docs/tutorials/first-flow/) provides a complete executable host.
 
 ## Removed commands and flags
 

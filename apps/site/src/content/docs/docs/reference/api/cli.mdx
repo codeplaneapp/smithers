@@ -247,6 +247,7 @@ Where an invocation decides it is running.
 | `legacyNotice` | `(path: string) => string` | The one-line stderr notice. |
 | `ProjectRoot`, `MigrationRoot`, `LegacyState` | `Context.Reference` | The three answers, as services. |
 | `layer` | `(projectRoot, migrationRoot) => Layer` | Provides all three. The 0.x sample is taken while the layers are described, before anything creates `.flows/`. |
+| `assertRoot` | `(projectRoot: string) => void` | Throws `UsageError` if the selected root is not an accessible directory, before a command creates durable state. |
 
 ## Environment
 

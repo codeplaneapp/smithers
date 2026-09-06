@@ -124,7 +124,7 @@ const repoAbout = Smithers.ToolRun({
 
 const ubuntu = "ubuntu-latest"
 
-const node = Smithers.CiToolchain.Node({ release: "22.19.0" })
+const node = Smithers.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
 
 const bareNode = Smithers.CiToolchain.Node({ release: "22.19.0", cachePackageStore: false })
 
@@ -163,6 +163,8 @@ const ci = Smithers.GithubCiGen({
   mode: "check",
   gates: [
     { name: "documentation parity", verb: Smithers.Verb.Docs, pattern: "//packages/...", job: "test" },
+    { name: "example typecheck", verb: Smithers.Verb.Build, pattern: "//examples/...", job: "test" },
+    { name: "example suite", verb: Smithers.Verb.Test, pattern: "//examples/...", job: "test" },
     { name: "web bundle compatibility", verb: Smithers.Verb.Test, pattern: "//scripts:webBundleContract" }
   ],
   requiredJobs: ["test", "apps-e2e", "rust", "wasm-repro", "browser", "e2e-faults", "packages"],
@@ -202,6 +204,7 @@ const ci = Smithers.GithubCiGen({
         })
       }),
       steps: [
+        { name: "Examples", verb: Smithers.Verb.Ci, pattern: "//examples/..." },
         { name: "Workspace targets", verb: Smithers.Verb.Ci, pattern: "//packages/...", parallelism: 2 },
         { name: "Script gates", verb: Smithers.Verb.Test, pattern: "//scripts/..." },
         { name: "Public export JSDoc", verb: Smithers.Verb.Lint, pattern: "//:jsdocTree" },

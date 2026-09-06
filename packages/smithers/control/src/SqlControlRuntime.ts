@@ -119,6 +119,13 @@ export type DurableFlow = MemoryFlow
  */
 export interface Options {
   readonly flows?: ReadonlyArray<DurableFlow> | undefined
+  /**
+   * Reads the current flow catalog for each plan and listing. When supplied,
+   * this replaces `flows`, including the default system catalog. A host with
+   * a refreshable registry should return one complete snapshot per call.
+   * Existing plans retain the definition they were approved against.
+   */
+  readonly loadFlows?: (() => Effect.Effect<ReadonlyArray<DurableFlow>, PersistenceError>) | undefined
   readonly owner?: Ownership.OwnerId | undefined
   readonly principal?: Omit<Principal, "stampedAt"> | undefined
   readonly approvalAuthority?: ApprovalAuthority.Service | undefined
@@ -367,7 +374,11 @@ const makeRuntime = (
       deployClass: entry.deployClass,
       envelope: emptyEnvelope
     }))
-    const flows = new Map(configuredFlows.map((flow) => [flow.flowId, flow] as const))
+    const readFlows = (options.loadFlows === undefined
+      ? Effect.succeed(configuredFlows)
+      : Effect.suspend(options.loadFlows)).pipe(
+        Effect.map((entries) => new Map(entries.map((flow) => [flow.flowId, flow] as const)))
+      )
 
     // Fibers are live continuations, not rows. A restarted process legitimately
     // has none, and interrupting a run it does not own is the other process's
@@ -1014,7 +1025,7 @@ const makeRuntime = (
     const service = make({
       authorizeApproval,
       plan: Effect.fn("SqlControlRuntime.plan")(function*(input: PlanInput) {
-        const flow = flows.get(input.flowId)
+        const flow = (yield* readFlows).get(input.flowId)
         if (flow === undefined) {
           return yield* new FlowNotFound({ flowId: input.flowId })
         }
@@ -1056,6 +1067,7 @@ const makeRuntime = (
           decodedInput: decoded,
           envelope: flow.envelope,
           deployClass: flow.deployClass,
+          executionDigest: flow.executionDigest,
           handoff,
           idempotencyKey: input.idempotencyKey
         }).pipe(Effect.provideService(Crypto.Crypto, crypto))
@@ -1393,12 +1405,11 @@ const makeRuntime = (
         })
       )(),
       listFlows: Effect.fn("SqlControlRuntime.listFlows")(() =>
-        Effect.succeed(
+        Effect.map(readFlows, (flows) =>
           Array.from(flows.values(), (flow) => ({
             flowId: flow.flowId,
             description: flow.description
-          }))
-        )
+          })))
       )(),
       enqueueSteer: Effect.fn("SqlControlRuntime.enqueueSteer")((runId: RunId, message: SteerMessage) =>
         appendMessage(runId, "steer", message)

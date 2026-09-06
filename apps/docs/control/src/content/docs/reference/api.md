@@ -94,7 +94,13 @@ schema constant and a type of the same name unless noted.
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `PlanNodeStatus` | `"cached" \| "run"`. The two outcomes a step key already decides: reuse the cached result, or run the step. A card reports nothing else.                                             |
 | `PlanNode`       | The persisted plan node's fields plus `status`. `key` is the step key [`@smthrs/plan`](https://plan.smithers.sh/reference/api/) compiled, so a node named here and a node in the persisted plan are the same node. |
-| `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.                        |
+| `PlanCard`       | `{ planId, flowId, digest, inputSummary, envelope, deployClass, executionDigest?, plan?, nodes, approval }`. `approval` is the complete payload a reviewer resubmits unchanged.      |
+
+`executionDigest` binds a discovery-based host's measured source and metadata
+to the approved card digest. It is optional for generic control-plane hosts,
+but `AgentSession` requires it for prompt execution and checks it again at
+launch and on every drive or resume. Changing prompt bytes, model, parameters,
+or other discovered metadata requires a new plan and approval.
 
 ### Runs
 
@@ -269,17 +275,17 @@ requested while one is being taken up is not lost with it.
 
 ### Models
 
-| Type             | Shape                                                                                                                                                                         |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                                    |
-| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget } & ApprovalDecision`; `_tag: "Pending"`, or `_tag: "Approved"` with principal/time/scope, or `_tag: "Denied"` with principal/time |
-| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                                             |
-| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                                          |
-| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                                |
-| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                   |
-| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                   |
-| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; decode?; plan? }`. `decode` validates a flow's own input; `plan` projects it into the keyed node graph, purely.                |
-| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                       |
+| Type             | Shape                                                                                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StoredPlan`     | `{ card: PlanCard; decodedInput: unknown; decision: "pending" \| "approved" \| "denied" }`                                                                                                                                       |
+| `ApprovalToken`  | `{ tokenId: string; target: ApprovalTarget } & ApprovalDecision`; `_tag: "Pending"`, or `_tag: "Approved"` with principal/time/scope, or `_tag: "Denied"` with principal/time                                                    |
+| `BulkGrant`      | `{ tokenId: string; envelope: Envelope; scope: GrantScope; installedAt: number }`                                                                                                                                                |
+| `LaunchResult`   | `{ _tag: "Started"; receipt; run }` or `{ _tag: "Parked"; receipt }`                                                                                                                                                             |
+| `PlanOutcome`    | `{ card: PlanCard; created: boolean }`. `created` is what lets `plan` journal one creation per plan rather than one per retry.                                                                                                   |
+| `MutationRecord` | `{ fingerprint: string; receipt: Receipt }`                                                                                                                                                                                      |
+| `PendingResume`  | `{ runId: RunId; sequence: number; requestedAtMs: number }`                                                                                                                                                                      |
+| `MemoryFlow`     | `{ flowId; description; deployClass; envelope; executionDigest?; decode?; plan? }`. The optional execution identity is included in the approved card; `decode` validates input and `plan` projects it into the keyed node graph. |
+| `MemoryOptions`  | `{ flows?: MemoryFlow[]; now?: () => number; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }`                                                                                          |
 
 `layerMemory` models the production fence and approval ordering seams but keeps
 everything in a `Map`. Nothing it decides survives the process.
@@ -309,14 +315,21 @@ does not require a grant scope because it grants nothing. See the
 The durable `ControlRuntime` over a SQL database and the fenced run store from
 [`@smthrs/run-store`](https://run-store.smithers.sh/reference/api/).
 
-| Export           | Kind      | Signature                                                                                                                                       |
-| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                                             |
-| `Options`        | interface | `{ flows?: DurableFlow[]; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }` |
-| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                                                   |
-| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                    |
-| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                              |
-| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                                                       |
+| Export           | Kind      | Signature                                                                                                                                                                                                                            |
+| ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DurableFlow`    | type      | `MemoryFlow`, so one catalog serves either runtime.                                                                                                                                                                                  |
+| `Options`        | interface | `{ flows?: ReadonlyArray<DurableFlow>; loadFlows?: () => Effect<ReadonlyArray<DurableFlow>, PersistenceError>; owner?: Ownership.OwnerId; principal?: Omit<Principal, "stampedAt">; approvalAuthority?: ApprovalAuthority.Service }` |
+| `migrate`        | effect    | `Effect<void, PersistenceError, SqlClient>`. Creates every control-plane table, idempotently.                                                                                                                                        |
+| `make`           | function  | `(options?: Options) => Effect<Service, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                                                                                                         |
+| `layer`          | layer     | `(options?: Options) => Layer<ControlRuntime, PersistenceError, Crypto \| DurableWriter \| SqlClient \| RunStore>`                                                                                                                   |
+| `layerWithStore` | layer     | The same, with `RunStore.layer` provided.                                                                                                                                                                                            |
+
+`loadFlows` replaces the static `flows` or default system catalog. It runs afresh
+for each `plan` and `listFlows` operation, and one plan uses one complete catalog
+snapshot. Loader failures remain typed `PersistenceError`s. A host using a
+refreshable registry can therefore plan from newly discovered or edited flows
+without restarting the runtime. Stored plans and approvals retain the execution
+identity they originally captured; refreshing the catalog does not rewrite them.
 
 Omitting `owner` mints one synthetic identity for this runtime only, so
 separately constructed runtimes cannot cross each other's fences. Hosts that

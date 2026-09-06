@@ -9,6 +9,7 @@ const manifest = JSON.parse(
   readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")
 ) as {
   readonly private: boolean
+  readonly version: string
   readonly exports: Record<string, unknown>
   readonly publishConfig: { readonly exports: Record<string, unknown> }
 }

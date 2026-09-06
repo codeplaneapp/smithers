@@ -74,6 +74,10 @@ describe("Options.layoutIssue", () => {
     expect(Options.layoutIssue({ root: "/w", reportDir: "flows", layout: { flowsDir: "flows" } })).toMatch(/overlap/)
     expect(Options.layoutIssue({ root: "/w", reportDir: "flows/report" })).toMatch(/overlap/)
     expect(Options.layoutIssue({ root: "/w", layout: { flowsDir: ".smithers-migrate/flows" } })).toMatch(/overlap/)
+    expect(Options.layoutIssue({ root: "/w", reportDir: "audit", layout: { flowsDir: ".smithers-migrate" } }))
+      .toMatch(/fixed migration state/)
+    expect(Options.layoutIssue({ root: "/w", reportDir: "audit", layout: { flowsDir: ".smithers-migrate/flows" } }))
+      .toMatch(/fixed migration state/)
     // The same directory name spelled with a composed and a decomposed é.
     expect(Options.layoutIssue({ root: "/w", reportDir: "caf\u00e9", layout: { flowsDir: "cafe\u0301/flows" } }))
       .toMatch(/overlap/)
@@ -96,6 +100,16 @@ describe("Options.layoutIssue", () => {
 describe("Options.validateLayout", () => {
   const validate = (options: Options.MigrateOptions) =>
     Options.validateLayout(options).pipe(Effect.provide(NodeServices.layer))
+
+  it.effect("accepts the persistent project lock state left by a completed apply", () =>
+    Effect.gen(function*() {
+      const root = copyFixture("jsx-single")
+      mkdirSync(join(root, ".smithers-migrate"))
+      writeFileSync(join(root, ".smithers-migrate", "apply.lock.sqlite"), "")
+      writeFileSync(join(root, ".smithers-migrate", "apply.lock.sqlite-journal"), "")
+      yield* validate({ root, mode: "apply" })
+      yield* validate({ root, mode: "apply", reportDir: "audit" })
+    }))
 
   it.effect("accepts a project whose root is itself reached through a symlink", () =>
     Effect.gen(function*() {

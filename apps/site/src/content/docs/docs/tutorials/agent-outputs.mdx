@@ -6,17 +6,14 @@ sidebar:
 ---
 
 import { CardGrid, LinkCard } from "@astrojs/starlight/components"
-import versions from "../../../../data/versions.json"
 
-In this tutorial you'll build a two-step research-then-write flow. The first step's answer must decode against a schema you declare, the second step reads the typed fields, and afterwards you record the run in your project and read both steps' outputs back. It takes about 15 minutes.
+In this tutorial you'll build a two-step research-then-write flow. The first step's answer must decode against a schema you declare, and the second reads its typed fields. You will run the chain in memory, then persist it over SQLite. It takes about 15 minutes and needs no provider key: the model responses are scripted.
 
-A declared `output` schema is rendered into the step's system teaching as JSON Schema, and the model's final answer is decoded by it with one correction re-prompt before the step fails, so a downstream step reads `research.summary` as a `string` instead of prose somebody has to parse. [Agent runtime](/docs/concepts/agent-runtime/) explains the loop this runs in.
+A declared `output` schema is rendered into the step's system teaching as JSON Schema. The model's final answer is decoded against it, with one correction re-prompt before the step fails. [Agent runtime](/docs/concepts/agent-runtime/) explains the loop.
 
 ## Before you begin
 
-- The project from [Build your first agent flow](/docs/tutorials/first-agent-flow/), with its library install.
-- Node.js {versions.node} or later.
-- Two more packages for part 3's durable engine:
+Use the project from [Build your first agent flow](/docs/tutorials/first-agent-flow/), with its library install, and a supported Node.js version (`^22.19.0 || >=24.11.0`). Add the durable engine dependencies:
 
 ```bash
 pnpm add @smthrs/plan@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/kernel@next @smthrs/run-store@next
@@ -24,21 +21,16 @@ pnpm add @smthrs/plan@next @smthrs/engine-store@next @smthrs/flows@next @smthrs/
 
 ## 1. Declare the research step's output schema
 
-A model call is an ordinary action, so `AgentAction.make` declares one the way `Action.make` declares any other. The difference is that the author does not write the implementation: a model call runs the cell loop, and that loop ships with the declaration as `.layer`.
+`AgentAction.make` declares a model-backed action. Its `.layer` provides the cell loop implementation. Create `research.ts` with the action, a single-step flow, and a shared scripted host. Importing this file does not start a run.
 
-Write `article.ts` with the research step, its schema, and the host composition:
-
-```ts title="article.ts"
-import { NodeRuntime } from "@effect/platform-node"
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+```ts title="research.ts"
 import * as Agent from "@smthrs/agent/Agent"
 import * as AgentAction from "@smthrs/agent/AgentAction"
 import * as Budget from "@smthrs/agent/Budget"
 import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import * as Seat from "@smthrs/agent/Seat"
 import * as SeatResolver from "@smthrs/agent/SeatResolver"
-import { FlowEngine } from "@smthrs/engine"
-import { Action, Flow, Interpreter } from "@smthrs/flow"
+import { Flow } from "@smthrs/flow"
 import * as Model from "@smthrs/model/Model"
 import * as ModelEvent from "@smthrs/model/ModelEvent"
 import type * as Route from "@smthrs/model/Route"
@@ -55,7 +47,7 @@ const ResearchResult = Schema.Struct({
 })
 
 // The research step: a model call whose answer must be a ResearchResult.
-const Research = AgentAction.make("research/Research", {
+export const Research = AgentAction.make("research/Research", {
   payload: { topic: Schema.String },
   output: ResearchResult,
   seat: "anthropic:claude-sonnet-4-5",
@@ -63,7 +55,7 @@ const Research = AgentAction.make("research/Research", {
   prompt: ({ topic }) => `Research the topic "${topic}" and report what matters about it.`
 })
 
-const Brief = Flow.make("research/Brief", {
+export const Brief = Flow.make("research/Brief", {
   payload: { topic: Schema.String },
   success: ResearchResult,
   error: AgentAction.AgentFailure,
@@ -112,7 +104,7 @@ const scripted: Model.Model = Model.make({
 
 // The host: one registry and one sandbox budget, shared by every model-backed
 // action in the composition.
-const host = AgentAction.layerHost({
+export const host = AgentAction.layerHost({
   registry: Registry.makeNoop({
     list: () => Effect.succeed([]),
     visible: () => Effect.succeed([]),
@@ -123,7 +115,7 @@ const host = AgentAction.layerHost({
   maxFrames: 4
 })
 
-const seats = SeatResolver.layer({
+export const seats = SeatResolver.layer({
   resolve: (id) =>
     Effect.succeed(
       Seat.make({
@@ -135,11 +127,25 @@ const seats = SeatResolver.layer({
     )
 })
 
-const stack = Layer.mergeAll(Research.layer, Interpreter.layer(Brief)).pipe(
-  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
-  // This offline run has no approved plan envelope to derive a ceiling from.
+export const agentHost = Layer.mergeAll(host, seats, Agent.layer).pipe(
   Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
-  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(Agent.layerDefaults)
+)
+```
+
+Create a separate entry point that supplies the in-memory engine:
+
+```ts title="run-research.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Brief, Research } from "./research.ts"
+
+const stack = Layer.mergeAll(Research.layer, Interpreter.layer(Brief)).pipe(
+  Layer.provideMerge(agentHost),
   Layer.provideMerge(Action.layerImplementations),
   Layer.provideMerge(FlowEngine.layerMemory),
   Layer.provideMerge(NodeCrypto.layer)
@@ -154,31 +160,33 @@ const main = Brief.execute({ topic: "durable workflows" }, { executionId: "brief
 NodeRuntime.runMain(main)
 ```
 
-Run it:
-
 ```bash
-node article.ts
+node run-research.ts
 ```
 
 ```text
-You should see: the research step's answer as JSON with a summary string and
-a keyPoints array. The model's final answer was decoded against the declared
-schema, so the program holds research.summary as a string, not as text
-somebody has to parse.
+You should see: JSON with a summary string and a keyPoints array. The final
+answer decoded against ResearchResult before it reached the caller.
 ```
 
 ## 2. Chain the typed output into the writing step
 
-Add the writing step. Its payload is the research step's output, field for field:
+Create `article.ts`. `Node.bindPlanned` feeds the research result into `Write.call`; planning records the calls without executing them.
 
 ```ts title="article.ts"
+import * as AgentAction from "@smthrs/agent/AgentAction"
+import { Flow } from "@smthrs/flow"
+import { Node } from "@smthrs/plan"
+import * as Schema from "effect/Schema"
+import { Research } from "./research.ts"
+
 const ArticleResult = Schema.Struct({
   article: Schema.String,
   wordCount: Schema.Number
 })
 
 // The writing step, which consumes the first step's typed fields.
-const Write = AgentAction.make("research/Write", {
+export const Write = AgentAction.make("research/Write", {
   payload: {
     summary: Schema.String,
     keyPoints: Schema.Array(Schema.String)
@@ -191,14 +199,8 @@ const Write = AgentAction.make("research/Write", {
       keyPoints.map((point) => `- ${point}`).join("\n")
     }`
 })
-```
 
-Add a flow that chains the two steps; `Brief` stays as the single-step flow. Nothing executes at plan time: `Research.call` records one node, and `Node.bindPlanned` feeds its planned result into `Write.call`:
-
-```ts title="article.ts"
-import { Node } from "@smthrs/plan"
-
-const Article = Flow.make("research/Article", {
+export const Article = Flow.make("research/Article", {
   payload: { topic: Schema.String },
   success: ArticleResult,
   error: AgentAction.AgentFailure,
@@ -209,9 +211,26 @@ const Article = Flow.make("research/Article", {
 })
 ```
 
-Add `Write.layer` to the stack's first `Layer.mergeAll`, and change `main` to execute the chain:
+Register both actions and the new flow in `run-article.ts`:
 
-```ts fragment
+```ts title="run-article.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
+import { FlowEngine } from "@smthrs/engine"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Research } from "./research.ts"
+
+import { Article, Write } from "./article.ts"
+
+const stack = Layer.mergeAll(Research.layer, Write.layer, Interpreter.layer(Article)).pipe(
+  Layer.provideMerge(agentHost),
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(FlowEngine.layerMemory),
+  Layer.provideMerge(NodeCrypto.layer)
+)
+
 const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
   Effect.provide(stack),
   Effect.tap((article) => Effect.sync(() => console.log(JSON.stringify(article, null, 2)))),
@@ -221,33 +240,32 @@ const main = Article.execute({ topic: "durable workflows" }, { executionId: "art
 NodeRuntime.runMain(main)
 ```
 
-Run it:
-
 ```bash
-node article.ts
+node run-article.ts
 ```
 
 ```text
-You should see: the finished article as JSON with an article string and a
-wordCount number. The writing step received the research step's fields as
-typed values, and no step parsed model text.
+You should see: JSON with article and wordCount fields. The writing step
+received the research step's summary and keyPoints as typed values.
 ```
 
-## 3. Record the run and read both outputs
+## 3. Persist the chain over SQLite
 
-So far the runs lived in memory, and their outputs died with the process. To read a step's output afterwards, drive the same flow on the project's durable engine at `.flows/engine.db`, and then read the recorded outputs with `smthrs output`.
-
-Add the durable engine composition as `engine.ts`:
+Create `engine.ts` and `run-durable-article.ts`. The declarations and scripted host stay the same; the entry point supplies a durable engine and closes its database at the end of the run.
 
 ```ts title="engine.ts"
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { StepBoundary, WorkspaceSandbox } from "@smthrs/engine-store"
 import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
 import { Jj } from "@smthrs/kernel"
 import { Ownership } from "@smthrs/run-store"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import { dirname } from "node:path"
 
-// A Jujutsu service that records nothing.
+// These scripted steps change no files. This stub provides no filesystem
+// rollback; file-writing actions need a real Jj host.
 const stubJj = Layer.succeed(
   Jj.Jj,
   Jj.make({
@@ -274,18 +292,20 @@ export const durableEngine = (filename: string, hostId: string) =>
   )
 ```
 
-In `article.ts`, swap the in-memory engine for the durable one in the stack, and scope the run so the database closes when it ends:
+```ts title="run-durable-article.ts"
+import { NodeRuntime } from "@effect/platform-node"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { agentHost, Research } from "./research.ts"
 
-```ts fragment
+import { Article, Write } from "./article.ts"
 import { durableEngine } from "./engine.ts"
 
-// In the stack, replace FlowEngine.layerMemory and NodeCrypto.layer with:
 const stack = Layer.mergeAll(Research.layer, Write.layer, Interpreter.layer(Article)).pipe(
-  Layer.provideMerge(Layer.mergeAll(host, seats, Agent.layer)),
-  Layer.provideMerge(Layer.mergeAll(QuotaPolicy.layerDefault(), Budget.layerUnbounded())),
-  Layer.provideMerge(Agent.layerDefaults),
+  Layer.provideMerge(agentHost),
   Layer.provideMerge(Action.layerImplementations),
-  Layer.provideMerge(durableEngine(".flows/engine.db", "article"))
+  Layer.provideMerge(durableEngine("article.sqlite", "article"))
 )
 
 const main = Article.execute({ topic: "durable workflows" }, { executionId: "article-1" }).pipe(
@@ -298,19 +318,19 @@ const main = Article.execute({ topic: "durable workflows" }, { executionId: "art
 NodeRuntime.runMain(main)
 ```
 
-Run it. The article prints from the program itself, and that is the only place to read this run: `smthrs output` projects node outputs from the control plane's run list in `.flows/control.db`, so it lists only runs launched through `smthrs up` or `smthrs run`. A run driven on the engine directly, as this program does, is not in that list, and `smthrs output article-1` answers `Run not found` with exit 2 (`packages/smithers/src/Command.ts`, `missingRun`). To read a run's node outputs from the CLI, launch the flow through the control plane instead. The [smthrs output reference](/docs/reference/cli/output/) covers the listing, the single-node read, and `--json`.
-
 ```bash
-node article.ts
+node run-durable-article.ts
+node run-durable-article.ts
 ```
-
 
 ```text
-You should see: the first command lists one entry per recorded node in the
-order the calls started, plus result for the run's final output. The second
-prints the node's outcome line followed by its recorded value.
+You should see: the same article JSON from each process. The second process
+reads the completed article-1 result from article.sqlite.
 ```
 
+To start a new durable run, choose another execution id. Keep `article.sqlite` to retain the recorded actions and their outcomes.
+
+This program drives the engine directly. `smthrs output` reads the control plane's run list and will not find `article-1`. To inspect node outputs through that command, launch a markdown agent flow through `smthrs up` or supply an application host that integrates module execution with the control plane. See [module flows](/docs/guides/module-flows/) and the [output reference](/docs/reference/cli/output/).
 
 ## Next steps
 

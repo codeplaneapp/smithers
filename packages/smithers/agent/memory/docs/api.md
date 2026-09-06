@@ -329,6 +329,18 @@ The service tag is `MemoryStore`, `Context.Service` tag `flows/memory/MemoryStor
 | `parts`       | `(options) => Parts`    | Applies the policy to the author and the leaf without composing them.                                       |
 | `make`        | `(options) => Flow.Any` | Declares a trellis whose author, leaves, and memory flows all run under one policy. The graph is unchanged. |
 
+### `@smthrs/memory/Migrations`
+
+| Export  | Signature                                                                                 | Behavior                                                                                                                                                            |
+| ------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set`   | `DatabaseMigrations.MigrationSet`                                                         | Namespace `memory`, migration block `7000`; owns the authoritative memory schema and its indexes.                                                                   |
+| `run`   | `Effect<ReadonlyArray<readonly [number, string]>, MigrationError \| SqlError, SqlClient>` | Applies pending memory migrations and records their identities atomically in `flows_migrations`. Repeated calls return an empty list after the schema is installed. |
+| `layer` | `Layer<never, MigrationError \| SqlError, SqlClient>`                                     | Runs `run` during layer construction.                                                                                                                               |
+
+`MemoryStore.make` and `MemoryStore.layer` run these migrations automatically. A standalone store needs only its SQL client, durable writer, and Crypto service; the resulting database can be reopened by another process.
+
+When memory shares a database with the engine or control plane, compose all required lower migration sets before building memory. The CLI's shared control database installs `TimeTravelMigrations.sets`, `ControlMigrations.set`, and `MemoryMigrations.set` together. The database migration ladder rejects adding a previously absent lower block after memory has advanced the ledger; it does not assume those tables already exist. The [memory tutorial](https://smithers.sh/docs/tutorials/memory) shows that shared composition.
+
 ### `@smthrs/memory/Namespace`
 
 | Export                | Signature                                                      | Behavior                                                                                                                                                                                                                           |

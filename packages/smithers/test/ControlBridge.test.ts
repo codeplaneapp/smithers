@@ -3,8 +3,10 @@ import { ApprovalAuthority, Control } from "@smthrs/control"
 import { Unavailable } from "@smthrs/control/ControlError"
 import { Console, Effect, Layer, Logger, References, Stream } from "effect"
 import { getEventListeners } from "node:events"
-import { resolve } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join, relative, resolve } from "node:path"
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as Bridge from "../src/cli/ControlBridge.ts"
 import * as Presentation from "../src/cli/Presentation.ts"
 import * as RunProgress from "../src/cli/RunProgress.ts"
@@ -50,7 +52,11 @@ vi.mock("../src/Serve.ts", async (load) => ({
   host: ports.serve
 }))
 
-const local = { root: "/bridge-fixture", quiet: false }
+const directory = mkdtempSync(join(tmpdir(), "smithers-control-bridge-"))
+const relativeRoot = relative(process.cwd(), join(directory, "relative"))
+mkdirSync(join(directory, "relative"))
+afterAll(() => rmSync(directory, { recursive: true, force: true }))
+const local = { root: directory, quiet: false }
 const plain = Audience.resolve({ env: {}, audience: "human", stdout: false, stderr: false })
 const silent = { ...plain, progress: "silent" as const, interactive: false }
 const runtime = { environment: {}, presentation: plain }
@@ -181,8 +187,8 @@ describe("control bridge configuration and routing", () => {
 
   it("resolves relative roots, caller environment and explicit transport precedence", () => {
     const environment = { SMITHERS_REMOTE: "https://env.invalid", SMITHERS_API_KEY: "env-fixture" }
-    expect(Bridge.configuration({ root: "relative", quiet: false }, { environment })).toMatchObject({
-      root: resolve("relative"),
+    expect(Bridge.configuration({ root: relativeRoot, quiet: false }, { environment })).toMatchObject({
+      root: resolve(relativeRoot),
       remote: "https://env.invalid",
       credential: "env-fixture",
       executionRoot: undefined

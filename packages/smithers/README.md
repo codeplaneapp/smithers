@@ -24,16 +24,19 @@ Name the version. This README describes 1.0.0-rc.0, and until that release candi
 
 ## The shortest real example
 
-Initialize a workspace, discover targets, and start a flow after configuring a provider key:
+With pnpm installed and a provider key configured, initialize a workspace, discover targets, and start a flow:
 
 ```sh
 smthrs init hello
-smthrs targets
-smthrs flow plan hello
-smthrs flow start hello
-smthrs runs list
-smthrs runs logs <run-id> --follow
+pnpm add --save-dev @smthrs/cli@1.0.0-rc.0 @smthrs/targets@1.0.0-rc.0
+pnpm exec smthrs targets
+pnpm exec smthrs flow plan hello
+pnpm exec smthrs flow start hello
+pnpm exec smthrs runs list
+pnpm exec smthrs runs logs <run-id> --follow
 ```
+
+The dependency install applies after publication; before then, use the [source checkout](https://smithers.sh/docs/installation/#use-the-source-checkout-before-publication) and its workspace dependencies. `init` can use a global CLI. Target commands must use the workspace-local CLI so declarations and the loader resolve the same physical Effect and Smithers packages; matching versions in a separate global installation are insufficient.
 
 `init` creates workspace and target declarations plus `flows/hello/flow.mdx`, preserving existing files. `flow plan` compiles without execution; `flow start` plans, approves, and starts the flow. Use `flow execute <payload>` to execute a separately approved plan. Top-level `run <pattern>` executes run-kind targets, while `runs` manages durable flow execution records.
 
@@ -91,7 +94,7 @@ The root entry point exports the following namespaces; each is also available fr
 | `NodeControl`       | `Environment`, `ServerOptions`, `makeConfig`, `config`, `projectSources`, `layerHostPlatform`, `layerGrantStore`, `layerGuardedPlatform`, `layerObserver`, `layerRegistry`, `databasePath`, `executionDatabasePath`, `EngineDurable`, `engineDurable`, `seatResolver`, `layerSeatResolver`, `testRunner`, `checkpointStore`, `testFlows`, `rebuildableTransport`, `layerExecutor`, `layerControl`, `layerOutput`, `layer`, `layerMemoryRemote`, `layerMemory`, `layerServer`, `layerGateway`, `layerServerBearerAuth`, `layerServerNoopAuth` | Assembles Node configuration, Control, the run executor, output, and the served gateway.                                  |
 | `NodeOutput`        | `resultNodeId`, `Node`, `project`, `find`, `notFound`, `render`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Reads one registered node output from the node-output projection.                                                         |
 | `Output`            | `Format`, `Rendered`, `Service`, `Output`, `renderValue`, `maximumDepth`, `maximumMembers`, `maximumOutputBytes`, `make`, `layer`, `exitCode`                                                                                                                                                                                                                                                                                                                                                                                                | Renders deterministic human or JSON output through an injectable service.                                                 |
-| `Project`           | `legacyMarkers`, `root`, `legacyRoot`, `stateDirectory`, `logDirectory`, `logFile`, `flowsDirectory`, `legacyDatabases`, `legacyState`, `legacyNotice`, `ProjectRoot`, `LegacyState`, `MigrationRoot`, `layer`                                                                                                                                                                                                                                                                                                                               | Resolves the rc.0 project root, the 0.x root `migrate` converts, the state directories, and the 0.x state beside them.    |
+| `Project`           | `legacyMarkers`, `root`, `legacyRoot`, `stateDirectory`, `logDirectory`, `logFile`, `flowsDirectory`, `legacyDatabases`, `legacyState`, `legacyNotice`, `ProjectRoot`, `LegacyState`, `MigrationRoot`, `layer`, `assertRoot`                                                                                                                                                                                                                                                                                                                 | Resolves the rc.0 project root, the 0.x root `migrate` converts, the state directories, and the 0.x state beside them.    |
 | `Providers`         | `order`, `compatible`, `compatibleKey`, `defaultSeat`, `starterSeats`, `detect`, `NoSeatError`, `SeatSyntaxError`, `noSeatMessage`, `chooseSeat`                                                                                                                                                                                                                                                                                                                                                                                             | Which model seats this machine can run `smthrs suggest` on, and which one it runs.                                        |
 | `Serve`             | `loopbackHosts`, `defaultBind`, `Mount`, `mounts`, `isLoopback`, `Bind`, `GatewayHost`, `refuse`, `workspaceHash`, `health`, `banner`, `host`                                                                                                                                                                                                                                                                                                                                                                                                | The gateway bind rule, the mount list, and the banner rendered from it.                                                   |
 | `Suggest`           | `Implementation`, `Outcome`, `exitStatus`, `Implement`, `Options`, `isDirectory`, `suggestionDocument`, `seatDocument`, `outcomeDocument`, `introLine`, `streamLabel`, `wroteNote`, `run`                                                                                                                                                                                                                                                                                                                                                    | Reads the project, streams the ways Smithers can help, and implements the one picked.                                     |
@@ -154,7 +157,7 @@ rc.0 reads a closed set of variables, all listed by `Environment.names`, with fo
 | Variable                                 | Meaning                                                                               |
 | ---------------------------------------- | ------------------------------------------------------------------------------------- |
 | `SMITHERS_REMOTE`                        | Fallback for `--remote`.                                                              |
-| `SMITHERS_API_KEY`                       | Preferred credential channel; avoids argv exposure.                                                          |
+| `SMITHERS_API_KEY`                       | Preferred credential channel; avoids argv exposure.                                   |
 | `SMITHERS_MCP_CONFIG`                    | Fallback for `--mcp-config`.                                                          |
 | `SMITHERS_CREDENTIAL_KEY`                | Base64-encoded 32-byte host key for encrypted credential add, rotate, and resolution. |
 | `SMITHERS_BACKEND`                       | SQLite only. Any other value exits 1 with `unsupported_database`.                     |

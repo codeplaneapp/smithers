@@ -17,9 +17,15 @@ const route = "/docs/reference/support-matrix/"
 test("the support reference states every released Node engine range and current CI pins", () => {
   const page = read("apps/site/src/content/docs/docs/reference/support-matrix.mdx")
   const manifests = readWorkspaceManifests(root)
+  const inventory = page.slice(page.indexOf("## Published Node engine ranges"))
+  const rows = new Map([...inventory.matchAll(/^\| `([^`]+)` \| `([^`]+)` \| (.+) \|$/gm)]
+    .map(([, name, engine, source]) => [name, { engine: engine.replaceAll("\\|", "|"), source }]))
+  assert.equal(rows.size, manifests.size, "the published table has exactly one row per release package")
   for (const [directory, manifest] of manifests) {
-    assert.ok(page.includes(`\`${manifest.engines.node}\``), `${manifest.name}: exact engines.node`)
-    assert.ok(page.includes(`${directory}/package.json`), `${manifest.name}: manifest citation`)
+    const row = rows.get(manifest.name)
+    assert.ok(row, `${manifest.name}: manifest row`)
+    assert.equal(row.engine, manifest.engines.node, `${manifest.name}: exact engines.node`)
+    assert.ok(row.source.includes(`${directory}/package.json`), `${manifest.name}: manifest citation`)
   }
   const ci = read(".github/workflows/ci.yml")
   for (const [, pin] of ci.matchAll(/(?:node|bun)-version: ([\d.]+)/g)) {

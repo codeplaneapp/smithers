@@ -82,4 +82,52 @@ describe("case14 gateway RPC round trip", () => {
     expect(server.databasePath).toBe(join(directory, ".flows", "control.db"))
     expect(existsSync(server.databasePath)).toBe(true)
   })
+
+  it("keeps an approval across restart and accepts the environment credential for later decisions", async () => {
+    const card = await remote(Effect.gen(function*() {
+      const control = yield* Control.Control
+      const card = yield* control.plan({ flowId: "system/test", input: { case: "case14-restart" } })
+      yield* control.approve(card.approval)
+      return card
+    }))
+    const pid = server.pid
+    const credential = server.token
+    await server.stop()
+    server = await startServe(directory, { credential, credentialSource: "environment" })
+    expect(server.pid).not.toBe(pid)
+    expect(server.argv).not.toContain("--credential")
+    await remote(Effect.gen(function*() {
+      const control = yield* Control.Control
+      const receipt = yield* control.run({
+        _tag: "Plan",
+        planId: card.planId,
+        digest: card.digest,
+        envelope: card.envelope,
+        idempotencyKey: `restart:${card.planId}`
+      })
+      expect(receipt._tag).toBe("Accepted")
+      const approved = yield* control.plan({ flowId: "system/test", input: { case: "case14-env-approve" } })
+      yield* control.approve(approved.approval)
+      expect(
+        (yield* control.run({
+          _tag: "Plan",
+          planId: approved.planId,
+          digest: approved.digest,
+          envelope: approved.envelope,
+          idempotencyKey: `env:${approved.planId}`
+        }))._tag
+      ).toBe("Accepted")
+      const denied = yield* control.plan({ flowId: "system/test", input: { case: "case14-env-deny" } })
+      yield* control.deny(denied.approval)
+      expect(
+        (yield* Effect.flip(control.run({
+          _tag: "Plan",
+          planId: denied.planId,
+          digest: denied.digest,
+          envelope: denied.envelope,
+          idempotencyKey: `deny:${denied.planId}`
+        })))._tag
+      ).toBe("/control/PlanDenied")
+    }))
+  }, 180_000)
 })

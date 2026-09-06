@@ -66,6 +66,25 @@ not supported on Bun. That makes every installation path run on Node:
 Bun honours the shebang, so `bun x` starts Node. Running the CLI with
 `bun --bun` overrides the shebang and is not supported.
 
+## Workspace target commands
+
+Global and one-off installations can initialize a project and operate its flows.
+To load `WORKSPACE.ts` and `PACKAGE.ts`, install the CLI and declaration packages
+in that workspace, then select its local binary. After publication:
+
+```bash
+smthrs init hello
+pnpm add --save-dev @smthrs/cli@1.0.0-rc.0 @smthrs/targets@1.0.0-rc.0
+pnpm exec smthrs targets
+```
+
+The loader and declarations must resolve the same physical Effect and Smithers
+packages. A separately installed global CLI can report
+`declaration_dependency_mismatch` even when versions match. Before publication,
+use the checkout's workspace dependency graph. The
+[first-target tutorial](https://smithers.sh/docs/tutorials/first-target/) walks
+through local planning, execution, and cache reuse.
+
 ## Using the library
 
 The package is also importable. The root entry point re-exports every module

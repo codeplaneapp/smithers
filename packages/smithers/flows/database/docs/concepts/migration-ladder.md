@@ -48,11 +48,13 @@ These are the blocks the shipped packages reserve:
 | [`@smthrs/plan`](/api/plan)                 | `plan`         | `idBlock * 4` | `4001`             |
 | [`@smthrs/time-travel`](/api/time-travel)   | `time-travel`  | `idBlock * 5` | `5001`             |
 | [`@smthrs/control`](/api/control)           | `control`      | `idBlock * 6` | `6001`             |
+| [`@smthrs/memory`](/api/memory)             | `memory`       | `idBlock * 7` | `7001`             |
+| [`@smthrs/integrations`](/api/integrations) | `integrations` | `idBlock * 8` | `8001`             |
 
-Offsets must be unique among the sets composed into one database, not
-globally. [`@smthrs/integrations`](/api/integrations) also reserves
-`idBlock * 6` because it migrates a different database and is never composed
-with `control`.
+Offsets must be unique among the sets composed into one database. Integration
+cursors can share the control database, so integrations reserves its own
+block after control and memory. It can also migrate a standalone cursor
+database with that same set.
 
 `@smthrs/engine-store` exports `Migrations.sets`, the journal, run store, step
 cache, engine store, and plan sets together, which is the full durable schema an

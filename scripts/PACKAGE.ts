@@ -20,7 +20,11 @@ import { Smithers } from "@smthrs/targets"
  * written in `.mjs`, and a glob that saw only `.mjs` would leave an edit to it
  * out of the digest every gate here is keyed on.
  */
-const sources = [Smithers.glob("//scripts/**/*.mjs"), Smithers.glob("//scripts/**/*.ts")]
+const sources = [
+  Smithers.glob("//scripts/**/*.mjs"),
+  Smithers.glob("//scripts/**/*.ts"),
+  Smithers.glob("//scripts/fixtures/**/*.json")
+]
 
 /**
  * The pack directory the release rehearsal writes and the smoke check reads.
@@ -86,8 +90,8 @@ const releaseCut = Smithers.NodeTest({
 })
 
 /**
- * Checks that the dry-run path of `release.yml` skips publication and that a tag
- * push does not.
+ * Checks release preparation, installed consumer boundaries and runtime floors,
+ * and that the dry-run path skips publication while a tag push does not.
  *
  * The assertions read `release.yml` itself, so an edit that breaks either half
  * fails here instead of at the next release.
@@ -99,9 +103,18 @@ const releaseRehearsal = Smithers.NodeTest({
   runner: Smithers.testRunner([
     Smithers.file("//scripts/release-rehearsal.test.mjs"),
     Smithers.file("//scripts/release-publish.test.mjs"),
+    Smithers.file("//scripts/build-release.test.mjs"),
+    Smithers.file("//scripts/dependency-consumers.test.mjs"),
+    Smithers.file("//scripts/installed-consumer-boundary.test.mjs"),
+    Smithers.file("//scripts/template-replay.test.mjs"),
+    Smithers.file("//scripts/release-npm-support.test.mjs"),
+    Smithers.file("//scripts/release-node-support.test.mjs"),
+    Smithers.file("//scripts/release-peer-ranges.test.mjs"),
+    Smithers.file("//scripts/release-registry.test.mjs"),
+    Smithers.file("//scripts/release-process.test.mjs"),
     Smithers.file("//scripts/release-graph.test.mjs")
   ]),
-  srcs: [...sources, Smithers.file("//.github/workflows/release.yml")],
+  srcs: [...sources, Smithers.file("//.github/workflows/release.yml"), Smithers.file("//.github/workflows/ci.yml")],
   deps: []
 })
 

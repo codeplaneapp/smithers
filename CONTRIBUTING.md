@@ -286,7 +286,7 @@ The Rust crates under `crates/` build against `jj-lib` from the pinned jj fork, 
 A release is one commit and one tag. The commit carries the version bump and
 the changelog section; the tag is what publishes. Pushing a `v*` tag starts
 `.github/workflows/release.yml`, which validates the tag, runs every gate,
-packs the 40-name publish set, smoke-tests the tarballs, and publishes to npm.
+packs the publish set declared by `scripts/pack-release.mjs`, smoke-tests the tarballs, and publishes to npm.
 npm versions are immutable, so everything that can be proved before the push
 is proved before the push.
 

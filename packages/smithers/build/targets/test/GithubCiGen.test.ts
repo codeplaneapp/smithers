@@ -844,9 +844,37 @@ describe("render", () => {
     expect(rendered).not.toContain("cp -R -- '/tmp/shot-'*'.png'")
     expect(rendered).not.toContain("2>/dev/null || true")
     expect(rendered).toContain("          if-no-files-found: ignore\n")
-    // Issue #176: the generated workflow carries no step condition at all, so
-    // nobody has to adjudicate in review which conditions are load-bearing.
-    expect(rendered).not.toMatch(/^\s*if:/m)
+    const steps = parseWorkflow(rendered).jobs.find((job) => job.id === "e2e")!.steps
+    expect(steps.filter((step) => step.condition !== undefined).map((step) => [step.name, step.condition])).toEqual([
+      ["Collect e2e-artifacts", "always()"],
+      ["Upload e2e-artifacts", "always()"]
+    ])
+    expect(steps.find((step) => step.run?.includes("smthrs test"))?.condition).toBeUndefined()
+  })
+
+  it("installs and verifies the certified npm after Node and before workspace gates", () => {
+    const rendered = render(attrsOf({
+      ...goldenAttrs,
+      gates: [],
+      jobs: [{
+        id: "test",
+        runsOn: "ubuntu-latest",
+        toolchain: CiToolchain.Needs({ runtimes: [CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })] }),
+        steps: [{ name: "Required gate", verb: Verb.Test, pattern: "//scripts/..." }]
+      }]
+    }))
+    const steps = parseWorkflow(rendered).jobs[0]!.steps
+    const nodeIndex = steps.findIndex((step) => step.uses === actions.setupNode)
+    const npmIndex = steps.findIndex((step) => step.name === "Install certified npm")
+    expect(npmIndex).toBe(nodeIndex + 1)
+    expect(steps[npmIndex]!.run).toBe([
+      "npm install --global 'npm@11.16.0' --ignore-scripts --no-audit --no-fund",
+      "test \"$(npm --version)\" = '11.16.0'"
+    ].join("\n"))
+    expect(steps[npmIndex]!.shell).toBe("bash")
+    expect(steps[npmIndex]!.condition).toBeUndefined()
+    expect(npmIndex).toBeLessThan(steps.findIndex((step) => step.name === "Required gate"))
+    expect(() => CiToolchain.Node({ release: "22.19.0", npmRelease: "10.9.3" as never })).toThrow()
   })
 
   it("refuses a declared path or diagnostic a shell would reinterpret", () => {

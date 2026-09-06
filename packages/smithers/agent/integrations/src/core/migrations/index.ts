@@ -16,17 +16,18 @@ import * as Layer from "effect/Layer"
 import { integrationCursors } from "../../internal/IntegrationCursorMigration.ts"
 
 /**
- * The integration cursor set, in migration id block 6000.
+ * The integration cursor set, in migration id block 8000.
  *
  * The blocks below it are journal `0`, run-store `1000`, step-cache `2000`,
- * engine-store `3000`, plan `4000`, and time-travel `5000`.
+ * engine-store `3000`, plan `4000`, time-travel `5000`, control `6000`,
+ * and memory `7000`. A cursor store may share the control database.
  *
  * @category migrations
  * @since 1.0.0
  */
 export const set: DatabaseMigrations.MigrationSet = {
   namespace: "integrations",
-  idOffset: DatabaseMigrations.idBlock * 6,
+  idOffset: DatabaseMigrations.idBlock * 8,
   migrations: { "0001_integration_cursors": integrationCursors }
 }
 

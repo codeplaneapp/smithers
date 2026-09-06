@@ -253,6 +253,8 @@ export const PlanCard = Schema.Struct({
   inputSummary: Schema.String,
   envelope: Envelope,
   deployClass: Schema.Boolean,
+  /** Executable source/metadata identity supplied by a discovery-based host. */
+  executionDigest: Schema.optional(Schema.String),
   plan: Schema.optional(PersistedPlan.Plan),
   nodes: Schema.Array(PlanNode),
   approval: ApprovalPayload

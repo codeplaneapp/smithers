@@ -21,7 +21,7 @@ Smithers 1.0.0-rc.0 is a source migration, not a compatible upgrade. A 0.x proje
 | --- | --- |
 | `<Workflow>` and the other JSX components | A module flow at `flows/<name>/flow.ts`, built on `Flow.make(tag, { payload, success, error, body })`. The JSX root has no counterpart; the flow declaration is the root. |
 | Markdown agent steps (MDX prompts) | `flows/<name>/flow.mdx`, or a `prompt: (payload) => string` template on an agent action. `{props.x}` becomes `${payload.x}`. |
-| `createSmithers` and `runWorkflow` | `Flow.make(tag, { payload, success, error, body })` and `flow.execute(payload, { executionId })`. From the CLI, `smthrs up` plans, approves, and runs the flow on the `@smthrs/engine` runtime. |
+| `createSmithers` and `runWorkflow` | `Flow.make(tag, { payload, success, error, body })` and `flow.execute(payload, { executionId })`, run by a host that registers the flow and provides its action implementations and engine. The CLI discovers and plans module flows, but leaves their execution `pending` until a host drives them. `smthrs up` executes markdown agent flows directly. |
 | `.smithers/workflows/` | `flows/`. A workflow keeps its position: `.smithers/workflows/pipelines/ci-fast.tsx` becomes `flows/pipelines/ci-fast/flow.ts`. |
 | `smithers.config.ts` | No 1.0 equivalent. `repoCommands.test` seeds the migration's test command (override it with `--verify-test`), `backend` is recorded in the report, and the file is deleted after the final unit. |
 | `smithers` binary | Both spellings still work. `@smthrs/cli@next` installs `smthrs`, with `smithers` as an alias of the same executable. |
@@ -121,6 +121,7 @@ Three notes on the set:
 - Run the project's own checks the way the migration verified each unit: install, format, typecheck, and tests.
 - Run `smthrs doctor`. It reports registry, database, runtime, and provider readiness.
 - Run `smthrs ls`. It lists the flows discovered under the project, and the migrated flows should appear under their kept positions, such as `pipelines/ci-fast` for `.smithers/workflows/pipelines/ci-fast.tsx`. See [Flow discovery](/docs/guides/flow-discovery/).
+- Execute each migrated module flow through its application host, with its action layers registered. Discovery and a successful CLI plan do not establish that the flow executes: the CLI leaves module flows `pending`. [Module flows](/docs/guides/module-flows/) describes this boundary; [the durable flow tutorial](/docs/tutorials/first-flow/) provides a complete executable host.
 
 ## Removed commands and flags
 

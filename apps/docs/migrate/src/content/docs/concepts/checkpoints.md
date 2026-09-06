@@ -24,7 +24,9 @@ bytes digested to. Targets are recorded as well as sources, because a target
 you already had at a path a unit writes is your data too.
 
 **A digest of the whole tree.** Everything except `.git`, `.jj`,
-`node_modules`, the report directory, `.flows/`, and the 0.x run-state roots.
+`node_modules`, the report directory, `.smithers-migrate/`, `.flows/`, and the
+0.x run-state roots. The fixed `.smithers-migrate/` exclusion preserves the
+project lock when reports use a custom directory.
 That last exclusion is not a gap: run-state paths have a stricter check of
 their own. The tree manifest is written beside the unit's backup rather than
 carried in the journal, because a project has thousands of files and each one
@@ -81,7 +83,9 @@ The model's half runs on kernel-guarded services pinned to the project root,
 with a grant store that denies every filesystem action on each 0.x run-state
 path and everything under it. A read is a copy into a model call, so "do not
 read the run state" is enforced by the kernel rather than by a sentence in a
-prompt. A source file that merely shares the directory stays readable.
+prompt. A source file that merely shares the directory stays readable. The
+same deny protects `.smithers-migrate/` and its contents, so agent filesystem
+tools cannot remove or replace the migration's lock.
 
 Shell access is granted one command line at a time: this project's own install,
 format, typecheck, and test commands, and nothing else. A spawned process

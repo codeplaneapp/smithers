@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, relative, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { describe, expect, it } from "vitest"
 
 /**
@@ -829,7 +830,7 @@ describe("vitest coverage isolation conformance", () => {
     expect(ci).not.toMatch(/^\s*run: node --test /m)
   })
 
-  it("smoke-validates packed artifacts before rerunnable publication", () => {
+  it("smoke-validates packed artifacts before rerunnable publication", async () => {
     const release = readFileSync(join(packagesDir, "..", ".github", "workflows", "release.yml"), "utf8")
     const smoke = release.indexOf("Pack and smoke-test release artifacts")
     const publish = release.indexOf("Publish packages in dependency order")
@@ -861,7 +862,42 @@ describe("vitest coverage isolation conformance", () => {
     expect(publishScript).toContain("join(directory, \"release-manifest.json\")")
     expect(publishScript).toContain("const pending = await preflight(directory, candidate, options)")
     expect(publishScript).toContain("for (const entry of pending)")
-    expect(publishScript).toContain("execFileSync(\"pnpm\", [\"publish\", tarball, \"--provenance\"")
+    // Verify the actual registry adapter's invocation, so extracting a helper
+    // cannot break this contract while dropping provenance still does.
+    const { registryPublisher } = await import(
+      pathToFileURL(join(packagesDir, "..", "scripts", "publish-release.mjs")).href
+    )
+    const calls: Array<readonly [string, ReadonlyArray<string>]> = []
+    const publisher = registryPublisher({
+      run: (command: string, args: ReadonlyArray<string>) => {
+        calls.push([command, args])
+        return ""
+      }
+    })
+    publisher.publish("candidate.tgz", { version: "1.0.0" })
+    publisher.publish("candidate-rc.tgz", { version: "1.0.0-rc.0" })
+    expect(calls).toEqual([
+      ["pnpm", [
+        "publish",
+        "candidate.tgz",
+        "--provenance",
+        "--access",
+        "public",
+        "--tag",
+        "latest",
+        "--no-git-checks"
+      ]],
+      ["pnpm", [
+        "publish",
+        "candidate-rc.tgz",
+        "--provenance",
+        "--access",
+        "public",
+        "--tag",
+        "next",
+        "--no-git-checks"
+      ]]
+    ])
     expect(publishScript).toContain("[\"view\", spec, \"dist.integrity\", \"--json\"]")
     expect(publishScript).toContain("evidence.candidateIntegrity !== candidateIntegrity(candidate)")
     expect(packScript).toContain("publicationManifest(manifest)")
@@ -887,7 +923,14 @@ describe("vitest coverage isolation conformance", () => {
     // an enforcement step must widen this cell in review.
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
     expect(ci).toMatch(/^on:\n {2}push:\n {4}branches: \[main\]\n {2}pull_request:$/m)
-    expect(ci).not.toMatch(/^\s*if:/m)
+    // Evidence collection must run after a failed gate too. Only these named
+    // artifact steps may be unconditional finalizers; enforcement steps still
+    // cannot add an `if` that makes the required work disappear.
+    const enforcement = ci.replace(
+      /^ {6}- name: (?:Collect|Upload) (?:ci-test-tier-evidence|apps-e2e-artifacts)\n {8}if: always\(\)$/gm,
+      ""
+    )
+    expect(enforcement).not.toMatch(/^\s*if:/m)
   })
 
   it("inventories every coverage-ignore directive against a pinned allowlist (issues #153/#157)", () => {
@@ -1003,7 +1046,6 @@ describe("vitest coverage isolation conformance", () => {
       // ECMAScript arrays expose a uint32 own `length`; Proxy invariants do
       // not permit the descriptor-backed boundary walk to observe any other
       // shape. These guards keep future reflection changes fail-closed.
-      "smithers/agent/fs/src/internal/Boundary.ts": 1,
       // Projection rows, selectors, cursors, and tags are decoded before the
       // internal frame and snapshot objects are assembled. Re-decoding those
       // same admitted fields cannot fail; the catches remain fail-closed if a
@@ -1062,10 +1104,8 @@ describe("vitest coverage isolation conformance", () => {
       // The plugin boundary uses the same ECMAScript array-length invariant
       // as the fs boundary above, retaining a defensive refusal for a future
       // host-reflection change.
-      "smithers/agent/plugin/src/internal/Boundary.ts": 1,
       "smithers/flows/run-store/src/AttemptStore.ts": 1,
       "smithers/flows/run-store/src/RunStore.ts": 3,
-      "smithers/flows/run-store/src/internal/Boundary.ts": 1,
       // Provider processes can only originate from each provider's `spawn`,
       // which records the opaque handle before returning it. These guards
       // turn a future provenance violation into a typed unknown-process error.

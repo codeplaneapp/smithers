@@ -145,8 +145,16 @@ export const layerAuth = (options: ServerOptions): Layer.Layer<ControlRpcs.Contr
     ? ControlRpcs.layerNoopAuth({ id: "local", kind: "operator", stampedAt: 0 })
     : ControlRpcs.layerBearerAuth({
       token: options.credential,
-      principal: { id: "gateway", kind: "bearer" }
+      principal: bearerPrincipal
     })
+
+/**
+ * The identity stamped only after this gateway verifies its configured token.
+ * Hosts may explicitly delegate operator decisions to this exact identity.
+ * @category constants
+ * @since 1.0.0
+ */
+export const bearerPrincipal = Object.freeze({ id: "gateway", kind: "bearer" })
 
 /** Authenticates protected HTTP paths before any request body is read. */
 const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions => {
@@ -159,12 +167,12 @@ const ingressOptions = (options: ServerOptions): GatewayServer.IngressOptions =>
     return {
       loopbackOnly: true,
       ...(maxRequestBodyBytes === undefined ? {} : { maxRequestBodyBytes }),
-    allowedHosts
+      allowedHosts
     }
   }
   const authenticator = ControlRpcs.bearerAuthenticator({
     token: options.credential,
-    principal: { id: "gateway", kind: "bearer" }
+    principal: bearerPrincipal
   })
   return {
     allowedHosts,

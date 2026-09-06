@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 
 const packageRoot = fileURLToPath(new URL("../", import.meta.url))
 
-// The `src/migrations/*.sql` files mirror the schema that `internal/Sql.ts`
+// The `src/migrations/*.sql` files mirror the schema that `internal/MemorySchema.ts`
 // applies inline; they are sealed implementation detail, not importable API.
 describe("package exports", () => {
   it("keeps migration implementations private in development and published exports", () => {

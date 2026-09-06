@@ -26,6 +26,9 @@ const repoRoot = resolve(import.meta.dirname, "..")
 
 const dependencyFields = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
 
+/** Shipped consumer manifests are not workspace members, but their pins ship. */
+export const versionedTemplates = ["packages/smithers/create-app/template/default/package.json"]
+
 /**
  * Source declarations that repeat the release version as a literal.
  *
@@ -93,6 +96,16 @@ export const readManifests = (root = repoRoot) =>
     manifest: entry.manifest
   }))
 
+export const readVersionedManifests = (root = repoRoot) => [
+  ...readManifests(root),
+  ...versionedTemplates.map((directory) => ({
+    directory,
+    path: join(root, directory),
+    manifest: JSON.parse(readFileSync(join(root, directory), "utf8")),
+    registryDependencies: true
+  }))
+]
+
 /**
  * Retargets one manifest at `version`.
  *
@@ -102,14 +115,14 @@ export const readManifests = (root = repoRoot) =>
  * Private manifests retain workspace/catalog protocols and only have concrete
  * sibling versions retargeted.
  */
-export const retarget = (manifest, version, workspaceNames) => {
+export const retarget = (manifest, version, workspaceNames, { registryDependencies = false } = {}) => {
   const updated = manifest.private === true ? { ...manifest } : { ...manifest, version }
   for (const field of dependencyFields) {
     if (manifest[field] === undefined) continue
     updated[field] = Object.fromEntries(
       Object.entries(manifest[field]).map(([name, range]) => {
         if (!workspaceNames.has(name)) return [name, range]
-        if (manifest.private !== true || !range.includes(":")) return [name, version]
+        if (registryDependencies || manifest.private !== true || !range.includes(":")) return [name, version]
         return [name, range]
       })
     )
@@ -125,14 +138,14 @@ const count = (total, noun) => `${total} ${noun}${total === 1 ? "" : "s"}`
 export const mismatches = (entries, version) => {
   const workspaceNames = new Set(entries.map(({ manifest }) => manifest.name))
   const found = []
-  for (const { directory, manifest } of entries) {
+  for (const { directory, manifest, registryDependencies = false } of entries) {
     if (manifest.private !== true && manifest.version !== version) {
       found.push(`${directory}: version is ${manifest.version}, expected ${version}`)
     }
     for (const field of dependencyFields) {
       for (const [name, range] of Object.entries(manifest[field] ?? {})) {
         if (!workspaceNames.has(name) || range === version) continue
-        if (manifest.private === true && range.includes(":")) continue
+        if (!registryDependencies && manifest.private === true && range.includes(":")) continue
         found.push(`${directory}: ${field}.${name} is ${range}, expected ${version}`)
       }
     }
@@ -149,7 +162,7 @@ export const main = (argv) => {
   if (version.startsWith("v")) {
     throw new Error(`pass the version, not the tag: ${version.slice(1)}`)
   }
-  const entries = readManifests()
+  const entries = readVersionedManifests()
   if (check) {
     const drift = [...mismatches(entries, version), ...sourceMismatches(version)]
     for (const line of drift) console.error(line)
@@ -159,14 +172,14 @@ export const main = (argv) => {
       return
     }
     console.log(
-      `${entries.length} workspace manifests and ${count(versionedSources.length, "versioned source")} are at ${version}.`
+      `${entries.length} versioned manifests and ${count(versionedSources.length, "versioned source")} are at ${version}.`
     )
     return
   }
   const workspaceNames = new Set(entries.map(({ manifest }) => manifest.name))
   let written = 0
-  for (const { manifest, path } of entries) {
-    const updated = retarget(manifest, version, workspaceNames)
+  for (const { manifest, path, registryDependencies } of entries) {
+    const updated = retarget(manifest, version, workspaceNames, { registryDependencies })
     const text = `${JSON.stringify(updated, null, 2)}\n`
     if (text === `${JSON.stringify(manifest, null, 2)}\n`) continue
     writeFileSync(path, text)
@@ -181,7 +194,7 @@ export const main = (argv) => {
     writeFileSync(path, updated)
     rewritten += 1
   }
-  console.log(`set ${written} of ${entries.length} workspace manifests to ${version}.`)
+  console.log(`set ${written} of ${entries.length} versioned manifests to ${version}.`)
   console.log(`set ${rewritten} of ${count(versionedSources.length, "versioned source")} to ${version}.`)
   console.log("run `pnpm install --lockfile-only` next: the lockfile records these specifiers.")
 }

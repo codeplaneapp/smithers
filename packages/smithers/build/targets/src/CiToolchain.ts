@@ -49,6 +49,22 @@ export const NodeRelease = Schema.Literals(["22.19.0"])
 export type NodeRelease = typeof NodeRelease.Type
 
 /**
+ * npm releases certified with the packed optional-peer consumer matrix.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const NpmRelease = Schema.Literals(["11.16.0"])
+
+/**
+ * A certified npm release installed alongside the declared Node runtime.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type NpmRelease = typeof NpmRelease.Type
+
+/**
  * Schema for the Bun releases a runner may install.
  *
  * The pin has to name a published `oven-sh/bun` release: the setup action
@@ -84,6 +100,7 @@ export const NodeSetup = Schema.Struct({
   name: Schema.Literal("node"),
   runtime: Schema.optional(Runtime.NodeRuntime),
   release: NodeRelease,
+  npmRelease: Schema.optional(NpmRelease),
   cachePackageStore: Schema.Boolean
 })
 
@@ -152,6 +169,8 @@ export const Node = (options: {
    */
   readonly runtime?: Runtime.NodeRuntime | undefined
   readonly release: NodeRelease
+  /** Install and verify this npm release instead of the one bundled with Node. */
+  readonly npmRelease?: NpmRelease | undefined
   /** @default true */
   readonly cachePackageStore?: boolean | undefined
 }): NodeSetup =>
@@ -159,6 +178,7 @@ export const Node = (options: {
     name: "node",
     ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
     release: options.release,
+    ...(options.npmRelease === undefined ? {} : { npmRelease: options.npmRelease }),
     cachePackageStore: options.cachePackageStore ?? true
   })
 

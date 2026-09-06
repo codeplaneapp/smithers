@@ -9,9 +9,17 @@ import { join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { releaseRegistry } from "../release-registry.mjs"
 import { build as bundle } from "esbuild"
+import { valid } from "semver"
 
 const effect = "4.0.0-rc.112"
-const firstParty = "1.0.0-rc.0"
+/** Consumer requests must select this candidate, including a future stable cut. */
+export const candidateVersion = (entries) => {
+  const versions = new Set(entries.map((entry) => entry.version))
+  assert.equal(versions.size, 1, "candidate must have one synchronized release version")
+  const [version] = versions
+  assert.equal(valid(version), version, "candidate release version must be exact semver")
+  return version
+}
 // Temporary projects must select the same pnpm toolchain as the repository.
 // Otherwise a different pnpm on a Node-version PATH can change command support.
 export const releasePackageManager = JSON.parse(readFileSync(resolve(import.meta.dirname, "../../package.json"), "utf8")).packageManager
@@ -26,76 +34,85 @@ const browserAdapters = ["@smthrs/platform-browser", "@smthrs/platform-bun", "@e
 const absentByDefault = [...runners, ...nodeAdapters, ...telemetryAdapters, ...browserAdapters, "react", "tsx", "vite"]
 
 // Explicit policy expectations; never derived from the manifest being tested.
-export const minimalProfiles = ["database", "gateway", "observability", "flows", "create-app"].map((name) => ({
-  name: name + "-default",
-  dependencies: { ["@smthrs/" + name]: firstParty, effect },
-  absent: absentByDefault,
-  imports: ["@smthrs/" + name]
-}))
+export const minimalProfiles = (entries) => {
+  const firstParty = candidateVersion(entries)
+  return ["database", "gateway", "observability", "flows", "create-app"].map((name) => ({
+    name: name + "-default",
+    dependencies: { ["@smthrs/" + name]: firstParty, effect },
+    absent: absentByDefault,
+    imports: ["@smthrs/" + name]
+  }))
+}
 
-export const adapterProfiles = [
-  {
-    name: "cli-default",
-    dependencies: { "@smthrs/cli": firstParty, effect },
-    required: ["@effect/platform-node", "@effect/sql-sqlite-node"],
-    absent: [...runners, ...browserAdapters, ...telemetryAdapters],
-    imports: ["@smthrs/cli"]
-  },
-  {
-    name: "node",
-    dependencies: {
-      "@smthrs/flows": firstParty, "@smthrs/gateway": firstParty, "@smthrs/observability": firstParty,
-      "@smthrs/platform-node": firstParty, "@effect/platform-node": effect, "@effect/sql-sqlite-node": effect, effect,
-      "@opentelemetry/exporter-logs-otlp-http": "0.222.0", "@opentelemetry/exporter-metrics-otlp-http": "0.222.0",
-      "@opentelemetry/exporter-trace-otlp-http": "0.222.0", "@opentelemetry/sdk-trace-base": "2.11.0",
-      "@opentelemetry/sdk-trace-node": "2.11.0"
+export const adapterProfiles = (entries) => {
+  const firstParty = candidateVersion(entries)
+  return [
+    {
+      name: "cli-default",
+      dependencies: { "@smthrs/cli": firstParty, effect },
+      required: ["@effect/platform-node", "@effect/sql-sqlite-node"],
+      absent: [...runners, ...browserAdapters, ...telemetryAdapters],
+      imports: ["@smthrs/cli"]
     },
-    absent: [...runners, ...browserAdapters, "@opentelemetry/sdk-trace-web"],
-    imports: ["@smthrs/flows/NodeRuntime", "@smthrs/gateway/node/NodeGateway", "@smthrs/observability/NodeOtel"]
-  },
-  {
-    name: "browser",
-    dependencies: { "@smthrs/observability": firstParty, "@smthrs/platform-browser": firstParty,
-      "@opentelemetry/sdk-trace-base": "2.11.0", "@opentelemetry/sdk-trace-web": "2.11.0", effect },
-    absent: [...runners, ...nodeAdapters, "@effect/platform-bun", "@smthrs/platform-bun",
-      "@opentelemetry/sdk-trace-node", ...telemetryAdapters.slice(0, 3)],
-    imports: ["@smthrs/observability/BrowserOtel", "@smthrs/platform-browser"]
-  },
-  {
-    name: "bun",
-    dependencies: { "@smthrs/platform-bun": firstParty, "@smthrs/platform-node": firstParty,
-      "@effect/platform-bun": effect, "@effect/platform-node": effect, effect },
-    absent: [...runners, ...telemetryAdapters, "@effect/sql-sqlite-node", "@smthrs/platform-browser"],
-    imports: ["@smthrs/platform-bun", "@smthrs/platform-bun/BunFileSystem", "@smthrs/platform-bun/BunHost"]
-  },
-  {
-    name: "create-app-testing",
-    dependencies: { "@smthrs/create-app": firstParty, "@smthrs/testing": firstParty,
-      "@effect/platform-node": effect, vitest: "4.1.9", effect },
-    absent: ["@effect/platform-bun", "@smthrs/platform-bun", "@effect/sql-sqlite-node", ...telemetryAdapters],
-    imports: [],
-    vitest: true
-  }
-]
+    {
+      name: "node",
+      dependencies: {
+        "@smthrs/flows": firstParty, "@smthrs/gateway": firstParty, "@smthrs/observability": firstParty,
+        "@smthrs/platform-node": firstParty, "@effect/platform-node": effect, "@effect/sql-sqlite-node": effect, effect,
+        "@opentelemetry/exporter-logs-otlp-http": "0.222.0", "@opentelemetry/exporter-metrics-otlp-http": "0.222.0",
+        "@opentelemetry/exporter-trace-otlp-http": "0.222.0", "@opentelemetry/sdk-trace-base": "2.11.0",
+        "@opentelemetry/sdk-trace-node": "2.11.0"
+      },
+      absent: [...runners, ...browserAdapters, "@opentelemetry/sdk-trace-web"],
+      imports: ["@smthrs/flows/NodeRuntime", "@smthrs/gateway/node/NodeGateway", "@smthrs/observability/NodeOtel"]
+    },
+    {
+      name: "browser",
+      dependencies: { "@smthrs/observability": firstParty, "@smthrs/platform-browser": firstParty,
+        "@opentelemetry/sdk-trace-base": "2.11.0", "@opentelemetry/sdk-trace-web": "2.11.0", effect },
+      absent: [...runners, ...nodeAdapters, "@effect/platform-bun", "@smthrs/platform-bun",
+        "@opentelemetry/sdk-trace-node", ...telemetryAdapters.slice(0, 3)],
+      imports: ["@smthrs/observability/BrowserOtel", "@smthrs/platform-browser"]
+    },
+    {
+      name: "bun",
+      dependencies: { "@smthrs/platform-bun": firstParty, "@smthrs/platform-node": firstParty,
+        "@effect/platform-bun": effect, "@effect/platform-node": effect, effect },
+      absent: [...runners, ...telemetryAdapters, "@effect/sql-sqlite-node", "@smthrs/platform-browser"],
+      imports: ["@smthrs/platform-bun", "@smthrs/platform-bun/BunFileSystem", "@smthrs/platform-bun/BunHost"]
+    },
+    {
+      name: "create-app-testing",
+      dependencies: { "@smthrs/create-app": firstParty, "@smthrs/testing": firstParty,
+        "@effect/platform-node": effect, vitest: "4.1.9", effect },
+      absent: ["@effect/platform-bun", "@smthrs/platform-bun", "@effect/sql-sqlite-node", ...telemetryAdapters],
+      imports: [],
+      vitest: true
+    }
+  ]
+}
 
-export const migrationProfiles = [
-  {
-    name: "migrate-scan",
-    dependencies: { "@smthrs/migrate": firstParty, "@effect/platform-node": effect, effect,
-      ["@typescript/typescript-" + process.platform + "-" + process.arch]: "7.0.2" },
-    omitOptional: true,
-    absent: [...runners, ...telemetryAdapters, ...browserAdapters, "@smthrs/agent", "@smthrs/engine",
-      "@smthrs/harness", "@smthrs/registry", "@smthrs/flows", "@effect/sql-sqlite-node"],
-    imports: ["@smthrs/migrate", "@smthrs/migrate/Inventory"]
-  },
-  {
-    name: "migrate-apply",
-    dependencies: { "@smthrs/migrate": firstParty, "@effect/platform-node": effect, effect },
-    required: ["@smthrs/agent", "@smthrs/engine", "@smthrs/harness", "@smthrs/registry", "@smthrs/platform-node"],
-    absent: [...runners, ...telemetryAdapters, ...browserAdapters, "@smthrs/flows", "@effect/sql-sqlite-node"],
-    imports: ["@smthrs/migrate/flow/Command", "@smthrs/migrate/flow/MigrateFlow", "@smthrs/migrate/flow/Layers"]
-  }
-]
+export const migrationProfiles = (entries) => {
+  const firstParty = candidateVersion(entries)
+  return [
+    {
+      name: "migrate-scan",
+      dependencies: { "@smthrs/migrate": firstParty, "@effect/platform-node": effect, effect,
+        ["@typescript/typescript-" + process.platform + "-" + process.arch]: "7.0.2" },
+      omitOptional: true,
+      absent: [...runners, ...telemetryAdapters, ...browserAdapters, "@smthrs/agent", "@smthrs/engine",
+        "@smthrs/harness", "@smthrs/registry", "@smthrs/flows", "@effect/sql-sqlite-node"],
+      imports: ["@smthrs/migrate", "@smthrs/migrate/Inventory"]
+    },
+    {
+      name: "migrate-apply",
+      dependencies: { "@smthrs/migrate": firstParty, "@effect/platform-node": effect, effect },
+      required: ["@smthrs/agent", "@smthrs/engine", "@smthrs/harness", "@smthrs/registry", "@smthrs/platform-node"],
+      absent: [...runners, ...telemetryAdapters, ...browserAdapters, "@smthrs/flows", "@effect/sql-sqlite-node"],
+      imports: ["@smthrs/migrate/flow/Command", "@smthrs/migrate/flow/MigrateFlow", "@smthrs/migrate/flow/Layers"]
+    }
+  ]
+}
 
 /** The shipped template must select every prerequisite its test helper needs. */
 export const templateProfile = (directory, entries) => {
@@ -103,8 +120,16 @@ export const templateProfile = (directory, entries) => {
   assert.ok(entry, "candidate has no create-app template")
   const manifest = JSON.parse(execFileSync("tar", ["-xOf", join(directory, entry.filename),
     "package/template/default/package.json"], { encoding: "utf8" }))
-  return { name: "template-default", dependencies: { ...manifest.dependencies, ...manifest.devDependencies },
-    imports: [], vitest: true }
+  const version = candidateVersion(entries)
+  const dependencies = { ...manifest.dependencies, ...manifest.devDependencies }
+  for (const [name, range] of Object.entries(dependencies)) {
+    if (name.startsWith("@smthrs/")) {
+      assert.equal(range, version, `shipped template ${name} must select candidate ${version}`)
+      assert.ok(entries.some((candidate) => candidate.name === name), `shipped template ${name} is not in this candidate`)
+    }
+  }
+  return { name: "template-default", dependencies,
+    imports: [], vitest: true, scaffold: true }
 }
 
 /** Only walk package directories and their nested modules; symlinks are not copies. */
@@ -158,9 +183,9 @@ export const assertConsumerTree = (consumer, profile) => {
 }
 
 /** Record actual exit status and exact command, including expected install refusals. */
-export const consumerCommand = (command, args, cwd) => new Promise((resolveRun, reject) => {
+export const consumerCommand = (command, args, cwd, options = {}) => new Promise((resolveRun, reject) => {
   const started = Date.now()
-  const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "pipe"] })
+  const child = spawn(command, args, { cwd, env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"] })
   let output = ""
   child.stdout.on("data", (chunk) => { output += chunk })
   child.stderr.on("data", (chunk) => { output += chunk })
@@ -172,10 +197,34 @@ export const consumerCommand = (command, args, cwd) => new Promise((resolveRun, 
   })
 })
 
-const successful = async (command, args, cwd) => {
-  const result = await consumerCommand(command, args, cwd)
+const successful = async (command, args, cwd, options) => {
+  const result = await consumerCommand(command, args, cwd, options)
   assert.equal(result.exit, 0, command + " " + args.join(" ") + "\n" + result.output)
   return result
+}
+
+/** Run the generated app's own recorded flow through the installed tools. */
+export const runTemplateReplay = async (consumer, profile) => {
+  const app = join(consumer, "generated-app")
+  await successful(join(consumer, "node_modules/.bin/smithers-build"), ["create-app", app], consumer)
+  const manifestPath = join(app, "package.json")
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"))
+  assert.equal(manifest.name, "generated-app", "the installed scaffolder must replace the template name")
+  assert.deepEqual({ ...manifest.dependencies, ...manifest.devDependencies }, profile.dependencies,
+    "generated app dependencies differ from the selected packed template")
+  // The app and its installed CLI must resolve the same targets declaration
+  // package. Their shared, isolated install contains exactly the app's deps.
+  const appRequire = createRequire(manifestPath)
+  const consumerRequire = createRequire(join(consumer, "package.json"))
+  for (const name of Object.keys(profile.dependencies).filter((name) => name.startsWith("@smthrs/"))) {
+    assert.equal(realpathSync(appRequire.resolve(name + "/package.json")),
+      realpathSync(consumerRequire.resolve(name + "/package.json")), `${name}: generated app resolution differs`)
+  }
+  await successful(join(consumer, "node_modules/.bin/vitest"), [
+    "run", "--config", join(app, "vitest.config.ts"), "--root", app, "--maxWorkers=1"
+  ], app, { env: { ...process.env, SMTHRS_RECORD: "0" } })
+  console.log("template replay ok: installed scaffold and generated app's recorded flow")
+  return app
 }
 
 export const runConsumerProfile = async (profile, manager, registryUrl, { runtime = false } = {}) => {
@@ -184,6 +233,7 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
     await writeFile(join(consumer, ".npmrc"), "@smthrs:registry=" + registryUrl + "\n")
     await writeFile(join(consumer, "package.json"), JSON.stringify({
       name: "dependency-profile", version: "1.0.0", private: true, type: "module",
+      smthrsReleaseConsumer: true,
       packageManager: releasePackageManager, dependencies: profile.dependencies
     }))
     const managerVersion = (await successful(manager, ["--version"], consumer)).output.trim()
@@ -199,7 +249,8 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
           : "for (const name of " + JSON.stringify(profile.imports) + ") require(name)"
         await successful(process.execPath, [...(mode === "esm" ? ["--input-type=module"] : []), "--eval", source], consumer)
       }
-      const fixture = resolve(import.meta.dirname, "dependency-adapters.mjs")
+      const fixture = resolve(import.meta.dirname, "installed-consumer/dependency-adapters.mjs")
+      await writeFile(join(consumer, "consumer-boundary.mjs"), await readFile(resolve(import.meta.dirname, "installed-consumer/consumer-boundary.mjs")))
       await writeFile(join(consumer, "dependency-adapters.mjs"), await readFile(fixture))
       await successful(process.execPath, ["dependency-adapters.mjs", profile.name], consumer)
       if (profile.name === "browser") {
@@ -209,9 +260,10 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
       }
       if (profile.name === "bun") await successful("bun", ["dependency-adapters.mjs", profile.name], consumer)
       if (profile.vitest) {
-        await writeFile(join(consumer, "adapter.test.mjs"), await readFile(resolve(import.meta.dirname, "dependency-testing.mjs")))
+        await writeFile(join(consumer, "adapter.test.mjs"), await readFile(resolve(import.meta.dirname, "installed-consumer/dependency-testing.mjs")))
         await successful(join(consumer, "node_modules/.bin/vitest"), ["run", "adapter.test.mjs", "--maxWorkers=1"], consumer)
       }
+      if (profile.scaffold) await runTemplateReplay(consumer, profile)
     }
     console.log("consumer ok " + manager + " " + profile.name + ": " + tree.count + " packages; one Effect; " + (profile.absent?.length ?? 0) + " absent adapters")
     return { manager, managerVersion, profile: profile.name, ...tree }
@@ -220,7 +272,8 @@ export const runConsumerProfile = async (profile, manager, registryUrl, { runtim
   }
 }
 
-export const refuseIncompatibleRc = async (manager, registryUrl) => {
+export const refuseIncompatibleRc = async (manager, registryUrl, entries) => {
+  const firstParty = candidateVersion(entries)
   const consumer = await mkdtemp(join(tmpdir(), "smithers-k-incompatible-" + manager + "-"))
   try {
     await writeFile(join(consumer, ".npmrc"), "@smthrs:registry=" + registryUrl + "\n")
@@ -244,7 +297,7 @@ export const refuseIncompatibleRc = async (manager, registryUrl) => {
 }
 
 export const runConsumerMatrix = async (directory, entries, {
-  profiles = minimalProfiles, managers = ["npm", "pnpm"], runtime = false
+  profiles = minimalProfiles(entries), managers = ["npm", "pnpm"], runtime = false
 } = {}) => {
   const registry = await releaseRegistry(directory, entries)
   const results = []
@@ -261,7 +314,7 @@ export const runConsumerMatrix = async (directory, entries, {
         }
       }
       try {
-        results.push({ incompatible: await refuseIncompatibleRc(manager, registry.url) })
+        results.push({ incompatible: await refuseIncompatibleRc(manager, registry.url, entries) })
       } catch (cause) {
         failures.push(new Error(manager + " incompatible RC: " + cause.message, { cause }))
       }
@@ -282,6 +335,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const directory = resolve(process.argv[2])
   const entries = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8"))
   await runConsumerMatrix(directory, entries, {
-    profiles: [...minimalProfiles, ...adapterProfiles, ...migrationProfiles, templateProfile(directory, entries)], runtime: true
+    profiles: [...minimalProfiles(entries), ...adapterProfiles(entries), ...migrationProfiles(entries), templateProfile(directory, entries)], runtime: true
   })
 }

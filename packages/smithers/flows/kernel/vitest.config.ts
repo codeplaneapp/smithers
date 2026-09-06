@@ -31,7 +31,7 @@ export default defineConfig({
       include: ["src/**/*.ts"].map((pattern) => join(import.meta.dirname, pattern)),
       // The published host-contract runner is exercised by the concrete host
       // suites in @smthrs/testing, which owns its cross-platform coverage.
-      exclude: ["src/test/HostContract.ts"],
+      exclude: ["src/test/HostContract.ts"].map((pattern) => join(import.meta.dirname, pattern)),
       // Accurate, enforceable floors measured against the committed suite.
       // Ratchet upward as tests land; never lower without a written
       // justification.

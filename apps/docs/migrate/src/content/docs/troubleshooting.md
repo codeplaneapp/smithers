@@ -55,17 +55,30 @@ than an imitation. See
 
 ## apply-in-progress
 
-**What happened.** A second `apply` started over a project whose first one is
-still running. Each apply holds a lock in the report directory
-(`.smithers-migrate/apply.lock`) for its whole run, because two runs would
-share the backups and the pending marker, and one run's rollback would delete
-the other's files. The message names the pid and the start time the lock
-recorded.
+**What happened.** Another `apply` holds this project's lock. The canonical
+project root has one lock even when callers use different `--report-dir`
+values or reach the project through a symlink. Each apply holds a SQLite
+transaction on `.smithers-migrate/apply.lock.sqlite` for its whole run. The
+adjacent `apply.lock` JSON file records its pid, start time, and report
+directory for diagnostics. A missing or incomplete JSON record still refuses
+a contender while the transaction is held.
 
-**What to change.** Wait for the other run to finish. If the lock is stale —
-the pid is gone — you do not have to remove it: the next run takes it over
-itself and notes the takeover in its report, because a run that died mid-unit
-may have left `pending-unit.json` behind with its recovery record.
+**What to change.** Wait for the other run to finish. Process exit releases
+the operating-system lock, including a crash before the JSON record was
+written. A later apply can acquire it and records any abandoned owner's
+report directory in its takeover note. If the earlier run stopped mid-unit,
+recover from that directory's `pending-unit.json` before applying again.
+
+An unresolved `pending-unit.json` refuses a retry with `checkpoint-failed`
+before replacing the owner record or any backup. This also applies when a
+retry chooses a different report directory. The original owner record stays
+in place until its checkpoint has been recovered and its pending marker
+removed.
+
+The SQLite guard file remains after release so every process locks the same
+file. Leave it in place; deleting or replacing it while an apply is running
+would split ownership across two files. Normal release removes only the JSON
+owner record, provided that run has no unresolved checkpoint.
 
 ## no-vcs
 
@@ -92,10 +105,14 @@ message names which one and why:
 - The report directory and the flows directory overlap. A report written under
   the flows directory is discovered as a flow, and a flows directory under the
   report directory is archived with the backups.
+- The flows directory is `.smithers-migrate` or inside it. This fixed directory
+  holds the project lock even with a custom report directory. The lock directory
+  itself must not be a symlink.
 - A symlink on either path leads out of the project root.
 - The report directory already holds files that are not the tool's. It may be
   empty, new, or hold only `report.json`, `report.md`, `units/`, `backup/`,
-  `archive/`, and `pending-unit.json`. The scan skips the report directory
+  `archive/`, `pending-unit.json`, and the tool's `apply.lock`,
+  `apply.lock.sqlite`, and `apply.lock.sqlite-journal` files. The scan skips the report directory
   wholesale, so a project directory named as the report directory would vanish
   from the plan and then receive the archive.
 

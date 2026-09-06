@@ -8,6 +8,9 @@ import { pathToFileURL } from "node:url"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
+import { assertInstalledConsumer } from "./consumer-boundary.mjs"
+
+assertInstalledConsumer(import.meta.url)
 
 const profile = process.argv[2]
 for (const entry of JSON.parse(readFileSync("dependency-resolutions.json", "utf8"))) {

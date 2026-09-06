@@ -2,7 +2,7 @@
 
 One Astro Starlight site per published package, each on its own subdomain:
 `@smthrs/flow` documents at `flow.smithers.sh`, `@smthrs/agent` at
-`agent.smithers.sh`, and so on for all 53.
+`agent.smithers.sh`, and so on for every entry in `shared/manifest.mjs`.
 
 **Do not edit anything in this directory by hand.** Every site here is
 generated, and every page in it is stitched from the package it documents.
@@ -47,8 +47,8 @@ From the repo root:
 ```bash
 pnpm run docs:sync     # restitch every site from its package's docs/
 pnpm run docs:check    # the drift gate: scaffolding and content both current
-pnpm run docs:build    # astro build for all 53
-pnpm run docs:deploy   # alchemy deploy for all 53
+pnpm run docs:build    # astro build for every site
+pnpm run docs:deploy   # alchemy deploy for every configured site
 ```
 
 One site at a time, by its slug:
@@ -73,19 +73,47 @@ declared in `apps/docs/<slug>` could never reach the package it documents.
 
 ## Deploying
 
-Each site is an assets-only Cloudflare Website serving its `dist/`, defined by
-`shared/alchemy-site.mjs` and mirroring `apps/site/alchemy.run.ts`. Resources
-are adopted, so a deploy over an existing site takes it over rather than
-failing.
+Each site declares an Alchemy 2 `Cloudflare.Website.StaticSite` stack serving
+its `dist/` directory. The CLI evaluates the default export to plan, deploy,
+or destroy it. Importing the configuration does not deploy anything.
+
+Set `<SLUG>_WORKER_NAME` to the existing physical Cloudflare Worker name. The
+slug is uppercased with dashes replaced by underscores, for example
+`PLATFORM_NODE_WORKER_NAME`. A new site also needs an explicit, unique name.
+Alchemy 1 and 2 derive names differently, so guessing the old name would
+create another Worker and orphan the original.
+
+For an existing Alchemy 1 deployment, retain a backup of its `.alchemy`
+state before using Alchemy 2. Alchemy 2 uses its own local state under
+`.alchemy/state`; do not treat the old state as an Alchemy 2 migration.
+From the site's directory, archive the old directory separately, preserve
+the existing Worker name, and review an adoption plan before deploying:
 
 ```bash
-CLOUDFLARE_API_TOKEN=... ALCHEMY_PASSWORD=... pnpm -C apps/docs/flow deploy
+cd apps/docs/flow
+export FLOW_WORKER_NAME="existing-worker-name"
+# Configure CLOUDFLARE_API_TOKEN through your usual secret mechanism.
+pnpm exec alchemy plan --adopt
+pnpm run deploy --adopt
 ```
 
-Optional environment: `<SLUG>_SITE_DOMAIN` overrides the domain for a preview
-deploy (the slug uppercased with dashes as underscores, so
-`PLATFORM_NODE_SITE_DOMAIN`), and `CLOUDFLARE_SMITHERS_ZONE_ID` pins the zone
-when the domain does not resolve it.
+The initial `--adopt` explicitly admits an existing Worker into the new state.
+Keep the resulting local state for future deploys and destroys. A hostname
+already attached to a different Worker is refused; transfers require a
+separate explicit operation. This includes `flows.smithers.sh`: the former
+Alchemy 1 `overrideExistingOrigin` shortcut is not part of this configuration.
+
+`<SLUG>_SITE_DOMAIN` selects a preview domain and
+`CLOUDFLARE_SMITHERS_ZONE_ID` pins its zone. Use a separate Worker name for a
+preview. The main site follows the same stack contract, with the existing
+Worker name `smithers-site` from `apps/site/wrangler.jsonc`.
+`SMITHERS_SITE_WORKER_NAME` is required when `SMITHERS_SITE_DOMAIN` selects a
+preview domain. Both configurations disable workers.dev URLs and use 404-page
+asset handling.
+
+Run `node --test apps/site/scripts/deployment.test.mjs` for offline import and
+type checks against the declared Alchemy dependency. These checks do not
+exercise credentials, Cloudflare APIs, or an actual deployment.
 
 ## One slug is not its package name
 

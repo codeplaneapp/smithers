@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import {
   BodyRefMarkdown,
   DiscoveryWarning,
+  executionDigest,
   FlowDescriptor,
   Provenance,
   SchemaRefInline,
@@ -89,6 +90,19 @@ const attemptMutation = (mutation: () => void): void => {
 }
 
 describe("Registry", () => {
+  it("loads only the executable identity the caller reviewed", async () => {
+    await Effect.runPromise(provideRegistry(Effect.gen(function*() {
+      const registry = yield* Registry.Registry
+      const current = yield* registry.get("changelog")
+      const expected = executionDigest(current)
+      expect(expected).toMatch(/^[0-9a-f]{64}$/)
+      expect((yield* registry.loadBody("changelog", expected))._tag).toBe("Prompt")
+      const failure = yield* Effect.flip(registry.loadBody("changelog", "0".repeat(64)))
+      expect(failure.code).toBe("execution_changed")
+      expect(failure.message).toContain("create and approve a new plan")
+    })))
+  })
+
   it("owns descriptors and warnings after layerFromDescriptors constructs the service", async () => {
     const entry = new FlowDescriptor({
       ...descriptor("owned"),

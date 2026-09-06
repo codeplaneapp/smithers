@@ -17,6 +17,7 @@ import * as WorkspaceObservation from "@smthrs/agent/WorkspaceObservation"
 import { CapabilityPattern } from "@smthrs/capability/Capability"
 import { Rule } from "@smthrs/capability/Permission"
 import {
+  ApprovalAuthority,
   Control,
   ControlExecutor,
   ControlRpcs,
@@ -36,7 +37,7 @@ import * as GatewayProjections from "@smthrs/gateway/Projections"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type * as Sandbox from "@smthrs/harness/Sandbox"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
-import { Migrations, SqlJournal } from "@smthrs/journal"
+import { SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
 import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
 import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
@@ -59,7 +60,7 @@ import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import * as Descriptor from "@smthrs/registry/Descriptor"
 import * as Discovery from "@smthrs/registry/Discovery"
 import * as Registry from "@smthrs/registry/Registry"
-import { Migrations as RunStoreMigrations, Ownership, RunStore } from "@smthrs/run-store"
+import { Ownership, RunStore } from "@smthrs/run-store"
 import * as Checkpoints from "@smthrs/std/Checkpoints"
 import * as Container from "@smthrs/std/Container"
 import * as NativeSearch from "@smthrs/std/NativeSearch"
@@ -86,6 +87,7 @@ import * as CodexAuth from "./CodexAuth.ts"
 import * as Environment_ from "./Environment.ts"
 import * as HistoryWorkspace from "./history/Workspace.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
+import * as ControlDatabaseMigrations from "./internal/ControlDatabaseMigrations.ts"
 import * as Output from "./Output.ts"
 import * as Project from "./Project.ts"
 import * as Providers from "./Providers.ts"
@@ -532,12 +534,21 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
   flowId: descriptor.name,
   description: descriptor.description,
   deployClass: false,
+  executionDigest: Descriptor.executionDigest(descriptor),
   envelope: {
     capabilities: descriptor.capabilities,
     flows: descriptor.flows,
     budget: Descriptor.budgetOf(descriptor)
   }
 })
+
+// Configuring the CLI's gateway token delegates the local operator's supported
+// decisions to that gateway's authenticated identity. This is a host policy,
+// not an authorization rule for arbitrary bearer or agent principals.
+const gatewayApprovalAuthority = Effect.runSync(ApprovalAuthority.make([
+  { principal: { id: "local", kind: "operator" }, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] },
+  { principal: NodeGateway.bearerPrincipal, scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"] }
+]))
 
 /**
  * Provides the durable local engine: `SqlControlRuntime` and the production
@@ -563,9 +574,16 @@ const durableFlow = (descriptor: Descriptor.FlowDescriptor): ControlRuntime.Memo
 export const engineDurable = (
   root: string,
   registry?: Layer.Layer<Registry.Registry> | undefined,
-  authority: Pick<SqlControlRuntime.Options, "approvalAuthority" | "principal"> = {}
+  authority: Pick<Application.Config, "approvalAuthority" | "principal" | "credential"> = {}
 ): EngineDurable => {
   const file = databasePath(root)
+  const authorization = {
+    principal: authority.principal,
+    approvalAuthority: authority.approvalAuthority ??
+      (authority.credential === undefined || authority.credential === ""
+        ? ApprovalAuthority.local
+        : gatewayApprovalAuthority)
+  }
   // One real process identity per local control plane. A constant pid made two
   // CLIs on one host appear to own the same fence and allowed the loser to
   // re-drive work claimed by the winner.
@@ -575,7 +593,7 @@ export const engineDurable = (
   // create the directory holding it, and a missing one is the first-run case,
   // not an error.
   const database = Layer.provideMerge(
-    Layer.merge(Migrations.layer, RunStoreMigrations.layer),
+    ControlDatabaseMigrations.layer,
     Layer.provideMerge(
       DurableWriter.layer(),
       Layer.suspend(() => {
@@ -604,15 +622,17 @@ export const engineDurable = (
     Layer.orDie
   )
   const runtime = registry === undefined
-    ? SqlControlRuntime.layer({ ...authority, owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
+    ? SqlControlRuntime.layer({ ...authorization, owner }).pipe(Layer.provide([stores, NodeCrypto.layer]), Layer.orDie)
     : Layer.effect(ControlRuntime.ControlRuntime)(
       Effect.gen(function*() {
         const registryService = yield* Registry.Registry
-        const discovered = yield* registryService.list()
         return yield* SqlControlRuntime.make({
-          ...authority,
+          ...authorization,
           owner,
-          flows: [...systemFlows, ...discovered.map(durableFlow)]
+          loadFlows: () =>
+            registryService.list().pipe(
+              Effect.map((discovered) => [...systemFlows, ...discovered.map(durableFlow)])
+            )
         })
       })
     ).pipe(Layer.provide([stores, NodeCrypto.layer, registry]), Layer.orDie)
@@ -1185,7 +1205,7 @@ export const layerControl = (
 ) => {
   const root = applicationConfig.root ?? process.cwd()
   const registry = suppliedRegistry ?? layerRegistry(root)
-  const engine = suppliedEngine ?? engineDurable(root, registry)
+  const engine = suppliedEngine ?? engineDurable(root, registry, applicationConfig)
   if (applicationConfig.remote !== undefined) {
     return layerControlFromEngine(applicationConfig, registry, engine)
   }
@@ -1448,7 +1468,7 @@ export const layerGateway = (
   health: GatewayServer.Health,
   options: NodeGateway.ServerOptions = { host: "127.0.0.1", port: defaultServerOptions.port },
   root: string,
-  engine: EngineDurable = engineDurable(root),
+  engine: EngineDurable = engineDurable(root, undefined, options),
   journal: Layer.Layer<Journal.Journal> = engine.journal
 ) => {
   const host = options.host ?? "127.0.0.1"

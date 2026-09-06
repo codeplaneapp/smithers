@@ -46,6 +46,7 @@
     "./MemoryError": "./src/MemoryError.ts",
     "./MemoryStore": "./src/MemoryStore.ts",
     "./MemoryTrellis": "./src/MemoryTrellis.ts",
+    "./Migrations": "./src/Migrations.ts",
     "./Namespace": "./src/Namespace.ts",
     "./Recall": "./src/Recall.ts",
     "./RecallFts": "./src/RecallFts.ts",
@@ -122,6 +123,11 @@
         "types": "./dist/esm/MemoryTrellis.d.ts",
         "import": "./dist/esm/MemoryTrellis.js",
         "require": "./dist/cjs/MemoryTrellis.js"
+      },
+      "./Migrations": {
+        "types": "./dist/esm/Migrations.d.ts",
+        "import": "./dist/esm/Migrations.js",
+        "require": "./dist/cjs/Migrations.js"
       },
       "./Namespace": {
         "types": "./dist/esm/Namespace.d.ts",

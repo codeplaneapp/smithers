@@ -178,7 +178,6 @@ export const admit = (input: unknown, limits: Limits = defaultLimits): Admission
       if (Array.isArray(value)) {
         if (prototype !== Array.prototype) return fail(frame.path, "must be an ordinary array")
         const length = value.length
-        /* v8 ignore next -- ECMAScript arrays expose a uint32 length and proxy invariants prevent substituting one. */
         if (!Number.isSafeInteger(length)) return fail(frame.path, "has an invalid array length")
         members += length
         if (members > limits.maxMembers) return fail(frame.path, `exceeds the ${limits.maxMembers}-member limit`)

@@ -100,6 +100,11 @@ jobs:
           node-version: 22.19.0
           cache: pnpm
           registry-url: https://registry.npmjs.org
+      - name: Install certified npm
+        run: |
+          npm install --global 'npm@11.16.0' --ignore-scripts --no-audit --no-fund
+          test "$(npm --version)" = '11.16.0'
+        shell: bash
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.1
@@ -323,9 +328,7 @@ jobs:
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Build all workspaces from clean artifacts
         if: env.CANDIDATE_RUN_ID == ''
-        run: |
-          find packages -type d -name dist -prune -exec rm -rf {} +
-          pnpm --recursive --if-present run build
+        run: node scripts/build-release.mjs
       # Pack from staging manifests whose exports point at built artifacts.
       # Repository manifests retain Effect's source-first export shape.
       - name: Pack and smoke-test release artifacts
@@ -357,6 +360,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Collect ci-test-tier-evidence
+        if: always()
         run: |
           mkdir -p "$RUNNER_TEMP/ci-test-tier-evidence"
           for f in '/tmp/smithers-ci-inventory-'*'.json'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/ci-test-tier-evidence"; fi; done
@@ -365,6 +369,7 @@ jobs:
           for f in '/tmp/smithers-runner-'*'.log'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/ci-test-tier-evidence"; fi; done
           for f in '/tmp/smithers-runner-'*'.json'; do if [ -e "$f" ]; then cp -R -- "$f" "$RUNNER_TEMP/ci-test-tier-evidence"; fi; done
       - name: Upload ci-test-tier-evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ci-test-tier-evidence

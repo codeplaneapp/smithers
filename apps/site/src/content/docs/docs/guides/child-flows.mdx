@@ -12,7 +12,7 @@ Run one flow from inside another as a separate durable run, join the results, an
 ## Before you start
 
 - The packages: `pnpm add @smthrs/flow@next @smthrs/plan@next effect@4.0.0-rc.112`. The detached-children half also uses `@smthrs/agent@next`.
-- A durable engine composition. The examples below compose one over a local SQLite file.
+- The `durable-layer.ts` composition from [the first-flow tutorial](/docs/tutorials/first-flow/). The examples below use a local SQLite file.
 
 ## 1. Choose the boundary
 
@@ -38,13 +38,28 @@ With `.child`, the parent suspends while the child is unsettled and resumes when
 
 ## 2. Spawn two children and join their results
 
-`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. From example 20, where `Bundle`, `Sign`, and `Report` are the declared actions:
+`Node.all` settles two children concurrently, and a fan-in step reads each result off the joined value as a payload field. Create `children.ts` with the actions and the three flow declarations:
 
-```ts
-import { Action, Flow, Interpreter } from "@smthrs/flow"
+```ts title="children.ts"
+import { Action, Flow } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
 import type * as Planned from "@smthrs/plan/Planned"
 import * as Schema from "effect/Schema"
+
+export const Bundle = Action.make("examples/Bundle", {
+  payload: { target: Schema.String },
+  success: Schema.String
+})
+
+export const Sign = Action.make("examples/Sign", {
+  payload: { target: Schema.String },
+  success: Schema.String
+})
+
+export const Report = Action.make("examples/Report", {
+  payload: { bundle: Schema.String, signature: Schema.String },
+  success: Schema.String
+})
 
 export const Compile = Flow.make("examples/Compile", {
   payload: { target: Schema.String },
@@ -62,18 +77,64 @@ export const Release = Flow.make("examples/Release", {
   payload: { target: Schema.String },
   success: Schema.String,
   body: ({ target }: { readonly target: string }) =>
-    Node.andThen(
-      Node.all({
-        bundle: Compile.child({ target }),
-        signature: Notarize.child({ target })
-      }),
-      (results: Planned.Planned<{ readonly bundle: string; readonly signature: string }>) =>
+    Node.all({
+      bundle: Compile.child({ target }),
+      signature: Notarize.child({ target })
+    }).pipe(
+      Node.bindPlanned((results: Planned.Planned<{ readonly bundle: string; readonly signature: string }>) =>
         Report.call({ bundle: results.bundle, signature: results.signature })
+      )
     )
 })
 ```
 
 Register each flow with its own `Interpreter.layer`. Re-executing the parent under the same execution id observes each child's persisted result instead of starting a second child under the same id, so the children's bodies run once across both executions.
+
+Create `run-children.ts` to execute the parent twice:
+
+```ts title="run-children.ts"
+import { Action, Interpreter } from "@smthrs/flow"
+import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
+import { Bundle, Compile, Notarize, Release, Report, Sign } from "./children.ts"
+import { durableEngine } from "./durable-layer.ts"
+
+const dispatches = { bundle: 0, sign: 0, report: 0 }
+const stack = Layer.mergeAll(
+  Bundle.toLayer(({ target }) => Effect.sync(() => {
+    dispatches.bundle += 1
+    return `dist/${target}.js`
+  })),
+  Sign.toLayer(({ target }) => Effect.sync(() => {
+    dispatches.sign += 1
+    return `${target}.sig`
+  })),
+  Report.toLayer(({ bundle, signature }) => Effect.sync(() => {
+    dispatches.report += 1
+    return `${bundle} + ${signature}`
+  })),
+  Interpreter.layer(Release),
+  Interpreter.layer(Compile),
+  Interpreter.layer(Notarize)
+).pipe(
+  Layer.provideMerge(Action.layerImplementations),
+  Layer.provideMerge(durableEngine("children.sqlite", "children-guide"))
+)
+
+const main = Effect.gen(function*() {
+  const first = yield* Release.execute({ target: "app" }, { executionId: "release-1" })
+  const second = yield* Release.execute({ target: "app" }, { executionId: "release-1" })
+  return { first, second, dispatches }
+}).pipe(Effect.provide(stack), Effect.scoped, Effect.orDie)
+
+Effect.runPromise(main).then((summary) => console.log(JSON.stringify(summary)))
+```
+
+```bash
+node run-children.ts
+```
+
+Both results are `dist/app.js + app.sig`, and each dispatch counter is 1.
 
 ## 3. Cancel a parent and watch the cascade reach its children
 

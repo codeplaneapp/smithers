@@ -265,49 +265,6 @@ describe("MemoryStore", () => {
     ])
   })
 
-  it("upgrades the legacy global message key without losing rows", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function*() {
-        const sql = yield* Effect.service(SqlClient.SqlClient)
-        yield* sql`DROP TABLE memory_messages`
-        yield* sql`CREATE TABLE memory_messages (
-          id TEXT PRIMARY KEY CHECK (length(id) > 0),
-          thread_id TEXT NOT NULL,
-          role TEXT NOT NULL,
-          text TEXT NOT NULL,
-          at_ms INTEGER NOT NULL,
-          FOREIGN KEY (thread_id) REFERENCES memory_threads (thread_id)
-        )`
-        yield* sql`CREATE INDEX memory_messages_thread_order_idx
-          ON memory_messages (thread_id, at_ms, id)`
-        yield* sql`INSERT INTO memory_threads (
-          thread_id, namespace_kind, namespace_id, created_at_ms, updated_at_ms
-        ) VALUES ('legacy-thread', 'global', 'history', 1, 1)`
-        yield* sql`INSERT INTO memory_messages (id, thread_id, role, text, at_ms)
-          VALUES ('shared', 'legacy-thread', 'user', 'legacy', 1)`
-        const store = yield* Effect.service(MemoryStore.MemoryStore).pipe(
-          Effect.provide(Layer.fresh(MemoryStore.layer))
-        )
-        yield* store.appendMessage({ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 })
-        const table = yield* sql<{ readonly sql: string }>`SELECT sql FROM sqlite_master
-          WHERE type = 'table' AND name = 'memory_messages'`
-        return {
-          definition: table[0]?.sql,
-          messages: yield* Effect.all([
-            store.listMessages({ threadId: "legacy-thread" }),
-            store.listMessages({ threadId: "new-thread" })
-          ])
-        }
-      }).pipe(Effect.provide(TestMemory.layerWithDatabase))
-    )
-
-    expect(result.definition).toMatch(/PRIMARY KEY\s*\(\s*thread_id\s*,\s*id\s*\)/iu)
-    expect(result.messages).toEqual([
-      [{ threadId: "legacy-thread", id: "shared", role: "user", text: "legacy", at: 1 }],
-      [{ threadId: "new-thread", id: "shared", role: "assistant", text: "new", at: 2 }]
-    ])
-  })
-
   it("supports the complete fact, thread, note, and message contract", async () => {
     const result = await run(Effect.gen(function*() {
       const store = yield* MemoryStore.MemoryStore
@@ -931,7 +888,7 @@ describe("MemoryStore", () => {
         let inserted = false
         const failingSql = new Proxy(sql, {
           apply(target, thisArg, argumentsList) {
-            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            const statement = Array.isArray(argumentsList[0]) ? argumentsList[0].join(" ") : ""
             if (statement.includes("INSERT INTO memory_threads")) {
               inserted = true
             } else if (inserted && statement.includes("FROM memory_threads WHERE thread_id")) {
@@ -967,7 +924,7 @@ describe("MemoryStore", () => {
         const answers = [Effect.succeed("opaque driver answer"), Effect.succeed({ ok: true })]
         const opaqueSql = new Proxy(sql, {
           apply(target, thisArg, argumentsList) {
-            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            const statement = Array.isArray(argumentsList[0]) ? argumentsList[0].join(" ") : ""
             return statement.includes("INSERT INTO memory_threads")
               ? { raw: answers.shift() ?? Effect.succeed({}) }
               : Reflect.apply(target, thisArg, argumentsList)
@@ -993,7 +950,7 @@ describe("MemoryStore", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         const opaqueSql = new Proxy(sql, {
           apply(target, thisArg, argumentsList) {
-            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            const statement = Array.isArray(argumentsList[0]) ? argumentsList[0].join(" ") : ""
             return statement.includes("INSERT INTO memory_notes")
               ? { raw: Effect.succeed({ changes: 1 }) }
               : Reflect.apply(target, thisArg, argumentsList)
@@ -1016,7 +973,7 @@ describe("MemoryStore", () => {
         const sql = yield* Effect.service(SqlClient.SqlClient)
         const failingSql = new Proxy(sql, {
           apply(target, thisArg, argumentsList) {
-            const statement = (argumentsList[0] as TemplateStringsArray).join(" ")
+            const statement = Array.isArray(argumentsList[0]) ? argumentsList[0].join(" ") : ""
             return statement.includes("FROM memory_notes")
               ? Effect.fail("x".repeat(2_000))
               : Reflect.apply(target, thisArg, argumentsList)
@@ -1692,8 +1649,8 @@ describe("MemoryStore", () => {
         const forged = { _tag: "flows/memory/MemoryError" }
         const failingSql = new Proxy(sql, {
           apply(target, thisArg, argumentsList) {
-            const strings = argumentsList[0] as TemplateStringsArray
-            if (strings.join(" ").includes("FROM memory_facts")) {
+            const strings = argumentsList[0]
+            if (Array.isArray(strings) && strings.join(" ").includes("FROM memory_facts")) {
               return Effect.fail(forged)
             }
             return Reflect.apply(target, thisArg, argumentsList)

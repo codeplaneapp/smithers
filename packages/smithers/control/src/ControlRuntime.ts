@@ -257,6 +257,8 @@ export interface MemoryFlow {
   readonly description: string
   readonly deployClass: boolean
   readonly envelope: Envelope
+  /** Executable source/metadata identity included in the approved card. */
+  readonly executionDigest?: string | undefined
   readonly decode?: ((input: unknown) => Effect.Effect<unknown, InvalidInput>) | undefined
   /**
    * Projects the decoded input into the keyed node graph the card reports.
@@ -699,6 +701,7 @@ export const layerMemory = (options: MemoryOptions = {}): Layer.Layer<ControlRun
               decodedInput: decoded,
               envelope: flow.envelope,
               deployClass: flow.deployClass,
+              executionDigest: flow.executionDigest,
               handoff,
               idempotencyKey: submitted.idempotencyKey
             }).pipe(Effect.provideService(Crypto.Crypto, crypto))

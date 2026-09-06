@@ -261,7 +261,7 @@ export const rpcPaths: ReadonlyArray<string> = ["/rpc", "/projections", "/sync"]
  * error is `ControlError.Unauthorized`, and that typed control error is the
  * refusal the control plane publishes: "Missing, malformed, empty, and
  * incorrect credentials all return the same typed `Unauthorized` control
- * error" (`docs/pages/guides/control-plane-trust.md`). An edge 401 answered
+ * error" (`packages/smithers/gateway/docs/guides/serve-beyond-loopback.md`). An edge 401 answered
  * ahead of the mount, and `ControlClient` filters a non-2xx status, so every
  * refusal reached a caller as a `TransportError`, the one error class
  * `@smthrs/control` reserves for a request that failed *before* a declared
@@ -373,19 +373,25 @@ const requestAuthority = (host: string | undefined): URL | undefined => {
   return parsed === null ? undefined : parsed
 }
 
-const browserRequestAllowed = (
+const browserRequestRefusal = (
   headers: Readonly<Record<string, string>>,
-  allowedHosts: ReadonlyArray<string>
-): boolean => {
+  allowedHosts: ReadonlyArray<string>,
+  loopbackOnly: boolean
+): { readonly error: GatewayError; readonly status: number } | undefined => {
   const authority = requestAuthority(headers.host)
-  if (authority === undefined || !allowedHosts.includes(authority.hostname)) return false
+  if (
+    authority === undefined || !allowedHosts.includes(authority.hostname) ||
+    (loopbackOnly && !loopbackHost.test(headers.host!))
+  ) return { error: invalidHostRequest(), status: 421 }
   const origin = headers.origin
   // CLI clients do not send Origin. Browsers must prove they came from this
   // exact authority, including the port, on HTTP requests AND WS upgrades.
-  if (origin === undefined) return true
+  if (origin === undefined) return undefined
   const parsed = URL.parse(origin)
   return parsed !== null && (parsed.protocol === "http:" || parsed.protocol === "https:") &&
-    parsed.origin === origin && parsed.host === authority.host
+      parsed.origin === origin && parsed.host === authority.host
+    ? undefined
+    : { error: invalidOriginRequest(), status: 403 }
 }
 
 /** One refusal on the wire: the typed error, under the status it answers. */
@@ -399,10 +405,10 @@ const unauthorizedRequest = () =>
   new GatewayError({ code: "unauthorized", message: "A valid bearer credential is required" })
 
 const invalidHostRequest = () =>
-  new GatewayError({ code: "invalid_host", message: "This local gateway accepts only loopback Host values" })
+  new GatewayError({ code: "invalid_host", message: "This gateway does not allow the supplied Host value" })
 
 const invalidOriginRequest = () =>
-  new GatewayError({ code: "invalid_origin", message: "This local gateway accepts only loopback browser origins" })
+  new GatewayError({ code: "invalid_origin", message: "The browser Origin must match an allowed gateway Host" })
 
 const requestTooLarge = (path: string, maxBytes: number) =>
   new GatewayError({
@@ -414,19 +420,6 @@ const requestTooLarge = (path: string, maxBytes: number) =>
 const maxBytesExceeded = "maxBytes exceeded"
 
 const loopbackHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
-const loopbackOrigin = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/i
-
-/** A Host header naming exactly one admitted loopback spelling and an optional valid port. */
-const acceptsLoopbackHost = (host: string | undefined): boolean => {
-  if (host === undefined || !loopbackHost.test(host)) return false
-  return URL.parse(`http://${host}`) !== null
-}
-
-/** A browser Origin naming HTTP(S) on an admitted loopback spelling. */
-const acceptsLoopbackOrigin = (origin: string): boolean => {
-  if (!loopbackOrigin.test(origin)) return false
-  return URL.parse(origin) !== null
-}
 
 /**
  * Whether a failed request-body read hit the configured size limit rather than
@@ -548,20 +541,9 @@ export const layerIngress = (options: IngressOptions = {}) => {
       return (httpEffect: Effect.Effect<HttpServerResponse.HttpServerResponse, Types.unhandled>) =>
         Effect.gen(function*() {
           const request = yield* HttpServerRequest.HttpServerRequest
-          if (!browserRequestAllowed(request.headers, allowedHosts)) {
-            return refuse(
-              new GatewayError({ code: "unauthorized", message: "Gateway Host or Origin is not allowed" }),
-              403
-            )
-          }
+          const browserRefusal = browserRequestRefusal(request.headers, allowedHosts, options.loopbackOnly === true)
+          if (browserRefusal !== undefined) return refuse(browserRefusal.error, browserRefusal.status)
           const path = routedPath(request.url)
-          if (options.loopbackOnly === true) {
-            if (!acceptsLoopbackHost(request.headers.host)) return refuse(invalidHostRequest(), 421)
-            const origin = request.headers.origin
-            if (origin !== undefined && !acceptsLoopbackOrigin(origin)) {
-              return refuse(invalidOriginRequest(), 403)
-            }
-          }
           if (protectedPaths.includes(path) && options.authorize !== undefined) {
             const authorized = yield* options.authorize(request.headers)
             if (!authorized) return refuse(unauthorizedRequest(), 401)

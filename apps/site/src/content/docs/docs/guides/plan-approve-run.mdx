@@ -45,6 +45,8 @@ Review a flow's plan before launching it. If you already trust the plan and want
 
    The decision binds to the submitted payload. It does not launch a run. Do not edit the payload between approval and execution; changed work needs a new plan and approval.
 
+   For a discovered prompt flow, the plan also binds the measured prompt source and all discovered metadata, including model and parameters. The runtime checks that identity at launch and on resume. Editing the flow file or changing its model invalidates the old approval; refresh discovery, create a new plan, and review it again.
+
 4. **Execute the approved plan.**
 
    ```bash

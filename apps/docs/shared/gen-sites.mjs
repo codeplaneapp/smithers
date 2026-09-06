@@ -81,16 +81,18 @@ const alchemyRun = (site) => `/**
  * Alchemy infrastructure-as-code for ${site.domain}, the ${site.name} docs site.
  * ${header("alchemy.run.ts")}
  *
- * Deploy:   CLOUDFLARE_API_TOKEN=... ALCHEMY_PASSWORD=... pnpm -C apps/docs/${site.slug} deploy
+ * Deploy:   CLOUDFLARE_API_TOKEN=... ${site.slug.toUpperCase().replace(/-/g, "_")}_WORKER_NAME=... pnpm -C apps/docs/${site.slug} deploy
  * Destroy:  pnpm -C apps/docs/${site.slug} destroy
  *
+ * Required: ${site.slug.toUpperCase().replace(/-/g, "_")}_WORKER_NAME, preserving the existing Worker name.
+ * See apps/docs/README.md for Alchemy 1 state migration and explicit adoption.
  * Optional env: ${site.envDomain} (preview deploys, default ${site.domain}),
  * CLOUDFLARE_SMITHERS_ZONE_ID (alchemy resolves the zone from the domain when
  * omitted).
  */
-import { deployDocsSite } from "@smithers/docs-shared/alchemy-site"
+import { makeDocsSiteStack } from "@smithers/docs-shared/alchemy-site"
 
-export const site = await deployDocsSite({ slug: ${JSON.stringify(site.slug)} })
+export default makeDocsSiteStack({ slug: ${JSON.stringify(site.slug)} })
 `
 
 /** The package tsconfig: apps/site's, verbatim. */

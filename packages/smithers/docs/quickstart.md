@@ -210,8 +210,9 @@ retention policy, and it is the easiest value to type by accident.
 One project directory anchored every command on the same two SQLite files, so
 the run `run` started is the run `ps` listed and `gc` deleted. The approval you
 passed to `run` and `approve` was the same serialized payload `plan` printed,
-which is why the decision is portable: another process, or an agent over MCP,
-can decide a park this shell created.
+which is why another local operator process or explicitly delegated remote
+operator can decide a park this shell created. The MCP surface can inspect
+pending approvals but refuses approval and denial decisions.
 
 ## Next steps
 

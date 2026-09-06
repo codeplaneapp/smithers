@@ -1,6 +1,6 @@
 ---
 title: "Run the migration as a durable flow"
-description: "Drive the migration from your own program: build the options, run it on the bundled Node composition, or register the flow with a durable host so it plans, approves, and runs under the journal."
+description: "Drive the migration from your own program, inspect its survey, and compose its registrations with an application-owned durable host."
 sidebar:
   order: 7
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/migrate/docs/guides/run-as-a-durable-flow.md"
@@ -53,6 +53,11 @@ const report = await Effect.runPromise(
 console.log(Command.render(report, "human", Command.reportDirectory(options)))
 process.exitCode = Command.exitCode(report)
 ```
+
+The bundled composition uses an in-memory engine. Its checkpoints and pending
+unit marker support [manual crash recovery](/guides/recover-a-failed-unit/); starting
+the command again creates a new execution. Cross-process journal replay
+requires an application-owned durable engine and recovery integration.
 
 `Command.optionsOf` is the same conversion the bin and the CLI verb use, so
 your program takes the flags they take, with the same rules: `--scan` wins over
@@ -115,10 +120,21 @@ import * as Command from "@smthrs/migrate/flow/Command"
 const registerFlows = Command.registration
 ```
 
-`@smthrs/flows`' `NodeRuntime` takes this as its `registerFlows` layer, and
-then `smthrs flow start system/migrate --data '<migration options>'` starts the same
-flow under the same journal as everything else. `Command.flowId` is the name
-the control plane knows it by, `system/migrate`.
+This layer installs the migration's action implementations and its two flow
+registrations. A host such as `@smthrs/flows`' `NodeRuntime` can compose it after
+providing the services listed by `Command.Requirements`. Registration alone
+does not create a control-plane route: `Command.flowId` is the integration
+label `system/migrate`, and the stock CLI has no automatic
+`flow start system/migrate` entry point. Use `smthrs migrate` or `Command.runNode`
+for the bundled entry points.
+
+An application host should invoke `Command.launch(options, surveyed)` after
+its own approval decision. That wrapper supplies the surveyed unit outlines,
+run-state roots, generation time, and plan seal, and holds the project's apply
+lock until execution settles. Calling `MigrateFlow.flow.execute` directly
+bypasses that lock and requires the full enriched payload, not just migration
+options. A durable host must also retain ownership of the apply lock throughout
+its recovery and resume path before permitting filesystem work.
 
 The flow's own tag is `smithers/migrate-v1` and each unit runs as
 `smithers/migrate-v1/unit`.

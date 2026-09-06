@@ -14,6 +14,14 @@ const limits = (overrides: Partial<Boundary.Limits> = {}): Boundary.Limits => ({
 const admit = (value: unknown, overrides?: Partial<Boundary.Limits>) => Boundary.admit(value, limits(overrides))
 
 describe("the inert plugin JSON boundary", () => {
+  it("refuses a proxy reporting an invalid array length", () => {
+    const input = new Proxy([], {
+      get: (target, key, receiver) => key === "length" ? Number.NaN : Reflect.get(target, key, receiver)
+    })
+    expect(Array.isArray(input)).toBe(true)
+    expect(admit(input)).toEqual({ ok: false, path: "$", complaint: "has an invalid array length" })
+  })
+
   it("copies every JSON scalar without normalizing valid text", () => {
     for (const value of [null, true, false, 0, -1.5, "", "é", "e\u0301", "😀"] as const) {
       expect(admit(value)).toEqual({ ok: true, value })

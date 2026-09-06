@@ -6,7 +6,6 @@
 import { NodeCrypto } from "@effect/platform-node"
 import * as DurableWriter from "@smthrs/database/DurableWriter"
 import * as NodeDatabase from "@smthrs/database/node/NodeDatabase"
-import { Migrations } from "@smthrs/journal"
 import * as Redaction from "@smthrs/journal/Redaction"
 import { Effect, Layer } from "effect"
 import { z } from "incur"
@@ -14,6 +13,7 @@ import { mkdirSync } from "node:fs"
 import { join } from "node:path"
 import * as Presentation from "../cli/Presentation.ts"
 import * as Environment from "../Environment.ts"
+import * as ControlDatabaseMigrations from "../internal/ControlDatabaseMigrations.ts"
 import * as Project from "../Project.ts"
 
 /**
@@ -62,7 +62,7 @@ export const databaseLayer = (root: string) => {
     mkdirSync(join(root, ".flows"), { recursive: true })
     return NodeDatabase.layer({ filename: join(root, ".flows", "control.db") })
   })
-  return Layer.mergeAll(Migrations.layer, NodeCrypto.layer).pipe(
+  return Layer.mergeAll(ControlDatabaseMigrations.layer, NodeCrypto.layer).pipe(
     Layer.provideMerge(DurableWriter.layer().pipe(Layer.provideMerge(database)))
   )
 }
