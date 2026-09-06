@@ -459,12 +459,127 @@ describe.skipIf(process.platform === "win32")("one-shot workspace runtime refere
       )
         .toBe(true)
       if (runtime === "node") {
+        expect(invocations.some((entry) =>
+          entry.tool === "runtime" &&
+          JSON.stringify(entry.args) ===
+            JSON.stringify([Path.join(root, "node_modules/private-npm/bin/npx-cli.js"), "--version"])
+        )).toBe(true)
+        expect(
+          invocations.some((entry) => entry.tool === "launcher" && JSON.stringify(entry.args) === "[\"--version\"]")
+        ).toBe(true)
         expect(invocations.filter((entry) => entry.tool === "launcher" && entry.args[0] !== "--version")).toEqual([
           { tool: "launcher", args: [oneShotSpec, ...oneShotArgs] }
         ])
       } else expect(invocations.some((entry) => entry.tool === "launcher")).toBe(false)
     }
   )
+
+  it("probes Node and its launcher independently while sharing identical probes across targets", async () => {
+    const root = await oneShotFixture("node")
+    const index = PackageIndex.make(await PackageLoader.load(await PackageDiscovery.discover(root)))
+    const plan = await PackageExec.plan({ index, cacheDirectory: ".flows", pattern: "//...", verb: "run" })
+    for (const target of ["//:generate", "//:run"]) {
+      expect(plan.nodes.get(target)?.refusal).toBeUndefined()
+      expect(plan.nodes.get(target)?.keyPreview).toBeTypeOf("string")
+    }
+    const invocations = (await Fs.readFile(Path.join(root, ".flows/one-shot-invocations.jsonl"), "utf8"))
+      .trim().split("\n").map((line) =>
+        JSON.parse(line) as { readonly tool: string; readonly args: ReadonlyArray<string> }
+      )
+    expect(invocations.filter((entry) => entry.tool === "runtime")).toEqual([
+      { tool: "runtime", args: ["--version"] },
+      { tool: "runtime", args: [Path.join(root, "node_modules/private-npm/bin/npx-cli.js"), "--version"] }
+    ])
+    expect(invocations.filter((entry) => entry.tool === "launcher")).toEqual([
+      { tool: "launcher", args: ["--version"] }
+    ])
+  })
+
+  it("invalidates cached output when an unchanged launcher reports a changed imported implementation version", async () => {
+    const root = await oneShotFixture("node")
+    const launcher = Path.join(root, "node_modules/private-npm/bin/npx-cli.js")
+    await Fs.writeFile(
+      launcher,
+      `#!${process.execPath}\nrequire("../lib/implementation.cjs").main(process.argv.slice(2))\n`
+    )
+    const setImplementation = async (version: string) => {
+      await write(root, "node_modules/private-npm/package.json", JSON.stringify({ private: true, version }))
+      await write(
+        root,
+        "node_modules/private-npm/lib/implementation.cjs",
+        `
+// Private implementation ${version}; this package is never fetched.
+const fs = require("node:fs")
+const version = require("../package.json").version
+exports.main = (args) => {
+  if (JSON.stringify(args) === '["--version"]') process.stdout.write(version + "\\n")
+  else if (JSON.stringify(args) === ${JSON.stringify(JSON.stringify([oneShotSpec, ...oneShotArgs]))}) {
+    fs.mkdirSync("dist", {recursive: true})
+    fs.writeFileSync("dist/observed.txt", version + "\\n")
+    process.stdout.write("PRIVATE_IMPORTED_IMPLEMENTATION_" + version + "\\n")
+  } else { process.stderr.write("private implementation refused unexpected argv"); process.exitCode = 91 }
+}
+`
+      )
+    }
+    await setImplementation("11.16.0")
+    await write(root, ".gitignore", ".flows/\nnode_modules/\ndist/\n")
+    await write(
+      root,
+      "PACKAGE.ts",
+      `import { Smithers as S } from "@smthrs/targets"
+export const Package = S.Package({targets: {
+  build: S.Shell.Build({
+    bin: S.Runtime.npx(${JSON.stringify(oneShotSpec)}), args: ${JSON.stringify(oneShotArgs)},
+    data: [S.file("value.ts")], outFiles: ["dist/observed.txt"]
+  })
+}})
+`
+    )
+    const stablePaths = [
+      "WORKSPACE.ts",
+      "PACKAGE.ts",
+      "package.json",
+      "value.ts",
+      "node_modules/.bin/selected-runtime",
+      "node_modules/private-npm/bin/npx-cli.js"
+    ]
+    const stableBytes = await Promise.all(stablePaths.map((path) => Fs.readFile(Path.join(root, path), "utf8")))
+    const index = PackageIndex.make(await PackageLoader.load(await PackageDiscovery.discover(root)))
+    const plan = async () => {
+      const target = (await PackageExec.plan({ index, cacheDirectory: ".flows", pattern: "//:build", verb: "build" }))
+        .nodes.get("//:build")!
+      expect(target.refusal).toBeUndefined()
+      expect(target.cacheable).toBe(true)
+      return target.keyPreview
+    }
+    const args = ["build", "//:build", "--jobs", "1"]
+    const before = await plan()
+    const first = await serve(root, args)
+    expect(first.code, first.output).toBe(0)
+    expect(first.output).toContain("PRIVATE_IMPORTED_IMPLEMENTATION_11.16.0")
+    const warm = await serve(root, args)
+    expect(warm.code, warm.output).toBe(0)
+    expect(warm.output).toContain("//:build  hit")
+    expect(warm.output).not.toContain("PRIVATE_IMPORTED_IMPLEMENTATION_")
+
+    await setImplementation("11.17.0")
+    expect(await Promise.all(stablePaths.map((path) => Fs.readFile(Path.join(root, path), "utf8"))))
+      .toEqual(stableBytes)
+    expect(await plan()).not.toBe(before)
+    // A removed output forces restoration if the old cache key aliases. The
+    // correct plan executes the new implementation and writes its new value.
+    await Fs.rm(Path.join(root, "dist/observed.txt"))
+    const changed = await serve(root, args)
+    expect(changed.code, changed.output).toBe(0)
+    expect(changed.output).toContain("//:build  ran")
+    expect(changed.output).toContain("PRIVATE_IMPORTED_IMPLEMENTATION_11.17.0")
+    expect(await Fs.readFile(Path.join(root, "dist/observed.txt"), "utf8")).toBe("11.17.0\n")
+    const changedWarm = await serve(root, args)
+    expect(changedWarm.code, changedWarm.output).toBe(0)
+    expect(changedWarm.output).toContain("//:build  hit")
+    expect(changedWarm.output).not.toContain("PRIVATE_IMPORTED_IMPLEMENTATION_")
+  })
 
   it("keys changed launcher bytes even when the npx path and reported version stay the same", async () => {
     const root = await oneShotFixture("node")

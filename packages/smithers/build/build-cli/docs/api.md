@@ -649,6 +649,14 @@ The package planner verifies native `Runtime.bin` references and
 do not change legacy Yarn lowering or guarantee the
 interpreter chosen by an arbitrary custom package-manager launcher.
 
+For native `Runtime.npx` references under Node, the planner keys both the
+JavaScript launcher bytes and its bounded `--version` result (exit code and
+output), executed by the selected Node in the same restricted environment and
+workspace directory. Runtime and launcher version probes are distinct even
+though they use the same executable; identical executable/argument probes are
+shared within a plan. This measures a changed reported implementation version
+behind an unchanged launcher, without claiming to hash every transitive import.
+
 ## Modules outside the barrel
 
 Every one of these is importable as `@smthrs/build-cli/<Module>`. The barrel

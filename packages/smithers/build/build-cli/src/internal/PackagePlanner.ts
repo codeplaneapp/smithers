@@ -442,8 +442,15 @@ const graphDigestOf = async (
   return undefined
 }
 
-const probeOnce = async (context: PlanContext, path: string): Promise<PackageTree.Probe> => {
-  const known = context.probes.get(path)
+const probeOnce = async (
+  context: PlanContext,
+  path: string,
+  args: ReadonlyArray<string> = ["--version"]
+): Promise<PackageTree.Probe> => {
+  // A selected interpreter can probe both itself and a script launcher. Their
+  // distinct argument vectors must never share a cached version observation.
+  const key = JSON.stringify([path, args])
+  const known = context.probes.get(key)
   if (known !== undefined) return known
   // A declared executable's version probe needs lookup capabilities, never
   // the CLI's credentials. Configuration lookup starts at the workspace just
@@ -454,8 +461,8 @@ const probeOnce = async (context: PlanContext, path: string): Promise<PackageTre
       typeof value === "string" && names.has(process.platform === "win32" ? name.toUpperCase() : name)
     )
   )
-  const probe = await PackageTree.probeVersion(path, { cwd: context.root, environment })
-  context.probes.set(path, probe)
+  const probe = await PackageTree.probeVersion(path, { cwd: context.root, args, environment })
+  context.probes.set(key, probe)
   return probe
 }
 
@@ -991,6 +998,10 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
         } else {
           const relative = Path.containedRelative(context.root, script)
           const portable = relative === undefined ? script : `${workspaceRootToken}/${posix(relative)}`
+          // The launcher can remain byte-identical across npm releases while
+          // its imported implementation changes. Keep its reported version in
+          // identity, measured by the same Node that will execute the command.
+          const probe = await probeOnce(context, runtime.tool.path, [script, "--version"])
           outcome = {
             _tag: "resolved",
             tool: {
@@ -1000,6 +1011,7 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
                 tag: "RuntimeNpx",
                 spec,
                 runtime: runtime.tool.identity,
+                probe,
                 // The launcher is script input to the measured interpreter;
                 // its original shebang is intentionally not executed.
                 launcher: {

@@ -102,9 +102,12 @@ force arbitrary custom package-manager launchers to use a particular shebang
 interpreter.
 
 `Runtime.npx(spec)` is a command reference for a `Shell` or `Generate` `bin`:
-Node runs the resolved JavaScript npx launcher with the selected interpreter;
+Node runs npm's resolved JavaScript one-shot launcher with the selected interpreter;
 Bun runs `x --bun`. Both forward the spec and user arguments. It cannot be used
-as a path argument or a path-only tool binding. See the
+as a path argument or a path-only tool binding. The Node route keys the selected
+runtime, launcher bytes, and its bounded `--version` probe through that same
+runtime. A changed reported implementation version invalidates cached results
+even when the launcher bytes stay the same. See the
 [runtime reference](./reference/targets.md#smithersruntime) for flags, keying,
 and launcher constraints.
 

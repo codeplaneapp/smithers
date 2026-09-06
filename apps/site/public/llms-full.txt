@@ -9904,7 +9904,7 @@ Declared JavaScript runtimes and the argv they run programs with. The name is bo
 
 `Runtime.bin` selects the workspace's declared executable. A missing runtime or an installed version that does not satisfy its requirement refuses the target before its command runs.
 
-Use `Runtime.npx(spec)` as the `bin` of a `Shell` target or `Generate`. Under Node, the planner resolves the JavaScript `npx` launcher on the target's tool PATH and runs it with the declared Node executable, followed by `spec` and the target's `args`. Under Bun, it runs the declared executable with `x --bun`, `spec`, and those arguments. `Shell.runtimeArgs` remain flags before the launcher or `x`. The runtime identity and, for Node, launcher bytes enter the target key. A Windows batch shim cannot serve as the Node launcher. `Runtime.npx` cannot occupy a path argument, a `using` binding, or a generator's path-only `tools` slot, because those positions cannot carry its command arguments.
+Use `Runtime.npx(spec)` as the `bin` of a `Shell` target or `Generate`. Under Node, the planner resolves npm's JavaScript one-shot launcher on the target's tool PATH and runs it with the declared Node executable, followed by `spec` and the target's `args`. Under Bun, it runs the declared executable with `x --bun`, `spec`, and those arguments. `Shell.runtimeArgs` remain flags before the launcher or `x`. The runtime identity and, for Node, launcher bytes and its bounded `--version` result enter the target key. That launcher probe uses the selected Node, so a changed reported implementation version invalidates results even when the launcher stays unchanged. A Windows batch shim cannot serve as the Node launcher. `Runtime.npx` cannot occupy a path argument, a `using` binding, or a generator's path-only `tools` slot, because those positions cannot carry its command arguments.
 
 ### `Smithers.PackageManager`
 
@@ -13516,6 +13516,14 @@ The package planner verifies native `Runtime.bin` references and
 `PackageManager.bin` references with a resolved Node/Bun toolchain. These checks
 do not change legacy Yarn lowering or guarantee the
 interpreter chosen by an arbitrary custom package-manager launcher.
+
+For native `Runtime.npx` references under Node, the planner keys both the
+JavaScript launcher bytes and its bounded `--version` result (exit code and
+output), executed by the selected Node in the same restricted environment and
+workspace directory. Runtime and launcher version probes are distinct even
+though they use the same executable; identical executable/argument probes are
+shared within a plan. This measures a changed reported implementation version
+behind an unchanged launcher, without claiming to hash every transitive import.
 
 ## Modules outside the barrel
 
