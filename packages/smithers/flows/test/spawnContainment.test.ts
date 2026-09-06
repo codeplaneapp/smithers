@@ -8,10 +8,10 @@ import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
  * Containment is a property of the `ChildProcessSpawner` SERVICE, not of any
  * call site.
  *
- * A host decides its kill policy once, by decorating that service
- * (`ContainedSpawner` adds `forceKillAfter ?? graceMs` and a `ProcessLedger`
- * record), and every module that resolves the tag inherits the deadline and
- * the journal entry for free. A module that reaches for `child_process` (or
+ * A host decides its kill policy once, by decorating that service.
+ * `ContainedSpawner` records a prepared supervisor in the `ProcessLedger`
+ * before activating its target; every module that resolves the tag inherits
+ * that ownership and cleanup policy. A module that reaches for `child_process` (or
  * `cluster`) instead inherits neither: its children outlive a cancel by
  * however long they choose, and a hard-killed host leaves them with nothing
  * recording that they exist, so the next incarnation cannot reap them.
@@ -33,7 +33,7 @@ import { collectSources, fileBindsSpawningModule } from "./SpawnSpecifiers.ts"
  * file per layout, live beside it in
  * `packages/smithers/flows/test/SpawnSpecifiers.test.ts`.
  *
- * The exceptions are named here with the reason each one is bounded, not
+ * The exceptions are named here with their ownership boundary and limitations, not
  * derived from what happens to be in the tree. The list is checked in both
  * directions, the way the coverage-gate deferral next door is: an unlisted
  * importer fails, and a listed file that no longer imports a process-starting
@@ -47,8 +47,8 @@ describe("child-process containment conformance", () => {
   const packagesDir = resolve(import.meta.dirname, "..", "..", "..")
 
   /**
-   * Files allowed to start a child outside the host's spawner, each with the
-   * bound that makes it safe.
+   * Native spawner implementations and explicit callers outside a contained
+   * host. An exemption does not grant that caller a host-ledger guarantee.
    *
    * Keys are `<package>/<path under the package>` with POSIX separators.
    */
@@ -73,28 +73,26 @@ describe("child-process containment conformance", () => {
     ],
     [
       "smithers/flows/platform-node/src/ProcessReaper.ts",
-      "`spawnSync` of `ps` and `taskkill`, inside the reaper itself. Synchronous and sub-second: "
-      + "routing the reaper through the spawner it exists to clean up after would close a cycle "
-      + "of its own."
+      "Native process-table probes and Windows taskkill inside the reaper itself. "
+      + "POSIX identity probes have a 5-second timeout and cleanup snapshots a 500-ms timeout; "
+      + "the Windows fallback has no explicit timeout and is outside the RC support matrix. "
+      + "Routing these through the spawner being recovered would close a layer cycle."
+    ],
+    [
+      "smithers/flows/platform-node/src/internal/PipedProcess.ts",
+      "The private native standard-command adapter beneath `ProcessReaper.layerSpawner`. "
+      + "It cannot recursively invoke the spawner it implements. The contained POSIX path "
+      + "prepares a supervisor, records that owner before target activation, and delegates "
+      + "group cleanup to that live owner. The adapter retains native pipe errors and owns "
+      + "its direct child's finalizer. Real Node/Bun, CLI, build and sandbox tests exercise "
+      + "this boundary; the package export map denies direct access to internal modules."
     ],
     [
       "testing/src/Faults.ts",
       "The fault tier's process primitives. `execFileSync` of `ps -o ppid=` reads the process "
-      + "TABLE; it starts nothing a `ProcessLedger` could record and nothing a kill deadline could "
-      + "bound, and the module's other exports signal pids the caller already owns rather than "
-      + "spawning any. Bounded twice over: the read is synchronous and sub-second, the same shape "
-      + "`smithers/flows/platform-node/src/ProcessReaper.ts` is exempted for, and no flow reaches this module — it "
-      + "is imported only by a package's `test/faults` tree, which is exactly the tier that exists "
-      + "to prove containment rather than to be contained by it."
-    ],
-    [
-      "smithers/build/targets/src/Exec.ts",
-      "The private build-graph target executor, not reachable through the kernel's `proc:spawn`. "
-      + "It kills its child's process group on fiber death or `timeoutMs` itself."
-    ],
-    [
-      "smithers/build/targets/src/LlmLint.ts",
-      "Same private build-graph executor path as `smithers/build/targets/src/Exec.ts`."
+      + "TABLE. The other exports signal pids the test already owns. This test-only diagnostic "
+      + "is synchronous but has no explicit command timeout; it is not a host-spawn guarantee. "
+      + "Fault suites use it to verify actual parentage independently of the implementation."
     ],
     [
       "smithers/src/Detached.ts",
@@ -108,18 +106,19 @@ describe("child-process containment conformance", () => {
       + "kill deadline (`packages/smithers/test/Detached.test.ts`)."
     ],
     ...[
-      "AgentSession.ts",
       "GitCommit.ts",
       "GoExec.ts",
       "MemoryBackend.ts",
       "NixExec.ts",
       "PackageTree.ts",
-      "RepoResolution.ts",
-      "ServiceSupervisor.ts"
+      "RepoResolution.ts"
     ].map((file): [string, string] => [
       `smithers/build/build-cli/src/${file}`,
-      "Repository tooling. `@smthrs/build-cli` is private and runs no flow, so it hosts nothing "
-      + "a `ProcessLedger` would ever be asked about."
+      "Repository discovery, planning and bootstrap tooling in the public build CLI. "
+      + "These native helpers run outside the durable host and retain command-specific "
+      + "output, cancellation and timeout policies; some commands have no timeout. "
+      + "This exemption does not promise durable process-ledger recovery. Target execution "
+      + "and service supervision instead use the contained platform adapter."
     ])
   ])
 
@@ -182,7 +181,7 @@ describe("child-process containment conformance", () => {
   it("starts child processes only through the host's spawner", () => {
     // An unlisted importer is a module whose children are outside the kill
     // deadline and outside the ledger. If it belongs there, add it above with
-    // the bound that makes it safe; the reason is the review, not the entry.
+    // its ownership boundary and limitations; the reason is the review, not the entry.
     expect(importers.filter((id) => !allowed.has(id))).toEqual([])
   })
 

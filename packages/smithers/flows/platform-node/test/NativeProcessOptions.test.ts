@@ -5,7 +5,7 @@ import * as Native from "node:child_process"
 import NativeMutable from "node:child_process"
 import { EventEmitter } from "node:events"
 import { syncBuiltinESMExports } from "node:module"
-import { PassThrough } from "node:stream"
+import { Duplex, PassThrough } from "node:stream"
 import { describe, expect, it, vi } from "vitest"
 import * as PipedProcess from "../src/internal/PipedProcess.ts"
 
@@ -32,11 +32,21 @@ const withNativePipes = async (
   modes: ReadonlyArray<Native.IOType>,
   test: (
     child: Native.ChildProcess,
-    pipes: ReadonlyArray<PassThrough | null>,
+    pipes: ReadonlyArray<Duplex | null>,
     calls: Array<Parameters<typeof Native.spawn>>
   ) => Promise<void>
 ) => {
-  const pipes = modes.map((mode) => mode === "pipe" || mode === "overlapped" ? new PassThrough() : null)
+  const pipes = modes.map((mode, fd) => {
+    if (mode !== "pipe" && mode !== "overlapped") return null
+    // Native extra pipes have independent directions: ending the parent's
+    // unused writable half must not end the child's readable output half.
+    return fd < 3 ? new PassThrough() : new Duplex({
+      read() {},
+      write(_chunk, _encoding, callback) {
+        callback()
+      }
+    })
+  })
   const child = Object.assign(new EventEmitter(), {
     pid: 12345,
     stdin: pipes[0],
@@ -253,8 +263,9 @@ describe("native public process I/O options", () => {
         })
         expect(yield* output(handle.getOutputFd(2))).toBe("")
         yield* Stream.run(input("discarded"), handle.getInputFd(3))
-        const pipe = child.stdio[4] as PassThrough
-        pipe.end(bytes("valid fd04"))
+        const pipe = child.stdio[4] as Duplex
+        pipe.push(bytes("valid fd04"))
+        pipe.push(null)
         child.emit("exit", 0, null)
         expect(yield* output(handle.getOutputFd(4))).toBe("valid fd04")
       })))
@@ -267,8 +278,13 @@ describe("native public process I/O options", () => {
       const late = Object.assign(new Error("late pending native write"), { code: "EPIPE" })
       await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
         const handle = yield* spawn([], { additionalFds: { fd4: { type: "input" }, fd5: { type: "output" } } })
+        expect(pipes[4]!.writableEnded).toBe(false)
+        expect(pipes[5]!.writableEnded).toBe(true)
+        expect(pipes[5]!.readableEnded).toBe(false)
         yield* Stream.run(input("written before consumer exit"), handle.getInputFd(4))
-        pipes[5]!.end(bytes("read before consumer exit"))
+        expect(pipes[4]!.writableEnded).toBe(true)
+        pipes[5]!.push(bytes("read before consumer exit"))
+        pipes[5]!.push(null)
         expect(yield* output(handle.getOutputFd(5))).toBe("read before consumer exit")
         for (const fd of [4, 5]) {
           expect(pipes[fd]!.listenerCount("error")).toBeGreaterThan(0)

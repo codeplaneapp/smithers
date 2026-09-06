@@ -33,6 +33,8 @@ const withNativeFailure = async (
   startError?: Error
 ) => {
   const child = fakeChild()
+  // A native startup failure never creates a process identity.
+  if (startError !== undefined) child.pid = undefined
   const spawn = vi.spyOn(NativeMutable, "spawn").mockImplementation(() => {
     queueMicrotask(() => child.emit(startError === undefined ? "spawn" : "error", startError))
     return child as unknown as ReturnType<typeof Native.spawn>
@@ -51,7 +53,9 @@ const withNativeFailure = async (
 
 const fakeChild = () =>
   Object.assign(new EventEmitter(), {
-    pid: 12345,
+    pid: 12345 as number | undefined,
+    exitCode: null as number | null,
+    signalCode: null as NodeJS.Signals | null,
     stdin: new PassThrough(),
     stdout: new PassThrough(),
     stderr: new PassThrough(),
@@ -64,6 +68,47 @@ const fakeChild = () =>
   })
 
 describe("native pipe adapter", () => {
+  it.each(["running", "exited", "signalled"] as const)(
+    "observes a returned native handle after its spawn event was emitted early (%s)",
+    async (state) => {
+      const child = fakeChild()
+      const spawn = vi.spyOn(NativeMutable, "spawn").mockImplementation(() => {
+        // Bun's cold-start ordering is observable before spawn returns. The
+        // public pid and status fields survive even when the events are missed.
+        child.emit("spawn")
+        if (state === "exited") {
+          child.exitCode = 17
+          child.emit("exit", 17, null)
+        } else if (state === "signalled") {
+          child.signalCode = "SIGTERM"
+          child.emit("exit", null, "SIGTERM")
+        }
+        return child as unknown as ReturnType<typeof Native.spawn>
+      })
+      syncBuiltinESMExports()
+      try {
+        await Effect.runPromise(
+          Effect.scoped(Effect.gen(function*() {
+            const handle = yield* PipedProcess.spawn(ChildProcess.make("fixture"), undefined)
+            expect(handle.pid).toBe(12345)
+            expect(yield* handle.isRunning).toBe(state === "running")
+            if (state === "running") child.emit("exit", 0, null)
+            if (state === "signalled") {
+              expect((yield* Effect.flip(handle.exitCode)).cause).toMatchObject({ signal: "SIGTERM" })
+            } else expect(yield* handle.exitCode).toBe(state === "exited" ? 17 : 0)
+          })).pipe(Effect.timeout("3 seconds"))
+        )
+        expect(child.kill).not.toHaveBeenCalled()
+      } finally {
+        child.stdin.destroy()
+        child.stdout.destroy()
+        child.stderr.destroy()
+        spawn.mockRestore()
+        syncBuiltinESMExports()
+      }
+    }
+  )
+
   it("preserves literal argv, native Windows verbatim options and independent byte streams", async () => {
     const directory = await mkdtemp(join(tmpdir(), "scoped-pipes-"))
     const spawn = vi.spyOn(NativeMutable, "spawn")

@@ -46,7 +46,10 @@ const checkNames = (violations: ReadonlyArray<{ readonly check: string }>): Read
   violations.map((violation) => violation.check)
 
 describe("SandboxConformance", () => {
-  it.effect(
+  // These trials run real OS processes. A cleanup observation may need a
+  // clock-driven retry after native exit; a frozen TestClock never advances
+  // that retry. Keep real deadlines here, as in ProviderConformance's trials.
+  it.live(
     "reports nothing for a conforming provider and acquires the default session key",
     () =>
       Effect.gen(function*() {
@@ -68,7 +71,7 @@ describe("SandboxConformance", () => {
     120_000
   )
 
-  it.effect("names a session that corrupts bytes or misreports absence", () =>
+  it.live("names a session that corrupts bytes or misreports absence", () =>
     Effect.gen(function*() {
       const corrupting = warped((session) => ({
         ...session,
@@ -96,7 +99,7 @@ describe("SandboxConformance", () => {
         .toContain("reports-an-absent-file")
     }), 120_000)
 
-  it.effect("names a session that refuses parent creation", () =>
+  it.live("names a session that refuses parent creation", () =>
     Effect.gen(function*() {
       const flat = warped((session) => ({
         ...session,
@@ -109,7 +112,7 @@ describe("SandboxConformance", () => {
         .toContain("creates-parent-directories")
     }), 120_000)
 
-  it.effect(
+  it.live(
     "names a session that runs commands in the wrong place or drops env or stdin",
     () =>
       Effect.gen(function*() {
@@ -151,7 +154,7 @@ describe("SandboxConformance", () => {
     120_000
   )
 
-  it.effect("names a session whose files are not the machine its processes run on", () =>
+  it.live("names a session whose files are not the machine its processes run on", () =>
     Effect.gen(function*() {
       // The split-brain session: a self-consistent file store that is NOT the
       // tree the shell sees. Every single-surface check passes against it;
@@ -171,7 +174,7 @@ describe("SandboxConformance", () => {
       expect(names).not.toContain("round-trips-binary-bytes")
     }), 120_000)
 
-  it.effect("names a provider that cannot serve a session again after a bare release", () =>
+  it.live("names a provider that cannot serve a session again after a bare release", () =>
     Effect.gen(function*() {
       // The reacquire sequence is the one place the suite acquires, releases
       // without running anything, and acquires again; failing exactly the
@@ -208,7 +211,7 @@ describe("SandboxConformance", () => {
         .toContain("reacquires-its-session")
     }), 120_000)
 
-  it.effect("carries the delegated spawn violations up whole", () =>
+  it.live("carries the delegated spawn violations up whole", () =>
     Effect.gen(function*() {
       const silent = warped((session) => ({
         ...session,

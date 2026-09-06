@@ -106,7 +106,8 @@ export const spawn = (
         try: () => {
           const ready = promise<void>()
           // Startup errors reject ready before any handle is exposed. Once
-          // started, only the native exit event supplies this result.
+          // started, the native exit event or retained native status supplies
+          // this result.
           let recordExit!: (result: readonly [number | null, NodeJS.Signals | null]) => void
           const exited = new Promise<readonly [number | null, NodeJS.Signals | null]>((resolve) => {
             recordExit = resolve
@@ -142,16 +143,50 @@ export const spawn = (
               ready.reject(error)
             }
           })
-          child.once("exit", (code, signal) => {
+          const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
             state.ended = true
             recordExit([code, signal])
-          })
+          }
+          child.once("exit", onExit)
+          // Bun can emit spawn before Native.spawn returns on a cold start.
+          // A returned pid proves that the native child was created; failed
+          // native spawns have no pid and still reject through the error event.
+          if (child.pid !== undefined) {
+            state.started = true
+            ready.resolve()
+          }
+          // Likewise retain an exit already reflected by the native handle
+          // before listeners could attach. Later events settle the same result.
+          if (child.exitCode != null || child.signalCode != null) {
+            onExit(child.exitCode ?? null, child.signalCode ?? null)
+          }
           // A pipe can fail before a consumer has started reading or writing.
           // Preserve the cause for consumers that attach after its error event.
           for (const pipe of child.stdio) {
             pipe?.on("error", (error: Error) => {
               state.pipeErrors.set(pipe, error)
             })
+          }
+          // Node resumes unread stdio after exit to deliver its close event.
+          // A fast target can exit before activation returns the public handle;
+          // flowing at that point discards bytes before any consumer subscribes.
+          // Keep declared outputs in readable mode for their entire lifetime.
+          // This listener does not drain or copy data: the native high-water
+          // mark still applies backpressure until NodeStream pulls the bytes.
+          for (
+            const fd of [
+              1,
+              2,
+              ...descriptors.additional.filter(({ config }) => config.type === "output").map(({ fd }) => fd)
+            ]
+          ) {
+            const pipe = child.stdio[fd]
+            pipe?.on("readable", () => {})
+            // Extra pipes are native duplex sockets, but an output descriptor
+            // exposes only its readable half. Close the unused parent writer:
+            // Bun otherwise resets the socket on child exit even with unread
+            // bytes buffered. Keep input descriptors open for their callers.
+            if (fd > 2 && pipe !== null && pipe !== undefined && "end" in pipe) pipe.end()
           }
           return state
         },

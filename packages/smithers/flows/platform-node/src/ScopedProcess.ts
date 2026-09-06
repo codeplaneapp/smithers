@@ -43,6 +43,10 @@ export interface Handle extends ChildProcessHandle {
  * the actual target. The private parent connection stops the tree on host loss.
  * Transient commands have no durable ledger; durable hosts use NodeHost instead.
  *
+ * Unconsumed output stays in bounded native buffers until it is read or the
+ * scope closes. Consume stdout and stderr alongside exitCode: a command can
+ * block when an unread pipe is full.
+ *
  * Failed startup closes its child scope before returning an error, even when
  * the caller catches that error and retains the surrounding scope.
  * @category constructors

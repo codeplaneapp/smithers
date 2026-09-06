@@ -376,6 +376,32 @@ describe("failed process preparation", () => {
 })
 
 describe("failed process shutdown", () => {
+  it("releases an unactivated owner immediately without launching its target or signalling a raw pid", async () => {
+    const host = fixture({ snapshot: "owner" })
+    try {
+      const outcome = await Effect.runPromise(
+        Effect.scoped(Effect.gen(function*() {
+          const prepared = yield* Supervisor.prepare(host.system, Cleanup.policy)(
+            ChildProcess.make("literal", { killSignal: "SIGTERM", forceKillAfter: 500 }),
+            host.spawn
+          )
+          // Preparation can be withdrawn before the ledger accepts the owner.
+          // Observe only that owner and request cleanup through its live channel.
+          yield* prepared.handle.kill()
+          expect(yield* prepared.settled).toBe(true)
+        })).pipe(Effect.exit)
+      )
+      expect(Exit.isSuccess(outcome)).toBe(true)
+      expect(host.requests.map((frame) => frame.type)).toEqual(["configure", "stop"])
+      expect(host.requests[1]).toMatchObject({ type: "stop", explicit: true, killSignal: "SIGKILL", graceMs: 500 })
+      expect(host.rawKills).toBe(0)
+      expect(host.unrefs).toBe(0)
+      expect(host.rawFinalizerReferenced).toBe(true)
+    } finally {
+      host.dispose()
+    }
+  })
+
   it("disconnects after an owner-only natural-exit fast-stop write fails and verifies cleanup", async () => {
     const host = fixture({ snapshot: "owner" })
     const original = Supervisor.Control.prototype.write
