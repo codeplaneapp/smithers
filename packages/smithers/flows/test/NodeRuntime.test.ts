@@ -277,8 +277,7 @@ describe("the supported Node SQLite composition", () => {
     // `storage`'s second argument is its own refusal path, and it used to
     // escape as a raw schema failure with no code at all.
     expect(() => NodeRuntime.storage(filename, "")).toThrowError(refusal("workspaceRoot"))
-    // `isAlive` is the one option the schema cannot check, because a function
-    // is not a JSON value. A JavaScript caller that passes the wrong shape has
+    // Function hooks are not JSON values. A JavaScript caller that passes the wrong shape has
     // to hear about it here rather than at the first ownership claim, hours
     // into a run.
     expect(
@@ -287,6 +286,35 @@ describe("the supported Node SQLite composition", () => {
       .toThrowError(refusal("isAlive"))
     // Nothing above may have created the database the journey below owns.
     expect(existsSync(filename)).toBe(false)
+  })
+
+  it("validates an optional execution predicate eagerly without invoking it or opening storage", () => {
+    const root = join(directory, "predicate-validation")
+    const database = join(root, "runtime.sqlite")
+    const declare = (canExecute: NodeRuntime.Options["canExecute"]) =>
+      NodeRuntime.layer(
+        { ...options("predicate-validation"), filename: database, workspaceRoot: root, canExecute },
+        StepBoundary.layer,
+        WorkspaceSandbox.layerFileSystem(),
+        Layer.empty
+      )
+    for (const invalid of [null, false, 0, "not a function", {}, []]) {
+      expect(() => declare(invalid as never)).toThrowError(expect.objectContaining({
+        code: "invalid_runtime_configuration",
+        field: "canExecute"
+      }))
+    }
+    let invocations = 0
+    expect(() =>
+      declare(() => {
+        invocations++
+        return Effect.succeed(false)
+      })
+    ).not.toThrow()
+    expect(() => declare(undefined)).not.toThrow()
+    expect(invocations).toBe(0)
+    expect(existsSync(root)).toBe(false)
+    expect(existsSync(database)).toBe(false)
   })
 
   it("stores artifacts beside the database without nesting a second .flows directory", async () => {

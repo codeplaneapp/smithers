@@ -365,7 +365,7 @@ describe("the fault matrix is wired to a gate", () => {
     const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8")
     assert.match(
       ci,
-      /^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1$/m,
+      /^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1(?: --verbose)?$/m,
       "the generated workflow does not run the fault matrix serially over every package that declares one"
     )
   })

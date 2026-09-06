@@ -17,6 +17,34 @@ import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { copyFixture, hashTree, runBin } from "../fixtures/helpers.ts"
 
+const expectSuccessfulPlan = (
+  result: ReturnType<typeof runBin>,
+  root: string,
+  before: ReadonlyMap<string, string>
+): void => {
+  expect(result.status, result.stderr).toBe(0)
+  // TypeScript 7.0.2's synchronous API inherits compiler stderr, then closes
+  // its pipes and sends SIGTERM in API.close(). On Linux that successful
+  // syntax-session shutdown can print this exact line. Keep the allowance
+  // local to successful plans; every other diagnostic and error exit stays
+  // visible, and verify the complete persisted result and original sources.
+  expect(result.stderr).toMatch(process.platform === "linux" ? /^(?:context canceled\r?\n)*$/ : /^$/)
+  const report = JSON.parse(readFileSync(join(root, ".out", "report.json"), "utf8")) as {
+    mode: string
+    exitCode: number
+    units: Array<{ id: string; status: string }>
+  }
+  expect(report).toMatchObject({ mode: "plan", exitCode: 0 })
+  expect(report.units.map(({ id, status }) => ({ id, status }))).toEqual([
+    { id: "dependencies", status: "planned" },
+    { id: "workflow:simple-workflow", status: "planned" },
+    { id: "project", status: "planned" }
+  ])
+  const after = hashTree(root)
+  for (const [path, digest] of before) expect([path, after.get(path)]).toEqual([path, digest])
+  expect([...after.keys()].filter((path) => !before.has(path)).every((path) => path.startsWith(".out/"))).toBe(true)
+}
+
 describe("smithers-migrate", () => {
   it("plans a project, writes the report where it was asked to, and changes nothing else", () => {
     const root = copyFixture("jsx-single")
@@ -73,6 +101,7 @@ describe("smithers-migrate", () => {
 
   it("takes the verification commands the operator names, and knows the ones it does not have", () => {
     const root = copyFixture("jsx-single")
+    const before = hashTree(root)
 
     // A project whose real typecheck is not the one the manifests imply has no
     // other way to be migrated: every unit is verified with these lines, and
@@ -93,12 +122,12 @@ describe("smithers-migrate", () => {
       "--verify-test",
       "make test"
     ])
-    expect([taken.status, taken.stderr]).toEqual([0, ""])
+    expectSuccessfulPlan(taken, root, before)
 
     // One empty value is how the live end-to-end test says "run no typecheck",
     // which is the shape a project whose 1.0 dependencies are unpublished needs.
     const none = runBin(["--root", root, "--report-dir", ".out", "--verify-typecheck", ""])
-    expect([none.status, none.stderr]).toEqual([0, ""])
+    expectSuccessfulPlan(none, root, before)
 
     const unknown = runBin(["--root", root, "--verify-everything", "make"])
     expect(unknown.status).not.toBe(0)

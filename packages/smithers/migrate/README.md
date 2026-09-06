@@ -95,6 +95,8 @@ The editing half is reached by subpath, as `@smthrs/migrate/flow/Command`, becau
 
 `plan` and `apply` write `.smithers-migrate/report.json` and `.smithers-migrate/report.md` (`--report-dir` moves them). The Markdown is deterministic for a given JSON, so two runs diff cleanly. Its sections, in order: summary, run state and operator instructions, project detection, construct inventory, mapping decisions, units, verification, manual follow-ups, and the commands that restore each checkpoint.
 
+On Linux, TypeScript 7.0.2 can print `context canceled` when its syntax-only compiler sessions close. A successful `plan` can include these shutdown messages alongside exit 0 and a complete report. The migration CLI preserves this upstream stderr output.
+
 Commit `report.md`. It is the record of what the tool changed, what it could not translate, and what a person still has to decide.
 
 Read the verification output before you commit it. Each command's last 12 KB of stdout and stderr is captured verbatim into `report.json` and rendered into `report.md`, and a failing install or test suite in a 0.x project prints whatever it prints: a registry token, a value read from `.env`, a CI credential. The tool does not redact it, because it cannot tell a secret from a stack frame.

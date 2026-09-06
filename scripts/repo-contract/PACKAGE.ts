@@ -145,8 +145,9 @@ const smithersLinks = Smithers.NodeTest({
 })
 
 /**
- * CLI reference pages name exactly the commands the shipped command tree
- * accepts, excluding the built-in flags that are not subcommands.
+ * The reference indexes every canonical command, retains the compatibility
+ * pages, and describes flags accepted by the public parser. The generated
+ * manifest and help have their own executable drift gate.
  *
  * @since 1.0.0
  * @category test

@@ -1,5 +1,5 @@
 /**
- * The command surface of `smthrs` in 1.0.0-rc.0.
+ * The retained Effect CLI handlers in `smthrs` 1.0.0-rc.0.
  *
  * At the import reference this module projected `SystemFlows.catalog`
  * directly, so eleven verbs existed only as bodiless reserved flows that
@@ -7,16 +7,18 @@
  * appearance: a verb either ships with a handler (the shipped-command contract, {@link shipped})
  * or is removed and says so (the removed-command contract, `Unsupported.removedVerbs`).
  *
- * This table is therefore the authority, and `test/Verb.test.ts` pins it. The
- * reserved flow ids that survive are still named here so a catalog change
- * cannot silently desynchronise the two.
+ * This table is the authority for those handlers, and `test/Verb.test.ts` pins
+ * it. `Cli.makeCli` registers the canonical public Incur command tree, including
+ * target commands and the `flow`, `runs`, and `approvals` groups. The reserved
+ * flow ids that survive are still named here so a catalog change cannot
+ * silently desynchronise the compatibility handlers and the control catalog.
  *
  * @since 1.0.0
  */
 import { SystemFlows } from "@smthrs/control"
 
 /**
- * One command that ships in rc.0.
+ * One retained Effect CLI command in rc.0.
  *
  * `aliases` are alternate spellings accepted by the parser. They are hidden
  * from `--help`, because help lists the canonical surface; the alias set is
@@ -48,7 +50,7 @@ const verb = (name: string, help: string, aliases: ReadonlyArray<string> = []): 
 }
 
 /**
- * Every command that ships in rc.0.
+ * Every retained Effect CLI command in rc.0.
  *
  * @category constants
  * @since 1.0.0

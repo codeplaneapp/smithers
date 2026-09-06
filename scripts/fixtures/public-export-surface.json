@@ -2,6 +2,28 @@
   "version": 1,
   "added": [
     {
+      "name": "@smthrs/canonical",
+      "subpath": "./BoundedJson",
+      "development": "./src/BoundedJson.ts",
+      "published": {
+        "types": "./dist/esm/BoundedJson.d.ts",
+        "import": "./dist/esm/BoundedJson.js",
+        "require": "./dist/cjs/BoundedJson.js"
+      },
+      "reason": "Shared bounded JSON admission and encoded-byte accounting used by flow, run-store, and step-cache; explicitly re-exported and documented by canonical. Persistence-specific error vocabulary remains with each caller."
+    },
+    {
+      "name": "@smthrs/memory",
+      "subpath": "./Migrations",
+      "development": "./src/Migrations.ts",
+      "published": {
+        "types": "./dist/esm/Migrations.d.ts",
+        "import": "./dist/esm/Migrations.js",
+        "require": "./dist/cjs/Migrations.js"
+      },
+      "reason": "Host-composable memory migration set and installation layer on the shared durable database ladder. NodeControl composes this public set with lower engine/control blocks; SQL schema implementation remains private."
+    },
+    {
       "name": "@smthrs/engine-store",
       "subpath": "./ExecutionSnapshot",
       "development": "./src/ExecutionSnapshot.ts",

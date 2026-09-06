@@ -767,10 +767,14 @@ describe("the assembled gateway over a real loopback bind", () => {
         })
       } else {
         // Effect's Node stream adapter destroys an over-limit source rather
-        // than draining attacker-controlled bytes. Node fetch reports that
-        // intentional hard close as UND_ERR_SOCKET.
-        expect((chunked.error as { readonly cause?: { readonly code?: unknown } }).cause?.code).toBe("UND_ERR_SOCKET")
+        // than draining attacker-controlled bytes. Node fetch can surface the
+        // socket close itself or the OS reset, depending on when it observes it.
+        const code = (chunked.error as { readonly cause?: { readonly code?: unknown } }).cause?.code
+        expect(["UND_ERR_SOCKET", "ECONNRESET"]).toContain(code)
       }
+      const next = yield* Effect.promise(() => fetch(`${url}/health`))
+      expect(next.status).toBe(200)
+      expect(yield* Effect.promise(() => next.json() as Promise<unknown>)).toEqual(health)
     }).pipe(Effect.provide(served({ host: "127.0.0.1", port: 0, maxRequestBodyBytes: 64 }))))
 
   test("admits a body at exactly the limit and never trusts a declared length", () =>

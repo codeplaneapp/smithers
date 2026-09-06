@@ -14,6 +14,25 @@ import * as PackageManager from "../packages/smithers/build/targets/src/PackageM
 export const root = fileURLToPath(new URL("../", import.meta.url))
 const cli = resolve(root, "packages/smithers/src/bin.ts")
 
+/** Recognize target invocations without silently dropping a newly added option. */
+export function targetInvocation(run) {
+  if (typeof run !== "string" || !/^pnpm exec smthrs (?:ci|test|build|lint|docs)\b/.test(run)) return undefined
+  const match = run.match(/^pnpm exec smthrs (ci|test|build|lint|docs) '(\/\/[^']+)'(.*)$/)
+  if (!match) throw new Error(`Unrecognized CI target invocation: ${run}`)
+  const [, verb, pattern, tail] = match
+  const options = tail.trim() === "" ? [] : tail.trim().split(/\s+/)
+  let jobs
+  let verbose = false
+  for (let index = 0; index < options.length; index++) {
+    const option = options[index]
+    if (option === "--verbose" && !verbose) verbose = true
+    else if (option === "--jobs" && jobs === undefined && /^[1-9]\d*$/.test(options[index + 1] ?? "")) {
+      jobs = Number(options[++index])
+    } else throw new Error(`Unrecognized CI target option in: ${run}`)
+  }
+  return { verb, pattern, jobs, verbose }
+}
+
 export function planned(verb, pattern, workspace = root) {
   const result = spawnSync(process.execPath, [cli, verb, pattern, "--plan", "--json", "--workspace", workspace], {
     cwd: workspace, encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 128 * 1024 * 1024,
@@ -56,9 +75,9 @@ export async function resolveInventory() {
   for (const [jobId, job] of Object.entries(workflow.jobs)) {
     if ([true, "true"].includes(job["continue-on-error"])) continue
     for (const step of job.steps ?? []) {
-      const match = step.run?.match(/^pnpm exec smthrs (ci|test|build|lint|docs) '(\/\/[^']+)'(?: --jobs \d+)?$/)
-      if (!match) continue
-      const [, verb, pattern] = match
+      const invocation = targetInvocation(step.run)
+      if (!invocation) continue
+      const { verb, pattern } = invocation
       const identity = `${verb} ${pattern}`
       if (!selections.has(identity)) {
         console.error(`Resolving CI selection: ${identity}`)

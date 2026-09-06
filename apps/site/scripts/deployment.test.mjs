@@ -1,13 +1,28 @@
 /** Validate real Alchemy entry points offline; never evaluate or deploy a stack. */
+import * as Config from "effect/Config"
+import * as ConfigProvider from "effect/ConfigProvider"
+import * as Effect from "effect/Effect"
+import * as Redacted from "effect/Redacted"
 import assert from "node:assert/strict"
-import { pathToFileURL } from "node:url"
+import { readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import test from "node:test"
-import * as Effect from "effect/Effect"
+import { pathToFileURL } from "node:url"
 import ts from "typescript"
 import { sites } from "../../docs/shared/manifest.mjs"
 
 const root = resolve(import.meta.dirname, "../../..")
+const appEntries = ["review", "bug-worker", "status-site"].map((name) => join(root, "apps", name, "alchemy.run.ts"))
+
+const appOptions = [
+  "REVIEW_ENABLE_SMITHERS_SH_ROUTE",
+  "REVIEW_PUBLIC_BASE_URL",
+  "BUG_PUBLIC_BASE_URL",
+  "RESEND_API_KEY",
+  "NOTIFICATION_FROM",
+  "STATUS_SITE_DOMAIN",
+  "CLOUDFLARE_SMITHERS_ZONE_ID"
+]
 
 test("all deployment entry points import as Alchemy 2 stack effects", async (t) => {
   const overrides = new Map()
@@ -24,7 +39,8 @@ test("all deployment entry points import as Alchemy 2 stack effects", async (t) 
   })
   set("SMITHERS_SITE_DOMAIN", undefined)
   set("SMITHERS_SITE_WORKER_NAME", undefined)
-  const entryPoints = [join(root, "apps/site/alchemy.run.ts")]
+  for (const name of appOptions) set(name, undefined)
+  const entryPoints = [join(root, "apps/site/alchemy.run.ts"), ...appEntries]
   for (const site of sites) {
     set(`${site.slug.toUpperCase().replaceAll("-", "_")}_WORKER_NAME`, `docs-test-${site.slug}`)
     entryPoints.push(join(site.siteDir, "alchemy.run.ts"))
@@ -39,6 +55,7 @@ test("stack properties and shared implementation typecheck against the declared 
   const program = ts.createProgram({
     rootNames: [
       join(root, "apps/site/alchemy.run.ts"),
+      ...appEntries,
       join(root, "apps/docs/shared/alchemy-site.mjs"),
       ...sites.map((site) => join(site.siteDir, "alchemy.run.ts"))
     ],
@@ -54,12 +71,102 @@ test("stack properties and shared implementation typecheck against the declared 
       target: ts.ScriptTarget.ESNext
     }
   })
-  const errors = ts.getPreEmitDiagnostics(program).filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
-  assert.equal(errors.length, 0, ts.formatDiagnosticsWithColorAndContext(errors, {
-    getCanonicalFileName: (file) => file,
-    getCurrentDirectory: () => root,
-    getNewLine: () => "\n"
-  }))
+  const errors = ts.getPreEmitDiagnostics(program).filter((diagnostic) =>
+    diagnostic.category === ts.DiagnosticCategory.Error
+  )
+  assert.equal(
+    errors.length,
+    0,
+    ts.formatDiagnosticsWithColorAndContext(errors, {
+      getCanonicalFileName: (file) => file,
+      getCurrentDirectory: () => root,
+      getNewLine: () => "\n"
+    })
+  )
+})
+
+test("app stacks retain their Worker routing and defer required redacted credentials", async () => {
+  const [review, bugs, status] = await Promise.all(appEntries.map((path) => import(pathToFileURL(path).href)))
+  assert.equal(review.workerProps.name, "smithers-review")
+  assert.equal(review.workerProps.main, "src/server/worker.ts")
+  assert.deepEqual(review.workerProps.domain, { name: "review.jjhub.tech", zoneId: "72854846f57d9e46794e7e6aae7e3328" })
+  assert.deepEqual(review.workerProps.routes, [])
+  assert.equal(review.workerProps.env.PUBLIC_BASE_URL, "https://review.jjhub.tech")
+  assert.ok(Effect.isEffect(review.workerProps.env.WALKTHROUGHS))
+  assert.ok(Effect.isEffect(review.workerProps.env.DB))
+
+  assert.equal(bugs.workerProps.name, "smithers-bug-worker")
+  assert.equal(bugs.workerProps.main, "src/worker.ts")
+  assert.deepEqual(bugs.workerProps.domain, { name: "bug.smithers.sh" })
+  assert.deepEqual(bugs.workerProps.crons, ["*/10 * * * *"])
+  assert.equal(bugs.workerProps.env.PUBLIC_BASE_URL, "https://bug.smithers.sh")
+  assert.ok(Effect.isEffect(bugs.workerProps.env.BUGS))
+  assert.ok(!("RESEND_API_KEY" in bugs.workerProps.env))
+  assert.ok(!("NOTIFICATION_FROM" in bugs.workerProps.env))
+
+  const credentials = [
+    [review.workerProps.env.REVIEW_PUBLISH_TOKEN, "REVIEW_PUBLISH_TOKEN"],
+    [review.workerProps.env.ADMIN_TOKEN, "REVIEW_ADMIN_TOKEN"],
+    [review.workerProps.env.METRICS_TOKEN, "REVIEW_METRICS_TOKEN"],
+    [review.workerProps.env.ANTHROPIC_API_KEY, "REVIEW_ANTHROPIC_API_KEY"],
+    [bugs.workerProps.env.BUG_ADMIN_TOKEN, "BUG_ADMIN_TOKEN"]
+  ]
+  for (const [config, name] of credentials) {
+    assert.ok(Config.isConfig(config), `${name}: resolve credentials only while evaluating the stack`)
+    assert.equal(Effect.runSyncExit(config.parse(ConfigProvider.fromUnknown({})))._tag, "Failure")
+    assert.equal(Effect.runSyncExit(config.parse(ConfigProvider.fromUnknown({ [name]: "  " })))._tag, "Failure")
+    const value = Effect.runSync(
+      config.parse(ConfigProvider.fromUnknown({ [name]: "  deployment-test-placeholder  " }))
+    )
+    assert.ok(Redacted.isRedacted(value))
+    assert.equal(Redacted.value(value), "deployment-test-placeholder")
+  }
+
+  const wranglerPath = join(root, "apps/status-site/wrangler.jsonc")
+  const wrangler = ts.parseConfigFileTextToJson(wranglerPath, readFileSync(wranglerPath, "utf8"))
+  assert.equal(wrangler.error, undefined)
+  assert.equal(status.workerProps.name, wrangler.config.name)
+  assert.equal(status.workerProps.main, wrangler.config.main)
+  assert.equal(status.workerProps.compatibility.date, wrangler.config.compatibility_date)
+  assert.equal(status.workerProps.workersDev, wrangler.config.workers_dev)
+  assert.equal(status.workerProps.domain.name, wrangler.config.routes[0].pattern)
+  assert.equal(status.workerProps.assets.directory, resolve(root, "apps/status-site", wrangler.config.assets.directory))
+  assert.equal(wrangler.config.assets.binding, "ASSETS")
+  assert.equal(status.workerProps.assets.notFoundHandling, wrangler.config.assets.not_found_handling)
+  assert.equal(status.workerProps.assets.runWorkerFirst, wrangler.config.assets.run_worker_first)
+  assert.deepEqual(status.workerProps.observability, wrangler.config.observability)
+})
+
+test("app stack overrides preserve the optional route, bindings, domain and zone", async (t) => {
+  const previous = new Map(appOptions.map((name) => [name, process.env[name]]))
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+  Object.assign(process.env, {
+    REVIEW_ENABLE_SMITHERS_SH_ROUTE: "1",
+    REVIEW_PUBLIC_BASE_URL: " https://review-preview.example ",
+    BUG_PUBLIC_BASE_URL: " https://bug-preview.example ",
+    RESEND_API_KEY: "deployment-test-placeholder",
+    NOTIFICATION_FROM: "reports@example.test",
+    STATUS_SITE_DOMAIN: " status-preview.example ",
+    CLOUDFLARE_SMITHERS_ZONE_ID: " test-zone "
+  })
+  const [review, bugs, status] = await Promise.all(
+    appEntries.map((path) => import(`${pathToFileURL(path).href}?deployment-overrides`))
+  )
+  assert.deepEqual(review.workerProps.routes, [{
+    pattern: "review.smithers.sh/*",
+    zoneId: "72854846f57d9e46794e7e6aae7e3328"
+  }])
+  assert.equal(review.workerProps.env.PUBLIC_BASE_URL, "https://review-preview.example")
+  assert.equal(bugs.workerProps.env.PUBLIC_BASE_URL, "https://bug-preview.example")
+  assert.equal(bugs.workerProps.env.NOTIFICATION_FROM, "reports@example.test")
+  assert.ok(Config.isConfig(bugs.workerProps.env.RESEND_API_KEY))
+  assert.deepEqual(bugs.workerProps.domain, { name: "bug.smithers.sh", zoneId: "test-zone" })
+  assert.deepEqual(status.workerProps.domain, { name: "status-preview.example", zoneId: "test-zone" })
 })
 
 test("package stacks require an explicit physical Worker identity", async () => {

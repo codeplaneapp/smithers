@@ -1,5 +1,5 @@
 /**
- * Alchemy infrastructure-as-code for bug.smithers.sh.
+ * Alchemy 2 stack for bug.smithers.sh. Importing it deploys nothing.
  *
  * One Cloudflare Worker (entry: src/worker.ts) plus one KV namespace for bug
  * reports and the per-IP rate-limit counters. The smithers.sh zone lives on
@@ -9,41 +9,47 @@
  * Deploy:   BUG_ADMIN_TOKEN=... bun x alchemy deploy
  *           (equivalently: BUG_ADMIN_TOKEN=... pnpm -C apps/bug-worker deploy)
  * Destroy:  bun x alchemy destroy
+ * Review existing resource names and Alchemy 2 state/adoption before the
+ * first deployment; importing old Alchemy 1 state is not automatic.
  *
  * Required env: CLOUDFLARE_API_TOKEN, ALCHEMY_PASSWORD, BUG_ADMIN_TOKEN.
  * Optional env: CLOUDFLARE_SMITHERS_ZONE_ID (alchemy resolves the zone from
  * the domain when omitted, same convention as apps/telegram-summary).
  */
-import alchemy from "alchemy";
-import { KVNamespace, Worker } from "alchemy/cloudflare";
+import * as Alchemy from "alchemy";
+import * as Cloudflare from "alchemy/Cloudflare";
+import * as Config from "effect/Config";
+import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 
 const zoneId = process.env.CLOUDFLARE_SMITHERS_ZONE_ID?.trim() || undefined;
 
-const app = await alchemy("smithers-bug-worker");
+const adminToken = Config.schema(
+  Schema.Redacted(Schema.Trim.check(Schema.isNonEmpty())),
+  "BUG_ADMIN_TOKEN",
+).pipe(Config.map((value) => Redacted.make(Redacted.value(value).trim())));
+const bugs = Cloudflare.KV.Namespace("bug-reports", { title: "bug-reports" });
 
-const adminToken = process.env.BUG_ADMIN_TOKEN?.trim();
-if (!adminToken) throw new Error("BUG_ADMIN_TOKEN is required to deploy");
-
-const bugs = await KVNamespace("bug-reports", {
-  adopt: true,
-});
-
-export const worker = await Worker("smithers-bug-worker", {
-  entrypoint: "src/worker.ts",
-  compatibilityDate: "2025-05-01",
-  url: true,
+export const workerProps = {
+  name: "smithers-bug-worker",
+  main: "src/worker.ts",
+  compatibility: { date: "2025-05-01" },
+  workersDev: true,
   crons: ["*/10 * * * *"],
-  adopt: true,
-  bindings: {
+  env: {
     BUGS: bugs,
-    ...(process.env.RESEND_API_KEY ? { RESEND_API_KEY: alchemy.secret(process.env.RESEND_API_KEY) } : {}),
+    ...(process.env.RESEND_API_KEY ? { RESEND_API_KEY: Config.redacted("RESEND_API_KEY") } : {}),
     ...(process.env.NOTIFICATION_FROM ? { NOTIFICATION_FROM: process.env.NOTIFICATION_FROM } : {}),
-    BUG_ADMIN_TOKEN: alchemy.secret(adminToken),
+    BUG_ADMIN_TOKEN: adminToken,
     PUBLIC_BASE_URL: process.env.BUG_PUBLIC_BASE_URL?.trim() || "https://bug.smithers.sh",
   },
-  domains: [{ domainName: "bug.smithers.sh", ...(zoneId ? { zoneId } : {}), adopt: true }],
-});
+  domain: { name: "bug.smithers.sh", ...(zoneId ? { zoneId } : {}) },
+} satisfies Cloudflare.WorkerProps;
 
-console.log(`smithers bug worker deployed → ${worker.url ?? "(no workers.dev url)"}`);
+export const worker = Cloudflare.Worker("smithers-bug-worker", workerProps);
 
-await app.finalize();
+export default Alchemy.Stack(
+  "smithers-bug-worker",
+  { providers: Cloudflare.providers(), state: Alchemy.localState() },
+  worker,
+);

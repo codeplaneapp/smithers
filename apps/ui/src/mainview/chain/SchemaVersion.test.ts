@@ -1,7 +1,8 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
+import type { Card, WorkingCopy } from "../state/AppState"
 import { createAppStore } from "../state/AppStore"
-import { ENVELOPE_STORAGE_KEY } from "./TransactionalStorage"
+import { ENVELOPE_STORAGE_KEY, parseStorageEnvelope, STAGED_ENVELOPE_STORAGE_KEY } from "./TransactionalStorage"
 import {
   APP_SCHEMA_VERSION,
   enforceSchemaVersion,
@@ -52,15 +53,33 @@ describe("the persisted collection inventory the gate clears", () => {
   /*
    * The gate clears a declared list, so a collection added to AppStore and not
    * declared here would keep its rows across a bump — exactly the silent
-   * survival E14.2 exists to stop. Compare against the ids a real store
-   * exposes, not against a copy of the list.
+   * survival E14.2 exists to stop. Observe the actual storage reads: public
+   * collections include derived views whose ids must never replace the
+   * durable collections they project.
    */
-  test("covers every collection a real store exposes", async () => {
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    const liveIds = Object.values(store.collections)
-      .map((collection) => collection.id)
-      .sort()
-    expect([...PERSISTED_COLLECTION_IDS].sort()).toEqual(liveIds)
+  test("covers every durable collection a real store reads, excluding derived views", async () => {
+    const storage = memoryStorage()
+    const reads = new Set<string>()
+    const store = await createAppStore({
+      kind: "localStorage",
+      storage: {
+        ...storage,
+        getItem: (key) => { reads.add(key); return storage.getItem(key) }
+      }
+    })
+    const bookkeeping = new Set([
+      ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY,
+      SCHEMA_VERSION_STORAGE_KEY, PERSISTENCE_BACKEND_STORAGE_KEY
+    ])
+    const durableIds = [...reads]
+      .filter((key) => key.startsWith(PERSISTED_KEY_PREFIX) && !bookkeeping.has(key))
+      .map((key) => key.slice(PERSISTED_KEY_PREFIX.length))
+    // The file tree is memory-only; its historical key remains resettable.
+    expect(durableIds).not.toContain(store.collections.repoTree.id)
+    expect([...PERSISTED_COLLECTION_IDS].sort()).toEqual([...durableIds, store.collections.repoTree.id].sort())
+    expect(durableIds).not.toContain(store.collections.cards.id)
+    expect(durableIds).not.toContain(store.collections.workingCopies.id)
+    await store.dispose?.()
   })
 
   /*
@@ -190,6 +209,60 @@ describe("enforceSchemaVersion", () => {
 })
 
 describe("a real store across a schema version bump", () => {
+  test("legacy cards and copies keep durable authority across migration, live projection, reopen and reset", async () => {
+    const storage = memoryStorage()
+    const card: Card = {
+      id: "legacy-card", kind: "status", title: "Before", status: "active",
+      createdAt: 1, ordinal: 1, payload: { note: "kept from the old store" }
+    }
+    const copy: WorkingCopy = {
+      id: "workspace:legacy", workspaceId: "legacy", repoId: "org/repo",
+      kind: "workspace", label: "Before", updatedAt: 1, revision: 0
+    }
+    const cardKey = `${PERSISTED_KEY_PREFIX}app-cards`
+    const copyKey = `${PERSISTED_KEY_PREFIX}app-working-copies`
+    const legacyCard = persistedRow(card.id, card)
+    const legacyCopy = persistedRow(copy.id, copy)
+    storage.setItem(cardKey, legacyCard)
+    storage.setItem(copyKey, legacyCopy)
+    storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION - 1))
+
+    const store = await createAppStore({ kind: "localStorage", storage })
+    expect(store.collections.cards.get(card.id)).toMatchObject(card)
+    expect(store.collections.workingCopies.get(copy.id)).toMatchObject(copy)
+    await store.dispatch({ type: "card.updated", actor: "system", id: card.id, patch: { title: "After" } })
+      .isPersisted.promise
+    await store.dispatch({
+      type: "workingcopies.workspaces.loaded", actor: "system", copies: [{ ...copy, label: "After" }]
+    }).isPersisted.promise
+
+    const committed = storage.getItem(ENVELOPE_STORAGE_KEY)!
+    const entries = parseStorageEnvelope(committed)!.entries
+    expect(JSON.parse(entries[cardKey]!)[`s:${card.id}`].data.title).toBe("After")
+    expect(JSON.parse(entries[copyKey]!)[`s:${copy.id}`].data.label).toBe("After")
+    for (const view of [store.collections.cards, store.collections.workingCopies]) {
+      const key = `${PERSISTED_KEY_PREFIX}${view.id}`
+      expect(entries[key]).toBeUndefined()
+      expect(storage.getItem(key)).toBeNull()
+    }
+    // Legacy bytes are recovery copies; the committed envelope now owns data.
+    expect(storage.getItem(cardKey)).toBe(legacyCard)
+    expect(storage.getItem(copyKey)).toBe(legacyCopy)
+    expect(storage.getItem(SCHEMA_VERSION_STORAGE_KEY)).toBe(String(APP_SCHEMA_VERSION))
+    await store.dispose?.()
+    const reopened = await createAppStore({ kind: "localStorage", storage })
+    expect(reopened.collections.cards.get(card.id)?.title).toBe("After")
+    expect(reopened.collections.workingCopies.get(copy.id)?.label).toBe("After")
+    await reopened.dispose?.()
+
+    const outcome = enforceSchemaVersion(storage, { version: APP_SCHEMA_VERSION + 1, onMismatch: "reset" })
+    for (const key of [cardKey, copyKey, ENVELOPE_STORAGE_KEY]) expect(storage.getItem(key)).toBeNull()
+    const recovery = outcome.quarantinedKeys.map((key) => storage.getItem(key))
+    expect(recovery).toContain(committed)
+    expect(recovery).toContain(legacyCard)
+    expect(recovery).toContain(legacyCopy)
+  })
+
   test("future state refuses app open without changing the durable store", async () => {
     const storage = memoryStorage()
     storage.setItem(SCHEMA_VERSION_STORAGE_KEY, String(APP_SCHEMA_VERSION + 1))

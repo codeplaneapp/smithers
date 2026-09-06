@@ -20,6 +20,7 @@ import { AGENT_ROLES, findAgentRole, roleLaunchArgv } from "@smthrs/rpc/AgentRol
 import type { AgentRole, AgentRoleId } from "@smthrs/rpc/AgentRoles"
 import type { Harness, PtySession } from "@smthrs/rpc/LocalApp"
 import { harnessCandidateDirs, harnessModelSpec } from "./Harnesses"
+import { PtySpawnError, spawnPty } from "./PtySpawn"
 import { currentSandboxHost, harnessPolicy, terminalPolicy, wrapSandbox } from "./Sandbox"
 import type { SandboxHost } from "./Sandbox"
 
@@ -340,7 +341,7 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
     })
     let proc: ReturnType<typeof Bun.spawn>
     try {
-      proc = Bun.spawn([...wrapped.argv], {
+      proc = spawnPty(wrapped.argv, {
         cwd,
         env: childEnvironment,
         terminal: {
@@ -354,6 +355,7 @@ export const createPtyManager = (options: PtyManagerOptions): PtyManager => {
         }
       })
     } catch (error) {
+      if (error instanceof PtySpawnError) await error.stopped
       return { status: "error", code: "spawn_failed", message: error instanceof Error ? error.message : String(error) }
     }
     const record: PtySession = {

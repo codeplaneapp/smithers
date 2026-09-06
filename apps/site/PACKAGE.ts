@@ -280,6 +280,11 @@ const docsRuntimeTests = Smithers.Shell.Test({
     Smithers.file("//apps/docs/shared/alchemy-site.d.ts"),
     Smithers.file("//apps/docs/shared/manifest.mjs"),
     Smithers.file("//apps/docs/shared/package.json"),
+    Smithers.file("//apps/status-site/wrangler.jsonc"),
+    ...["review", "bug-worker", "status-site"].flatMap((name) => [
+      Smithers.file(`//apps/${name}/alchemy.run.ts`),
+      Smithers.file(`//apps/${name}/package.json`)
+    ]),
     ...docsSites.map((site) => Smithers.file(`//apps/docs/${site.slug}/alchemy.run.ts`)),
     examplesPackage.docs,
     cliPackage.docsSources,

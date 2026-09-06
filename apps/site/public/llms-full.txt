@@ -5156,8 +5156,9 @@ Pointed at a GitHub pull request, it also posts the review onto the PR: the narr
 Findings never fail the build. The review service reports; humans decide.
 
 This guide covers the review action and the separate `smithers-review` executable.
-The `review` subcommand was removed from the rc.0 CLI; see the
-[CLI migration reference](/docs/reference/cli/).
+The `smthrs review <pattern>` command executes workspace model-review targets;
+use `smithers-review` for the pull-request service described here. See the
+[CLI reference](/docs/reference/cli/) for target execution.
 
 ## Before you start
 
@@ -43551,6 +43552,7 @@ flow is a workflow, and a run is a persisted flow execution.
 | `runs inspect/replay/fork/rewind` | Inspect historical frames, branch a run, or restore an earlier frame. |
 | `approvals list/approve/deny` | Read pending approvals and submit the exact payload or `@file`. |
 | `init [name]`, `generate app/flow/package/ci` | Set up a workspace or scaffold a resource. |
+| `create-app [directory]` | Scaffold an app from a `@smthrs/create-app` template. |
 | `install`, `git-hooks [--write]` | Apply the workspace's declared installation and hook configuration. |
 | `cache status/prune/clear`, `clean`, `gc` | Maintain local action results, declared cleanup targets, and old runs. |
 | `memory`, `credentials`, `triggers`, `integrations`, `eval` | Operate persistent agent features. |

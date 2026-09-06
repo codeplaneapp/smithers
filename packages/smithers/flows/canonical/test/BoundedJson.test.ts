@@ -34,6 +34,29 @@ describe("bounded JSON admission", () => {
     expect(accepted([{ a: 1 }, { b: 2 }], { maxTotalMembers: 3 })).toMatchObject({ ok: false, path: ["1"] })
   })
 
+  it("refuses impossible array lengths before they can reduce the cumulative member count", () => {
+    const withLength = (length: number) =>
+      new Proxy([], {
+        getOwnPropertyDescriptor: (target, key) =>
+          key === "length"
+            ? { ...Object.getOwnPropertyDescriptor(target, key)!, value: length }
+            : Object.getOwnPropertyDescriptor(target, key)
+      })
+
+    for (const length of [-1, -100, 0x100000000, Number.MAX_SAFE_INTEGER]) {
+      expect(accepted(withLength(length))).toMatchObject({ ok: false, code: "arrayLength" })
+    }
+    // The largest valid array length still reaches the ordinary member bound.
+    expect(accepted(withLength(0xffffffff))).toMatchObject({ ok: false, code: "members" })
+
+    // Two object fields plus three array entries exceed a total budget of three.
+    // A negative descriptor used to subtract from that total and admit all five.
+    expect(accepted({ empty: [], values: [1, 2, 3] }, { maxTotalMembers: 3 }))
+      .toMatchObject({ ok: false, code: "members", path: ["values"] })
+    expect(accepted({ empty: withLength(-100), values: [1, 2, 3] }, { maxTotalMembers: 3 }))
+      .toMatchObject({ ok: false, code: "arrayLength", path: ["empty"] })
+  })
+
   it("identifies invalid fields without reading accessors", () => {
     const value = {
       nested: Object.defineProperty({}, "secret", {

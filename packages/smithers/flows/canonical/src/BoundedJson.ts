@@ -150,7 +150,10 @@ export const admit = (input: unknown, limits: Limits): Result => {
     try {
       if (Array.isArray(object)) {
         const length = Object.getOwnPropertyDescriptor(object, "length")
-        if (length === undefined || !("value" in length) || !Number.isSafeInteger(length.value)) {
+        if (
+          length === undefined || !("value" in length) || !Number.isSafeInteger(length.value)
+          || length.value < 0 || length.value > 0xffffffff
+        ) {
           return refuse("arrayLength", "has an invalid array length")
         }
         if (!countMembers(length.value)) return refuse("members", "exceeds the JSON members limit")

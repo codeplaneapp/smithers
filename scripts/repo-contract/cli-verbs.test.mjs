@@ -1,11 +1,11 @@
 /**
  * The CLI reference pages match the shipped command tree.
  *
- * This checks `Verb.subcommands`, not `Verb.names`: `completions` is shipped
- * as the built-in `--completions` flag rather than as a command-tree
- * subcommand, so it does not have a CLI reference page. Reading `Verb.ts` as
- * text keeps this repository-wide gate from loading the CLI and its control
- * runtime just to inspect its declarative command table.
+ * The generated Incur manifest and help describe the canonical parser; their
+ * separate generation gate checks them against the executable. `Verb.ts`
+ * describes the retained Effect CLI handlers, whose reference pages remain
+ * useful for compatibility. Reading these artifacts avoids starting the CLI's
+ * control runtime merely to check its documentation.
  */
 import assert from "node:assert/strict"
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -24,14 +24,20 @@ const subcommands = (source) => {
     .map((match) => match[1])
 }
 
-const compare = (verbs, pages) => {
-  const expected = new Set(verbs)
+const compare = (required, accepted, pages) => {
+  const expected = new Set(required)
+  const available = new Set(accepted)
   const documented = new Set(pages)
   return [
-    ...[...documented].filter((page) => !expected.has(page)).map((page) => `reference/cli/${page}.mdx documents no shipped verb: ${page}`),
+    ...[...documented].filter((page) => !available.has(page)).map((page) => `reference/cli/${page}.mdx documents no shipped verb: ${page}`),
     ...[...expected].filter((verb) => !documented.has(verb)).map((verb) => `shipped verb has no reference/cli page: ${verb}`)
   ]
 }
+
+const indexedCommands = (page) => new Set(page.split("\n")
+  .filter((line) => line.startsWith("|"))
+  .flatMap((line) => [...(line.split("|")[1] ?? "").matchAll(/`([^`]+)`/g)])
+  .flatMap((match) => match[1].split(/\s/, 1)[0].split("/")))
 
 const cliPages = (directory) =>
   readdirSync(directory)
@@ -48,9 +54,26 @@ const markdownFiles = (directory) =>
 describe("the CLI reference", () => {
   const verbSource = readFileSync(join(root, "packages/smithers/src/Verb.ts"), "utf8")
   const pagesDirectory = join(root, "apps/site/src/content/docs/docs/reference/cli")
+  const manifest = JSON.parse(readFileSync(join(root, "apps/site/src/data/cli-commands.json"), "utf8"))
+  const canonical = [...new Set(manifest.commands.map((command) => command.name.split(" ")[0]))]
+  const legacy = subcommands(verbSource)
+  const help = readFileSync(join(root, "apps/site/src/data/help/smthrs.txt"), "utf8")
 
-  it("has one page for each shipped subcommand and no other verb pages", () => {
-    assert.deepEqual(compare(subcommands(verbSource), cliPages(pagesDirectory)), [])
+  it("retains compatibility pages and documents the canonical durable groups", () => {
+    const durableGroups = ["flow", "runs", "approvals"]
+    for (const group of durableGroups) assert.ok(canonical.includes(group), `${group} must be a public command`)
+    assert.deepEqual(compare([...legacy, ...durableGroups], [...legacy, ...canonical], cliPages(pagesDirectory)), [])
+  })
+
+  it("indexes every canonical command, including those without a dedicated page", () => {
+    assert.equal(manifest.version, "incur.v1")
+    assert.ok(canonical.length > 0)
+    const indexed = indexedCommands(readFileSync(join(pagesDirectory, "index.mdx"), "utf8"))
+    assert.deepEqual(canonical.filter((command) => !indexed.has(command)), [])
+  })
+
+  it("accepts a canonical page that has no legacy handler", () => {
+    assert.deepEqual(compare(["status"], ["status", "runs"], ["status", "runs"]), [])
   })
 
   it("rejects an added page for a nonexistent verb", () => {
@@ -58,7 +81,7 @@ describe("the CLI reference", () => {
     try {
       writeFileSync(join(directory, "run.mdx"), "")
       writeFileSync(join(directory, "imaginary.mdx"), "")
-      assert.deepEqual(compare(["run"], cliPages(directory)), [
+      assert.deepEqual(compare(["run"], ["run"], cliPages(directory)), [
         "reference/cli/imaginary.mdx documents no shipped verb: imaginary"
       ])
     } finally {
@@ -70,7 +93,7 @@ describe("the CLI reference", () => {
     const directory = mkdtempSync(join(tmpdir(), "smithers-cli-reference-"))
     try {
       writeFileSync(join(directory, "run.mdx"), "")
-      assert.deepEqual(compare(["run", "status"], cliPages(directory)), [
+      assert.deepEqual(compare(["run", "status"], ["run", "status"], cliPages(directory)), [
         "shipped verb has no reference/cli page: status"
       ])
     } finally {
@@ -106,16 +129,20 @@ describe("the CLI reference", () => {
     assert.deepEqual(stale, [], `CLI install commands need an explicit tag: ${stale.join(", ")}`)
   })
 
-  it("documents the built-in input and logging flags", () => {
+  it("documents the public help, schema, and presentation flags", () => {
     const page = readFileSync(join(pagesDirectory, "index.mdx"), "utf8")
-    for (const flag of ["--wizard", "--log-level"]) assert.ok(page.includes(`| \`${flag}\` |`))
+    for (const flag of ["--help", "--schema", "--format", "--silent", "--audience"]) {
+      assert.match(help, new RegExp(`^  ${flag}(?:\\s|,|$)`, "m"), `${flag} must be accepted by the public parser`)
+      assert.match(page, new RegExp("`" + flag + "(?:\\s|`)"), `${flag} needs an explanation in the CLI reference`)
+    }
   })
 
-  it("identifies the review service separately from the removed CLI verb", () => {
+  it("distinguishes the review service from the model-review target command", () => {
     const page = readFileSync(join(root, "apps/site/src/content/docs/docs/guides/pr-review-action.mdx"), "utf8")
     assert.ok(page.includes("`smithers-review`"))
-    assert.ok(page.includes("review` subcommand was removed"))
-    assert.ok(!page.includes("`smthrs review` runs"))
+    assert.ok(page.includes("`smthrs review <pattern>`"))
+    assert.ok(page.includes("model-review targets"))
+    assert.ok(!page.includes("review` subcommand was removed"))
   })
 
 })

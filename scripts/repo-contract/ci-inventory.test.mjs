@@ -3,7 +3,22 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { resolveInventory, root } from "../ci-inventory.mjs"
+import { resolveInventory, root, targetInvocation } from "../ci-inventory.mjs"
+
+test("CI command discovery retains diagnostic options and refuses unknown selection syntax", () => {
+  for (const options of ["--jobs 2 --verbose", "--verbose --jobs 2"]) {
+    assert.deepEqual(targetInvocation(`pnpm exec smthrs ci '//packages/...' ${options}`), {
+      verb: "ci", pattern: "//packages/...", jobs: 2, verbose: true
+    })
+  }
+  assert.deepEqual(targetInvocation("pnpm exec smthrs build '//apps/ui:check' --verbose"), {
+    verb: "build", pattern: "//apps/ui:check", jobs: undefined, verbose: true
+  })
+  assert.equal(targetInvocation("node scripts/generate-ci.mjs"), undefined)
+  for (const options of ["--include-exclusive", "--jobs", "--jobs 0", "--jobs 2 --jobs 3", "--plan"])
+    assert.throws(() => targetInvocation(`pnpm exec smthrs test '//packages/...' ${options}`), /Unrecognized CI target/)
+  assert.throws(() => targetInvocation("pnpm exec smthrs test //packages/..."), /Unrecognized CI target/)
+})
 
 test("required CI resolves package, app, script, evaluation and fault suites to real runners", async () => {
   const inventory = await resolveInventory()

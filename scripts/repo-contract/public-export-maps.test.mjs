@@ -55,7 +55,7 @@ describe("explicit public entrypoints", () => {
 
   it("admits only explicitly reviewed additions without rewriting the original surface", () => {
     assert.deepEqual(baseline.added.map(({ name, subpath }) => `${name}${subpath.slice(1)}`).sort(), [
-      "@smthrs/canonical/Record", "@smthrs/control/ApprovalAuthority", "@smthrs/engine-store/ExecutionSnapshot", "@smthrs/engine-store/PlanInputStore", "@smthrs/engine-store/PlanMergeStore", "@smthrs/engine-store/RunChangeFeed", "@smthrs/journal/EngineEvent", "@smthrs/journal/JournalGeneration", "@smthrs/kernel/ChildProcessEnvironment", "@smthrs/plan/Scheduling", "@smthrs/scorers/ScoreGate"
+      "@smthrs/canonical/BoundedJson", "@smthrs/canonical/Record", "@smthrs/control/ApprovalAuthority", "@smthrs/engine-store/ExecutionSnapshot", "@smthrs/engine-store/PlanInputStore", "@smthrs/engine-store/PlanMergeStore", "@smthrs/engine-store/RunChangeFeed", "@smthrs/journal/EngineEvent", "@smthrs/journal/JournalGeneration", "@smthrs/kernel/ChildProcessEnvironment", "@smthrs/memory/Migrations", "@smthrs/plan/Scheduling", "@smthrs/scorers/ScoreGate"
     ])
     for (const entry of baseline.added) {
       const manifest = current.get(entry.name).manifest

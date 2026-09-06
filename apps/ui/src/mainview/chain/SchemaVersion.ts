@@ -83,10 +83,11 @@ export const recordBackend = (storage: StorageApi, backend: PersistenceBackendKi
 }
 
 /**
- * Every collection id AppStore persists. SchemaVersion.test.ts asserts this
- * list equals the ids of the collections a real store exposes, so adding a
- * collection without adding it here fails the suite instead of leaving a
- * stale key behind after a bump.
+ * Stable collection storage ids, plus the historical cleanup-only id below.
+ * SchemaVersion.test.ts compares this list with the storage keys a real store
+ * reads. Derived live views have their own ids and never own persisted rows.
+ * Adding durable storage without declaring it here must fail the suite rather
+ * than leave a stale key behind after an explicit reset.
  */
 export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-sessions",
@@ -122,8 +123,8 @@ export const PERSISTED_COLLECTION_IDS: ReadonlyArray<string> = [
   "app-github-app-statuses",
   /*
    * The sidebar's file tree rows live in a per-launch memory store (a
-   * checkout changes on disk, so nothing survives a relaunch). Declared so
-   * the inventory test stays exact and a stray key under this id is cleared.
+   * checkout changes on disk, so nothing survives a relaunch). Retain its
+   * historical cleanup key so a stray persisted tree is cleared on reset.
    */
   "app-repo-tree"
 ]
