@@ -9,6 +9,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { join, resolve } from "node:path"
 import test from "node:test"
 import { readWorkspaceManifests } from "../../../scripts/pack-release.mjs"
+import { parseWorkflow } from "../../../scripts/release-rehearsal.mjs"
 
 const root = resolve(import.meta.dirname, "../../..")
 const read = (path) => readFileSync(resolve(root, path), "utf8")
@@ -18,7 +19,7 @@ test("the support reference states every released Node engine range and current 
   const page = read("apps/site/src/content/docs/docs/reference/support-matrix.mdx")
   const manifests = readWorkspaceManifests(root)
   const inventory = page.slice(page.indexOf("## Published Node engine ranges"))
-  const rows = new Map([...inventory.matchAll(/^\| `([^`]+)` \| `([^`]+)` \| (.+) \|$/gm)]
+  const rows = new Map([...inventory.matchAll(/^\| `([^`]+)`\s+\| `([^`]+)`\s+\| (.+) \|$/gm)]
     .map(([, name, engine, source]) => [name, { engine: engine.replaceAll("\\|", "|"), source }]))
   assert.equal(rows.size, manifests.size, "the published table has exactly one row per release package")
   for (const [directory, manifest] of manifests) {
@@ -47,6 +48,22 @@ test("the support reference states every released Node engine range and current 
   ) {
     assert.ok(page.includes(term), `support boundary: ${term}`)
   }
+})
+
+test("the release smoke row names the exact runtimes that certify the candidate tarballs", () => {
+  const workflow = parseWorkflow(read(".github/workflows/release.yml"))
+  const smokeSteps = workflow.jobs.publish.steps.filter((step) => step.run?.includes("node scripts/smoke-release.mjs "))
+  assert.equal(smokeSteps.length, 2, "the release requires two runtime smoke receipts")
+  const pins = smokeSteps.map((step) => {
+    const assertion = step.run.match(/test "\$\(node --version\)" = 'v([\d.]+)'/)
+    assert.ok(assertion, `${step.name}: exact runtime assertion`)
+    return assertion[1]
+  })
+  const page = read("apps/site/src/content/docs/docs/reference/support-matrix.mdx")
+  const row = page.match(/^\| Node\.js release smoke\s+\| (.+) \|$/m)
+  assert.ok(row, "the support matrix has a release smoke row")
+  const documentedPins = [...row[1].matchAll(/`(\d+\.\d+\.\d+)`/g)].map(([, pin]) => pin)
+  assert.deepEqual(documentedPins, pins, "release smoke versions must match the actual workflow checks")
 })
 
 test("installation, changelog, API overview, and navigation lead to the one support reference", () => {

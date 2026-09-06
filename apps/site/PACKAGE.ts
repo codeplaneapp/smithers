@@ -60,6 +60,7 @@ import { Package as migratePackage } from "../../packages/smithers/migrate/PACKA
 import { Package as notificationsPackage } from "../../packages/smithers/notifications/PACKAGE.ts"
 import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
 import { Package as testingPackage } from "../../packages/testing/PACKAGE.ts"
+import { workspacePackages } from "../../scripts/workspace-packages.mjs"
 import { sites as docsSites } from "../docs/shared/manifest.mjs"
 
 const cwd = "apps/site"
@@ -257,7 +258,7 @@ const llms = Smithers.Generate({
  * including redirects and migration anchors.
  */
 const docsTextTest = Smithers.Shell.Test({
-  shell: "node --test --test-concurrency=1 scripts/docs-text.test.mjs scripts/built-site.test.mjs",
+  shell: "node --test --test-concurrency=1 apps/site/scripts/docs-text.test.mjs apps/site/scripts/built-site.test.mjs",
   data: [
     Smithers.file("scripts/docs-text.mjs"),
     Smithers.file("scripts/docs-text.test.mjs"),
@@ -266,9 +267,35 @@ const docsTextTest = Smithers.Shell.Test({
   ]
 })
 
+/** Verify the support claims against the release workflow and complete workspace inventory. */
+const supportMatrixTest = Smithers.Shell.Test({
+  shell: "node --test --test-concurrency=1 apps/site/scripts/support-matrix.test.mjs",
+  data: [
+    Smithers.file("scripts/support-matrix.test.mjs"),
+    Smithers.file("scripts/sync-support-docs.mjs"),
+    Smithers.glob("docs/**/*"),
+    Smithers.file("src/content/docs/docs/reference/support-matrix.mdx"),
+    Smithers.file("src/content/docs/docs/reference/api/index.mdx"),
+    Smithers.file("src/content/docs/docs/installation.mdx"),
+    Smithers.file("src/content/docs/changelogs/1.0.0-rc.0.mdx"),
+    Smithers.file("astro.config.mjs"),
+    Smithers.file("//.github/workflows/ci.yml"),
+    Smithers.file("//.github/workflows/release.yml"),
+    Smithers.file("//pnpm-workspace.yaml"),
+    ...["pack-release", "packed-export-targets", "publish-release", "release-rehearsal", "workspace-packages"].map(
+      (name) => Smithers.file(`//scripts/${name}.mjs`)
+    ),
+    // The shared reader parses every member before selecting public packages.
+    // Explicit files cross package boundaries; a site-scoped glob cannot.
+    ...workspacePackages().map(({ dir }) => Smithers.file(`//${dir}/package.json`)),
+    platformBunPackage.docsFiles,
+    Smithers.file("//packages/smithers/flows/README.md")
+  ]
+})
+
 /** Execute exact tutorial files and validate deployment entry points offline. */
 const docsRuntimeTests = Smithers.Shell.Test({
-  shell: "node --test --test-concurrency=1 scripts/tutorials.test.mjs scripts/deployment.test.mjs",
+  shell: "node --test --test-concurrency=1 apps/site/scripts/tutorials.test.mjs apps/site/scripts/deployment.test.mjs",
   data: [
     Smithers.file("scripts/tutorials.test.mjs"),
     Smithers.file("scripts/deployment.test.mjs"),
@@ -349,6 +376,7 @@ export const Package = Smithers.Package({
     apiDocs,
     docsLint,
     docsTextTest,
+    supportMatrixTest,
     docsRuntimeTests,
     examplesPages,
     llms,
