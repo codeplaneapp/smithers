@@ -24,6 +24,61 @@ const appOptions = [
   "CLOUDFLARE_SMITHERS_ZONE_ID"
 ]
 
+let mainSiteImport = 0
+const importMainSite = async (overrides = {}) => {
+  const names = ["SMITHERS_SITE_DOMAIN", "SMITHERS_SITE_WORKER_NAME", "CLOUDFLARE_SMITHERS_ZONE_ID"]
+  const previous = new Map(names.map((name) => [name, process.env[name]]))
+  try {
+    for (const name of names) {
+      if (overrides[name] === undefined) delete process.env[name]
+      else process.env[name] = overrides[name]
+    }
+    return await import(`${pathToFileURL(join(root, "apps/site/alchemy.run.ts")).href}?main-site-${mainSiteImport++}`)
+  } finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  }
+}
+
+test("the main site defaults to its dedicated Worker and agrees with Wrangler", async () => {
+  const site = await importMainSite()
+  const wranglerPath = join(root, "apps/site/wrangler.jsonc")
+  const wrangler = ts.parseConfigFileTextToJson(wranglerPath, readFileSync(wranglerPath, "utf8"))
+  assert.equal(wrangler.error, undefined)
+  assert.ok(Effect.isEffect(site.default))
+  assert.equal(site.siteProps.name, "smithers-site-v1")
+  assert.equal(site.siteProps.name, wrangler.config.name)
+  assert.equal(site.siteProps.command, "pnpm run build")
+  assert.equal(site.siteProps.outdir, wrangler.config.assets.directory)
+  assert.equal(site.siteProps.compatibility.date, wrangler.config.compatibility_date)
+  assert.equal(site.siteProps.workersDev, wrangler.config.workers_dev)
+  assert.equal(site.siteProps.assets.notFoundHandling, wrangler.config.assets.not_found_handling)
+  assert.deepEqual(site.siteProps.domain, { name: wrangler.config.routes[0].pattern })
+  assert.equal(site.siteProps.domain.name, "smithers.sh")
+})
+
+test("main-site overrides preserve separate preview identity and refuse an unnamed preview", async () => {
+  const preview = await importMainSite({
+    SMITHERS_SITE_DOMAIN: " preview.example.test ",
+    SMITHERS_SITE_WORKER_NAME: " smithers-site-preview-test ",
+    CLOUDFLARE_SMITHERS_ZONE_ID: " test-zone "
+  })
+  assert.ok(Effect.isEffect(preview.default))
+  assert.equal(preview.siteProps.name, "smithers-site-preview-test")
+  assert.deepEqual(preview.siteProps.domain, { name: "preview.example.test", zoneId: "test-zone" })
+  const apex = await importMainSite({ SMITHERS_SITE_WORKER_NAME: " explicit-main-site-test " })
+  assert.equal(apex.siteProps.name, "explicit-main-site-test")
+  assert.deepEqual(apex.siteProps.domain, { name: "smithers.sh" })
+  for (const workerName of [undefined, "", "  "]) {
+    await assert.rejects(
+      importMainSite({ SMITHERS_SITE_DOMAIN: "preview.example.test", SMITHERS_SITE_WORKER_NAME: workerName }),
+      /Set SMITHERS_SITE_WORKER_NAME to a separate Worker name for a preview domain/
+    )
+  }
+})
+
 test("all deployment entry points import as Alchemy 2 stack effects", async (t) => {
   const overrides = new Map()
   const set = (name, value) => {

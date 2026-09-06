@@ -302,6 +302,7 @@ const docsRuntimeTests = Smithers.Shell.Test({
     Smithers.glob("src/content/docs/docs/tutorials/*.mdx"),
     Smithers.file("src/content/docs/docs/guides/child-flows.mdx"),
     Smithers.file("alchemy.run.ts"),
+    Smithers.file("wrangler.jsonc"),
     Smithers.file("package.json"),
     Smithers.file("//apps/docs/shared/alchemy-site.mjs"),
     Smithers.file("//apps/docs/shared/alchemy-site.d.ts"),

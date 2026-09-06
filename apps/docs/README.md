@@ -107,11 +107,15 @@ Alchemy 1 `overrideExistingOrigin` shortcut is not part of this configuration.
 
 `<SLUG>_SITE_DOMAIN` selects a preview domain and
 `CLOUDFLARE_SMITHERS_ZONE_ID` pins its zone. Use a separate Worker name for a
-preview. The main site follows the same stack contract, with the existing
-Worker name `smithers-site` from `apps/site/wrangler.jsonc`.
-`SMITHERS_SITE_WORKER_NAME` is required when `SMITHERS_SITE_DOMAIN` selects a
-preview domain. Both configurations disable workers.dev URLs and use 404-page
-asset handling.
+preview. The main site defaults to the dedicated physical Worker
+`smithers-site-v1`, matching `apps/site/wrangler.jsonc`. Its logical Alchemy
+stack and resource identifiers remain `smithers-site`. The existing physical
+`smithers-site` Worker serves `jjhub.tech` and must retain that separate site.
+`SMITHERS_SITE_WORKER_NAME` overrides the main site's physical name and is
+required when `SMITHERS_SITE_DOMAIN` selects a preview domain. Review all
+account-wide domain assignments before overriding a physical Worker name:
+Alchemy reconciles its complete domain list, including domains in other zones.
+Both configurations disable workers.dev URLs and use 404-page asset handling.
 
 Run `node --test apps/site/scripts/deployment.test.mjs` for offline import and
 type checks against the declared Alchemy dependency. These checks do not
