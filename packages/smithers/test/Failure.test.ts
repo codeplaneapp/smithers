@@ -11,6 +11,23 @@ import { ControlError } from "@smthrs/control"
 import { describe, expect, it } from "vitest"
 import * as Failure from "../src/internal/Failure.ts"
 
+describe("Failure.causeLine", () => {
+  it("preserves typed headlines and selects older nested cause text", () => {
+    expect(Failure.causeLine("quota_exceeded: Add credits.\nError: wrapper\n  [cause]: Error: inner"))
+      .toBe("quota_exceeded: Add credits.")
+    expect(Failure.causeLine("Error: wrapper\n  [cause]: Error: middle\n    [cause]: Error: retry later"))
+      .toBe("Error: retry later")
+    expect(Failure.causeLine("")).toBe("")
+    expect(Failure.causeLine("x".repeat(2000))).toHaveLength(1024)
+  })
+
+  it("redacts before extracting a nested sentence and removes terminal controls", () => {
+    expect(Failure.causeLine("Error: wrapper\n [cause]: Error: api_key=privatevalue123456 \u001b[31mrefused\u001b[0m"))
+      .not.toContain("privatevalue123456")
+    expect(Failure.causeLine("Error: denied\u0007")).toBe("Error: denied")
+  })
+})
+
 describe("Failure.sentence", () => {
   it("keeps the failure's own sentence when it has one", () => {
     const stated = new ControlError.NoMatchingWait({ runId: "run-42", waitName: "go" })

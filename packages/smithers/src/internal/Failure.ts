@@ -16,6 +16,20 @@
  *
  * @since 1.0.0
  */
+import * as Redaction from "@smthrs/journal/Redaction"
+import { stripVTControlCharacters } from "node:util"
+
+/** The most specific recorded cause, including older nested Error stacks. */
+export const causeLine = (cause: string): string => {
+  const safe = String(Redaction.redact(stripVTControlCharacters(cause)))
+  let line = safe.split(/\r?\n/, 1)[0] ?? ""
+  // New lifecycle records lead with the typed code. Older records only carry
+  // an Error stack, whose innermost cause still explains the failed run.
+  if (!/^[a-z][a-z0-9_]*: /.test(line)) {
+    for (const nested of safe.matchAll(/^\s*\[cause\]:\s*([^\r\n]+)/gm)) line = nested[1]!
+  }
+  return line.replace(/[\p{Cc}\p{Cf}]/gu, " ").trim().slice(0, 1024)
+}
 
 /**
  * How much of one field a refusal line may spend, before the rest is cut.

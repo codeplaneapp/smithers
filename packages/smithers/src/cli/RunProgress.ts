@@ -12,6 +12,7 @@ import * as Redaction from "@smthrs/journal/Redaction"
 import { Cause, Context, Effect, Exit, Stream } from "effect"
 import type { Writable } from "node:stream"
 import { stripVTControlCharacters } from "node:util"
+import { causeLine } from "../internal/Failure.ts"
 
 /**
  * Invocation-scoped display settings, independent of document encoding.
@@ -208,8 +209,13 @@ export const project = (
       return { state: { ...state, status: "Pending · executor did not start", settled: true }, lines: [] }
     case "control.run.completed":
       return { state: { ...state, status: "Completed", settled: true }, lines: [] }
-    case "control.run.failed":
-      return { state: { ...state, status: "Failed", settled: true }, lines: logLines(payload["message"]) }
+    case "control.run.failed": {
+      const cause = payload["cause"] ?? payload["message"]
+      return {
+        state: { ...state, status: "Failed", settled: true },
+        lines: logLines(typeof cause === "string" ? causeLine(cause) : cause)
+      }
+    }
     case "control.run.cancelled":
       return { state: { ...state, status: "Cancelled", settled: true }, lines: [] }
     default:

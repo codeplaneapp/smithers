@@ -19,6 +19,7 @@
  * @since 0.1.0
  */
 import type { ControlSchema } from "@smthrs/control"
+import { causeLine } from "./internal/Failure.ts"
 
 /**
  * One refused flow call, aggregated by its refusal message. Reach for this in
@@ -231,7 +232,7 @@ const verdict = (d: Digest): string => {
   if (status === "failed") {
     return d.cause === undefined
       ? "failed: no cause recorded in the journal"
-      : `failed: ${clip(firstLine(d.cause), 100)}`
+      : `failed: ${clip(causeLine(d.cause), 160)}`
   }
   // `control.run.pending` is the executor declining the launch. The run row is
   // durable and stays `accepted` with nothing driving it, which the bare word
@@ -314,7 +315,7 @@ export const renderDiagnosis = (
     lines.push(`${label(index === 0 ? "Refusals" : "")}${refusal.count}× ${clip(refusal.message, 110)}`)
   }
   if (d.cause !== undefined) {
-    lines.push(`${label("Cause")}${clip(firstLine(d.cause), 120)}`)
+    lines.push(`${label("Cause")}${clip(causeLine(d.cause), 240)}`)
   }
   if (d.finalOutput !== undefined && d.finalOutput.length > 0) {
     lines.push(`${label("Output")}${clip(firstLine(d.finalOutput), 120)}`)

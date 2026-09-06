@@ -174,6 +174,16 @@ describe("Forensics.digest", () => {
 })
 
 describe("Forensics.renderDiagnosis", () => {
+  it("shows the nested provider refusal from an older recorded stack", () => {
+    const cause =
+      "/harness/HarnessError: The cell frame failed\n    at harness.ts:1\n  [cause]: flows/model/ModelError: Add credits to continue.\n    at model.ts:1"
+    const d = Forensics.digest([event("control.run.failed", { cause }, 1)])
+    expect(d.cause).toBe(cause)
+    const card = Forensics.renderDiagnosis({ runId: "run-1" }, d)
+    expect(card).toContain("Verdict   failed: flows/model/ModelError: Add credits to continue.")
+    expect(card).not.toContain("The cell frame failed")
+  })
+
   it("names the failure cause in the verdict", () => {
     const d = Forensics.digest([
       turn(0),

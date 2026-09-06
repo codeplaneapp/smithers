@@ -43,6 +43,16 @@ const events = [
 ]
 
 describe("durable run progress projection", () => {
+  it("prints the recorded provider cause when an attached run fails", () => {
+    const result = RunProgress.project(
+      RunProgress.initial(),
+      event(1, "control.run.failed", {
+        cause: "quota_exceeded: Add credits to continue.\nError: wrapper"
+      })
+    )
+    expect(result.state.status).toBe("Failed")
+    expect(result.lines).toEqual([{ level: "info", text: "quota_exceeded: Add credits to continue." }])
+  })
   it.each(
     [
       ["control.run.running", "Starting run", false],

@@ -943,7 +943,12 @@ describe("owned-run settlement", () => {
                   watch: (filter) =>
                     filter.follow === false
                       ? Stream.empty
-                      : Stream.make(event(1, "control.agent.turn-opened", { seat: "s" }), event(2, kind)).pipe(
+                      : Stream.make(
+                        event(1, "control.agent.turn-opened", { seat: "s" }),
+                        event(2, kind, {
+                          cause: "quota_exceeded: Add credits to continue.\nError: The cell frame failed"
+                        })
+                      ).pipe(
                         Stream.concat(Stream.never)
                       )
                 })
@@ -972,6 +977,13 @@ describe("owned-run settlement", () => {
       }
       expect(Exit.isSuccess(exit)).toBe(true)
       expect(Exit.isSuccess(exit) ? exit.value : undefined).toMatchObject({ _tag: "Accepted" })
+      if (kind === "control.run.failed") {
+        expect(Exit.isSuccess(exit) ? exit.value : undefined).toMatchObject({
+          runId: "run-1",
+          status: "failed",
+          cause: "quota_exceeded: Add credits to continue."
+        })
+      }
     }
   })
 })

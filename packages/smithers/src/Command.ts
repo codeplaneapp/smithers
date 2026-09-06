@@ -42,6 +42,7 @@ import * as Forensics from "./Forensics.ts"
 import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
+import { causeLine } from "./internal/Failure.ts"
 import * as History from "./internal/History.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
@@ -346,11 +347,16 @@ const watchFailure = (
  * Waits for the run to settle and reports the event kind that settled it, or
  * `undefined` when nothing was waited for.
  */
+interface Settlement {
+  readonly kind: string
+  readonly cause?: string
+}
+
 const awaitRun = (
   control: ControlService.Service,
   runId: string,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
+): Effect.Effect<Settlement | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
   Effect.gen(function*() {
     const globals = yield* rootCommand
     return yield* RunProgress.observe(
@@ -361,7 +367,13 @@ const awaitRun = (
       Stream.filter((event) => settled(event.kind)),
       Stream.take(1),
       Stream.runCollect,
-      Effect.map((events) => globalThis.Array.from(events)[0]?.kind),
+      Effect.map((events): Settlement | undefined => {
+        const event = globalThis.Array.from(events)[0]
+        if (event === undefined) return undefined
+        const payload = event.payload
+        const cause = typeof payload === "object" && payload !== null && "cause" in payload ? payload.cause : undefined
+        return { kind: event.kind, ...(typeof cause === "string" ? { cause } : {}) }
+      }),
       Effect.mapError((error) => watchFailure(error, runId, "settlement"))
     )
   })
@@ -406,7 +418,7 @@ const awaitOwnedRun = (
   control: ControlService.Service,
   receipt: ControlSchema.Receipt,
   afterSequence: number | undefined
-): Effect.Effect<string | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
+): Effect.Effect<Settlement | undefined, ControlError.TransportError, Command.CommandContext<"smthrs">> =>
   Effect.gen(function*() {
     // A run that had already settled when the verb reached it has no
     // settlement event left to wait for, and the receipt carries the answer.
@@ -414,7 +426,7 @@ const awaitOwnedRun = (
     // settled `failed` printed `{"_tag":"Terminal","status":"failed"}` and
     // exited 0, because every receipt tag but `Accepted` reported nothing at
     // all (recorded by the cli-exit-code lane's verifier).
-    if (receipt._tag === "Terminal") return `control.run.${receipt.status}`
+    if (receipt._tag === "Terminal") return { kind: `control.run.${receipt.status}` }
     const ownsExecutor = yield* ExecutorOwnership.ExecutorOwnership
     if (!ownsExecutor || receipt._tag !== "Accepted" || receipt.runId === undefined) return undefined
     return yield* awaitRun(control, receipt.runId, afterSequence)
@@ -461,7 +473,7 @@ const declinedLaunch = (control: ControlService.Service, runId: string) =>
   })
 
 /** Whether the settlement this process waited for was the executor declining. */
-const wasDeclined = (settlement: string | undefined): boolean => settlement === "control.run.pending"
+const wasDeclined = (settlement: Settlement | undefined): boolean => settlement?.kind === "control.run.pending"
 
 /**
  * The process status one settlement reports, or nothing when the settlement
@@ -481,8 +493,8 @@ const wasDeclined = (settlement: string | undefined): boolean => settlement === 
  * release validation measured `smthrs up ci-fast --json` returning 0 in
  * three seconds while `smthrs ps` reported `failed`.
  */
-const settlementStatus = (settlement: string | undefined): number | undefined => {
-  switch (settlement) {
+const settlementStatus = (settlement: Settlement | undefined): number | undefined => {
+  switch (settlement?.kind) {
     case "control.run.completed":
       return 0
     case "control.run.failed":
@@ -505,11 +517,23 @@ const settlementStatus = (settlement: string | undefined): number | undefined =>
  * successful exit whatever `process.exitCode` holds, which is how
  * `smthrs migrate` reports its own status too.
  */
-const reportSettlement = (settlement: string | undefined) =>
+const reportSettlement = (settlement: Settlement | undefined) =>
   Effect.suspend(() => {
     const status = settlementStatus(settlement)
     return status === undefined ? Effect.void : CommandStatus.set(status)
   })
+
+/** Admission stays identifiable while an attached failure states its verdict. */
+const renderReceipt = (receipt: ControlSchema.Receipt, settlement: Settlement | undefined) =>
+  render(
+    settlement?.kind === "control.run.failed"
+      ? {
+        ...receipt,
+        status: "failed",
+        cause: settlement.cause === undefined ? "no cause recorded in the journal" : causeLine(settlement.cause)
+      }
+      : receipt
+  )
 
 /** Every event of one run, oldest first. */
 const eventsOf = (control: ControlService.Service, runId: string) =>
@@ -581,7 +605,7 @@ const runResume = (planOrRunId: string) =>
     if (wasDeclined(settlement) && receipt._tag === "Accepted" && receipt.runId !== undefined) {
       return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
     }
-    yield* render(receipt)
+    yield* renderReceipt(receipt, settlement)
     return yield* reportSettlement(settlement)
   })
 
@@ -616,13 +640,16 @@ const runLaunch = (payload: ControlService.ApprovalInput) =>
     if (wasDeclined(settlement) && receipt._tag === "Accepted" && receipt.runId !== undefined) {
       return yield* Effect.fail(yield* declinedLaunch(control, receipt.runId))
     }
-    yield* render(receipt)
+    yield* renderReceipt(receipt, settlement)
     yield* reportSettlement(settlement)
   })
 
 const run = Command.make("run", {
   plan: requiredArgument("plan-payload"),
-  resume: Flag.boolean("resume").pipe(Flag.withDefault(false), Flag.withDescription("Resume the parked run named by the positional argument"))
+  resume: Flag.boolean("resume").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Resume the parked run named by the positional argument")
+  )
 }, (config) =>
   Effect.gen(function*() {
     yield* guardGlobals
@@ -639,7 +666,9 @@ const resume = Command.make("resume", { runId: requiredArgument("run-id") }, (co
 const upFlags = {
   flow: requiredArgument("flow", true),
   data,
-  detached: Flag.boolean("detached").pipe(Flag.withDefault(false), Flag.withAlias("d"),
+  detached: Flag.boolean("detached").pipe(
+    Flag.withDefault(false),
+    Flag.withAlias("d"),
     Flag.withDescription("Launch a local executor in the background and print its run id and log path")
   ),
   serve: removedFlag("up", "serve"),
@@ -752,7 +781,7 @@ const approve = Command.make("approve", {
     // a settled run, and the shell that ran `smthrs approve` is entitled to
     // read that run's status from `$?` exactly as `up` and `run` promise it.
     const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
-    yield* render(receipt)
+    yield* renderReceipt(receipt, settlement)
     yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("approve")!.help))
 
@@ -764,7 +793,7 @@ const deny = Command.make("deny", { approval: requiredArgument("approval") }, (c
     const parkSequence = yield* decisionPark(control, payload.target)
     const receipt = yield* control.deny(payload)
     const settlement = yield* awaitOwnedRun(control, receipt, parkSequence)
-    yield* render(receipt)
+    yield* renderReceipt(receipt, settlement)
     yield* reportSettlement(settlement)
   })).pipe(Command.withDescription(Verb.find("deny")!.help))
 
@@ -1095,14 +1124,20 @@ const readLogs = (runId: Option.Option<string>, follow: boolean, forceJson: bool
 
 const logs = Command.make("logs", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow").pipe(Flag.withDefault(false), Flag.withDescription("Keep streaming new run events after the recorded history"))
+  follow: Flag.boolean("follow").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Keep streaming new run events after the recorded history")
+  )
 }, (config) => readLogs(config.runId, config.follow, false)).pipe(
   Command.withDescription(Verb.find("logs")!.help)
 )
 
 const events = Command.make("events", {
   runId: Argument.string("run-id").pipe(Argument.optional),
-  follow: Flag.boolean("follow").pipe(Flag.withDefault(false), Flag.withDescription("Keep streaming new run events after the recorded history"))
+  follow: Flag.boolean("follow").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Keep streaming new run events after the recorded history")
+  )
 }, (config) => readLogs(config.runId, config.follow, true)).pipe(
   Command.withDescription("Alias of `logs --json`"),
   Command.unlisted
@@ -1548,7 +1583,10 @@ const claudeNodeWait = Command.make("node-wait", {
 
 const claudeMonitor = Command.make("monitor", {
   session: claudeSession,
-  allRuns: Flag.boolean("all-runs").pipe(Flag.withDefault(false), Flag.withDescription("Include all runs, beyond this session’s subscriptions")),
+  allRuns: Flag.boolean("all-runs").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Include all runs, beyond this session’s subscriptions")
+  ),
   limit: Flag.integer("limit").pipe(
     Flag.withDefault(200),
     Flag.withDescription("Maximum number of runs in the monitor frame")
@@ -1806,7 +1844,7 @@ const gc = Command.make("gc", {
     Flag.withDefault(Gc.defaultRetention),
     Flag.withDescription("Delete terminal runs older than this duration, for example 7d")
   ),
-  dryRun:  Flag.boolean("dry-run").pipe(
+  dryRun: Flag.boolean("dry-run").pipe(
     Flag.withDescription("Report the runs and rows that would be deleted without deleting them")
   ).pipe(Flag.withDefault(false))
 }, (config) =>
@@ -1832,7 +1870,8 @@ const serveFlags = {
     Flag.withDefault(Serve.defaultBind.port),
     Flag.withDescription("TCP port for the control server")
   ),
-  listen: Flag.boolean("listen").pipe(Flag.withDefault(false),
+  listen: Flag.boolean("listen").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Allow binding a non-loopback host; also requires --credential or SMITHERS_API_KEY")
   )
 }
