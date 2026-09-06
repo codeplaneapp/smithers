@@ -601,23 +601,33 @@ const functionMarker = (member: object): string => {
 }
 
 /**
- * Keeps the prefix of one string that still fits, and says how much it cut.
+ * Keeps both ends of one string that still fits, and says how much it cut.
  *
  * The member that overruns a failure budget is almost always the largest one,
  * which is the captured output of whatever failed. Replacing the whole of it
- * with a marker would drop the evidence, so the prefix that fits is kept.
+ * with a marker would drop the evidence. Keeping only its prefix also loses
+ * a test runner's final failure list, since Exec already retained a stream
+ * tail. The middle is omitted so both the context and summary survive.
  */
 const truncateToBudget = (member: string, budget: OutputBudget): string => {
   const total = Buffer.byteLength(member, "utf8")
   const note = (cut: number): string => `...<${cut} more bytes truncated>`
   const room = Math.max(0, budget.limit - budget.bytes - 2 - note(total).length)
-  let keep = Math.min(member.length, room)
-  while (keep > 0 && Buffer.byteLength(member.slice(0, keep), "utf8") > room) keep = Math.floor(keep / 2)
-  const kept = member.slice(0, keep)
+  let keep = Math.min(Math.floor(member.length / 2), Math.floor(room / 2))
+  let head: string
+  let tail: string
+  let bytes: number
+  do {
+    // Never introduce a lone surrogate when a cut crosses a code point.
+    head = member.slice(0, keep).replace(/[\ud800-\udbff]$/, "")
+    tail = member.slice(member.length - keep).replace(/^[\udc00-\udfff]/, "")
+    bytes = Buffer.byteLength(head, "utf8") + Buffer.byteLength(tail, "utf8")
+    keep = Math.floor(keep / 2)
+  } while (bytes > room)
   budget.bytes = budget.limit
   budget.members += 1
   budget.exhausted = true
-  return `${kept}${note(total - Buffer.byteLength(kept, "utf8"))}`
+  return `${head}${note(total - bytes)}${tail}`
 }
 
 /**

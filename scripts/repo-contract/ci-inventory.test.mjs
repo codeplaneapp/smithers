@@ -49,7 +49,7 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
   assert.deepEqual(inventory.selectionErrors, [], "every required command must successfully plan")
   const selected = (label, job) => inventory.rows.filter((row) => row.label === label && row.job === job && row.required && row.selectedRoot)
   for (const [label, job] of [
-    ["//apps/ui:check", "test"], ["//apps/ui:unitTests", "test"], ["//apps/ui:browserE2e", "apps-e2e"],
+    ["//apps/ui:check", "apps-e2e"], ["//apps/ui:unitTests", "apps-e2e"], ["//apps/ui:browserE2e", "apps-e2e"],
     ["//apps/server:check", "test"], ["//apps/server:unitTests", "test"],
     ["//apps/review:unitTests", "test"], ["//apps/bug-worker:unitTests", "test"], ["//apps/status-site:unitTests", "test"],
     ["//apps/review:check", "test"], ["//apps/review:checkTests", "test"],
@@ -63,6 +63,9 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
     ["//scripts:webBundleContract", "browser"],
     ["//packages/smithers/gateway:test", "test"], ["//packages/smithers/flows/jj:test", "packages"]
   ]) assert.ok(selected(label, job).length, `${label} must be a required root of ${job}`)
+  const uiUnits = inventory.rows.filter((row) => row.label === "//apps/ui:unitTests" && row.required && row.selectedRoot)
+  assert.equal(uiUnits.length, 1, "the UI unit tier runs once in required CI")
+  assert.deepEqual(uiUnits[0].runner, ["bun", "test", "src"])
   const packageTests = inventory.rows.filter((row) => row.job === "packages" && row.required && row.selectedRoot)
   assert.ok(packageTests.length > 100, "the complete package test graph must resolve")
   for (const row of packageTests) assert.ok(selected(row.label, "test").length, `${row.label} must also be selected by ci //packages/...`)
@@ -83,7 +86,12 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
     if (/^browser|^e2e|faults$/i.test(name)) {
       assert.ok(name === "browserE2e" || name === "faults", `${row.label}: classify and verify this suite's E2E runner`)
     }
-    if (/unitTests$/.test(row.label)) assert.doesNotMatch(`${row.job} ${row.step}`, /e2e|end.to.end/i)
+    if (/unitTests$/.test(row.label)) {
+      // One required UI job owns three distinct tiers; its unit step must
+      // still name and execute the unit runner, never claim browser coverage.
+      assert.doesNotMatch(row.step, /e2e|end.to.end/i)
+      if (row.job === "apps-e2e") assert.equal(row.label, "//apps/ui:unitTests")
+    }
     if (/browserE2e$/.test(row.label)) {
       assert.equal(row.rule, "NodeTest")
       assert.ok(row.runner.includes("scripts/run-pr-e2e.mjs"))

@@ -121,16 +121,6 @@ jobs:
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: UI typecheck
-        run: pnpm exec smthrs build '//apps/ui:check' --verbose
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
-      - name: UI unit tests
-        run: pnpm exec smthrs test '//apps/ui:unitTests' --verbose
-        env:
-          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
-          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Server typecheck and tests
         run: pnpm exec smthrs ci '//apps/server/...' --verbose
         env:
@@ -217,6 +207,16 @@ jobs:
         with:
           bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install jj
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b
+        with:
+          tool: jj-cli@0.39.0
+      - name: Initialize colocated jj repository
+        run: jj git init --colocate
+      - name: Install ripgrep
+        uses: taiki-e/install-action@e67fa11c4b9316fa714ddf0abed07a0c3143b95b
+        with:
+          tool: ripgrep@14.1.1
       - name: Install system packages
         run: |
           if command -v apt-get >/dev/null 2>&1; then
@@ -226,6 +226,16 @@ jobs:
             fi
           fi
         shell: bash
+      - name: UI typecheck
+        run: pnpm exec smthrs build '//apps/ui:check' --verbose
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
+      - name: UI unit tests
+        run: pnpm exec smthrs test '//apps/ui:unitTests' --verbose
+        env:
+          SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
+          SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: UI browser end-to-end suite
         run: pnpm exec smthrs test '//apps/ui:browserE2e' --verbose
         env:

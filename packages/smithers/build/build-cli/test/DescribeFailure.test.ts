@@ -61,12 +61,34 @@ describe("describeFailure", () => {
       stderr: `${"e".repeat(tail - 40)}\n3 fail\n  routes > agents > spawns a session`,
       stdout: "o".repeat(tail)
     }))
-    expect(rendered).not.toBe("target failed")
-    expect(rendered).toContain("bun")
-    expect(rendered).toContain("exitCode")
+    namesTheRun(rendered)
     expect(rendered).toContain("apps/ui")
     expect(rendered).toContain("truncated")
     expect(rendered.length).toBeLessThanOrEqual(Diagnostic.maximumMessageCodeUnits)
+  })
+
+  it.each(["stderr", "stdout"] as const)("keeps the beginning and final runner summary of oversized %s", (stream) => {
+    const start = "runner started: 日本語 🙂\n"
+    const summary = "\n(fail) routes > agents > spawns a session\n2336 pass\n1 fail\n"
+    // Multibyte characters straddle cuts; quotes, newlines and control bytes
+    // expand again when the bounded diagnostic is encoded as JSON.
+    const transcript = start + "(pass) 日本語🙂\\\"\u0001\n".repeat(5000) + summary
+    const failure = execError({ stderr: "", stdout: "", [stream]: transcript })
+    const rendered = describeFailure(failure)
+    const decoded = JSON.parse(rendered)
+    expect(decoded).toMatchObject({
+      _tag: "smithers-build/ExecError",
+      argv: ["bun", "test", "src"],
+      code: "exit_status",
+      cwd: "apps/ui",
+      exitCode: 1
+    })
+    expect(decoded[stream].startsWith(start)).toBe(true)
+    expect(decoded[stream].endsWith(summary)).toBe(true)
+    expect(decoded[stream]).toContain("more bytes truncated")
+    expect(decoded[stream].isWellFormed()).toBe(true)
+    expect(rendered.length).toBeLessThanOrEqual(Diagnostic.maximumMessageCodeUnits)
+    expect(failure[stream]).toBe(transcript)
   })
 
   it("does not invoke an accessor while rendering a failure", () => {

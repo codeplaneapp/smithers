@@ -89,12 +89,30 @@ describe("test-script wiring", () => {
 describe("required PR selection", () => {
   const workflow = parseWorkflow(readFileSync(join(root, ".github/workflows/ci.yml"), "utf8"))
   const runs = (job) => workflow.jobs[job].steps.flatMap((step) => step.run ? [step.run] : [])
-  it("selects UI typecheck, UI unit tests, and server CI in the required main job", () => {
+  it("keeps server CI required while selecting the UI tiers once in their earlier Ubuntu job", () => {
     const main = runs("test").join("\n")
-    assert.match(main, /(?:smthrs|smithers-build) build '\/\/apps\/ui:check'/)
-    assert.match(main, /(?:smthrs|smithers-build) test '\/\/apps\/ui:unitTests'/)
+    assert.doesNotMatch(main, /\/\/apps\/ui:(?:check|unitTests)/)
     assert.match(main, /(?:smthrs|smithers-build) ci '\/\/apps\/server\/\.\.\.'/)
     assert.notEqual(workflow.jobs.test["continue-on-error"], true)
+    const ui = workflow.jobs["apps-e2e"]
+    assert.equal(ui["runs-on"], "ubuntu-latest")
+    assert.equal(ui.needs, undefined, "UI diagnostics must not wait behind the workspace graph")
+    const targets = ui.steps.filter((step) => /(?:smthrs|smithers-build) (?:build|test) /.test(step.run ?? ""))
+    assert.deepEqual(targets.map((step) => step.run), [
+      "pnpm exec smthrs build '//apps/ui:check' --verbose",
+      "pnpm exec smthrs test '//apps/ui:unitTests' --verbose",
+      "pnpm exec smthrs test '//apps/ui:browserE2e' --verbose"
+    ])
+    for (const step of targets) {
+      assert.equal(step.if, undefined)
+      assert.equal(step["continue-on-error"], undefined)
+      const occurrences = Object.values(workflow.jobs).flatMap((job) => job.steps)
+        .filter((entry) => entry.run === step.run)
+      assert.equal(occurrences.length, 1, `${step.name} must run once in required CI`)
+    }
+    for (const tool of ["jj-cli@0.39.0", "ripgrep@14.1.1"])
+      assert.ok(ui.steps.some((step) => step.with?.tool === tool), `preserve ${tool}`)
+    assert.ok(runs("apps-e2e").some((run) => run.includes("'bubblewrap'")))
   })
   it("the browser job selects the target that executes actual Playwright", () => {
     assert.match(runs("apps-e2e").join("\n"), /(?:smthrs|smithers-build) test '\/\/apps\/ui:browserE2e'/)

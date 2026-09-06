@@ -235,10 +235,7 @@ const ci = Smithers.GithubCiGen({
         // The review app, the two Workers, and the seeded-bug eval. Without
         // these steps the only pipeline that ran them was the 0.x one this
         // repository replaced: `//packages/...` does not reach `apps/`, and the
-        // apps-e2e job runs `//apps/ui` alone. They sit in this job rather than
-        // in apps-e2e because none of them needs a browser.
-        { name: "UI typecheck", verb: Smithers.Verb.Build, pattern: "//apps/ui:check" },
-        { name: "UI unit tests", verb: Smithers.Verb.Test, pattern: "//apps/ui:unitTests" },
+        // apps-e2e job runs the UI's check, unit and browser tiers separately.
         { name: "Server typecheck and tests", verb: Smithers.Verb.Ci, pattern: "//apps/server/..." },
         { name: "Review app and workers", verb: Smithers.Verb.Ci, pattern: "//apps/review/..." },
         { name: "Bug worker", verb: Smithers.Verb.Ci, pattern: "//apps/bug-worker/..." },
@@ -285,6 +282,8 @@ const ci = Smithers.GithubCiGen({
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({
         runtimes: [node, bun],
+        jj,
+        ripgrep,
         apt: bubblewrap,
         artifacts: Smithers.CiToolchain.Artifacts({
           artifact: "apps-e2e-artifacts",
@@ -296,7 +295,13 @@ const ci = Smithers.GithubCiGen({
           ]
         })
       }),
-      steps: [{ name: "UI browser end-to-end suite", verb: Smithers.Verb.Test, pattern: "//apps/ui:browserE2e" }]
+      // Fail the UI's Linux checks promptly, without waiting behind the
+      // workspace graph. Each tier remains a required, separate command.
+      steps: [
+        { name: "UI typecheck", verb: Smithers.Verb.Build, pattern: "//apps/ui:check" },
+        { name: "UI unit tests", verb: Smithers.Verb.Test, pattern: "//apps/ui:unitTests" },
+        { name: "UI browser end-to-end suite", verb: Smithers.Verb.Test, pattern: "//apps/ui:browserE2e" }
+      ]
     },
     {
       id: "rust",
