@@ -29,7 +29,6 @@ import { actorSharedState } from "../ActorBindings"
  * feed. The run is polled here — a card is a projection, never a lifecycle.
  */
 import {
-  CLOUD_ROUTE_PREFIX,
   LINEAR_AUTH_SESSION_PATH,
   LINEAR_AUTH_START_PATH,
   LinearAuthSessionSchema,
@@ -41,6 +40,7 @@ import { resolveTargetRepo } from "../RepoContext"
 /* plue pages the ops feed with the same Link/`rel="next"` keyset scheme the egress audit uses. */
 import { nextEgressCursor } from "./EgressSeam"
 import { readErrorMessage } from "./SeamContext"
+import { createCloudClient } from "./CloudClient"
 import type { SeamContext } from "./SeamContext"
 
 export const SIGN_OUT_REFUSAL = "Sign in to Smithers Cloud first — /cloud.sign-in."
@@ -275,44 +275,13 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
   const pollMs = deps.pollMs ?? 2000
   const timeoutMs = deps.timeoutMs ?? 5 * 60 * 1000
   const now = deps.now ?? (() => Date.now())
-  const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
+  const { url: cloud, get: getJson, send: sendJson } = createCloudClient(ctx)
   /* One tracking loop per integration: a re-run supersedes the loop before it. */
   const epochs = actorSharedState(ctx, "linear-epochs", () => new Map<string, number>())
 
   const gate = (): string | void => {
     const session = ctx.store.collections.cloudSessions.get("cloud")
     if (session?.state !== "signed-in") return SIGN_OUT_REFUSAL
-  }
-
-  const getJson = async (path: string): Promise<{ readonly body: unknown } | { readonly error: string }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path))
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
-    return { body: await response.json().catch(() => null) }
-  }
-
-  const sendJson = async (
-    method: "POST" | "DELETE",
-    path: string,
-    body?: Record<string, unknown>
-  ): Promise<{ readonly body: unknown; readonly status: number } | { readonly error: string; readonly status: number }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path), {
-        method,
-        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      })
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`, status: 0 }
-    }
-    if (!response.ok) {
-      return { error: await readErrorMessage(response, `The ${method} to ${path} failed (${response.status})`), status: response.status }
-    }
-    return { body: await response.json().catch(() => null), status: response.status }
   }
 
   /* ---- the card ---- */
@@ -485,18 +454,13 @@ export const createLinearSeam = (ctx: SeamContext, deps: LinearSeamDeps = {}): L
     if (query.since !== undefined) params.set("since", query.since)
     if (query.cursor !== undefined && query.cursor !== null && query.cursor !== "") params.set("cursor", query.cursor)
     const path = `/linear/${encodeURIComponent(integrationId)}/ops?${params.toString()}`
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path))
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
-    const ops = parseOps(await response.json().catch(() => null))
+    const answer = await getJson(path)
+    if ("error" in answer) return answer
+    const ops = parseOps(answer.body)
     if (ops === null) return { error: "Smithers Cloud's answer for the Linear sync ops was malformed." }
     return {
       ops,
-      nextCursor: nextEgressCursor(response.headers.get("link"), path.split("?")[0] ?? path)
+      nextCursor: nextEgressCursor(answer.response.headers.get("link"), path.split("?")[0] ?? path)
     }
   }
 

@@ -16,8 +16,7 @@
  * whose head could not be read carries `head: null`, and a failed bookmarks
  * call is an absent answer, not a fact.
  */
-import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
-import { readErrorMessage } from "./SeamContext"
+import { createCloudClient } from "./CloudClient"
 import type { SeamContext } from "./SeamContext"
 
 export interface RepositoriesSeam {
@@ -99,18 +98,7 @@ const parseWorkspace = (value: unknown): { readonly id: string; readonly repoId:
 }
 
 export const createRepositoriesSeam = (ctx: SeamContext): RepositoriesSeam => {
-  const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
-
-  const getJson = async (path: string): Promise<{ readonly response: Response; readonly body: unknown } | { readonly error: string }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path))
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
-    return { response, body: await response.json().catch(() => null) }
-  }
+  const { get: getJson } = createCloudClient(ctx)
 
   /** The default bookmark's head for one repo: the wire field when plue#445 lands it, else the per-repo call. */
   const headOf = async (repo: RepoWire): Promise<{ readonly bookmark: string; readonly changeId: string | null; readonly commitId: string | null } | null> => {
@@ -166,14 +154,9 @@ export const createRepositoriesSeam = (ctx: SeamContext): RepositoriesSeam => {
        * and the honest answer is no workspace rows. Other failures leave the
        * rows alone: a transient error is not a fact about the inventory.
        */
-      let workspacesResponse: Response
-      try {
-        workspacesResponse = await ctx.http(cloud("/user/workspaces"))
-      } catch {
-        return
-      }
-      if (workspacesResponse.ok || workspacesResponse.status === 403) {
-        const body: unknown = workspacesResponse.ok ? await workspacesResponse.json().catch(() => null) : null
+      const workspaces = await getJson("/user/workspaces")
+      if (!("error" in workspaces) || workspaces.status === 403) {
+        const body = "error" in workspaces ? null : workspaces.body
         ctx.dispatch({
           type: "workingcopies.workspaces.loaded",
           actor: "system",

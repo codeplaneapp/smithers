@@ -1314,6 +1314,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
     kind: z.literal("workspace"),
     payload: z.object({
       workspaceId: z.string(),
+      /** Frame history captures these facts; live cards derive them from the workspace row. */
+      snapshot: z.literal(true).optional(),
       /** `org/repo` — the repository the workspace is bound to. */
       repo: z.string(),
       name: z.string(),

@@ -712,8 +712,10 @@ export const Package = S.Package({ targets: { gate, prNoToken, pr, prApproval } 
 
       const undeclared = await serve(root, ["//:prNoToken"], { environment: withoutToken })
       expect(undeclared.exitCode).toBe(1)
+      // The shared progress redactor treats `missing_token_secret:` as a
+      // credential assignment, so the following identifier is masked.
       expect(undeclared.logs).toContain(
-        "refused: missing_token_secret: Github.Pr declares no " +
+        "refused: missing_token_secret: [REDACTED] declares no " +
           "S.HttpSecret(S.Secret(\"GITHUB_TOKEN\"), [...]) in secrets"
       )
 

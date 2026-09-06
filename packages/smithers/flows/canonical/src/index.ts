@@ -43,3 +43,10 @@ export type { CanonicalErrorCode } from "./internal/canonicalize.ts"
  * @category guards
  */
 export { isRecord } from "./Record.ts"
+
+/**
+ * Bounded descriptor-only admission for untrusted durable JSON.
+ * @category validation
+ * @since 1.0.0
+ */
+export * as BoundedJson from "./BoundedJson.ts"

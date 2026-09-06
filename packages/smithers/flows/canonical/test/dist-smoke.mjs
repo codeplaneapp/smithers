@@ -9,4 +9,8 @@ test("the built root exports canonicalize to CJS and ESM consumers", async () =>
   const esm = await import("../dist/esm/index.js")
   assert.equal(cjs.canonicalize({ b: 2, a: 1 }), '{"a":1,"b":2}')
   assert.equal(esm.canonicalize({ b: 2, a: 1 }), '{"a":1,"b":2}')
+  for (const api of [cjs, esm]) {
+    assert.equal(api.BoundedJson.encodedStringBytes("\n"), 4)
+    assert.equal(api.BoundedJson.admit({ ok: true }, { maxDepth: 2, maxNodes: 4, maxMembers: 2 }).ok, true)
+  }
 })

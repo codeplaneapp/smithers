@@ -31,6 +31,13 @@ export default defineConfig({
         // behind an aggregate dominated by the planner and the renderers,
         // which is exactly where it hid before.
         "src/PackageExec.ts": { statements: 76, branches: 67, functions: 83, lines: 80 },
+        // The original coordinator floor follows every extracted implementation.
+        "src/internal/{PackagePlanner,PackageRunner,RulePolicy,rules/{NativeRules,NativeFileRule,DocsCheckRule}}.ts": {
+          statements: 76,
+          branches: 67,
+          functions: 83,
+          lines: 80
+        },
         "src/PackageLoader.ts": { statements: 80, branches: 65, functions: 86, lines: 83 },
         "src/PackageTree.ts": { statements: 86, branches: 74, functions: 95, lines: 90 },
         "src/ServiceSupervisor.ts": { statements: 87, branches: 80, functions: 84, lines: 88 },

@@ -264,30 +264,7 @@ export const CloudWorkspaceRowSchema = z.object({
 export type CloudWorkspaceRow = z.infer<typeof CloudWorkspaceRowSchema>
 
 /** The fields a workspace load or act writes (the reducer adds updatedAt/revision). */
-export type CloudWorkspaceInput = Pick<
-  CloudWorkspaceRow,
-  | "id"
-  | "repoId"
-  | "name"
-  | "targetBookmark"
-  | "status"
-  | "failureCode"
-  | "failureMessage"
-  | "provisioningStage"
-  | "suspendedAt"
-  | "createdAt"
-  | "kind"
-  | "agentSessionId"
-  | "head"
-  | "ahead"
-  | "behind"
-  | "startedAt"
-  | "environment"
-  | "persistence"
-  | "sshHost"
-  | "desktop"
-  | "lspLanguages"
->
+export type CloudWorkspaceInput = Omit<CloudWorkspaceRow, "updatedAt" | "revision">
 
 /*
  * Lane change (ADR 0003 — the change is the unit): one change as the app
@@ -1385,9 +1362,9 @@ export type AppTransition =
   /*
    * Lane citc: the workspaces collection (the authority the workspace
    * working copies derive from). `workspaces.loaded` replaces a scope — the
-   * per-user list (no repoId) or one repository's — and re-syncs the
-   * workingCopies rows for that scope; `workspace.updated` upserts one row
-   * (an act's answer, the watch's poll) and re-syncs its copy row.
+   * per-user list (no repoId) or one repository's; `workspace.updated` upserts
+   * one row (an act's answer, the watch's poll). Live working copies and card
+   * headers are derived views over those rows.
    */
   | {
     type: "workspaces.loaded"

@@ -31,7 +31,6 @@
  * reads freely; dispatching an agent or opening a computer refuses it with
  * the enable wording.
  */
-import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import type {
   ChangeAnalyzerRun,
   ChangeCheck,
@@ -52,7 +51,7 @@ import type {
 import { changeRowId, WORKSPACE_STATUSES } from "../AppState"
 import type { Card, ChangeInput, CloudWorkspaceInput } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
-import { readErrorMessage } from "./SeamContext"
+import { createCloudClient } from "./CloudClient"
 import type { SeamContext } from "./SeamContext"
 import { DEGRADED_WORKSPACE_REFUSAL } from "./WorkspaceSeam"
 
@@ -791,7 +790,7 @@ const resolvePins = (
 const pinLabel = (token: string): string => (token === "parent" || token === "current" ? token : `rev ${token}`)
 
 export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): ChangeSeam => {
-  const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
+  const { get: getJson, send: sendJson } = createCloudClient(ctx)
   const repoPath = (repoId: string, rest: string): string => {
     const [owner = "", name = ""] = repoId.split("/")
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${rest}`
@@ -806,39 +805,6 @@ export const createChangeSeam = (ctx: SeamContext, deps: ChangeSeamDeps = {}): C
   }
   const degraded = (): boolean => ctx.store.collections.cloudSessions.get("cloud")?.scopes === "degraded"
   const username = (): string | null => ctx.store.collections.cloudSessions.get("cloud")?.username ?? null
-
-  const getJson = async (
-    path: string
-  ): Promise<{ readonly body: unknown } | { readonly error: string; readonly status: number | null }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path))
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`, status: null }
-    }
-    if (!response.ok) {
-      return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`), status: response.status }
-    }
-    return { body: await response.json().catch(() => null) }
-  }
-
-  const sendJson = async (
-    method: "POST" | "PUT" | "DELETE",
-    path: string,
-    body?: Record<string, unknown>
-  ): Promise<{ readonly body: unknown; readonly status: number } | { readonly error: string }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path), {
-        method,
-        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      })
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    if (!response.ok) return { error: await readErrorMessage(response, `The ${method} to ${path} failed (${response.status})`) }
-    return { body: await response.json().catch(() => null), status: response.status }
-  }
 
   /*
    * The repository a change act routes through: the explicit one, else the

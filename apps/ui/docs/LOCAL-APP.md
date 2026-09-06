@@ -381,6 +381,21 @@ main`. `rev N exists · view` renders only when BOTH seqs are known.
 
 ## Navigation and persistence
 
+`AppStore` declares persisted collections once, including each schema, key,
+and recovery policy. Construction, preload, and recovery use that declaration;
+the repository tree remains memory-only. Cloud seams share `CloudClient` for
+JSON transport and failure metadata while keeping their own authorization,
+DTO parsing, and retry decisions.
+
+`cloudWorkspaces` owns live workspace facts. `WorkspaceViews` derives working
+copies and card headers through TanStack DB queries; ordinary updates and status
+polls write the workspace row only. Local pins and sparse older inventory remain
+readable until a full workspace row supersedes them. Removing a workspace from the
+inventory retains its last observed card facts until a live row is available again.
+Frame and branch snapshots capture complete cards and mark workspace cards as
+snapshots. Restoring one preserves its captured facts until an explicit workspace
+act refreshes it.
+
 Durable routes use `/w/:workspace/b/:branch/f/:frame`. Browser back/forward,
 reload, and immutable branch forks operate on workspace/branch/frame records in
 the same store as cards. Fullscreen is explicit; the composer remains mounted

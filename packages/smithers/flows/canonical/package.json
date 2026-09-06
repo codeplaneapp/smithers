@@ -24,7 +24,8 @@
     "./*/index": null,
     "./Canonical": "./src/Canonical.ts",
     "./index": "./src/index.ts",
-    "./Record": "./src/Record.ts"
+    "./Record": "./src/Record.ts",
+    "./BoundedJson": "./src/BoundedJson.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -59,6 +60,11 @@
         "types": "./dist/esm/Record.d.ts",
         "import": "./dist/esm/Record.js",
         "require": "./dist/cjs/Record.js"
+      },
+      "./BoundedJson": {
+        "types": "./dist/esm/BoundedJson.d.ts",
+        "import": "./dist/esm/BoundedJson.js",
+        "require": "./dist/cjs/BoundedJson.js"
       }
     }
   },

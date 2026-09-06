@@ -5,6 +5,7 @@
  * the command contract — an honest error string, or void on success. Cards
  * carry the substance; a seam never returns raw payloads to the transcript.
  */
+import { isRecord } from "@smthrs/canonical/Record"
 import type { AppStore } from "../AppStore"
 
 export type SeamFetch = (input: string, init?: RequestInit) => Promise<Response>
@@ -31,25 +32,17 @@ export interface SeamContext {
  * product's own voice, so that is what a plumbing body gets.
  */
 export const readErrorMessage = async (response: Response, fallback: string): Promise<string> => {
-  const text = (await response.text().catch(() => "")).trim()
-  if (text === "") return fallback
-  try {
-    const body = JSON.parse(text) as { message?: unknown; error?: unknown }
-    if (typeof body.message === "string" && body.message !== "") return body.message.slice(0, 240)
-    if (typeof body.error === "string" && body.error !== "") return body.error.slice(0, 240)
-    /*
-     * The local app's own envelope (src/bun/routes.ts jsonError):
-     * `{ error: { code, message } }`. Its message is addressed to a person
-     * ("secret points outside the repository.") and is what the sidebar's
-     * tree and the files cards show in place — never the fallback.
-     */
-    if (typeof body.error === "object" && body.error !== null) {
-      const nested = (body.error as { message?: unknown }).message
-      if (typeof nested === "string" && nested !== "") return nested.slice(0, 240)
-    }
-  } catch {
-    // Not JSON at all: plumbing, never copy.
-    return fallback
+  return errorMessage(await response.json().catch(() => null), fallback)
+}
+
+/** The human-facing message in an already decoded response. */
+export const errorMessage = (body: unknown, fallback: string): string => {
+  if (!isRecord(body)) return fallback
+  if (typeof body.message === "string" && body.message !== "") return body.message.slice(0, 240)
+  if (typeof body.error === "string" && body.error !== "") return body.error.slice(0, 240)
+  // Native routes use { error: { code, message } }.
+  if (isRecord(body.error) && typeof body.error.message === "string" && body.error.message !== "") {
+    return body.error.message.slice(0, 240)
   }
   return fallback
 }

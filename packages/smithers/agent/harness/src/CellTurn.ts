@@ -643,8 +643,9 @@ export class State extends Schema.Class<State>("flows/harness/CellTurn/State")({
  * forgotten silently reset a budget. Changes are stated; everything else is
  * carried.
  */
-const advance = (state: State, changes: Partial<ConstructorParameters<typeof State>[0]>): State =>
-  new State({ ...state, ...changes })
+type StateChanges = Partial<ConstructorParameters<typeof State>[0]>
+
+const advance = (state: State, changes: StateChanges): State => new State({ ...state, ...changes })
 
 /**
  * Runtime declarations used to interpret serializable controller state.
@@ -1953,76 +1954,76 @@ const frame = (
         return drained
       })
 
+    // Rejected cells have no execution facts. Once a cell runs, every
+    // continuation carries the same measured facts through this one boundary.
+    let facts: StateChanges = {}
+    const continuing = (changes: StateChanges): Extract<Step, { readonly _tag: "Continue" }> => ({
+      _tag: "Continue",
+      state: advance(state, {
+        frame: state.frame + 1,
+        truncatedOutputs: TruncatedOutput.retain(ledger),
+        ...facts,
+        ...changes
+      })
+    })
+    const close = (
+      outcome: "continue" | "resolved" | "suspended",
+      output: string = budgetMessage(state)
+    ): Effect.Effect<void> =>
+      Effect.gen(function*() {
+        yield* emit(
+          new AgentEvent.TurnClosed({
+            eventType: eventType.turnClosed,
+            stopReason: answer.message.stopReason,
+            outcome
+          })
+        )
+        if (outcome === "resolved") {
+          yield* emit(
+            new AgentEvent.Resolved({
+              eventType: eventType.resolved,
+              message: ModelRequest.Message.assistant(output, { stopReason: "stop" })
+            })
+          )
+        }
+      })
+    const finish = (step: Step): Effect.Effect<Step> =>
+      close(step._tag === "Done" ? "resolved" : step._tag === "Suspend" ? "suspended" : "continue").pipe(
+        Effect.as(step)
+      )
+
+    const resumed = (
+      drained: Steering.DrainRecord,
+      changes: StateChanges = {},
+      text: string = printed,
+      echo: number = liveCellEcho
+    ): Effect.Effect<Extract<Step, { readonly _tag: "Continue" }>, HarnessError> =>
+      Effect.gen(function*() {
+        const settings = yield* steered(state, drained.seatChanges, input.contextWindowTokensFor)
+        const context = appended(
+          contextWindow,
+          answer.message,
+          [ModelRequest.Message.user(text), ...drained.inserts],
+          echo
+        )
+        return continuing({
+          ...settings,
+          contextWindow: windowOn(state, settings.seat, context),
+          ...changes
+        })
+      })
+
     /** Records an unusable frame and asks for another, budget permitting. */
     const observe = (
       note: string,
-      changes: Partial<ConstructorParameters<typeof State>[0]> = {},
+      changes: StateChanges = {},
       echo: number = liveCellEcho
     ): Effect.Effect<Step, HarnessError> =>
       Effect.gen(function*() {
         const drained = yield* drain(!hasNextFrame)
-        if (!hasNextFrame) return { _tag: "Done" }
-        const { contextWindowTokens, modelParams, seat } = yield* steered(
-          state,
-          drained.seatChanges,
-          input.contextWindowTokensFor
-        )
-        const context = appended(
-          contextWindow,
-          answer.message,
-          [ModelRequest.Message.user(printed === "" ? note : `${printed}\n\n${note}`), ...drained.inserts],
-          echo
-        )
-        return {
-          _tag: "Continue",
-          state: advance(state, {
-            frame: state.frame + 1,
-            seat,
-            modelParams,
-            contextWindowTokens,
-            contextWindow: windowOn(state, seat, context),
-            truncatedOutputs: TruncatedOutput.retain(ledger),
-            ...changes
-          })
-        }
-      })
-
-    /**
-     * Continues a park a steer answered, carrying what the steer changed.
-     *
-     * The same shape the continue path builds, because that is what this is: an
-     * answered park is a frame the run carries on from, and the only difference
-     * is that its trailing messages came from an operator rather than from the
-     * loop's own notices.
-     */
-    const resumed = (
-      drained: Steering.DrainRecord,
-      changes: Partial<ConstructorParameters<typeof State>[0]> = {}
-    ): Effect.Effect<Extract<Step, { readonly _tag: "Continue" }>, HarnessError> =>
-      Effect.gen(function*() {
-        const { contextWindowTokens, modelParams, seat } = yield* steered(
-          state,
-          drained.seatChanges,
-          input.contextWindowTokensFor
-        )
-        const context = appended(
-          contextWindow,
-          answer.message,
-          [ModelRequest.Message.user(printed), ...drained.inserts],
-          liveCellEcho
-        )
-        return {
-          _tag: "Continue",
-          state: advance(state, {
-            frame: state.frame + 1,
-            seat,
-            modelParams,
-            contextWindowTokens,
-            contextWindow: windowOn(state, seat, context),
-            truncatedOutputs: TruncatedOutput.retain(ledger),
-            ...changes
-          })
-        }
+        return hasNextFrame
+          ? yield* resumed(drained, changes, printed === "" ? note : `${printed}\n\n${note}`, echo)
+          : { _tag: "Done" }
       })
 
     if (produced === undefined) {
@@ -2047,30 +2048,7 @@ const frame = (
         return yield* readOnlyCapFailure(state.readOnlyCap, rejectedFrames)
       }
       const step = yield* observe(rejection.message, { readOnlyFrames: rejectedFrames }, deadCellEcho)
-      if (step._tag === "Done") {
-        yield* emit(
-          new AgentEvent.TurnClosed({
-            eventType: eventType.turnClosed,
-            stopReason: answer.message.stopReason,
-            outcome: "resolved"
-          })
-        )
-        yield* emit(
-          new AgentEvent.Resolved({
-            eventType: eventType.resolved,
-            message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-          })
-        )
-        return step
-      }
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: "continue"
-        })
-      )
-      return step
+      return yield* finish(step)
     }
 
     const cell = produced.source
@@ -2400,6 +2378,22 @@ const frame = (
         onSome: (value) => value.complete ? value.digest : ""
       })
 
+    facts = {
+      workspace: closed,
+      repeatFrames,
+      callSignatures,
+      checkpointIds,
+      checks,
+      callLedger,
+      failures,
+      mutations,
+      openingDigest,
+      panel,
+      ...(mutated ? { readOnlyGrace: 0, pendingReadOnlyDemand: undefined } : {})
+    }
+    const readOnly = !mutated
+    const readOnlyFrames = readOnly ? state.readOnlyFrames + 1 : 0
+
     // Read-only discipline is armed for the whole frame, not for one exit: a
     // raise, a refused park and a settled transition all continue the run, and
     // each of them judges the frame by this cap.
@@ -2415,7 +2409,6 @@ const frame = (
       // own report reads the drift the other way round — the journal's
       // mutation streak and this counter disagreed by one per raise — and the
       // instance that spent its whole budget raised twice.
-      const raisedFrames = mutated ? 0 : state.readOnlyFrames + 1
       // A demand is answered by a write or by a justification, and a frame
       // that settled no transition produced neither. So a raise leaves the
       // demand pending — its text is still in the transcript this exit appends
@@ -2431,8 +2424,8 @@ const frame = (
           })
         )
       }
-      if (cap > 0 && raisedFrames >= cap * 2) {
-        return yield* readOnlyCapFailure(cap, raisedFrames)
+      if (cap > 0 && readOnlyFrames >= cap * 2) {
+        return yield* readOnlyCapFailure(cap, readOnlyFrames)
       }
       // The flow name is clipped for the same reason `CallLedger` clips it: a
       // call names whatever string the cell passed to `ctx.call`, a name that
@@ -2459,35 +2452,9 @@ const frame = (
         }${salvage}${alert}`
         : `${outcome.message}${salvage}${alert}`
       const step = yield* observe(note, {
-        workspace: closed,
-        readOnlyFrames: raisedFrames,
-        repeatFrames,
-        callSignatures,
-        checkpointIds,
-        checks,
-        callLedger,
-        failures,
-        mutations,
-        openingDigest,
-        panel,
-        ...(mutated ? { readOnlyGrace: 0, pendingReadOnlyDemand: undefined } : {})
+        readOnlyFrames
       })
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: step._tag === "Done" ? "resolved" : "continue"
-        })
-      )
-      if (step._tag === "Done") {
-        yield* emit(
-          new AgentEvent.Resolved({
-            eventType: eventType.resolved,
-            message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-          })
-        )
-      }
-      return step
+      return yield* finish(step)
     }
 
     const transition = outcome.transition
@@ -2520,9 +2487,8 @@ const frame = (
         // waiting here: a cell that parks every frame changes nothing, and
         // without this it would be the one shape a stalled run can take that
         // the read-only cap never sees.
-        const parkFrames = mutated ? 0 : state.readOnlyFrames + 1
-        if (cap > 0 && parkFrames >= cap * 2) {
-          return yield* readOnlyCapFailure(cap, parkFrames)
+        if (cap > 0 && readOnlyFrames >= cap * 2) {
+          return yield* readOnlyCapFailure(cap, readOnlyFrames)
         }
         const limits = Sandbox.withDefaults(sandbox.capabilities, input.limits)
         const step = yield* observe(
@@ -2533,52 +2499,14 @@ const frame = (
           ),
           {
             pendingReadOnlyDemand: undefined,
-            workspace: closed,
-            readOnlyFrames: parkFrames,
-            repeatFrames,
-            callSignatures,
-            checkpointIds,
-            checks,
-            callLedger,
-            failures,
-            mutations,
-            openingDigest,
-            panel,
-            ...(mutated ? { readOnlyGrace: 0 } : {})
+            readOnlyFrames
           }
         )
-        yield* emit(
-          new AgentEvent.TurnClosed({
-            eventType: eventType.turnClosed,
-            stopReason: answer.message.stopReason,
-            outcome: step._tag === "Done" ? "resolved" : "continue"
-          })
-        )
-        if (step._tag === "Done") {
-          yield* emit(
-            new AgentEvent.Resolved({
-              eventType: eventType.resolved,
-              message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-            })
-          )
-        }
-        return step
+        return yield* finish(step)
       }
       if (!hasNextFrame) {
         yield* drain(true)
-        yield* emit(
-          new AgentEvent.TurnClosed({
-            eventType: eventType.turnClosed,
-            stopReason: answer.message.stopReason,
-            outcome: "resolved"
-          })
-        )
-        yield* emit(
-          new AgentEvent.Resolved({
-            eventType: eventType.resolved,
-            message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-          })
-        )
+        yield* close("resolved")
         return { _tag: "Done" }
       }
       // The drain on the park path, and the only thing that can ever answer an
@@ -2630,50 +2558,23 @@ const frame = (
         // honored park still is — waiting is not evasion — so the read-only
         // streak is carried rather than advanced.
         const step = yield* resumed(answered, {
-          pendingReadOnlyDemand: undefined,
-          workspace: closed,
-          repeatFrames,
-          callSignatures,
-          checkpointIds,
-          checks,
-          callLedger,
-          failures,
-          mutations,
-          openingDigest,
-          panel,
-          ...(mutated ? { readOnlyGrace: 0 } : {})
+          pendingReadOnlyDemand: undefined
         })
-        yield* emit(
-          new AgentEvent.TurnClosed({
-            eventType: eventType.turnClosed,
-            stopReason: answer.message.stopReason,
-            outcome: "continue"
-          })
-        )
-        return step
+        return yield* finish(step)
       }
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: "suspended"
-        })
-      )
-      return {
+      return yield* finish({
         _tag: "Suspend",
         reason: new EngineLike.SuspendReason({
           code: transition.reason,
           message: transition.message
         })
-      }
+      })
     }
 
     // Read-only discipline, applied to every frame that settled a decision.
     // An honored park is exempt: waiting is not evasion, and a parked run is
     // not reporting anything as done. A refused park is not exempt — it
     // continues the run — and the branch above applies the same rule to it.
-    const readOnly = !mutated
-    const readOnlyFrames = readOnly ? state.readOnlyFrames + 1 : 0
     if (state.pendingReadOnlyDemand !== undefined) {
       yield* emit(
         new AgentEvent.ReadOnlyDemanded({
@@ -2706,27 +2607,9 @@ const frame = (
       printed += `\n\nThe completed answer before this follow-up:\n${transition.output}`
       const step = yield* resumed(drained, {
         bouncedCompletion: transition.output,
-        workspace: closed,
-        readOnlyFrames,
-        repeatFrames,
-        callSignatures,
-        checkpointIds,
-        checks,
-        callLedger,
-        failures,
-        mutations,
-        openingDigest,
-        panel,
-        ...(mutated ? { readOnlyGrace: 0, pendingReadOnlyDemand: undefined } : {})
+        readOnlyFrames
       })
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: "continue"
-        })
-      )
-      return step
+      return yield* finish(step)
     }
     if (transition._tag === "complete") {
       // The completion's own evidence, judged once per demand. A run gets
@@ -2861,89 +2744,37 @@ const frame = (
         ? { note: NarrowedCheck.demandOnly(narrowOnly), spent: { narrowingDemands: state.narrowingDemands + 1 } }
         : undefined
       if (demanded !== undefined) {
-        yield* emit(
-          new AgentEvent.TurnClosed({
-            eventType: eventType.turnClosed,
-            stopReason: answer.message.stopReason,
-            outcome: "continue"
-          })
-        )
-        return {
-          _tag: "Continue",
-          state: advance(state, {
-            frame: state.frame + 1,
-            // The demand is an in-frame observation appended to what the run
-            // was already holding, not a projected context: a completion names
-            // no context for a next frame, and a run answering this one needs
-            // the frame it just wrote.
-            contextWindow: observedOn(contextWindow, answer.message, demanded.note, liveCellEcho),
-            truncatedOutputs: TruncatedOutput.retain(ledger),
-            workspace: closed,
-            readOnlyFrames,
-            pendingReadOnlyDemand: undefined,
-            repeatFrames,
-            callSignatures,
-            checkpointIds,
-            checks,
-            callLedger,
-            failures,
-            mutations,
-            openingDigest,
-            panel,
-            ...demanded.spent,
-            // The answer the demand is taking away, kept so it cannot be lost.
-            // A frame was reserved for the run to answer in, but nothing makes
-            // that frame end in a completion, and a run that spends it and
-            // then runs out of budget would end on the budget notice with its
-            // own answer discarded. See {@link budgetMessage}.
-            bouncedCompletion: transition.output,
-            // The frame this demand was handed to, which is the frame that
-            // gets to answer it without being judged again. See
-            // {@link State.demandedFrame}.
-            demandedFrame: state.frame + 1,
-            ...(mutated ? { readOnlyGrace: 0 } : {})
-          })
-        }
+        yield* close("continue")
+        return continuing({
+          // The demand is an in-frame observation appended to what the run
+          // was already holding, not a projected context: a completion names
+          // no context for a next frame, and a run answering this one needs
+          // the frame it just wrote.
+          contextWindow: observedOn(contextWindow, answer.message, demanded.note, liveCellEcho),
+          readOnlyFrames,
+          pendingReadOnlyDemand: undefined,
+          ...demanded.spent,
+          // The answer the demand is taking away, kept so it cannot be lost.
+          // A frame was reserved for the run to answer in, but nothing makes
+          // that frame end in a completion, and a run that spends it and
+          // then runs out of budget would end on the budget notice with its
+          // own answer discarded. See {@link budgetMessage}.
+          bouncedCompletion: transition.output,
+          // The frame this demand was handed to, which is the frame that
+          // gets to answer it without being judged again. See
+          // {@link State.demandedFrame}.
+          demandedFrame: state.frame + 1
+        })
       }
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: "resolved"
-        })
-      )
-      yield* emit(
-        new AgentEvent.Resolved({
-          eventType: eventType.resolved,
-          message: ModelRequest.Message.assistant(transition.output, { stopReason: "stop" })
-        })
-      )
+      yield* close("resolved", transition.output)
       return { _tag: "Done" }
     }
 
     if (state.maxFrames > 0 && state.frame + 1 >= state.maxFrames) {
-      yield* emit(
-        new AgentEvent.TurnClosed({
-          eventType: eventType.turnClosed,
-          stopReason: answer.message.stopReason,
-          outcome: "resolved"
-        })
-      )
-      yield* emit(
-        new AgentEvent.Resolved({
-          eventType: eventType.resolved,
-          message: ModelRequest.Message.assistant(budgetMessage(state), { stopReason: "stop" })
-        })
-      )
+      yield* close("resolved")
       return { _tag: "Done" }
     }
-    yield* emit(
-      new AgentEvent.TurnClosed({
-        eventType: eventType.turnClosed,
-        stopReason: answer.message.stopReason,
-        outcome: "continue"
-      })
-    )
+    yield* close("continue")
     const { contextWindowTokens, modelParams, seat } = yield* steered(
       state,
       drained.seatChanges,
@@ -3043,31 +2874,17 @@ const frame = (
       [ModelRequest.Message.user(printed), ...trailing],
       liveCellEcho
     )
-    return {
-      _tag: "Continue",
-      state: advance(state, {
-        frame: state.frame + 1,
-        seat,
-        modelParams,
-        contextWindowTokens,
-        contextWindow: windowOn(state, seat, context),
-        truncatedOutputs: TruncatedOutput.retain(ledger),
-        workspace: closed,
-        readOnlyFrames,
-        readOnlyGrace,
-        repeatFrames: repeatDemanded ? 0 : repeatFrames,
-        callSignatures,
-        checkpointIds,
-        checks,
-        callLedger,
-        failures,
-        mutations,
-        panel,
-        ...(sufficient === undefined ? {} : { sufficiencyStated: true }),
-        openingDigest,
-        pendingReadOnlyDemand: demanded && !justified ? { streak: readOnlyFrames, cap } : undefined
-      })
-    }
+    return continuing({
+      seat,
+      modelParams,
+      contextWindowTokens,
+      contextWindow: windowOn(state, seat, context),
+      readOnlyFrames,
+      readOnlyGrace,
+      repeatFrames: repeatDemanded ? 0 : repeatFrames,
+      ...(sufficient === undefined ? {} : { sufficiencyStated: true }),
+      pendingReadOnlyDemand: demanded && !justified ? { streak: readOnlyFrames, cap } : undefined
+    })
   })
 
 /**

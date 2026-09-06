@@ -2493,6 +2493,7 @@
       "name": "@smthrs/run-store",
       "version": "1.0.0-rc.0",
       "dependencies": {
+        "@smthrs/canonical": "1.0.0-rc.0",
         "@smthrs/database": "1.0.0-rc.0",
         "@smthrs/journal": "1.0.0-rc.0",
         "@smthrs/observability": "1.0.0-rc.0",

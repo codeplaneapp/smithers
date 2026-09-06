@@ -12,38 +12,39 @@ stamp operands, and a Shell.Serve carries its resolved command and service
 probes. An incomplete plan has an explicit refusal. Native rule names cannot
 enter the custom declaration-body fallback without their payload.
 
-The union refines required execution data as each family is extracted. Fetch
-is the first complete family contract: no file inputs or services, exactly
-one declared output file, execute mode, intrinsic network access, and no
-process command. Process rules already require a nonempty resolved argv.
-The remaining families retain shared input, output, and policy fields while
-their planners remain in `PackageExec.ts`; the union now enforces their
-rule/lane and agent-flavor relationships.
+Fetch, Copy, Literal, and Docs.Check have paired planners and executors in
+`internal/rules`. `NativeRules` selects the pair from one registry. Fetch
+requires exactly one output, execute mode, and intrinsic network access;
+native file rules require one output; Docs.Check carries its resolved input
+closure. Process rules require a nonempty resolved command. The union also
+enforces the remaining rule/lane and agent-flavor relationships.
 
 ## Execution boundaries
 
 ```mermaid
 flowchart TD
-  Declaration["Target declaration and schemas"] --> Package["PackageExec: graph and shared policy"]
+  Declaration["Target declaration and schemas"] --> Package["PackagePlanner: graph and keys"]
   Package --> Plan["Family planner: exact variant or refusal"]
   Plan --> Node["RuleContract.PlannedRule"]
-  Node --> Shared["Scheduling, admission, services and cache decisions"]
+  Node --> Shared["PackageRunner: scheduling, admission, services and cache"]
   Shared --> Execute["Family executor: exact planned variant"]
   Execute --> Verify["Shared output verification, capture and provenance"]
 ```
 
-The first pair is `internal/rules/FetchPlan.ts` and
+The Fetch pair is `internal/rules/FetchPlan.ts` and
 `internal/rules/FetchExecutor.ts`, joined by `FetchRule.contract`.
 The planner resolves the package-relative output without network or filesystem
 access. The executor reads the planned URL, digest, and destination; it does
 not read the declaration again. It streams into a temporary file, verifies
 the digest, and publishes by rename using the existing limits and errors.
 
-`PackageExec.ts` continues to own graph expansion, scheduling, cancellation,
-admission, service acquisition, output verification, cache eligibility,
-capture/replay, and provenance. `ServiceSupervisor.ts` remains the sole
-shared service lifetime owner. Extracting a rule does not create another
-scheduler, cache decision, or supervisor.
+`PackageExec.ts` is the public facade. `PackagePlanner` owns graph expansion,
+input resolution, and preview keys. `PackageRunner` owns admission, service
+acquisition, execution, output verification, and cache publication. Its
+artifact lifecycle restores before running and captures only a successful
+result. `RulePolicy` declares each rule's default mode, cache eligibility,
+capabilities, and scheduling flags in one place. `ServiceSupervisor` owns
+service lifetimes; extracting a rule introduces no new scheduler or cache.
 
 The public `FetchExec` functions remain adapters to the same planner and
 download implementation. Its error class, limits, result type, and URL
@@ -65,15 +66,15 @@ does not validate untyped or serialized values.
 | Resolved environment                                 | `NixExec.ResolvedEnvironment`                 | `Planner.PlannedEnvironment` projects the store path, hash, closure, PATH, and variables needed at execution; resolver diagnostics and declaration facts are intentionally absent. |
 | Fetch planning and transport                         | `FetchPlan` and `FetchExecutor`               | `FetchRule` pairs them; `FetchExec` preserves the public call shape without duplicating behavior.                                                                                  |
 | Process service lifetime                             | `ServiceSupervisor`                           | Declaration probe schemas validate attrs. The supervisor's host-facing readiness, health, and stop types describe the reduced runtime contract.                                    |
-| Output manifests and workspace snapshots             | `PackageTree`                                 | `Cache` owns the persisted entry envelope and content store. `PackageExec` decides when an entry is reusable and when to publish provenance.                                       |
+| Output manifests and workspace snapshots             | `PackageTree`                                 | `Cache` owns the persisted entry envelope and content store. `PackageRunner` decides when an entry is reusable and when to publish provenance.                                     |
 
 `CoreRuleSelection` is a temporary adapter for the core rules still planned
 inline. Its native-lane name table is checked against the union at compile
 time, so adding a native variant also requires guarding the body fallback.
-The remaining inline dispatch and the two frontend executors,
-`PackageExec` and `Executor`, are explicit staged work. Their different
-graph inputs justify adapters; shared rule behavior should move behind the
-same contracts as each extraction earns equivalence evidence.
+The remaining specialized dispatch stays in `PackagePlanner` and
+`PackageRunner`, behind the same shared policy and scheduler. New native
+families should join `NativeRules` with a paired contract instead of adding
+independent planning and execution cases.
 
 ## Equivalence and coverage
 
@@ -90,17 +91,15 @@ cancellation, and byte limits at N-1, N, and N+1. `PlannedRule.types.ts`
 contains negative compilation tests for invalid rule/lane, command,
 output, service, and execution-policy combinations.
 
-New implementation modules have their own coverage floors. Floors follow
-moved code and may only increase. Existing PackageExec, RepoResolution,
-DockerExec, and other backend floors remain in place; aggregate coverage
-does not replace those individual responsibilities.
+The original PackageExec coverage floor also gates the combined extracted
+planner, runner, policy, and native rule modules. Moving code does not remove
+it from the gate. Existing per-backend floors remain in place.
 
 ## Current scheduler and dispatch owners
 
-The reference above to two frontend executors describes the historical split.
-In the current implementation, `Executor` owns `schedule`, `mergePlans`,
+`Executor` owns `schedule`, `mergePlans`,
 concurrency validation, report types, and the cache-output codecs.
-`PackageExec.execute` coordinates rule dispatch, cache decisions, services,
+`PackageRunner.execute`, reexported by `PackageExec`, coordinates rule dispatch, cache decisions, services,
 and output capture, calling that shared scheduler. `TargetExecution.runTarget`
 is the adapter that lowers declaration bodies into the isolated Flow runtime.
 There is no second rule-dispatch loop in `Executor` to extract.

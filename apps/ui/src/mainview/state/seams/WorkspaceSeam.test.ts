@@ -358,7 +358,7 @@ describe("workspace seam list", () => {
       ["ws-vm", "vm", "landing/main"],
       ["ws-desk", "desktop", "landing/main"]
     ])
-    expect(copiesOf(store).map((copy) => copy.id)).toEqual(["workspace:ws-vm", "workspace:ws-desk"])
+    expect(copiesOf(store).map((copy) => copy.id).sort()).toEqual(["workspace:ws-desk", "workspace:ws-vm"])
   })
 
   test("a per-user row keeps the bookmark the collection already knows; a status that moved on drops its stage", async () => {

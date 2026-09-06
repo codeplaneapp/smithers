@@ -16,10 +16,9 @@
  * A secret VALUE is never on the wire and never rendered: the audit names
  * which binding was substituted, which is the whole point of the boundary.
  */
-import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
+import { createCloudClient } from "./CloudClient"
 import type { SandboxEgressRow } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
-import { readErrorMessage } from "./SeamContext"
 import type { SeamContext } from "./SeamContext"
 
 export const DEGRADED_EGRESS_REFUSAL =
@@ -104,14 +103,9 @@ export const loadEgressPage = async (
   const query = `?limit=${EGRESS_PAGE_LIMIT}${
     cursor === undefined || cursor === null || cursor === "" ? "" : `&cursor=${encodeURIComponent(cursor)}`
   }`
-  let response: Response
-  try {
-    response = await ctx.http(`${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}${query}`)
-  } catch (error) {
-    return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-  }
-  if (!response.ok) return { error: await readErrorMessage(response, `Reading ${path} failed (${response.status})`) }
-  const body = await response.json().catch(() => null)
+  const answer = await createCloudClient(ctx).get(`${path}${query}`, path)
+  if ("error" in answer) return { error: answer.error }
+  const { body, response } = answer
   const raw = Array.isArray(body) ? body : isRecord(body) && Array.isArray(body.items) ? body.items : []
   const rows = raw.flatMap((entry) => {
     const parsed = parseEgressRow(entry)

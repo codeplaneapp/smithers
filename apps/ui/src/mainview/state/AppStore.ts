@@ -25,6 +25,7 @@ import { ENVELOPE_STORAGE_KEY, STAGED_ENVELOPE_STORAGE_KEY, matchesStoredStringI
 import type { TransactionalStorage } from "../chain/TransactionalStorage"
 import { PALETTE_MIRROR_KEY, rememberAppearance, THEME_MIRROR_KEY } from "./Appearance"
 import { archiveNotice, conversationNotes } from "./ConversationArchive"
+import { createWorkspaceViews, projectWorkspaceCard, snapshotCard } from "./WorkspaceViews"
 import { framePath } from "../runtime/FrameHistory"
 import {
   AgentRoleSchema,
@@ -81,40 +82,26 @@ import {
   WorldDocumentSchema
 } from "./AppState"
 import type {
-  AgentRole,
   AppTransition,
-  BillingAccount,
-  Branch,
   Card,
-  ChainEventRecord,
-  RetiredChainLineage,
   ChangeRow,
   CloudRepository,
   CloudSessionRow,
   CloudWorkspaceRow,
-  ConnectorOperation,
   Frame,
   FrameSnapshot,
   GitHubAppStatusRow,
-  Harness,
-  IdentitySession,
   LinearIntegrationRow,
   LocalRepositoryConnector,
   Message,
   Palette,
-  PinnedRepo,
   Recommendation,
   RepoTreeRow,
-  StarredTarget,
-  Repo,
   RepositoryCapabilityPattern,
   Session,
   TabRow,
   Toast,
-  ToolCallRecord,
-  TransitionRecord,
   WorkingCopy,
-  Workspace,
   WorldDocument
 } from "./AppState"
 
@@ -287,43 +274,7 @@ interface ResolvedPersistence {
 
 const OPFS_DATABASE_NAME = "smithers-mvp.sqlite"
 
-const PERSISTED_COLLECTION_SPECS = [
-  { id: "app-sessions", schema: SessionSchema },
-  { id: "app-messages", schema: MessageSchema },
-  { id: "app-connectors", schema: LocalRepositoryConnectorSchema },
-  { id: "app-connector-operations", schema: ConnectorOperationSchema },
-  { id: "world-documents", schema: WorldDocumentSchema },
-  { id: "app-cards", schema: CardSchema },
-  { id: "app-transitions", schema: TransitionRecordSchema },
-  { id: "app-identity-sessions", schema: IdentitySessionSchema },
-  { id: "app-billing-accounts", schema: BillingAccountSchema },
-  { id: "app-toasts", schema: ToastSchema },
-  { id: "app-tool-calls", schema: ToolCallRecordSchema },
-  { id: "app-chain-events", schema: ChainEventRecordSchema, invalidRows: "refuse" as const, validateKey: matchesStoredStringId },
-  { id: "app-retired-chain-lineages", schema: RetiredChainLineageSchema, invalidRows: "refuse" as const, validateKey: matchesStoredStringId },
-  { id: "app-tabs", schema: TabSchema },
-  { id: "app-harnesses", schema: HarnessSchema },
-  /* Agents as data (custom-agents.md): the mirror of `GET /api/agents`, re-read after every mutation. */
-  { id: "app-agents", schema: AgentRoleSchema },
-  { id: "app-repos", schema: RepoSchema },
-  { id: "app-pinned-repos", schema: PinnedRepoSchema },
-  { id: "app-starred-targets", schema: StarredTargetSchema },
-  { id: "app-workspaces", schema: WorkspaceSchema },
-  { id: "app-branches", schema: BranchSchema },
-  { id: "app-frames", schema: FrameSchema },
-  { id: "app-recommendations", schema: RecommendationSchema },
-  /* Lane piper: the Smithers Cloud inventory, the working copies, and the cloud session. */
-  { id: "app-cloud-repositories", schema: CloudRepositorySchema },
-  { id: "app-working-copies", schema: WorkingCopySchema },
-  { id: "app-cloud-sessions", schema: CloudSessionRowSchema },
-  /* Lane citc: the cloud workspaces (the authority the workspace copies derive from). */
-  { id: "app-cloud-workspaces", schema: CloudWorkspaceRowSchema },
-  /* Lane change: the changes the app has read (ADR 0003). */
-  { id: "app-changes", schema: ChangeRowSchema },
-  /* Lane sync: the Linear integrations and the per-repo GitHub App statuses (ADR 0005). */
-  { id: "app-linear-integrations", schema: LinearIntegrationRowSchema },
-  { id: "app-github-app-statuses", schema: GitHubAppStatusRowSchema }
-]
+
 /** Attempts spent waiting out a locked access-handle pool. See `openOpfsDatabase`. */
 const OPFS_OPEN_ATTEMPTS = 5
 /** The whole OPFS open, retries included. A store that never answers must not hang boot. */
@@ -616,49 +567,11 @@ const createPersistedCollection = <TSchema extends StandardSchemaV1>(
   return createCollection({ ...options, schema: spec.schema })
 }
 
-export interface AppCollections {
-  readonly sessions: ReturnType<typeof createSessionCollection>
-  readonly messages: ReturnType<typeof createMessageCollection>
-  readonly connectors: ReturnType<typeof createConnectorCollection>
-  readonly connectorOperations: ReturnType<typeof createConnectorOperationCollection>
-  readonly worldDocuments: ReturnType<typeof createWorldDocumentCollection>
-  readonly cards: ReturnType<typeof createCardCollection>
-  readonly transitions: ReturnType<typeof createTransitionCollection>
-  readonly identitySessions: ReturnType<typeof createIdentitySessionCollection>
-  readonly billingAccounts: ReturnType<typeof createBillingAccountCollection>
-  readonly toasts: ReturnType<typeof createToastCollection>
-  readonly toolCalls: ReturnType<typeof createToolCallCollection>
-  readonly chainEvents: ReturnType<typeof createChainEventCollection>
-  readonly retiredChainLineages: ReturnType<typeof createRetiredChainLineageCollection>
-  /* The local-app tab strip and what its `+` menu and repo chip read (docs/LOCAL-APP.md). */
-  readonly tabs: ReturnType<typeof createTabCollection>
-  readonly harnesses: ReturnType<typeof createHarnessCollection>
-  /** The agents (built-in and custom) the `+` menus, the Agents card, and the roles paragraph read; empty until `/api/agents` answers. */
-  readonly agents: ReturnType<typeof createAgentCollection>
-  readonly repos: ReturnType<typeof createRepoCollection>
-  /** The sidebar's pinned repositories; tabs nest under them (docs/LOCAL-APP.md "Tabs"). */
-  readonly pinnedRepos: ReturnType<typeof createPinnedRepoCollection>
-  /** The sidebar's file tree rows, one per expanded directory of a working copy; memory-only (docs/workbench-lanes/sidebar-tree.md). */
-  readonly repoTree: ReturnType<typeof createRepoTreeCollection>
-  readonly starredTargets: ReturnType<typeof createStarredTargetCollection>
-  readonly workspaces: ReturnType<typeof createWorkspaceCollection>
-  readonly branches: ReturnType<typeof createBranchCollection>
-  readonly frames: ReturnType<typeof createFrameCollection>
-  /* The one next-step recommendation row the pills project (Recommend.ts). */
-  readonly recommendations: ReturnType<typeof createRecommendationCollection>
-  /* Lane piper: the Smithers Cloud inventory, its working copies, and the cloud session (no token). */
-  readonly repositories: ReturnType<typeof createRepositoriesCollection>
-  readonly workingCopies: ReturnType<typeof createWorkingCopyCollection>
-  readonly cloudSessions: ReturnType<typeof createCloudSessionCollection>
-  /** Lane citc: the cloud workspaces (ADR 0002), the authority behind the workspace working copies. */
-  readonly cloudWorkspaces: ReturnType<typeof createCloudWorkspaceCollection>
-  /** Lane change: the changes the app has read (ADR 0003), keyed `${repoId}#${changeId}`. */
-  readonly changes: ReturnType<typeof createChangeCollection>
-  /** Lane sync: the user's Linear integrations (ADR 0005), keyed by the wire's id. */
-  readonly linearIntegrations: ReturnType<typeof createLinearIntegrationCollection>
-  /** Lane sync: the GitHub App statuses the app has read, keyed `org/repo` (ADR 0005). */
-  readonly githubAppStatuses: ReturnType<typeof createGitHubAppStatusCollection>
+export type StoredCollections = {
+  readonly [K in keyof typeof COLLECTION_DEFINITIONS]: ReturnType<typeof COLLECTION_DEFINITIONS[K]["create"]>
 }
+
+export type AppCollections = Omit<StoredCollections, "cards" | "workingCopies"> & ReturnType<typeof createWorkspaceViews>
 
 export interface WorldStateSnapshot {
   readonly capturedAt: number
@@ -696,231 +609,67 @@ export interface AppStore {
   readonly dispose?: () => void | Promise<void>
 }
 
-const createSessionCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-sessions",
-    getKey: (session: Session) => session.id,
-    schema: SessionSchema
-  })
+/** A persisted collection declares its storage identity and row schema once. */
+const persistedCollection = <TSchema extends StandardSchemaV1>(
+  id: string,
+  schema: TSchema,
+  getKey: (row: InferSchemaOutput<TSchema>) => string,
+  recovery: { readonly invalidRows?: "refuse"; readonly validateKey?: typeof matchesStoredStringId } = {}
+) => ({
+  id,
+  schema,
+  persisted: true as const,
+  ...recovery,
+  create: (backend: PersistenceBackend) => createPersistedCollection(backend, { id, schema, getKey })
+})
 
-const createMessageCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-messages",
-    getKey: (message: Message) => message.id,
-    schema: MessageSchema
-  })
+const byId = (row: { readonly id: string }): string => row.id
+const strictJournalRows = { invalidRows: "refuse" as const, validateKey: matchesStoredStringId }
 
-const createConnectorCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-connectors",
-    getKey: (connector: LocalRepositoryConnector) => connector.id,
-    schema: LocalRepositoryConnectorSchema
-  })
+/** Construction, recovery, preload, and the public collection types share this roster. */
+const COLLECTION_DEFINITIONS = {
+  sessions: persistedCollection("app-sessions", SessionSchema, byId),
+  messages: persistedCollection("app-messages", MessageSchema, byId),
+  connectors: persistedCollection("app-connectors", LocalRepositoryConnectorSchema, byId),
+  connectorOperations: persistedCollection("app-connector-operations", ConnectorOperationSchema, byId),
+  worldDocuments: persistedCollection("world-documents", WorldDocumentSchema, byId),
+  cards: persistedCollection("app-cards", CardSchema, byId),
+  transitions: persistedCollection("app-transitions", TransitionRecordSchema, byId),
+  identitySessions: persistedCollection("app-identity-sessions", IdentitySessionSchema, byId),
+  billingAccounts: persistedCollection("app-billing-accounts", BillingAccountSchema, byId),
+  toasts: persistedCollection("app-toasts", ToastSchema, byId),
+  toolCalls: persistedCollection("app-tool-calls", ToolCallRecordSchema, byId),
+  chainEvents: persistedCollection("app-chain-events", ChainEventRecordSchema, byId, strictJournalRows),
+  retiredChainLineages: persistedCollection("app-retired-chain-lineages", RetiredChainLineageSchema, byId, strictJournalRows),
+  tabs: persistedCollection("app-tabs", TabSchema, byId),
+  harnesses: persistedCollection("app-harnesses", HarnessSchema, byId),
+  agents: persistedCollection("app-agents", AgentRoleSchema, byId),
+  repos: persistedCollection("app-repos", RepoSchema, byId),
+  pinnedRepos: persistedCollection("app-pinned-repos", PinnedRepoSchema, byId),
+  starredTargets: persistedCollection("app-starred-targets", StarredTargetSchema, byId),
+  workspaces: persistedCollection("app-workspaces", WorkspaceSchema, byId),
+  branches: persistedCollection("app-branches", BranchSchema, byId),
+  recommendations: persistedCollection("app-recommendations", RecommendationSchema, byId),
+  frames: persistedCollection("app-frames", FrameSchema, byId),
+  repositories: persistedCollection("app-cloud-repositories", CloudRepositorySchema, byId),
+  workingCopies: persistedCollection("app-working-copies", WorkingCopySchema, byId),
+  cloudSessions: persistedCollection("app-cloud-sessions", CloudSessionRowSchema, byId),
+  cloudWorkspaces: persistedCollection("app-cloud-workspaces", CloudWorkspaceRowSchema, byId),
+  changes: persistedCollection("app-changes", ChangeRowSchema, byId),
+  linearIntegrations: persistedCollection("app-linear-integrations", LinearIntegrationRowSchema, byId),
+  githubAppStatuses: persistedCollection("app-github-app-statuses", GitHubAppStatusRowSchema, (row) => row.repo),
+  repoTree: {
+    persisted: false as const,
+    create: (_backend: PersistenceBackend) => createCollection(localOnlyCollectionOptions({
+      id: "app-repo-tree", schema: RepoTreeRowSchema, getKey: byId
+    }))
+  }
+} as const
 
-const createConnectorOperationCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-connector-operations",
-    getKey: (operation: ConnectorOperation) => operation.id,
-    schema: ConnectorOperationSchema
-  })
-
-const createWorldDocumentCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "world-documents",
-    getKey: (document: WorldDocument) => document.id,
-    schema: WorldDocumentSchema
-  })
-
-const createCardCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-cards",
-    getKey: (card: Card) => card.id,
-    schema: CardSchema
-  })
-
-const createTransitionCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-transitions",
-    getKey: (transition: TransitionRecord) => transition.id,
-    schema: TransitionRecordSchema
-  })
-
-const createIdentitySessionCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-identity-sessions",
-    getKey: (session: IdentitySession) => session.id,
-    schema: IdentitySessionSchema
-  })
-
-const createBillingAccountCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-billing-accounts",
-    getKey: (account: BillingAccount) => account.id,
-    schema: BillingAccountSchema
-  })
-
-const createToastCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-toasts",
-    getKey: (toast: Toast) => toast.id,
-    schema: ToastSchema
-  })
-
-const createToolCallCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-tool-calls",
-    getKey: (record: ToolCallRecord) => record.id,
-    schema: ToolCallRecordSchema
-  })
-
-const createChainEventCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-chain-events",
-    getKey: (record: ChainEventRecord) => record.id,
-    schema: ChainEventRecordSchema
-  })
-
-const createRetiredChainLineageCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-retired-chain-lineages",
-    getKey: (record: RetiredChainLineage) => record.id,
-    schema: RetiredChainLineageSchema
-  })
-
-const createTabCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-tabs",
-    getKey: (tab: TabRow) => tab.id,
-    schema: TabSchema
-  })
-
-const createHarnessCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-harnesses",
-    getKey: (harness: Harness) => harness.id,
-    schema: HarnessSchema
-  })
-
-const createAgentCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-agents",
-    getKey: (agent: AgentRole) => agent.id,
-    schema: AgentRoleSchema
-  })
-
-const createRepoCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-repos",
-    getKey: (repo: Repo) => repo.id,
-    schema: RepoSchema
-  })
-
-const createPinnedRepoCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-pinned-repos",
-    getKey: (pin: PinnedRepo) => pin.id,
-    schema: PinnedRepoSchema
-  })
-
-/*
- * The tree rows ride the same collection machinery as everything else (the
- * dispatcher, acceptMutations, live queries) over a store that lives only as
- * long as this document: a checkout changes on disk between launches, so a
- * remembered listing would be a stale one presented as current.
- */
-const createRepoTreeCollection = () =>
-  createCollection(localOnlyCollectionOptions({
-    id: "app-repo-tree",
-    getKey: (row: RepoTreeRow) => row.id,
-    schema: RepoTreeRowSchema
-  }))
-
-const createStarredTargetCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-starred-targets",
-    getKey: (star: StarredTarget) => star.id,
-    schema: StarredTargetSchema
-  })
-
-const createWorkspaceCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-workspaces",
-    getKey: (workspace: Workspace) => workspace.id,
-    schema: WorkspaceSchema
-  })
-
-const createBranchCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-branches",
-    getKey: (branch: Branch) => branch.id,
-    schema: BranchSchema
-  })
-
-const createRecommendationCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-recommendations",
-    getKey: (recommendation: Recommendation) => recommendation.id,
-    schema: RecommendationSchema
-  })
-
-const createFrameCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-frames",
-    getKey: (frame: Frame) => frame.id,
-    schema: FrameSchema
-  })
-
-const createRepositoriesCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-cloud-repositories",
-    getKey: (repository: CloudRepository) => repository.id,
-    schema: CloudRepositorySchema
-  })
-
-const createWorkingCopyCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-working-copies",
-    getKey: (copy: WorkingCopy) => copy.id,
-    schema: WorkingCopySchema
-  })
-
-const createCloudSessionCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-cloud-sessions",
-    getKey: (session: CloudSessionRow) => session.id,
-    schema: CloudSessionRowSchema
-  })
-
-const createCloudWorkspaceCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-cloud-workspaces",
-    getKey: (workspace: CloudWorkspaceRow) => workspace.id,
-    schema: CloudWorkspaceRowSchema
-  })
-
-const createChangeCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-changes",
-    getKey: (change: ChangeRow) => change.id,
-    schema: ChangeRowSchema
-  })
-
-const createLinearIntegrationCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-linear-integrations",
-    getKey: (integration: LinearIntegrationRow) => integration.id,
-    schema: LinearIntegrationRowSchema
-  })
-
-const createGitHubAppStatusCollection = (backend: PersistenceBackend) =>
-  createPersistedCollection(backend, {
-    id: "app-github-app-statuses",
-    getKey: (status: GitHubAppStatusRow) => status.repo,
-    schema: GitHubAppStatusRowSchema
-  })
+const PERSISTED_COLLECTION_SPECS = Object.values(COLLECTION_DEFINITIONS).filter((definition) => definition.persisted)
 
 /** The strip's order: main first, then creation order. */
-const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =>
+const orderedTabs = (collections: Pick<StoredCollections, "tabs">): Array<TabRow> =>
   [...collections.tabs.values()].sort((left, right) => left.ordinal - right.ordinal)
 
 /*
@@ -930,7 +679,7 @@ const orderedTabs = (collections: Pick<AppCollections, "tabs">): Array<TabRow> =
  * follows its process. Main is never removed.
  */
 const closeTabRows = (
-  collections: Pick<AppCollections, "tabs" | "sessions" | "cards">,
+  collections: Pick<StoredCollections, "tabs" | "sessions" | "cards">,
   ids: ReadonlyArray<string>,
   revision: number
 ): void => {
@@ -980,47 +729,15 @@ const closeTabRows = (
 }
 
 /** The terminal tabs attached to cloud workspaces — all of them, or those of the named workspaces. */
-const workspaceTabIds = (collections: Pick<AppCollections, "tabs">, workspaceIds?: ReadonlySet<string>): Array<string> =>
+const workspaceTabIds = (collections: Pick<StoredCollections, "tabs">, workspaceIds?: ReadonlySet<string>): Array<string> =>
   [...collections.tabs.values()]
     .filter((tab) =>
       tab.kind === "terminal" && tab.workspaceId !== undefined && (workspaceIds === undefined || workspaceIds.has(tab.workspaceId))
     )
     .map((tab) => tab.id)
 
-const seed = async (collections: AppCollections): Promise<void> => {
-  await Promise.all([
-    collections.sessions.preload(),
-    collections.messages.preload(),
-    collections.connectors.preload(),
-    collections.connectorOperations.preload(),
-    collections.worldDocuments.preload(),
-    collections.cards.preload(),
-    collections.transitions.preload(),
-    collections.identitySessions.preload(),
-    collections.billingAccounts.preload(),
-    collections.toasts.preload(),
-    collections.toolCalls.preload(),
-    collections.chainEvents.preload(),
-    collections.retiredChainLineages.preload(),
-    collections.tabs.preload(),
-    collections.harnesses.preload(),
-    collections.agents.preload(),
-    collections.repos.preload(),
-    collections.pinnedRepos.preload(),
-    collections.repoTree.preload(),
-    collections.starredTargets.preload(),
-    collections.workspaces.preload(),
-    collections.branches.preload(),
-    collections.frames.preload(),
-    collections.recommendations.preload(),
-    collections.repositories.preload(),
-    collections.workingCopies.preload(),
-    collections.cloudSessions.preload(),
-    collections.cloudWorkspaces.preload(),
-    collections.changes.preload(),
-    collections.linearIntegrations.preload(),
-    collections.githubAppStatuses.preload()
-  ])
+const seed = async (collections: StoredCollections): Promise<void> => {
+  await Promise.all(Object.values(collections).map((collection) => collection.preload()))
 
   if (collections.sessions.get(SESSION_ID) === undefined) {
     await collections.sessions.insert(initialSession(preferredTheme())).isPersisted.promise
@@ -1164,7 +881,7 @@ const repositoryCapabilities = (
  * the work on this machine, sign-out is not "delete my data", and losing them
  * is not undoable.
  */
-const forgetAccountState = (collections: AppCollections): void => {
+const forgetAccountState = (collections: StoredCollections): void => {
   // Private journal contents leave with the account, but their identities
   // cannot become executable again. Refusal and deletion are one transaction.
   const lineages = new Set([...collections.chainEvents.values()].map((event) => event.lineageId))
@@ -1217,7 +934,7 @@ const forgetAccountState = (collections: AppCollections): void => {
   }
 }
 
-const nextOrdinal = (collections: Pick<AppCollections, "messages" | "cards">): number => {
+const nextOrdinal = (collections: Pick<StoredCollections, "messages" | "cards">): number => {
   let highest = -1
   for (const message of collections.messages.values()) highest = Math.max(highest, message.ordinal)
   for (const card of collections.cards.values()) highest = Math.max(highest, card.ordinal)
@@ -1267,41 +984,13 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     ...(resolvedBackend.kind === "opfs" ? { flush: resolvedBackend.flush } : {})
   })
   const collectionBackend = { ...resolvedBackend, collectionPersistence }
-  const collections: AppCollections = {
-    sessions: createSessionCollection(collectionBackend),
-    messages: createMessageCollection(collectionBackend),
-    connectors: createConnectorCollection(collectionBackend),
-    connectorOperations: createConnectorOperationCollection(collectionBackend),
-    worldDocuments: createWorldDocumentCollection(collectionBackend),
-    cards: createCardCollection(collectionBackend),
-    transitions: createTransitionCollection(collectionBackend),
-    identitySessions: createIdentitySessionCollection(collectionBackend),
-    billingAccounts: createBillingAccountCollection(collectionBackend),
-    toasts: createToastCollection(collectionBackend),
-    toolCalls: createToolCallCollection(collectionBackend),
-    chainEvents: createChainEventCollection(collectionBackend),
-    retiredChainLineages: createRetiredChainLineageCollection(collectionBackend),
-    tabs: createTabCollection(collectionBackend),
-    harnesses: createHarnessCollection(collectionBackend),
-    agents: createAgentCollection(collectionBackend),
-    repos: createRepoCollection(collectionBackend),
-    pinnedRepos: createPinnedRepoCollection(collectionBackend),
-    repoTree: createRepoTreeCollection(),
-    starredTargets: createStarredTargetCollection(collectionBackend),
-    workspaces: createWorkspaceCollection(collectionBackend),
-    branches: createBranchCollection(collectionBackend),
-    frames: createFrameCollection(collectionBackend),
-    recommendations: createRecommendationCollection(collectionBackend),
-    repositories: createRepositoriesCollection(collectionBackend),
-    workingCopies: createWorkingCopyCollection(collectionBackend),
-    cloudSessions: createCloudSessionCollection(collectionBackend),
-    cloudWorkspaces: createCloudWorkspaceCollection(collectionBackend),
-    changes: createChangeCollection(collectionBackend),
-    linearIntegrations: createLinearIntegrationCollection(collectionBackend),
-    githubAppStatuses: createGitHubAppStatusCollection(collectionBackend)
-  }
+  const collections = Object.fromEntries(
+    Object.entries(COLLECTION_DEFINITIONS).map(([name, definition]) => [name, definition.create(collectionBackend)])
+  ) as StoredCollections
 
   await seed(collections)
+  const views = createWorkspaceViews(collections)
+  await Promise.all(Object.values(views).map((view) => view.preload()))
   if (resolvedBackend.kind === "opfs") await resolvedBackend.flush()
   applyTheme(collections.sessions.get(SESSION_ID)?.theme ?? "light")
   applyPalette(collections.sessions.get(SESSION_ID)?.palette ?? DEFAULT_PALETTE)
@@ -1367,10 +1056,13 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
     transaction.mutate(() => {
       const activeWorkspaceId = current.activeWorkspaceId ?? DEFAULT_WORKSPACE_ID
       const activeBranchId = current.activeBranchId ?? DEFAULT_BRANCH_ID
+      const currentCard = (card: Card): Card => projectWorkspaceCard(
+        card, card.kind === "workspace" ? collections.cloudWorkspaces.get(card.payload.workspaceId) : undefined
+      )
       const snapshot = (): FrameSnapshot => ({
         revision,
         messages: [...collections.messages.values()],
-        cards: [...collections.cards.values()],
+        cards: [...collections.cards.values()].map((card) => snapshotCard(currentCard(card))),
         worldDocuments: [...collections.worldDocuments.values()],
         draft: collections.sessions.get(SESSION_ID)?.draft ?? "",
         selectedWorldDocumentId: collections.sessions.get(SESSION_ID)?.selectedWorldDocumentId ?? null
@@ -1394,7 +1086,8 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           if (collections.messages.get(row.id) === undefined) collections.messages.insert(row)
           else collections.messages.update(row.id, (draft) => replace(draft, row))
         }
-        for (const row of saved.cards) {
+        for (const savedCard of saved.cards) {
+          const row = snapshotCard(savedCard)
           if (collections.cards.get(row.id) === undefined) collections.cards.insert(row)
           else collections.cards.update(row.id, (draft) => replace(draft, row))
         }
@@ -2778,8 +2471,8 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         }
         /*
          * Lane citc: the workspaces collection is the authority; the
-         * workspace working copies (`workspace:<id>` rows) derive from it in
-         * the same transaction, so the tree never disagrees with the card.
+         * workspace working copies and live card headers are query projections.
+         * Ordinary updates write the workspace row.
          */
         case "workspaces.loaded": {
           const scope = transition.repoId
@@ -2787,7 +2480,19 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           const stale = [...collections.cloudWorkspaces.values()]
             .filter((workspace) => (scope === undefined || workspace.repoId === scope) && !next.has(workspace.id))
             .map((workspace) => workspace.id)
-          if (stale.length > 0) collections.cloudWorkspaces.delete(stale)
+          if (stale.length > 0) {
+            const removed = new Set(stale)
+            // Leaving the live inventory captures the last observed facts once.
+            for (const card of collections.cards.values()) {
+              if (card.kind !== "workspace" || !removed.has(card.payload.workspaceId)) continue
+              const captured = currentCard(card)
+              collections.cards.update(card.id, (draft) => {
+                Object.assign(draft, captured)
+              })
+            }
+            collections.cloudWorkspaces.delete(stale)
+            closeTabRows(collections, workspaceTabIds(collections, removed), revision)
+          }
           const staleCopies = [...collections.workingCopies.values()]
             .filter((copy) =>
               copy.kind === "workspace" &&
@@ -2797,31 +2502,12 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
             )
             .map((copy) => copy.id)
           if (staleCopies.length > 0) collections.workingCopies.delete(staleCopies)
-          // A workspace the list no longer carries takes its terminal tabs with it, here, not one redial later.
-          if (stale.length > 0) closeTabRows(collections, workspaceTabIds(collections, new Set(stale)), revision)
           for (const workspace of transition.workspaces) {
             const row: CloudWorkspaceRow = { ...workspace, updatedAt: createdAt, revision }
             if (collections.cloudWorkspaces.get(workspace.id) === undefined) collections.cloudWorkspaces.insert(row)
             else {
               collections.cloudWorkspaces.update(workspace.id, (draft) => {
                 Object.assign(draft, row)
-              })
-            }
-            const copyId = `workspace:${workspace.id}`
-            const copy: WorkingCopy = {
-              id: copyId,
-              repoId: workspace.repoId,
-              kind: "workspace",
-              label: workspace.name,
-              workspaceId: workspace.id,
-              state: workspace.status,
-              updatedAt: createdAt,
-              revision
-            }
-            if (collections.workingCopies.get(copyId) === undefined) collections.workingCopies.insert(copy)
-            else {
-              collections.workingCopies.update(copyId, (draft) => {
-                Object.assign(draft, copy)
               })
             }
           }
@@ -2837,23 +2523,6 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           else {
             collections.cloudWorkspaces.update(workspace.id, (draft) => {
               Object.assign(draft, row)
-            })
-          }
-          const copyId = `workspace:${workspace.id}`
-          const copy: WorkingCopy = {
-            id: copyId,
-            repoId: workspace.repoId,
-            kind: "workspace",
-            label: workspace.name,
-            workspaceId: workspace.id,
-            state: workspace.status,
-            updatedAt: createdAt,
-            revision
-          }
-          if (collections.workingCopies.get(copyId) === undefined) collections.workingCopies.insert(copy)
-          else {
-            collections.workingCopies.update(copyId, (draft) => {
-              Object.assign(draft, copy)
             })
           }
           collections.sessions.update(SESSION_ID, (draft) => {
@@ -2999,14 +2668,14 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
           if (selection === null) return
           if ("repoId" in selection) {
             if (selection.copyId !== undefined) {
-              if (collections.workingCopies.get(selection.copyId) === undefined) return
+              if (views.workingCopies.get(selection.copyId) === undefined) return
             } else if (
               collections.repositories.get(selection.repoId) === undefined &&
-              ![...collections.workingCopies.values()].some((copy) => copy.repoId === selection.repoId)
+              ![...views.workingCopies.values()].some((copy) => copy.repoId === selection.repoId)
             ) return
           } else if (
             collections.pinnedRepos.get(selection.localCopyId) === undefined &&
-            collections.workingCopies.get(selection.localCopyId) === undefined
+            views.workingCopies.get(selection.localCopyId) === undefined
           ) return
           collections.sessions.update(SESSION_ID, (draft) => {
             draft.activeRepoKey = transition.id
@@ -3307,7 +2976,7 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
   }
 
   return {
-    collections,
+    collections: { ...collections, ...views },
     dispatch,
     persistenceMode: resolved.mode,
     persistenceDegraded: resolved.degraded,
@@ -3322,6 +2991,9 @@ const initializeAppStore = async (resolved: ResolvedPersistence): Promise<AppSto
         : browserSqliteRecoveryReader(),
       ...(resolved.mode === "memory" ? { memory: recoveryStorage(persistedLocally) } : {})
     }),
-    dispose: resolvedBackend.kind === "opfs" ? () => resolvedBackend.close() : undefined
+    dispose: async () => {
+      await Promise.all(Object.values(views).map((view) => view.cleanup()))
+      if (resolvedBackend.kind === "opfs") await resolvedBackend.close()
+    }
   }
 }

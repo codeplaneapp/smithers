@@ -1,10 +1,10 @@
 ---
 title: "API reference"
-description: "Every public export of @smthrs/canonical: the canonicalize function, the Canonical schema and its branded type, CanonicalError, the stable failure codes, and the shared isRecord guard."
+description: "Canonical JSON serialization, schema and errors, bounded JSON admission, and the shared record guard."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/canonical/docs/api.md"
 ---
 
-The package provides canonical serialization, its schema and errors, and an array-excluding record guard.
+The package provides canonical serialization, its schema and errors, bounded JSON admission, and an array-excluding record guard.
 
 ```ts
 import { Canonical, CanonicalError, canonicalize } from "@smthrs/canonical"
@@ -173,3 +173,25 @@ Each code, with its cause and its fix, is in
 ## isRecord
 
 `isRecord(value)` accepts non-null objects and excludes arrays. It preserves member types for typed JSON-like values. It does not read properties or validate their contents, and accepts class instances; use `canonicalize` or a schema when validating serialization. Import it from the package root or `@smthrs/canonical/Record`.
+
+## BoundedJson
+
+`BoundedJson.admit(input, limits)` copies inert JSON without calling getters or
+`toJSON`. A success carries `{ ok: true, value, bytes }`; a refusal carries
+`{ ok: false, code, complaint, path }`. `path` contains property names and array
+indices, so callers should bound it when displaying untrusted field names.
+
+The required limits are `maxDepth`, `maxNodes`, and `maxMembers` (per array or
+object). Optional `maxTotalMembers` bounds members across the whole tree.
+`maxBytes`, `maxStringBytes`, and `maxKeyBytes` bound the encoded JSON bytes,
+including quotes and escapes. The snapshot is deeply frozen; objects have null
+prototypes. Sparse arrays, accessors, enumerable symbols, non-plain objects,
+cycles, non-JSON values, and malformed Unicode are refused.
+
+`BoundedJson.encodedStringBytes(value, maximum?)` counts a JSON string's UTF-8
+bytes without allocating its encoded copy, or returns `undefined` for malformed
+or oversized text. It counts the short control escapes exactly.
+
+Import the namespace from the package root or `@smthrs/canonical/BoundedJson`.
+Admission is a separate boundary from canonical serialization and does not alter
+`canonicalize`'s handling of values or its output bytes.

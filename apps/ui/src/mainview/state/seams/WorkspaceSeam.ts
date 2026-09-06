@@ -41,7 +41,6 @@ import { actorSharedState } from "../ActorBindings"
  * starting) is polled until it settles or is gone; a 404 mid-watch refreshes
  * the repository's list.
  */
-import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import {
   parseRepoSelection,
   WORKSPACE_STATUSES
@@ -63,7 +62,8 @@ import { resolveTargetRepo } from "../RepoContext"
 import { dropDesktopStream, holdDesktopStream } from "./DesktopStream"
 import type { DesktopStream } from "./DesktopStream"
 import { loadEgressPage, workspaceEgressPath } from "./EgressSeam"
-import { readErrorMessage } from "./SeamContext"
+import { workspaceCardFacts } from "../WorkspaceViews"
+import { createCloudClient, cloudFailure as failed } from "./CloudClient"
 import type { SeamContext } from "./SeamContext"
 
 export const DEGRADED_WORKSPACE_REFUSAL =
@@ -116,19 +116,6 @@ export const terminalSessionRetry = {
   maxAttempts: 30,
   /** Used only when the refusal carried no `Retry-After` this app could read. */
   defaultDelayMs: 3_000
-}
-
-/**
- * The `Retry-After` header in whole seconds, or null when the response named
- * none this app can read. plue writes a delta-seconds integer; a header this
- * app cannot parse is no instruction at all, and the caller's default delay
- * stands in for it rather than a guess at a date.
- */
-const retryAfterSecondsOf = (response: Response): number | null => {
-  const header = response.headers.get("retry-after")
-  if (header === null) return null
-  const seconds = Number(header.trim())
-  return Number.isInteger(seconds) && seconds >= 0 ? seconds : null
 }
 
 export type WorkspaceFacet = "terminal" | "files" | "services" | "snapshots" | "egress" | "desktop"
@@ -226,18 +213,6 @@ interface SessionRow {
 }
 
 /** The auxiliaries a workspace card renders beside the DTO row. */
-/**
- * One refused call, in the server's own terms. `status` is null when there
- * was no HTTP answer at all (the request never reached Smithers Cloud), so a
- * card never prints a status the wire did not state.
- */
-interface SeamRefusal {
-  readonly error: string
-  readonly code: string | null
-  readonly status: number | null
-  readonly retryAfterSeconds: number | null
-}
-
 interface CardAux {
   readonly bookmarkHead: { readonly changeId: string | null; readonly commitId: string | null } | null
   readonly snapshots: ReadonlyArray<SnapshotRow>
@@ -616,7 +591,7 @@ const splitRepo = (repoId: string): { readonly owner: string; readonly name: str
 
 export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = {}): WorkspaceSeam => {
   const pollMs = deps.pollMs ?? 5_000
-  const cloud = (path: string): string => `${ctx.baseUrl}${CLOUD_ROUTE_PREFIX}api${path}`
+  const { url: cloud, get: getJson, send: sendJson } = createCloudClient(ctx)
   const repoPath = (repoId: string, rest: string): string => {
     const { owner, name } = splitRepo(repoId)
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}${rest}`
@@ -661,77 +636,6 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     const session = ctx.store.collections.cloudSessions.get("cloud")
     if (session?.state !== "signed-in") return SIGN_OUT_REFUSAL
     if (session.scopes === "degraded") return DEGRADED_WORKSPACE_REFUSAL
-  }
-
-  /*
-   * A refusal's machine-readable code beside its message. plue sanitizes a
-   * 5xx message down to the status text but KEEPS `code` (routes/auth.go
-   * writeRouteError), so the code is the only place `egress_proxy_unavailable`
-   * can reach a person — reading only the message would lose it.
-   */
-  const refusalCode = async (response: Response): Promise<string | null> => {
-    const clone = response.clone()
-    const text = (await clone.text().catch(() => "")).trim()
-    if (text === "") return null
-    try {
-      const body = JSON.parse(text) as { code?: unknown }
-      return typeof body.code === "string" && body.code !== "" ? body.code : null
-    } catch {
-      return null
-    }
-  }
-
-  /*
-   * One refusal, in the server's own terms: its sentence, its
-   * machine-readable code, its status, and the `Retry-After` it asked for.
-   * The status and the header are what let a caller answer a retryable
-   * refusal (plue#496's `desktop_not_ready`, plue#504's `guest_not_ready`)
-   * on the server's clock rather than this app's guess.
-   */
-  const failed = async (response: Response, fallback: string): Promise<SeamRefusal> => ({
-    code: await refusalCode(response),
-    error: await readErrorMessage(response, fallback),
-    status: response.status,
-    retryAfterSeconds: retryAfterSecondsOf(response)
-  })
-
-  const getJson = async (path: string): Promise<{ readonly body: unknown } | SeamRefusal> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path))
-    } catch (error) {
-      return {
-        error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`,
-        code: null,
-        status: null,
-        retryAfterSeconds: null
-      }
-    }
-    if (!response.ok) return failed(response, `Reading ${path} failed (${response.status})`)
-    return { body: await response.json().catch(() => null) }
-  }
-
-  const sendJson = async (
-    method: "POST" | "DELETE",
-    path: string,
-    body?: Record<string, unknown>
-  ): Promise<{ readonly body: unknown } | SeamRefusal> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(path), {
-        method,
-        ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      })
-    } catch (error) {
-      return {
-        error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}`,
-        code: null,
-        status: null,
-        retryAfterSeconds: null
-      }
-    }
-    if (!response.ok) return failed(response, `The ${method} to ${path} failed (${response.status})`)
-    return { body: await response.json().catch(() => null) }
   }
 
   /*
@@ -863,33 +767,8 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
      */
     const current = ctx.store.collections.cloudWorkspaces.get(workspace.id) ?? workspace
     const payload = {
-      workspaceId: workspace.id,
-      repo: current.repoId,
-      name: current.name,
-      targetBookmark: current.targetBookmark,
-      status: current.status,
-      failureCode: current.failureCode ?? null,
-      failureMessage: current.failureMessage ?? null,
-      provisioningStage: current.provisioningStage,
-      suspendedAt: current.suspendedAt,
+      ...workspaceCardFacts(current),
       bookmarkHead: overrides.bookmarkHead !== undefined ? overrides.bookmarkHead : prior?.bookmarkHead ?? null,
-      /*
-       * plue#446's header facts ride the collection, never the prior card: a
-       * poll that landed while an act's auxiliaries loaded has already
-       * advanced the row, and a field the wire stopped answering must go
-       * absent rather than linger from an older render.
-       */
-      workspaceKind: current.kind ?? null,
-      agentSessionId: current.agentSessionId ?? null,
-      head: current.head ?? null,
-      ahead: current.ahead ?? null,
-      behind: current.behind ?? null,
-      startedAt: current.startedAt ?? null,
-      environment: current.environment ?? null,
-      persistence: current.persistence ?? null,
-      sshHost: current.sshHost ?? null,
-      desktop: current.desktop ?? null,
-      lspLanguages: current.lspLanguages ?? null,
       snapshots: overrides.snapshots !== undefined ? [...overrides.snapshots] : prior?.snapshots ?? [],
       sessions: overrides.sessions !== undefined ? [...overrides.sessions] : prior?.sessions ?? [],
       ...(overrides.files !== undefined
@@ -953,17 +832,13 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
     pagePath: string,
     routePath: string
   ): Promise<{ readonly body: unknown; readonly next: string | null; readonly total: number | null } | { readonly error: string }> => {
-    let response: Response
-    try {
-      response = await ctx.http(cloud(pagePath))
-    } catch (error) {
-      return { error: `Could not reach Smithers Cloud: ${error instanceof Error ? error.message : String(error)}` }
-    }
-    if (!response.ok) return { error: await readErrorMessage(response, `Reading ${routePath} failed (${response.status})`) }
+    const answer = await getJson(pagePath, routePath)
+    if ("error" in answer) return answer
+    const { response } = answer
     const totalHeader = response.headers.get("x-total-count")
     const total = Number(totalHeader)
     return {
-      body: await response.json().catch(() => null),
+      body: answer.body,
       next: nextPageOf(response.headers.get("link"), routePath),
       total: totalHeader !== null && Number.isInteger(total) && total >= 0 ? total : null
     }
@@ -1085,7 +960,6 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       const parsed = parseWorkspaceWire(await response.json().catch(() => null), row.repoId)
       if (parsed !== null) {
         ctx.dispatch({ type: "workspace.updated", actor: "system", workspace: parsed })
-        renderWorkspace(parsed)
         if (!UNSETTLED.has(parsed.status)) {
           watching.delete(workspaceId)
           watchPolls.delete(workspaceId)
@@ -1690,12 +1564,10 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       }
       if (desktopMintEpochs.get(workspace.id) !== epoch) return
       if (!response.ok) {
-        const code = await refusalCode(response)
-        const message = await readErrorMessage(
+        const { code, error: message, retryAfterSeconds: after } = await failed(
           response,
           `The desktop session on ${workspace.id} was refused (${response.status}).`
         )
-        const after = retryAfterSecondsOf(response)
         dropDesktopStream(workspace.id)
         renderWorkspace(workspace, {
           facet: "desktop",
@@ -1771,8 +1643,6 @@ export const createWorkspaceSeam = (ctx: SeamContext, deps: WorkspaceSeamDeps = 
       desktop: known.desktop ?? null
     }
     ctx.dispatch({ type: "workspace.updated", actor: "system", workspace })
-    /* A card already in the transcript follows the row, so the header line moves live. */
-    if (ctx.store.collections.cards.get(cardIdOf(workspaceId)) !== undefined) renderWorkspace(workspace)
   }
 
   const openDesktop: WorkspaceSeam["openDesktop"] = (workspaceId) => mintDesktopSession(workspaceId, "open")

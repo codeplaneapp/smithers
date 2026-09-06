@@ -39,4 +39,6 @@ Canonical output is digest-critical: changing its bytes changes every downstream
 
 `isRecord` is the shared array-excluding object guard, available from the package root and `@smthrs/canonical/Record`. It checks shape without reading members; it is not a plain-object or JSON validator.
 
+`BoundedJson`, also available from `@smthrs/canonical/BoundedJson`, admits untrusted JSON through own data descriptors without invoking getters or `toJSON`. It returns a detached, deeply frozen snapshot and its encoded byte count, or a refusal with a field path. Callers supply depth, node, and per-container member limits; byte, string, key, and cumulative member limits are optional. Flow, cache, and run persistence share this traversal while retaining their own limits and diagnostic presentation. This admission API does not change `canonicalize` or the bytes it emits.
+
 The serialization contract, every failure code, and the guide to converting a value the serializer refuses are at https://canonical.smithers.sh.

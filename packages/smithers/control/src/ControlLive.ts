@@ -31,7 +31,6 @@ import {
   type PlanDigestMismatch,
   type PlanNotFound,
   type RunNotFound,
-  Unauthorized,
   Unavailable
 } from "./ControlError.ts"
 import type { CancelRecord } from "./ControlExecutor.ts"

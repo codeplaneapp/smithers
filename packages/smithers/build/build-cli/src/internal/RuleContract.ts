@@ -396,7 +396,7 @@ export interface ExecutionContext {
  * @category models
  * @since 1.0.0
  */
-export interface Contract<S extends Selection, Request, Result> {
+export interface Contract<S extends Selection, Request, Result, Context extends ExecutionContext = ExecutionContext> {
   readonly plan: (request: Request) => PlanResult<S>
-  readonly execute: (node: Planned<S>, context: ExecutionContext) => Promise<Result>
+  readonly execute: (node: Planned<S>, context: Context) => Promise<Result>
 }

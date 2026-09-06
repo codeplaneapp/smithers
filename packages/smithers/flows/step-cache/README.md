@@ -120,7 +120,7 @@ guarantees, is on the
 | Namespace            | What it is                                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
 | `CacheStore`         | The service contract and its SQL implementation, with the schemas, limits, and validators it admits by. |
-| `CacheStoreMetrics`  | Hit, miss, recording-outcome, and degraded shared-tier operation counters.                                    |
+| `CacheStoreMetrics`  | Hit, miss, recording-outcome, and degraded shared-tier operation counters.                              |
 | `CombinedCacheStore` | Local-first read-through, local write-back, and inline or deferred remote publication.                  |
 | `RemoteCacheStore`   | The HTTP client for a shared tier, bounded, under `/ac/{keyDigest}`.                                    |
 | `Migrations`         | The namespaced migration set that creates the two tables.                                               |

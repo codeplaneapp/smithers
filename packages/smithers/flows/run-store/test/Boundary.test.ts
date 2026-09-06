@@ -18,6 +18,13 @@ const complaint = (value: unknown, overrides?: Partial<Boundary.JsonLimits>): st
 }
 
 describe("run-store inert JSON boundary", () => {
+  it("uses exact canonical escape bytes while retaining the cumulative member limit", () => {
+    expect(Boundary.admitJson("\n", limits({ maxBytes: 4, maxStringBytes: 4 })))
+      .toEqual({ ok: true, value: "\n", bytes: 4 })
+    expect(Boundary.admitJson({ a: [1], b: [2] }, limits({ maxMembers: 3 })))
+      .toMatchObject({ ok: false })
+  })
+
   it("compares admitted JSON structurally", () => {
     const cases: ReadonlyArray<readonly [Boundary.Json | undefined, Boundary.Json | undefined, boolean]> = [
       [undefined, undefined, true],
