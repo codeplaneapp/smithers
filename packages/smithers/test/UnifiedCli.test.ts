@@ -143,6 +143,44 @@ describe("unified CLI", { timeout: 240_000 }, () => {
     expect(legacyArguments(["flow", "start", "hello"])).toBeUndefined()
   })
 
+  it("accepts canonical log formatting through the flat alias", async () => {
+    const root = await fixture()
+    const flags = [
+      "missing-run",
+      "--root",
+      root,
+      "--audience",
+      "human",
+      "--format",
+      "jsonl",
+      "--after",
+      "0",
+      "--limit",
+      "2"
+    ]
+    const canonical = await run(root, ["runs", "logs", ...flags])
+    const alias = await run(root, ["logs", ...flags])
+    for (const result of [canonical, alias]) {
+      expect(result.code, result.stdout + result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout)).toEqual({
+        type: "done",
+        ok: true,
+        meta: { command: "runs logs", duration: expect.any(String) }
+      })
+    }
+    expect(alias.stderr).toBe(canonical.stderr)
+    expect(alias.stdout + alias.stderr).not.toContain("Unknown flag")
+  })
+
+  it("explains the removed global initializer through the executable before writing", async () => {
+    const root = await fixture()
+    const result = await run(root, ["init", "change", "--root", root, "--global"])
+    expect(result.code, result.stdout + result.stderr).toBe(1)
+    expect(result.stdout + result.stderr).toContain("https://smithers.sh/migration/1.0#init")
+    expect(result.stdout + result.stderr).not.toContain("Unknown flag")
+    expect(await readdir(root)).toEqual([])
+  })
+
   it("retains the diagnostic report on a blocking problem even with quiet progress", async () => {
     const root = await fixture()
     const result = await run(root, ["doctor", "--root", root, "--json", "--quiet"], { SMITHERS_BACKEND: "legacy" })

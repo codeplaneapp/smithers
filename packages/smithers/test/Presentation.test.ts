@@ -1,7 +1,7 @@
 import * as Audience from "@smthrs/build-cli/Audience"
 import type { RuntimeConfig } from "@smthrs/build-cli/Cli"
 import { describe, expect, it } from "vitest"
-import { agentArguments, legacyArguments } from "../src/cli/Compatibility.ts"
+import { agentArguments, formattedLogArguments, legacyArguments } from "../src/cli/Compatibility.ts"
 import * as Presentation from "../src/cli/Presentation.ts"
 
 const fixture = (audience: "human" | "agent", tty = true, silent = false) => {
@@ -214,6 +214,16 @@ describe("shared command presentation", () => {
 describe("agent-friendly compatibility spellings", () => {
   it("routes familiar bot commands to canonical results", () => {
     expect(agentArguments(["up", "hello", "--silent"])).toEqual(["flow", "start", "hello", "--silent"])
+    expect(formattedLogArguments(["logs", "run-1", "--format", "jsonl", "--after", "4", "--limit", "2"]))
+      .toEqual(["runs", "logs", "run-1", "--format", "jsonl", "--after", "4", "--limit", "2"])
+    expect(formattedLogArguments(["--audience", "human", "--format=jsonl", "logs", "run-1"]))
+      .toEqual(["runs", "logs", "--audience", "human", "--format=jsonl", "run-1"])
+    expect(formattedLogArguments(["logs", "run-1"])).toBeUndefined()
+    expect(formattedLogArguments(["logs", "run-1", "--json"])).toBeUndefined()
+    expect(formattedLogArguments(["logs", "run-1", "--format", "jsonl", "--backend=sqlite"])).toBeUndefined()
+    expect(formattedLogArguments(["--backend", "sqlite", "logs", "run-1", "--format", "jsonl"])).toBeUndefined()
+    expect(legacyArguments(["init", "change", "--global"]))
+      .toEqual(["init", "change", "--global"])
     expect(agentArguments(["--audience", "agent", "ps"])).toEqual(["runs", "list", "--audience", "agent"])
     expect(legacyArguments(["--audience", "human", "up", "hello", "--silent"])).toBeDefined()
   })

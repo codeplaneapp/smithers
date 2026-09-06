@@ -6,13 +6,13 @@
 import * as Audience from "@smthrs/build-cli/Audience"
 import { installEffectResolution } from "@smthrs/build-cli/effect-resolution"
 import * as Redaction from "@smthrs/journal/Redaction"
-import { agentArguments, legacyArguments } from "./cli/Compatibility.ts"
+import { agentArguments, formattedLogArguments, legacyArguments } from "./cli/Compatibility.ts"
 
 const start = async (): Promise<void> => {
   const original = process.argv.slice(2)
-  let agentAlias: Array<string> | undefined
+  let agentAlias = formattedLogArguments(original)
   try {
-    agentAlias = Audience.fromArguments(original).audience === "agent" ? agentArguments(original) : undefined
+    agentAlias ??= Audience.fromArguments(original).audience === "agent" ? agentArguments(original) : undefined
   } catch { /* The selected entrypoint renders invalid presentation configuration. */ }
   const legacy = agentAlias === undefined ? legacyArguments(original) : undefined
   if (legacy !== undefined) {

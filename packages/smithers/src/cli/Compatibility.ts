@@ -28,7 +28,7 @@ const legacy = new Set([
   "gateway",
   "claude"
 ])
-const valued = new Set(["--root", "--remote", "--credential", "--mcp-config", "--backend", "--audience"])
+const valued = new Set(["--root", "--remote", "--credential", "--mcp-config", "--backend", "--audience", "--format"])
 const switches = new Set(["--json", "--quiet", "--silent", "--verbose"])
 
 /**
@@ -45,11 +45,16 @@ export const legacyArguments = (args: ReadonlyArray<string>): Array<string> | un
     else return undefined
   }
   const command = args[index]
+  if (command === "init" && args.slice(index + 1).some((arg) => arg === "--global" || arg.startsWith("--global="))) {
+    return [...args]
+  }
   if (command === "internal" && args[index + 1] === "claude") return [...args.slice(0, index), ...args.slice(index + 1)]
   // Preserve the existing no-input refusal without constructing either runtime.
   if ((command === "memory" || command === "mcp" || command === "bug") && args.length === index + 1) return [...args]
-  if (command === "memory" && ((args[index + 1] === "get" && args.length === index + 2) ||
-    (args[index + 1] === "set" && args.length === index + 3))) return [...args]
+  if (
+    command === "memory" && ((args[index + 1] === "get" && args.length === index + 2) ||
+      (args[index + 1] === "set" && args.length === index + 3))
+  ) return [...args]
   if (command !== undefined && legacy.has(command)) return [...args]
   if (command === "run") {
     const rest = args.slice(index + 1)
@@ -58,6 +63,23 @@ export const legacyArguments = (args: ReadonlyArray<string>): Array<string> | un
     }
   }
   return undefined
+}
+
+/** Modern log formatting and pagination use the canonical streaming command. */
+export const formattedLogArguments = (args: ReadonlyArray<string>): Array<string> | undefined => {
+  let index = 0
+  while (index < args.length && args[index]!.startsWith("-")) {
+    const flag = args[index]!
+    if (switches.has(flag) || [...valued].some((value) => flag.startsWith(`${value}=`))) index++
+    else if (valued.has(flag)) index += 2
+    else return undefined
+  }
+  if (
+    args[index] !== "logs" ||
+    args.some((arg) => arg === "--json" || arg === "--backend" || arg.startsWith("--backend="))
+  ) return undefined
+  if (!args.some((arg) => ["--format", "--after", "--limit"].includes(arg.split("=")[0]!))) return undefined
+  return ["runs", "logs", ...args.slice(0, index), ...args.slice(index + 1)]
 }
 
 /**
@@ -97,8 +119,10 @@ export const agentArguments = (args: ReadonlyArray<string>): Array<string> | und
   }
   if (command === undefined || aliases[command] === undefined) return undefined
   // A missing positional still uses the legacy parser's typed, file-free usage error.
-  if (command !== "ls" && command !== "ps" && command !== "down" &&
-    (args[index + 1] === undefined || args[index + 1]!.startsWith("--"))) return undefined
+  if (
+    command !== "ls" && command !== "ps" && command !== "down" &&
+    (args[index + 1] === undefined || args[index + 1]!.startsWith("--"))
+  ) return undefined
   // Removed 0.x options must keep their specific migration refusal, not become
   // a generic Incur unknown-flag error through a superficially similar alias.
   const allowed = new Set([
