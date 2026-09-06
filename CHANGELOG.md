@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1541 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1544 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -341,6 +341,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **build:** honor and verify declared workspace toolchains ([461c19fadc](https://github.com/smithersai/smithers/commit/461c19fadc2dae0f6f9b1383a56f24fab4a9c3e3))
+- **ci:** retain failure summaries and run UI checks early ([fd47a04159](https://github.com/smithersai/smithers/commit/fd47a0415921afdb502c26bc89c22540d417b604))
 - **ui:** prepare the Electrobun SDK before typechecking ([a78dda3918](https://github.com/smithersai/smithers/commit/a78dda3918d086b5d54a1b7b2acf0f934879be24))
 - **docs:** use a dedicated Worker for the main site ([cc731a360a](https://github.com/smithersai/smithers/commit/cc731a360a54cb7122de7fe8bfa23ea723ca909c))
 - **docs:** enforce support claims and run tutorial gates from the workspace root ([1da4d100d4](https://github.com/smithersai/smithers/commit/1da4d100d4d9e1e44b9a2b73629ed9e4e1304a99))
@@ -1419,6 +1421,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(ui):** delimit PTY readiness across interactive shells ([9198508262](https://github.com/smithersai/smithers/commit/9198508262017a2d5fe724c2aeddf5270ccf90bc))
 - **test(release):** verify contained consumers and order inventory after builds ([2f436a502d](https://github.com/smithersai/smithers/commit/2f436a502d0df82a2fe4d5f8535741d48bfbcaad))
 - **test:** make process fault and restart checks deterministic ([987a6a4c2f](https://github.com/smithersai/smithers/commit/987a6a4c2f0df17b248a38c84c14ca0a7be593b5))
 - **test(ui):** cover a failed target settling the graph and attach run journals on failure ([88458e337d](https://github.com/smithersai/smithers/commit/88458e337d27934c744de3c47d89fcbde29aad73))
