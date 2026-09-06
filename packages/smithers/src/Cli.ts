@@ -186,13 +186,23 @@ export const makeCli = (config: Bridge.Runtime = {}): ReturnType<typeof makeBuil
     .command("bug", {
       description: "Submit a redacted bug report to the configured endpoint",
       args: z.object({ summary: z.array(z.string()).min(1) }),
-      options: options.extend({ run: z.string().optional() }),
+      options: options.extend({
+        run: z.string().optional(),
+        yes: z.boolean().default(false).describe("Post the previewed report without an interactive confirmation"),
+        dryRun: z.boolean().default(false).describe("Preview the redacted report without posting")
+      }),
       run: (c) =>
         safe(
           c,
           () =>
             Bridge.invoke(
-              ["bug", ...c.args.summary, ...(c.options.run ? ["--run", c.options.run] : [])],
+              [
+                "bug",
+                ...c.args.summary,
+                ...(c.options.run ? ["--run", c.options.run] : []),
+                ...(c.options.yes ? ["--yes"] : []),
+                ...(c.options.dryRun ? ["--dry-run"] : [])
+              ],
               c.options,
               config
             )

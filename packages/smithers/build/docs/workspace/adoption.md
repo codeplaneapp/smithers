@@ -5,7 +5,6 @@ description: "A worked case of smithers build running a real TypeScript monorepo
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 The Smithers monorepo runs its own CI through smithers build. This page is the
 worked case: what a large TypeScript workspace looks like once the build graph
 owns the pipeline, and what is honestly still outside it. Read it before you

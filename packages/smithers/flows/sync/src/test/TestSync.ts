@@ -6,7 +6,6 @@
 import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Queue from "effect/Queue"
 import * as RpcClient from "effect/unstable/rpc/RpcClient"
 import * as RpcSerialization from "effect/unstable/rpc/RpcSerialization"
 import * as RpcServer from "effect/unstable/rpc/RpcServer"

@@ -52,11 +52,11 @@ asserts the marker symbol is present on one and absent on the other.
 
 Composing `layer` is therefore an assertion about the object you passed:
 
-| You pass                       | The claim is                                                                                         |
+| You pass                       | The claim is                                                                 |
 | ------------------------------ | ---------------------------------------------------------------------------- |
 | A mounted ZenFS volume         | Only when the workspace occupies the whole mount.                            |
 | A rooted adapter over the host | Only when it confines every path and the workspace occupies the whole mount. |
-| `node:fs/promises` directly    | False. It addresses the whole machine.                                                               |
+| `node:fs/promises` directly    | False. It addresses the whole machine.                                       |
 
 Passing `node:fs/promises` is a test-time convenience for a process that is
 itself the sandbox. It is never a production composition. When you want the

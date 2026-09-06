@@ -4,9 +4,9 @@
  *
  * It exists because the tool has to run inside a project that does not have
  * Smithers 1.0 yet: `npx @smthrs/migrate` is the first command an operator
- * types, before `@smthrs/cli` is anywhere near the tree. Once the project is
- * migrated the same flow is reachable as `smithers migrate` and as a durable
- * `smthrs flow start system/migrate`.
+ * types, before `@smthrs/cli` is anywhere near the tree. The 1.0 CLI exposes
+ * the same migration as `smthrs migrate`; an application-owned durable host
+ * invokes `Command.launch` after surveying the project.
  *
  * The default mode is `plan`. Editing is never the default: `--apply` is a
  * thing the operator types after reading `report.md`.

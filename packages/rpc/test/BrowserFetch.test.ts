@@ -291,7 +291,10 @@ describe("browserFetch guards", () => {
     const outcome = await browserFetch("https://example.com", {
       timeoutMs: 20,
       resolveHost: () => new Promise(() => {}),
-      fetchImpl: async () => { fetched = true; return okPage("unexpected") }
+      fetchImpl: async () => {
+        fetched = true
+        return okPage("unexpected")
+      }
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.message).toContain("took too long")
@@ -303,10 +306,17 @@ describe("browserFetch guards", () => {
     const outcome = await browserFetch("https://example.com", {
       timeoutMs: 20,
       resolveHost: publicResolver,
-      fetchImpl: async () => new Response(new ReadableStream({
-        start(controller) { controller.enqueue(new TextEncoder().encode("partial")) },
-        cancel() { cancelled = true }
-      }))
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("partial"))
+            },
+            cancel() {
+              cancelled = true
+            }
+          })
+        )
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.message).toContain("took too long")
@@ -316,9 +326,14 @@ describe("browserFetch guards", () => {
   test("a body error is returned as a failure instead of rejecting the route", async () => {
     const outcome = await browserFetch("https://example.com", {
       resolveHost: publicResolver,
-      fetchImpl: async () => new Response(new ReadableStream({
-        start(controller) { controller.error(new Error("body disconnected")) }
-      }))
+      fetchImpl: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error("body disconnected"))
+            }
+          })
+        )
     })
     expect(outcome.ok).toBe(false)
     if (!outcome.ok) expect(outcome.message).toContain("body disconnected")

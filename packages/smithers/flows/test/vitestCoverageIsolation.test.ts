@@ -715,13 +715,13 @@ describe("vitest coverage isolation conformance", () => {
     const ci = readFileSync(join(packagesDir, "..", ".github", "workflows", "ci.yml"), "utf8")
     expect(ci).toMatch(/^\s*- uses: pnpm\/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86$/m)
     expect(ci).toMatch(/^\s*- run: pnpm install --frozen-lockfile --ignore-scripts$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs ci '\/\/packages\/\.\.\.'/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs ci '\/\/packages\/\.\.\.' --jobs 2 --verbose$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts\/\.\.\.' --verbose$/m)
     // Browser support is a hard requirement met through layers; the browser
     // contract target is the only thing that proves it, so CI has to run it
     // (REVIEW.md blocker 7).
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:webBundleContract'$/m)
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.'$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/scripts:webBundleContract' --verbose$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.' --jobs 2 --verbose$/m)
     // The Bun compatibility matrix. It used to be `//ci/...`, a directory whose
     // only content was one Vitest target per package, declared from outside the
     // package it re-ran, and then a dedicated `bun` job running
@@ -751,7 +751,7 @@ describe("vitest coverage isolation conformance", () => {
     // deliverable landed: case 22's terminal-log half was the one gate red by
     // design, the redacting logger closed it, and the matrix is 67 of 67.
     expect(ci).not.toContain("//e2e:")
-    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1$/m)
+    expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.:faults' --jobs 1 --verbose$/m)
     // And it gates. `continue-on-error: true` is the single line that makes a
     // lane advisory, so a matrix that runs but cannot fail the pipeline is
     // exactly the state this deliverable left behind, and it would read as
@@ -818,7 +818,7 @@ describe("vitest coverage isolation conformance", () => {
     const commands = [...ci.matchAll(/^\s*(?:- )?run: (?!\|)(.+)$/gm)].map((match) => match[1]!)
     expect(commands.length).toBeGreaterThan(0)
     const derived = [
-      /^pnpm exec smthrs (?:build|test|lint|docs|review|ci) '\/\/[^']*'( --jobs \d+)?$/,
+      /^pnpm exec smthrs (?:build|test|lint|docs|review|ci) '\/\/[^']*'( --jobs \d+)? --verbose$/,
       /^pnpm install --frozen-lockfile --ignore-scripts$/,
       /^rustup toolchain install$/,
       /^jj git init --colocate$/

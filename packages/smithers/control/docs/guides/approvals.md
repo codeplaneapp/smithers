@@ -36,11 +36,13 @@ const runtime = Effect.gen(function*() {
   const approvalAuthority = yield* ApprovalAuthority.make([
     {
       principal: { id: "local", kind: "operator" },
-      scopes: ["once", "run", "remembered"], targets: ["Plan", "Node"]
+      scopes: ["once", "run", "remembered"],
+      targets: ["Plan", "Node"]
     },
     {
       principal: { id: "release-bot", kind: "agent" },
-      scopes: ["once"], targets: ["Node"]
+      scopes: ["once"],
+      targets: ["Node"]
     }
   ])
   return yield* SqlControlRuntime.make({ approvalAuthority })

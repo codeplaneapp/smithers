@@ -5,7 +5,6 @@ description: "Discovery, PACKAGE.ts placement, package boundaries, lazy evaluati
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 A smithers build workspace is a directory tree containing `PACKAGE.ts` files. The
 workspace root is whatever `--workspace` points at, and it defaults to the
 process working directory.

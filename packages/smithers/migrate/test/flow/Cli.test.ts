@@ -74,14 +74,20 @@ describe("the smithers-migrate command in process", () => {
       const root = copyFixture("jsx-single")
       // Held by this process, which is alive: exactly what a concurrent apply
       // in another process looks like to the lock.
-      const held = yield* Lock.acquire({ root, reportDir: ".out" }).pipe(Effect.provide(NodeServices.layer))
-      const before = hashTree(root)
+      yield* Effect.acquireUseRelease(
+        Lock.acquire({ root, reportDir: ".out" }),
+        () =>
+          Effect.gen(function*() {
+            const before = hashTree(root)
+            // This fixture has no VCS. Pass that earlier guard so the command
+            // reaches the live-lock refusal without taking a file-copy backup.
+            const status = yield* run(["--root", root, "--apply", "--allow-no-vcs", "--report-dir", ".out"])
 
-      const status = yield* run(["--root", root, "--apply", "--report-dir", ".out"])
-
-      expect(status).toBe(3)
-      expect(hashTree(root)).toEqual(before)
-      yield* Lock.release(held).pipe(Effect.provide(NodeServices.layer))
+            expect(status).toBe(3)
+            expect(hashTree(root)).toEqual(before)
+          }),
+        Lock.release
+      ).pipe(Effect.provide(NodeServices.layer))
     }))
 
   it.live("refuses a report directory that could leave the project with exit 1", () =>

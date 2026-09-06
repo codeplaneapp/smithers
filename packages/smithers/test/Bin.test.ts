@@ -1211,10 +1211,9 @@ describe("the migrate verb's target", processBudget, () => {
       expect(result.status).toBe(1)
       expect(JSON.parse(result.stdout).message).toContain(`"${project}" is under no version control`)
       expect(JSON.parse(result.stdout).message).not.toContain(`"${ancestor}" is under no version control`)
-      // Apply acquires and releases its lock before checking VCS. It may
-      // leave that empty directory, but no checkpoint, report, or source edit.
+      // The read-only VCS preflight precedes even lock metadata creation.
       expect(existsSync(join(ancestor, ".smithers-migrate"))).toBe(false)
-      expect(readdirSync(join(project, ".smithers-migrate"))).toEqual([])
+      expect(existsSync(join(project, ".smithers-migrate"))).toBe(false)
       expect(readFileSync(join(project, ".smithers/workflows/ship.tsx"), "utf8")).toBe("export default null\n")
       expect(readFileSync(join(project, "package.json"), "utf8")).toBe(JSON.stringify({ name: "legacy" }))
     } finally {

@@ -2,6 +2,7 @@
 title: "API reference"
 description: "Every export of @smthrs/platform-bun: the BunHost layers and their refusal, the containment options, the implementation identities, and the BunFileSystem escape hatch."
 ---
+
 ```ts
 import { BunHost } from "@smthrs/platform-bun"
 import * as Effect from "effect/Effect"

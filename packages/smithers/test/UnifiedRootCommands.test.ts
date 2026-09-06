@@ -233,6 +233,16 @@ describe("unified root command dispatch", () => {
     ])
   })
 
+  it.each([
+    ["--yes"],
+    ["--dry-run"],
+    ["--yes", "--dry-run"]
+  ])("forwards explicit bug consent and preview flags (%j)", async (...flags) => {
+    const result = await invoke(["bug", "a failure", ...flags, "--json"])
+    expect(result.codes).not.toContain(1)
+    expect(ports.invoke.mock.calls[0]![0]).toEqual(["bug", "a failure", ...flags])
+  })
+
   it("redacts bridge failure credentials in structured command errors", async () => {
     ports.invoke.mockRejectedValue(new Error("Authorization: Bearer private-fixture"))
     const result = await invoke(["doctor", "--json"])

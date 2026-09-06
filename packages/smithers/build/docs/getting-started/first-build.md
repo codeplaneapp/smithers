@@ -7,7 +7,6 @@ sidebar:
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 This tutorial writes a workspace declaration and one package, then runs the core
 query, graph, build, test, lint, CI, and install paths. It assumes the layout
 from [Install](install.md).

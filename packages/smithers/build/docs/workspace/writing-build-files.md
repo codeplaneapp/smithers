@@ -5,7 +5,6 @@ description: "How a PACKAGE.ts declares targets, why a build file never carries 
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 A `PACKAGE.ts` file is a TypeScript module. The CLI imports it through the
 programmatic `tsx` loader with `tsconfig: false`, then reads its `Package`
 export.

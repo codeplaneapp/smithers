@@ -5,7 +5,6 @@ description: "The everything-is-a-flow model behind smithers build, and how it c
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 smithers build orchestrates builds for TypeScript workspaces. It borrows Bazel's model:
 a workspace is a set of packages, a package declares targets, a target names its
 inputs and its dependencies, and a verb selects a set of targets to run.
@@ -73,11 +72,11 @@ rather than running it unconfined. See
 
 ## The three packages
 
-| Package                                                                                                   | What it holds                                                                                                                   |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| [`@smthrs/build`](../api.md)                                                                              | Dependency installation as a flow, and the `PackageManager` and `Runtime` host seams.                                           |
-| [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets)     | The declaration surface: `Target.make`, `Input`, `Workspace`, `Package`, `PackageDefaults`, and the catalog. |
-| [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli) | The `smithers-build` CLI: workspace discovery, the planner, the executor, the caches, and query and graph output.               |
+| Package                                                                                                   | What it holds                                                                                                     |
+| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| [`@smthrs/build`](../api.md)                                                                              | Dependency installation as a flow, and the `PackageManager` and `Runtime` host seams.                             |
+| [`@smthrs/targets`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/targets)     | The declaration surface: `Target.make`, `Input`, `Workspace`, `Package`, `PackageDefaults`, and the catalog.      |
+| [`@smthrs/build-cli`](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli) | The `smithers-build` CLI: workspace discovery, the planner, the executor, the caches, and query and graph output. |
 
 ## Next
 

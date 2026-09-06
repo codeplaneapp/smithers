@@ -9,11 +9,11 @@ import * as Os from "node:os"
 import * as Path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeCli, normalizeArgv } from "../src/Cli.ts"
-import { executionPresentation } from "./fixtures/presentation.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import * as PackageExec from "../src/PackageExec.ts"
 import { PackageIndex } from "../src/PackageIndex.ts"
 import * as PackageLoader from "../src/PackageLoader.ts"
+import { executionPresentation } from "./fixtures/presentation.ts"
 
 const temporary: Array<string> = []
 const originalPath = process.env["PATH"]

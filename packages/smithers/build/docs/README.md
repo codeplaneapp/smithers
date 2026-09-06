@@ -127,7 +127,7 @@ build system, start at [`@smthrs/cli`](/api/cli).
 | Page                                                       | Description                                                                        |
 | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | [Writing target definitions](extending/writing-targets.md) | `Target.make`: the attrs schema, the plan-time implementation, and typed failures. |
-| [Writing macros](extending/writing-macros.md)              | `buildAndCheckPackage` as the worked example.                                           |
+| [Writing macros](extending/writing-macros.md)              | `buildAndCheckPackage` as the worked example.                                      |
 | [Default targets](extending/default-rules.md)              | `PackageDefaults`, `directories`, `marker`, `unless`, and `macro`.                 |
 
 ### Reference

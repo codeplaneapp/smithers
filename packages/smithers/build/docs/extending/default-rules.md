@@ -5,7 +5,6 @@ description: "PackageDefaults: synthesizing targets for directories with no PACK
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 A default target synthesizes targets for directories that have no `PACKAGE.ts` of
 their own. It is how one declaration covers every conventional package in a
 workspace.

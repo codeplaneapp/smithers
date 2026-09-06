@@ -5,7 +5,6 @@ description: "How importing a target from another PACKAGE.ts file becomes a depe
 
 Examples importing `buildAndCheckPackage` use the [local helper defined here](../reference/targets/standard-package.md). Create that file in your repository before using those examples.
 
-
 A dependency edge is a direct import between `PACKAGE.ts` files. There are no label
 strings in target attributes.
 
@@ -86,10 +85,10 @@ The conventional shape is one `lib` target per package, imported by dependent
 packages:
 
 ```ts
-import { buildAndCheckPackage } from "./package-targets.ts"
 import { packageManager } from "../../PACKAGE.ts"
 import { lib as flow } from "../flow/PACKAGE.ts"
 import { lib as plan } from "../plan/PACKAGE.ts"
+import { buildAndCheckPackage } from "./package-targets.ts"
 
 export const { lib, test, lint } = buildAndCheckPackage({
   packageManager,

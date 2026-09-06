@@ -126,7 +126,12 @@ export const invoke = async (
   const values: Array<unknown> = []
   const outputConsole: Console.Console = Object.assign(Object.create(console), {
     error: (...items: ReadonlyArray<unknown>) => {
-      if (display.progress !== "silent") progressOutput.write(`${RunProgress.text(format(...items), 500)}\n`)
+      if (args[0] === "bug") {
+        // The bug handler emits its endpoint and already-redacted consent
+        // document here. Preserve the exact report even under quiet output so
+        // the operator can inspect everything a subsequent POST will send.
+        progressOutput.write(`${format(...items)}\n`)
+      } else if (display.progress !== "silent") progressOutput.write(`${RunProgress.text(format(...items), 500)}\n`)
     },
     log: (...items: ReadonlyArray<unknown>) => {
       for (const item of items) {
@@ -143,8 +148,8 @@ export const invoke = async (
   })
   const commandArguments = [
     "--json",
-    // Canonical quiet suppresses progress, not the returned data. The legacy
-    // flag also hides its final document, so silence its progress sink instead.
+    // Quiet suppresses progress, not the returned data. Silence the progress
+    // sink without changing the handler's result projection.
     ...connectionArguments({ ...options, quiet: false }),
     ...args
   ]

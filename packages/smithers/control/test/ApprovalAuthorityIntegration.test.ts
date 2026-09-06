@@ -68,7 +68,11 @@ for (const [name, layer] of stacks) {
                 }
                 const receipt = yield* control[decision]({ ...request, principal: operator })
                 expect(receipt._tag).toBe("Accepted")
-                if (target._tag === "Node") expect((yield* runtime.registerApproval(target))._tag).toBe(decision === "approve" ? "Approved" : "Denied")
+                if (target._tag === "Node") {
+                  expect((yield* runtime.registerApproval(target))._tag).toBe(
+                    decision === "approve" ? "Approved" : "Denied"
+                  )
+                }
               }).pipe(Effect.provide(layer), Effect.scoped)
             )
           }

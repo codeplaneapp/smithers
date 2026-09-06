@@ -95,14 +95,14 @@ const check = Smithers.ToolRun({
   cwd
 })
 
-/** `astro build`: the static site, docs included, into `apps/site/dist`. */
+/** Build the site and verify its links against the CLI and release changelog. */
 const build = Smithers.ToolBuild({
   tool: "astro",
   command: "pnpm",
   args: ["run", "build"],
-  inputs: sources,
+  inputs: [...sources, Smithers.file("//CHANGELOG.md")],
   outputs: ["dist"],
-  deps: [],
+  deps: [cliPackage.docsSources],
   env: {},
   cache: true,
   cwd
@@ -253,12 +253,17 @@ const llms = Smithers.Generate({
 })
 
 /**
- * Checks page metadata, prose rules, code-fence languages, internal links and
- * anchors, package import subpaths, source links, and migration anchors.
+ * Checks documentation text extraction and built release URL resolution,
+ * including redirects and migration anchors.
  */
 const docsTextTest = Smithers.Shell.Test({
-  shell: "node --test scripts/docs-text.test.mjs",
-  data: [Smithers.file("scripts/docs-text.mjs"), Smithers.file("scripts/docs-text.test.mjs")]
+  shell: "node --test --test-concurrency=1 scripts/docs-text.test.mjs scripts/built-site.test.mjs",
+  data: [
+    Smithers.file("scripts/docs-text.mjs"),
+    Smithers.file("scripts/docs-text.test.mjs"),
+    Smithers.file("scripts/check-built-site.mjs"),
+    Smithers.file("scripts/built-site.test.mjs")
+  ]
 })
 
 /** Execute exact tutorial files and validate deployment entry points offline. */
@@ -337,8 +342,11 @@ export const Package = Smithers.Package({
     referenceIngest,
     cliData,
     apiDocs,
-    docsLint, docsTextTest, docsRuntimeTests,
-    examplesPages, llms,
+    docsLint,
+    docsTextTest,
+    docsRuntimeTests,
+    examplesPages,
+    llms,
     ...tutorialCodeBlocks
   }
 })

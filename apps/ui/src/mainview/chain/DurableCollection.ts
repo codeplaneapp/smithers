@@ -133,10 +133,26 @@ export const durableCollectionOptions = <TSchema extends StandardSchemaV1>(
     readonly schema: TSchema
     readonly getKey: (item: InferSchemaOutput<TSchema>) => string
   }
-) => localOnlyCollectionOptions({
-  ...spec,
-  initialData: [...persistence.register(spec.id)] as Array<InferSchemaOutput<TSchema>>,
-  onInsert: ({ transaction }) => persistence.persist(transaction),
-  onUpdate: ({ transaction }) => persistence.persist(transaction),
-  onDelete: ({ transaction }) => persistence.persist(transaction)
-})
+) => {
+  const options = localOnlyCollectionOptions({
+    ...spec,
+    initialData: [...persistence.register(spec.id)] as Array<InferSchemaOutput<TSchema>>,
+    onInsert: ({ transaction }) => persistence.persist(transaction),
+    onUpdate: ({ transaction }) => persistence.persist(transaction),
+    onDelete: ({ transaction }) => persistence.persist(transaction)
+  })
+  return {
+    ...options,
+    sync: {
+      ...options.sync,
+      sync: (params: Parameters<typeof options.sync.sync>[0]) => options.sync.sync({
+        ...params,
+        // These confirmations already passed the serialized durable commit.
+        // Apply each confirmed base beneath any newer optimistic changes now:
+        // parking it until all transactions settle lets intervening updates
+        // invalidate TanStack's captured previous row and corrupt live queries.
+        begin: () => params.begin({ immediate: true })
+      })
+    }
+  }
+}

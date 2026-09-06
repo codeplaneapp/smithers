@@ -5,6 +5,8 @@
     "docs/reference/support-matrix.md",
     "scripts/support-matrix.test.mjs",
     "scripts/sync-support-docs.mjs",
+    "scripts/check-built-site.mjs",
+    "scripts/built-site.test.mjs",
     "PACKAGE.ts",
     "package.json",
     "dprint.json"

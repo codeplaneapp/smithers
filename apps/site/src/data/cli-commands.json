@@ -297,10 +297,22 @@
             },
             "run": {
               "type": "string"
+            },
+            "yes": {
+              "default": false,
+              "description": "Post the previewed report without an interactive confirmation",
+              "type": "boolean"
+            },
+            "dryRun": {
+              "default": false,
+              "description": "Preview the redacted report without posting",
+              "type": "boolean"
             }
           },
           "required": [
-            "quiet"
+            "quiet",
+            "yes",
+            "dryRun"
           ],
           "additionalProperties": false
         }

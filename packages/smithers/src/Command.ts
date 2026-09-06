@@ -1715,8 +1715,12 @@ const bug = Command.make("bug", {
   summary: requiredArgument("summary"),
   rest: Argument.string("summary").pipe(Argument.variadic()),
   runId: Flag.string("run").pipe(Flag.optional, Flag.withDescription("Include only this run and its event digest")),
-  yes: Flag.boolean("yes").pipe(Flag.withDescription("Post the previewed payload without an interactive confirmation")),
+  yes: Flag.boolean("yes").pipe(
+    Flag.withDefault(false),
+    Flag.withDescription("Post the previewed payload without an interactive confirmation")
+  ),
   dryRun: Flag.boolean("dry-run").pipe(
+    Flag.withDefault(false),
     Flag.withDescription("Print the exact redacted payload and endpoint without posting")
   )
 }, (config) =>

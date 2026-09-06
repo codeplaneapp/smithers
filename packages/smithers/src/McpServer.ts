@@ -77,9 +77,6 @@ export const maximumHistoryBytes = 1024 * 1024
  */
 export type Surface = "raw" | "semantic" | "both"
 
-// MCP tools are callable by models, so they never inherit operator authority.
-const principal: ControlSchema.Principal = Object.freeze({ id: "mcp", kind: "agent", stampedAt: 0 })
-
 /**
  * The `{ ok, data?, error? }` envelope every tool answers with.
  *

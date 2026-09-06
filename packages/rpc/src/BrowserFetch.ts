@@ -267,7 +267,10 @@ const abortable = <T>(pending: Promise<T>, signal: AbortSignal): Promise<T> =>
   new Promise((resolve, reject) => {
     const abort = (): void => reject(signal.reason)
     pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort))
-    if (signal.aborted) { reject(signal.reason); return }
+    if (signal.aborted) {
+      reject(signal.reason)
+      return
+    }
     signal.addEventListener("abort", abort, { once: true })
   })
 
@@ -358,16 +361,19 @@ export const browserFetch = async (
     const address = guarded.addresses[0]!
     let response: Response
     try {
-      response = await abortable(deps.fetchImpl(current.toString(), {
-        method: "GET",
-        redirect: "manual",
-        signal: timeout,
-        headers: {
-          "user-agent": "smithers-browser",
-          "accept-encoding": "identity",
-          accept: "text/html,application/xhtml+xml,text/plain,text/markdown;q=0.8,*/*;q=0.5"
-        }
-      }, address), timeout)
+      response = await abortable(
+        deps.fetchImpl(current.toString(), {
+          method: "GET",
+          redirect: "manual",
+          signal: timeout,
+          headers: {
+            "user-agent": "smithers-browser",
+            "accept-encoding": "identity",
+            accept: "text/html,application/xhtml+xml,text/plain,text/markdown;q=0.8,*/*;q=0.5"
+          }
+        }, address),
+        timeout
+      )
     } catch (error) {
       return failedRead(error)
     }

@@ -2,6 +2,7 @@
 title: "The browser host contract"
 description: "What BrowserHost guarantees where it diverges from NodeHost: the filesystem options a mounted volume honours, the operations it refuses, and the spawner's one-run-at-a-time abort boundary."
 ---
+
 The governing statement for `@smthrs/platform-browser`: what a program gets when
 it runs on `BrowserHost` instead of [`NodeHost`](/api/platform-node), what you
 have to supply for those promises to hold, and where they stop. Every service

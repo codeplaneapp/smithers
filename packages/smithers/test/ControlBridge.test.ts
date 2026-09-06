@@ -24,8 +24,9 @@ const ports = vi.hoisted(() => ({
   serve: vi.fn()
 }))
 
-// The bridge owns routing and Effect scopes; handlers and host transports are
-// bounded doubles so these tests never open a database, worktree, or listener.
+// Host transports are bounded doubles, so these tests never open a database,
+// worktree, or listener. The bug consent cases opt into the actual command
+// parser, handler and output layer; routing-only cases use a bounded handler.
 vi.mock("../src/Command.ts", () => ({ cli: "legacy", doctorCli: "doctor", migrationCli: "migration" }))
 vi.mock("effect/unstable/cli", async (load) => {
   const actual = await load<typeof import("effect/unstable/cli")>()
@@ -347,6 +348,99 @@ describe("control bridge result and progress contract", () => {
     )
     await expect(Bridge.invoke([fixture.command], local, { ...runtime, exit })).rejects.toBe(fixture.failure)
     expect(exit).not.toHaveBeenCalled()
+  })
+})
+
+describe("control bridge bug report consent", () => {
+  const endpoint = "https://preview.invalid/report"
+  const summary = `${"two  spaces of diagnostic context; ".repeat(30)}Authorization: Bearer private-preview-token`
+  const useRealHandler = async () => {
+    const { cli } = await vi.importActual<typeof import("../src/Command.ts")>("../src/Command.ts")
+    const { Command } = await vi.importActual<typeof import("effect/unstable/cli")>("effect/unstable/cli")
+    const { layerOutput } = await vi.importActual<typeof import("../src/NodeControl.ts")>("../src/NodeControl.ts")
+    ports.runWith.mockImplementation(() => (args: ReadonlyArray<string>) =>
+      Command.runWith(cli, { version: "1.0.0-test" })(args).pipe(Effect.provide(layerOutput))
+    )
+    vi.stubEnv("SMITHERS_BUG_ENDPOINT", endpoint)
+  }
+  const capturePreview = () => {
+    let stderr = ""
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderr += String(chunk)
+      return true
+    })
+    return () => {
+      const [shownEndpoint, payload] = stderr.trimEnd().split("\n")
+      expect(shownEndpoint).toBe(endpoint)
+      expect(payload!.length).toBeGreaterThan(500)
+      expect(payload).not.toContain("private-preview-token")
+      expect(JSON.parse(payload!).summary).toContain("two  spaces")
+      return payload!
+    }
+  }
+
+  it.each([true, false])("shows the complete redacted payload before interactive consent (%s)", async (accepted) => {
+    await useRealHandler()
+    const preview = capturePreview()
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 202 }))
+    let shownBeforeConsent = ""
+    const ui = Ui.make({ output: process.stderr, input: process.stdin, interactive: true })
+    const confirm = vi.fn(() =>
+      Effect.sync(() => {
+        expect(fetch).not.toHaveBeenCalled()
+        shownBeforeConsent = preview()
+        return accepted
+      })
+    )
+    vi.spyOn(Ui, "make").mockReturnValue({ ...ui, confirm })
+    const result = Bridge.invoke(["bug", summary], local, { ...runtime, presentation: { ...plain, interactive: true } })
+    if (accepted) {
+      expect(await result).toEqual({ reported: true, endpoint })
+      expect(fetch).toHaveBeenCalledExactlyOnceWith(
+        endpoint,
+        expect.objectContaining({
+          method: "POST",
+          body: shownBeforeConsent
+        })
+      )
+    } else {
+      await expect(result).rejects.toThrow("Report not sent")
+      expect(fetch).not.toHaveBeenCalled()
+    }
+    expect(confirm).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      initialValue: false,
+      nonInteractive: false
+    }))
+  })
+
+  it("quiet explicit consent still shows the complete payload before posting", async () => {
+    await useRealHandler()
+    const preview = capturePreview()
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      expect(options?.body).toBe(preview())
+      return new Response("{}", { status: 202 })
+    })
+    expect(await Bridge.invoke(["bug", summary, "--yes"], { ...local, quiet: true }, runtime))
+      .toEqual({ reported: true, endpoint })
+    expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it("dry-run wins over explicit consent and quiet without posting", async () => {
+    await useRealHandler()
+    const preview = capturePreview()
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 202 }))
+    const result = await Bridge.invoke(["bug", summary, "--yes", "--dry-run"], { ...local, quiet: true }, runtime)
+    expect(result).toEqual({ reported: false, endpoint, payload: JSON.parse(preview()) })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("quiet without consent previews the report and refuses to post", async () => {
+    await useRealHandler()
+    const preview = capturePreview()
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 202 }))
+    await expect(Bridge.invoke(["bug", summary], { ...local, quiet: true }, runtime)).rejects.toThrow("Report not sent")
+    preview()
+    expect(fetch).not.toHaveBeenCalled()
   })
 })
 

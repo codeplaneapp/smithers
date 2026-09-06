@@ -12,6 +12,8 @@ Options:
   --mcp-config <string>  Path to the configured MCP servers
   --quiet                Suppress progress messages
   --run <string>
+  --yes                  Post the previewed report without an interactive confirmation
+  --dry-run              Preview the redacted report without posting
 
 Custom Global Options:
   --audience <auto|human|agent>  Presentation audience; auto detects agent harnesses, CI, and terminals (default: auto)

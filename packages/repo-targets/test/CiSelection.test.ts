@@ -12,7 +12,7 @@ it("CI's package pattern discovers the actual coverage-enabled test target and r
   const root = resolve(import.meta.dirname, "../../..")
   const ci = readFileSync(resolve(root, ".github/workflows/ci.yml"), "utf8")
   expect(ci).toMatch(/^\s*run: pnpm exec smthrs ci '\/\/packages\/\.\.\.' --jobs 2 --verbose$/m)
-  expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.' --verbose$/m)
+  expect(ci).toMatch(/^\s*run: pnpm exec smthrs test '\/\/packages\/\.\.\.' --jobs 2 --verbose$/m)
   const result = JSON.parse(execFileSync(process.execPath, [
     resolve(root, "packages/smithers/src/bin.ts"),
     "targets",

@@ -25,6 +25,43 @@ const fixture = async () => {
   return { collection, storage, persistence, host, fail: () => { failing = true }, heal: () => { failing = false } }
 }
 
+const observedFixture = async (initialRows: Array<z.infer<typeof Widget>>) => {
+  const app = await fixture()
+  await app.collection.insert(initialRows).isPersisted.promise
+  const query = createLiveQueryCollection({ query: (q) => q.from({ row: app.collection }).fn.select(({ row }) => row) })
+  const subscription = query.subscribeChanges(() => {})
+  await query.preload()
+  const rows = () => [...query.values()].map(({ id, label }) => ({ id, label })).sort((a, b) => a.id.localeCompare(b.id))
+  const durableRows = async () => {
+    const reopened = await openTransactionalStorage(app.host, { collections: [spec] })
+    const stored = JSON.parse(reopened.storage.getItem("smithers-mvp.widgets")!) as Record<string, { data: z.infer<typeof Widget> }>
+    return Object.values(stored).map(({ data }) => data).sort((a, b) => a.id.localeCompare(b.id))
+  }
+  const pending = (mutate: () => void) => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const transaction = createTransaction({ mutationFn: async ({ transaction }) => {
+      await gate
+      await app.persistence.persist(transaction)
+      app.collection.utils.acceptMutations(transaction)
+    } })
+    transaction.mutate(mutate)
+    return {
+      release,
+      persisted: transaction.isPersisted.promise,
+      confirm: async () => { release(); await transaction.isPersisted.promise }
+    }
+  }
+  return {
+    ...app,
+    query,
+    rows,
+    durableRows,
+    pending,
+    dispose: async () => { subscription.unsubscribe(); await query.cleanup(); await app.collection.cleanup() }
+  }
+}
+
 describe("durable local-only collection adapter", () => {
   test("rows adopted from the historical unprefixed-key layout remain editable", async () => {
     const app = await fixture()
@@ -105,5 +142,120 @@ describe("durable local-only collection adapter", () => {
     await mutate("fresh")
     expect(app.collection.get("one")?.label).toBe("fresh")
     expect(JSON.parse(app.storage.storage.getItem("smithers-mvp.widgets")!)["s:one"].data.label).toBe("fresh")
+  })
+
+  test("overlapping confirmations preserve the latest query row after an unrelated transaction settles", async () => {
+    const app = await fixture()
+    await app.collection.insert([{ id: "one", label: "A" }, { id: "aux", label: "A" }]).isPersisted.promise
+    const query = createLiveQueryCollection({
+      query: (q) => q.from({ row: app.collection }).fn.select(({ row }) => row)
+    })
+    const subscription = query.subscribeChanges(() => {})
+    await query.preload()
+    const update = (label: string, key = "one") => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      const transaction = createTransaction({ mutationFn: async ({ transaction }) => {
+        await gate
+        await app.persistence.persist(transaction)
+        app.collection.utils.acceptMutations(transaction)
+      } })
+      transaction.mutate(() => app.collection.update(key, (draft) => { draft.label = label }))
+      return async () => { release(); await transaction.isPersisted.promise }
+    }
+    const labels = () => [...query.values()].map(({ id, label }) => ({ id, label })).sort((a, b) => a.id.localeCompare(b.id))
+    try {
+      const b = update("B")
+      const c = update("C")
+      await b()
+      const d = update("D")
+      const auxiliary = update("Z", "aux")
+      await c()
+      await d()
+      await auxiliary()
+      expect(labels()).toEqual([{ id: "aux", label: "Z" }, { id: "one", label: "D" }])
+      await update("E")()
+      expect(labels()).toEqual([{ id: "aux", label: "Z" }, { id: "one", label: "E" }])
+      const reopened = await openTransactionalStorage(app.host, { collections: [spec] })
+      const rows = JSON.parse(reopened.storage.getItem("smithers-mvp.widgets")!)
+      expect(rows["s:one"].data.label).toBe("E")
+      expect(rows["s:aux"].data.label).toBe("Z")
+    } finally {
+      subscription.unsubscribe()
+      await query.cleanup()
+    }
+  })
+
+  test("confirmed inserts, updates and deletes preserve a newer optimistic replacement", async () => {
+    const app = await observedFixture([{ id: "aux", label: "A" }])
+    try {
+      const inserted = app.pending(() => app.collection.insert({ id: "one", label: "B" }))
+      const updated = app.pending(() => app.collection.update("one", (draft) => { draft.label = "C" }))
+      await inserted.confirm()
+      expect(app.query.get("one")?.label).toBe("C")
+      const deleted = app.pending(() => app.collection.delete("one"))
+      await updated.confirm()
+      expect(app.query.has("one")).toBe(false)
+      const replaced = app.pending(() => app.collection.insert({ id: "one", label: "D" }))
+      const auxiliary = app.pending(() => app.collection.update("aux", (draft) => { draft.label = "Z" }))
+      await deleted.confirm()
+      expect(app.query.get("one")?.label).toBe("D")
+      await replaced.confirm()
+      await auxiliary.confirm()
+      await app.pending(() => app.collection.update("one", (draft) => { draft.label = "E" })).confirm()
+      expect(app.rows()).toEqual([{ id: "aux", label: "Z" }, { id: "one", label: "E" }])
+      expect(await app.durableRows()).toEqual(app.rows())
+    } finally {
+      await app.dispose()
+    }
+  })
+
+  test("a failed deletion rejects its replacement and restores the last confirmed row", async () => {
+    const app = await observedFixture([{ id: "one", label: "A" }, { id: "aux", label: "A" }])
+    try {
+      const durable = app.pending(() => app.collection.update("one", (draft) => { draft.label = "B" }))
+      const deleted = app.pending(() => app.collection.delete("one"))
+      await durable.confirm()
+      expect(app.query.has("one")).toBe(false)
+      const replacement = app.pending(() => app.collection.insert({ id: "one", label: "D" }))
+      const auxiliary = app.pending(() => app.collection.update("aux", (draft) => { draft.label = "Z" }))
+      app.fail()
+      const settled = Promise.allSettled([deleted.persisted, replacement.persisted, auxiliary.persisted])
+      deleted.release()
+      replacement.release()
+      auxiliary.release()
+      expect((await settled).map((result) => result.status)).toEqual(["rejected", "rejected", "rejected"])
+      expect(app.rows()).toEqual([{ id: "aux", label: "A" }, { id: "one", label: "B" }])
+      app.heal()
+      expect(await app.durableRows()).toEqual(app.rows())
+      await app.pending(() => app.collection.update("one", (draft) => { draft.label = "E" })).confirm()
+      expect(app.rows()).toEqual([{ id: "aux", label: "A" }, { id: "one", label: "E" }])
+      expect(await app.durableRows()).toEqual(app.rows())
+    } finally {
+      await app.dispose()
+    }
+  })
+
+  test("a failed insertion and its queued update and delete restore absence before a fresh insert", async () => {
+    const app = await observedFixture([{ id: "aux", label: "A" }])
+    try {
+      const inserted = app.pending(() => app.collection.insert({ id: "one", label: "B" }))
+      const updated = app.pending(() => app.collection.update("one", (draft) => { draft.label = "C" }))
+      const deleted = app.pending(() => app.collection.delete("one"))
+      app.fail()
+      const settled = Promise.allSettled([inserted.persisted, updated.persisted, deleted.persisted])
+      inserted.release()
+      updated.release()
+      deleted.release()
+      expect((await settled).map((result) => result.status)).toEqual(["rejected", "rejected", "rejected"])
+      expect(app.rows()).toEqual([{ id: "aux", label: "A" }])
+      app.heal()
+      expect(await app.durableRows()).toEqual(app.rows())
+      await app.pending(() => app.collection.insert({ id: "one", label: "E" })).confirm()
+      expect(app.rows()).toEqual([{ id: "aux", label: "A" }, { id: "one", label: "E" }])
+      expect(await app.durableRows()).toEqual(app.rows())
+    } finally {
+      await app.dispose()
+    }
   })
 })

@@ -175,8 +175,12 @@ describe("legacy operator command contracts", () => {
     const result = await invoke(["migrate", "--scan", "--quiet"])
     expect(result.failure).toBeUndefined()
     expect(ports.migrate.mock.calls[0]![0]).toMatchObject({ root, mode: "scan" })
-    expect(ports.renderMigration).not.toHaveBeenCalled()
-    expect(result.stdout).toBe("")
+    expect(ports.renderMigration).toHaveBeenCalledExactlyOnceWith(
+      { exitCode: 1 },
+      "human",
+      join(root, ".smithers-migrate")
+    )
+    expect(result.stdout).toBe(`migration human ${join(root, ".smithers-migrate")}`)
     expect(result.codes).toEqual([1])
   })
 

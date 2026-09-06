@@ -38,7 +38,7 @@ in the workspace declaration, then `.flows`. See
 | Option                   | Alias | Type       | Default          | Meaning                                                           |
 | ------------------------ | ----- | ---------- | ---------------- | ----------------------------------------------------------------- |
 | `--plan`                 |       | boolean    | `false`          | Print the inert plan and execute nothing.                         |
-| `--verbose`              |       | boolean    | `false`          | Show plain progress for agents and pipe consumers.              |
+| `--verbose`              |       | boolean    | `false`          | Show plain progress for agents and pipe consumers.                |
 | `--jobs`                 | `-j`  | integer 1+ | host parallelism | Maximum concurrent targets.                                       |
 | `--include-exclusive`    |       | boolean    | `false`          | Include exclusive targets in wildcard `ci` and `test` selections. |
 | `--cache` / `--no-cache` |       | boolean    | `true`           | Consult the cache before running. `--no-cache` still publishes.   |

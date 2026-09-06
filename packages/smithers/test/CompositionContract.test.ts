@@ -6,11 +6,11 @@
  * protocol. The provider is the one external input: an Undici transport
  * returns the wire response named by each case.
  */
-import { NodeCrypto, NodeHttpClient } from "@effect/platform-node"
+import { NodeHttpClient } from "@effect/platform-node"
 import { MockAgent } from "@effect/platform-node/Undici"
 import * as QuotaPolicy from "@smthrs/agent/QuotaPolicy"
 import { Application, NodeControl } from "@smthrs/cli"
-import { Control, type ControlSchema, SqlControlRuntime } from "@smthrs/control"
+import { Control, type ControlSchema } from "@smthrs/control"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as RequestExecutor from "@smthrs/model/RequestExecutor"
 import { Effect, Layer, Stream } from "effect"
@@ -31,7 +31,7 @@ afterEach(async () => {
   roots.clear()
 })
 
-const workspace = async (): Promise<string> => {
+const workspace = async (budget: ControlSchema.Envelope["budget"] = {}): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "smithers-composition-contract-"))
   roots.add(root)
   const directory = join(root, "flows", "capacity")
@@ -43,6 +43,7 @@ const workspace = async (): Promise<string> => {
       "name: capacity",
       "description: Exercises the production model boundary.",
       "model: openai:gpt-4o-mini",
+      `budget: ${JSON.stringify(budget)}`,
       "---",
       "",
       "Exercise the production model boundary.",
@@ -64,23 +65,12 @@ const modelExecutor = async (agent: MockAgent): Promise<Layer.Layer<RequestExecu
 
 const composition = (
   root: string,
-  budget: ControlSchema.Envelope["budget"],
   executor: Layer.Layer<RequestExecutor.RequestExecutor>
 ): Layer.Layer<Control.Control> => {
   const registry = NodeControl.layerRegistry(root)
-  const base = NodeControl.engineDurable(root, registry)
-  const runtime = SqlControlRuntime.layer({
-    flows: [{
-      flowId: "capacity",
-      description: "Exercises the production model boundary.",
-      deployClass: false,
-      envelope: { capabilities: [], flows: [], budget }
-    }]
-  }).pipe(
-    Layer.provide([base.stores, NodeCrypto.layer]),
-    Layer.orDie
-  )
-  const engine: NodeControl.EngineDurable = { ...base, runtime }
+  // Discover the actual descriptor, including its budget and executable
+  // identity, through the same composition used by the shipped CLI.
+  const engine = NodeControl.engineDurable(root, registry)
   const runs = NodeControl.layerExecutor(
     registry,
     engine,
@@ -153,7 +143,7 @@ describe("the shipped Node agent composition", () => {
       JSON.stringify({ error: { code: "rate_limit_exceeded", message: "capacity window closed" } }),
       { headers: { "content-type": "application/json", "retry-after": "0" } }
     ).persist()
-    const layer = composition(root, {}, await modelExecutor(agent))
+    const layer = composition(root, await modelExecutor(agent))
 
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
@@ -176,7 +166,7 @@ describe("the shipped Node agent composition", () => {
   }, 30_000)
 
   it("enforces the token budget approved in the plan envelope", async () => {
-    const root = await workspace()
+    const root = await workspace({ tokens: 1_000 })
     const agent = new MockAgent({ enableCallHistory: true })
     agents.add(agent)
     agent.disableNetConnect()
@@ -203,7 +193,7 @@ describe("the shipped Node agent composition", () => {
       response,
       { headers: { "content-type": "text/event-stream" } }
     ).persist()
-    const layer = composition(root, { tokens: 1_000 }, await modelExecutor(agent))
+    const layer = composition(root, await modelExecutor(agent))
 
     const observed = await Effect.runPromise(
       Effect.gen(function*() {
