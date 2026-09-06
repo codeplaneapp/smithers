@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test"
 import type { Locator, Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, join, resolve } from "node:path"
 import { localApiGet, localApiPost } from "./localApi"
@@ -61,9 +61,22 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
-test.afterEach(async ({ page, request }) => {
+test.afterEach(async ({ page, request }, testInfo) => {
   try {
     if (openedRepoPath !== undefined) {
+      // The real executor's journal explains failures before the owned repo is
+      // removed. Browser traces retain the UI, but not its WebSocket frames.
+      const runsDir = join(openedRepoPath, ".flows", "ui", "runs")
+      if (testInfo.status !== testInfo.expectedStatus && existsSync(runsDir)) {
+        for (const entry of readdirSync(runsDir, { withFileTypes: true })) {
+          if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+            await testInfo.attach(`target-run-${entry.name}`, {
+              path: join(runsDir, entry.name),
+              contentType: "application/x-ndjson"
+            })
+          }
+        }
+      }
       const listed = await localApiGet(page, request, "/api/repos")
       if (listed.ok()) {
         const { repos } = (await listed.json()) as { repos: Array<{ id: string; path: string }> }
