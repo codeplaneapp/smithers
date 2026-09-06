@@ -2,9 +2,10 @@ import * as Filegroup from "@smthrs/targets/Filegroup"
 import * as Input from "@smthrs/targets/Input"
 import * as NodeTest from "@smthrs/targets/NodeTest"
 import * as Target from "@smthrs/targets/Target"
+import type * as Vitest from "@smthrs/targets/Vitest"
 import { describe, expect, it } from "vitest"
 import { BuildAndCheckTypeScriptPackage } from "../src/BuildAndCheckTypeScriptPackage.ts"
-import { plannedArgv } from "./plan.ts"
+import { plannedArgv, plannedCalls } from "./plan.ts"
 import { packageManager } from "./toolchain.ts"
 
 describe("BuildAndCheckTypeScriptPackage docsFiles", () => {
@@ -118,6 +119,22 @@ describe("BuildAndCheckTypeScriptPackage lib", () => {
 
 describe("BuildAndCheckTypeScriptPackage", () => {
   const targets = BuildAndCheckTypeScriptPackage({ packageManager, deps: [], cwd: "packages/smithers/flows/plan" })
+
+  it("changes only the outer test deadline when a package needs a larger suite budget", () => {
+    const standard = BuildAndCheckTypeScriptPackage({ packageManager, cwd: "packages/example" })
+    const extended = BuildAndCheckTypeScriptPackage({
+      packageManager,
+      cwd: "packages/example",
+      testTimeoutMs: 2_400_000
+    })
+    expect(plannedCalls(standard.test)[0]?.payload).toMatchObject({ timeoutMs: 1_200_000 })
+    expect(plannedCalls(extended.test)[0]?.payload).toMatchObject({ timeoutMs: 2_400_000 })
+    expect(plannedArgv(extended.test)).toEqual(plannedArgv(standard.test))
+    expect(Target.metadata(extended.test).attrs).toEqual({
+      ...attrsOf<Vitest.Attrs>(standard.test),
+      timeoutMs: 2_400_000
+    })
+  })
 
   it("emits a docs target beside lib, test, and lint", () => {
     expect(Target.metadata(targets.docs).target).toBe("DocsParity")

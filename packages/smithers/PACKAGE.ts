@@ -6,6 +6,11 @@ import { docsWriter, referenceStyle } from "../../PACKAGE.ts"
 const { check, circular, docs, docsFiles, fmt, lib, lint, test } = BuildAndCheckTypeScriptPackage({
   deps: [],
   cwd: "packages/smithers",
+  // On the Node 22 CI hosts this complete process-boundary suite took
+  // 1166.5 s on macOS and was killed at 1200.1 s on Ubuntu. Keep its
+  // aggregate coverage gate in one run, with twice the observed completed
+  // duration available; individual test deadlines remain unchanged.
+  testTimeoutMs: 40 * 60_000,
   tests: Smithers.glob("test/**/*.test.ts", { exclude: ["test/faults/**"] })
 })
 

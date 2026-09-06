@@ -41,6 +41,12 @@ export interface Options {
   readonly tsconfig?: Input.File | undefined
   readonly testTsconfig?: Input.File | undefined
   readonly vitestConfig?: Input.File | null | undefined
+  /**
+   * Outer deadline for the complete Vitest process. Omitted, the Vitest
+   * target keeps its 20-minute default. Per-case deadlines and coverage
+   * thresholds remain owned by the selected Vitest config.
+   */
+  readonly testTimeoutMs?: number | undefined
   readonly eslintConfigs?: ReadonlyArray<Input.File> | undefined
   readonly dprintConfig?: Input.File | undefined
   readonly readme?: Input.File | undefined
@@ -154,6 +160,7 @@ export const BuildAndCheckTypeScriptPackage = (options: Options): PackageTargets
   })
   const test = Vitest({
     ...(options.packageManager === undefined ? {} : { packageManager: options.packageManager }),
+    ...(options.testTimeoutMs === undefined ? {} : { timeoutMs: options.testTimeoutMs }),
     tests: [tests],
     sources: [sources],
     deps: [lib, ...deps],

@@ -13,6 +13,8 @@ The review functions declare `LlmLint` targets. They run under `smthrs review`, 
 
 Root development dependencies make this package available to repository declarations. Published packages must not depend on it or re-export it.
 
+`BuildAndCheckTypeScriptPackage` accepts `testTimeoutMs` for a package whose complete test process needs a different outer deadline. The default remains 20 minutes. This option preserves the selected suite, its per-case deadlines, and its aggregate coverage thresholds.
+
 `pnpm --filter @smthrs/repo-targets test` enforces 100% V8 coverage across `src/**`. Both required CI package selections reach its declared Vitest target, `//packages/repo-targets:test`. The suite checks the actual CLI discovery result and the target's runner configuration, so a declared test script alone cannot satisfy that contract.
 
 ## Bun tests in this repository
