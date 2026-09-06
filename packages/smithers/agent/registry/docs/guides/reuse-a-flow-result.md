@@ -54,10 +54,11 @@ policy, and runs the delegate underneath it as a **child execution** derived
 from the parent's. The child keeps its own execution, journal lineage, and
 retry policy beneath the step rather than being hidden inside it.
 
-Deriving the child id from the parent's is what keeps two runs' children apart.
-The ambient default derives an id from the flow tag and the payload, so two
-runs invoking the same descriptor the same way would otherwise be one child
-execution, and a descriptor that declared nothing would reuse a result anyway.
+Deriving the child id from the parent's keeps two runs' children apart while
+making a retry of one parent's step reattach to its existing child. The ambient
+default mints a fresh UUID for unkeyed invocations; relying on that source here
+would create a new child on every retry. The bridge supplies the stable child
+id explicitly, independent of the host's chosen execution-ID source.
 
 ## The gate: a sealed tier
 

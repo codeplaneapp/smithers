@@ -75,7 +75,7 @@ Hello, Ada.
 
 ## Choose identity and persistence
 
-The explicit `executionId` identifies this invocation. Without one, Smithers first checks the flow's declared idempotency key, then uses the host's execution-ID source. The default derives an ID from the flow tag and encoded payload. See [Execution IDs and ownership](/docs/concepts/ownership/) before using equal payloads for independent requests.
+The explicit `executionId` identifies this invocation. Without one, Smithers first checks the flow's declared idempotency key, then uses the host's execution-ID source. The default mints a fresh UUID, so equal inputs start independent executions. Retain the returned ID to resume that work, or opt into `Flow.layerExecutionIds(Flow.derived)` to identify work by its flow tag and encoded payload. See [Execution IDs and ownership](/docs/concepts/ownership/).
 
 The in-memory engine loses its state when the process exits. To resume after a restart, compose a durable engine over persistent SQLite state. The [first flow tutorial](/docs/tutorials/first-flow/#6-run-durably-over-sqlite) supplies that complete host setup.
 

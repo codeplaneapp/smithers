@@ -60,7 +60,7 @@ Effect is not an interchangeable detail. The pin is a hard requirement of the pr
 
 ## Where Smithers diverges from upstream
 
-Smithers vendors Effect's workflow surface and extends it with explicit execution IDs, content-derived step keys, and a separate policy for infrastructure interruptions. By default, an invocation without an explicit ID derives one from its tag and payload. Supply an ID when equal inputs need independent executions. [Execution IDs and ownership](/docs/concepts/ownership/) and [Retries and interruption](/docs/concepts/retries/) describe these contracts.
+Smithers vendors Effect's workflow surface and extends it with explicit execution IDs, content-derived step keys, and a separate policy for infrastructure interruptions. By default, an invocation without an explicit ID or declared idempotency key receives a fresh UUID. Retain that ID to resume the work, or opt into the derived source when equal inputs should identify one execution. [Execution IDs and ownership](/docs/concepts/ownership/) and [Retries and interruption](/docs/concepts/retries/) describe these contracts.
 
 ## Related
 

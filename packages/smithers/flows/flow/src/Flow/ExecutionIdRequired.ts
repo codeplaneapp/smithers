@@ -11,11 +11,11 @@ import * as Schema from "effect/Schema"
 /**
  * A flow execution has no selected identity.
  *
- * The default `CurrentExecutionIds` source raises this when neither the caller
- * nor the flow declaration selected an id. The opt-in `derived` source also
- * raises it when the payload cannot be canonicalized, for example a
- * non-finite number, a lone surrogate, or a cycle. Both die with it before
- * starting a run, so it is a defect and not a typed failure a body catches.
+ * The opt-in `derived` execution-id source raises this when the payload
+ * cannot be canonicalized, for example a non-finite number, a lone surrogate,
+ * or a cycle. It dies with it before starting a run, so this is a defect and
+ * not a typed failure a body catches. The default `fresh` source instead
+ * mints a cryptographic UUID for every unkeyed invocation.
  *
  * @category errors
  * @since 0.1.0
