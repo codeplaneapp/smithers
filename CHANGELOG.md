@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1533 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1534 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -341,6 +341,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **platform:** contain subprocess lifetimes through prepared owners ([fb05640c3e](https://github.com/smithersai/smithers/commit/fb05640c3e32193db48effb8f1700ae84a2d4c86))
 - close UI startup and remaining release gate regressions ([cb77047ddf](https://github.com/smithersai/smithers/commit/cb77047ddf0bfdce48ba706a23cf3587dce41864))
 - close candidate UI, CLI, and documentation regressions ([ebf8834a9f](https://github.com/smithersai/smithers/commit/ebf8834a9fd3cc7072ecc777afad99141380c95c))
 - close CLI, MCP and public repository release gaps ([6d2c527c2a](https://github.com/smithersai/smithers/commit/6d2c527c2af4cfc6bda9586b6dad7feaa70e5ad5))
