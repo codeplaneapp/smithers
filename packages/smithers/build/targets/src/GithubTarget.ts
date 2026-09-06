@@ -537,7 +537,9 @@ export class PrRefused extends Error {
   readonly code: "missing_token_secret" | "approval_unsatisfied"
 
   constructor(code: "missing_token_secret" | "approval_unsatisfied", message: string) {
-    super(`${code}: ${message}`)
+    // A code ending in `secret:` looks like a credential assignment to the
+    // shared log redactor. Brackets retain the target name in the diagnosis.
+    super(`[${code}] ${message}`)
     this.code = code
   }
 }
