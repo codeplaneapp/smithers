@@ -27,8 +27,10 @@ import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
 import { type Flow, FlowRuntime } from "@smthrs/flow"
 import * as Cell from "@smthrs/harness/Cell"
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
+import { HarnessError } from "@smthrs/harness/HarnessError"
 import { Journal, JournalEvent } from "@smthrs/journal"
 import * as Model from "@smthrs/model/Model"
+import { ModelError } from "@smthrs/model/ModelError"
 import { NotificationQueue } from "@smthrs/notifications"
 import { Node } from "@smthrs/plan"
 import * as Descriptor from "@smthrs/registry/Descriptor"
@@ -879,6 +881,31 @@ describe("the executor's driver admission fence", () => {
     })
 
     expect(result).toEqual({ acceptance: "accepted", status: "failed" })
+  })
+
+  it("journals the provider code and message ahead of the outer frame stack", async () => {
+    const record = recorder()
+    const failure = new HarnessError({
+      code: "model_failed",
+      message: "The cell frame failed",
+      cause: new ModelError({ code: "quota_exceeded", message: "Add credits to continue." })
+    })
+    const result = await launched(record, {
+      agent: Agent.makeNoop({ run: () => Stream.fail(failure) })
+    })
+    expect(result.status).toBe("failed")
+    expect(causeOf(record).split("\n")[0]).toBe("quota_exceeded: Add credits to continue.")
+    expect(causeOf(record)).toContain("The cell frame failed")
+  })
+
+  it("retains the engine's cause when a defect has no typed message fields", async () => {
+    const record = recorder()
+    const result = await launched(record, {
+      agent: Agent.makeNoop({ run: () => Stream.die("opaque model transport defect") })
+    })
+    expect(result.status).toBe("failed")
+    expect(causeOf(record)).toContain("opaque model transport defect")
+    expect(causeOf(record)).not.toContain("undefined")
   })
 })
 

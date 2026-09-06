@@ -91,6 +91,7 @@ import * as Scope from "effect/Scope"
 import * as Stream from "effect/Stream"
 import { Agent } from "./Agent.ts"
 import type * as Budget from "./Budget.ts"
+import { failureSummary } from "./internal/FailureSummary.ts"
 import type * as QuotaPolicy from "./QuotaPolicy.ts"
 import { contextWindowResolver, SeatResolver } from "./SeatResolver.ts"
 import * as StandardFlows from "./StandardFlows.ts"
@@ -1444,7 +1445,11 @@ export const make = (
             runId,
             cause: Cause.pretty(exit.cause)
           }),
-          writeStatus(runId, "failed", Cause.pretty(exit.cause))
+          Effect.suspend(() => {
+            const detail = failureSummary(settlementFailure(Cause.squash(exit.cause)))
+            const cause = Cause.pretty(exit.cause)
+            return writeStatus(runId, "failed", detail === undefined ? cause : `${detail}\n${cause}`)
+          })
         )
 
     const approvedExecution = (
