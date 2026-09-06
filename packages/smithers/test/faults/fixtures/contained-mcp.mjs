@@ -1,14 +1,13 @@
 // A real stdio MCP server that deliberately survives stdin closure and TERM.
 // This proves both deadline escalation and crash recovery without a vendor.
-import { appendFileSync, writeFileSync } from "node:fs"
+import { appendFileSync } from "node:fs"
 import { join } from "node:path"
 
 const directory = process.argv[2]
 if (!directory) throw new Error("Missing MCP fixture directory")
 process.on("SIGTERM", () => {})
 setInterval(() => {}, 1000)
-appendFileSync(join(directory, "mcp-pids.jsonl"), `${JSON.stringify({ pid: process.pid, owner: process.ppid })}\n`)
-writeFileSync(join(directory, `${process.ppid}.mcp.pid`), String(process.pid))
+appendFileSync(join(directory, "mcp-pids.jsonl"), `${JSON.stringify({ pid: process.pid, supervisor: process.ppid })}\n`)
 process.stdin.setEncoding("utf8")
 let buffered = ""
 process.stdin.on("data", (chunk) => {

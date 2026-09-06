@@ -67,11 +67,14 @@ const requiredGates = new Map([
     "packages/smithers/test/faults/case31-cli-process-containment.test.ts",
     {
       title: [
-        "reaps a crashed CLI's shell child without touching a live CLI's child",
-        "contains configured MCP children during shutdown and after a CLI crash"
+        "automatically contains a crashed CLI's shell child and retires its durable record on replacement startup",
+        "automatically contains a crashed CLI's mcp child and retires its durable record on replacement startup",
+        "reaps a crashed CLI's shell group when its supervisor cannot perform automatic cleanup",
+        "reaps a crashed CLI's mcp group when its supervisor cannot perform automatic cleanup"
       ],
       why: "The CLI must actually install durable containment under shell and MCP children, "
-        + "escalate a shutdown that ignores TERM, and refuse to reap children with a live owner. "
+        + "escalate a shutdown that ignores TERM, refuse to reap children with a live owner, and "
+        + "retire records correctly after automatic crash cleanup or actual replacement reaping. "
         + "A host-library test alone does not prove this CLI composition."
     }
   ],

@@ -2,7 +2,8 @@
  * Native I/O ownership for transient commands and prepared process owners.
  * @since 1.0.0
  */
-import { NodeSink, NodeStream } from "@effect/platform-node"
+import * as NodeSink from "@effect/platform-node/NodeSink"
+import * as NodeStream from "@effect/platform-node/NodeStream"
 import * as Effect from "effect/Effect"
 import * as PlatformError from "effect/PlatformError"
 import type * as Scope from "effect/Scope"
