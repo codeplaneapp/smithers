@@ -17,7 +17,7 @@ one process with no engine, no model, and no file system.
 - A package with the dependency installed:
 
 ```bash
-pnpm add @smthrs/core
+pnpm add @smthrs/core@next
 ```
 
 ## Declare two flows

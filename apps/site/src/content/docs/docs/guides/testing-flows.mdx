@@ -13,13 +13,13 @@ Exercise a flow in a test runner the way the shipped examples do: on the in-memo
 - The library dependencies, with Effect pinned exactly:
 
 ```bash
-pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/platform-node@next
+pnpm add @smthrs/flow@next @smthrs/engine@next @smthrs/platform-node@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 - The testing library and a runner as dev dependencies:
 
 ```bash
-pnpm add --save-dev @smthrs/testing@next vitest @effect/vitest
+pnpm add --save-dev @smthrs/testing@next vitest@4.1.9 @effect/vitest@4.0.0-rc.112
 ```
 
 `@smthrs/testing/Vitest` is ESM-only and deliberately absent from the root barrel, so import the adapter from its subpath.
@@ -72,6 +72,7 @@ The test body yields the program and asserts on the value the flow returned. Thi
 
 ```ts
 import { expect, it } from "@smthrs/testing/Vitest"
+import * as Effect from "effect/Effect"
 import { main } from "../src/greeting.ts"
 
 it.effect("runs a typed flow on the in-memory engine", () =>

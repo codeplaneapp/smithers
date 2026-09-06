@@ -12,7 +12,7 @@ Upgrades a Smithers 0.x (JSX) project to the Smithers 1.0 authoring model and wr
 
 ## Availability
 
-The Smithers 1.0 packages are not on npm yet, so `npx @smthrs/migrate` resolves once they publish. Until then, run the tool from a source checkout of the [smithers repository](https://github.com/smithersai/smithers):
+The Smithers 1.0 packages are not on npm yet, so `npx @smthrs/migrate@next` resolves once they publish. Until then, run the tool from a source checkout of the [smithers repository](https://github.com/smithersai/smithers):
 
 ```sh
 git clone https://github.com/smithersai/smithers.git
@@ -30,7 +30,7 @@ The executable takes the same flags either way, so the rest of this page reads t
 
 ## Availability
 
-The Smithers 1.0 packages are not on npm yet, so `npx @smthrs/migrate` resolves once they publish. Until then, run the tool from a source checkout of the [smithers repository](https://github.com/smithersai/smithers):
+The Smithers 1.0 packages are not on npm yet, so `npx @smthrs/migrate@next` resolves once they publish. Until then, run the tool from a source checkout of the [smithers repository](https://github.com/smithersai/smithers):
 
 ```sh
 git clone https://github.com/smithersai/smithers.git
@@ -45,13 +45,13 @@ The executable takes the same flags either way, so the rest of this page reads t
 ## The shortest real example
 
 ```sh
-npx @smthrs/migrate
+npx @smthrs/migrate@next
 ```
 
 That plans. It reads the project, decides what each unit of work would be, writes `.smithers-migrate/report.md`, and changes nothing else. Read the report, then decide whether to apply:
 
 ```sh
-ANTHROPIC_API_KEY=... npx @smthrs/migrate --apply --seat anthropic:<model>
+ANTHROPIC_API_KEY=... npx @smthrs/migrate@next --apply --seat anthropic:<model>
 ```
 
 ## Modes

@@ -25,7 +25,7 @@ It needs Node.js 22.19+ (Node 22) or 24.11+, [`effect`](https://effect.website),
 publishes, the install is one command:
 
 ```bash
-pnpm add @smthrs/mcp @effect/platform-node
+pnpm add @smthrs/mcp@next @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Connect a server and read its flows

@@ -26,7 +26,7 @@ Alongside it, this tutorial imports the flow declaration layer, the in-memory
 flow engine, the Node platform layer, and Effect itself:
 
 ```bash
-pnpm add @smthrs/flow @smthrs/engine @effect/platform-node effect
+pnpm add @smthrs/flow@next @smthrs/engine@next @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112
 ```
 
 ## 2. Configure the credential

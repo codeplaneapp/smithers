@@ -52,7 +52,7 @@ The package itself has no platform bindings. `Discovery` is written against
 directory means providing an implementation of both:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 ```ts

@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install
 
 ```bash
-pnpm add @smthrs/engine @smthrs/flow
+pnpm add @smthrs/engine@next @smthrs/flow@next
 ```
 
 `@smthrs/flow` is a runtime dependency of this package and also the package you
@@ -43,7 +43,7 @@ browser program provides its own; a Node program provides
 `@effect/platform-node`:
 
 ```bash
-pnpm add -D @effect/platform-node
+pnpm add -D @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Compensable actions

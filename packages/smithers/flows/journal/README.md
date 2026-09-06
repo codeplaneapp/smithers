@@ -23,7 +23,7 @@ Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the
 release candidate publishes under the `next` tag, which is what this installs:
 
 ```sh
-pnpm add @smthrs/journal@next @smthrs/database@next effect@4.0.0-rc.112
+pnpm add @smthrs/journal@next @smthrs/database@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 `effect` is a peer dependency at exactly that version. Two copies of `effect`

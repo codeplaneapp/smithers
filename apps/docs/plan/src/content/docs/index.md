@@ -47,7 +47,7 @@ Compiling asks Effect for its `Crypto` service, which a platform package
 supplies:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 [Installation](/installation/) covers the import forms, the extra packages

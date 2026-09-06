@@ -25,7 +25,7 @@ as a workspace dependency:
 When it publishes, the install is one command:
 
 ```bash
-pnpm add @smthrs/memory effect@4.0.0-rc.112
+pnpm add @smthrs/memory@next effect@4.0.0-rc.112
 ```
 
 ## Requirements
@@ -40,8 +40,15 @@ Smithers dependencies (`@smthrs/core`, `@smthrs/database`,
 
 ## Packages you add for production wiring
 
-The in-memory test layer needs nothing beyond the install. A store backed by a
-database file needs the database package and its selected Node adapters:
+The `TestMemory` layer uses a real in-memory SQLite database. Add its optional
+Node driver before following the quickstart:
+
+```bash
+pnpm add @effect/sql-sqlite-node@4.0.0-rc.112
+```
+
+A store backed by a database file needs the database package and its selected
+Node adapters:
 
 ```bash
 pnpm add @smthrs/database@1.0.0-rc.0 @effect/platform-node@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112

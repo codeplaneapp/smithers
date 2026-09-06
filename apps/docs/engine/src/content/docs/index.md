@@ -30,7 +30,7 @@ when running a step twice would be worse than running it late.
 ## Install
 
 ```bash
-pnpm add @smthrs/engine @smthrs/flow
+pnpm add @smthrs/engine@next @smthrs/flow@next
 ```
 
 Node 22.19.0 or later, plus a platform crypto service.

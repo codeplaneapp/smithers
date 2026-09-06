@@ -11,7 +11,7 @@ hooks that are ordinary Effects, ordering that follows Vite's rules exactly, and
 a resolution boundary that copies every value a caller hands it.
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.112
+pnpm add @smthrs/plugin@next effect@4.0.0-rc.112
 ```
 
 ```ts

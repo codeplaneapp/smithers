@@ -9,7 +9,7 @@ all Smithers packages share one Effect runtime.
 Pure plan-time data model for flows. It defines inert Flow and Node declarations plus the graph, effect, placement, annotation, key-material, and Markdown projections consumed by the registry and execution layers above it. `TestRuntime` is the deliberately non-production exception: a pure evaluator for testing deferred declaration callbacks.
 
 ```sh
-npm install @smthrs/core
+npm install @smthrs/core@next
 ```
 
 The full API reference lives at [core.smithers.sh/reference/api](https://core.smithers.sh/reference/api/).

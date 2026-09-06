@@ -18,15 +18,17 @@ gateway a real workspace serves.
 
 ## Compose the stack
 
-The stack reaches below this package's own dependencies, so add the four that
-supply the storage and the control runtime's ports:
+The stack reaches below this package's own dependencies. Add the packages
+that supply storage, the selected SQLite driver, and the control runtime's ports:
 
 ```bash
 pnpm add -D \
   @smthrs/database@1.0.0-rc.0 \
   @smthrs/journal@1.0.0-rc.0 \
   @smthrs/notifications@1.0.0-rc.0 \
-  @smthrs/registry@1.0.0-rc.0
+  @smthrs/registry@1.0.0-rc.0 \
+  effect@4.0.0-rc.112 \
+  @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 ```ts

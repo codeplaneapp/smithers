@@ -20,7 +20,7 @@ appear in, and disappear from, the process ledger.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/platform-bun @effect/platform-bun@4.0.0-rc.112 @smthrs/kernel effect@4.0.0-rc.112
+pnpm add @smthrs/platform-bun@next @effect/platform-bun@4.0.0-rc.112 @smthrs/kernel@next effect@4.0.0-rc.112
 ```
 
 ## Run a file operation and a command

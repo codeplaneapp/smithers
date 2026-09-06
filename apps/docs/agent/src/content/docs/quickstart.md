@@ -20,7 +20,7 @@ A runnable version of this walkthrough lives in the Smithers repository, as
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/agent @smthrs/engine @smthrs/flow @smthrs/model @smthrs/registry @effect/platform-node
+pnpm add @smthrs/agent@next @smthrs/engine@next @smthrs/flow@next @smthrs/model@next @smthrs/registry@next @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Declare the step and the flow

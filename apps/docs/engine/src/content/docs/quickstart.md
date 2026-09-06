@@ -16,8 +16,8 @@ configured.
 Install the packages and a crypto service:
 
 ```bash
-pnpm add @smthrs/engine @smthrs/flow
-pnpm add -D @effect/platform-node
+pnpm add @smthrs/engine@next @smthrs/flow@next
+pnpm add -D @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Declare the action and the flow

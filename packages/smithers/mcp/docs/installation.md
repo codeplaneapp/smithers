@@ -15,7 +15,7 @@ behind `--mcp-config`.
 When it publishes, the install is one command:
 
 ```bash
-pnpm add @smthrs/mcp
+pnpm add @smthrs/mcp@next
 ```
 
 ## Requirements
@@ -104,7 +104,7 @@ What a host adds is the thing that runs the cell loop:
 package. A host that imports them declares them in its own manifest.
 
 ```bash
-pnpm add @smthrs/agent
+pnpm add @smthrs/agent@next
 ```
 
 [`@smthrs/agent`](/api/agent) takes the projected sources as its `flows` option,

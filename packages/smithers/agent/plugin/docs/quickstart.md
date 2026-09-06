@@ -18,7 +18,7 @@ Everything here runs in one file with no services to provide and no I/O.
 - A TypeScript project with the package installed:
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.112
+pnpm add @smthrs/plugin@next effect@4.0.0-rc.112
 ```
 
 ## Declare the host's hook catalog

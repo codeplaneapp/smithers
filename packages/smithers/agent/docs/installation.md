@@ -8,7 +8,7 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/agent
+pnpm add @smthrs/agent@next
 ```
 
 The package requires Node.js 22.19+ (Node 22) or 24.11+ and ships as both ESM and CommonJS
@@ -48,7 +48,7 @@ and in a browser. A composition that executes a flow adds the durable engine
 and the authoring packages, plus a platform crypto service:
 
 ```bash
-pnpm add @smthrs/engine @smthrs/flow @smthrs/model @smthrs/registry @effect/platform-node
+pnpm add @smthrs/engine@next @smthrs/flow@next @smthrs/model@next @smthrs/registry@next @effect/platform-node@4.0.0-rc.112
 ```
 
 - [`@smthrs/engine`](/api/engine) provides the durable engine a run executes

@@ -13,7 +13,7 @@ volatile in-memory implementation of it; `@smthrs/engine-store` supplies
 durable persistence over the same seam.
 
 ```sh
-pnpm add @smthrs/engine @smthrs/flow
+pnpm add @smthrs/engine@next @smthrs/flow@next
 ```
 
 Built on [Effect](https://effect.website): flows, actions, and the engine are

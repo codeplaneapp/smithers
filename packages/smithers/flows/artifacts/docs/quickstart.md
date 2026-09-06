@@ -18,7 +18,7 @@ corrupted on purpose.
 - The package and the Node host layers:
 
 ```bash
-pnpm add @smthrs/artifacts@next @effect/platform-node
+pnpm add @smthrs/artifacts@next @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Compose the store

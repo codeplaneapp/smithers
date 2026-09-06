@@ -32,7 +32,11 @@ version error.
 `SqlJournal.layer` needs two services from `@smthrs/database`: a
 `SqlClient.SqlClient` to read through and a `DurableWriter` to write through.
 On Node, `NodeDatabase.layer` provides the client and `DurableWriter.layer()`
-provides the writer:
+provides the writer. This composition selects the optional Node SQLite driver:
+
+```bash
+pnpm add @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 ```ts
 import * as DurableWriter from "@smthrs/database/DurableWriter"

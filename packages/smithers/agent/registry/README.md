@@ -21,7 +21,7 @@ a path plus the SHA-256 digest measured during the scan.
 ## Install
 
 ```sh
-pnpm add @smthrs/registry@next effect@4.0.0-rc.112 @effect/platform-node
+pnpm add @smthrs/registry@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 Smithers is at `1.0.0-rc.0` and has not reached npm yet. When it does, the

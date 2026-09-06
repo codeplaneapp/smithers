@@ -59,7 +59,7 @@ This package declares the `FlowRuntime` port and implements none of it, so a
 composition that runs a flow adds an engine and a platform crypto service:
 
 ```bash
-pnpm add @smthrs/engine@next @effect/platform-node
+pnpm add @smthrs/engine@next @effect/platform-node@4.0.0-rc.112
 ```
 
 - [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) implements `FlowRuntime`. Its

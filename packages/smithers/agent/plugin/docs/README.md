@@ -52,7 +52,7 @@ class, no registration call, and no inheritance.
 ## Install
 
 ```bash
-pnpm add @smthrs/plugin effect@4.0.0-rc.112
+pnpm add @smthrs/plugin@next effect@4.0.0-rc.112
 ```
 
 Node.js 22.19.0 or later is required. For the runtime requirements, the import

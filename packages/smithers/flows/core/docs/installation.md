@@ -8,7 +8,7 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/core
+pnpm add @smthrs/core@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and

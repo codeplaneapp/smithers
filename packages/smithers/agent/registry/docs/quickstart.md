@@ -15,7 +15,7 @@ renders the prompt an agent would run.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/registry@next effect@4.0.0-rc.112 @effect/platform-node
+pnpm add @smthrs/registry@next effect@4.0.0-rc.112 @effect/platform-node@4.0.0-rc.112
 ```
 
 ## Write two flows

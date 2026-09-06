@@ -17,7 +17,7 @@ or opens a database except read only.
 ## Install the scan-only half
 
 ```bash
-pnpm add -D @smthrs/migrate --no-optional
+pnpm add -D @smthrs/migrate@next --no-optional
 ```
 
 `--no-optional` leaves out the `@smthrs/*` packages that only `apply` needs.

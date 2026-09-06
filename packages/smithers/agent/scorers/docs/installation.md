@@ -54,7 +54,11 @@ root `Migrations` namespace. Importing a blocked subpath fails with Node's
 
 `SqlScoreStore.layer` needs a SQL client and a durable writer, both from
 [`@smthrs/database`](/api/database). In production that is the Node SQLite
-driver over a file:
+driver over a file. Add the database package and its optional Node driver:
+
+```bash
+pnpm add @smthrs/database@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 ```ts
 import * as DurableWriter from "@smthrs/database/DurableWriter"

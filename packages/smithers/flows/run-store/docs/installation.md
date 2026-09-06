@@ -49,6 +49,13 @@ so they carry no database of their own. A composition supplies two services:
 - `DurableWriter` from `@smthrs/database`, which serializes and retries the
   write transactions the stores run inside.
 
+Using `NodeDatabase` or the in-memory `TestRunStore` helper selects the optional
+Node SQLite driver:
+
+```bash
+pnpm add @effect/sql-sqlite-node@4.0.0-rc.112
+```
+
 Both `RunStore.layer` and `AttemptStore.layer` require exactly those two, and
 `Migrations.layer` requires the `SqlClient` alone. The layer order that
 satisfies them is in [Compose the stores into a host](./guides/compose-the-stores.md).

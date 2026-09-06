@@ -8,7 +8,7 @@ sidebar:
 ## Install the package
 
 ```bash
-pnpm add @smthrs/notifications @smthrs/journal
+pnpm add @smthrs/notifications@next @smthrs/journal@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
@@ -36,7 +36,7 @@ For a real deployment, the journal is the SQLite one, over a database and a
 migration run:
 
 ```bash
-pnpm add @smthrs/database
+pnpm add @smthrs/database@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 ```ts

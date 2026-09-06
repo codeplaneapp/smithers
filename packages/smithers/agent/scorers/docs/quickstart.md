@@ -13,7 +13,12 @@ in-memory, so the whole thing runs from one file with no setup.
 ## Prerequisites
 
 Node.js 22.19.0 or later, and a project that depends on `@smthrs/scorers` and
-`@smthrs/database`. See [Installation](./installation.md).
+`@smthrs/database`. The in-memory SQLite example also needs the optional Node
+driver. See [Installation](./installation.md).
+
+```bash
+pnpm add @smthrs/scorers@next @smthrs/database@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 ## Declare the scorer
 

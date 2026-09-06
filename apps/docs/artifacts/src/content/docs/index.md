@@ -34,7 +34,7 @@ sandbox.
 ## Install
 
 ```bash
-pnpm add @smthrs/artifacts@next @effect/platform-node
+pnpm add @smthrs/artifacts@next @effect/platform-node@4.0.0-rc.112
 ```
 
 `@effect/platform-node` supplies the Node.js implementations of the services

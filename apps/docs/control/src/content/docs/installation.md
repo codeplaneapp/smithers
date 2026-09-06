@@ -69,13 +69,18 @@ read-only dashboard.
 
 ### An in-memory composition
 
-Nothing extra. `TestControl.layer` bundles all four collaborators with the
-deterministic runtime, and it is what the [Quickstart](/quickstart/) uses.
+`TestControl.layer` bundles all four collaborators with the deterministic
+runtime. Its journal uses a real in-memory SQLite database, so the
+[Quickstart](/quickstart/) adds the optional Node driver:
+
+```bash
+pnpm add effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 ### A durable composition
 
 ```bash
-pnpm add @smthrs/database @smthrs/run-store
+pnpm add @smthrs/database@next @smthrs/run-store@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 - [`@smthrs/database`](https://database.smithers.sh/reference/api/) supplies the SQL client and the
@@ -93,7 +98,7 @@ inside `effect`. A Node host adds the platform bindings and a serialization
 format:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 See [Serve the control plane over RPC](/guides/serve-over-rpc/).

@@ -16,7 +16,7 @@ embeds a scheduler in application code, never hides an untranslatable construct
 behind `any`, and never rewrites or resumes 0.x run state.
 
 ```bash
-npx @smthrs/migrate
+npx @smthrs/migrate@next
 ```
 
 The Smithers 1.0 packages are not on npm yet, so that line resolves once they
@@ -47,7 +47,7 @@ one. Install that package after the migration to use what the migration wrote.
 
 You can also install it first. `@smthrs/cli` carries this same tool as the
 [`smthrs migrate`](https://smithers.sh/docs/reference/cli/migrate/) verb, over the same entry point and the same
-flags. Reach for `npx @smthrs/migrate` when the project is still on 0.x and you
+flags. Reach for `npx @smthrs/migrate@next` when the project is still on 0.x and you
 want to install nothing at all, and for `smthrs migrate` when the CLI is
 already there. [Installation](/installation/) covers the two differences
 between them.

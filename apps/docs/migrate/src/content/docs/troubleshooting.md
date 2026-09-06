@@ -146,8 +146,8 @@ the plan covers changed. Nothing was written.
 **What to change.** Plan again, then apply:
 
 ```bash
-npx @smthrs/migrate
-npx @smthrs/migrate --apply --seat anthropic:<model>
+npx @smthrs/migrate@next
+npx @smthrs/migrate@next --apply --seat anthropic:<model>
 ```
 
 ## checkpoint-failed

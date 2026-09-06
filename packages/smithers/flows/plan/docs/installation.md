@@ -25,7 +25,7 @@ That is enough to build node graphs, compile plans, and diff them. Compiling
 asks for Effect's `Crypto` service, which a platform package supplies:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 ## What persistence adds
@@ -35,7 +35,7 @@ pnpm add @effect/platform-node
 writer:
 
 ```bash
-pnpm add @smthrs/database@next @effect/platform-node
+pnpm add @smthrs/database@next @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 `@smthrs/crypto` and [`@smthrs/keys`](/api/keys) arrive as dependencies of this

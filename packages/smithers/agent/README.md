@@ -27,7 +27,7 @@ is another implementation of `Agent.Service`, not a second loop beside this one.
 ## Install
 
 ```bash
-pnpm add @smthrs/agent
+pnpm add @smthrs/agent@next
 ```
 
 Node.js 22.19+ (Node 22) or 24.11+. The shortest real use is one model-backed step: an

@@ -92,7 +92,7 @@ Time travel reads a journal the engine wrote, so a composition that produces
 history adds the engine and the storage under it:
 
 ```bash
-pnpm add @smthrs/engine@next @smthrs/engine-store@next @smthrs/flow@next @smthrs/database@next @effect/platform-node
+pnpm add @smthrs/engine@next @smthrs/engine-store@next @smthrs/flow@next @smthrs/database@next @effect/platform-node@4.0.0-rc.112 effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 - [`@smthrs/engine`](https://engine.smithers.sh/reference/api/) is the durable engine a run executes on, and

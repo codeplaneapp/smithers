@@ -60,7 +60,7 @@ as an in-run approval does.
 ## Install
 
 ```bash
-pnpm add @smthrs/control@next
+pnpm add @smthrs/control@next effect@4.0.0-rc.112 @effect/sql-sqlite-node@4.0.0-rc.112
 ```
 
 The `next` tag is where the 1.0 release candidates publish. The package needs

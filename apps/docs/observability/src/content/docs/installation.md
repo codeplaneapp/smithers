@@ -9,7 +9,7 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 ## Install the package
 
 ```bash
-pnpm add @smthrs/observability
+pnpm add @smthrs/observability@next
 ```
 
 The package requires Node.js 22.19.0 or later and ships as both ESM and
@@ -22,7 +22,7 @@ resolves two copies of `effect` splits its context and a provided layer stops
 satisfying a requirement. Install the release this package is tested against:
 
 ```bash
-pnpm add @smthrs/observability effect@4.0.0-rc.112
+pnpm add @smthrs/observability@next effect@4.0.0-rc.112
 ```
 
 `Otlp` is written entirely against `effect`, including its HTTP client and its

@@ -50,7 +50,11 @@ import * as TestSync from "@smthrs/sync/test/TestSync"
 
 `@smthrs/sync/test/TestSync` binds the Node SQLite test journal, so it is a
 Node-only import. `@smthrs/sync/test/TestSocket` is an in-memory socket pair
-and runs anywhere.
+and runs anywhere. Install the optional SQLite driver when using `TestSync`:
+
+```bash
+pnpm add @effect/sql-sqlite-node@4.0.0-rc.112
+```
 
 `@smthrs/sync/internal/*` is not exported. A path under it fails to resolve.
 
@@ -61,7 +65,7 @@ A follower needs a transport. `SyncClient.layer` derives its RPC client from
 serialization:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @effect/platform-node@4.0.0-rc.112
 ```
 
 A browser follower needs no extra package: the WebSocket protocol and the JSON

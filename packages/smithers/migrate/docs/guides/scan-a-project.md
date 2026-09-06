@@ -11,7 +11,7 @@ credential. Two modes read and report; neither edits.
 ## Read and report nothing to disk
 
 ```bash
-npx @smthrs/migrate --scan
+npx @smthrs/migrate@next --scan
 ```
 
 `scan` walks the project and prints a summary. It writes no file at all, not
@@ -21,7 +21,7 @@ time you want to know what changed since.
 ## Read and write the report
 
 ```bash
-npx @smthrs/migrate
+npx @smthrs/migrate@next
 ```
 
 `plan` is the default mode. It does everything `scan` does, plans the migration
@@ -70,7 +70,7 @@ The scanner modules import only `effect`, `@effect/platform-node`,
 are optional dependencies, so a scan-only install can leave them out:
 
 ```bash
-pnpm add -D @smthrs/migrate --no-optional
+pnpm add -D @smthrs/migrate@next --no-optional
 ```
 
 ## When a scan could not read everything

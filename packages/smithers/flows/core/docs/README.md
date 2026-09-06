@@ -37,7 +37,7 @@ diagram, or a test.
 ## Install
 
 ```bash
-pnpm add @smthrs/core
+pnpm add @smthrs/core@next
 ```
 
 The package needs Node.js 22.19.0 or later. It has no platform bindings, so the

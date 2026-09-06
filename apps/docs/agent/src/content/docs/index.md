@@ -34,7 +34,7 @@ coordinate concurrent calls, but cannot hard-cap a provider's actual bill.
 ## Install
 
 ```bash
-pnpm add @smthrs/agent
+pnpm add @smthrs/agent@next
 ```
 
 The package requires Node.js 22.19+ (Node 22) or 24.11+. For the import forms and the

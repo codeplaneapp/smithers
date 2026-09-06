@@ -29,7 +29,7 @@ The tool has to run inside a project that does not have Smithers 1.0 yet, so
 the first command needs no install:
 
 ```bash
-npx @smthrs/migrate
+npx @smthrs/migrate@next
 ```
 
 The package ships one executable, `smithers-migrate`, and `npx` runs it. With
@@ -42,10 +42,10 @@ Install the package when you want the scanner API in your own script, or when
 you want the tool pinned in the project you are migrating:
 
 ```bash
-npm install --save-dev @smthrs/migrate
-pnpm add -D @smthrs/migrate
-yarn add -D @smthrs/migrate
-bun add -d @smthrs/migrate
+npm install --save-dev @smthrs/migrate@next
+pnpm add -D @smthrs/migrate@next
+yarn add -D @smthrs/migrate@next
+bun add -d @smthrs/migrate@next
 ```
 
 The package requires Node.js 22.19+ (Node 22) or 24.11+, and ships as both ESM and
@@ -104,7 +104,7 @@ declared as `optionalDependencies`, so a package manager installs them by
 default and `--no-optional` leaves them out:
 
 ```bash
-pnpm add -D @smthrs/migrate --no-optional
+pnpm add -D @smthrs/migrate@next --no-optional
 ```
 
 That flag also omits TypeScript's platform-specific native compiler package.
@@ -126,7 +126,7 @@ environment:
 | `openrouter` | `OPENROUTER_API_KEY` |
 
 ```bash
-ANTHROPIC_API_KEY=... npx @smthrs/migrate --apply --seat anthropic:<model>
+ANTHROPIC_API_KEY=... npx @smthrs/migrate@next --apply --seat anthropic:<model>
 ```
 
 No model id is hard coded anywhere in this package, so the seat resolver
