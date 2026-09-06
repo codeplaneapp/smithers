@@ -24,8 +24,8 @@ The declared seat lives in the flow source. A markdown flow carries it on the `m
 
 ```md
 ---
-name: "reviewer"
 description: Reviews the uncommitted change in this repository.
+capabilities: ["fs:read:**"]
 model: anthropic:claude-sonnet-4-5
 ---
 ```

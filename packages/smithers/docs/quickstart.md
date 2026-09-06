@@ -53,11 +53,15 @@ environment sets, in the order `doctor` reports them:
 
 ```text
 ---
-name: "hello"
 description: A starter Smithers flow.
+capabilities: ["fs:read:**", "fs:write:**", "proc:spawn:*"]
 model: anthropic:claude-sonnet-4-5
 ---
 ```
+
+The directory supplies the flow's name. The starter requests file reads,
+file writes, and process spawning for its editing and testing instructions;
+narrow those capabilities when the task needs less authority.
 
 If no provider key was set when `init` ran, the line names the default seat and
 the variable to set for it. Set that variable now, because a launch with no

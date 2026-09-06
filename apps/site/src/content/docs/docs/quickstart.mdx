@@ -57,6 +57,8 @@ Do not modify files or run commands.
 
 The `model:` field selects the provider and model. `init` chooses it from the first available provider credential; if none is set, the generated comment names the key required by its default model. Set that credential in your shell, or change `model:` to a seat you can use. The [init reference](/docs/reference/cli/init/) lists the selection order. A model call uses that provider's account and usage limits.
 
+The starter declares file-read, file-write, and process-spawn capabilities for editing and testing. For this read-only task, replace its `capabilities:` line with `capabilities: ["fs:read:**"]`. Review that declaration whenever you change the task; the flow name comes from its directory, so no `name:` field is needed.
+
 Check the configuration and flow discovery:
 
 ```bash

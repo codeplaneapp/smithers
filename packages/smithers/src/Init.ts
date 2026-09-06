@@ -192,8 +192,10 @@ const seatNote = (seat: Seat): string =>
  */
 export const template = (name: string, seat: Seat): string =>
   `---
-name: ${JSON.stringify(name)}
 description: A starter Smithers flow.
+# The starter reads and edits files and runs the project's tests. Narrow these
+# capabilities to the task before running it; proc:spawn permits shell commands.
+capabilities: ["fs:read:**", "fs:write:**", "proc:spawn:*"]
 ${seatNote(seat)}
 model: ${seat.seat}
 ---

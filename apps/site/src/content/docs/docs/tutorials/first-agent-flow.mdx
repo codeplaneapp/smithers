@@ -29,7 +29,6 @@ The scaffold creates `flows/reviewer/flow.mdx`, the `.flows/` state directory, a
 
 ```md
 ---
-name: "reviewer"
 description: Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.
 capabilities: ["fs:read:**", "proc:spawn:*"]
 model: anthropic:claude-sonnet-4-5
@@ -62,7 +61,7 @@ Keep the `model:` line `smthrs init` wrote for you: it chose the seat from the f
 ```text
 You should see: init reports the flow file it created, the project's state
 directory, and the seat it wrote. After your edit, the flow declares the
-review's name, description, capabilities, and model, with its instructions
+review's description, capabilities, and model, with its instructions
 organized under headings.
 ```
 

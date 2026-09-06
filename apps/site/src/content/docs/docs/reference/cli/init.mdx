@@ -27,6 +27,8 @@ The scaffolded flow declares a `model:` seat chosen from the first provider cred
 
 With no credential set, the scaffold still declares the default (`anthropic:claude-sonnet-4-5`), and the frontmatter comment names the key to set. A scaffold without a `model:` line would not be launchable at all.
 
+The starter requests `fs:read:**`, `fs:write:**`, and `proc:spawn:*` for its file-editing and test-running instructions. Narrow these capabilities before running a smaller task; process spawning permits shell commands. Its directory supplies the flow name, so the frontmatter contains no ignored `name:` key.
+
 ## Arguments
 
 | Name | Type | Required | Description |

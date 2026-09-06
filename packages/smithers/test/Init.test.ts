@@ -5,6 +5,14 @@
  * and `init.e2e.test.js`): run state must never reach a commit, the edit is
  * idempotent, and a directory that is not a repository is left alone.
  */
+import * as Capability from "@smthrs/capability/Capability"
+import * as Descriptor from "@smthrs/registry/Descriptor"
+import * as MarkdownFlow from "@smthrs/registry/MarkdownFlow"
+import * as ApplyPatch from "@smthrs/std/ApplyPatch"
+import * as Bash from "@smthrs/std/Bash"
+import * as Read from "@smthrs/std/Read"
+import * as TestRun from "@smthrs/std/TestRun"
+import { Option } from "effect"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -96,7 +104,7 @@ describe("the scaffold", () => {
     expect(result).toMatchObject({ name: "review", created: true, gitignore: "created" })
     expect(result.flowFile).toBe(join(root, "flows", "review", "flow.mdx"))
     const body = readFileSync(result.flowFile, "utf8")
-    expect(body).toContain("name: \"review\"")
+    expect(body).not.toContain("\nname:")
     expect(body).toContain("# review")
   })
 
@@ -224,13 +232,33 @@ describe("the seat the scaffold writes", () => {
     expect(body.slice(body.indexOf("# review"))).not.toContain("doctor")
   })
 
-  it("round-trips the frontmatter name as a quoted YAML scalar", () => {
+  it("discovers the generated flow by its path without warnings and grants its editing tools explicitly", () => {
     const name = "review_2-final"
-    const line = Init.template(name, Init.defaultSeat({})).split("\n")
-      .find((candidate) => candidate.startsWith("name: "))
-
-    expect(line).toBe(`name: ${JSON.stringify(name)}`)
-    expect(JSON.parse(line!.slice("name: ".length))).toBe(name)
+    const root = directory(".git")
+    const scaffolded = Init.scaffold(root, name, {})
+    const result = MarkdownFlow.fromMarkdown({
+      text: readFileSync(scaffolded.flowFile, "utf8"),
+      path: scaffolded.flowFile,
+      baseDirectory: join(root, "flows", name),
+      naming: "path",
+      name: Option.some(name),
+      dirBasename: name,
+      provenance: new Descriptor.Provenance({ source: "project", root })
+    })
+    const descriptor = Option.getOrThrow(result.descriptor)
+    expect(descriptor.name).toBe(name)
+    expect(result.warnings).toEqual([])
+    const grants = descriptor.capabilities.map((value) => Option.getOrThrow(Capability.parsePattern(value)))
+    expect(grants.map((grant) => grant.action)).toEqual(["fs:read", "fs:write", "proc:spawn"])
+    for (const flow of [Read.flow, ApplyPatch.flow, Bash.flow, TestRun.flow]) {
+      for (const formatted of flow.capabilities) {
+        const required = Option.getOrThrow(Capability.parsePattern(formatted))
+        expect(grants.some((grant) => Capability.subsumes(grant, required))).toBe(true)
+      }
+    }
+    for (const action of ["net:post", "model:call", "jj:snapshot"] as const) {
+      expect(grants.some((grant) => Capability.matches(grant, Capability.make(action, "unrequested")))).toBe(false)
+    }
   })
 
   it("scaffolds the flow the environment can launch", () => {
