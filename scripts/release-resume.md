@@ -13,3 +13,20 @@ The workflow-run source SHA can differ from the candidate's SHA when a workflow 
 A missing or expired archive is a failed resume, not permission to rebuild different bytes under an already published version. For a changed candidate, use a new version and repeat the complete release validation. Publication remains controlled by the workflow's existing `dryRun` input and npm-publish environment.
 
 The local restore implementation uses Node, the GitHub CLI, and Python 3's standard ZIP library, available on the workflow's Ubuntu runner. All GitHub calls are read-only and request JSON metadata under API version `2026-03-10`; archive bytes are downloaded by artifact ID. The action token needs `actions: read`. The endpoint and metadata contract is documented by GitHub's [artifact API](https://docs.github.com/en/rest/actions/artifacts) and [workflow-run API](https://docs.github.com/en/rest/actions/workflow-runs).
+
+## Rehearse an untagged main commit
+
+For a fresh candidate before creating a release tag, dispatch **Release** from `main` with `dryRun=true`, an explicit `sourceRef` containing the full 40- or 64-character commit SHA already pushed to main, and `releaseTag` naming the intended `v<version>`. Leave both archived-candidate IDs empty. For example, after setting `SOURCE_SHA` to the chosen full SHA:
+
+```bash
+gh workflow run release.yml --ref main \
+  -f releaseTag=v1.0.0-rc.0 \
+  -f sourceRef="$SOURCE_SHA" \
+  -F dryRun=true
+```
+
+This path checks out that exact commit and verifies its ancestry to `origin/main`. It runs every existing version, changelog, source, build, and smoke gate, archives the tested candidate, and skips publication. The intended tag need not exist; a stale changelog still fails and must be corrected in a new source commit before certification. The candidate records the checked-out source SHA and intended release label.
+
+New candidates must pass installed-consumer smoke on Node 22.19.0 and Node 24.11.0 with npm 11.16.0, using the same tarballs without repacking. The separate `release-smoke-evidence-<run-id>` artifact retains `node22.json` and `node24.json`; its upload also runs on failure, so an incomplete artifact identifies which runtime passed. The candidate's `smoke-evidence.json` is the final Node 24 receipt. Archived-candidate restores preserve the original receipt.
+
+`sourceRef` is refused for publication and for every archived-candidate restore, including a restored dry run. Those paths still require a real release tag pointing to the exact tested source. An untagged rehearsal does not authorize creating or pushing that tag. The local rehearsal script skips the checkout action, so it does not establish that GitHub checked out the selected SHA.

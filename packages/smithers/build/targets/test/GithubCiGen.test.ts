@@ -138,9 +138,9 @@ jobs:
       - name: Initialize colocated jj repository
         run: jj git init --colocate
       - name: Workspace targets
-        run: pnpm exec smthrs ci '//packages/...' --jobs 2
+        run: pnpm exec smthrs ci '//packages/...' --jobs 2 --verbose
       - name: Script gates
-        run: pnpm exec smthrs test '//scripts/...'
+        run: pnpm exec smthrs test '//scripts/...' --verbose
   browser:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -153,7 +153,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Browser bundle guard
-        run: pnpm exec smthrs test '//scripts:browserContract'
+        run: pnpm exec smthrs test '//scripts:browserContract' --verbose
   rust:
     runs-on: ubuntu-latest
     continue-on-error: false
@@ -170,7 +170,7 @@ jobs:
         run: rustup toolchain install
       - uses: ${actions.rustCache}
       - name: Cargo gates
-        run: pnpm exec smthrs lint '//crates/flows-jj'
+        run: pnpm exec smthrs lint '//crates/flows-jj' --verbose
 `
 
 const attrsOf = (input: unknown): never => GithubCiGen(input as typeof goldenAttrs)[Target.TargetTypeId].attrs as never
@@ -304,7 +304,7 @@ describe("render", () => {
       packageManager: { name: "bun", version: ">=1.4.0", executable: "bun", runtime: bunRuntime }
     }))
     expect(rendered).toContain("      - run: bun install --frozen-lockfile --ignore-scripts\n")
-    expect(rendered).toContain("        run: bun x smthrs test '//scripts/...'\n")
+    expect(rendered).toContain("        run: bun x smthrs test '//scripts/...' --verbose\n")
     // Bun installs itself; a second manager-setup action would install the same
     // program twice.
     expect(rendered).not.toContain("pnpm/action-setup")
@@ -655,9 +655,9 @@ describe("render", () => {
           steps: [{ verb: Verb.Test, pattern }]
         }]
       }))
-      expect(rendered).toContain(`      - run: pnpm exec smthrs test '${pattern}'\n`)
+      expect(rendered).toContain(`      - run: pnpm exec smthrs test '${pattern}' --verbose\n`)
       expect(parseWorkflow(rendered).jobs[0]!.steps.map((step) => step.run))
-        .toContain(`pnpm exec smthrs test '${pattern}'`)
+        .toContain(`pnpm exec smthrs test '${pattern}' --verbose`)
     }
   })
 
@@ -748,7 +748,7 @@ describe("render", () => {
     expect(withDepth).toContain(
       `      - uses: ${actions.checkout}\n        with:\n          fetch-depth: "0"\n`
     )
-    expect(withDepth).toContain("        run: pnpm exec smthrs review '//...'\n")
+    expect(withDepth).toContain("        run: pnpm exec smthrs review '//...' --verbose\n")
 
     const both = render(attrsOf({
       ...goldenAttrs,

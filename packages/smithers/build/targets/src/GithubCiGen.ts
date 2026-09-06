@@ -668,6 +668,8 @@ const installArgv = (attrs: Attrs): ReadonlyArray<string> =>
  *
  * The workspace binary is resolved through the declared package manager, so the
  * CLI that runs is the one the lockfile pinned, never a fetched one.
+ * CI retains plain failure diagnostics even when its noninteractive streams
+ * select the agent audience; quiet summaries alone hide the failing tests.
  *
  * @category rendering
  * @since 0.1.0
@@ -677,7 +679,8 @@ export const stepCommand = (attrs: Attrs, step: TargetStep, nix?: CiToolchain.Ni
     ...developPrefix(nix),
     ...PackageManager.exec(attrs.packageManager, ["smthrs", Verb.command(step.verb)]),
     shellArgument(step.pattern),
-    ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)])
+    ...(step.parallelism === undefined ? [] : ["--jobs", String(step.parallelism)]),
+    "--verbose"
   ].join(" ")
 
 /**

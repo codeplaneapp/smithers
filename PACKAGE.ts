@@ -285,6 +285,7 @@ const ci = Smithers.GithubCiGen({
       timeoutMinutes: 30,
       toolchain: Smithers.CiToolchain.Needs({
         runtimes: [node, bun],
+        apt: bubblewrap,
         artifacts: Smithers.CiToolchain.Artifacts({
           artifact: "apps-e2e-artifacts",
           sources: [

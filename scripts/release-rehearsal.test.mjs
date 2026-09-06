@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { spawnSync } from "node:child_process"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
@@ -174,14 +174,19 @@ test("only candidate preparation and publication select a path; diagnostics surv
   assert.deepEqual(conditional, [
     "Build all workspaces from clean artifacts",
     "Pack and smoke-test release artifacts",
+    "Install the supported Node 24 floor",
+    "Install certified npm for Node 24",
+    "Smoke release artifacts on the Node 24 floor",
     "Restore and verify archived release candidate",
     "Collect ci-test-tier-evidence",
     "Upload ci-test-tier-evidence",
+    "Upload release runtime smoke evidence",
     "Publish packages in dependency order",
     "Report the skipped publication"
   ])
   assert.equal(step("Collect ci-test-tier-evidence").if, "always()")
   assert.equal(step("Upload ci-test-tier-evidence").if, "always()")
+  assert.equal(step("Upload release runtime smoke evidence").if, "always()")
   assert.equal(step("Archive tested release artifacts").if, undefined)
 })
 
@@ -194,6 +199,56 @@ test("release builds the checked public graph and pins npm before smoke", () => 
   assert.ok(release.jobs.publish.steps.indexOf(install) < release.jobs.publish.steps.indexOf(step("Workspace targets")))
 })
 
+test("both supported runtime floors smoke the same tarballs and retain separate receipts", () => {
+  const node22 = step("Pack and smoke-test release artifacts")
+  const node24 = step("Smoke release artifacts on the Node 24 floor")
+  assert.equal(node24.env.PACK_DIR, node22.env.PACK_DIR)
+  assert.equal(node24.env.SMOKE_EVIDENCE_DIR, node22.env.SMOKE_EVIDENCE_DIR)
+  assert.equal(step("Install the supported Node 24 floor").with["node-version"], "24.11.0")
+  assert.match(step("Install certified npm for Node 24").run, /npm install --global 'npm@11\.16\.0'/)
+  const names = release.jobs.publish.steps.map((candidate) => candidate.name)
+  assert.ok(names.indexOf(node22.name) < names.indexOf("Install the supported Node 24 floor"))
+  assert.ok(names.indexOf("Install certified npm for Node 24") < names.indexOf(node24.name))
+  assert.ok(names.indexOf(node24.name) < names.indexOf("Archive tested release artifacts"))
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "smithers-runtime-smoke-workflow-")))
+  try {
+    const bin = join(root, "bin")
+    mkdirSync(bin)
+    const driver = join(root, "node.cjs")
+    writeFileSync(driver, [
+      'const fs = require("node:fs"), path = require("node:path")',
+      'const [command, directory] = process.argv.slice(2)',
+      'if (command === "--version") { console.log(process.env.MOCK_NODE_VERSION); process.exit(0) }',
+      'fs.appendFileSync(process.env.TRACE, JSON.stringify([command, directory, process.env.MOCK_NODE_VERSION]) + "\\n")',
+      'if (command === "scripts/pack-release.mjs") { fs.mkdirSync(directory, { recursive: true }); fs.writeFileSync(path.join(directory, "package.tgz"), "fixed candidate bytes") }',
+      'else if (command === "scripts/smoke-release.mjs") {',
+      '  const bytes = fs.readFileSync(path.join(directory, "package.tgz"), "utf8")',
+      '  fs.writeFileSync(path.join(directory, "smoke-evidence.json"), JSON.stringify({ bytes, node: process.env.MOCK_NODE_VERSION }))',
+      '} else throw new Error("unexpected release command")'
+    ].join("\n"))
+    writeFileSync(join(bin, "node"), '#!/bin/sh\nexec "$ACTUAL_NODE" "$MOCK_NODE_DRIVER" "$@"\n')
+    writeFileSync(join(bin, "npm"), '#!/bin/sh\n[ "$1" = --version ] || exit 90\nprintf "11.16.0\\n"\n')
+    chmodSync(join(bin, "node"), 0o755)
+    chmodSync(join(bin, "npm"), 0o755)
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, ACTUAL_NODE: process.execPath,
+      MOCK_NODE_DRIVER: driver, PACK_DIR: join(root, "packs"), SMOKE_EVIDENCE_DIR: join(root, "receipts"), TRACE: join(root, "trace.jsonl") }
+    const run = (body, version) => spawnSync("bash", ["-e", "-c", body], { cwd: root,
+      env: { ...env, MOCK_NODE_VERSION: version }, encoding: "utf8" })
+    const first = run(node22.run, "v22.19.0")
+    assert.equal(first.status, 0, first.stderr)
+    const preserved = readFileSync(join(env.SMOKE_EVIDENCE_DIR, "node22.json"))
+    assert.notEqual(run(node24.run, "v22.19.0").status, 0, "a skipped setup action cannot mislabel Node22 as Node24")
+    assert.equal(existsSync(join(env.SMOKE_EVIDENCE_DIR, "node24.json")), false)
+    const second = run(node24.run, "v24.11.0")
+    assert.equal(second.status, 0, second.stderr)
+    assert.deepEqual(readFileSync(join(env.SMOKE_EVIDENCE_DIR, "node22.json")), preserved)
+    assert.deepEqual(JSON.parse(readFileSync(join(env.SMOKE_EVIDENCE_DIR, "node24.json"), "utf8")), { bytes: "fixed candidate bytes", node: "v24.11.0" })
+    const calls = readFileSync(env.TRACE, "utf8").trim().split("\n").map((line) => JSON.parse(line))
+    assert.deepEqual(calls, [["scripts/pack-release.mjs", env.PACK_DIR, "v22.19.0"],
+      ["scripts/smoke-release.mjs", env.PACK_DIR, "v22.19.0"], ["scripts/smoke-release.mjs", env.PACK_DIR, "v24.11.0"]])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
 test("archived retries restore an explicit immutable artifact without rebuilding or replacing smoke evidence", () => {
   for (const restore of [false, true]) {
     for (const dryRun of [false, true]) {
@@ -203,6 +258,9 @@ test("archived retries restore an explicit immutable artifact without rebuilding
       contexts.env = jobEnv(contexts)
       assert.equal(condition(step("Build all workspaces from clean artifacts").if, contexts), !restore)
       assert.equal(condition(step("Pack and smoke-test release artifacts").if, contexts), !restore)
+      for (const name of ["Install the supported Node 24 floor", "Install certified npm for Node 24", "Smoke release artifacts on the Node 24 floor"]) {
+        assert.equal(condition(step(name).if, contexts), !restore)
+      }
       assert.equal(condition(step("Restore and verify archived release candidate").if, contexts), restore)
       assert.equal(condition(step("Publish packages in dependency order").if, contexts), !dryRun)
     }
@@ -269,12 +327,14 @@ test("the dispatch inputs keep the rehearsal safe by default", () => {
   assert.equal(inputs.dryRun.type, "boolean")
   assert.equal(inputs.dryRun.default, true)
   assert.equal(inputs.releaseTag.default, "")
+  assert.equal(inputs.sourceRef.type, "string")
+  assert.equal(inputs.sourceRef.default, "")
 })
 
 test("CI gates the server's checks and tests in the required test job", () => {
   const ci = parseWorkflow(readFileSync(join(repoRoot, ".github/workflows/ci.yml"), "utf8"))
   const server = ci.jobs.test.steps.find((entry) => entry.name === "Server typecheck and tests")
-  assert.equal(server?.run, "pnpm exec smthrs ci '//apps/server/...'")
+  assert.equal(server?.run, "pnpm exec smthrs ci '//apps/server/...' --verbose")
   assert.equal(server?.if, undefined)
 })
 
@@ -284,7 +344,7 @@ test("ordinary PR CI gates executable examples before workspace checks", () => {
   const examples = steps.find((entry) => entry.name === "Examples")
   assert.equal(Object.hasOwn(ci.on, "pull_request"), true)
   assert.equal(ci.jobs.test["continue-on-error"], undefined)
-  assert.equal(examples?.run, "pnpm exec smthrs ci '//examples/...'")
+  assert.equal(examples?.run, "pnpm exec smthrs ci '//examples/...' --verbose")
   assert.equal(examples?.if, undefined)
   assert.ok(steps.indexOf(examples) < steps.indexOf(steps.find((entry) => entry.name === "Workspace targets")))
 })
@@ -378,3 +438,132 @@ test("release checks out the requested candidate, serializes its tag, and archiv
   assert.ok(archive >= 0 && publish > archive)
   assert.equal(steps[archive].with["if-no-files-found"], "error")
 })
+
+/** Run the workflow's own guards against real, isolated Git histories. */
+const withSourceRepository = (format, check) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "release-source-ref-")))
+  const env = {
+    ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1"
+  }
+  const git = (...args) => {
+    const result = spawnSync("git", args, { cwd: root, env, encoding: "utf8", timeout: 10_000 })
+    assert.equal(result.status, 0, result.stdout + result.stderr)
+    return result.stdout.trim()
+  }
+  const run = (name, contexts) => spawnSync("bash", [
+    "--noprofile", "--norc", "-eo", "pipefail", "-c", interpolate(step(name).run, contexts)
+  ], {
+    cwd: root,
+    env: { ...env, ...jobEnv(contexts), GITHUB_EVENT_NAME: contexts.github.event_name },
+    encoding: "utf8",
+    timeout: 10_000
+  })
+  try {
+    git("init", `--object-format=${format}`, "-b", "main")
+    git("config", "user.name", "Release source fixture")
+    git("config", "user.email", "release-source@example.invalid")
+    git("commit", "--allow-empty", "-m", "Initial candidate")
+    const candidate = git("rev-parse", "HEAD")
+    git("commit", "--allow-empty", "-m", "Later main commit")
+    const tip = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/main", tip)
+    git("checkout", "--detach", candidate)
+    check({ root, git, run, candidate, tip })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+const sourceContexts = (sourceRef) => {
+  const contexts = dispatchContexts("v1.0.0-rc.0", true)
+  contexts.github.ref = "refs/heads/main"
+  contexts.inputs.sourceRef = sourceRef
+  contexts.env = jobEnv(contexts)
+  return contexts
+}
+
+for (const format of ["sha1", "sha256"]) {
+  test(`an untagged ${format} candidate is pinned independently of its intended release version`, () =>
+    withSourceRepository(format, ({ git, run, candidate, tip }) => {
+      assert.notEqual(candidate, tip, "the selected source may be an older main commit")
+      assert.equal(git("tag", "--list"), "")
+      const contexts = sourceContexts(candidate)
+      const steps = release.jobs.publish.steps
+      const checkout = steps.find((entry) => entry.uses?.startsWith("actions/checkout@"))
+      assert.equal(interpolate(checkout.with.ref, contexts), candidate)
+      assert.equal(contexts.env.RELEASE_TAG, "v1.0.0-rc.0")
+      assert.equal(run("Validate explicit dry-run source", contexts).status, 0)
+      assert.equal(run("Verify explicit dry-run source", contexts).status, 0)
+      const uppercase = sourceContexts(candidate.toUpperCase())
+      assert.equal(run("Validate explicit dry-run source", uppercase).status, 0)
+      assert.equal(run("Verify explicit dry-run source", uppercase).status, 0)
+      assert.equal(git("rev-parse", "HEAD"), candidate)
+      assert.equal(git("status", "--porcelain"), "")
+      assert.equal(condition(step("Publish packages in dependency order").if, contexts), false)
+      contexts.env.DRY_RUN = "false"
+      assert.equal(condition(step("Publish packages in dependency order").if, contexts), false,
+        "the explicit source input independently forbids publication")
+      assert.ok(steps.indexOf(step("Validate explicit dry-run source")) < steps.indexOf(checkout))
+      assert.ok(steps.indexOf(checkout) < steps.indexOf(step("Verify explicit dry-run source")))
+      assert.ok(steps.indexOf(step("Verify explicit dry-run source")) < steps.indexOf(step("Install pinned Rust toolchain")))
+    }))
+}
+
+test("the actual source guard refuses publication, non-dispatch events, and any archived selection", () =>
+  withSourceRepository("sha1", ({ run, candidate }) => {
+    const forbidden = [
+      { inputs: { dryRun: false } },
+      { event: "push" },
+      { event: "schedule" },
+      { inputs: { candidateRunId: "10" } },
+      { inputs: { candidateArtifactId: "20" } },
+      { inputs: { candidateRunId: "10", candidateArtifactId: "20" } }
+    ]
+    for (const variant of forbidden) {
+      const contexts = sourceContexts(candidate)
+      Object.assign(contexts.inputs, variant.inputs)
+      if (variant.event !== undefined) contexts.github.event_name = variant.event
+      const result = run("Validate explicit dry-run source", contexts)
+      assert.notEqual(result.status, 0, JSON.stringify(variant))
+      assert.match(result.stderr, /only for a fresh workflow_dispatch dry run/)
+    }
+    for (const contexts of [pushContexts("v1.0.0-rc.0"), dispatchContexts("v1.0.0-rc.0", false)]) {
+      assert.equal(run("Validate explicit dry-run source", contexts).status, 0)
+      assert.equal(run("Verify explicit dry-run source", contexts).status, 0)
+    }
+  }))
+
+test("the actual source guard requires a full hexadecimal SHA and a release version label", () =>
+  withSourceRepository("sha1", ({ run, candidate }) => {
+    for (const value of ["main", "refs/heads/main", candidate.slice(0, 12), `${candidate}0`, "g".repeat(40), `${candidate}\n`, `${candidate}; true`]) {
+      const result = run("Validate explicit dry-run source", sourceContexts(value))
+      assert.notEqual(result.status, 0, JSON.stringify(value))
+      assert.match(result.stderr, /full 40- or 64-character hexadecimal commit SHA/)
+    }
+    const contexts = sourceContexts(candidate)
+    contexts.inputs.releaseTag = ""
+    const result = run("Validate explicit dry-run source", contexts)
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /requires releaseTag in v<version> format/)
+  }))
+
+test("the actual source verifier refuses a different checkout, unrelated history, and missing main", () =>
+  withSourceRepository("sha1", ({ git, run, candidate, tip }) => {
+    const mismatch = run("Verify explicit dry-run source", sourceContexts(tip))
+    assert.notEqual(mismatch.status, 0)
+    assert.match(mismatch.stderr, /checked-out source does not match sourceRef/)
+
+    const unrelated = git("commit-tree", git("rev-parse", "HEAD^{tree}"), "-m", "Unrelated candidate")
+    git("checkout", "--detach", unrelated)
+    const outside = run("Verify explicit dry-run source", sourceContexts(unrelated))
+    assert.notEqual(outside.status, 0)
+    assert.match(outside.stderr, /must be reachable from origin\/main/)
+
+    git("checkout", "--detach", candidate)
+    git("update-ref", "-d", "refs/remotes/origin/main")
+    const missing = run("Verify explicit dry-run source", sourceContexts(candidate))
+    assert.notEqual(missing.status, 0)
+    assert.match(missing.stderr, /must be reachable from origin\/main/)
+  }))

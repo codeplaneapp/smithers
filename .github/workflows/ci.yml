@@ -72,112 +72,112 @@ jobs:
           fi
         shell: bash
       - name: Examples
-        run: pnpm exec smthrs ci '//examples/...'
+        run: pnpm exec smthrs ci '//examples/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Workspace targets
-        run: pnpm exec smthrs ci '//packages/...' --jobs 2
+        run: pnpm exec smthrs ci '//packages/...' --jobs 2 --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Script gates
-        run: pnpm exec smthrs test '//scripts/...'
+        run: pnpm exec smthrs test '//scripts/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Public export JSDoc
-        run: pnpm exec smthrs lint '//:jsdocTree'
+        run: pnpm exec smthrs lint '//:jsdocTree' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: JSDoc rule harness
-        run: pnpm exec smthrs test '//:jsdocRules'
+        run: pnpm exec smthrs test '//:jsdocRules' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Agent eval suite (offline, baseline-gated)"
-        run: pnpm exec smthrs test '//evals/agent:test'
+        run: pnpm exec smthrs test '//evals/agent:test' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Agent eval typecheck
-        run: pnpm exec smthrs build '//evals/agent:check'
+        run: pnpm exec smthrs build '//evals/agent:check' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Authoring eval dataset (offline)"
-        run: pnpm exec smthrs test '//evals/authoring:test'
+        run: pnpm exec smthrs test '//evals/authoring:test' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Authoring eval typecheck
-        run: pnpm exec smthrs build '//evals/authoring:check'
+        run: pnpm exec smthrs build '//evals/authoring:check' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: SWE-bench rig typecheck
-        run: pnpm exec smthrs build '//evals/swebench:check'
+        run: pnpm exec smthrs build '//evals/swebench:check' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: UI typecheck
-        run: pnpm exec smthrs build '//apps/ui:check'
+        run: pnpm exec smthrs build '//apps/ui:check' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: UI unit tests
-        run: pnpm exec smthrs test '//apps/ui:unitTests'
+        run: pnpm exec smthrs test '//apps/ui:unitTests' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Server typecheck and tests
-        run: pnpm exec smthrs ci '//apps/server/...'
+        run: pnpm exec smthrs ci '//apps/server/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Review app and workers
-        run: pnpm exec smthrs ci '//apps/review/...'
+        run: pnpm exec smthrs ci '//apps/review/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Bug worker
-        run: pnpm exec smthrs ci '//apps/bug-worker/...'
+        run: pnpm exec smthrs ci '//apps/bug-worker/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Status site
-        run: pnpm exec smthrs ci '//apps/status-site/...'
+        run: pnpm exec smthrs ci '//apps/status-site/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Project copy drift
-        run: pnpm exec smthrs lint '//:projectCopy'
+        run: pnpm exec smthrs lint '//:projectCopy' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Site
-        run: pnpm exec smthrs ci '//apps/site/...'
+        run: pnpm exec smthrs ci '//apps/site/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Package docs sites
-        run: pnpm exec smthrs ci '//apps/docs/...'
+        run: pnpm exec smthrs ci '//apps/docs/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: "Review eval suite (offline, baseline-gated)"
-        run: pnpm exec smthrs test '//evals/review-seeded-bugs/...'
+        run: pnpm exec smthrs test '//evals/review-seeded-bugs/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Review eval typecheck
-        run: pnpm exec smthrs build '//evals/review-seeded-bugs:check'
+        run: pnpm exec smthrs build '//evals/review-seeded-bugs:check' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Generated workflow drift
-        run: pnpm exec smthrs lint '//:ci'
+        run: pnpm exec smthrs lint '//:ci' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -217,8 +217,17 @@ jobs:
         with:
           bun-version: 1.4.1
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install system packages
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends 'bubblewrap'
+            if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+              sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+            fi
+          fi
+        shell: bash
       - name: UI browser end-to-end suite
-        run: pnpm exec smthrs test '//apps/ui:browserE2e'
+        run: pnpm exec smthrs test '//apps/ui:browserE2e' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -252,17 +261,17 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Cargo lint gates
-        run: pnpm exec smthrs lint '//crates/flows-jj/...'
+        run: pnpm exec smthrs lint '//crates/flows-jj/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Third-party notices
-        run: pnpm exec smthrs test '//scripts:thirdPartyNotices'
+        run: pnpm exec smthrs test '//scripts:thirdPartyNotices' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Cargo test suite
-        run: pnpm exec smthrs test '//crates/flows-jj:cargoTest'
+        run: pnpm exec smthrs test '//crates/flows-jj:cargoTest' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -280,12 +289,12 @@ jobs:
       - name: Install pinned Rust toolchain
         run: rustup toolchain install
       - name: Build-script unit tests
-        run: pnpm exec smthrs test '//crates/flows-jj:buildScript'
+        run: pnpm exec smthrs test '//crates/flows-jj:buildScript' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
       - name: Rebuild and byte-compare flows_jj.wasm
-        run: pnpm exec smthrs test '//crates/flows-jj:wasmReproducibility'
+        run: pnpm exec smthrs test '//crates/flows-jj:wasmReproducibility' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -313,7 +322,7 @@ jobs:
       - name: Initialize colocated jj repository
         run: jj git init --colocate
       - name: Exclusive fault matrix
-        run: pnpm exec smthrs test '//packages/...:faults' --jobs 1
+        run: pnpm exec smthrs test '//packages/...:faults' --jobs 1 --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -335,7 +344,7 @@ jobs:
         shell: bash
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Web bundle compilation guard
-        run: pnpm exec smthrs test '//scripts:webBundleContract'
+        run: pnpm exec smthrs test '//scripts:webBundleContract' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -413,7 +422,7 @@ jobs:
           fi
         shell: bash
       - name: Package test targets
-        run: pnpm exec smthrs test '//packages/...'
+        run: pnpm exec smthrs test '//packages/...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
@@ -438,7 +447,7 @@ jobs:
         shell: bash
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Review lints
-        run: pnpm exec smthrs review '//...'
+        run: pnpm exec smthrs review '//...' --verbose
         env:
           SMITHERS_CACHE_URL: "${{ secrets.SMITHERS_CACHE_URL }}"
           SMITHERS_CACHE_TOKEN: "${{ secrets.SMITHERS_CACHE_TOKEN }}"
