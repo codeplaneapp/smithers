@@ -1,0 +1,89 @@
+import * as Seat from "@smthrs/agent/Seat"
+import * as SeatResolver from "@smthrs/agent/SeatResolver"
+import * as Model from "@smthrs/model/Model"
+import * as ModelEvent from "@smthrs/model/ModelEvent"
+import { Effect, Stream } from "effect"
+import { execFileSync } from "node:child_process"
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import type { TestContext } from "node:test"
+import type { Analysis, Draft, Evidence } from "../release-support/schema.ts"
+
+export const evidence: Evidence = {
+  version: "1.0.0-rc.1", currentVersion: "1.0.0-rc.1", sourceSha: "a".repeat(40),
+  from: "b".repeat(40), date: "2026-09-06", commits: `${"c".repeat(40)} fix: resume approval`,
+  changes: "src/approval.ts", documents: "HumanTask resumes approvals after restart.", sources: ["README.md"], recordings: []
+}
+export const analysis: Analysis = {
+  title: "Resume release approvals", summary: "Release approvals survive restarts.",
+  highlights: ["Resume approval after restart"], risks: [], migration: [],
+  claims: [{ id: "approval", text: "Approvals resume after restart", sources: ["README.md"] }]
+}
+export const brief = { template: "reliability report", angle: "Durable approvals", outline: ["Resume an approval"] }
+export const copy = { text: "Release approvals resume after a process restart.", claimIds: ["approval"] }
+export const draft: Draft = { changelog: copy, blog: copy, thread: { tweets: [copy] } }
+export const review = { passed: true, score: 0.95, feedback: [] }
+
+export const repository = async (test: TestContext) => {
+  const root = await mkdtemp(join(tmpdir(), "smithers-release-flow-"))
+  test.after(() => rm(root, { recursive: true, force: true }))
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+  git("init", "-b", "main")
+  git("config", "user.name", "Release workflow test")
+  git("config", "user.email", "release-test@example.invalid")
+  await writeFile(join(root, ".gitignore"), ".flows/\n")
+  await mkdir(join(root, "packages/smithers"), { recursive: true })
+  await writeFile(join(root, "packages/smithers/package.json"), JSON.stringify({ name: "@smthrs/cli", version: evidence.version }))
+  await writeFile(join(root, "README.md"), "# Smithers\nDurable release approvals.\n")
+  git("add", ".")
+  git("commit", "-m", "fixture")
+  git("tag", "v0.35.0")
+  const sourceSha = git("rev-parse", "HEAD")
+  return { root, git, evidence: { ...evidence, sourceSha } }
+}
+
+/** Real AgentAction/QuickJS loop; only the provider stream is scripted. */
+export const scriptedSeats = (counts: Record<string, number>, options: { failReviews?: number; allChannels?: boolean } = {}) => {
+  const model = Model.make({
+    stream: (request) => Stream.suspend(() => {
+      const asked = [
+        ...request.system.map((part) => part.text),
+        ...request.messages.flatMap((message) => message.content.flatMap((part) => part.type === "text" ? [part.text] : []))
+      ].join("\n")
+      let stage: string
+      let output: unknown
+      if (asked.includes("Analyze this release.")) { stage = "analyze"; output = analysis }
+      else if (asked.includes("Choose a release narrative")) { stage = "brief"; output = brief }
+      else if (asked.includes("Draft the user-facing changelog")) { stage = "changelog"; output = copy }
+      else if (asked.includes("Draft an X thread")) { stage = "thread"; output = draft.thread }
+      else if (asked.includes("Outline a technical release blog")) { stage = "outline"; output = brief }
+      else if (asked.includes("Write the release blog")) { stage = "blog"; output = copy }
+      else if (asked.includes("Independently review the release materials")) {
+        stage = "score"
+        const fail = (counts.score ?? 0) < (options.failReviews ?? 0)
+        output = fail ? { passed: false, score: 0.4, feedback: ["Explain restart behavior"] } : review
+      } else if (asked.includes("Revise every enabled channel")) {
+        stage = "revise"
+        output = options.allChannels ? draft : { changelog: copy, blog: { text: "", claimIds: [] }, thread: { tweets: [] } }
+      } else if (asked.includes("Identify any undocumented")) {
+        stage = "audit"
+        output = { passed: true, missing: [], explanation: "The supplied docs cover the changes." }
+      } else throw new Error(`Unexpected agent task: ${asked.slice(0, 200)}`)
+      counts[stage] = (counts[stage] ?? 0) + 1
+      return Stream.fromIterable([
+        ModelEvent.ModelEvent.TextStart({ type: "text-start", id: "cell" }),
+        ModelEvent.ModelEvent.TextDelta({ type: "text-delta", id: "cell", text: `\`\`\`cell\nctx.done(${JSON.stringify(output)})\n\`\`\`` }),
+        ModelEvent.ModelEvent.TextEnd({ type: "text-end", id: "cell" }),
+        ModelEvent.ModelEvent.Settle({ type: "settle", stopReason: "stop" })
+      ])
+    })
+  })
+  return SeatResolver.layer({ resolve: (id) => Effect.succeed(Seat.make({
+    id, model, contextWindowTokens: 200_000,
+    route: { prepare: () => Effect.succeed({
+      routeId: "release-test", protocolId: "release-test", method: "POST", url: "https://example.invalid",
+      publicHeaders: {}, body: new TextEncoder().encode("{}"), bodyText: "{}"
+    }) }
+  })) })
+}

@@ -23,11 +23,16 @@
     "packages/smithers/flows/*",
     "packages/smithers/ui/*",
     "examples",
+    "flows",
     "apps/*",
     "apps/docs/*",
     "evals/*"
   ],
   "scripts": {
+    "release:workflow": "node --experimental-strip-types flows/release-support/main.ts release",
+    "release:content": "node --experimental-strip-types flows/release-support/main.ts release-content",
+    "release:status": "node --experimental-strip-types flows/release-support/main.ts status",
+    "release:answer": "node --experimental-strip-types flows/release-support/main.ts answer",
     "browser": "node scripts/browser-check.mjs",
     "check": "pnpm --recursive --if-present run check",
     "check:npm-dedupe": "node scripts/check-npm-dedupe.mjs",

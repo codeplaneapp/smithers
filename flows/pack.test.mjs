@@ -333,7 +333,7 @@ describe("the CLI the staged prompt bodies teach", () => {
 });
 
 describe("discovery over the project flows directory", () => {
-  it("finds exactly the staged bodies, with no warnings", async () => {
+  it("finds the prompt bodies and conservatively projects the release delegates", async () => {
     const scan = await run(
       Effect.gen(function* () {
         const discovery = Discovery.make(yield* FileSystem.FileSystem, yield* Path.Path);
@@ -342,10 +342,10 @@ describe("discovery over the project flows directory", () => {
     );
 
     assert.deepEqual(
-      scan.warnings.map((warning) => `${warning.code} at ${warning.path}: ${warning.message}`),
-      [],
+      scan.warnings.map((warning) => `${warning.code} at ${relative(flowsRoot, warning.path).split("\\").join("/")}: ${warning.message}`).sort(),
+      ["release-content", "release"].map((name) => `unsupported_module_metadata at ${name}/flow.ts: Flow authority cannot be projected statically; using the conservative wildcard`).sort(),
     );
-    assert.deepEqual([...scan.entries].map((entry) => entry.name).sort(), EXPECTED_FLOWS);
+    assert.deepEqual([...scan.entries].map((entry) => entry.name).sort(), [...EXPECTED_FLOWS, "release", "release-content"].sort());
   });
 
   it("finds no flow inside the 0.x fixture, which is data and not a flow", async () => {

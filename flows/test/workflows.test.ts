@@ -1,0 +1,212 @@
+import assert from "node:assert/strict"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
+import { join } from "node:path"
+import { test } from "node:test"
+import * as DurableEngineState from "@smthrs/engine-store/DurableEngineState"
+import { Action, Graph, HumanTask, Interpreter } from "@smthrs/flow"
+import * as DurableDeferred from "@smthrs/flow/DurableDeferred"
+import * as NodeRuntime from "@smthrs/flows/NodeRuntime"
+import { Effect, Exit, Layer, Option, Schema } from "effect"
+import * as Content from "../release-content/workflow.ts"
+import * as Release from "../release/workflow.ts"
+import { contentInput, releaseInput } from "../release-support/input.ts"
+import { commandRunner } from "../release-support/io.ts"
+import { actionLayers } from "../release-support/operations.ts"
+import { agentLayers } from "../release-support/runtime.ts"
+import { ReleaseError, type Candidate } from "../release-support/schema.ts"
+import { evidence, repository, scriptedSeats } from "./fixtures.ts"
+
+test("content approval survives exit and restart in a different Node process", { timeout: 60_000 }, async (test) => {
+  const fixture = await repository(test)
+  const worker = join(import.meta.dirname, "resume-worker.ts")
+  const start = await promisify(execFile)(process.execPath, [worker, fixture.root, "start"])
+  const resume = await promisify(execFile)(process.execPath, [worker, fixture.root, "resume"])
+  const first = JSON.parse(start.stdout.trim().split("\n").at(-1)!)
+  const last = JSON.parse(resume.stdout.trim().split("\n").at(-1)!)
+  assert.equal(first.result.status, "waiting")
+  assert.equal(last.result.status, "approved")
+  assert.deepEqual(last.counts, first.counts)
+})
+
+const waiting = (id: string) => Effect.gen(function*() {
+  const state = yield* DurableEngineState.DurableEngineState
+  const row = yield* state.waiting(id)
+  assert.ok(Option.isSome(row), "run must actually park in the durable engine")
+  assert.equal(row.value.reason, "approval")
+  return Schema.decodeUnknownSync(DurableDeferred.Token)(row.value.token)
+})
+
+test("planning contains the bounded revision loop and no disabled drafting stages", () => {
+  const input = contentInput({ channels: { blog: false, thread: false }, maxRevisions: 2 }, evidence.version)
+  const calls = [...Graph.nodes(Graph.build(Content.ReleaseContent, input))]
+    .filter((node) => node.kind === "ActionCall")
+    .map((node) => (node.ast as { action: string }).action)
+  assert.equal(calls.filter((name) => name === "release-content/revise").length, 2)
+  assert.equal(calls.includes("release-content/draft-blog"), false)
+  assert.equal(calls.includes("release-content/draft-thread"), false)
+  assert.equal(calls.includes("release-content/post-thread"), false)
+  assert.equal(calls.includes("system/human-task"), false)
+})
+
+test("real agents draft, revise, and park; a fresh SQLite host resumes without redrafting", { timeout: 90_000 }, async (test) => {
+  const fixture = await repository(test)
+  const counts: Record<string, number> = {}
+  let collections = 0
+  const filename = join(fixture.root, ".flows", "engine.db")
+  const input = contentInput({ dryRun: false, from: "v0.35.0", channels: { blog: false, thread: false } }, fixture.evidence.version)
+  const engine = () => NodeRuntime.layerHost({
+    filename, workspaceRoot: fixture.root, owner: { hostId: "release-content-test" }, signals: []
+  }, Layer.mergeAll(
+    actionLayers({ root: fixture.root, run: async (command, args, opts) => {
+      if (command === "git" && args[0] === "log") collections++
+      return commandRunner(fixture.root)(command, args, opts)
+    } }),
+    agentLayers(scriptedSeats(counts, { failReviews: 1 }), 250_000),
+    HumanTask.layer, Interpreter.layer(Content.ReleaseContent)
+  ).pipe(Layer.provideMerge(Action.layerImplementations)))
+
+  const token = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    yield* Content.ReleaseContent.execute(input, { executionId: "content-resume", discard: true })
+    const polled = yield* Content.ReleaseContent.poll("content-resume")
+    if (Option.isSome(polled) && polled.value._tag === "Complete" && Exit.isFailure(polled.value.exit)) return yield* Effect.failCause(polled.value.exit.cause)
+    return yield* waiting("content-resume")
+  }).pipe(Effect.provide(engine()))))
+  assert.equal(counts.score, 2)
+  assert.equal(counts.revise, 1)
+  const before = { ...counts }
+  const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+    yield* HumanTask.answer({ token, value: true })
+    return yield* Content.ReleaseContent.execute(input, { executionId: "content-resume" })
+  }).pipe(Effect.provide(engine()))))
+  assert.equal(result.status, "approved")
+  assert.deepEqual(counts, before)
+  assert.equal(collections, 1)
+})
+
+test("exhausted quality reviews fail before preview or publication", { timeout: 90_000 }, async (test) => {
+  const fixture = await repository(test)
+  const counts: Record<string, number> = {}
+  const input = contentInput({ maxRevisions: 1, from: "v0.35.0", channels: { blog: false, thread: false } }, fixture.evidence.version)
+  const engine = NodeRuntime.layerHost({
+    filename: join(fixture.root, ".flows", "engine.db"), workspaceRoot: fixture.root,
+    owner: { hostId: "release-quality-test" }, signals: []
+  }, Layer.mergeAll(
+    actionLayers({ root: fixture.root }),
+    agentLayers(scriptedSeats(counts, { failReviews: 99 }), 250_000),
+    HumanTask.layer, Interpreter.layer(Content.ReleaseContent)
+  ).pipe(Layer.provideMerge(Action.layerImplementations)))
+  await assert.rejects(Effect.runPromise(Effect.scoped(Content.ReleaseContent.execute(input, { executionId: "quality" }).pipe(Effect.provide(engine)))), /score|Explain restart behavior/)
+  assert.equal(counts.score, 2)
+  assert.equal(counts.revise, 1)
+})
+
+for (const decision of [true, false] as const) {
+  test(`release preparation ${decision}: version and lock commands require approval`, { timeout: 60_000 }, async (test) => {
+    const fixture = await repository(test)
+    const commands: string[] = []
+    const counts: Record<string, number> = {}
+    const input = releaseInput({ version: "2.0.0", from: "v0.35.0", phase: "prepare", dryRun: false, requireContentApproval: false }, fixture.evidence.version)
+    const engine = () => NodeRuntime.layerHost({
+      filename: join(fixture.root, ".flows", "engine.db"), workspaceRoot: fixture.root,
+      owner: { hostId: "release-prepare-test" }, signals: []
+    }, Layer.mergeAll(
+      actionLayers({ root: fixture.root, run: async (command, args, options) => {
+        if (command === "git") return commandRunner(fixture.root)(command, args, options)
+        commands.push([command, ...args].join(" "))
+        return ""
+      } }),
+      agentLayers(scriptedSeats(counts), 250_000), HumanTask.layer, Interpreter.layer(Release.Release)
+    ).pipe(Layer.provideMerge(Action.layerImplementations)))
+    const token = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      yield* Release.Release.execute(input, { executionId: "prepare", discard: true })
+      return yield* waiting("prepare")
+    }).pipe(Effect.provide(engine()))))
+    assert.equal(commands.length, 0)
+    const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+      yield* HumanTask.answer({ token, value: decision })
+      return yield* Release.Release.execute(input, { executionId: "prepare" })
+    }).pipe(Effect.provide(engine()))))
+    assert.equal(result.status, decision ? "prepared" : "declined")
+    assert.equal(counts.audit, 1)
+    if (decision) {
+      assert.equal(commands.length, 5)
+      assert.match(commands[0]!, /set-release-version.mjs 2.0.0/)
+      assert.match(commands[1]!, /generate-changelog.mjs --version 2.0.0/)
+      assert.match(commands[2]!, /install --lockfile-only --ignore-scripts/)
+      assert.ok(commands.every((command) => !/publish|git commit|git tag|git push/.test(command)))
+    } else assert.equal(commands.length, 0)
+  })
+}
+
+for (const decision of [true, false, "dry-run"] as const) {
+  test(`release publication ${decision}: all gates precede approval, then only the chosen branch executes`, { timeout: 60_000 }, async (test) => {
+    const fixture = await repository(test)
+    const calls: string[] = []
+    const candidate: Candidate = { directory: ".flows/releases/npm/test", digest: "sha512-tested", sourceSha: fixture.evidence.sourceSha, version: fixture.evidence.version, packageCount: 49, approvalPrompt: "Publish the 49 exact tested packages?" }
+    const input = releaseInput({ phase: "publish", dryRun: decision === "dry-run", requireContentApproval: false }, fixture.evidence.version)
+    const note = <A>(name: string, value: A) => Effect.sync(() => { calls.push(name); return value })
+    const engine = () => NodeRuntime.layerHost({
+      filename: join(fixture.root, ".flows", "engine.db"), workspaceRoot: fixture.root,
+      owner: { hostId: "release-publish-test" }, signals: []
+    }, Layer.mergeAll(
+      Release.AuditDocs.toLayer(() => note("audit", { passed: true, missing: [], explanation: "covered" })),
+      Release.PreparePlan.toLayer(() => Effect.die("must not prepare during publication")),
+      Release.WritePreparation.toLayer(() => Effect.die("must not write preparation during publication")),
+      Content.Collect.toLayer(() => note("collect", fixture.evidence)),
+      Release.Validate.toLayer(() => note("validate", fixture.evidence)),
+      Release.Checks.toLayer(() => note("checks", fixture.evidence)),
+      Release.Build.toLayer(() => note("build", fixture.evidence)),
+      Release.Pack.toLayer(() => note("pack", candidate)),
+      Release.Smoke.toLayer(({ runtime }) => note(`smoke-${runtime}`, candidate)),
+      Release.VerifyCandidate.toLayer(() => note("verify", candidate)),
+      Release.Publish.toLayer(() => note("publish", { status: "published" as const, version: input.version, artifact: candidate.directory, published: ["smthrs"] })),
+      Release.Outcome.toLayer(Effect.succeed), HumanTask.layer, Interpreter.layer(Release.Release)
+    ).pipe(Layer.provideMerge(Action.layerImplementations)))
+    if (decision === "dry-run") {
+      const result = await Effect.runPromise(Effect.scoped(Release.Release.execute(input, { executionId: "release" }).pipe(Effect.provide(engine()))))
+      assert.equal(result.status, "preview")
+    } else {
+      const token = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+        yield* Release.Release.execute(input, { executionId: "release", discard: true })
+        return yield* waiting("release")
+      }).pipe(Effect.provide(engine()))))
+      assert.equal(calls.includes("publish"), false)
+      const result = await Effect.runPromise(Effect.scoped(Effect.gen(function*() {
+        yield* HumanTask.answer({ token, value: decision })
+        return yield* Release.Release.execute(input, { executionId: "release" })
+      }).pipe(Effect.provide(engine()))))
+      assert.equal(result.status, decision ? "published" : "declined")
+    }
+    assert.deepEqual(calls, ["collect", "audit", "validate", "checks", "build", "pack", "smoke-22.19.0", "smoke-24.11.0", "verify", ...(decision === true ? ["publish"] : [])])
+  })
+}
+
+test("a failed release gate prevents packing and publication", { timeout: 60_000 }, async (test) => {
+  const fixture = await repository(test)
+  let packed = false
+  const input = releaseInput({ phase: "publish", dryRun: false, requireContentApproval: false }, fixture.evidence.version)
+  const engine = NodeRuntime.layerHost({
+    filename: join(fixture.root, ".flows", "engine.db"), workspaceRoot: fixture.root,
+    owner: { hostId: "release-failed-check-test" }, signals: []
+  }, Layer.mergeAll(
+    Release.AuditDocs.toLayer(() => Effect.succeed({ passed: true, missing: [], explanation: "covered" })),
+    Release.PreparePlan.toLayer(() => Effect.die("must not prepare during publication")),
+    Release.WritePreparation.toLayer(() => Effect.die("must not write preparation during publication")),
+    Content.Collect.toLayer(() => Effect.succeed(fixture.evidence)),
+    Release.Validate.toLayer(() => Effect.succeed(fixture.evidence)),
+    Release.Checks.toLayer(() => Effect.fail(new ReleaseError({ step: "checks", message: "tests failed" }))),
+    Release.Pack.toLayer(() => Effect.sync(() => { packed = true; throw new Error("must not pack") })),
+    Release.Build.toLayer(() => Effect.die("must not build")),
+    Release.Smoke.toLayer(() => Effect.die("must not smoke")),
+    Release.VerifyCandidate.toLayer(() => Effect.die("must not verify")),
+    Release.Publish.toLayer(() => Effect.die("must not publish")),
+    Release.Outcome.toLayer(Effect.succeed),
+    HumanTask.layer,
+    Interpreter.layer(Release.Release)
+  ).pipe(Layer.provideMerge(Action.layerImplementations)))
+  const result = await Effect.runPromise(Effect.scoped(Effect.exit(Release.Release.execute(input, { executionId: "fail" })).pipe(Effect.provide(engine))))
+  assert.equal(Exit.isFailure(result), true)
+  if (Exit.isFailure(result)) assert.match(JSON.stringify(result.cause), /tests failed/)
+  assert.equal(packed, false)
+})

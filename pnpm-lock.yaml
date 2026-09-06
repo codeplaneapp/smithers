@@ -1760,6 +1760,61 @@ importers:
         specifier: 4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.4.1)(@vitest/coverage-v8@4.1.9)(happy-dom@20.13.2)(vite@8.2.2(@types/node@26.4.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.50.0)(tsx@4.23.13)(yaml@2.9.0))
 
+  flows:
+    dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112(effect@4.0.0-rc.112)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@smthrs/agent':
+        specifier: workspace:*
+        version: link:../packages/smithers/agent
+      '@smthrs/cli':
+        specifier: workspace:*
+        version: link:../packages/smithers
+      '@smthrs/core':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/core
+      '@smthrs/engine':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/engine
+      '@smthrs/engine-store':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/engine-store
+      '@smthrs/flow':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/flow
+      '@smthrs/flows':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows
+      '@smthrs/model':
+        specifier: workspace:*
+        version: link:../packages/smithers/agent/model
+      '@smthrs/plan':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/plan
+      '@smthrs/registry':
+        specifier: workspace:*
+        version: link:../packages/smithers/agent/registry
+      '@smthrs/run-store':
+        specifier: workspace:*
+        version: link:../packages/smithers/flows/run-store
+      '@smthrs/targets':
+        specifier: workspace:*
+        version: link:../packages/smithers/build/targets
+      effect:
+        specifier: 4.0.0-rc.112
+        version: 4.0.0-rc.112
+      playwright:
+        specifier: 1.62.1
+        version: 1.62.1
+    devDependencies:
+      '@types/node':
+        specifier: 26.4.1
+        version: 26.4.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   packages/errors:
     devDependencies:
       '@effect/language-service':
