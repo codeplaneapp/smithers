@@ -155,10 +155,18 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1505 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1531 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **init:** scaffold explicit editing capabilities and drop the ignored name key ([c25353157c](https://github.com/smithersai/smithers/commit/c25353157ca695e187325e4d8c3cdb37575727e0))
+- **cli:** report the recorded provider cause when an attached run fails ([bd7c06886f](https://github.com/smithersai/smithers/commit/bd7c06886f09c91fe390412aded34043a1cfd0e2))
+- **agent:** lead a failed run's recorded cause with the innermost typed refusal ([cf844e3c54](https://github.com/smithersai/smithers/commit/cf844e3c545bb52b1f66f386e49b1f25fc9774e6))
+- **repo-targets:** let a package raise its outer Vitest deadline ([c124e1acfd](https://github.com/smithersai/smithers/commit/c124e1acfd9c048630697d41caac20b70f77507f))
+- **ci:** verbose gate output, bubblewrap for browser e2e, and sourceRef dry runs ([65a1df9ea0](https://github.com/smithersai/smithers/commit/65a1df9ea0e1412dedea4c8920c72d35ed7c7b0b))
+- **build-cli:** bound affected git discovery and contain watch cycles in process groups ([8e857e9ec0](https://github.com/smithersai/smithers/commit/8e857e9ec0662c4ad54c209100797f984b79577b))
+- **build-cli:** add ContainedProcess with deadlines, output caps, and process-group teardown ([545013f130](https://github.com/smithersai/smithers/commit/545013f130e850a96ccc7ddf4054c5c204406c83))
+- **repo:** land the lane/integrate lineage onto main ([d7c971c7a7](https://github.com/smithersai/smithers/commit/d7c971c7a7eda9511fefc54a9b604d543807d595))
 - **review:** integrate repository review workflows ([0b6a9d2db1](https://github.com/smithersai/smithers/commit/0b6a9d2db1333daa6c0c65c1cd1e807ec20164cd))
 - **bug-worker:** integrate redacted report handling ([3128c9327b](https://github.com/smithersai/smithers/commit/3128c9327ba581485bd67f97658615a3670744f0))
 - **ui:** integrate the planning workbench and embedded tool interactions ([8112c22c5a](https://github.com/smithersai/smithers/commit/8112c22c5a5bb359b27d734c88e5174344e63e8f))
@@ -333,6 +341,15 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- close CLI, MCP and public repository release gaps ([6d2c527c2a](https://github.com/smithersai/smithers/commit/6d2c527c2af4cfc6bda9586b6dad7feaa70e5ad5))
+- **targets:** keep the Github.Pr name visible in the missing-token refusal ([09943cb5e4](https://github.com/smithersai/smithers/commit/09943cb5e4d1ce81ef10a51d9e4cd2e1264b6c3b))
+- **create-app:** make the packed starter's routes and replay pass from its own install ([b6cb63e636](https://github.com/smithersai/smithers/commit/b6cb63e636da86fd58fd00b90549d8cc77214adb))
+- **release:** retry transport failures and confirm a lost publish by registry integrity ([d396c40433](https://github.com/smithersai/smithers/commit/d396c404336cbf4e7bf82d813f1b2cf3e9dba250))
+- **examples:** accept Node 22's SQLite warning in the host-containment stderr ([d0087ab0e3](https://github.com/smithersai/smithers/commit/d0087ab0e3797b91b5c84d75c532986eec77c4b1))
+- **cli:** restrict the execution database files to the owner ([368b62f7d0](https://github.com/smithersai/smithers/commit/368b62f7d0ea9d0f10159d2faef2c41f0629ffe6))
+- **cli:** route formatted logs to runs logs and keep init --global on the legacy refusal ([155f0afbca](https://github.com/smithersai/smithers/commit/155f0afbcad113d659a7e4b6f28ff1fcee841c83))
+- bind approvals and repair 1.0 release gates ([70f2f9709e](https://github.com/smithersai/smithers/commit/70f2f9709e93292c0df6f9107a34b8549ad0cf97))
+- **agent:** keep the sealed cell-call key stable while validating call results ([a49b68ef7d](https://github.com/smithersai/smithers/commit/a49b68ef7d8d4bed1cb482e5d730bc13701ff363))
 - **build-cli:** admit native tool installations to the sandbox ([05b5f32b7d](https://github.com/smithersai/smithers/commit/05b5f32b7d6ba4066f01a54590f99a26b99341db))
 - **build-cli:** reword the npx mention in the caching doc ([a609846cbf](https://github.com/smithersai/smithers/commit/a609846cbf650e853011d8e016830a26399df2dd))
 - **build-cli:** key selected executable contents ([c56ef91613](https://github.com/smithersai/smithers/commit/c56ef91613f1e0f8d8bdfd5c7c43581076f15ad9))
@@ -994,6 +1011,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ♻️ Refactors
 
+- centralize shared policy and derived workspace state ([05f69de9d8](https://github.com/smithersai/smithers/commit/05f69de9d87587ffe47b255c4f1e0e3fa9b42101))
 - **repo-targets:** consolidate package gates and review declarations ([095bde5138](https://github.com/smithersai/smithers/commit/095bde513893ef305046866cee075f41288216ed))
 - **errors:** standardize public error contracts ([aa48b1de60](https://github.com/smithersai/smithers/commit/aa48b1de60bbd171451a76fd827ef5799cf43e66))
 - **rpc:** integrate shared contracts and preserve product verification ([fb42ae2709](https://github.com/smithersai/smithers/commit/fb42ae27090bfa8435849b5897a93024c66824a3))
@@ -1042,6 +1060,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **flow:** describe the fresh execution-ID default and the derived opt-in ([b5a900ba05](https://github.com/smithersai/smithers/commit/b5a900ba05c93c75429a974064b2c84199be4c59))
+- **readme:** link the API cheat sheet to its source file ([48e2710dea](https://github.com/smithersai/smithers/commit/48e2710dea0c30d59b591b70ba2e6140988c51a0))
 - **repo:** integrate contributor guidance and review evidence ([f49a676289](https://github.com/smithersai/smithers/commit/f49a67628962ae18784cd04e732ed313537592b8))
 - **site:** integrate the unified CLI guides and generated references ([a13c5b35e6](https://github.com/smithersai/smithers/commit/a13c5b35e6ac9f5f6e1453e282a60dc36f330877))
 - **sites:** synchronize package documentation and site inventories ([e92796253a](https://github.com/smithersai/smithers/commit/e92796253a44f3c98777ff8b1d5baee53d913491))
@@ -1283,6 +1303,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🧹 Chores
 
+- gitignore the dated release review ledgers ([4062eea14d](https://github.com/smithersai/smithers/commit/4062eea14d9c3e344e036ece22f1d1ee51964a2a))
 - **deps:** align workspace toolchains and regenerate both lockfiles ([3466f91d5a](https://github.com/smithersai/smithers/commit/3466f91d5a4942cff6098ff4ac0d423a811bbc38))
 - **release:** integrate immutable artifacts and preserve registry retry policy ([44bafddb20](https://github.com/smithersai/smithers/commit/44bafddb20c84e8d13594215305b8f4e8d5f1857))
 - **jj-wasm:** align native build and release metadata ([c265271955](https://github.com/smithersai/smithers/commit/c265271955ba4aa71f16f36b2c0e814b0fdb90d8))
@@ -1390,6 +1411,11 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(ui):** cover a failed target settling the graph and attach run journals on failure ([88458e337d](https://github.com/smithersai/smithers/commit/88458e337d27934c744de3c47d89fcbde29aad73))
+- **test(platform-bun):** give the host contracts 30 s test and hook budgets ([a8c0889cc4](https://github.com/smithersai/smithers/commit/a8c0889cc465fa9341d38a904e3ebd121cef571a))
+- **test(model):** run each default-ceiling boundary as its own case ([c80c635cb0](https://github.com/smithersai/smithers/commit/c80c635cb06d51dff162cfc0343e89be5bbcbd88))
+- Add available repo card and cached anonymous repository reads ([464ac30e87](https://github.com/smithersai/smithers/commit/464ac30e87fbb7a6a36858353b366eb07317509f))
+- Simplify landing page copy for private alpha ([a50256bac1](https://github.com/smithersai/smithers/commit/a50256bac1ff8fc817abe28b9b93f62981a3b0fe))
 - **test(fs):** cover optional nullable command schemas ([8c54b65b24](https://github.com/smithersai/smithers/commit/8c54b65b24e61e05611f93b0daa21915b7d103a4))
 - **test(ui):** pin the dark shimmer palette tokens ([1ac3dec862](https://github.com/smithersai/smithers/commit/1ac3dec862e5c1e890055a03ed11efc69b0476bf))
 - **test(targets):** observe descendant termination after exec timeout ([4904b238c1](https://github.com/smithersai/smithers/commit/4904b238c1ad78db631784cc282e31ae9006d527))
