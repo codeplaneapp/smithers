@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1535 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1537 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -341,6 +341,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **docs:** enforce support claims and run tutorial gates from the workspace root ([1da4d100d4](https://github.com/smithersai/smithers/commit/1da4d100d4d9e1e44b9a2b73629ed9e4e1304a99))
+- **platform-node:** preserve output across native startup and exit races ([ef26dc11f6](https://github.com/smithersai/smithers/commit/ef26dc11f6b69f720b283a9c7bd5352bfdd8e8c9))
 - **platform:** preserve browser imports and crash-recovery contracts ([d5829166b8](https://github.com/smithersai/smithers/commit/d5829166b8698e67155a47f0a76090e428af566e))
 - **platform:** contain subprocess lifetimes through prepared owners ([fb05640c3e](https://github.com/smithersai/smithers/commit/fb05640c3e32193db48effb8f1700ae84a2d4c86))
 - close UI startup and remaining release gate regressions ([cb77047ddf](https://github.com/smithersai/smithers/commit/cb77047ddf0bfdce48ba706a23cf3587dce41864))
