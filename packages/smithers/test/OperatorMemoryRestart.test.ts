@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url"
 import { afterEach, expect, it } from "vitest"
 
 const roots: Array<string> = []
+const processTimeoutMs = 20_000
+// Each journey performs four sequential fresh-process invocations. Allow
+// their existing individual bounds plus cleanup, without extending a child.
+const journeyTimeoutMs = 4 * processTimeoutMs + 10_000
 const root = () => {
   const directory = mkdtempSync(join(tmpdir(), "smithers-memory-cli-restart-"))
   roots.push(directory)
@@ -18,7 +22,7 @@ const invoke = (args: ReadonlyArray<string>) => {
   const env = { ...process.env }
   delete env.SMITHERS_REMOTE
   delete env.SMITHERS_CREDENTIAL
-  return JSON.parse(execFileSync(process.execPath, args, { encoding: "utf8", timeout: 20_000, env }))
+  return JSON.parse(execFileSync(process.execPath, args, { encoding: "utf8", timeout: processTimeoutMs, env }))
 }
 const list = (directory: string) =>
   invoke([
@@ -44,7 +48,7 @@ it("reads memory from a terminated public NodeControl composition in a fresh CLI
   ])
   expect(invoke([fixture, "control", directory])).toMatchObject({ plans: [] })
   expect(list(directory)).toHaveLength(1)
-})
+}, journeyTimeoutMs)
 
 it("allows memory to be the first project command before opening and reopening control", () => {
   const directory = root()
@@ -71,4 +75,4 @@ it("allows memory to be the first project command before opening and reopening c
   } finally {
     db.close()
   }
-})
+}, journeyTimeoutMs)

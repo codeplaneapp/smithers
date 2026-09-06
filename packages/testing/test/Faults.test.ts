@@ -18,7 +18,7 @@
  * refuses to let any config carve an exception out of.
  */
 import { spawn } from "node:child_process"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   isAlive,
   isGroupAlive,
@@ -117,11 +117,25 @@ describe("killProcess", () => {
   it("gives up on a reparenting that never happens, naming the parent it kept", async () => {
     const child = sleeper()
     const pid = child.pid as number
+    const clock = vi.spyOn(Date, "now").mockReturnValue(0)
     try {
-      await expect(waitForReparent(pid, process.pid, 100)).rejects.toThrow(
+      // Keep a slow native parent observation from consuming the entire
+      // deadline before the polling contract has made even one retry.
+      const waiting = waitForReparent(pid, process.pid, 100)
+      let settled = false
+      void waiting.then(() => {
+        settled = true
+      }, () => {
+        settled = true
+      })
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      clock.mockReturnValue(100)
+      await expect(waiting).rejects.toThrow(
         new RegExp(`still reports parent ${process.pid} after 100ms`)
       )
     } finally {
+      clock.mockRestore()
       await killProcess(child)
     }
   })

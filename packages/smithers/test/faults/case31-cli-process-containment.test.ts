@@ -48,12 +48,17 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
       timeout: 45_000,
       maxBuffer: 1024 * 1024
     })
+    // A failed invocation may still have launched a detached CLI or MCP pair.
+    // Capture its recorded identities before status or JSON assertions throw.
+    captureLiveRecorded()
     expect(result.error, result.stderr).toBeUndefined()
     expect(result.status, `${result.stderr}\n${result.stdout}`).toBe(0)
     return { pid: result.pid, value: JSON.parse(result.stdout) }
   }
-  const processes = (): Array<{ pid: number; ppid: number; verb: string; event: string }> =>
-    readFileSync(join(recording, "processes.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line))
+  const processes = (): Array<{ pid: number; ppid: number; verb: string; event: string }> => {
+    const path = join(recording, "processes.jsonl")
+    return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []
+  }
   const mcpProcesses = (): Array<{ pid: number; supervisor: number }> => {
     const path = join(recording, "mcp-pids.jsonl")
     return existsSync(path) ? readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line)) : []
@@ -62,10 +67,33 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
   // rechecks that identity before signalling each test-owned PID.
   const owned = new Map<number, number>()
   const remember = (pid: number) => {
+    expect(Number.isSafeInteger(pid) && pid > 1, `fixture PID ${pid}`).toBe(true)
     const started = ProcessReaper.posixSystem.startedAtMs(pid)
     expect(started._tag, `start time for fixture PID ${pid}`).toBe("started")
-    if (started._tag === "started") owned.set(pid, started.startedAtMs)
+    if (started._tag === "started") {
+      if (owned.has(pid)) expect(started.startedAtMs, `unchanged fixture PID ${pid}`).toBe(owned.get(pid))
+      else owned.set(pid, started.startedAtMs)
+    }
     return pid
+  }
+  const captureLiveRecorded = () => {
+    const recorded = [
+      ...processes().filter((entry) => entry.event === "start").map((entry) => entry.pid),
+      ...mcpProcesses().flatMap((entry) => [entry.pid, entry.supervisor])
+    ]
+    for (const pid of recorded) {
+      if (!Number.isSafeInteger(pid) || pid <= 1 || owned.has(pid)) continue
+      const started = ProcessReaper.posixSystem.startedAtMs(pid)
+      if (started._tag === "started") owned.set(pid, started.startedAtMs)
+    }
+  }
+  const expectCompletedMcpGone = (supervisor: number) => {
+    // Completed commands' MCP servers ignore TERM. Their exit proves normal
+    // scope shutdown escalates, including the final replacement command.
+    for (const entry of mcpProcesses().filter((entry) => entry.supervisor !== supervisor)) {
+      expect(isAlive(entry.pid)).toBe(false)
+      expect(isAlive(entry.supervisor)).toBe(false)
+    }
   }
   const ledger = () => {
     const database = new DatabaseSync(join(root, ".flows", "engine.db"), { readOnly: true })
@@ -77,6 +105,7 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
       database.close()
     }
   }
+  let primaryFailure: { error: unknown } | undefined
   try {
     expect(spawnSync("git", ["init", "--quiet"], { cwd: root }).status).toBe(0)
     writeFileSync(join(root, ".gitignore"), ".flows/\nrecording/\n")
@@ -160,14 +189,7 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
     expect(parentPid(child)).toBe(supervisor)
     expect(parentPid(supervisor)).toBe(owner)
     expect(isAlive(child)).toBe(true)
-    // The completed commands' own MCP servers ignore TERM. Their exit proves
-    // that normal scope shutdown escalates instead of hanging indefinitely.
-    for (const process of mcpProcesses().filter((entry) => entry.supervisor !== supervisor)) {
-      if (isAlive(process.pid)) remember(process.pid)
-      if (isAlive(process.supervisor)) remember(process.supervisor)
-      expect(isAlive(process.pid)).toBe(false)
-      expect(isAlive(process.supervisor)).toBe(false)
-    }
+    expectCompletedMcpGone(supervisor)
     expect(childEvents()).toHaveLength(1)
 
     if (recovery === "reaper") {
@@ -190,6 +212,7 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
       await waitFor(() => parentPid(supervisor) !== owner, "the stopped supervisor to be reparented", 10_000)
     }
     invoke("plan", "done")
+    expectCompletedMcpGone(supervisor)
     expect(isAlive(child), "A replacement CLI left the crashed CLI's child alive").toBe(false)
     expect(isAlive(supervisor), "A replacement CLI left the crashed CLI's supervisor alive").toBe(false)
     expect(childEvents()).toMatchObject([
@@ -198,20 +221,48 @@ const containment = async (mode: "shell" | "mcp", recovery: "automatic" | "reape
         ? { kind: "flows.host.process-reap-skipped.v1", payload: { reason: "process-gone" } }
         : { kind: "flows.host.process-reaped.v1" }
     ])
+  } catch (error) {
+    primaryFailure = { error }
+    throw error
   } finally {
     // Every identity was observed in this fixture while alive. No broad
-    // process-name or process-group kill is used for teardown.
+    // process-name or process-group kill is used for teardown. Signal every
+    // owner before waiting: a stopped parent cannot reap its killed child.
+    const cleanupErrors: Array<unknown> = []
+    const signalled: Array<number> = []
+    try {
+      captureLiveRecorded()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
     for (const [pid, startedAtMs] of owned) {
-      const current = ProcessReaper.posixSystem.startedAtMs(pid)
-      if (current._tag !== "started" || current.startedAtMs !== startedAtMs) continue
       try {
+        const current = ProcessReaper.posixSystem.startedAtMs(pid)
+        if (current._tag !== "started" || current.startedAtMs !== startedAtMs) continue
+        signalled.push(pid)
         process.kill(pid, "SIGKILL")
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") cleanupErrors.push(error)
       }
-      await waitFor(() => !isAlive(pid), "test-owned child cleanup", 10_000)
     }
-    rmSync(root, { recursive: true, force: true })
+    const settled = await Promise.allSettled(
+      signalled.map((pid) => waitFor(() => !isAlive(pid), `test-owned child ${pid} cleanup`, 10_000))
+    )
+    for (const result of settled) {
+      if (result.status === "rejected") cleanupErrors.push(result.reason)
+    }
+    try {
+      rmSync(root, { recursive: true, force: true })
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [...(primaryFailure ? [primaryFailure.error] : []), ...cleanupErrors],
+        "CLI containment fixture cleanup failed",
+        primaryFailure ? { cause: primaryFailure.error } : undefined
+      )
+    }
   }
 }
 
