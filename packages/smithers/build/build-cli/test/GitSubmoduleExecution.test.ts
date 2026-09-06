@@ -67,7 +67,7 @@ const fixture = async (): Promise<{
 export const Workspace = S.Workspace("submodules", {
   repository: "git+https://example.invalid/submodules.git",
   cache: S.Cache({ directory: ".flows" }),
-  runtime: S.Runtime.Node({ version: "26" }),
+  runtime: S.Runtime.Node({ version: ">=22.19.0" }),
   packageManager: S.PackageManager.Pnpm({ manifest: S.file("//package.json"), lockfile: S.file("//pnpm-lock.yaml") }),
   nodeModules: S.Npm.NodeModules({ packageJson: S.file("//package.json") }),
   host: S.Host({ bins: ["git"] })
@@ -83,7 +83,11 @@ const direct = S.Git.Submodule({ path: "//vendor/one" })
 export const Package = S.Package({ targets: { direct, libs } })
 `
   )
-  await write(root, "package.json", JSON.stringify({ name: "submodule-fixture", private: true }))
+  await write(
+    root,
+    "package.json",
+    JSON.stringify({ name: "submodule-fixture", private: true, packageManager: "pnpm@11.25.0" })
+  )
   await write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
   commit(root, "workspace")
   NodeChildProcess.execFileSync(

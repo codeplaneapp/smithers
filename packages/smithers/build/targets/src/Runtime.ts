@@ -11,12 +11,10 @@
  * into its own argv, which made the interpreter an undeclared ambient fact
  * that no key covered and no legacy declaration file could change.
  *
- * The declaration is a discriminated union, one variant per supported
- * interpreter, discriminated by `name`. Each variant hardcodes its own name and
- * enumerates the version requirements it supports, so a declaration that names
- * one interpreter and requires a version the workspace does not support does
- * not typecheck. The version lists are deliberately short; they grow as the
- * workspace adopts new floors.
+ * Classic declarations enumerate the reviewed workspace floors. Tagged
+ * resolved declarations also carry exact pins and manifest requirements through
+ * the same target schemas. Every variant names its interpreter explicitly;
+ * resolving a manifest never changes which program a target selects.
  *
  * A declaration is a requirement, not a measurement. `packages/smithers/build`
  * carries the matching `Runtime` service, which measures the host interpreter
@@ -132,12 +130,64 @@ export const BunRuntime = Schema.Struct({
 export type BunRuntime = typeof BunRuntime.Type
 
 /**
+ * A bounded printable requirement resolved from a workspace declaration.
+ * The runtime service verifies its exact-version or single-comparator syntax.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const VersionRequirement = Schema.NonEmptyString.check(
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[\x21-\x7e][\x20-\x7e]*(?![\s\S])/)
+)
+
+/**
+ * Schema for a Node requirement resolved from a literal or manifest.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const ResolvedNodeRuntime = Schema.TaggedStruct("ResolvedNodeRuntime", {
+  name: Schema.Literal("node"),
+  version: VersionRequirement,
+  executable: Schema.NonEmptyString
+})
+
+/**
+ * One resolved Node runtime.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type ResolvedNodeRuntime = typeof ResolvedNodeRuntime.Type
+
+/**
+ * Schema for a Bun requirement resolved from an exact workspace pin.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const ResolvedBunRuntime = Schema.TaggedStruct("ResolvedBunRuntime", {
+  name: Schema.Literal("bun"),
+  version: VersionRequirement,
+  executable: Schema.NonEmptyString
+})
+
+/**
+ * One resolved Bun runtime.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type ResolvedBunRuntime = typeof ResolvedBunRuntime.Type
+
+/**
  * Schema for one declared JavaScript runtime.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const Runtime = Schema.Union([NodeRuntime, BunRuntime])
+export const Runtime = Schema.Union([NodeRuntime, BunRuntime, ResolvedNodeRuntime, ResolvedBunRuntime])
 
 /**
  * One declared JavaScript runtime.
@@ -329,25 +379,24 @@ export const npx = Reference.runtimeNpx
  * @category constructors
  * @since 0.1.0
  */
-export const Bun = (options: Options<BunVersion>): BunRuntime => {
+export function Bun(options: Options<BunVersion>): BunRuntime
+export function Bun(options: Options<string>): BunRuntime | ResolvedBunRuntime
+export function Bun(options: Options<string>): BunRuntime | ResolvedBunRuntime {
   const version = usable(options.version, "runtime version")
   const executable = executableFor("bun", options.executable)
   if (version === ">=1.4.0") return BunRuntime.make({ name: "bun", version, executable })
   if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
     throw new Error(`unsupported Bun runtime requirement: ${version}`)
   }
-  // PACKAGE.ts modules are transpiled rather than typechecked while loading.
-  // Preserve the reviewed legacy declaration signature while admitting their exact
-  // runtime pins as inert declarations, just as Node does.
-  return BunDeclaration.make({ version, executable }) as never
+  return ResolvedBunRuntime.make({ name: "bun", version, executable })
 }
 
 /**
  * Checks whether a value is a declared runtime.
  *
  * The guard is the schema itself, so it admits exactly the values a
- * constructor can produce: a supported `name`, a `version` from that variant's
- * enumeration, and a non-empty `executable`.
+ * constructor or resolver can produce: a supported `name`, a reviewed legacy
+ * requirement or a tagged resolved requirement, and a non-empty `executable`.
  *
  * @category guards
  * @since 0.1.0

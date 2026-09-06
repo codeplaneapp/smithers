@@ -35,7 +35,11 @@ export const Workspace = S.Workspace("fixture", {
 })
 `
   )
-  await Fs.writeFile(Path.join(root, "package.json"), "{\"name\":\"fault-tier-fixture\",\"private\":true}\n")
+  await Fs.writeFile(
+    Path.join(root, "package.json"),
+    JSON.stringify({ name: "fault-tier-fixture", private: true, packageManager: "pnpm@11.25.0" })
+  )
+  await Fs.writeFile(Path.join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   for (const name of ["a", "b"]) {
     const cwd = `packages/${name}`
     await Fs.mkdir(Path.join(root, cwd), { recursive: true })

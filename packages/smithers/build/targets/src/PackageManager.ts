@@ -13,10 +13,9 @@
  * as an attr and asks this module for the argv, so the manager is both
  * swappable and covered by key material.
  *
- * The declaration is a discriminated union, one variant per supported manager,
- * discriminated by `name`. Each variant hardcodes its own name and enumerates
- * the versions the workspace supports, so a declaration that names one manager
- * and requires a version the workspace does not support does not typecheck.
+ * The declaration is discriminated by manager `name`. Classic variants retain
+ * their reviewed version enumerations; tagged resolved variants also admit
+ * requirements read from the workspace's declared manifest.
  * The Bun variant additionally types its `runtime` as the Bun runtime, so a Bun
  * manager declared against a Node runtime is not a value a legacy declaration file can
  * write. The variant list is deliberately short — pnpm and Bun are what this
@@ -131,12 +130,59 @@ export const BunPackageManager = Schema.Struct({
 export type BunPackageManager = typeof BunPackageManager.Type
 
 /**
+ * Schema for pnpm resolved from a workspace manifest or explicit requirement.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const ResolvedPnpmPackageManager = Schema.TaggedStruct("ResolvedPnpmPackageManager", {
+  name: Schema.Literal("pnpm"),
+  version: Runtime.VersionRequirement,
+  executable: Schema.NonEmptyString,
+  runtime: Runtime.Runtime
+})
+
+/**
+ * One resolved pnpm declaration.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type ResolvedPnpmPackageManager = typeof ResolvedPnpmPackageManager.Type
+
+/**
+ * Schema for Bun acting as package manager under a resolved runtime pin.
+ *
+ * @category schemas
+ * @since 1.0.0
+ */
+export const ResolvedBunPackageManager = Schema.TaggedStruct("ResolvedBunPackageManager", {
+  name: Schema.Literal("bun"),
+  version: Runtime.VersionRequirement,
+  executable: Schema.NonEmptyString,
+  runtime: Schema.Union([Runtime.BunRuntime, Runtime.ResolvedBunRuntime])
+})
+
+/**
+ * One resolved Bun package-manager declaration.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type ResolvedBunPackageManager = typeof ResolvedBunPackageManager.Type
+
+/**
  * Schema for one declared package manager.
  *
  * @category schemas
  * @since 0.1.0
  */
-export const PackageManager = Schema.Union([PnpmPackageManager, BunPackageManager])
+export const PackageManager = Schema.Union([
+  PnpmPackageManager,
+  BunPackageManager,
+  ResolvedPnpmPackageManager,
+  ResolvedBunPackageManager
+])
 
 /**
  * One declared package manager.
@@ -270,17 +316,30 @@ export function Pnpm(
  * @category constructors
  * @since 0.1.0
  */
-export const BunPackages = (options: {
+export function BunPackages(options: {
   readonly runtime: Runtime.BunRuntime
-  /** @default "bun" */
+  /** @default the runtime executable */
   readonly executable?: string | undefined
-}): BunPackageManager =>
-  BunPackageManager.make({
+}): BunPackageManager
+export function BunPackages(options: {
+  readonly runtime: Runtime.BunRuntime | Runtime.ResolvedBunRuntime
+  /** @default the runtime executable */
+  readonly executable?: string | undefined
+}): BunPackageManager | ResolvedBunPackageManager
+export function BunPackages(options: {
+  readonly runtime: Runtime.BunRuntime | Runtime.ResolvedBunRuntime
+  readonly executable?: string | undefined
+}): BunPackageManager | ResolvedBunPackageManager {
+  const fields = {
     name: "bun",
     version: options.runtime.version,
-    executable: executableFor("bun", options.executable),
+    executable: executableFor("bun", options.executable ?? options.runtime.executable),
     runtime: options.runtime
-  })
+  } as const
+  return "_tag" in options.runtime
+    ? ResolvedBunPackageManager.make(fields)
+    : BunPackageManager.make({ ...fields, version: options.runtime.version, runtime: options.runtime })
+}
 
 /**
  * Schema for the audit policy a WORKSPACE.ts Yarn declaration may carry.
@@ -407,8 +466,9 @@ export const bin: Reference.PackageManagerBin = Reference.packageManagerBin
  * Checks whether a value is a declared package manager.
  *
  * The guard is the schema itself, so it admits exactly the values a
- * constructor can produce: a supported `name`, a `version` from that variant's
- * enumeration, a non-empty `executable`, and a runtime the variant allows.
+ * constructor or resolver can produce: a supported `name`, a reviewed legacy
+ * or tagged resolved requirement, a non-empty `executable`, and a runtime the
+ * variant allows.
  *
  * @category guards
  * @since 0.1.0

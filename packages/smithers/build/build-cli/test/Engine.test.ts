@@ -1,16 +1,19 @@
 import * as PackageManager from "@smthrs/build/PackageManager"
 import * as Runtime from "@smthrs/build/Runtime"
+import * as TargetRuntime from "@smthrs/targets/Runtime"
 import * as Effect from "effect/Effect"
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
+  declaredToolchain,
   layerNonInteractiveNodeServices,
   layerPackageManager,
   layerRuntime,
   packageManagerEnvironment,
-  runInstall
+  runInstall,
+  targetToolchain
 } from "../src/engine.ts"
 
 describe("install engine boundary", () => {
@@ -199,6 +202,54 @@ describe("install engine boundary", () => {
     await expect(runInstall("/path/need/not/exist", { signal: {} as AbortSignal })).rejects.toThrow(
       /must be an AbortSignal/
     )
+  })
+})
+
+describe("target tool selection boundary", () => {
+  it("provides a runtime-only declaration to the same service the target verifies", () => {
+    const runtime = TargetRuntime.ResolvedNodeRuntime.make({ name: "node", version: "24.11.0", executable: "./node" })
+    expect(declaredToolchain({ runtime })).toMatchObject({
+      runtime: "node",
+      runtimeVersion: "24.11.0",
+      runtimeExecutable: "./node"
+    })
+  })
+
+  it("does not turn an absent or malformed tool declaration into a host requirement", () => {
+    for (const attrs of [undefined, null, {}, { runtime: { name: "node" } }, { packageManager: { name: "pnpm" } }]) {
+      expect(targetToolchain("NodeBinary", attrs)).toEqual({ runtime: undefined, packageManager: undefined })
+    }
+  })
+
+  it("does not invoke getters or Proxy traps while selecting declared tools", () => {
+    let reads = 0
+    const attrs = Object.defineProperty({}, "runtime", {
+      get: () => {
+        reads += 1
+        throw new Error("getter invoked")
+      }
+    })
+    const proxy = new Proxy({}, {
+      getOwnPropertyDescriptor: () => {
+        reads += 1
+        throw new Error("proxy invoked")
+      }
+    })
+    for (const value of [attrs, proxy, { runtime: proxy }, { packageManager: proxy }]) {
+      expect(targetToolchain("NodeBinary", value)).toEqual({ runtime: undefined, packageManager: undefined })
+    }
+    expect(reads).toBe(0)
+  })
+
+  it("does not inspect rendering-only generators' toolchain data", () => {
+    const attrs = new Proxy({}, {
+      getOwnPropertyDescriptor: () => {
+        throw new Error("not an execution capability")
+      }
+    })
+    for (const kind of ["GithubCiGen", "PnpmWorkspace"]) {
+      expect(targetToolchain(kind, attrs)).toEqual({ runtime: undefined, packageManager: undefined })
+    }
   })
 })
 

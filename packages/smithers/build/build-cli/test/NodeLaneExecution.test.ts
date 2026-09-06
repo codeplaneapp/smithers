@@ -22,7 +22,7 @@ const packageJson = S.file("//package.json")
 export const Workspace = S.Workspace("node-lane", {
   repository: "git+https://example.invalid/node-lane.git",
   cache: S.Cache({ directory: ".flows" }),
-  runtime: S.Runtime.Node({ version: "26" }),
+  runtime: S.Runtime.Node({ version: ">=22.19.0" }),
   packageManager: S.PackageManager.Pnpm({ manifest: packageJson, lockfile: S.file("//pnpm-lock.yaml") }),
   nodeModules: S.Npm.NodeModules({ packageJson }),
   host: S.Host({ bins: ["git"] }),
@@ -106,7 +106,12 @@ const fixture = async (): Promise<string> => {
   await write(
     root,
     "package.json",
-    JSON.stringify({ name: "node-lane-fixture", version: "1.0.0", files: ["input.txt"] })
+    JSON.stringify({
+      name: "node-lane-fixture",
+      version: "1.0.0",
+      packageManager: "pnpm@11.25.0",
+      files: ["input.txt"]
+    })
   )
   await write(root, "pnpm-lock.yaml", "lockfileVersion: '9.0'\n")
   await write(root, "input.txt", "input")

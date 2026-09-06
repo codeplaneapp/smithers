@@ -12,7 +12,7 @@ import type * as Node from "@smthrs/plan/Node"
 import { ExecIrreversibleLive } from "@smthrs/targets/Changesets"
 import { GenerateCheckLive } from "@smthrs/targets/Compose"
 import { CheckDocsLive } from "@smthrs/targets/DocsParity"
-import { ExecLive, type ToolEnvironment } from "@smthrs/targets/Exec"
+import * as Exec from "@smthrs/targets/Exec"
 import type * as ExecSandbox from "@smthrs/targets/ExecSandbox"
 import { ExpandFilegroupLive } from "@smthrs/targets/Filegroup"
 import { CheckFileLive, WriteFileLive } from "@smthrs/targets/GeneratedFile"
@@ -26,7 +26,14 @@ import type * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as NodePath from "node:path"
-import { declaredToolchain, layerInstall, layerNonInteractiveNodeServices, layerPackageManager } from "./engine.ts"
+import {
+  declaredToolchain,
+  layerInstall,
+  layerNonInteractiveNodeServices,
+  layerPackageManager,
+  targetToolchain,
+  verifyTargetToolchain
+} from "./engine.ts"
 import type * as OutputStream from "./OutputStream.ts"
 import type * as Planner from "./Planner.ts"
 
@@ -48,42 +55,68 @@ export const runTarget = (
   nixEnvironment?: Planner.PlannedEnvironment | undefined,
   sandbox?: ExecSandbox.Request | undefined,
   output?: OutputStream.Observer | undefined
-): Promise<Exit.Exit<unknown, unknown>> => {
-  const flow = Flow.make(target._tag, {
-    payload: {},
-    success: Schema.Unknown,
-    error: Schema.Unknown,
-    body: (): Node.Node<unknown, unknown, never> => Target.plan(target, attrs)
-  })
-  const environment: ToolEnvironment | undefined = nixEnvironment === undefined
-    ? undefined
-    : { path: nixEnvironment.path.join(NodePath.delimiter), variables: nixEnvironment.variables }
-  const hostEnvironment: Readonly<Record<string, string | undefined>> = environment === undefined
-    ? process.env
-    : { ...process.env, ...environment.variables, PATH: environment.path }
-  const runtime = Layer.mergeAll(
-    layerInstall,
-    ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment, sandbox, ...output }),
-    GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment }),
-    ExecIrreversibleLive({ workspaceRoot }),
-    CaptureOutputsLive({ workspaceRoot, cacheDirectory }),
-    ExpandFilegroupLive({ workspaceRoot, cacheDirectory }),
-    WriteFileLive({ workspaceRoot }),
-    CheckFileLive({ workspaceRoot }),
-    CheckDocsLive({ workspaceRoot }),
-    LlmReviewLive({ workspaceRoot, sensitiveEnv }),
-    SyncPackageJsonLive({ workspaceRoot, cacheDirectory }),
-    ScaffoldPackageLive({ workspaceRoot, packageName }),
-    Target.layerNotImplemented,
-    Interpreter.layer(flow)
-  ).pipe(
-    Layer.provideMerge(Action.layerImplementations),
-    Layer.provideMerge(FlowEngine.layerMemory),
-    Layer.provideMerge(layerPackageManager(workspaceRoot, declaredToolchain(attrs), sensitiveEnv, hostEnvironment)),
-    Layer.provideMerge(layerNonInteractiveNodeServices)
-  )
-  return Effect.runPromiseExit(
-    flow.execute({}, { executionId }).pipe(Effect.provide(runtime)),
+): Promise<Exit.Exit<unknown, unknown>> =>
+  Effect.runPromiseExit(
+    Effect.suspend(() => {
+      // Decode and lower before acquiring services or probing executables. The
+      // exact validated attrs select both the action plan and its tool checks.
+      const validated = Target.metadata(target).attrsSchema.make(attrs, {
+        parseOptions: { onExcessProperty: "error" }
+      })
+      const planned: Node.Node<unknown, unknown, never> = Target.plan(target, validated)
+      if (typeof validated !== "object" || validated === null) throw new TypeError("target attrs must be a record")
+      const flow = Flow.make(target._tag, {
+        payload: {},
+        success: Schema.Unknown,
+        error: Schema.Unknown,
+        body: () => planned
+      })
+      const environment: Exec.ToolEnvironment | undefined = nixEnvironment === undefined
+        ? undefined
+        : { path: nixEnvironment.path.join(NodePath.delimiter), variables: nixEnvironment.variables }
+      const cwd = Exec.resolveWorkspacePath(
+        workspaceRoot,
+        "cwd" in validated && typeof validated.cwd === "string" ? validated.cwd : "."
+      )
+      const declared = targetToolchain(target._tag, validated)
+      const declaredEnvironment = declared.runtime === undefined && declared.packageManager === undefined
+        ? {}
+        : Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.String))(
+          "env" in validated ? validated.env ?? {} : {}
+        )
+      const hostEnvironment = Exec.toolEnvironment(declaredEnvironment, sensitiveEnv, {}, environment)
+      const runtime = Layer.mergeAll(
+        layerInstall,
+        Exec.ExecLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment, sandbox, ...output }),
+        GenerateCheckLive({ workspaceRoot, cacheDirectory, sensitiveEnv, environment }),
+        ExecIrreversibleLive({ workspaceRoot }),
+        CaptureOutputsLive({ workspaceRoot, cacheDirectory }),
+        ExpandFilegroupLive({ workspaceRoot, cacheDirectory }),
+        WriteFileLive({ workspaceRoot }),
+        CheckFileLive({ workspaceRoot }),
+        CheckDocsLive({ workspaceRoot }),
+        LlmReviewLive({ workspaceRoot, sensitiveEnv }),
+        SyncPackageJsonLive({ workspaceRoot, cacheDirectory }),
+        ScaffoldPackageLive({ workspaceRoot, packageName }),
+        Target.layerNotImplemented,
+        Interpreter.layer(flow)
+      ).pipe(
+        Layer.provideMerge(Action.layerImplementations),
+        Layer.provideMerge(FlowEngine.layerMemory),
+        Layer.provideMerge(
+          layerPackageManager(
+            workspaceRoot,
+            declaredToolchain({ runtime: declared.runtime, packageManager: declared.packageManager }),
+            sensitiveEnv,
+            hostEnvironment
+          )
+        ),
+        Layer.provideMerge(layerNonInteractiveNodeServices)
+      )
+      return verifyTargetToolchain(declared, cwd, hostEnvironment, sensitiveEnv).pipe(
+        Effect.andThen(flow.execute({}, { executionId })),
+        Effect.provide(runtime)
+      )
+    }),
     { signal }
   )
-}

@@ -623,6 +623,39 @@ Bundler targets, run through the workspace's own bundler. From
 | `RunnerOptions`    | `{ workspaceRoot; scratchDirectory; timeoutMs? }`                       | Host wiring for one runner.                     |
 | `defaultTimeoutMs` | `15 * 60 * 1000`                                                        | Wall-clock bound for one bundler child process. |
 
+## WorkspaceToolchain
+
+Workspace declaration resolution, from `@smthrs/build-cli/WorkspaceToolchain`.
+
+| Export                                   | Contract                                                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `WorkspaceToolchain`                     | The resolved `runtime` and `packageManager`, either of which may be absent.                     |
+| `ResolvedWorkspaceToolchain`             | A `WorkspaceToolchain` with sorted `manifestDigests: ReadonlyArray<Input.FileDigest>`.          |
+| `of(workspace)`                          | Reads literal declarations without I/O; leaves manifest-derived requirements unresolved.        |
+| `resolve(workspace, { root, signal? })`  | Returns `Promise<ResolvedWorkspaceToolchain>` after resolving declared manifests within `root`. |
+| `fill(workspaceAttrs, attrs, toolchain)` | Fills only named, omitted attrs; preserves explicit target declarations.                        |
+
+`resolve` reads `engines.node` and the pnpm `packageManager` pin from declared
+manifests. An explicit pnpm version wins while its manifest is still read and
+measured. Each manifest is bounded at 1 MiB, decoded as strict UTF-8, and must be
+a JSON object inside the workspace. The same validated text supplies both its
+requirements and digest; equivalent paths are read once per resolution. Missing
+or invalid pins, unsupported version syntax, path escapes, and cancellation
+refuse resolution. No tool is installed or executed by this resolver.
+
+From `@smthrs/build-cli/engine`, `TargetToolchain` carries the tools one
+action-backed target uses. `targetToolchain(target, attrs)` selects them from
+validated attrs without probing. `verifyTargetToolchain(toolchain, cwd,
+environment, sensitiveEnvironment?)` is an Effect requiring a
+`ChildProcessSpawner`; it verifies the selected runtime and manager in the
+target's directory and tool environment before execution. It performs no
+install or fetch. `PnpmWorkspace` and `GithubCiGen` only render declarations and
+need no tool probe; an explicit Bun Vitest runtime selects Bun as its runner.
+The package planner verifies native `Runtime.bin` references and
+`PackageManager.bin` references with a resolved Node/Bun toolchain. These checks
+do not change legacy Yarn lowering or guarantee the
+interpreter chosen by an arbitrary custom package-manager launcher.
+
 ## Modules outside the barrel
 
 Every one of these is importable as `@smthrs/build-cli/<Module>`. The barrel

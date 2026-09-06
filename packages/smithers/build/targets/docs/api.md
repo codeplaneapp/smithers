@@ -75,6 +75,39 @@ somebody else's machine. It reads declarations only: a required credential the
 declaration never names is refused here, and a variable that is declared but
 unset is refused later, at the transport boundary.
 
+## Workspace toolchains
+
+Authors normally use `Runtime.Node`, `Runtime.Bun`, and `PackageManager.Pnpm`.
+The package executor resolves manifest declarations before filling omitted
+target attrs, and preserves explicit target overrides. `Runtime.Node({ manifest })`
+reads `engines.node`; `PackageManager.Pnpm({ manifest, lockfile })` reads
+`packageManager: "pnpm@<version>"`. An explicit manager `version` overrides that
+field while the manifest is still parsed and digested. Requirements use exact
+versions or a single comparator; unsupported compound ranges and tags refuse.
+
+`Runtime.ResolvedNodeRuntime`, `Runtime.ResolvedBunRuntime`,
+`PackageManager.ResolvedPnpmPackageManager`, and
+`PackageManager.ResolvedBunPackageManager` are tagged schemas and types for the
+resolver's output. They carry `name`, `version`, and `executable`; manager values
+also carry their `runtime`. The `Runtime.Runtime` and
+`PackageManager.PackageManager` unions admit these values alongside the classic
+records. `Runtime.VersionRequirement` bounds printable requirement text; the
+resolver and execution services validate the supported version grammar.
+
+Action-backed targets verify their declared tools before executing the body.
+Native `Runtime.bin` references and `PackageManager.bin` references with a
+resolved Node/Bun toolchain select and verify the declared executable. This
+does not change the existing Yarn lowering limit or
+force arbitrary custom package-manager launchers to use a particular shebang
+interpreter.
+
+`Runtime.npx(spec)` is a command reference for a `Shell` or `Generate` `bin`:
+Node runs the resolved JavaScript npx launcher with the selected interpreter;
+Bun runs `x --bun`. Both forward the spec and user arguments. It cannot be used
+as a path argument or a path-only tool binding. See the
+[runtime reference](./reference/targets.md#smithersruntime) for flags, keying,
+and launcher constraints.
+
 ## Composition
 
 `Compose` holds the rules that are about other rules: `Generate` (check by

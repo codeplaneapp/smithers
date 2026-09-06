@@ -3,6 +3,7 @@
  *
  * @since 1.0.0
  */
+import * as RuntimeService from "@smthrs/build/Runtime"
 import * as AgentTarget from "@smthrs/targets/AgentTarget"
 import type * as Anvil from "@smthrs/targets/Anvil"
 import * as BundlerTarget from "@smthrs/targets/BundlerTarget"
@@ -65,7 +66,7 @@ import { posix, sha256Hex } from "./Text.ts"
  * @category keys
  * @since 0.1.0
  */
-export const PACKAGE_EXECUTION_FORMAT = 2
+export const PACKAGE_EXECUTION_FORMAT = 3
 
 /** Whether a node's workspace snapshot must exclude every concurrent peer.
  * @category execution
@@ -165,6 +166,8 @@ const attrTargets = (attrs: unknown, name: string): ReadonlyArray<Target.AnyTarg
 /** One resolved tool: the executable path plus its key-material identity. */
 interface ResolvedTool {
   readonly path: string
+  /** Fixed arguments for a one-shot reference, before the caller's arguments. */
+  readonly args?: ReadonlyArray<string> | undefined
   readonly identity: unknown
 }
 
@@ -442,9 +445,74 @@ const graphDigestOf = async (
 const probeOnce = async (context: PlanContext, path: string): Promise<PackageTree.Probe> => {
   const known = context.probes.get(path)
   if (known !== undefined) return known
-  const probe = await PackageTree.probeVersion(path)
+  // A declared executable's version probe needs lookup capabilities, never
+  // the CLI's credentials. Configuration lookup starts at the workspace just
+  // as native target execution does. Target env overrides have separate maps.
+  const names = new Set<string>(RuntimeService.lookupEnvironmentNames)
+  const environment = Object.fromEntries(
+    Object.entries(context.environment).filter(([name, value]) =>
+      typeof value === "string" && names.has(process.platform === "win32" ? name.toUpperCase() : name)
+    )
+  )
+  const probe = await PackageTree.probeVersion(path, { cwd: context.root, environment })
   context.probes.set(path, probe)
   return probe
+}
+
+/** Resolves and measures one declared JavaScript tool before native execution. */
+const declaredJavaScriptTool = async (
+  context: PlanContext,
+  tag: string,
+  declared: { readonly name: string; readonly executable: string; readonly version?: string | undefined }
+): Promise<ToolOutcome> => {
+  const executable = declared.executable
+  const path = NodePath.isAbsolute(executable)
+    ? executable
+    : executable.includes(NodePath.sep) || executable.includes("/")
+    ? NodePath.resolve(context.root, executable)
+    : PackageTree.findOnPath(executable, context.environment)
+  const identity = { tag, name: declared.name, requirement: declared.version ?? null, executable }
+  if (path === undefined) {
+    return {
+      _tag: "refused",
+      tool: {
+        refusal: `workspace ${declared.name} executable ${JSON.stringify(executable)} is not present on PATH`,
+        identity
+      }
+    }
+  }
+  const probe = await probeOnce(context, path)
+  const measured = probe.output.trim()
+  const measuredIdentity = { ...identity, path, probe }
+  if (declared.version !== undefined) {
+    if (
+      probe.exitCode !== 0 ||
+      !/^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?(?:\+[0-9A-Za-z][0-9A-Za-z.-]*)?$/.test(measured)
+    ) {
+      return {
+        _tag: "refused",
+        tool: {
+          refusal: `cannot measure the declared ${declared.name} executable ${JSON.stringify(executable)}`,
+          identity: measuredIdentity
+        }
+      }
+    }
+    const satisfies = RuntimeService.satisfies(declared.version, measured)
+    if (satisfies !== true) {
+      return {
+        _tag: "refused",
+        tool: {
+          refusal: satisfies === "unsupported_requirement"
+            ? `unsupported workspace ${declared.name} version requirement: ${declared.version}`
+            : `workspace declares ${declared.name} ${declared.version}, but ${
+              JSON.stringify(executable)
+            } runs ${measured}`,
+          identity: measuredIdentity
+        }
+      }
+    }
+  }
+  return { _tag: "resolved", tool: { path, identity: measuredIdentity } }
 }
 
 /**
@@ -731,7 +799,7 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
   } else if (tag === "HostBin") {
     const name = String(reference["name"])
-    const path = PackageTree.findOnPath(name)
+    const path = PackageTree.findOnPath(name, context.environment)
     if (path === undefined) {
       outcome = {
         _tag: "refused",
@@ -751,7 +819,8 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
     }
   } else if (tag === "PackageManagerBin") {
-    const name = context.managerBinary
+    const manager = context.workspaceToolchain.packageManager
+    const name = manager?.executable ?? context.managerBinary
     if (name === undefined) {
       outcome = {
         _tag: "refused",
@@ -763,28 +832,16 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       context.tools.set(key, outcome)
       return outcome
     }
-    const path = PackageTree.findOnPath(name)
-    if (path === undefined) {
-      outcome = {
-        _tag: "refused",
-        tool: {
-          refusal: `workspace package manager binary ${JSON.stringify(name)} is not present on PATH`,
-          identity: { tag: "PackageManagerBin", manager: name, absent: true }
-        }
-      }
-    } else {
-      const probe = await probeOnce(context, path)
-      outcome = {
+    outcome = await declaredJavaScriptTool(context, "PackageManagerBin", {
+      name: manager?.name ?? name,
+      executable: name,
+      version: manager?.version
+    })
+    if (manager !== undefined && outcome._tag === "resolved") {
+      const runtime = await declaredJavaScriptTool(context, "RuntimeBin", manager.runtime)
+      outcome = runtime._tag === "refused" ? runtime : {
         _tag: "resolved",
-        tool: {
-          path,
-          identity: {
-            tag: "PackageManagerBin",
-            manager: name,
-            path,
-            probe: { exitCode: probe.exitCode, output: probe.output }
-          }
-        }
+        tool: { path: outcome.tool.path, identity: { manager: outcome.tool.identity, runtime: runtime.tool.identity } }
       }
     }
   } else if (tag === "GoBin" || tag === "GoRun") {
@@ -817,10 +874,16 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       ? { _tag: "resolved", tool: { path: resolved.path, identity: resolved.identity } }
       : { _tag: "refused", tool: { refusal: resolved.refusal, identity: resolved.identity } }
   } else if (tag === "RuntimeBin") {
-    outcome = {
-      _tag: "resolved",
-      tool: { path: process.execPath, identity: { tag: "RuntimeBin", runtime: "node", version: process.version } }
-    }
+    const runtime = context.workspaceToolchain.runtime
+    outcome = runtime === undefined
+      ? {
+        _tag: "refused",
+        tool: {
+          refusal: "workspace declares no JavaScript runtime; S.Runtime.bin is unavailable",
+          identity: { tag: "RuntimeBin", absent: true }
+        }
+      }
+      : await declaredJavaScriptTool(context, "RuntimeBin", runtime)
   } else if (tag === "CargoBin") {
     // Cargo comes from the workspace toolchain layer, never from a guess: a
     // workspace that declares no layer refuses every cargo target by name.
@@ -890,26 +953,64 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       }
     }
   } else if (tag === "RuntimeNpx") {
-    const path = PackageTree.findOnPath("npx")
-    if (path === undefined) {
-      outcome = {
-        _tag: "refused",
-        tool: {
-          refusal: "npx is not present on PATH",
-          identity: { tag: "RuntimeNpx", spec: reference["spec"], absent: true }
-        }
-      }
-    } else {
-      const probe = await probeOnce(context, path)
+    const runtime = await resolveTool(context, { _tag: "RuntimeBin" })
+    const spec = String(reference["spec"])
+    if (runtime._tag === "refused") {
+      outcome = runtime
+    } else if (context.workspaceToolchain.runtime?.name === "bun") {
       outcome = {
         _tag: "resolved",
         tool: {
-          path,
-          identity: {
-            tag: "RuntimeNpx",
-            spec: reference["spec"],
-            path,
-            probe: { exitCode: probe.exitCode, output: probe.output }
+          path: runtime.tool.path,
+          args: ["x", "--bun", spec],
+          identity: { tag: "RuntimeNpx", spec, runtime: runtime.tool.identity }
+        }
+      }
+    } else {
+      const path = PackageTree.findOnPath("npx", context.environment)
+      if (path === undefined) {
+        outcome = {
+          _tag: "refused",
+          tool: {
+            refusal: "npx is not present on PATH",
+            identity: { tag: "RuntimeNpx", spec: reference["spec"], absent: true }
+          }
+        }
+      } else {
+        // Run npm's JavaScript launcher with the selected Node, instead of
+        // allowing its shebang to silently select another interpreter.
+        const script = await Fs.realpath(path)
+        if (/\.(?:cmd|bat)$/i.test(script)) {
+          outcome = {
+            _tag: "refused",
+            tool: {
+              refusal: "Runtime.npx under Node requires the JavaScript npx launcher on PATH, not a batch shim",
+              identity: { tag: "RuntimeNpx", spec, path: script }
+            }
+          }
+        } else {
+          const relative = Path.containedRelative(context.root, script)
+          const portable = relative === undefined ? script : `${workspaceRootToken}/${posix(relative)}`
+          outcome = {
+            _tag: "resolved",
+            tool: {
+              path: runtime.tool.path,
+              args: [script, spec],
+              identity: {
+                tag: "RuntimeNpx",
+                spec,
+                runtime: runtime.tool.identity,
+                // The launcher is script input to the measured interpreter;
+                // its original shebang is intentionally not executed.
+                launcher: {
+                  _tag: "Executable",
+                  source: portable,
+                  path: portable,
+                  digest: await Input.digestFile(script, { signal: context.signal }),
+                  interpreters: []
+                }
+              }
+            }
           }
         }
       }
@@ -1316,6 +1417,10 @@ const visit = async (
         noteRefusal(outcome.tool.refusal)
         return entry
       }
+      if (outcome.tool.args !== undefined) {
+        noteRefusal("Runtime.npx references must be used as bin, not as a path argument")
+        return entry
+      }
       return outcome.tool.path
     }
     if (entry.startsWith("{smthrs:flag:") && entry.endsWith("}")) {
@@ -1350,6 +1455,31 @@ const visit = async (
       return outcome.tool.path
     }
     return entry
+  }
+
+  /** Expands command prefixes and confines Runtime.npx to the executable slot. */
+  const resolveCommand = async (
+    entries: ReadonlyArray<string>,
+    runtimeArguments = 0
+  ): Promise<Array<string>> => {
+    const resolved: Array<string> = []
+    for (const [index, entry] of entries.entries()) {
+      if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
+        const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
+        if (reference["_tag"] === "GoRun" || reference["_tag"] === "RuntimeNpx") {
+          const outcome = await resolveTool(toolContext, reference)
+          toolchain.push(outcome.tool.identity)
+          if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
+          else if (reference["_tag"] === "GoRun") resolved.push(outcome.tool.path, "run", String(reference["spec"]))
+          else if (index === 0) resolved.push(outcome.tool.path, ...outcome.tool.args!)
+          else if (runtimeArguments > 0 && index === runtimeArguments + 1) resolved.push(...outcome.tool.args!)
+          else noteRefusal("Runtime.npx references must be used as bin, not as a path argument")
+          continue
+        }
+      }
+      resolved.push(await resolveToken(entry))
+    }
+    return resolved
   }
 
   // The mode a target is planned under. A root's requested mode wins over the
@@ -1457,20 +1587,12 @@ const visit = async (
     const shellAttrs = attrs as Shell.ExecAttrs
     const payload = Shell.execPayload(shellAttrs)
     env = { ...(payload.env as Record<string, string>) }
-    const resolved: Array<string> = []
-    for (const entry of payload.argv as ReadonlyArray<string>) {
-      if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
-        const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
-        if (reference["_tag"] === "GoRun") {
-          const outcome = await resolveTool(toolContext, reference)
-          toolchain.push(outcome.tool.identity)
-          if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
-          else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
-          continue
-        }
-      }
-      resolved.push(await resolveToken(entry))
-    }
+    const resolved = await resolveCommand(
+      payload.argv as ReadonlyArray<string>,
+      (shellAttrs.bin as { readonly _tag?: string } | undefined)?._tag === "RuntimeNpx"
+        ? shellAttrs.runtimeArgs?.length ?? 0
+        : 0
+    )
     if (shellAttrs.bun !== undefined) {
       const bun = await resolveBun(toolContext)
       const consts: Record<string, string> = {}
@@ -1478,7 +1600,9 @@ const visit = async (
         const outcome = await resolveTool(toolContext, reference as Record<string, unknown>)
         toolchain.push({ slot: `using:${name}`, identity: outcome.tool.identity })
         if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
-        else consts[name] = outcome.tool.path
+        else if (outcome.tool.args !== undefined) {
+          noteRefusal("Runtime.npx references must be used as bin, not in using")
+        } else consts[name] = outcome.tool.path
       }
       if (bun._tag === "resolved" && refusal === undefined) {
         bunTemplate = { template: shellAttrs.bun, consts, bunPath: bun.tool.path }
@@ -1618,20 +1742,7 @@ const visit = async (
             ...env
           }
         }
-        const resolved: Array<string> = []
-        for (const entry of payload.argv as ReadonlyArray<string>) {
-          if (entry.startsWith("{smthrs:tool:") && entry.endsWith("}")) {
-            const reference = JSON.parse(entry.slice("{smthrs:tool:".length, -1)) as Record<string, unknown>
-            if (reference["_tag"] === "GoRun") {
-              const outcome = await resolveTool(toolContext, reference)
-              toolchain.push(outcome.tool.identity)
-              if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
-              else resolved.push(outcome.tool.path, "run", String(reference["spec"]))
-              continue
-            }
-          }
-          resolved.push(await resolveToken(entry))
-        }
+        const resolved = await resolveCommand(payload.argv as ReadonlyArray<string>)
         if (resolved.includes(Shell.targetBinToken) && Target.isTarget(bin)) {
           const executable = targetExecutable(context, bin)
           if ("problem" in executable) noteRefusal(executable.problem)
@@ -1676,7 +1787,9 @@ const visit = async (
           const outcome = await resolveTool(toolContext, reference as Record<string, unknown>)
           toolchain.push({ slot: "tool", identity: outcome.tool.identity })
           if (outcome._tag === "refused") noteRefusal(outcome.tool.refusal)
-          else generatorPath.push(NodePath.dirname(outcome.tool.path))
+          else if (outcome.tool.args !== undefined) {
+            noteRefusal("Runtime.npx references must be used as bin, not as PATH tools")
+          } else generatorPath.push(NodePath.dirname(outcome.tool.path))
         }
       }
       try {
@@ -2862,6 +2975,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     rootModes.set(row.label, rootMode(Target.metadata(row.target).target, options))
   }
   const workspace = index.workspace
+  const workspaceToolchain = await WorkspaceToolchain.resolve(workspace, { root: index.root, signal: options.signal })
   const lockfilePath = (workspace.packageManager as
     | { readonly lockfile?: { readonly path?: unknown } }
     | undefined)?.lockfile?.path
@@ -2894,7 +3008,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
     log,
     flags: workspace.flags?.flags ?? {},
     managerBinary: managerBinaryOf(workspace),
-    workspaceToolchain: WorkspaceToolchain.of(workspace),
+    workspaceToolchain,
     tools: new Map(),
     toolBytes: new Map(),
     probes: new Map(),
@@ -2913,6 +3027,9 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
       platform: process.platform,
       arch: process.arch,
       lockfile: lockfileDigest ?? null,
+      ...(workspaceToolchain.manifestDigests.length === 0
+        ? {}
+        : { toolchainManifests: workspaceToolchain.manifestDigests }),
       implementation: await Planner.implementationFingerprint(options.signal)
     },
     store: undefined,

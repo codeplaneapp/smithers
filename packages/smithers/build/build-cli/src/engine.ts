@@ -18,8 +18,12 @@ import { Install, PackageManager, Runtime } from "@smthrs/build"
 import { FlowEngine } from "@smthrs/engine"
 import { Action, Graph, Interpreter } from "@smthrs/flow"
 import * as Config from "@smthrs/targets/Config"
+import * as TargetPackageManager from "@smthrs/targets/PackageManager"
+import * as TargetRuntime from "@smthrs/targets/Runtime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { createHash } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as NodePath from "node:path"
@@ -256,6 +260,128 @@ const ownString = (value: object, name: string): string | undefined => {
     : undefined
 }
 
+/** Reads one data record without granting a getter or Proxy execution authority. */
+const ownRecord = (value: unknown, name: string): object | undefined => {
+  if (typeof value !== "object" || value === null || NodeUtil.isProxy(value)) return undefined
+  const descriptor = Object.getOwnPropertyDescriptor(value, name)
+  const member: unknown = descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
+  return typeof member === "object" && member !== null && !NodeUtil.isProxy(member) ? member : undefined
+}
+
+/**
+ * The declared tools an action-backed target actually uses.
+ *
+ * The two file generators carry package-manager data to render configuration,
+ * not to execute a manager. Vitest's explicit Bun runtime selects Bun itself
+ * as the manager, exactly as its target implementation does.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface TargetToolchain {
+  readonly runtime: TargetRuntime.Runtime | undefined
+  readonly packageManager: TargetPackageManager.PackageManager | undefined
+}
+
+/**
+ * Selects tools from already validated target attrs without executing a probe.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const targetToolchain = (target: string, attrs: unknown): TargetToolchain => {
+  if (target === "GithubCiGen" || target === "PnpmWorkspace") {
+    return { runtime: undefined, packageManager: undefined }
+  }
+  const runtimeRecord = ownRecord(attrs, "runtime")
+  const managerRecord = ownRecord(attrs, "packageManager")
+  const runtime = TargetRuntime.isRuntime(runtimeRecord) ? runtimeRecord : undefined
+  const declaredManager = TargetPackageManager.isPackageManager(managerRecord) ? managerRecord : undefined
+  const packageManager = target === "Vitest"
+    ? TargetPackageManager.under(declaredManager, runtime)
+    : declaredManager
+  return { runtime, packageManager }
+}
+
+/** The service-layer fields of one validated target runtime. */
+const runtimeToolchain = (runtime: TargetRuntime.Runtime): Toolchain => ({
+  ...defaultToolchain,
+  runtime: runtime.name,
+  runtimeVersion: runtime.version,
+  runtimeExecutable: runtime.executable
+})
+
+/**
+ * Verifies declarations before the target can execute a tool.
+ *
+ * The existing runtime and package-manager services own version parsing,
+ * deadlines and typed refusals. No install or fetch operation is performed.
+ * Bun's package-manager install service is deliberately unsupported; its tool
+ * runner is the Bun executable itself, so its version is verified through the
+ * real Bun runtime service instead.
+ *
+ * @category execution
+ * @since 1.0.0
+ */
+export const verifyTargetToolchain = (
+  toolchain: TargetToolchain,
+  cwd: string,
+  environment: Readonly<Record<string, string | undefined>>,
+  sensitiveEnvironment: ReadonlyArray<string> = []
+) => {
+  const verifyRuntime = (runtime: TargetRuntime.Runtime) =>
+    Effect.flatMap(Runtime.Runtime, (service) => service.verify).pipe(
+      Effect.provide(layerRuntime(runtimeToolchain(runtime), environment))
+    )
+  const verify = Effect.gen(function*() {
+    const manager = toolchain.packageManager
+    const runtime = toolchain.runtime
+    if (runtime !== undefined) yield* verifyRuntime(runtime)
+    if (manager === undefined) return
+    if (
+      runtime === undefined || runtime.name !== manager.runtime.name ||
+      runtime.version !== manager.runtime.version || runtime.executable !== manager.runtime.executable
+    ) yield* verifyRuntime(manager.runtime)
+    if (manager.name === "bun") {
+      // The public manager may explicitly name a different Bun executable.
+      // It must satisfy its own requirement as well as the runtime declaration.
+      if (manager.executable !== manager.runtime.executable || manager.version !== manager.runtime.version) {
+        yield* Effect.flatMap(Runtime.Runtime, (service) => service.verify).pipe(
+          Effect.provide(layerRuntime({
+            ...runtimeToolchain(manager.runtime),
+            runtime: "bun",
+            runtimeVersion: manager.version,
+            runtimeExecutable: manager.executable
+          }, environment))
+        )
+      }
+      return
+    }
+    yield* Effect.flatMap(PackageManager.PackageManager, (service) => service.verify).pipe(
+      Effect.provide(layerPackageManager(
+        cwd,
+        {
+          ...runtimeToolchain(manager.runtime),
+          manager: manager.name,
+          managerVersion: manager.version,
+          managerExecutable: manager.executable
+        },
+        sensitiveEnvironment,
+        environment
+      ))
+    )
+  })
+  // Runtime's public service deliberately has no cwd setting. The public
+  // command combinator makes its probe observe the actual target directory,
+  // including relative PATH entries and executable spellings, without a
+  // global chdir or a different native-spawn implementation.
+  return Effect.flatMap(ChildProcessSpawner, (spawner) =>
+    verify.pipe(Effect.provideService(
+      ChildProcessSpawner,
+      makeSpawner((command) => spawner.spawn(ChildProcess.setCwd(command, cwd)))
+    )))
+}
+
 const managerNames = new Set(["pnpm", "bun"])
 const runtimeNames = new Set(["node", "bun"])
 
@@ -274,15 +400,17 @@ const runtimeNames = new Set(["node", "bun"])
  */
 export const declaredToolchain = (attrs: unknown): Toolchain => {
   if (typeof attrs !== "object" || attrs === null || NodeUtil.isProxy(attrs)) return defaultToolchain
+  const directRuntime = ownRecord(attrs, "runtime")
+  const fallback = TargetRuntime.isRuntime(directRuntime) ? runtimeToolchain(directRuntime) : defaultToolchain
   const descriptor = Object.getOwnPropertyDescriptor(attrs, "packageManager")
   const declaration = descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined
   if (typeof declaration !== "object" || declaration === null || NodeUtil.isProxy(declaration)) {
-    return defaultToolchain
+    return fallback
   }
   const manager = ownString(declaration, "name")
   const managerVersion = ownString(declaration, "version")
   if (manager === undefined || !managerNames.has(manager) || managerVersion === undefined) {
-    return defaultToolchain
+    return fallback
   }
   const runtimeDescriptor = Object.getOwnPropertyDescriptor(declaration, "runtime")
   const runtimeDeclaration = runtimeDescriptor !== undefined && "value" in runtimeDescriptor

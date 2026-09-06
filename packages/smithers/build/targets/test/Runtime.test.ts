@@ -16,7 +16,7 @@ describe("Runtime declarations", () => {
   })
 
   it("discriminates the union on `name`", () => {
-    const declarations: ReadonlyArray<Runtime.Runtime> = [
+    const declarations: ReadonlyArray<Runtime.NodeRuntime | Runtime.BunRuntime> = [
       Runtime.Node({ version: ">=22.19.0" }),
       Runtime.Bun({ version: ">=1.4.0" })
     ]
@@ -41,12 +41,11 @@ describe("Runtime declarations", () => {
   it("routes versions outside the legacy declaration enumeration to the WORKSPACE.ts declaration", () => {
     // The reviewed enumeration still selects the classic NodeRuntime; any
     // other version string is the WORKSPACE.ts form and returns the inert
-    // NodeDeclaration instead of a runtime the BUILD-era service could
-    // measure. Bun keeps the enumeration-only contract.
+    // NodeDeclaration that the planner resolves before execution. Bun accepts
+    // exact pins directly, but not another interpreter's comparator floor.
     const pinned = Runtime.Node({ version: "24.9.0" })
     expect(Runtime.isNodeDeclaration(pinned)).toBe(true)
     expect(Runtime.isRuntime(pinned)).toBe(false)
-    // @ts-expect-error a Node requirement is not a supported Bun requirement.
     expect(() => Runtime.Bun({ version: ">=22.19.0" })).toThrow()
   })
 
@@ -55,9 +54,9 @@ describe("Runtime declarations", () => {
     expect(() => Runtime.Node(null as never)).toThrow("Runtime.Node options must be an object")
     expect(() => Runtime.Node({} as never)).toThrow("Runtime.Node requires a manifest or a version")
 
-    const bun = Runtime.Bun({ version: "1.3.4" as never })
-    expect(Runtime.isBunDeclaration(bun)).toBe(true)
-    expect(bun).toEqual({ _tag: "BunRuntimeDeclaration", version: "1.3.4", executable: "bun" })
+    const bun = Runtime.Bun({ version: "1.4.1" })
+    expect(Runtime.isRuntime(bun)).toBe(true)
+    expect(bun).toEqual({ _tag: "ResolvedBunRuntime", name: "bun", version: "1.4.1", executable: "bun" })
   })
 
   it("honours an executable override and rejects unusable ones", () => {
@@ -82,6 +81,15 @@ describe("Runtime declarations", () => {
     expect(Runtime.isRuntime({ name: "node" })).toBe(false)
     expect(Runtime.isRuntime(null)).toBe(false)
     expect(Runtime.isRuntime("node")).toBe(false)
+  })
+
+  it("admits tagged resolved requirements without widening classic declarations", () => {
+    const node = Runtime.ResolvedNodeRuntime.make({ name: "node", version: "22.19.0", executable: "node-22" })
+    expect(Runtime.isRuntime(node)).toBe(true)
+    expect(Runtime.run(node, ["build.mjs"])).toEqual(["node-22", "build.mjs"])
+    for (const version of ["", "  ", "22.19.0\n", "22\u0000", "x".repeat(257)]) {
+      expect(() => Runtime.ResolvedNodeRuntime.make({ name: "node", version, executable: "node" })).toThrow()
+    }
   })
 
   it("builds argv for a script and for an inline program", () => {

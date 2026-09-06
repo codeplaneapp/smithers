@@ -9896,7 +9896,15 @@ Declares one secret source, read lazily at a host-owned request boundary. The de
 - **Type:** the `Runtime` module, and `type Runtime = Runtime.Runtime`
 - **Since:** `0.1.0`
 
-Declared JavaScript runtimes and the argv they run programs with. The name is both the namespace the constructors live under and the type they return. `Runtime.Node({ version: ">=22.19.0" })` and `Runtime.Bun({ version: ">=1.3.0" })` are the two constructors, `Runtime.Node({ manifest })` is the form that reads the pin from a declared manifest, and `Runtime.bin`, `Runtime.npx`, `Runtime.required`, `Runtime.run`, `Runtime.evaluate`, `Runtime.test`, and `Runtime.isRuntime` are the accessors a rule builds argv with. A runtime belongs to the workspace and is declared once in `WORKSPACE.ts`; a single target overrides the interpreter by naming its own `runtime`.
+Declared JavaScript runtimes and the argv they run programs with. The name is both the namespace the constructors live under and the type they return. `Runtime.Node({ version: ">=22.19.0" })` and `Runtime.Bun({ version: ">=1.4.0" })` are the two constructors, `Runtime.Node({ manifest })` is the form that reads the pin from a declared manifest, and `Runtime.bin`, `Runtime.npx`, `Runtime.required`, `Runtime.run`, `Runtime.evaluate`, `Runtime.test`, and `Runtime.isRuntime` are the accessors a rule builds argv with. A runtime belongs to the workspace and is declared once in `WORKSPACE.ts`; a single target overrides the interpreter by naming its own `runtime`.
+
+`Runtime.Node({ manifest })` reads `engines.node` during planning. Literal Node pins and exact Bun pins also retain their declared versions. Requirements support an exact version or one comparator (`=`, `>`, `>=`, `<`, or `<=`); compound ranges, caret/tilde ranges, and tags such as `latest` are refused. The planner measures each declared manifest's validated text and includes that digest in the target key. Missing, malformed, oversized, or outside-workspace manifests fail resolution.
+
+`Runtime.ResolvedNodeRuntime` and `Runtime.ResolvedBunRuntime` are tagged schemas for resolver output, admitted by the `Runtime.Runtime` union. They retain `name`, `version`, and `executable`; authors normally use the constructors above. `Runtime.VersionRequirement` bounds the printable text, while resolution and verification check the supported version grammar.
+
+`Runtime.bin` selects the workspace's declared executable. A missing runtime or an installed version that does not satisfy its requirement refuses the target before its command runs.
+
+Use `Runtime.npx(spec)` as the `bin` of a `Shell` target or `Generate`. Under Node, the planner resolves the JavaScript `npx` launcher on the target's tool PATH and runs it with the declared Node executable, followed by `spec` and the target's `args`. Under Bun, it runs the declared executable with `x --bun`, `spec`, and those arguments. `Shell.runtimeArgs` remain flags before the launcher or `x`. The runtime identity and, for Node, launcher bytes enter the target key. A Windows batch shim cannot serve as the Node launcher. `Runtime.npx` cannot occupy a path argument, a `using` binding, or a generator's path-only `tools` slot, because those positions cannot carry its command arguments.
 
 ### `Smithers.PackageManager`
 
@@ -9904,6 +9912,10 @@ Declared JavaScript runtimes and the argv they run programs with. The name is bo
 - **Since:** `0.1.0`
 
 Declared package managers, their argv spellings, and the lockfile each one writes. `PackageManager.Pnpm` takes either the workspace form `{ manifest, lockfile, version?, audit?, workspaces? }` or the legacy form `{ version: "11.21.0", runtime }`; `PackageManager.BunPackages({ runtime })` and `PackageManager.Yarn` are the other two constructors. `PackageManager.exec`, `.dlx`, `.install`, `.publish`, `.under`, `.lockfileName`, `.bin`, and `.required` build the argv every tool-running rule asks for, so no rule spells `pnpm` or `node` into an argv of its own.
+
+The manifest form reads `packageManager: "pnpm@<version>"`. An explicit `version` selects the requirement instead, while the manifest is still parsed and measured. Resolution never invents a pin or installs a tool. With a resolved Node/Bun toolchain, `PackageManager.bin` honors the declared executable, and version mismatches refuse execution. Yarn's native behavior is unchanged. Action-backed targets also verify the runtime and manager they use before their body runs; configuration-only generators such as `PnpmWorkspace` and `GithubCiGen` do not run tool probes.
+
+`PackageManager.ResolvedPnpmPackageManager` and `PackageManager.ResolvedBunPackageManager` describe resolver output within the `PackageManager.PackageManager` union. Each retains `name`, `version`, `executable`, and the runtime declaration; package authors normally use `Pnpm` or `BunPackages`.
 
 ### `Smithers.Cargo`
 
@@ -13471,6 +13483,39 @@ Bundler targets, run through the workspace's own bundler. From
 | `BuildLive`        | `(options: RunnerOptions) => Layer`                                     | Implements the bundler-build action.            |
 | `RunnerOptions`    | `{ workspaceRoot; scratchDirectory; timeoutMs? }`                       | Host wiring for one runner.                     |
 | `defaultTimeoutMs` | `15 * 60 * 1000`                                                        | Wall-clock bound for one bundler child process. |
+
+## WorkspaceToolchain
+
+Workspace declaration resolution, from `@smthrs/build-cli/WorkspaceToolchain`.
+
+| Export                                   | Contract                                                                                        |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `WorkspaceToolchain`                     | The resolved `runtime` and `packageManager`, either of which may be absent.                     |
+| `ResolvedWorkspaceToolchain`             | A `WorkspaceToolchain` with sorted `manifestDigests: ReadonlyArray<Input.FileDigest>`.          |
+| `of(workspace)`                          | Reads literal declarations without I/O; leaves manifest-derived requirements unresolved.        |
+| `resolve(workspace, { root, signal? })`  | Returns `Promise<ResolvedWorkspaceToolchain>` after resolving declared manifests within `root`. |
+| `fill(workspaceAttrs, attrs, toolchain)` | Fills only named, omitted attrs; preserves explicit target declarations.                        |
+
+`resolve` reads `engines.node` and the pnpm `packageManager` pin from declared
+manifests. An explicit pnpm version wins while its manifest is still read and
+measured. Each manifest is bounded at 1 MiB, decoded as strict UTF-8, and must be
+a JSON object inside the workspace. The same validated text supplies both its
+requirements and digest; equivalent paths are read once per resolution. Missing
+or invalid pins, unsupported version syntax, path escapes, and cancellation
+refuse resolution. No tool is installed or executed by this resolver.
+
+From `@smthrs/build-cli/engine`, `TargetToolchain` carries the tools one
+action-backed target uses. `targetToolchain(target, attrs)` selects them from
+validated attrs without probing. `verifyTargetToolchain(toolchain, cwd,
+environment, sensitiveEnvironment?)` is an Effect requiring a
+`ChildProcessSpawner`; it verifies the selected runtime and manager in the
+target's directory and tool environment before execution. It performs no
+install or fetch. `PnpmWorkspace` and `GithubCiGen` only render declarations and
+need no tool probe; an explicit Bun Vitest runtime selects Bun as its runner.
+The package planner verifies native `Runtime.bin` references and
+`PackageManager.bin` references with a resolved Node/Bun toolchain. These checks
+do not change legacy Yarn lowering or guarantee the
+interpreter chosen by an arbitrary custom package-manager launcher.
 
 ## Modules outside the barrel
 

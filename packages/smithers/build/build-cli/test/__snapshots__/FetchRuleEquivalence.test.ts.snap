@@ -4,7 +4,7 @@ exports[`Fetch extraction goldens recorded through the original PackageExec path
 {
   "cacheable": true,
   "inputs": [],
-  "key": "3d63b798fd72ce0c2f823a72ddc76158facda95277c0f6ce51ad22e1cf658d8e",
+  "key": "ef1b16f5bbb086f7d391f95456e4fe1d476386f5ee9f04f7fdb8c011b22faadc",
   "material": {
     "body": {
       "cwd": ".",
@@ -17,7 +17,7 @@ exports[`Fetch extraction goldens recorded through the original PackageExec path
           "data/nested/payload.bin",
         ],
       },
-      "packageFormat": 2,
+      "packageFormat": 3,
       "schemas": {
         "attrs": {
           "definitions": {},
@@ -117,7 +117,7 @@ exports[`Fetch extraction goldens recorded through the original PackageExec path
 exports[`Fetch extraction goldens recorded through the original PackageExec path > preserves complete key material, output, provenance, report, and cache replay > pre-extraction provenance 1`] = `
 {
   "exitOk": true,
-  "key": "3d63b798fd72ce0c2f823a72ddc76158facda95277c0f6ce51ad22e1cf658d8e",
+  "key": "ef1b16f5bbb086f7d391f95456e4fe1d476386f5ee9f04f7fdb8c011b22faadc",
   "label": "//data:pinned",
   "output": {
     "files": [
@@ -138,7 +138,7 @@ exports[`Fetch extraction goldens recorded through the original PackageExec path
 exports[`Fetch extraction goldens recorded through the original PackageExec path > preserves complete key material, output, provenance, report, and cache replay > pre-extraction report 1`] = `
 [
   {
-    "key": "3d63b798fd72ce0c2f823a72ddc76158facda95277c0f6ce51ad22e1cf658d8e",
+    "key": "ef1b16f5bbb086f7d391f95456e4fe1d476386f5ee9f04f7fdb8c011b22faadc",
     "label": "//data:pinned",
     "status": "ran",
     "target": "Fetch",
