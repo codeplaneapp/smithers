@@ -64,6 +64,7 @@ REVIEW-*.md
 review-evidence/
 consolidated-review-plan.md
 release-rc0-review.md
+release-review-*.md
 packages/*/REVIEW-*.md
 packages/std/test/__repro.test.ts
 packages/std/test/ScratchGrepTiming.test.ts
