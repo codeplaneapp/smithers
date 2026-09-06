@@ -1,38 +1,47 @@
 ---
 title: "Contain and reap child processes"
-description: "Compose BunHost.layerContained with a ProcessLedger so every child leads a recorded process group with a kill deadline, and a crashed host's abandoned groups are swept by the next incarnation."
+description: "Compose BunHost.layerContained with a ProcessLedger so each command has a supervised process group, a cleanup deadline, and a durable identity for restart reconciliation."
 editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flows/platform-bun/docs/guides/contain-child-processes.md"
 ---
 
-`BunHost.layer` spawns children the way Effect does: a child is bound to the
-scope that spawned it and dies when that scope closes. That is enough while the
-host is alive, and nothing at all after it crashes, because a dead process runs
-no finalizer. The children it started keep running, nobody remembers them, and
-the next incarnation cannot tell them from anyone else's processes.
+`BunHost.layer` provides the raw process service. A scope finalizer can signal
+its target, but a target that exits first can leave descendants holding output
+open. A crashed host runs no finalizers at all.
 
-`BunHost.layerContained` closes that hole with three mechanisms.
+`BunHost.layerContained` combines a live process owner with a ledger for
+cleanup that a later host must reconcile.
 
 ## What containment adds
 
-**An escalation deadline.** Every spawn goes through
-[`@smthrs/kernel`](https://kernel.smithers.sh/reference/api/)'s `ContainedSpawner`, which rewrites the
-command so releasing it cannot hang: the child is asked to stop with `SIGTERM`,
-and is made to stop with `SIGKILL` `graceMs` later. A command that already
-names its own `killSignal` or `forceKillAfter` is left alone, because it has an
-owner who thought about it.
+**A live owner and deadline.** Every pipeline leg gets a prepared POSIX
+supervisor. Its lifetime is independent of the native target, so cleanup can
+stop the owned group even after the target exits. The default policy is
+`SIGTERM`, then `SIGKILL` after `graceMs`; an explicit `killSignal` or
+`forceKillAfter` is preserved. A private connection also initiates cleanup
+when the host disappears.
 
-**A durable record.** Each child is recorded in a `ProcessLedger` when it
-starts and released when it ends, so a host that dies without running a
-finalizer leaves a record its next incarnation can act on. The record carries
-the pid, the process group, the host identity, the pid of the incarnation that
-started it, and the instant it started.
+**A durable record before execution.** The kernel records the prepared
+supervisor's identity and the original command digest before activation starts
+the target. The record carries the owner pid and group, host identity, host
+incarnation pid, and start time. Only verified cleanup retires it; failed or
+unverified cleanup fails scope release and retains the record.
 
 **A sweep on the way up.** While the layer is built,
 [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/)'s `ProcessReaper` reads the
 records a previous incarnation of the same `hostId` left behind and signals the
-groups they name. The reaper lives in the Node package because the calls it
-makes, `process.kill` and `taskkill`, are Node's, and Bun implements them
-unchanged.
+groups they name after checking their identities. The lifecycle and reaper
+live in the Node package and support ordinary Node and Bun runtimes.
+
+On POSIX, a returned handle's `pid` identifies the supervisor; `exitCode` and
+`isRunning` describe the target. Signal through `handle.kill`, not either
+numeric pid. `detached: false` retains a supervisor but opts out of group
+cleanup, signalling only the target. Explicit stopping while a grouped target
+is still alive also attempts a revalidated positive-PID sweep of escaped
+descendants. That extra sweep is best effort; natural exit does not promise
+cleanup of deliberately escaped sessions. Windows remains unsupported best
+effort. Node single-executable applications and compiled Bun executables are
+refused before activation because the supervisor needs a runtime eval entry
+point.
 
 ## Compose it
 
@@ -53,7 +62,7 @@ const host = BunHost.layerContainedAt("/srv/repositories/app", {
 ```
 
 `ProcessLedger.layerMemory` records nothing durably. A host built on it still
-contains the children it holds handles for, because scope closure does that,
+contains the process groups it owns, including when the host connection closes,
 but it inherits nothing from a previous incarnation, so the reaper has nothing
 to sweep. Use it in tests and in short-lived programs.
 
@@ -80,19 +89,17 @@ by the other. Mutating the object you passed afterwards changes neither layer.
 `ContainedSpawner.Options` has a `platform` field. `ContainedOptions` omits it,
 deliberately.
 
-`platform` decides one thing: whether a command that names no `detached` option
-gets a process group of its own. The spawner underneath is Effect's Node
-spawner, which decides that from the real `process.platform` whatever it is
-told. So a caller-supplied `"win32"` on a POSIX host could not change what the
-kernel does; it could only make the ledger record `pgid: null` for a child that
-genuinely leads a group. `ProcessReaper.reap` retires such a record as
-`no-group` without signalling anything, so the orphan would outlive every
-incarnation.
+The contained factories use `ProcessReaper.layerSpawner`, which reads the real
+`process.platform`. The native process-group behavior and recorded identity
+must agree: a caller cannot describe a Windows record for an owner that
+actually leads a POSIX group. Casting `platform: "win32"` past the type does
+not override the running platform.
 
-That is a durable lie rather than a compile error, which is why the field is
-gone from the type instead of documented as unsupported. Casting
-`platform: "win32"` back in past the type changes nothing either: the record
-still carries the child's real process group.
+For a smaller Bun composition, use `ProcessReaper.layerSpawner` with a ledger
+and an underlying runtime spawner. It includes the prepared native adapter
+whose pipe error listeners remain alive through cancellation. Keep the kernel
+permission decorator above it to authorize the caller's command before
+preparation.
 
 ## `jj` is contained too
 
@@ -109,7 +116,7 @@ import { Jj } from "@smthrs/jj"
 import * as Effect from "effect/Effect"
 
 // The ledger records "jj status" while this runs, and retires it when the
-// invocation ends.
+// invocation and its cleanup finish.
 const status = Effect.flatMap(Jj, (jj) => jj.status()).pipe(
   Effect.provide(host),
   Effect.scoped
@@ -117,7 +124,8 @@ const status = Effect.flatMap(Jj, (jj) => jj.status()).pipe(
 ```
 
 That is the observable difference: the same call under `BunHost.layer` leaves
-the ledger empty.
+the ledger empty. The initial `jj --version` probe runs outside the ledger in
+both compositions; repository operations use the selected runner.
 
 ## What the reaper refuses to kill
 
@@ -128,8 +136,8 @@ host's own group, the pid is gone, the pid exists but did not start when the
 record says it did, the record predates the machine's boot, or the host could
 not ask the question at all.
 
-Three of those refusals leave the record inherited rather than retiring it:
-`owner-alive`, `identity-unverified`, and `own-group-unknown`. A host that
+Four refusals leave the record inherited rather than retiring it:
+`owner-alive`, `identity-unverified`, `own-group-unknown`, and `kill-failed`. A host that
 could not ask, or that has no business signalling, must not be the one that
 closes the question. A later incarnation that can ask gets the chance.
 

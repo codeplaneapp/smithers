@@ -29,6 +29,7 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import * as CommandLine from "./CommandLine.ts"
 import { GrantStore } from "./GrantStore.ts"
+import * as Containment from "./internal/Containment.ts"
 
 const data = (value: object, name: PropertyKey): unknown => {
   const descriptor = Object.getOwnPropertyDescriptor(value, name)
@@ -282,19 +283,22 @@ export const layer: Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner 
         )
       )
     }
-    return makeSpawner(
-      Effect.fn("ChildProcessSpawner.spawn")((command: ChildProcess.Command) =>
-        Effect.try({
-          try: () => snapshotCommand(command),
-          catch: () =>
-            systemError({
-              _tag: "InvalidData",
-              module: "ChildProcessSpawner",
-              method: "spawn",
-              description: "command must be an immutable supported process description"
-            })
-        }).pipe(
-          Effect.flatMap((snapshot) => check(snapshot).pipe(Effect.andThen(spawner.spawn(snapshot))))
+    return Containment.inherit(
+      spawner,
+      makeSpawner(
+        Effect.fn("ChildProcessSpawner.spawn")((command: ChildProcess.Command) =>
+          Effect.try({
+            try: () => snapshotCommand(command),
+            catch: () =>
+              systemError({
+                _tag: "InvalidData",
+                module: "ChildProcessSpawner",
+                method: "spawn",
+                description: "command must be an immutable supported process description"
+              })
+          }).pipe(
+            Effect.flatMap((snapshot) => check(snapshot).pipe(Effect.andThen(spawner.spawn(snapshot))))
+          )
         )
       )
     )

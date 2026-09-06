@@ -25,7 +25,6 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import type { Jj, JjError } from "@smthrs/jj"
 import * as NodeJj from "@smthrs/jj/node/NodeJj"
-import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import type { HostServiceIds } from "@smthrs/kernel/HostServices"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import type { FileSystem } from "effect/FileSystem"
@@ -79,7 +78,8 @@ const absoluteRoot = (root: string): string => {
 }
 
 /**
- * Stable implementation identities for the five Host service slots.
+ * Stable implementation identities for the raw bundle's five Host slots.
+ * Contained POSIX factories replace its spawner with {@link ProcessReaper.layerSpawner}.
  * @category models
  * @since 1.0.0-rc.0
  */
@@ -98,9 +98,9 @@ const platform = Layer.mergeAll(AtomicFileSystem.layer, Path.layer)
  * What a caller may configure about a contained Node host.
  *
  * `platform` is deliberately absent. `ContainedSpawner.Options` declares it so a
- * caller that supplies its own spawner can describe one, but here the spawner
- * IS Effect's Node spawner, which detaches by `process.platform` whatever a
- * record claims. A caller-supplied `"win32"` on a POSIX host would therefore
+ * caller that supplies its own spawner can describe one, but this native host
+ * detaches by `process.platform` whatever a record claims. A caller-supplied
+ * `"win32"` on a POSIX host would therefore
  * record `pgid: null` for a child that really does lead a group, and
  * {@link ProcessReaper.reap} would retire that record as `no-group` and leave
  * the orphan running forever — a durable lie rather than a compile error.
@@ -108,18 +108,7 @@ const platform = Layer.mergeAll(AtomicFileSystem.layer, Path.layer)
  * @category models
  * @since 1.0.0-rc.0
  */
-export type ContainedOptions = Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options
-
-/**
- * The spawner half of {@link ContainedOptions}, with the REAL platform last.
- *
- * Split from the reaper half rather than passed as one merged object, so a
- * property meant for one of them can never be read by the other.
- */
-const containment = (options?: ContainedOptions): ContainedSpawner.Options => ({
-  graceMs: options?.graceMs,
-  platform: process.platform
-})
+export type ContainedOptions = ProcessReaper.SpawnerOptions & ProcessReaper.Options
 
 /** The reaper half of {@link ContainedOptions}. */
 const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
@@ -184,7 +173,7 @@ export const layerContained = (
   options?: ContainedOptions
 ): Layer.Layer<NodeHost, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
-    ContainedSpawner.layer(containment(options)),
+    ProcessReaper.layerSpawner({ graceMs: options?.graceMs }),
     Layer.provide(NodeChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(
@@ -211,7 +200,7 @@ export const layerContainedAt = (
   options?: ContainedOptions
 ): Layer.Layer<NodeHost, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
-    ContainedSpawner.layer(containment(options)),
+    ProcessReaper.layerSpawner({ graceMs: options?.graceMs }),
     Layer.provide(NodeChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(

@@ -40,7 +40,6 @@ import * as NodeJj from "@smthrs/jj/node/NodeJj"
 import { SqlJournal } from "@smthrs/journal"
 import * as Journal from "@smthrs/journal/Journal"
 import * as KernelChildProcessSpawner from "@smthrs/kernel/ChildProcessSpawner"
-import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import * as KernelFileSystem from "@smthrs/kernel/FileSystem"
 import * as GrantStore from "@smthrs/kernel/GrantStore"
 import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
@@ -1031,7 +1030,7 @@ export const layerExecutor = (
   // MCP connections, and reap only verified children of dead owners before
   // exposing the spawner. The registration phase receives the engine journal
   // from NodeFlowsRuntime.layer, so these records survive this process.
-  const contained = ContainedSpawner.layer({ platform: process.platform }).pipe(
+  const contained = ProcessReaper.layerSpawner().pipe(
     Layer.provideMerge(platform),
     Layer.provideMerge(ProcessReaper.layer()),
     Layer.provide(ProcessLedger.layer({ hostId: hostname(), ownerPid: process.pid }))

@@ -245,7 +245,11 @@ const provider = DirectorySandbox.make({
 })
 ```
 
-`acquire` creates the deterministic scratch directory, runs shell commands there by default, exposes native host file operations, delivers real process signals, and removes the directory when the scope closes. The filesystem and spawner are injected values; the package takes no ambient host dependency. Closing a spawn's scope signals the whole process tree the command started, not only the wrapper shell, so a pipeline or a background job cannot outlive the scope that owned it.
+`acquire` first requires `ContainedSpawner.isContained(spawner)`: a raw spawner or a wrapper with only a kill deadline fails with `unavailable` before any directory or command is created. Use `NodeHost.layerContained()` or `BunHost.layerContained()` with a `ProcessLedger`; a custom host must supply a real platform lifecycle. The filesystem and spawner remain injected values, so this package has no production platform dependency.
+
+Acquisition creates the deterministic scratch directory, commands run there by default, and native host file operations serve it. Explicit `kill` and every spawn-scope finalizer delegate to the contained handle's `kill({ killSignal })`, including after the target's exit was observed. Cleanup failure fails scope release. The provider never signals a numeric handle pid itself: on POSIX that pid names the supervisor, while the exit code belongs to the target.
+
+The supplied POSIX lifecycle cleans up the owned process group even after a natural target exit, including a background child that keeps output open. Explicit stopping while the target is still alive also attempts to stop descendants that escaped into another process group. That extra ancestry sweep uses revalidated positive PIDs and is best effort; automatic cleanup after natural exit does not promise to recover deliberately escaped sessions. Closing the session removes its scratch directory after process cleanup.
 
 Each child receives only the host's `PATH`, `HOME`, `USER`, `LANG`, `LC_*`,
 `TERM`, `TMPDIR`, and `SHELL`, plus names explicitly declared in the spawn's

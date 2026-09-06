@@ -24,7 +24,7 @@ run anything you do not trust.
 - A package with the dependencies installed:
 
 ```bash
-pnpm add @smthrs/sandbox @effect/platform-node
+pnpm add @smthrs/sandbox@next @smthrs/platform-node@next @smthrs/kernel@next effect@4.0.0-rc.112
 ```
 
 ## Write the body
@@ -62,8 +62,10 @@ takes the host services it provisions with as values, so the package never
 reaches for an ambient host:
 
 ```ts
-import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
+import * as Layer from "effect/Layer"
 
 const program = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -80,6 +82,11 @@ const program = Effect.gen(function*() {
 })
 ```
 
+`DirectorySandbox` requires a lifecycle-backed spawner, such as
+`NodeHost.layerContained()` below. The memory ledger contains this process's
+commands; use a durable `ProcessLedger.layer` when a later host must reconcile
+retained process records.
+
 `Effect.scoped` is what ends the machine. Acquisition registers teardown as a
 finalizer of the acquiring scope, and closing the scope is the only lifecycle
 end the caller has: there is no `destroy` method to forget.
@@ -87,8 +94,12 @@ end the caller has: there is no `destroy` method to forget.
 ## Run it
 
 ```ts
+const host = NodeHost.layerContained().pipe(
+  Layer.provide(ProcessLedger.layerMemory({ hostId: "directory-quickstart", ownerPid: process.pid }))
+)
+
 console.log(
-  await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer), Effect.orDie))
+  await Effect.runPromise(program.pipe(Effect.provide(host), Effect.orDie))
 )
 ```
 

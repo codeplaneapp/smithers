@@ -51,12 +51,12 @@ The 1.0 release candidate has not reached npm yet. When it does it publishes
 under the `next` dist tag:
 
 ```bash
-pnpm add @smthrs/sandbox@next @effect/platform-node
+pnpm add @smthrs/sandbox@next @smthrs/platform-node@next @smthrs/kernel@next effect@4.0.0-rc.112
 ```
 
-Node.js 22.19.0 or later. `@effect/platform-node` supplies the host services
-`DirectorySandbox` is built from; a browser page or another runtime brings its
-own.
+Node.js 22.19.0 or later. `@smthrs/platform-node` supplies the contained host
+services `DirectorySandbox` requires. A raw spawner or a wrapper with only a
+kill deadline is refused before a workspace is created.
 
 ## Place one body on a machine
 
@@ -65,10 +65,12 @@ from one session, which is why `wc` finds a file that `writeFileString` wrote
 without either call naming a provider or an absolute remote path:
 
 ```ts
-import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 
@@ -91,14 +93,22 @@ const program = Effect.gen(function*() {
   )
 })
 
+const host = NodeHost.layerContained().pipe(
+  Layer.provide(ProcessLedger.layerMemory({ hostId: "directory-quickstart", ownerPid: process.pid }))
+)
+
 console.log(
-  await Effect.runPromise(program.pipe(Effect.provide(NodeServices.layer), Effect.orDie))
+  await Effect.runPromise(program.pipe(Effect.provide(host), Effect.orDie))
 )
 ```
 
 ```text
 22
 ```
+
+`DirectorySandbox` requires a lifecycle-backed spawner. The memory ledger
+contains this process's commands; use a durable `ProcessLedger.layer` when a
+later host must reconcile retained process records.
 
 `Effect.scoped` is what ends the machine: closing the scope runs the provider's
 teardown finalizer, which removes the directory and the file in it. Swap
@@ -108,7 +118,7 @@ teardown finalizer, which removes the directory and the file in it. Swap
 ## How this relates to @smthrs/flows
 
 `@smthrs/sandbox` stands alone: it shares its `effect` peer with the host and
-depends on [`@smthrs/kernel`](/api/kernel) for command-line rendering, and you
+depends on [`@smthrs/kernel`](/api/kernel) for command-line rendering and the containment contract, and you
 can use it in any Effect program without adopting anything else.
 
 It also supplies the machines that Smithers flows run on.

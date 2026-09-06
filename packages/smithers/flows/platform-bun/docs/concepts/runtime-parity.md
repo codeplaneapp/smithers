@@ -1,19 +1,18 @@
 ---
 title: "Runtime parity with Node"
-description: "Why the Bun bundle contains no runtime detection, which modules Bun and Node genuinely share, what that buys a program that composes it, and where the parity stops."
+description: "Which adapters Bun and Node share, how contained hosts prepare a runtime supervisor, and which runtime and platform boundaries still need separate verification."
 sidebar:
   order: 2
 ---
 
-The Bun bundle contains no `typeof Bun !== "undefined"` check, no branch on
-`process.versions.bun`, and no fallback path chosen at runtime. It needs none:
-the modules it puts in the slots are the modules Node runs. This page is why,
-and where the parity stops.
+The Bun bundle shares its host adapters with Node. A flow asks for the same
+service tags on either runtime. Shared source does not make every runtime or
+operating-system behavior identical, especially around native process pipes
+and cleanup.
 
 ## Bun and Node run the same modules here
 
-Three of the five slots are filled by code that is identical on both runtimes,
-not merely equivalent:
+Three of the raw bundle's five slots use shared implementations:
 
 - `@effect/platform-bun/BunChildProcessSpawner` is
   `@effect/platform-node-shared`'s spawner re-exported. Spawning a child is one
@@ -27,8 +26,15 @@ not merely equivalent:
   its own slot.
 
 `effect/Path` is runtime independent, and the network slot is Effect's
-fetch-backed client, which both runtimes provide natively. So the whole bundle
-is Bun-specific in exactly one way: which package it takes those modules from.
+fetch-backed client, which both runtimes provide natively.
+
+Contained POSIX variants substitute `ProcessReaper.layerSpawner`. It combines
+the shared native process adapter with a supervisor started by the current
+Node or Bun runtime. Preparation records the supervisor before executing the
+target. Compiled Bun executables and Node single-executable applications are
+refused before activation because they do not supply the runtime eval entry
+point. Windows retains the raw runtime spawner and remains unsupported best
+effort for containment.
 
 ## Two consequences you can rely on
 
@@ -37,9 +43,10 @@ runtime, so a program composed on `BunHost.layer` executes on Node 22.19.0 or
 later as well. That is not a compatibility shim; it is what "the same modules"
 means. The package declares both floors in `engines`.
 
-**A behavior recorded on one runtime replays on the other.** Because the
-spawner, the jj adapter, and the filesystem adapter are the same modules, a
-failure classified on Bun classifies the same way on Node.
+**Recorded durable behavior does not require a Bun-specific flow.** The same
+service contracts and error adapters are available on Node. Replay still
+depends on the flow's recorded inputs and implementations; shared source alone
+does not prove that a new native command has identical behavior on both hosts.
 
 ## Node-only in the browser-bundle sense
 
@@ -55,10 +62,11 @@ same five slots from browser primitives.
 
 ## Where the parity stops
 
-The bundle's conformance is verified on Node. Because the spawner, the jj
-adapter, and the filesystem adapter are the same modules on both runtimes, that
-is a claim about the modules Bun loads too, and not one about a Node-only
-build.
+Node-hosted conformance exercises the shared modules, but it is not an
+actual-Bun process test. Verify process streams, cancellation, and cleanup on
+the runtime and operating system you deploy. The contained handle's POSIX
+`pid` identifies its supervisor; target status and supported cleanup boundaries
+are described in [Contain and reap child processes](../guides/contain-child-processes.md).
 
 The filesystem is the exception worth holding on to. Its no-follow extension
 does not run in-process: it executes each guarded operation in a CPython 3

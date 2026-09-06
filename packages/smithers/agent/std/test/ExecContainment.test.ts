@@ -45,6 +45,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import * as ProcessReaper from "../../../flows/platform-node/src/ProcessReaper.ts"
 import { collectSources, fileBindsSpawningModule } from "../../../flows/test/SpawnSpecifiers.ts"
 import * as Exec from "../src/internal/Exec.ts"
 
@@ -106,7 +107,7 @@ const bareHost = Layer.provide(
 /** The real Node spawner under containment, which is how a host composes it. */
 const containedHost = (options?: ContainedSpawner.Options) =>
   Layer.provide(
-    ContainedSpawner.layer(options),
+    ContainedSpawner.layer(options, ProcessReaper.processLifecycle),
     Layer.merge(
       bareHost,
       Layer.effect(ProcessLedger.ProcessLedger, ProcessLedger.makeMemory({ hostId: "exec", ownerPid: process.pid }))

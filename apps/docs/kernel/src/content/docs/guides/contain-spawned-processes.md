@@ -8,18 +8,20 @@ editUrl: "https://github.com/smithersai/smithers/edit/main/packages/smithers/flo
 
 Without containment, a spawned child that ignores `SIGTERM` hangs a
 cancellation forever, and a host that crashes abandons every process it
-started. This guide wires the two pieces that fix both.
+started. This guide composes a platform lifecycle and a process ledger to own cleanup.
 
 ## Compose the spawner over the ledger
 
-`ContainedSpawner.layer` requires `ChildProcessSpawner` (which it also
-provides) and `ProcessLedger`:
+On Node or Bun, `ProcessReaper.layerSpawner` supplies the native adapter,
+prepared lifecycle, and kernel containment together. It requires
+`ChildProcessSpawner` (which it also provides) and `ProcessLedger`:
 
 ```ts
-import { ContainedSpawner, ProcessLedger } from "@smthrs/kernel"
+import { ProcessLedger } from "@smthrs/kernel"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import { Layer } from "effect"
 
-const contained = ContainedSpawner.layer({ graceMs: 2000, platform: process.platform }).pipe(
+const contained = ProcessReaper.layerSpawner({ graceMs: 2000 }).pipe(
   Layer.provide(rawSpawner),
   Layer.provideMerge(ProcessLedger.layer({ hostId: "my-host", ownerPid: process.pid }))
 )
@@ -29,13 +31,22 @@ const contained = ContainedSpawner.layer({ graceMs: 2000, platform: process.plat
 the `SIGKILL` that makes it. It defaults to `ContainedSpawner.defaultGraceMs`
 (2,000 ms).
 
-`platform` decides only one thing: whether a command that names no `detached`
-option gets a process group of its own. It defaults to `"linux"`, the detaching
-branch. Pass `process.platform` on a real host, because a win32 record claiming
+The factory always uses the real `process.platform`. A custom host can use
+`ContainedSpawner.layer(options, lifecycle)` directly; its `platform` option
+must describe the real process-group behavior. A win32 record claiming
 `pgid === pid` would name a group the child does not lead.
 
-The kernel's permission decorator and this one both provide the tag they
-require, so they stack in either order over one host implementation.
+The lifecycle prepares an owner before the command starts, records its
+identity, and only then activates the target. Each pipeline leg has its own
+record. Node and Bun use a live supervisor to keep group ownership after the
+target exits; its `pid` names that owner while `exitCode` and `isRunning`
+describe the target. A raw or deadline-only wrapper has no such contract and
+`ContainedSpawner.isContained` returns false for it.
+
+Compose the kernel permission decorator **above** containment. That order
+checks the caller's whole command before pipeline expansion or platform
+preparation. A permission decorator below it can see the trusted supervisor
+command instead of the command the caller requested.
 
 ## Choose a ledger
 
@@ -61,9 +72,11 @@ records before handing the host over. You supply the ledger.
 
 `record`, `release`, `reaped`, and `skipped` all carry the journal's failure to
 their caller, and the spawner acts on it: a spawn whose durable record fails is
-signalled, the call fails, and no pid is left in `ProcessLedger.live`. A child
-no incarnation of this host can discover is the one outcome containment exists
-to prevent, so do not catch that failure and proceed.
+cleaned up before target activation, and the call fails. Failed startup closes
+its own scope even if the caller catches the failure and keeps an outer scope
+open. A cleanup failure or an unverified result fails release and retains any
+record already committed; only the lifecycle's successful `settled` result
+permits retirement.
 
 The release finalizer is the exception, because it has nowhere left to report.
 A missed release leaves the record inherited, and the next reaper finds the pid

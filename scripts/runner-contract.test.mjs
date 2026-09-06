@@ -47,7 +47,9 @@ function declaration(directory, target) {
 export const Package = S.Package({ targets: { sentinel: ${target} } })\n`)
 }
 function run(directory, name) {
-  const result = spawnSync(process.execPath, [cli, "test", "//:sentinel", "--workspace", directory, "--json"], {
+  // Failure sentinels need the complete diagnostic tail: Playwright can emit
+  // installation output before the assertion that this contract must observe.
+  const result = spawnSync(process.execPath, [cli, "test", "//:sentinel", "--workspace", directory, "--json", "--verbose"], {
     cwd: directory, encoding: "utf8", timeout: 90_000, maxBuffer: 4 * 1024 * 1024,
     env: { ...process.env, SMITHERS_CACHE_URL: "", SMITHERS_CACHE_TOKEN: "" }
   })

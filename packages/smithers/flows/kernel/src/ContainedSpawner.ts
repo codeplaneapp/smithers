@@ -1,29 +1,22 @@
 /**
- * Process containment: a kill deadline and a durable record for every child.
+ * Process containment: prepared ownership, bounded cleanup and durable records.
  *
- * A cancelled run must leave no process behind. Effect's Node spawner already
- * signals a child's process group when the spawn scope closes, but it signals
- * only `SIGTERM` and then waits for the exit — and with no `forceKillAfter`
- * configured it waits forever. A child that traps `SIGTERM`, or a child whose
- * own children trap it, therefore turns a cancellation into a hung host: the
- * fiber never finishes releasing, so the run never reaches `cancelled` and the
- * process stays on the machine.
+ * A host supplies a {@link Lifecycle} that owns launch and cleanup independently
+ * of the command's exit status. The lifecycle first prepares a process identity;
+ * this decorator commits that identity to {@link ProcessLedger.ProcessLedger}
+ * before activating the caller's command. Failed or interrupted startup closes
+ * its child scope immediately, including any earlier legs of a partial pipeline.
  *
- * This module closes that hole in two places. Every command it spawns is
- * rewritten to carry an escalation deadline, so `SIGTERM` is followed by
- * `SIGKILL` after {@link Options.graceMs}; and every started process is
- * recorded in the {@link ProcessLedger.ProcessLedger} and released from it when
- * the scope closes, so a host that dies without running a finalizer leaves a
- * durable record its next incarnation can reap (`ProcessReaper` in
- * `@smthrs/platform-node`).
+ * Each command receives default termination and escalation options. The host
+ * lifecycle validates that policy and verifies cleanup before the decorator
+ * retires its record. Unverifiable cleanup retains the record for recovery;
+ * a host that dies also leaves its committed records discoverable by the next
+ * incarnation's reaper (`ProcessReaper` in `@smthrs/platform-node`).
  *
- * The spawner does not signal anything itself. Killing a live child is
- * Effect's job and it already does it correctly once a deadline exists; this
- * module supplies the deadline and the memory. That leaves nothing
- * platform-specific here, which is why it sits in the kernel beside the
- * `proc:spawn` decorator over the same tag rather than in one platform bundle:
- * `@smthrs/platform-node` and `@smthrs/platform-bun` compose the same
- * middleware.
+ * Every pipeline leg is prepared and recorded separately, including legs whose
+ * pid the aggregate handle does not expose. The module remains platform-neutral.
+ * A layer without a lifecycle provides only deadline defaults and bookkeeping;
+ * it does not declare the verified-cleanup contract read by {@link isContained}.
  *
  * Governing design:
  * `docs/specs/Concepts/Host Adapters.md`.
@@ -31,12 +24,20 @@
  * @since 1.0.0-rc.0
  */
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
 import * as Schedule from "effect/Schedule"
+import * as Scope from "effect/Scope"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import {
+  type ChildProcessHandle,
+  ChildProcessSpawner,
+  make as makeSpawner
+} from "effect/unstable/process/ChildProcessSpawner"
 import * as CommandLine from "./CommandLine.ts"
+import * as Containment from "./internal/Containment.ts"
+import * as Pipeline from "./internal/Pipeline.ts"
 import * as ProcessLedger from "./ProcessLedger.ts"
 
 /**
@@ -71,12 +72,60 @@ export interface Options {
 }
 
 /**
- * Rewrites a command so releasing it cannot hang.
+ * A platform's preparation, activation, and cleanup of a contained process.
+ *
+ * Preparation receives the underlying spawner and must own cleanup before it
+ * can fail or be interrupted. It returns the process identity to record and an
+ * idempotent `activate` effect. The decorator runs activation only after that
+ * identity commits to the ledger. A platform can therefore prepare an owner
+ * without executing the caller's command before it is durably discoverable.
+ *
+ * Failed startup closes its own scope immediately. A successful startup keeps
+ * that scope attached to the caller's scope. `settled` must stay false on failed
+ * or unverifiable cleanup; only verified cleanup permits ledger retirement.
+ * The wrapped handle applies the same policy to an explicit `kill`.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export type Lifecycle = (
+  command: ChildProcess.StandardCommand,
+  spawn: (
+    command: ChildProcess.StandardCommand
+  ) => Effect.Effect<ChildProcessHandle, PlatformError.PlatformError, Scope.Scope>
+) => Effect.Effect<
+  {
+    readonly handle: ChildProcessHandle
+    readonly activate: Effect.Effect<void, PlatformError.PlatformError, Scope.Scope>
+    readonly settled: Effect.Effect<boolean>
+  },
+  PlatformError.PlatformError,
+  Scope.Scope
+>
+
+/**
+ * Whether a spawner declares the platform lifecycle required for containment.
+ *
+ * Only a layer with a {@link Lifecycle} declares this contract. A kill deadline
+ * alone does not verify cleanup. The permission decorator preserves the
+ * declaration when it wraps a contained service. The marker interoperates
+ * across the package's ESM and CommonJS projections.
+ *
+ * This is a trusted composition check: a caller-supplied lifecycle remains
+ * responsible for implementing its contract.
+ *
+ * @category predicates
+ * @since 1.0.0
+ */
+export const isContained = (spawner: ChildProcessSpawner["Service"]): boolean => Containment.isContained(spawner)
+
+/**
+ * Supplies a command's default termination signal and escalation deadline.
  *
  * Both legs of a pipeline get the same policy — a pipeline is one action's
  * process tree and a surviving leg is as much of a leak as a surviving
- * child. A policy the caller chose is left alone: a command that already names
- * a `killSignal` or a `forceKillAfter` has an owner who thought about it.
+ * child. Explicit `killSignal` and `forceKillAfter` values are preserved for
+ * the host lifecycle to validate.
  *
  * @category constructors
  * @since 1.0.0-rc.0
@@ -129,50 +178,83 @@ const rightmost = (command: ChildProcess.Command): ChildProcess.StandardCommand 
  * Decorates the process spawner in place with containment and bookkeeping.
  *
  * Compose it over a host spawner layer with `Layer.provide`. It provides the
- * tag it also requires, exactly like `@smthrs/kernel`'s permission decorator,
- * so the two stack in either order over one host implementation.
+ * tag it also requires. Compose the permission decorator over this layer to
+ * authorize the caller's whole pipeline before its per-process expansion. A
+ * lifecycle may use different commands during preparation; a decorator below
+ * containment sees those platform commands instead of the caller's command.
  *
  * @category layers
  * @since 1.0.0-rc.0
  */
 export const layer = (
-  options?: Options
+  options?: Options,
+  lifecycle?: Lifecycle
 ): Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger.ProcessLedger> =>
   Layer.effect(
     ChildProcessSpawner,
     Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner
       const ledger = yield* ProcessLedger.ProcessLedger
-      return makeSpawner(
-        Effect.fn("ContainedSpawner.spawn")(function*(command: ChildProcess.Command) {
-          // The release finalizer is registered BEFORE the spawn, so scope
-          // closure runs it AFTER the spawn's own kill finalizer: finalizers
-          // run last-registered-first, and a ledger that announced an exit
-          // while the process was still being signalled would be telling the
-          // next incarnation to stop looking for something still alive. The
-          // slot is empty until the record exists, which is also what makes a
-          // spawn that never got recorded a no-op to release.
-          const slot: { current?: ProcessLedger.ProcessRecord } = {}
-          yield* Effect.addFinalizer(() =>
-            slot.current === undefined ? Effect.void : releaseQuietly(ledger, slot.current)
+      const service = makeSpawner(
+        (command) =>
+          Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function*() {
+              // A failed startup must clean up even when its caller catches the
+              // error and keeps the outer scope open. One child scope contains
+              // the entire pipeline, so failure of a later leg also closes all
+              // earlier legs. Successful spawns retain it until their caller closes.
+              const processScope = yield* Scope.fork(yield* Scope.Scope)
+              return yield* restore(
+                Pipeline.spawn(
+                  command,
+                  Effect.fn("ContainedSpawner.spawn")(function*(command) {
+                    // The release finalizer is registered BEFORE the spawn, so scope
+                    // closure runs it AFTER the spawn's own kill finalizer: finalizers
+                    // run last-registered-first, and a ledger that announced an exit
+                    // while the process was still being signalled would be telling the
+                    // next incarnation to stop looking for something still alive. The
+                    // slot is empty until the record exists, which is also what makes a
+                    // spawn that never got recorded a no-op to release.
+                    const slot: { current?: ProcessLedger.ProcessRecord; settled: Effect.Effect<boolean> } = {
+                      settled: Effect.succeed(true)
+                    }
+                    yield* Effect.addFinalizer(() =>
+                      Effect.gen(function*() {
+                        if (slot.current === undefined) return
+                        if (yield* slot.settled) return yield* releaseQuietly(ledger, slot.current)
+                        yield* Effect.logWarning(
+                          `process cleanup could not verify ${slot.current.pid}; retaining its ledger record`
+                        )
+                      })
+                    )
+                    const contained = withContainment(command, options) as ChildProcess.StandardCommand
+                    const watched = lifecycle === undefined ? undefined : yield* lifecycle(contained, spawner.spawn)
+                    const handle = watched?.handle ?? (yield* spawner.spawn(contained))
+                    slot.settled = watched?.settled ?? slot.settled
+                    const pid = handle.pid as number
+                    slot.current = yield* ledger.record({
+                      pid,
+                      pgid: groupOf(command, pid, options?.platform),
+                      commandDigest: CommandLine.render(command)
+                    }).pipe(
+                      // A spawn whose record did not commit is precisely the child this
+                      // module exists to make discoverable, so it is not started: the
+                      // process is signalled and the caller is told, rather than left
+                      // running with nothing durable naming it.
+                      Effect.tapCause(() => Effect.ignore(handle.kill())),
+                      Effect.mapError(unrecorded)
+                    )
+                    if (watched !== undefined) yield* watched.activate
+                    return handle
+                  })
+                ).pipe(Scope.provide(processScope))
+              ).pipe(
+                Effect.onError((cause) => Scope.close(processScope, Exit.failCause(cause)))
+              )
+            })
           )
-          const handle = yield* spawner.spawn(withContainment(command, options))
-          const pid = handle.pid as number
-          slot.current = yield* ledger.record({
-            pid,
-            pgid: groupOf(command, pid, options?.platform),
-            commandDigest: CommandLine.render(command)
-          }).pipe(
-            // A spawn whose record did not commit is precisely the child this
-            // module exists to make discoverable, so it is not started: the
-            // process is signalled and the caller is told, rather than left
-            // running with nothing durable naming it.
-            Effect.tapCause(() => Effect.ignore(handle.kill())),
-            Effect.mapError(unrecorded)
-          )
-          return handle
-        })
       )
+      return lifecycle === undefined ? service : Containment.mark(service)
     })
   )
 

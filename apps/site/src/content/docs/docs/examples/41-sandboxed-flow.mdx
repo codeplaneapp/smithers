@@ -28,13 +28,14 @@ Vitest reports the assertions that passed, failed, or were skipped. Examples tha
 
 ## Related reference
 
-[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/flows`](/docs/reference/api/flows/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
+[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/flows`](/docs/reference/api/flows/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
 
 ## Source
 
 ```ts title="examples/src/41-sandboxed-flow.ts"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as SandboxedFlow from "@smthrs/flows/SandboxedFlow"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, type Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -106,7 +107,11 @@ export const main = (options: MainOptions): Promise<MainResult> =>
       )
       return { result, acquisitions }
     }).pipe(
-      Effect.provide(NodeHost.layer),
+      Effect.provide(
+        NodeHost.layerContained().pipe(
+          Layer.provide(ProcessLedger.layerMemory({ hostId: "examples-sandboxed-flow", ownerPid: process.pid }))
+        )
+      ),
       Effect.orDie
     )
   )

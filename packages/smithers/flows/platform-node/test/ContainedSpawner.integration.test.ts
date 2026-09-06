@@ -23,6 +23,7 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import * as ProcessReaper from "../src/ProcessReaper.ts"
 
 const directory = mkdtempSync(join(tmpdir(), "flows-contained-"))
 
@@ -58,12 +59,12 @@ const waitForFile = async (path: string): Promise<string> => {
 
 const withLedger = <A, E>(
   use: (ledger: ProcessLedger.Service) => Effect.Effect<A, E, ChildProcessSpawner | Scope.Scope>,
-  options?: ContainedSpawner.Options
+  options?: ProcessReaper.SpawnerOptions
 ) =>
   Effect.gen(function*() {
     const ledger = yield* ProcessLedger.makeMemory({ hostId: "contained", ownerPid: process.pid })
     return yield* use(ledger).pipe(
-      Effect.provide(ContainedSpawner.layer(options)),
+      Effect.provide(ProcessReaper.layerSpawner(options)),
       Effect.provide(NodeChildProcessSpawner.layer),
       Effect.provide(NodeFileSystem.layer),
       Effect.provide(Path.layer),
@@ -178,7 +179,7 @@ describe("ContainedSpawner", () => {
       expect(result.failure._tag).toBe("PlatformError")
     }))
 
-  it.live("records the rightmost leg of a spawned pipeline", () =>
+  it.live("records every leg of a spawned pipeline", () =>
     Effect.gen(function*() {
       const pipeline = ChildProcess.pipeTo(
         ChildProcess.make("printf", ["a\\nb\\n"]),
@@ -192,12 +193,9 @@ describe("ContainedSpawner", () => {
         })
       ).pipe(Effect.scoped)
 
-      // One record for the pipeline, carrying the handle the spawner reports
-      // and the whole rendered line, so a reaper kills the tree it names.
-      expect(observed.live).toEqual([
-        expect.objectContaining({ pid: observed.pid, pgid: observed.pid })
-      ])
-      expect(observed.live[0]?.commandDigest).toContain("| wc -l")
+      expect(observed.live).toHaveLength(2)
+      expect(observed.live[0]?.commandDigest).toBe("printf 'a\\nb\\n'")
+      expect(observed.live[1]).toMatchObject({ pid: observed.pid, pgid: observed.pid, commandDigest: "wc -l" })
     }))
 
   it("gives every leg of a pipeline the same kill policy", () => {

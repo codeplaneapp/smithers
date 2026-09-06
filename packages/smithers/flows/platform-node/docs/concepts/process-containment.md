@@ -5,12 +5,11 @@ sidebar:
   order: 3
 ---
 
-Scope closure contains everything a live host still holds a handle for. It
-cannot contain anything after the host itself is gone: a `SIGKILL`ed engine
-runs no finalizer, so the agents it started keep running with nobody left to
-signal them.
-
-Containment is the answer to that, and it has two halves.
+A target's exit does not mean its children exited. A host killed outright
+runs no finalizers either. The contained Node host uses a live POSIX supervisor
+to own each process group independently of the target and to observe host loss
+through a private connection. A process ledger lets a later host reconcile
+records whose cleanup was not confirmed.
 
 ## Incarnations
 
@@ -25,15 +24,24 @@ operating system reuses pid numbers.
 
 ## The live half: the contained spawner
 
-`NodeHost.layerContained` composes [`@smthrs/kernel`](/api/kernel)'s
-`ContainedSpawner` over Effect's Node spawner. Two things change:
+`NodeHost.layerContained` uses `ProcessReaper.layerSpawner` to compose
+[`@smthrs/kernel`](/api/kernel)'s `ContainedSpawner` with a native process
+adapter and `ProcessReaper.processLifecycle`:
 
-- Each child gets an escalation deadline. Under `NodeHost.layer` a child is
-  signalled when its scope closes and then waited for, forever if it ignores
-  `SIGTERM`. Under containment it gets `SIGTERM`, then `SIGKILL` after
-  `graceMs`.
-- Each child is recorded in the `ProcessLedger` with the process group it
-  leads, so a crash leaves evidence.
+- Preparation creates an owner without executing the target. The kernel
+  records its identity and the original command digest before activation.
+- Every pipeline leg has a separate owner and ledger record. On POSIX the
+  handle's `pid` is that supervisor's; `exitCode` and `isRunning` describe the
+  target. Signals go through `handle.kill`.
+- Cleanup keeps its deadline after the target exits, so a same-group child
+  cannot keep inherited output open indefinitely. Only verified cleanup retires
+  the record; failed cleanup fails scope close and retains it.
+
+Default commands lead their own group. `detached: false` opts out of group
+cleanup and signals only the native target. Explicit stopping of a still-live
+grouped target additionally attempts a revalidated positive-PID sweep of
+escaped descendants, with ordinary POSIX PID races remaining. Natural exit
+does not promise cleanup of deliberately escaped sessions.
 
 `jj` goes through that same spawner rather than around it. `NodeJj.layer`
 spawns its own children, which is right for a host that has no spawner to

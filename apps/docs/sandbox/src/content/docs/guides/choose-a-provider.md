@@ -66,7 +66,11 @@ const microVm = MicrosandboxSandbox.make({
 ```
 
 `fs` and `spawner` are Effect's `FileSystem` and `ChildProcessSpawner`, taken
-from the host that composes the provider.
+from the host that composes the provider. For `DirectorySandbox`, the spawner
+must carry a platform lifecycle: use `NodeHost.layerContained()` or
+`BunHost.layerContained()` with a `ProcessLedger`, as in the
+[quickstart](/quickstart/). Raw and deadline-only spawners are refused
+before the workspace is created.
 
 `ContainerSandbox` defaults to the engine's `none` network. Set `network`
 explicitly to opt the container into an egress-capable engine mode.

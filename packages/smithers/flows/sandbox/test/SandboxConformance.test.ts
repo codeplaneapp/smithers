@@ -5,9 +5,8 @@
  * shown conforming doubles would be a statement about nothing, and a trial
  * whose truthful half is fake would prove the suite agrees with the fake.
  */
-import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -17,6 +16,7 @@ import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { platform } from "./helpers/containedPlatform.ts"
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-conformance-trials-")))
 const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-conformance-elsewhere-")))
@@ -24,11 +24,6 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
   rmSync(elsewhere, { recursive: true, force: true })
 })
-
-const platform = Layer.provideMerge(
-  NodeChildProcessSpawner.layer,
-  Layer.merge(NodeFileSystem.layer, Path.layer)
-)
 
 const services = Effect.runSync(
   Effect.gen(function*() {

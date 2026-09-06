@@ -2,13 +2,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Index from "../src/index.ts"
 import * as NodeHost from "../src/NodeHost.ts"
+import * as ScopedProcess from "../src/ScopedProcess.ts"
 
 describe("@smthrs/platform-node barrel", () => {
   it("re-exports every module as a namespace", () => {
-    expect(Object.keys(Index).sort()).toEqual(["HostLiveness", "NodeHost", "ProcessReaper"])
+    expect(Object.keys(Index).sort()).toEqual(["HostLiveness", "NodeHost", "ProcessReaper", "ScopedProcess"])
     expect(Index.NodeHost.layer).toBe(NodeHost.layer)
     expect(Index.NodeHost.layerAt).toBe(NodeHost.layerAt)
     expect(Index.NodeHost.layerContained).toBe(NodeHost.layerContained)
     expect(Index.NodeHost.layerContainedAt).toBe(NodeHost.layerContainedAt)
+    expect(Index.ScopedProcess.spawn).toBe(ScopedProcess.spawn)
+    expect(Index.ScopedProcess.status).toBe(ScopedProcess.status)
   })
 })

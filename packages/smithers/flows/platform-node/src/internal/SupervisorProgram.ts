@@ -1,0 +1,190 @@
+/**
+ * The isolated POSIX group owner. Kept as source because the same fixed program
+ * runs in Node and Bun without loading the caller's modules or configuration.
+ * Its behavior is exercised through the real prepared lifecycle tests.
+ * @private
+ * @since 1.0.0
+ */
+export const source = String.raw`
+const fs = require('node:fs');
+const net = require('node:net');
+const cp = require('node:child_process');
+const [socketPath, mode] = process.argv.slice(-2);
+const grouped = mode === 'group';
+const control = net.connect(socketPath);
+let config;
+let target;
+let targetDone = false;
+let stopping = false;
+let killing = false;
+let buffer = '';
+let timer;
+let escaped = new Map();
+
+// DirectorySandbox's trusted local explicit-stop contract also covers children
+// that deliberately create another session. This is best-effort positive-pid
+// signalling with identity revalidation, not the atomic own-group guarantee.
+const snapshot = () => {
+  const result = cp.spawnSync('/bin/ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart='], {
+    encoding: 'utf8', timeout: 500, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024,
+    env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }
+  });
+  if (result.error || result.status !== 0) throw new Error('Descendant observation unavailable');
+  const rows = new Map();
+  for (const line of result.stdout.trim().split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/.exec(line);
+    if (!match) throw new Error('Invalid descendant observation');
+    const [pid, parent, group] = match.slice(1, 4).map(Number);
+    const start = Date.parse(match[5]);
+    if (![pid, parent, group, start].every(Number.isSafeInteger)) throw new Error('Invalid descendant identity');
+    rows.set(pid, { pid, parent, group, start, zombie: match[4].startsWith('Z') });
+  }
+  return rows;
+};
+const captureEscaped = () => {
+  const rows = snapshot();
+  const descendants = new Set([target.pid]);
+  for (;;) {
+    const previous = descendants.size;
+    for (const row of rows.values()) if (descendants.has(row.parent)) descendants.add(row.pid);
+    if (descendants.size === previous) break;
+  }
+  for (const pid of descendants) {
+    const row = rows.get(pid);
+    if (row && !row.zombie && row.group !== process.pid && pid !== process.pid && pid > 1) escaped.set(pid, row);
+  }
+};
+const signalEscaped = (signal) => {
+  if (escaped.size === 0) return;
+  const rows = snapshot();
+  for (const [pid, recorded] of escaped) {
+    const row = rows.get(pid);
+    if (!row || row.zombie) { escaped.delete(pid); continue; }
+    if (row.start !== recorded.start || row.group !== recorded.group) {
+      throw new Error('Escaped descendant identity changed before signalling');
+    }
+    try { process.kill(pid, signal); }
+    catch (error) { if (error.code === 'ESRCH') escaped.delete(pid); else throw error; }
+  }
+};
+const cleanupError = (error) => send({ type: 'cleanup_error', message: String(error.message).slice(0, 2048) });
+const escapedSettled = () => {
+  if (escaped.size === 0) return true;
+  const rows = snapshot();
+  for (const [pid, recorded] of escaped) {
+    const row = rows.get(pid);
+    if (!row || row.zombie) { escaped.delete(pid); continue; }
+    if (row.start !== recorded.start || row.group !== recorded.group) {
+      throw new Error('Escaped descendant identity changed before cleanup verification');
+    }
+  }
+  return escaped.size === 0;
+};
+
+const send = (message, done = () => {}) => {
+  if (control.destroyed || !control.writable) return done();
+  control.write(JSON.stringify(message) + '\n', done);
+};
+const selfKill = () => process.kill(grouped ? -process.pid : process.pid, 'SIGKILL');
+const force = () => {
+  if (killing) return;
+  killing = true;
+  if (!grouped && target?.pid !== undefined && !targetDone) {
+    target.kill('SIGKILL');
+    return;
+  }
+  try { signalEscaped('SIGKILL'); } catch (error) { cleanupError(error); }
+  const deadline = Date.now() + 500;
+  const complete = () => {
+    try {
+      if (!escapedSettled()) {
+        if (Date.now() < deadline) { setTimeout(complete, 10); return; }
+        throw new Error('Escaped descendants did not settle before the cleanup bound');
+      }
+    } catch (error) { cleanupError(error); }
+    // A stopped/unresponsive parent must not prevent our own cleanup. Normally
+    // the tiny final frame flushes immediately; the fallback bounds that flush.
+    setTimeout(selfKill, 100);
+    send({ type: 'cleanup' }, selfKill);
+  };
+  complete();
+};
+const stop = (options = {}) => {
+  const signal = options.killSignal ?? config?.killSignal ?? 'SIGTERM';
+  // A target's exit cannot shorten a captured escaped child's grace period.
+  if (options.fast && escaped.size !== 0) return;
+  if (options.explicit && grouped && !targetDone && target?.pid !== undefined && !stopping) {
+    try { captureEscaped(); } catch (error) { cleanupError(error); }
+  }
+  if (signal === 'SIGKILL' || target?.pid === undefined || (!grouped && targetDone)) return force();
+  if (stopping) return;
+  stopping = true;
+  if (signal === 'SIGSTOP') return force();
+  // Keep the group owner alive to enforce escalation, including when the caller
+  // chooses a catchable signal other than TERM/INT. SIGSTOP is refused by host.
+  process.on(signal, () => {});
+  try { signalEscaped(signal); } catch (error) { cleanupError(error); }
+  if (grouped) process.kill(-process.pid, signal);
+  else target.kill(signal);
+  timer = setTimeout(force, options.graceMs ?? config?.graceMs ?? 2000);
+};
+const spawnError = (error) => {
+  send({ type: 'spawn_error', code: error.code, errno: error.errno,
+    syscall: error.syscall, path: error.path, message: String(error.message).slice(0, 2048) });
+  stop();
+};
+process.on('SIGTERM', () => { if (!stopping) stop(); });
+process.on('SIGINT', () => { if (!stopping) stop(); });
+process.on('uncaughtException', (error) => {
+  try { send({ type: 'fault', message: String(error.message).slice(0, 2048) }, force); }
+  finally { force(); }
+});
+process.on('unhandledRejection', (error) => { throw error; });
+control.on('end', () => stop());
+control.on('error', () => stop());
+control.setEncoding('utf8');
+control.on('data', (data) => {
+  buffer += data;
+  if (Buffer.byteLength(buffer) > 4 * 1024 * 1024) throw new Error('Control frame too large');
+  for (;;) {
+    const end = buffer.indexOf('\n');
+    if (end < 0) break;
+    const line = buffer.slice(0, end);
+    buffer = buffer.slice(end + 1);
+    const message = JSON.parse(line);
+    if (message.type === 'configure') {
+      if (config !== undefined || stopping) throw new Error('Duplicate or late configuration');
+      config = message;
+    } else if (message.type === 'stop') stop(message);
+    else if (message.type === 'start') {
+      if (config === undefined || target !== undefined || stopping) throw new Error('Invalid activation');
+      const descriptors = Array.from({ length: Math.max(2, ...config.userFds) + 1 }, () => 'ignore');
+      for (const fd of [0, 1, 2, ...config.userFds]) descriptors[fd] = fd;
+      try {
+        target = cp.spawn(config.command, config.args, {
+          cwd: config.cwd, env: config.env, shell: config.shell, detached: false, stdio: descriptors
+        });
+      } catch (error) { spawnError(error); continue; }
+      target.once('spawn', () => {
+        // Release every caller pipe copy. Keep the runtime's standard slots
+        // valid so a later internal allocation cannot reuse a closed 0/1/2.
+        for (const fd of [0, 1, 2]) {
+          fs.closeSync(fd);
+          const replacement = fs.openSync('/dev/null', fd === 0 ? 'r' : 'w');
+          if (replacement !== fd) throw new Error('Could not detach supervisor standard streams');
+        }
+        for (const fd of config.userFds) fs.closeSync(fd);
+        send({ type: 'spawned', pid: target.pid });
+      });
+      target.once('error', spawnError);
+      target.once('exit', (code, signal) => {
+        targetDone = true;
+        send({ type: 'exit', code, signal });
+        if (grouped) stop();
+        else { killing = false; clearTimeout(timer); force(); }
+      });
+    } else throw new Error('Invalid control message');
+  }
+});
+control.once('connect', () => send({ type: 'ready', version: 1, pid: process.pid }));
+`

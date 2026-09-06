@@ -39,7 +39,10 @@ descriptor, which names an inode rather than a name.
 outright runs no finalizer, so the agents and builds it started keep running
 with nobody left to signal them. `NodeHost.layerContained` gives every child a
 `SIGTERM`-then-`SIGKILL` deadline and a durable ledger record, and sweeps the
-records a previous incarnation abandoned while the layer is built.
+records a previous incarnation abandoned while the layer is built. The POSIX
+supervisor keeps ownership after a natural target exit and requests cleanup
+when its private parent connection closes. Cleanup must be verified before a
+record retires.
 
 **An honest answer about whether a run's owner is still alive.**
 `HostLiveness.isAlive` is the probe a durable engine consults before it takes a

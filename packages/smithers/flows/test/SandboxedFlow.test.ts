@@ -10,16 +10,17 @@
  * bundler cannot find, and a host-side declaration that drifted from the one
  * the guest ran.
  */
-import { NodeChildProcessSpawner, NodeCrypto, NodeFileSystem } from "@effect/platform-node"
+import { NodeCrypto } from "@effect/platform-node"
 import { afterAll, describe, expect, it } from "@effect/vitest"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Node from "@smthrs/plan/Node"
+import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, RemoteChildProcessSpawner, type Sandbox } from "@smthrs/sandbox"
 import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -49,9 +50,8 @@ const guestRuntime = (name: string, body: string): string => {
   return path
 }
 
-const platform = Layer.provideMerge(
-  NodeChildProcessSpawner.layer,
-  Layer.merge(NodeFileSystem.layer, Path.layer)
+const platform = NodeHost.layerContained({ graceMs: 80 }).pipe(
+  Layer.provide(ProcessLedger.layerMemory({ hostId: "sandboxed-flow-tests", ownerPid: process.pid }))
 )
 
 const provider = Effect.gen(function*() {

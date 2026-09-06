@@ -370,6 +370,37 @@ describe("run", () => {
     expect(Buffer.from(stdout).toString("utf8")).toBe("out")
     expect(Buffer.from(stderr).toString("utf8")).toBe("err")
   })
+
+  it("flushes a partial UTF-8 sequence when the command times out", async () => {
+    const error = await failed(
+      {
+        ...payload([
+          process.execPath,
+          "-e",
+          "process.stdout.write(Buffer.from([0x61,0xe2,0x82]));setInterval(()=>{},1000)"
+        ]),
+        timeoutMs: 2000
+      }
+    )
+    expect(error.code).toBe("timed_out")
+    expect(error.stdout).toBe("a\uFFFD")
+    expect(error.stderr).toContain("timed out")
+  })
+
+  it("keeps complete capture when optional output observers throw", async () => {
+    const result = await Effect.runPromise(Exec.run({
+      workspaceRoot: root,
+      onStdout: () => {
+        throw new Error("stdout observer failed")
+      },
+      onStderr: () => {
+        throw new Error("stderr observer failed")
+      }
+    }, payload([process.execPath, "-e", "process.stdout.write('out');process.stderr.write('err')"])))
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("out")
+    expect(result.stderr).toBe("err")
+  })
 })
 
 /**

@@ -5,8 +5,9 @@ sidebar:
   order: 4
 ---
 
-Cancelling a run must leave no process running. Two separate failures can
-break that, and `ContainedSpawner` closes both.
+A contained run owns its process lifetime independently of the target's exit
+status. The kernel supplies the ledger and composition contract; a platform
+lifecycle supplies launch and verified cleanup.
 
 ## A cancellation that never finishes
 
@@ -22,19 +23,31 @@ to `ContainedSpawner.defaultGraceMs` (2,000 ms). Both legs of a pipeline get
 the policy. A command that already names its own `killSignal` or
 `forceKillAfter` keeps the policy its caller chose.
 
-The spawner does not signal anything itself. Killing a live child is Effect's
-job, and Effect does it correctly once a deadline exists. This module supplies
-the deadline and the memory, which is why it lives in the kernel beside the
-`proc:spawn` decorator over the same tag rather than in one platform bundle:
-Node and Bun compose the same middleware.
+A deadline alone is insufficient. A target can exit naturally while a child
+keeps running or holds stdout open. `Lifecycle` prepares a live owner before
+execution, lets the kernel record it, then activates the target. Each pipeline
+leg has its own owner and record. Node and Bun use
+`ProcessReaper.layerSpawner`, which combines a prepared native adapter with
+`ProcessReaper.processLifecycle`; `NodeHost.layerContained` and
+`BunHost.layerContained` already install it. A smaller Node/Bun composition
+can use that factory directly. `ContainedSpawner.isContained` rejects a
+deadline-only wrapper.
+
+The platform owns signals and verifies cleanup. Its handle may identify a
+supervisor rather than the target, so callers use `handle.kill` and never
+signal the recorded numeric pid as a substitute. A target's exit alone does
+not authorize ledger retirement.
 
 ## A host that dies before its finalizers run
 
-The second failure is a crash. No finalizer runs, so nothing signals the
-children, and the next incarnation of the host has no idea they exist.
+A killed host runs no finalizers. The supplied POSIX supervisor observes its
+private parent connection closing and requests cleanup independently. A
+durable ledger still lets a later host reconcile any retained records when
+cleanup could not be confirmed.
 
 `ProcessLedger` is the durable memory that fixes it. Every successful spawn is
-recorded, and the record is released when the spawn's scope closes. Records
+recorded before target activation, and the record is released only after the
+lifecycle confirms cleanup when the spawn's scope closes. Records
 are ownerless journal entries on the run `flows.host:<hostId>` under the
 source id `@smthrs/kernel/ProcessLedger`, with four event types:
 
@@ -57,16 +70,14 @@ inherited.
 their caller. A swallowed write would leave a child no incarnation of the host
 can discover, which is the exact outcome containment exists to prevent.
 
-The spawner acts on that. A spawn whose durable record fails is signalled, the
-call fails, and no pid is left in `ProcessLedger.live`. Keeping it live would
-lie to every later reader about a process this incarnation still holds.
+A failed durable record prevents activation and closes the prepared owner.
+Failed startup in any pipeline leg immediately closes all legs already
+prepared for that logical command, even if the caller catches the failure.
 
-The release finalizer is the one exception, because it has nowhere left to
-report. It is registered **before** the spawn, so scope closure runs it after
-Effect's own kill finalizer: the exit is announced only once the process has
-been signalled. If the release write still fails after its retries, the record
-stays inherited rather than claiming that a possibly live process exited, and
-the next reaper finds the pid already gone and retires it then.
+The release finalizer runs after platform cleanup. If cleanup fails or its
+`settled` result is false, release fails and the record is retained. If cleanup
+is verified but the journal release write fails after its retries, the record
+also stays for the next reaper instead of inventing a successful retirement.
 
 ## Reaping is deliberately conservative
 
@@ -94,6 +105,8 @@ group at all instead.
 
 ## The grant identity is the command line alone
 
+Compose the permission decorator above containment to check the caller's
+whole command before pipeline expansion and platform preparation.
 Containment and authorization are separate concerns over the same tag, but
 they share one fact worth stating here. A spawn is checked as `proc:spawn`
 with `CommandLine.render(command)` as its resource, and that rendered line is

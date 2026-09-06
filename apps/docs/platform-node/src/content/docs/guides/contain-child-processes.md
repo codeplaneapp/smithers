@@ -20,7 +20,7 @@ underneath it. The choice belongs to the program that knows which it has.
 | `ProcessLedger.layer`       | yes                                        | `Journal` |
 | `ProcessLedger.layerMemory` | no                                         | nothing   |
 
-`layerMemory` still contains this incarnation: every child gets its deadline.
+`layerMemory` still supplies the live supervisor lifecycle and kill deadline.
 It simply inherits nothing, so the sweep always finds an empty orphan set.
 
 Both take the same options: `hostId`, the durable identity two incarnations
@@ -38,7 +38,7 @@ const host = NodeHost.layerContained({ graceMs: 2000 }).pipe(
 )
 ```
 
-`host` is a `Layer<NodeHost>`: the same five services `NodeHost.layer` hands
+`host` is a `Layer<NodeHost, JjError>`: the same five services `NodeHost.layer` hands
 out, spawning through the contained spawner. Swap `layerMemory` for
 `ProcessLedger.layer` to get the durable ledger, and provide a `Journal` from
 [`@smthrs/journal`](https://journal.smithers.sh/reference/api/) underneath it.
@@ -63,6 +63,20 @@ So standing a host up is also what cleans up after the incarnation that
 crashed. `jj` runs through that same spawner, so a `jj` invocation a crashed
 host left running is a ledger record like any other.
 
+Every spawn prepares a supervisor, commits its identity, and then activates
+the target. Each pipeline leg is recorded. On POSIX the handle's `pid` names
+the owner while `exitCode` describes the target. A natural target exit also
+cleans up its owned group; use the handle's `kill`, never an external signal
+to its numeric pid. Failed or unverified cleanup fails close and retains the
+record.
+
+A smaller host composition can use `ProcessReaper.layerSpawner` with a ledger
+and an underlying runtime spawner. This factory includes the native adapter
+whose pipe listeners remain alive through cancellation. Custom platform
+authors can pass a lifecycle to `ContainedSpawner.layer` directly. Compose
+the permission decorator above containment so it checks the original command
+before preparation.
+
 ## Set the options
 
 `NodeHost.ContainedOptions` has three fields, all optional:
@@ -77,11 +91,9 @@ A command that already names its own `killSignal` or `forceKillAfter` keeps
 them: a caller who set one thought about it.
 
 `ContainedSpawner.Options.platform` is deliberately not among these. The
-spawner underneath is Effect's, which detaches by the real `process.platform`
-whatever a record claims. A caller-supplied `"win32"` on a POSIX host would
-record `pgid: null` for a child that really does lead a group, and the reaper
-would retire that record as `no-group` and leave the orphan running forever: a
-durable lie rather than a compile error.
+platform factory reads the real `process.platform`, so process-group behavior
+and the recorded identity agree. A caller cannot describe a Windows record
+for an owner that actually leads a POSIX group.
 
 ## Read what the sweep decided
 
@@ -106,20 +118,22 @@ const sweep = Effect.gen(function*() {
 ```
 
 Each entry carries the record, whether it was killed, and, when it was not, the
-`Refusal` that says why. Three refusals leave the record for a later
-incarnation to try again: `owner-alive`, `identity-unverified`, and
-`own-group-unknown`. The rest are final. See
+`Refusal` that says why. Four refusals leave the record for a later
+incarnation to try again: `owner-alive`, `identity-unverified`,
+`own-group-unknown`, and `kill-failed`. The rest are final. See
 [Process containment](/concepts/process-containment/) for what each one
 means and why the split falls where it does.
 
 ## Verify it
 
-The most direct check is to kill a host outright and watch the next one clean
-up. Start a host that spawns a detached sleeper, `kill -9` the host process,
-confirm the sleeper is still running, then start a host with the same `hostId`
-and the same durable journal and confirm the sleeper is gone.
+Use a UUID-marked fixture that installs its signal handler before reporting
+readiness. Check both cancellation and natural target exit, including a child
+that inherits stdout, and require a stopped heartbeat plus an exited process
+identity. A target exit code alone is insufficient evidence.
 
-If it is still running, read the refusal. `identity-unverified` and
-`own-group-unknown` mean this host has no usable `/bin/ps`; `pre-boot` means
-the record was written within two seconds of the machine's boot instant and is
-one of the deliberate leaks.
+For host-loss behavior, kill only the fixture host and verify the private
+supervisor stops its owned group without requiring a new host. A subsequent
+host with the same `hostId` and durable journal reconciles retained records.
+Read any refusal instead of treating a skipped signal as a successful reap.
+The [process containment](/concepts/process-containment/) page describes
+`detached: false`, deliberately escaped sessions, and unsupported hosts.

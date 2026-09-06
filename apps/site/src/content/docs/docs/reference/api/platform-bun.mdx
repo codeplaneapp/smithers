@@ -62,12 +62,12 @@ identity record, and four re-exports.
 
 ### Layers
 
-| Export             | Signature                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `layer`            | `Layer<BunHost>`                                                                     |
-| `layerAt`          | `(root: string) => Layer<BunHost>`                                                   |
-| `layerContained`   | `(options?: ContainedOptions) => Layer<BunHost, never, ProcessLedger>`               |
-| `layerContainedAt` | `(root: string, options?: ContainedOptions) => Layer<BunHost, never, ProcessLedger>` |
+| Export             | Signature                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `layer`            | `Layer.Layer<BunHost \| Crypto.Crypto, JjError>`                                                              |
+| `layerAt`          | `(root: string) => Layer.Layer<BunHost \| Crypto.Crypto, JjError>`                                            |
+| `layerContained`   | `(options?: ContainedOptions) => Layer.Layer<BunHost \| Crypto.Crypto, JjError, ProcessLedger>`               |
+| `layerContainedAt` | `(root: string, options?: ContainedOptions) => Layer.Layer<BunHost \| Crypto.Crypto, JjError, ProcessLedger>` |
 
 `layer` provides all five Host services, including the runtime-independent
 `Path`. `Jj` is bound to the process working directory.
@@ -76,13 +76,27 @@ identity record, and four re-exports.
 absolute path; see [BunHostError](#bunhosterror).
 
 `layerContained` is `layer` with process containment turned on: every child is
-spawned through `@smthrs/kernel`'s `ContainedSpawner`, so it leads a recorded
-process group with a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger`
-record, and `@smthrs/platform-node`'s `ProcessReaper` sweeps the records a
+spawned through `@smthrs/kernel`'s `ContainedSpawner` with
+`ProcessReaper.layerSpawner`, including its native adapter and
+`ProcessReaper.processLifecycle`. Each pipeline leg prepares a supervisor,
+records its identity, and then activates the target with a
+`SIGTERM`-then-`SIGKILL` deadline. The ledger retires a record only after
+verified cleanup, and `@smthrs/platform-node`'s `ProcessReaper` sweeps the records a
 crashed incarnation left behind while the layer is built. `Jj` is built over
 that same spawner (`BunJj.layerSpawner`), so a `jj` a dead host left running is
 a ledger record like any other. The `ProcessLedger` requirement is deliberate:
 only the program knows whether it has a durable one.
+
+On POSIX, `handle.pid` names the supervisor; `exitCode` and `isRunning`
+describe the target. Natural target exit still cleans up children in its owned
+group, including children holding output open. `detached: false` retains the
+supervisor but opts out of group cleanup, signalling only the target. Use the
+handle's `kill` rather than signalling its numeric pid yourself. Explicit
+stopping while a grouped target is alive attempts a best-effort ancestry sweep
+for escaped descendants; natural exit does not reclaim deliberately escaped
+sessions. Failed cleanup fails scope close and retains its record. Ordinary
+Bun runtimes are supported; compiled Bun applications are refused before
+activation because they cannot launch the runtime supervisor.
 
 `layerContainedAt` is `layerContained` with `Jj` bound to `root`
 (`BunJj.layerSpawnerAt`). It refuses a root exactly as `layerAt` does.
@@ -114,12 +128,12 @@ its true length, so a root taken from input cannot flood a log line. Branch on
 
 ### Models
 
-| Export              | Type                                                                 | Meaning                                             |
-| ------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
-| `BunHost`           | `FileSystem \| Path \| ChildProcessSpawner \| Jj \| HttpClient`      | The closed Host service union this bundle provides. |
-| `BunHostErrorCode`  | `"invalid_repository_root"`                                          | The stable codes a factory refuses with.            |
-| `ContainedOptions`  | `Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options` | What a caller may configure about containment.      |
-| `implementationIds` | `Readonly<Record<HostServiceIds[number], string>>`                   | The module actually behind each closed Host slot.   |
+| Export              | Type                                                            | Meaning                                             |
+| ------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| `BunHost`           | `FileSystem \| Path \| ChildProcessSpawner \| Jj \| HttpClient` | The closed Host service union this bundle provides. |
+| `BunHostErrorCode`  | `"invalid_repository_root"`                                     | The stable codes a factory refuses with.            |
+| `ContainedOptions`  | `ProcessReaper.SpawnerOptions & ProcessReaper.Options`          | What a caller may configure about containment.      |
+| `implementationIds` | `Readonly<Record<HostServiceIds[number], string>>`              | The module behind each raw bundle Host slot.        |
 
 `ContainedOptions` carries three fields:
 
@@ -129,21 +143,21 @@ its true length, so a root taken from input cannot flood a log line. Branch on
 | `ownerPid` | The pid the reaper must never signal a group for. Default `process.pid`.                                              |
 | `system`   | The operating-system seam the reaper reads liveness and start times through. Default: chosen from `process.platform`. |
 
-`platform` is deliberately not part of it. It decides only whether a command
-that names no `detached` option gets a process group of its own, and the
-spawner underneath is Effect's Node spawner, which decides that from the real
-`process.platform` whatever it is told. A caller-supplied `"win32"` on a POSIX
-host could therefore only make the ledger record `pgid: null` for a child that
-genuinely leads a group, which `ProcessReaper.reap` then retires as `no-group`
-without signalling anything: a durable lie rather than a compile error.
+`platform` is deliberately not part of it. The factory uses the real
+`process.platform`, so the native process-group behavior and recorded identity
+agree. A caller cannot describe a Windows record for an owner that actually
+leads a POSIX group. For a smaller Bun composition, use
+`ProcessReaper.layerSpawner` with a ledger and an underlying runtime spawner.
 
 Each factory reads its options when it is called and splits them into the
 spawner half and the reaper half, so a field meant for one can never be read by
 the other and mutating the object afterwards changes neither layer.
 
-`implementationIds` names the implementation behind each slot rather than the
+`implementationIds` names the raw bundle implementation behind each slot rather than the
 specifier you import it through, which is why the filesystem entry is
-`@smthrs/platform-node/AtomicFileSystem`:
+`@smthrs/platform-node/AtomicFileSystem`. Contained factories replace the
+process runner with `ProcessReaper.layerSpawner`; this static table does not
+describe that substitution:
 
 ```ts
 {

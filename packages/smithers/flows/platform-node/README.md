@@ -80,21 +80,30 @@ const host = Layer.provide(
 )
 ```
 
+The contained spawner prepares a supervisor and records its identity before
+activating the target. On POSIX `handle.pid` names that owner, while
+`exitCode` and `isRunning` describe the target. Natural target exit still
+cleans up its owned group, including children holding output open. Use the
+handle's `kill` for signal delivery; cleanup failure retains the ledger record.
+`ScopedProcess` supplies this lifetime policy for transient commands without a
+durable ledger, and exposes the separate native `Handle.targetPid` for diagnostics.
+
 Complete host bundles require jj 0.39.0 or newer. Construction probes the binary outside the host process ledger and can fail with `JjError` (`not_installed` or `unsupported_version`). Repository commands use the selected process runner.
 
 ## Modules
 
-The barrel exports three namespaces: `NodeHost`, `HostLiveness`, and
-`ProcessReaper`. `AtomicFileSystem` is deliberately not among them; it is reached
+The barrel exports four namespaces: `NodeHost`, `HostLiveness`,
+`ProcessReaper`, and `ScopedProcess`. `AtomicFileSystem` is deliberately not among them; it is reached
 as `NodeHost.AtomicFileSystem` or through the
 `@smthrs/platform-node/AtomicFileSystem` subpath.
 
-| Module             | What it provides                                                                                                                                                    |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NodeHost`         | the complete closed Host bundle, plus re-exports of `AtomicFileSystem`, `ProcessReaper`, `NodeCrypto`, and Effect's raw `NodeFileSystem`, spawner, and `HttpClient` |
-| `AtomicFileSystem` | the descriptor-relative, no-follow filesystem layer and its options, ceilings, and glob grammar                                                                     |
-| `HostLiveness`     | whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                          |
-| `ProcessReaper`    | killing the process groups a dead incarnation of this host abandoned: `reap`, `layer`, `System`, `Refusal`, `posixSystem`, `windowsSystem`, `systemFor`             |
+| Module             | What it provides                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NodeHost`         | the complete closed Host bundle, plus re-exports of `AtomicFileSystem`, `ProcessReaper`, `NodeCrypto`, and Effect's raw `NodeFileSystem`, spawner, and `HttpClient`                  |
+| `AtomicFileSystem` | the descriptor-relative, no-follow filesystem layer and its options, ceilings, and glob grammar                                                                                      |
+| `HostLiveness`     | whether a recorded run owner is still alive: `isAlive`, `Owner`, `Options`                                                                                                           |
+| `ProcessReaper`    | live containment and restart reconciliation: `layerSpawner`, `SpawnerOptions`, `processLifecycle`, `reap`, `layer`, `System`, `Refusal`, `posixSystem`, `windowsSystem`, `systemFor` |
+| `ScopedProcess`    | transient scoped commands with the same lifecycle: `Options`, `Handle`, `spawn`, `Status`, `status`                                                                                  |
 
 `NodeCrypto` is re-exported for a different reason than the rest: `Crypto` is not
 a Host service, so it is not in the closed list, but every durable composition

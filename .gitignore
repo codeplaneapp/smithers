@@ -33,10 +33,12 @@ default.profraw
 
 # Environment
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+!.env.*.example
+!.env.sample
+!.env.template
+*.pem
 
 # Editor and OS files
 .vscode/

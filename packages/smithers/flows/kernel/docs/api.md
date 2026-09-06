@@ -739,7 +739,7 @@ looks sensitive; an `undefined` declaration removes an inherited name.
 
 ## ContainedSpawner
 
-Kill-escalation and ledger recording over the same spawner tag.
+Kill deadlines, platform lifecycle preparation, and ledger recording over the same spawner tag.
 
 ### ContainedSpawner.defaultGraceMs
 
@@ -762,6 +762,47 @@ interface Options {
 `platform` is `process.platform` spelling, and decides only whether a command
 naming no `detached` option gets a process group of its own. It defaults to
 `"linux"`, the detaching branch.
+
+### ContainedSpawner.Lifecycle
+
+```ts
+type Lifecycle = (
+  command: ChildProcess.StandardCommand,
+  spawn: (command: ChildProcess.StandardCommand) => Effect.Effect<ChildProcessHandle, PlatformError, Scope>
+) => Effect.Effect<
+  {
+    readonly handle: ChildProcessHandle
+    readonly activate: Effect.Effect<void, PlatformError, Scope>
+    readonly settled: Effect.Effect<boolean>
+  },
+  PlatformError,
+  Scope
+>
+```
+
+Preparation owns cleanup before it can fail or be interrupted. It returns an
+identity to record and an idempotent `activate` effect. The kernel records
+that identity with the original command digest before activation can execute
+the target. Failed startup closes its child scope immediately; successful
+startup attaches the whole logical command to the caller's scope. Only
+`settled === true` permits ledger retirement. A target exit alone does not
+prove its children ended.
+
+Node and Bun hosts install `ProcessReaper.layerSpawner` from
+`@smthrs/platform-node`, which composes the native adapter with
+`ProcessReaper.processLifecycle`. Use that factory for a smaller Node/Bun
+composition, or provide a lifecycle explicitly when implementing a custom host.
+
+### ContainedSpawner.isContained
+
+```ts
+const isContained: (spawner: ChildProcessSpawner["Service"]) => boolean
+```
+
+Checks whether the service declares a platform lifecycle. A deadline-only
+wrapper does not qualify. The declaration interoperates across ESM and CommonJS
+and is preserved by the kernel permission decorator. It is a trusted
+composition check, not proof that a caller-supplied lifecycle is honest.
 
 ### ContainedSpawner.withContainment
 
@@ -788,16 +829,22 @@ a group the child does not lead.
 
 ```ts
 const layer: (
-  options?: Options
+  options?: Options,
+  lifecycle?: Lifecycle
 ) => Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger>
 ```
 
-Applies containment to every spawn and records it in the `ProcessLedger`,
-releasing it when the scope closes. A spawn whose durable record fails is
-signalled, fails the call, and leaves no pid in `ProcessLedger.live`. The
-release finalizer is registered before the spawn, so scope closure runs it
-after Effect's own kill finalizer. It provides the tag it requires, so it and
-the permission decorator stack in either order over one host.
+Applies the policy to every spawn. Each pipeline leg is prepared and recorded
+separately; the aggregate handle exposes the rightmost leg's output and status.
+A failed record prevents target activation and closes the prepared owner's
+scope. Startup failure in a later pipeline leg also closes earlier legs.
+Cleanup failure or an unverified `settled` result retains the ledger record.
+
+Compose the permission decorator **above** containment so it authorizes the
+caller's whole command before expansion. A decorator below containment sees
+platform preparation commands, which may differ from the caller's command.
+Both layers provide the spawner tag they require, but their order has this
+semantic effect.
 
 ## ProcessLedger
 

@@ -85,7 +85,7 @@ is `not_installed`. Nothing else in the bundle is affected.
 The root entry point re-exports three modules as namespaces:
 
 ```ts
-import { HostLiveness, NodeHost, ProcessReaper } from "@smthrs/platform-node"
+import { HostLiveness, NodeHost, ProcessReaper, ScopedProcess } from "@smthrs/platform-node"
 ```
 
 Each module is also importable from its own subpath, which is the form the
@@ -120,6 +120,7 @@ Two subpath shapes are blocked in the export map:
 | `@smthrs/platform-node/AtomicFileSystem` | [src/AtomicFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/AtomicFileSystem.ts) |
 | `@smthrs/platform-node/HostLiveness`     | [src/HostLiveness.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/HostLiveness.ts)         |
 | `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       |
+| `@smthrs/platform-node/ScopedProcess`    | [src/ScopedProcess.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ScopedProcess.ts)       |
 
 Every entry point is Node-only by construction: the bundle resolves
 `node:child_process` and its siblings, and a build check keeps it that way. For a

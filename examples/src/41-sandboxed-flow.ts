@@ -11,6 +11,7 @@
  */
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as SandboxedFlow from "@smthrs/flows/SandboxedFlow"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, type Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -82,7 +83,11 @@ export const main = (options: MainOptions): Promise<MainResult> =>
       )
       return { result, acquisitions }
     }).pipe(
-      Effect.provide(NodeHost.layer),
+      Effect.provide(
+        NodeHost.layerContained().pipe(
+          Layer.provide(ProcessLedger.layerMemory({ hostId: "examples-sandboxed-flow", ownerPid: process.pid }))
+        )
+      ),
       Effect.orDie
     )
   )

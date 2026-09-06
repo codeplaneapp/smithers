@@ -1,11 +1,12 @@
-import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import * as CommandLine from "@smthrs/kernel/CommandLine"
+import * as ProcessReaper from "@smthrs/platform-node/ProcessReaper"
 import { Effect, Exit, FileSystem, Layer, Option, Path, PlatformError, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, realpathSync, rmSync } from "node:fs"
+import { randomUUID } from "node:crypto"
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll } from "vitest"
@@ -14,6 +15,7 @@ import type { RemoteProcess } from "../src/RemoteChildProcessSpawner/Provider.ts
 import { ProviderError } from "../src/RemoteChildProcessSpawner/ProviderError.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
 import * as SandboxConformance from "../src/SandboxConformance/index.ts"
+import { contain, platform, rawPlatform } from "./helpers/containedPlatform.ts"
 
 const isErrno = (cause: unknown, code: string): boolean =>
   typeof cause === "object" && cause !== null && "code" in cause && cause.code === code
@@ -83,11 +85,6 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-const platform = Layer.provideMerge(
-  NodeChildProcessSpawner.layer,
-  Layer.merge(NodeFileSystem.layer, Path.layer)
-)
-
 const services = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner
@@ -100,6 +97,38 @@ const provider = Effect.map(services, ({ fs, spawner }) => DirectorySandbox.make
 const budget = 30_000
 
 describe("DirectorySandbox", () => {
+  it.effect("refuses raw and deadline-only spawners before creating a workspace or starting a command", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      let created = 0
+      let spawns = 0
+      const raw = makeSpawner(() =>
+        Effect.suspend(() => {
+          spawns++
+          return Effect.fail(PlatformError.badArgument({ module: "ChildProcess", method: "spawn" }))
+        })
+      )
+      const deadlineOnly = yield* contain(raw)
+      for (const spawner of [raw, deadlineOnly]) {
+        const directory = DirectorySandbox.make({
+          fs: {
+            ...fs,
+            makeDirectory: (...args) =>
+              Effect.suspend(() => {
+                created++
+                return fs.makeDirectory(...args)
+              })
+          },
+          spawner,
+          root
+        })
+        const error = yield* Effect.scoped(Effect.flip(directory.acquire("uncontained")))
+        expect(error).toMatchObject({ code: "unavailable" })
+        expect(error.message).toContain("contained ChildProcessSpawner")
+      }
+      expect({ created, spawns }).toEqual({ created: 0, spawns: 0 })
+    }))
+
   it.effect(
     "passes the sandbox conformance suite against real directories and processes",
     () =>
@@ -418,25 +447,13 @@ describe("DirectorySandbox", () => {
     budget
   )
 
-  // Scope closure reaches only the `sh -c` wrapper the host spawner owns. A
-  // shell that forked its work, as a background job or pipeline, leaves that
-  // work running unless the finalizer performs the descendant walk.
+  // The contained host owns the whole group even when the shell forks its work.
   it.effect(
     "closing a spawn's scope ends everything the command started",
     () =>
       Effect.gen(function*() {
         const { fs, spawner } = yield* services
-        // The Node host currently adds process-group cleanup of its own. A
-        // non-detached command isolates the provider's descendant guarantee,
-        // because that host fallback can reach only the wrapper process.
-        const wrapperOnly = makeSpawner((command) =>
-          spawner.spawn(
-            command._tag === "StandardCommand"
-              ? ChildProcess.make(command.command, command.args, { ...command.options, detached: false })
-              : command
-          )
-        )
-        const directory = DirectorySandbox.make({ fs, spawner: wrapperOnly, root })
+        const directory = DirectorySandbox.make({ fs, spawner, root })
         let pid: number | undefined
         yield* Effect.scoped(
           Effect.gen(function*() {
@@ -465,10 +482,113 @@ describe("DirectorySandbox", () => {
     budget
   )
 
+  it.live(
+    "finishes inherited output and closes the group after observing the target's natural exit",
+    () =>
+      Effect.gen(function*() {
+        const token = randomUUID()
+        const heartbeat = join(root, `${token}.heartbeat`)
+        const trigger = join(root, `${token}.start`)
+        const child = `const fs=require('node:fs');const token=${JSON.stringify(token)};const path=${
+          JSON.stringify(heartbeat)
+        };let tick=0;process.on('SIGTERM',()=>{});const beat=()=>{fs.writeFileSync(path+'.tmp',JSON.stringify({token,pid:process.pid,tick:tick++}));fs.renameSync(path+'.tmp',path)};beat();setInterval(beat,25)`
+        const leader =
+          `const fs=require('node:fs');const{spawn}=require('node:child_process');const timer=setInterval(()=>{if(!fs.existsSync(${
+            JSON.stringify(trigger)
+          }))return;clearInterval(timer);spawn(process.execPath,['-e',${
+            JSON.stringify(child)
+          }],{stdio:['ignore','inherit','inherit']});const ready=setInterval(()=>{if(fs.existsSync(${
+            JSON.stringify(heartbeat)
+          })){clearInterval(ready);process.stdout.write('complete\\n',()=>process.exit(0))}},5)},5)`
+        const readBeat = (): { token: string; pid: number; tick: number } | undefined => {
+          try {
+            return JSON.parse(readFileSync(heartbeat, "utf8"))
+          } catch {
+            return undefined
+          }
+        }
+        const identity = (pid: number): string => {
+          const result = spawnSync("/bin/ps", ["-ww", "-o", "pid=,stat=,lstart=,command=", "-p", String(pid)], {
+            encoding: "utf8",
+            timeout: 2000,
+            env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+          })
+          if (result.status === 1 && result.stdout.trim() === "") return "gone"
+          if (result.status !== 0 || result.stdout.trim() === "") {
+            throw new Error(`ps failed: ${result.error ?? result.stderr}`)
+          }
+          return result.stdout.trim()
+        }
+        try {
+          const directory = yield* provider
+          const output = yield* Effect.scoped(
+            Effect.gen(function*() {
+              const session = yield* directory.acquire(`natural-${token}`)
+              const running = yield* session.spawn(
+                `${CommandLine.quote(process.execPath)} -e ${CommandLine.quote(leader)}`,
+                {}
+              )
+              // The child appears only after the host has returned its handle.
+              writeFileSync(trigger, "start")
+              const [output, code] = yield* Effect.all([stdoutOf(running), running.exitCode], {
+                concurrency: "unbounded"
+              })
+              expect(code).toBe(0)
+              return output
+            }).pipe(Effect.timeout("5 seconds"))
+          )
+          expect(output).toBe("complete\n")
+          const before = readBeat()
+          expect(before?.token).toBe(token)
+          yield* Effect.sleep(150)
+          const after = readBeat()
+          expect(after).toEqual(before)
+          const current = identity(after!.pid)
+          expect(current === "gone" || /^\d+\s+Z/.test(current), current).toBe(true)
+        } finally {
+          const beat = readBeat()
+          if (beat?.token === token && identity(beat.pid).includes(token)) {
+            try {
+              process.kill(beat.pid, "SIGKILL")
+            } catch (error) {
+              if (!isErrno(error, "ESRCH")) throw error
+            }
+          }
+        }
+      }),
+    budget
+  )
+
+  it.live("fails scope release when the contained handle refuses cleanup", () =>
+    Effect.gen(function*() {
+      const { fs } = yield* services
+      const native = yield* ChildProcessSpawner.pipe(Effect.provide(rawPlatform))
+      const refusing = yield* contain(native, (command, spawn) =>
+        ProcessReaper.processLifecycle(command, spawn).pipe(Effect.map((prepared) => ({
+          ...prepared,
+          handle: {
+            ...prepared.handle,
+            kill: () =>
+              Effect.fail(PlatformError.badArgument({
+                module: "ChildProcess",
+                method: "kill",
+                description: "cleanup was not confirmed"
+              }))
+          }
+        }))))
+      const closed = yield* Effect.scoped(Effect.gen(function*() {
+        const session = yield* DirectorySandbox.make({ fs, spawner: refusing, root }).acquire("cleanup-refusal")
+        const running = yield* session.spawn("true", {})
+        expect(yield* running.exitCode).toBe(0)
+      })).pipe(Effect.exit)
+      expect(Exit.isFailure(closed)).toBe(true)
+      expect(String(closed)).toContain("the signal SIGTERM could not be delivered")
+    }), budget)
+
   it.effect("reports a signal it could not deliver and leaves an exited command alone", () =>
     Effect.gen(function*() {
       const directory = yield* provider
-      const { fs, spawner } = yield* services
+      const { fs } = yield* services
       yield* Effect.scoped(
         Effect.gen(function*() {
           const session = yield* directory.acquire("kill-edges")
@@ -497,19 +617,32 @@ describe("DirectorySandbox", () => {
           )
         })
       )
-      // A spawner that starts the command but not the process walk reports
-      // the signal undelivered rather than delivered.
-      let spawns = 0
-      const walkless = makeSpawner((command) =>
-        ++spawns === 2
-          ? Effect.fail(
-            PlatformError.badArgument({ module: "ChildProcess", method: "spawn", description: "one process only" })
-          )
-          : spawner.spawn(command)
-      )
+      // A failed handle signal is reported directly; the provider must not
+      // spawn a second shell to signal a numeric pid behind the lifecycle.
+      const native = yield* ChildProcessSpawner.pipe(Effect.provide(rawPlatform))
+      let refusedOnce = false
+      const refusing = yield* contain(native, (command, spawn) =>
+        ProcessReaper.processLifecycle(command, spawn).pipe(Effect.map((prepared) => ({
+          ...prepared,
+          handle: {
+            ...prepared.handle,
+            kill: (options?: ChildProcess.KillOptions) =>
+              Effect.suspend(() => {
+                if (refusedOnce) {
+                  return prepared.handle.kill(options)
+                }
+                refusedOnce = true
+                return Effect.fail(PlatformError.badArgument({
+                  module: "ChildProcess",
+                  method: "kill",
+                  description: "signal transport refused"
+                }))
+              })
+          }
+        }))))
       const undelivered = yield* Effect.scoped(
         Effect.gen(function*() {
-          const session = yield* DirectorySandbox.make({ fs, spawner: walkless, root }).acquire("walkless")
+          const session = yield* DirectorySandbox.make({ fs, spawner: refusing, root }).acquire("refused-signal")
           const running = yield* session.spawn("sleep 3617", {})
           return yield* Effect.flip(session.kill!(running, "SIGTERM"))
         })
@@ -521,14 +654,17 @@ describe("DirectorySandbox", () => {
   it.effect("refuses a spawn against a command that cannot start", () =>
     Effect.gen(function*() {
       const { fs } = yield* services
-      const spawner = makeSpawner(() =>
-        Effect.fail(
-          PlatformError.badArgument({
-            module: "ChildProcess",
-            method: "spawn",
-            description: "broken transport"
-          })
-        )
+      const spawner = yield* contain(
+        makeSpawner(() =>
+          Effect.fail(
+            PlatformError.badArgument({
+              module: "ChildProcess",
+              method: "spawn",
+              description: "broken transport"
+            })
+          )
+        ),
+        ProcessReaper.processLifecycle
       )
       const directory = DirectorySandbox.make({ fs, spawner, root })
       const failure = yield* Effect.scoped(

@@ -1,12 +1,11 @@
 /**
  * Reaping the processes a dead host incarnation abandoned.
  *
- * Scope closure contains everything a live host still holds a handle for
- * ({@link ContainedSpawner}). It cannot contain anything after the host itself
- * is gone: a `SIGKILL`ed engine runs no finalizer, so the agents it had started
- * keep running with nobody left to signal them. The old runtime solved this by
- * recording spawned pids and sweeping them from the next process; this module
- * is that sweep over the {@link ProcessLedger.ProcessLedger}.
+ * Scope closure cleans up work a live host still owns. On POSIX, a prepared
+ * supervisor also receives private-channel EOF when its host disappears and
+ * independently requests group cleanup. The durable ledger remains the fallback
+ * when that cleanup is incomplete or cannot be verified; the next incarnation
+ * uses this module to examine the recorded process identities before acting.
  *
  * The rules are narrow on purpose, because the input is a durable record that
  * outlived the process that wrote it and a pid is reused. A record is signalled
@@ -49,11 +48,16 @@
  *
  * @since 0.1.0
  */
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import type * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner, make as makeSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawnSync } from "node:child_process"
 import { uptime } from "node:os"
+import * as PipedProcess from "./internal/PipedProcess.ts"
+import * as ProcessCleanup from "./internal/ProcessCleanup.ts"
 
 /**
  * What the operating system can say about a pid.
@@ -187,6 +191,89 @@ export const defaultPsExecutable = "/bin/ps"
 
 /** How long the probe may take before it counts as an answer nobody gave. */
 const psTimeoutMs = 5000
+
+/** A live-release probe has its own short bound within the shutdown deadline. */
+const cleanupProbeTimeoutMs = 500
+
+/**
+ * One fixed-path snapshot supplies group membership, start identities and our
+ * own group together. Only numeric fields and C-locale lstart are read; command
+ * text and the caller's PATH never influence signal authority.
+ */
+const groupSnapshot = (pgid: number): ProcessCleanup.Snapshot | undefined => {
+  const result = spawnSync(defaultPsExecutable, ["-A", "-o", "pid=,pgid=,stat=,lstart="], {
+    encoding: "utf8",
+    timeout: cleanupProbeTimeoutMs,
+    killSignal: "SIGKILL",
+    env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+  })
+  if (result.error !== undefined || result.signal !== null || result.status !== 0) return undefined
+  let own: number | undefined
+  const members: Array<ProcessCleanup.Member> = []
+  for (const line of result.stdout.trim().split("\n")) {
+    const match = /^\s*([0-9]+)\s+([0-9]+)\s+(\S+)\s+(.+)$/.exec(line)
+    if (match === null) return undefined
+    const pid = Number(match[1])
+    const group = Number(match[2])
+    if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(group)) return undefined
+    if (pid === process.pid) own = group
+    if (group !== pgid) continue
+    const started = Date.parse(match[4]!)
+    if (Number.isNaN(started)) return undefined
+    members.push({ pid, startedAtMs: started, zombie: match[3]!.startsWith("Z") })
+  }
+  return own === undefined || own <= 0 ? undefined : { ownGroup: own, members }
+}
+
+/**
+ * Live cleanup for Node and Bun contained spawners.
+ *
+ * A trusted supervisor remains the group owner after the target exits. It
+ * enforces cleanup on target completion, parent loss and explicit release; the
+ * target starts only after its owner is durably recorded. Host observations
+ * never signal a pid: they only shorten the owner's deadline or verify an empty
+ * group before retiring its record. Failed verification retains the record.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const processLifecycle = ProcessCleanup.lifecycle({
+  platform: process.platform,
+  snapshot: groupSnapshot
+})
+
+/**
+ * The default grace period for a contained host spawner.
+ *
+ * The platform is always the running platform; callers cannot describe a
+ * Windows ledger identity for a process that actually leads a POSIX group.
+ * @category models
+ * @since 1.0.0
+ */
+export type SpawnerOptions = Omit<ContainedSpawner.Options, "platform">
+
+/**
+ * Provides a ledger-backed spawner with this platform's prepared cleanup.
+ *
+ * On POSIX, native pipe listeners live until their descriptors close, including
+ * writes interrupted by owner loss. The kernel expands pipelines before this
+ * private standard-command adapter is called. On Windows, the supplied runtime
+ * spawner retains its existing process-tree termination behavior.
+ *
+ * The caller supplies the durable or in-memory ledger and the underlying
+ * runtime spawner. This layer records new owners; {@link layer} separately reaps
+ * records inherited from a previous host incarnation.
+ * @category layers
+ * @since 1.0.0
+ */
+export const layerSpawner = (
+  options?: SpawnerOptions
+): Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger.ProcessLedger> => {
+  const contained = ContainedSpawner.layer({ graceMs: options?.graceMs, platform: process.platform }, processLifecycle)
+  if (process.platform === "win32") return contained
+  const standard = makeSpawner((command) => PipedProcess.spawn(command as ChildProcess.StandardCommand, undefined))
+  return Layer.provide(contained, Layer.succeed(ChildProcessSpawner)(standard))
+}
 
 /** A whole number and nothing else, which is all a `pgid` column may be. */
 const decimal = /^[0-9]+$/

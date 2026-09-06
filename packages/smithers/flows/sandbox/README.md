@@ -116,6 +116,12 @@ hold. `signals-a-running-command` watches the process rather than the call: a
 and leaks a process for every cancelled action, so the check waits
 `Commands.stopsWithin` for the command to stop and names it when it does not.
 
+`DirectorySandbox` requires a lifecycle-backed contained spawner, such as
+`NodeHost.layerContained()` provided with a `ProcessLedger`. It refuses raw or
+deadline-only spawners before creating a workspace. Explicit kill and every
+spawn-scope close delegate to the contained handle; an observed target exit
+does not skip cleanup, and cleanup failure fails release.
+
 `DirectorySandbox` starts local children with a replacement environment. The
 host contributes only `PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TERM`, `TMPDIR`,
 and `SHELL`; `Session.spawn` adds the names its caller explicitly declares.

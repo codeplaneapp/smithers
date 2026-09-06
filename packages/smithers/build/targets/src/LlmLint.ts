@@ -9,11 +9,13 @@
  * @since 0.1.0
  */
 import { Action, type FlowRuntime } from "@smthrs/flow"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { minimatch } from "minimatch"
-import * as NodeChildProcess from "node:child_process"
 import * as NodePath from "node:path"
 import { failureMessage } from "./GeneratedFile.ts"
 import * as Input from "./Input.ts"
@@ -415,23 +417,9 @@ const decodeTail = (capture: TailCapture): string => {
   }
 }
 
-/** Kills the child and, on hosts with process groups, every descendant it started. */
-const killTree = (child: NodeChildProcess.ChildProcess): void => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, "SIGKILL")
-      return
-    } catch {
-      // Windows has no negative-pid process-group signaling; use the child fallback.
-    }
-  }
-  try {
-    child.kill("SIGKILL")
-  } catch {
-    // The process may have exited between the state observation and the signal.
-  }
-}
+/** Preserves the native errno used to distinguish a missing model executable. */
+const subprocessError = (error: PlatformError.PlatformError): NodeJS.ErrnoException =>
+  error.cause instanceof Error ? error.cause : new Error(error.reason.description ?? error.message, { cause: error })
 
 const spawnError = (message: string, code?: string | undefined): NodeJS.ErrnoException => {
   const error: NodeJS.ErrnoException = new Error(message)
@@ -473,88 +461,57 @@ const spawnText = (
   args: ReadonlyArray<string>,
   options: SpawnOptions
 ): Effect.Effect<Spawned, NodeJS.ErrnoException> =>
-  Effect.callback<Spawned, NodeJS.ErrnoException>((resume) => {
-    let child: NodeChildProcess.ChildProcess
-    try {
-      child = NodeChildProcess.spawn(executable, args, {
-        cwd,
-        detached: true,
-        env: spawnEnvironment(options.sensitiveEnv, options.git),
-        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-        windowsHide: true
-      })
-    } catch (cause) {
-      resume(Effect.fail(new Error(failureMessage(cause), { cause })))
-      return Effect.void
-    }
+  Effect.gen(function*() {
+    const child = yield* ScopedProcess.spawn({
+      command: executable,
+      args,
+      cwd,
+      env: spawnEnvironment(options.sensitiveEnv, options.git),
+      stdin: options.stdin === undefined ? "ignore" : "pipe",
+      killSignal: "SIGKILL",
+      forceKillAfter: 0,
+      windowsHide: true
+    }).pipe(Effect.mapError(subprocessError))
     const stdout = byteCapture(options.stdoutBytes)
     const stderr = tailCapture(maximumStderrBytes)
-    let settled = false
-    const timer = setTimeout(() => {
-      killTree(child)
-      settle(Effect.fail(spawnError(`subprocess timed out after ${options.timeoutMs}ms`, "ETIMEDOUT")))
-    }, options.timeoutMs)
-    const settle = (outcome: Effect.Effect<Spawned, NodeJS.ErrnoException>): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resume(outcome)
-    }
-    const failPipe = (message: string): void => {
-      killTree(child)
-      settle(Effect.fail(spawnError(message, "EIO")))
-    }
-    if (child.stdout === null || child.stderr === null) {
-      failPipe("the subprocess was created without stdout and stderr pipes")
-      return Effect.sync(() => killTree(child))
-    }
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (!settled && !appendBytes(stdout, chunk)) {
-        failPipe(`subprocess stdout exceeded ${options.stdoutBytes} bytes`)
-      }
+    const [status] = yield* Effect.all([
+      ScopedProcess.status(child).pipe(Effect.mapError(subprocessError)),
+      child.stdout.pipe(
+        Stream.mapError((error) => spawnError(`stdout could not be read: ${subprocessError(error).message}`, "EIO")),
+        Stream.runForEach((chunk) =>
+          Effect.suspend(() =>
+            appendBytes(stdout, chunk)
+              ? Effect.void
+              : Effect.fail(spawnError(`subprocess stdout exceeded ${options.stdoutBytes} bytes`, "EIO"))
+          )
+        )
+      ),
+      child.stderr.pipe(
+        Stream.mapError((error) => spawnError(`stderr could not be read: ${subprocessError(error).message}`, "EIO")),
+        Stream.runForEach((chunk) => Effect.sync(() => appendTail(stderr, chunk)))
+      ),
+      options.stdin === undefined ? Effect.void : Stream.make(Buffer.from(options.stdin, "utf8")).pipe(
+        Stream.run(child.stdin),
+        Effect.mapError((error) => spawnError(`stdin could not be written: ${subprocessError(error).message}`, "EIO"))
+      )
+    ], { concurrency: "unbounded" })
+    const decoded = yield* Effect.try({
+      try: () => decodeBytes(stdout, "subprocess stdout"),
+      catch: (cause) => new Error(failureMessage(cause), { cause })
     })
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (!settled) appendTail(stderr, chunk)
-    })
-    child.stdout.on("error", (error: NodeJS.ErrnoException) => failPipe(`stdout could not be read: ${error.message}`))
-    child.stderr.on("error", (error: NodeJS.ErrnoException) => failPipe(`stderr could not be read: ${error.message}`))
-    child.on("error", (error: NodeJS.ErrnoException) => settle(Effect.fail(error)))
-    child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return
-      let decoded: string
-      try {
-        decoded = decodeBytes(stdout, "subprocess stdout")
-      } catch (cause) {
-        settle(Effect.fail(new Error(failureMessage(cause), { cause })))
-        return
-      }
-      const diagnostic = decodeTail(stderr)
-      settle(Effect.succeed({
-        exitCode: exitCode ?? -1,
-        stdout: decoded,
-        stderr: signal === null ? diagnostic : `${diagnostic}\nsubprocess terminated by ${signal}`.trim()
-      }))
-    })
-    if (options.stdin !== undefined) {
-      if (child.stdin === null) {
-        failPipe("the subprocess was created without a stdin pipe")
-      } else {
-        child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-          if (!settled) failPipe(`stdin could not be written: ${error.message}`)
-        })
-        try {
-          child.stdin.end(options.stdin, "utf8")
-        } catch (cause) {
-          failPipe(`stdin could not be written: ${failureMessage(cause)}`)
-        }
-      }
+    const diagnostic = decodeTail(stderr)
+    return {
+      exitCode: status.code ?? -1,
+      stdout: decoded,
+      stderr: status.signal === null ? diagnostic : `${diagnostic}\nsubprocess terminated by ${status.signal}`.trim()
     }
-    return Effect.sync(() => {
-      settled = true
-      clearTimeout(timer)
-      killTree(child)
-    })
-  })
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: options.timeoutMs,
+      orElse: () => Effect.fail(spawnError(`subprocess timed out after ${options.timeoutMs}ms`, "ETIMEDOUT"))
+    }),
+    Effect.scoped
+  )
 
 /** Removes declared-input workspace-root notation for matching git paths. */
 const workspacePattern = (pattern: string): string => pattern.startsWith("//") ? pattern.slice(2) : pattern

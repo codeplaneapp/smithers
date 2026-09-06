@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import { execFile, spawnSync } from "node:child_process"
+import { randomUUID } from "node:crypto"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
@@ -1072,6 +1073,87 @@ describe("LlmLint.promptEngine protocol boundary", () => {
       else process.env["PROMPT_SECRET"] = previous
     }
   })
+
+  it.skipIf(process.platform === "win32")(
+    "settles a model that exits naturally while its child holds stdout",
+    async () => {
+      const token = randomUUID()
+      const heartbeat = NodePath.join(root, "natural-exit-heartbeat.json")
+      const child = [
+        "const fs = require(\"node:fs\")",
+        "const { execFileSync } = require(\"node:child_process\")",
+        `const token = ${JSON.stringify(token)}`,
+        `const path = ${JSON.stringify(heartbeat)}`,
+        "const start = execFileSync(\"/bin/ps\", [\"-o\", \"lstart=\", \"-p\", String(process.pid)], { encoding: \"utf8\", env: { LC_ALL: \"C\", PATH: \"/usr/bin:/bin\" } }).trim()",
+        "let tick = 0",
+        "process.on(\"SIGTERM\", () => {})",
+        "const beat = () => { fs.writeFileSync(path + \".tmp\", JSON.stringify({ token, pid: process.pid, start, tick: tick++ })); fs.renameSync(path + \".tmp\", path) }",
+        "beat()",
+        "setInterval(beat, 25)"
+      ].join("\n")
+      const body = [
+        "import { spawn } from \"node:child_process\"",
+        "import { existsSync } from \"node:fs\"",
+        "for await (const chunk of process.stdin) {}",
+        `spawn(process.execPath, ["-e", ${JSON.stringify(child)}], { stdio: ["ignore", "inherit", "inherit"] })`,
+        `const ready = setInterval(() => { if (existsSync(${
+          JSON.stringify(heartbeat)
+        })) { clearInterval(ready); process.stdout.write(${
+          JSON.stringify(JSON.stringify({ result: "contained" }))
+        }, () => process.exit(0)) } }, 5)`
+      ].join("\n")
+      const readBeat = async (): Promise<{ token: string; pid: number; start: string; tick: number } | undefined> => {
+        try {
+          return JSON.parse(await Fs.readFile(heartbeat, "utf8"))
+        } catch {
+          return undefined
+        }
+      }
+      const identity = (pid: number): string => {
+        const result = spawnSync("/bin/ps", ["-ww", "-o", "pid=,stat=,lstart=,command=", "-p", String(pid)], {
+          encoding: "utf8",
+          timeout: 2000,
+          env: { LC_ALL: "C", PATH: "/usr/bin:/bin" }
+        })
+        if (result.status === 1 && result.stdout.trim() === "") return "gone"
+        if (result.status !== 0 || result.stdout.trim() === "") {
+          throw new Error(
+            `ps failed: ${result.error ?? result.stderr}`
+          )
+        }
+        return result.stdout.trim()
+      }
+      const executable = await scriptCli("natural-exit-model", body)
+      try {
+        const answer = await Effect.runPromise(LlmLint.promptEngine(
+          { workspaceRoot: root, executable, timeoutMs: 5000 },
+          { engine: "claude", model: "model", prompt: "prompt" }
+        ))
+        expect(answer).toBe("contained")
+        const before = await readBeat()
+        expect(before?.token).toBe(token)
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        const after = await readBeat()
+        expect(after).toEqual(before)
+        const state = identity(after!.pid)
+        expect(state === "gone" || /^\d+\s+Z/.test(state), state).toBe(true)
+      } finally {
+        const beat = await readBeat()
+        if (beat?.token === token) {
+          const current = identity(beat.pid)
+          // A failing lifetime assertion must clean up only this UUID fixture,
+          // with its start identity rechecked immediately before signalling.
+          if (current.includes(token) && current.includes(beat.start)) {
+            try {
+              process.kill(beat.pid, "SIGKILL")
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error
+            }
+          }
+        }
+      }
+    }
+  )
 
   it("rejects invalid UTF-8 from model stdout", async () => {
     const executable = await scriptCli(

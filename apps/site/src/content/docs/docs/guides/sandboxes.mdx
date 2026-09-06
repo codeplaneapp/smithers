@@ -48,7 +48,7 @@ Every bundled provider derives the machine's name from the session key the same 
 
 ## 2. Place one action body somewhere else
 
-Keep the durable engine here and give only the action's implementation layer the sandbox host. `Sandbox.layerHost(provider, { session })` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This is example 40 verbatim, where `fs` and `spawner` are the engine host's own services and `CountBytes` is the declared action:
+Keep the durable engine here and give only the action's implementation layer the sandbox host. `Sandbox.layerHost(provider, { session })` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This excerpt from example 40 uses `fs` and `spawner` from `NodeHost.layerContained()` provided with a `ProcessLedger`; `CountBytes` is the declared action. `DirectorySandbox` refuses raw or deadline-only spawners before creating a workspace:
 
 ```ts
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"

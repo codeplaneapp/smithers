@@ -1,96 +1,107 @@
-import { performance } from "node:perf_hooks"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
+import { Effect, PlatformError, Sink, Stream } from "effect"
+import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
 import { afterEach, expect, it, vi } from "vitest"
-
-const timer = vi.hoisted(() => ({ wake: () => {} }))
-vi.mock("node:timers/promises", async (original) => ({
-  ...await original<typeof import("node:timers/promises")>(),
-  setTimeout: () =>
-    new Promise<void>((resolve) => {
-      timer.wake = resolve
-    })
-}))
-import { stopGroup } from "../src/internal/ContainedProcess.ts"
+import * as ContainedProcess from "../src/internal/ContainedProcess.ts"
 
 afterEach(() => vi.restoreAllMocks())
-const tick = async () => {
-  timer.wake()
-  // Flush the async send/poll continuations without advancing the independent clock.
-  for (let step = 0; step < 8; step++) await Promise.resolve()
+
+const fixture = (
+  kill: ScopedProcess.Handle["kill"],
+  exitCode: ScopedProcess.Handle["exitCode"] = Effect.succeed(ExitCode(0))
+) => {
+  const handle = Object.assign(
+    makeHandle({
+      pid: ProcessId(12345),
+      exitCode,
+      // A completed target still requires its owner's tree cleanup.
+      isRunning: Effect.succeed(false),
+      kill,
+      stdin: Sink.drain,
+      stdout: Stream.empty,
+      stderr: Stream.empty,
+      all: Stream.empty,
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      unref: Effect.succeed(Effect.void)
+    }),
+    { targetPid: 12346 }
+  )
+  vi.spyOn(ScopedProcess, "spawn").mockReturnValue(Effect.succeed(handle))
+  return {
+    command: "fixture",
+    args: ["literal argument"],
+    cwd: "/fixture",
+    stdout: () => {},
+    stderr: () => {}
+  }
 }
 
-it("escalates at 5000ms, never at 4999ms, and waits for absence after 5001ms", async () => {
-  let now = 0
-  let present = true
-  let released = false
-  const signals: Array<readonly [number, string | number | undefined]> = []
-  vi.spyOn(performance, "now").mockImplementation(() => now)
-  vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-    expect(pid).toBe(-12345)
-    if (!present) throw Object.assign(new Error("gone"), { code: "ESRCH" })
-    if (signal !== 0) signals.push([now, signal])
-    return true
-  })
-  const pending = stopGroup(12345).then(() => {
-    released = true
-  })
-  await tick()
-  now = 4999
-  await tick()
-  expect(signals).toEqual([[0, "SIGTERM"]])
-  expect(released).toBe(false)
-  now = 5000
-  await tick()
-  expect(signals).toEqual([[0, "SIGTERM"], [5000, "SIGKILL"]])
-  now = 5001
-  await tick()
-  expect(released).toBe(false)
-  present = false
-  await tick()
-  await pending
-  expect(released).toBe(true)
-})
+it.skipIf(process.platform === "win32")(
+  "awaits the owner's declared stop contract even after the target exits",
+  async () => {
+    let release!: () => void
+    let stopped = false
+    const killed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const kill = vi.fn(() => Effect.promise(() => killed))
+    const options = fixture(kill)
+    const pending = ContainedProcess.run(options).then((code) => {
+      stopped = true
+      return code
+    })
+    await vi.waitFor(() => expect(kill).toHaveBeenCalledWith({ killSignal: "SIGTERM", forceKillAfter: 5000 }))
+    expect(stopped).toBe(false)
+    expect(ScopedProcess.spawn).toHaveBeenCalledWith({
+      command: "fixture",
+      args: ["literal argument"],
+      cwd: "/fixture",
+      env: undefined,
+      stdin: "ignore",
+      killSignal: "SIGTERM",
+      forceKillAfter: 5000
+    })
+    release()
+    expect(await pending).toBe(0)
+    expect(stopped).toBe(true)
+  }
+)
 
-it("does not signal KILL after the group has already disappeared", async () => {
-  let present = true
-  const signals: Array<string | number | undefined> = []
-  vi.spyOn(process, "kill").mockImplementation((_pid, signal) => {
-    if (!present) throw Object.assign(new Error("gone"), { code: "ESRCH" })
-    if (signal !== 0) signals.push(signal)
-    return true
-  })
-  const pending = stopGroup(12345)
-  await tick()
-  present = false
-  await tick()
-  await pending
-  expect(signals).toEqual(["SIGTERM"])
-})
+it.skipIf(process.platform === "win32")(
+  "preserves refused cleanup instead of reporting an exited command as successful",
+  async () => {
+    const denied = PlatformError.systemError({
+      _tag: "PermissionDenied",
+      module: "ChildProcess",
+      method: "kill",
+      cause: Object.assign(new Error("cleanup observation denied"), { code: "EPERM" })
+    })
+    const options = fixture(() => Effect.fail(denied))
+    await expect(ContainedProcess.run(options)).rejects.toMatchObject({
+      _tag: "ProcessError",
+      code: "cleanup_failed",
+      cause: denied
+    })
+  }
+)
 
-it("fails closed at the post-KILL bound and preserves denied-signal evidence", async () => {
-  let now = 0
-  const denied = Object.assign(new Error("not signalable"), { code: "EPERM" })
-  vi.spyOn(performance, "now").mockImplementation(() => now)
-  vi.spyOn(process, "kill").mockImplementation(() => {
-    throw denied
-  })
-  let settled = false
-  const pending = stopGroup(12345)
-  const assertion = expect(pending).rejects.toMatchObject({
-    _tag: "ProcessError",
-    code: "cleanup_failed",
-    cause: { cause: denied }
-  }).then(() => {
-    settled = true
-  })
-  await tick()
-  now = 5000
-  await tick()
-  await tick()
-  now = 9999
-  await tick()
-  expect(settled).toBe(false)
-  now = 10000
-  await tick()
-  await assertion
-  expect(settled).toBe(true)
-})
+it.skipIf(process.platform === "win32")(
+  "retains a supervisor failure rather than inventing a nonzero target exit",
+  async () => {
+    const failure = PlatformError.systemError({
+      _tag: "Unknown",
+      module: "ChildProcess",
+      method: "exitCode",
+      cause: new Error("owner lost before target status")
+    })
+    const kill = vi.fn(() => Effect.void)
+    const options = fixture(kill, Effect.fail(failure))
+    await expect(ContainedProcess.run(options)).rejects.toMatchObject({
+      _tag: "ProcessError",
+      code: "process_failed",
+      cause: failure
+    })
+    expect(kill).toHaveBeenCalledOnce()
+  }
+)

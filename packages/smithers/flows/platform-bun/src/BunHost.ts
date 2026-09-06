@@ -28,7 +28,6 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunHttpClient from "@effect/platform-bun/BunHttpClient"
 import type { Jj, JjError } from "@smthrs/jj"
 import * as BunJj from "@smthrs/jj/bun/BunJj"
-import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
 import type { HostServiceIds } from "@smthrs/kernel/HostServices"
 import type * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as AtomicFileSystem from "@smthrs/platform-node/AtomicFileSystem"
@@ -146,7 +145,9 @@ const absoluteRoot = (factory: "layerAt" | "layerContainedAt", root: string): st
 /**
  * Stable implementation identities keyed by the closed Host service slots.
  *
- * Each value names the module actually behind that slot. They are identity
+ * Each value names the module behind that slot in the raw host bundle.
+ * Contained POSIX factories replace the spawner with {@link ProcessReaper.layerSpawner}.
+ * These are identity
  * tokens rather than import specifiers: the filesystem entry is
  * `@smthrs/platform-node/AtomicFileSystem` because that is the implementation,
  * even though a consumer reaches it through `@smthrs/platform-bun`.
@@ -176,8 +177,8 @@ export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number],
  *
  * `ContainedSpawner.Options.platform` is deliberately not part of it. It
  * decides one thing, whether a command that names no `detached` option gets a
- * process group of its own, and the spawner underneath IS Effect's Node
- * spawner, which detaches by `process.platform` whatever a record claims. A
+ * process group of its own, and this native host detaches by `process.platform`
+ * whatever a record claims. A
  * caller-supplied `"win32"` on a POSIX host would therefore record
  * `pgid: null` for a child that really does lead a group, and
  * {@link ProcessReaper.reap} would retire that record as `no-group` and leave
@@ -186,20 +187,7 @@ export const implementationIds: Readonly<Record<(typeof HostServiceIds)[number],
  * @category models
  * @since 1.0.0-rc.0
  */
-export type ContainedOptions = Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options
-
-/**
- * The spawner half of {@link ContainedOptions}, with the REAL platform last.
- *
- * Split from the reaper half rather than passed as one merged object, so a
- * property meant for one of them can never be read by the other, and read here
- * rather than at layer-build time, so a caller that mutates the object it
- * handed over cannot change what either layer was built with.
- */
-const containment = (options?: ContainedOptions): ContainedSpawner.Options => ({
-  graceMs: options?.graceMs,
-  platform: process.platform
-})
+export type ContainedOptions = ProcessReaper.SpawnerOptions & ProcessReaper.Options
 
 /** The reaper half of {@link ContainedOptions}. */
 const reaping = (options?: ContainedOptions): ProcessReaper.Options => ({
@@ -254,8 +242,8 @@ export const layerAt = (root: string): Layer.Layer<BunHost | Crypto.Crypto, JjEr
 /**
  * Provides the Bun host with process containment turned on.
  *
- * Bun runs Effect's Node child-process implementation, so containment is the
- * same story it is under Node: `@smthrs/kernel`'s `ContainedSpawner` gives
+ * Bun uses the same prepared native process lifecycle as Node on POSIX, while
+ * preserving its underlying runtime spawner on Windows. `ContainedSpawner` gives
  * every child an escalation deadline and a ledger entry, and
  * `ProcessReaper` sweeps the entries a crashed incarnation of this host left
  * behind. The reaper module lives in `@smthrs/platform-node` because the calls
@@ -269,7 +257,7 @@ export const layerContained = (
   options?: ContainedOptions
 ): Layer.Layer<BunHost | Crypto.Crypto, JjError, ProcessLedger.ProcessLedger> => {
   const spawner = Layer.provide(
-    ContainedSpawner.layer(containment(options)),
+    ProcessReaper.layerSpawner({ graceMs: options?.graceMs }),
     Layer.provide(BunChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(
@@ -297,7 +285,7 @@ export const layerContainedAt = (
 ): Layer.Layer<BunHost | Crypto.Crypto, JjError, ProcessLedger.ProcessLedger> => {
   const repositoryRoot = absoluteRoot("layerContainedAt", root)
   const spawner = Layer.provide(
-    ContainedSpawner.layer(containment(options)),
+    ProcessReaper.layerSpawner({ graceMs: options?.graceMs }),
     Layer.provide(BunChildProcessSpawner.layer, platform)
   )
   return Layer.mergeAll(

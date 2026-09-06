@@ -3749,7 +3749,7 @@ The local engine dispatches an action to a host backed by a sandbox session. Fil
 
 ## 2. Place one action body somewhere else
 
-Keep the durable engine here and give only the action's implementation layer the sandbox host. `Sandbox.layerHost(provider, { session })` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This is example 40 verbatim, where `fs` and `spawner` are the engine host's own services and `CountBytes` is the declared action:
+Keep the durable engine here and give only the action's implementation layer the sandbox host. `Sandbox.layerHost(provider, { session })` acquires one session for the layer scope and derives `ChildProcessSpawner`, `FileSystem`, and `Path` from it. This excerpt from example 40 uses `fs` and `spawner` from `NodeHost.layerContained()` provided with a `ProcessLedger`; `CountBytes` is the declared action. `DirectorySandbox` refuses raw or deadline-only spawners before creating a workspace:
 
 ```ts
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
@@ -12857,7 +12857,7 @@ https://smithers.sh/docs/reference/api/build-cli/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/api.md)
 
-> **Related APIs:** [`@smthrs/build`](/docs/reference/api/build/) · [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/create-app`](/docs/reference/api/create-app/) · [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/keys`](/docs/reference/api/keys/) · [`@smthrs/plan`](/docs/reference/api/plan/) · [`@smthrs/targets`](/docs/reference/api/targets/)
+> **Related APIs:** [`@smthrs/build`](/docs/reference/api/build/) · [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/create-app`](/docs/reference/api/create-app/) · [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/keys`](/docs/reference/api/keys/) · [`@smthrs/plan`](/docs/reference/api/plan/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/targets`](/docs/reference/api/targets/)
 
 ```ts
 import { cli, makeCli, Planner, Workspace } from "@smthrs/build-cli"
@@ -25615,7 +25615,7 @@ looks sensitive; an `undefined` declaration removes an inherited name.
 
 ## ContainedSpawner
 
-Kill-escalation and ledger recording over the same spawner tag.
+Kill deadlines, platform lifecycle preparation, and ledger recording over the same spawner tag.
 
 ### ContainedSpawner.defaultGraceMs
 
@@ -25638,6 +25638,47 @@ interface Options {
 `platform` is `process.platform` spelling, and decides only whether a command
 naming no `detached` option gets a process group of its own. It defaults to
 `"linux"`, the detaching branch.
+
+### ContainedSpawner.Lifecycle
+
+```ts
+type Lifecycle = (
+  command: ChildProcess.StandardCommand,
+  spawn: (command: ChildProcess.StandardCommand) => Effect.Effect<ChildProcessHandle, PlatformError, Scope>
+) => Effect.Effect<
+  {
+    readonly handle: ChildProcessHandle
+    readonly activate: Effect.Effect<void, PlatformError, Scope>
+    readonly settled: Effect.Effect<boolean>
+  },
+  PlatformError,
+  Scope
+>
+```
+
+Preparation owns cleanup before it can fail or be interrupted. It returns an
+identity to record and an idempotent `activate` effect. The kernel records
+that identity with the original command digest before activation can execute
+the target. Failed startup closes its child scope immediately; successful
+startup attaches the whole logical command to the caller's scope. Only
+`settled === true` permits ledger retirement. A target exit alone does not
+prove its children ended.
+
+Node and Bun hosts install `ProcessReaper.layerSpawner` from
+`@smthrs/platform-node`, which composes the native adapter with
+`ProcessReaper.processLifecycle`. Use that factory for a smaller Node/Bun
+composition, or provide a lifecycle explicitly when implementing a custom host.
+
+### ContainedSpawner.isContained
+
+```ts
+const isContained: (spawner: ChildProcessSpawner["Service"]) => boolean
+```
+
+Checks whether the service declares a platform lifecycle. A deadline-only
+wrapper does not qualify. The declaration interoperates across ESM and CommonJS
+and is preserved by the kernel permission decorator. It is a trusted
+composition check, not proof that a caller-supplied lifecycle is honest.
 
 ### ContainedSpawner.withContainment
 
@@ -25664,16 +25705,22 @@ a group the child does not lead.
 
 ```ts
 const layer: (
-  options?: Options
+  options?: Options,
+  lifecycle?: Lifecycle
 ) => Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger>
 ```
 
-Applies containment to every spawn and records it in the `ProcessLedger`,
-releasing it when the scope closes. A spawn whose durable record fails is
-signalled, fails the call, and leaves no pid in `ProcessLedger.live`. The
-release finalizer is registered before the spawn, so scope closure runs it
-after Effect's own kill finalizer. It provides the tag it requires, so it and
-the permission decorator stack in either order over one host.
+Applies the policy to every spawn. Each pipeline leg is prepared and recorded
+separately; the aggregate handle exposes the rightmost leg's output and status.
+A failed record prevents target activation and closes the prepared owner's
+scope. Startup failure in a later pipeline leg also closes earlier legs.
+Cleanup failure or an unverified `settled` result retains the ledger record.
+
+Compose the permission decorator **above** containment so it authorizes the
+caller's whole command before expansion. A decorator below containment sees
+platform preparation commands, which may differ from the caller's command.
+Both layers provide the spawner tag they require, but their order has this
+semantic effect.
 
 ## ProcessLedger
 
@@ -32101,12 +32148,12 @@ identity record, and four re-exports.
 
 ### Layers
 
-| Export             | Signature                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `layer`            | `Layer<BunHost>`                                                                     |
-| `layerAt`          | `(root: string) => Layer<BunHost>`                                                   |
-| `layerContained`   | `(options?: ContainedOptions) => Layer<BunHost, never, ProcessLedger>`               |
-| `layerContainedAt` | `(root: string, options?: ContainedOptions) => Layer<BunHost, never, ProcessLedger>` |
+| Export             | Signature                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `layer`            | `Layer.Layer<BunHost \| Crypto.Crypto, JjError>`                                                              |
+| `layerAt`          | `(root: string) => Layer.Layer<BunHost \| Crypto.Crypto, JjError>`                                            |
+| `layerContained`   | `(options?: ContainedOptions) => Layer.Layer<BunHost \| Crypto.Crypto, JjError, ProcessLedger>`               |
+| `layerContainedAt` | `(root: string, options?: ContainedOptions) => Layer.Layer<BunHost \| Crypto.Crypto, JjError, ProcessLedger>` |
 
 `layer` provides all five Host services, including the runtime-independent
 `Path`. `Jj` is bound to the process working directory.
@@ -32115,13 +32162,27 @@ identity record, and four re-exports.
 absolute path; see [BunHostError](#bunhosterror).
 
 `layerContained` is `layer` with process containment turned on: every child is
-spawned through `@smthrs/kernel`'s `ContainedSpawner`, so it leads a recorded
-process group with a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger`
-record, and `@smthrs/platform-node`'s `ProcessReaper` sweeps the records a
+spawned through `@smthrs/kernel`'s `ContainedSpawner` with
+`ProcessReaper.layerSpawner`, including its native adapter and
+`ProcessReaper.processLifecycle`. Each pipeline leg prepares a supervisor,
+records its identity, and then activates the target with a
+`SIGTERM`-then-`SIGKILL` deadline. The ledger retires a record only after
+verified cleanup, and `@smthrs/platform-node`'s `ProcessReaper` sweeps the records a
 crashed incarnation left behind while the layer is built. `Jj` is built over
 that same spawner (`BunJj.layerSpawner`), so a `jj` a dead host left running is
 a ledger record like any other. The `ProcessLedger` requirement is deliberate:
 only the program knows whether it has a durable one.
+
+On POSIX, `handle.pid` names the supervisor; `exitCode` and `isRunning`
+describe the target. Natural target exit still cleans up children in its owned
+group, including children holding output open. `detached: false` retains the
+supervisor but opts out of group cleanup, signalling only the target. Use the
+handle's `kill` rather than signalling its numeric pid yourself. Explicit
+stopping while a grouped target is alive attempts a best-effort ancestry sweep
+for escaped descendants; natural exit does not reclaim deliberately escaped
+sessions. Failed cleanup fails scope close and retains its record. Ordinary
+Bun runtimes are supported; compiled Bun applications are refused before
+activation because they cannot launch the runtime supervisor.
 
 `layerContainedAt` is `layerContained` with `Jj` bound to `root`
 (`BunJj.layerSpawnerAt`). It refuses a root exactly as `layerAt` does.
@@ -32153,12 +32214,12 @@ its true length, so a root taken from input cannot flood a log line. Branch on
 
 ### Models
 
-| Export              | Type                                                                 | Meaning                                             |
-| ------------------- | -------------------------------------------------------------------- | --------------------------------------------------- |
-| `BunHost`           | `FileSystem \| Path \| ChildProcessSpawner \| Jj \| HttpClient`      | The closed Host service union this bundle provides. |
-| `BunHostErrorCode`  | `"invalid_repository_root"`                                          | The stable codes a factory refuses with.            |
-| `ContainedOptions`  | `Omit<ContainedSpawner.Options, "platform"> & ProcessReaper.Options` | What a caller may configure about containment.      |
-| `implementationIds` | `Readonly<Record<HostServiceIds[number], string>>`                   | The module actually behind each closed Host slot.   |
+| Export              | Type                                                            | Meaning                                             |
+| ------------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| `BunHost`           | `FileSystem \| Path \| ChildProcessSpawner \| Jj \| HttpClient` | The closed Host service union this bundle provides. |
+| `BunHostErrorCode`  | `"invalid_repository_root"`                                     | The stable codes a factory refuses with.            |
+| `ContainedOptions`  | `ProcessReaper.SpawnerOptions & ProcessReaper.Options`          | What a caller may configure about containment.      |
+| `implementationIds` | `Readonly<Record<HostServiceIds[number], string>>`              | The module behind each raw bundle Host slot.        |
 
 `ContainedOptions` carries three fields:
 
@@ -32168,21 +32229,21 @@ its true length, so a root taken from input cannot flood a log line. Branch on
 | `ownerPid` | The pid the reaper must never signal a group for. Default `process.pid`.                                              |
 | `system`   | The operating-system seam the reaper reads liveness and start times through. Default: chosen from `process.platform`. |
 
-`platform` is deliberately not part of it. It decides only whether a command
-that names no `detached` option gets a process group of its own, and the
-spawner underneath is Effect's Node spawner, which decides that from the real
-`process.platform` whatever it is told. A caller-supplied `"win32"` on a POSIX
-host could therefore only make the ledger record `pgid: null` for a child that
-genuinely leads a group, which `ProcessReaper.reap` then retires as `no-group`
-without signalling anything: a durable lie rather than a compile error.
+`platform` is deliberately not part of it. The factory uses the real
+`process.platform`, so the native process-group behavior and recorded identity
+agree. A caller cannot describe a Windows record for an owner that actually
+leads a POSIX group. For a smaller Bun composition, use
+`ProcessReaper.layerSpawner` with a ledger and an underlying runtime spawner.
 
 Each factory reads its options when it is called and splits them into the
 spawner half and the reaper half, so a field meant for one can never be read by
 the other and mutating the object afterwards changes neither layer.
 
-`implementationIds` names the implementation behind each slot rather than the
+`implementationIds` names the raw bundle implementation behind each slot rather than the
 specifier you import it through, which is why the filesystem entry is
-`@smthrs/platform-node/AtomicFileSystem`:
+`@smthrs/platform-node/AtomicFileSystem`. Contained factories replace the
+process runner with `ProcessReaper.layerSpawner`; this static table does not
+describe that substitution:
 
 ```ts
 {
@@ -32302,10 +32363,10 @@ const program = Effect.gen(function*() {
 ```
 
 :::warning
-Every entry point here is Node-only by construction: the bundle resolves
-`node:child_process` and its siblings, and a build check keeps it that way. For
-a browser host use [@smthrs/platform-browser](/docs/reference/api/platform-browser/); for Bun,
-[@smthrs/platform-bun](/docs/reference/api/platform-bun/).
+These adapters require host APIs such as `node:child_process`; they cannot run
+in a browser. Use [@smthrs/platform-browser](/docs/reference/api/platform-browser/) for a browser
+host and [@smthrs/platform-bun](/docs/reference/api/platform-bun/) for the Bun host bundle.
+`ScopedProcess` supports ordinary Node and Bun runtime executables.
 :::
 
 There is no shell service. Running a command is Effect's `ChildProcess` /
@@ -32317,8 +32378,8 @@ so leaves every hop visible to [@smthrs/kernel](/docs/reference/api/kernel/).
 
 The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
 layer with one version probe; construction can fail with `JjError`, including
-`not_installed` or `unsupported_version`. The contained bundles route that probe
-through their process spawner and retire its ledger entry when it exits.
+`not_installed` or `unsupported_version`. The version probe runs outside the host process ledger; repository commands
+use the selected process runner.
 
 ## Requirements
 
@@ -32347,15 +32408,16 @@ const filesystem = AtomicFileSystem.layerWith({ executable: "/usr/local/bin/pyth
 
 ## Entry points
 
-| Import                                   | Source                                                                                                                                    | Platform |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `@smthrs/platform-node`                  | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/index.ts)                       | Node     |
-| `@smthrs/platform-node/NodeHost`         | [src/NodeHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/NodeHost.ts)                 | Node     |
-| `@smthrs/platform-node/AtomicFileSystem` | [src/AtomicFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/AtomicFileSystem.ts) | Node     |
-| `@smthrs/platform-node/HostLiveness`     | [src/HostLiveness.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/HostLiveness.ts)         | Node     |
-| `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       | Node     |
+| Import                                   | Source                                                                                                                                    | Platform   |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `@smthrs/platform-node`                  | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/index.ts)                       | Node       |
+| `@smthrs/platform-node/NodeHost`         | [src/NodeHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/NodeHost.ts)                 | Node       |
+| `@smthrs/platform-node/AtomicFileSystem` | [src/AtomicFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/AtomicFileSystem.ts) | Node       |
+| `@smthrs/platform-node/HostLiveness`     | [src/HostLiveness.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/HostLiveness.ts)         | Node       |
+| `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       | Node       |
+| `@smthrs/platform-node/ScopedProcess`    | [src/ScopedProcess.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ScopedProcess.ts)       | Node / Bun |
 
-The barrel exports `NodeHost`, `HostLiveness`, and `ProcessReaper`.
+The barrel exports `NodeHost`, `HostLiveness`, `ProcessReaper`, and `ScopedProcess`.
 `AtomicFileSystem` is reached as `NodeHost.AtomicFileSystem` or through its own
 subpath, never from the barrel.
 
@@ -32376,6 +32438,12 @@ Host service, so it is not in the closed list, but every durable composition
 needs one and a program that already depends on this package for its host
 should not need a second dependency for the digest.
 
+`NodeHost.implementationIds` is a
+`Readonly<Record<HostServiceIds[number], string>>` naming the five raw bundle
+implementations. Contained factories replace the process runner with
+`ProcessReaper.layerSpawner`; the static identity table does not describe
+that substitution.
+
 ## Layers
 
 | Layer                                       | Jj bound to           | Containment |
@@ -32385,18 +32453,130 @@ should not need a second dependency for the digest.
 | `NodeHost.layerContained(options?)`         | the process directory | yes         |
 | `NodeHost.layerContainedAt(root, options?)` | one absolute root     | yes         |
 
-The contained pair is what `@smthrs/flows`' `NodeRuntime` composes. Each child
-gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` record, `jj` runs
+The contained pair is what `@smthrs/flows`' `NodeRuntime` composes. Each pipeline leg
+gets a prepared supervisor, a `SIGTERM`-then-`SIGKILL` deadline, and a
+`ProcessLedger` record before activation, `jj` runs
 through that same spawner rather than starting its own children, and
 `ProcessReaper.reap` sweeps the records a crashed incarnation left behind while
 the layer is built. The ledger is a requirement rather than a default: only the
 program knows whether it has a durable one.
 
 `NodeHost.ContainedOptions` is `graceMs` plus the reaper's `ownerPid` and
-`system`. It deliberately omits `ContainedSpawner.Options.platform`: the spawner
-underneath is Effect's, which detaches by the real `process.platform`, so a
-caller-supplied platform would record a process group the child does not lead
-and strand the orphan behind a `no-group` refusal.
+`system`. It deliberately omits `ContainedSpawner.Options.platform`. The
+platform comes from the real `process.platform`, so the native process group
+and recorded identity agree. A caller cannot describe a Windows record for an
+owner that actually leads a POSIX group.
+
+## ScopedProcess
+
+A small scoped process API for transient CLI commands. It uses the same POSIX
+supervisor lifecycle as the contained hosts without requiring a filesystem,
+repository service, or durable process ledger.
+
+```ts
+interface Options extends ChildProcess.KillOptions {
+  readonly command: string
+  readonly args?: ReadonlyArray<string> | undefined
+  readonly cwd?: string | undefined
+  readonly env?: Readonly<Record<string, string | undefined>> | undefined
+  readonly stdin?: "ignore" | "pipe" | undefined
+  readonly windowsVerbatimArguments?: boolean | undefined
+  readonly windowsHide?: boolean | undefined
+}
+
+interface Handle extends ChildProcessHandle {
+  readonly targetPid: number
+}
+
+const spawn: (options: Options) => Effect.Effect<Handle, PlatformError, Scope>
+
+interface Status {
+  readonly code: number | null
+  readonly signal: ChildProcess.Signal | null
+}
+
+const status: (handle: ChildProcessHandle) => Effect.Effect<Status, PlatformError>
+```
+
+`spawn` runs the literal executable and argv with piped stdout/stderr and
+`stdin: "ignore"` by default. When `env` is provided it is the complete target
+environment; when omitted it inherits the host environment. The default
+termination policy is `SIGTERM`, then `SIGKILL` after 2,000 milliseconds.
+`windowsHide` defaults to true. Failed startup cleans up its child scope before
+returning an error.
+
+On POSIX, `handle.pid` identifies the live supervisor and `targetPid` identifies
+the native target for diagnostics. `exitCode` describes the target;
+`status(handle)` preserves a terminating signal as `{ code: null, signal }`.
+A missing or invalid target result remains a platform failure. Use the handle's
+`kill` for cleanup rather than signalling either numeric pid yourself.
+
+Drain stdout, stderr, stdin and status concurrently when using pipes. Keep the
+whole operation inside `Effect.scoped`; a target's natural exit also triggers
+cleanup of children holding those pipes open. The private parent connection
+requests cleanup on host loss. This API has no durable ledger; use
+`NodeHost.layerContained` when a later host must reconcile retained records.
+
+## ProcessReaper.layerSpawner
+
+```ts
+type SpawnerOptions = Omit<ContainedSpawner.Options, "platform">
+
+const layerSpawner: (
+  options?: SpawnerOptions
+) => Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger>
+```
+
+Provides a contained spawner without the complete Node or Bun host. Supply a
+`ProcessLedger` and the underlying runtime spawner. On POSIX this factory uses
+the platform's prepared native adapter, whose pipe error listeners live until
+their descriptors close, including writes interrupted by owner loss. On
+Windows it retains the supplied raw runtime spawner. The platform always comes
+from `process.platform`; `graceMs` defaults to 2,000 milliseconds.
+
+The adapter supports the standard command's stdin/stdout/stderr options and
+additional descriptors named `fdN` for indices 3 through 65,535. Recognized
+indices outside that finite integer range fail before target execution; the
+operating system may impose a lower limit. Names Effect does not recognize
+are ignored. A missing target result fails status and pending I/O; it never
+proves successful cleanup.
+
+`NodeHost.layerContained`, `BunHost.layerContained`, and their rooted variants
+use this factory. It records new owners; `ProcessReaper.layer` separately
+reconciles records inherited from a previous incarnation.
+
+## ProcessReaper.processLifecycle
+
+```ts
+const processLifecycle: ContainedSpawner.Lifecycle
+```
+
+The lower-level Node/Bun platform hook for custom
+`ContainedSpawner.layer(options, lifecycle)` compositions. Prefer
+`ProcessReaper.layerSpawner` for the supplied native adapter as well as the
+lifecycle.
+It prepares a live supervisor, lets the kernel commit the owner identity with
+the original command digest, and activates the target only afterward. The
+supervisor keeps group ownership until cleanup completes, including after a
+natural target exit. Each pipeline leg gets its own owner and ledger record.
+
+The returned handle's `pid` is the supervisor's, while `exitCode` and
+`isRunning` describe the target. `unref` changes liveness references without
+relinquishing cleanup ownership. Scope close and repeated explicit kills share
+one cleanup result; the first accepted policy wins. Failed or unverified
+cleanup fails close and leaves `settled` false so the kernel retains its record.
+
+Default POSIX commands own a separate process group. With `detached: false`,
+the supervisor and target share the caller's group, and cleanup signals only
+the target: group cleanup is explicitly disabled. Explicit stopping of a live
+grouped target also attempts a revalidated ancestry sweep for descendants that
+moved to other groups. That positive-PID sweep is best effort; automatic
+cleanup after natural exit does not promise to reclaim deliberately escaped
+sessions. Windows remains unsupported best effort.
+
+The supervisor starts the current Node or Bun runtime. Compiled Bun
+applications and Node single-executable applications are refused before target
+execution because they do not implement the runtime's eval entry point.
 
 ## Filesystem
 
@@ -35329,7 +35509,11 @@ const provider = DirectorySandbox.make({
 })
 ```
 
-`acquire` creates the deterministic scratch directory, runs shell commands there by default, exposes native host file operations, delivers real process signals, and removes the directory when the scope closes. The filesystem and spawner are injected values; the package takes no ambient host dependency. Closing a spawn's scope signals the whole process tree the command started, not only the wrapper shell, so a pipeline or a background job cannot outlive the scope that owned it.
+`acquire` first requires `ContainedSpawner.isContained(spawner)`: a raw spawner or a wrapper with only a kill deadline fails with `unavailable` before any directory or command is created. Use `NodeHost.layerContained()` or `BunHost.layerContained()` with a `ProcessLedger`; a custom host must supply a real platform lifecycle. The filesystem and spawner remain injected values, so this package has no production platform dependency.
+
+Acquisition creates the deterministic scratch directory, commands run there by default, and native host file operations serve it. Explicit `kill` and every spawn-scope finalizer delegate to the contained handle's `kill({ killSignal })`, including after the target's exit was observed. Cleanup failure fails scope release. The provider never signals a numeric handle pid itself: on POSIX that pid names the supervisor, while the exit code belongs to the target.
+
+The supplied POSIX lifecycle cleans up the owned process group even after a natural target exit, including a background child that keeps output open. Explicit stopping while the target is still alive also attempts to stop descendants that escaped into another process group. That extra ancestry sweep uses revalidated positive PIDs and is best effort; automatic cleanup after natural exit does not promise to recover deliberately escaped sessions. Closing the session removes its scratch directory after process cleanup.
 
 Each child receives only the host's `PATH`, `HOME`, `USER`, `LANG`, `LC_*`,
 `TERM`, `TMPDIR`, and `SHELL`, plus names explicitly declared in the spawn's
@@ -43309,7 +43493,7 @@ const program = Effect.gen(function*() {
 
 ### [@smthrs/sandbox](https://sandbox.smithers.sh)
 
-Runs an Effect program's files and commands on a machine you provision: a container, a microVM, a cloud sandbox, or a scratch directory.
+Runs an Effect program's files and commands on a machine you provision: a container, a microVM, a cloud sandbox, or a scratch directory. `DirectorySandbox` requires a lifecycle-backed spawner, such as `NodeHost.layerContained()` provided with a `ProcessLedger`; its [quickstart](https://sandbox.smithers.sh/quickstart/) shows the host composition.
 
 ```ts
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
@@ -52080,12 +52264,13 @@ Vitest reports the assertions that passed, failed, or were skipped. Examples tha
 
 ## Related reference
 
-[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
+[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
 
 ## Source
 
 ```ts title="examples/src/40-sandbox-placement.ts"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -52164,7 +52349,11 @@ export const main = (options: MainOptions): Promise<number> =>
         Effect.scoped
       )
     }).pipe(
-      Effect.provide(NodeHost.layer),
+      Effect.provide(
+        NodeHost.layerContained().pipe(
+          Layer.provide(ProcessLedger.layerMemory({ hostId: "examples-sandbox-placement", ownerPid: process.pid }))
+        )
+      ),
       Effect.orDie
     )
   )
@@ -52195,13 +52384,14 @@ Vitest reports the assertions that passed, failed, or were skipped. Examples tha
 
 ## Related reference
 
-[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/flows`](/docs/reference/api/flows/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
+[`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/flows`](/docs/reference/api/flows/) · [`@smthrs/kernel`](/docs/reference/api/kernel/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/sandbox`](/docs/reference/api/sandbox/)
 
 ## Source
 
 ```ts title="examples/src/41-sandboxed-flow.ts"
 import { Action, Flow, Interpreter } from "@smthrs/flow"
 import * as SandboxedFlow from "@smthrs/flows/SandboxedFlow"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, type Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -52273,7 +52463,11 @@ export const main = (options: MainOptions): Promise<MainResult> =>
       )
       return { result, acquisitions }
     }).pipe(
-      Effect.provide(NodeHost.layer),
+      Effect.provide(
+        NodeHost.layerContained().pipe(
+          Layer.provide(ProcessLedger.layerMemory({ hostId: "examples-sandboxed-flow", ownerPid: process.pid }))
+        )
+      ),
       Effect.orDie
     )
   )

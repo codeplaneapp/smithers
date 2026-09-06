@@ -2,6 +2,17 @@
   "version": 1,
   "added": [
     {
+      "name": "@smthrs/platform-node",
+      "subpath": "./ScopedProcess",
+      "development": "./src/ScopedProcess.ts",
+      "published": {
+        "types": "./dist/esm/ScopedProcess.d.ts",
+        "import": "./dist/esm/ScopedProcess.js",
+        "require": "./dist/cjs/ScopedProcess.js"
+      },
+      "reason": "Shared transient process ownership for build commands, model runners, discovery and services. The public wrapper preserves target status, literal pipe IO and native Windows arguments; the private supervisor protocol stays internal. Durable host ledger composition remains in NodeHost."
+    },
+    {
       "name": "@smthrs/canonical",
       "subpath": "./BoundedJson",
       "development": "./src/BoundedJson.ts",

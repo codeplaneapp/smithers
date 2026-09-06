@@ -15,13 +15,13 @@
  * One supervisor is created per CLI command; services are reference-counted by
  * `key` through an `RcMap`, so two consumers of one Serve target share one
  * spawn and the process group is stopped when the last consumer's scope
- * closes — on success, on failure, and on interruption alike. A module-level
- * backstop additionally SIGKILLs any still-registered process group when the
- * host process exits or receives an unhandled SIGINT/SIGTERM, so a service
- * child never outlives the command that started it.
+ * closes — on success, on failure, and on interruption alike. A separate
+ * process owner enforces that deadline after target exit and after the host
+ * loses its private connection; raw numeric-PID backstops are unnecessary.
  *
  * @since 0.1.0
  */
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import { inheritedEnvironmentNames } from "@smthrs/targets/Exec"
 import * as Secret from "@smthrs/targets/Secret"
 import * as SecretProxy from "@smthrs/targets/SecretProxy"
@@ -31,7 +31,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as RcMap from "effect/RcMap"
 import type * as Scope from "effect/Scope"
-import * as NodeChildProcess from "node:child_process"
+import * as Stream from "effect/Stream"
 import * as NodeHttp from "node:http"
 import * as NodeHttps from "node:https"
 import * as NodeNet from "node:net"
@@ -166,7 +166,7 @@ export class ServiceError extends Data.TaggedError("smithers-build/ServiceError"
  */
 export interface ServiceHandle {
   readonly key: string
-  /** Process id of the shared service child (its process-group leader). */
+  /** Process id of the actual shared service child. */
   readonly pid: number
   /** Trailing captured stdout+stderr of the service, for diagnostics. */
   readonly outputTail: () => string
@@ -661,81 +661,6 @@ const parseSpec = (caller: ServiceSpec): ParsedSpec => {
 }
 
 // ---------------------------------------------------------------------------
-// Orphan backstop
-//
-// Scope finalizers are the release path, but a process that dies without
-// running them — an unhandled SIGINT, an explicit process.exit — would leak
-// detached service children, which survive their parent. A module-level
-// registry of live process groups backs the finalizers: on 'exit' every
-// remaining group is SIGKILLed synchronously, and a SIGINT/SIGTERM with no
-// other listener kills the groups and re-raises so the default termination
-// still happens. When the embedding program handles the signal itself (the
-// integrator interrupting the main fiber for a graceful stop), the backstop
-// only schedules a delayed sweep that is a no-op once finalizers deregister
-// the groups.
-// ---------------------------------------------------------------------------
-
-const liveGroups = new Set<number>()
-let backstopInstalled = false
-
-const killAllGroups = (): void => {
-  for (const pid of [...liveGroups]) {
-    try {
-      process.kill(-pid, "SIGKILL")
-    } catch {
-      // The group may already be gone, or groups may be unsupported here.
-    }
-    try {
-      process.kill(pid, "SIGKILL")
-    } catch {
-      // The child itself may already be gone.
-    }
-  }
-  liveGroups.clear()
-}
-
-const onProcessExit = (): void => killAllGroups()
-
-const backstopFor = (signal: NodeJS.Signals): () => void => {
-  const handler = (): void => {
-    if (process.listenerCount(signal) === 1) {
-      // Nothing else owns this signal: hard-stop the services and re-raise so
-      // the process still dies of it.
-      killAllGroups()
-      process.removeListener(signal, handler)
-      process.kill(process.pid, signal)
-      return
-    }
-    // The embedding program handles the signal; give its finalizers a moment
-    // to release gracefully, then sweep whatever is left.
-    const timer = setTimeout(killAllGroups, 5_000)
-    timer.unref()
-  }
-  return handler
-}
-
-const onSigint = backstopFor("SIGINT")
-const onSigterm = backstopFor("SIGTERM")
-
-const registerGroup = (pid: number): void => {
-  liveGroups.add(pid)
-  if (backstopInstalled) return
-  backstopInstalled = true
-  process.on("exit", onProcessExit)
-  process.on("SIGINT", onSigint)
-  process.on("SIGTERM", onSigterm)
-}
-
-const deregisterGroup = (pid: number): void => {
-  liveGroups.delete(pid)
-  if (liveGroups.size > 0 || !backstopInstalled) return
-  backstopInstalled = false
-  process.removeListener("exit", onProcessExit)
-  process.removeListener("SIGINT", onSigint)
-  process.removeListener("SIGTERM", onSigterm)
-}
-
-// ---------------------------------------------------------------------------
 // Output capture
 // ---------------------------------------------------------------------------
 
@@ -793,77 +718,121 @@ interface ProbeContext {
   readonly environment: Readonly<Record<string, string>>
 }
 
+/** Retains the native diagnostic instead of the platform wrapper's generic tag. */
+const processError = (cause: unknown): string => {
+  const error = cause instanceof Error && cause.cause instanceof Error ? cause.cause : cause
+  return error instanceof Error ? error.message : String(error)
+}
+
+/** Runs one hook/probe with bounded pipes and verified scoped process cleanup. */
+const runServiceCommand = (
+  argv: ReadonlyArray<string>,
+  context: ProbeContext,
+  timeoutMs: number
+): Effect.Effect<{ readonly ok: boolean; readonly detail: string }> =>
+  Effect.suspend(() => {
+    const output: Array<Uint8Array> = []
+    const error: Array<Uint8Array> = []
+    const program = Effect.gen(function*() {
+      const handle = yield* ScopedProcess.spawn({
+        command: argv[0]!,
+        args: argv.slice(1),
+        cwd: context.cwd,
+        env: serviceEnvironment(context.environment),
+        stdin: "ignore"
+      })
+      const collect = (source: typeof handle.stdout, chunks: Array<Uint8Array>, name: string) => {
+        let size = 0
+        return source.pipe(Stream.runForEach((chunk) =>
+          Effect.try(() => {
+            size += chunk.byteLength
+            if (size > 1 << 20) throw new Error(`${name} maxBuffer length exceeded`)
+            chunks.push(chunk)
+          })
+        ))
+      }
+      const [status] = yield* Effect.all([
+        ScopedProcess.status(handle),
+        collect(handle.stdout, output, "stdout"),
+        collect(handle.stderr, error, "stderr")
+      ], { concurrency: "unbounded" })
+      const detail = `${Buffer.concat(output).toString("utf8")}${Buffer.concat(error).toString("utf8")}`.trim()
+      return {
+        ok: status.code === 0,
+        detail: detail || (status.signal === null
+          ? status.code === 0 ? "" : `command exited with code ${status.code}`
+          : `command terminated by ${status.signal}`)
+      }
+    })
+    return program.pipe(
+      Effect.timeoutOrElse({
+        duration: timeoutMs,
+        orElse: () => Effect.fail(new Error(`the command timed out after ${timeoutMs}ms`))
+      }),
+      Effect.scoped,
+      Effect.catch((cause) =>
+        Effect.succeed({
+          ok: false,
+          detail: `${Buffer.concat(output).toString("utf8")}${Buffer.concat(error).toString("utf8")}`.trim() ||
+            processError(cause)
+        })
+      )
+    )
+  })
+
 /** Runs one readiness probe attempt; never fails, reports the miss reason. */
 const probeOnce = (
   readiness: Readiness,
   attemptTimeoutMs: number,
   context: ProbeContext
 ): Effect.Effect<Probe> =>
-  Effect.callback<Probe>((resume) => {
-    let settled = false
-    let cleanup: () => void = () => {}
-    const settle = (result: Probe): void => {
-      if (settled) return
-      settled = true
-      cleanup()
-      resume(Effect.succeed(result))
-    }
-    const timer = setTimeout(
-      () => settle(miss(`the probe timed out after ${attemptTimeoutMs}ms`)),
-      Math.max(attemptTimeoutMs, 1)
+  "exec" in readiness
+    ? runServiceCommand(readiness.exec, context, Math.max(attemptTimeoutMs, 1)).pipe(
+      Effect.map((result) => result.ok ? { ok: true } : miss(`exec failed: ${result.detail}`))
     )
-    if ("port" in readiness) {
-      const socket = NodeNet.connect({ host: "127.0.0.1", port: readiness.port })
-      cleanup = () => {
-        clearTimeout(timer)
-        socket.destroy()
+    : Effect.callback<Probe>((resume) => {
+      let settled = false
+      let cleanup: () => void = () => {}
+      const settle = (result: Probe): void => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resume(Effect.succeed(result))
       }
-      socket.on("connect", () => settle({ ok: true }))
-      socket.on("error", (error: NodeJS.ErrnoException) => settle(miss(`connect failed: ${error.message}`)))
-    } else if ("http" in readiness) {
-      const url = new URL(readiness.http)
-      const get = url.protocol === "https:" ? NodeHttps.get : NodeHttp.get
-      const request = get(url, (response) => {
-        response.resume()
-        const status = response.statusCode ?? 0
-        settle(status > 0 && status < 500 ? { ok: true } : miss(`GET ${readiness.http} answered ${status}`))
-      })
-      cleanup = () => {
-        clearTimeout(timer)
-        request.destroy()
-      }
-      request.on(
-        "error",
-        (error: NodeJS.ErrnoException) => settle(miss(`GET ${readiness.http} failed: ${error.message}`))
+      const timer = setTimeout(
+        () => settle(miss(`the probe timed out after ${attemptTimeoutMs}ms`)),
+        Math.max(attemptTimeoutMs, 1)
       )
-    } else {
-      const child = NodeChildProcess.execFile(
-        readiness.exec[0]!,
-        readiness.exec.slice(1),
-        {
-          cwd: context.cwd,
-          env: serviceEnvironment(context.environment),
-          timeout: Math.max(attemptTimeoutMs, 1),
-          maxBuffer: 1 << 20
-        },
-        (error, stdout, stderr) => {
-          settle(
-            error === null
-              ? { ok: true }
-              : miss(`exec failed: ${`${stdout}${stderr}`.trim() || error.message}`)
-          )
+      if ("port" in readiness) {
+        const socket = NodeNet.connect({ host: "127.0.0.1", port: readiness.port })
+        cleanup = () => {
+          clearTimeout(timer)
+          socket.destroy()
         }
-      )
-      cleanup = () => {
-        clearTimeout(timer)
-        child.kill("SIGKILL")
+        socket.on("connect", () => settle({ ok: true }))
+        socket.on("error", (error: NodeJS.ErrnoException) => settle(miss(`connect failed: ${error.message}`)))
+      } else {
+        const url = new URL(readiness.http)
+        const get = url.protocol === "https:" ? NodeHttps.get : NodeHttp.get
+        const request = get(url, (response) => {
+          response.resume()
+          const status = response.statusCode ?? 0
+          settle(status > 0 && status < 500 ? { ok: true } : miss(`GET ${readiness.http} answered ${status}`))
+        })
+        cleanup = () => {
+          clearTimeout(timer)
+          request.destroy()
+        }
+        request.on(
+          "error",
+          (error: NodeJS.ErrnoException) => settle(miss(`GET ${readiness.http} failed: ${error.message}`))
+        )
       }
-    }
-    return Effect.sync(() => {
-      settled = true
-      cleanup()
+      return Effect.sync(() => {
+        settled = true
+        cleanup()
+      })
     })
-  })
 
 // ---------------------------------------------------------------------------
 // Service lifecycle
@@ -880,7 +849,6 @@ interface RunningService {
 /** Mutable lifecycle flags shared between listeners and the finalizer. */
 interface ServiceState {
   stopping: boolean
-  exited: boolean
 }
 
 /**
@@ -952,55 +920,6 @@ const serviceSecretBoundary = (
     }
   )
 }
-
-/** Signals a child's process group, falling back to the child itself. */
-const signalGroup = (child: NodeChildProcess.ChildProcess, signal: NodeJS.Signals): void => {
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal)
-      return
-    } catch {
-      // Fall through when process groups are unavailable.
-    }
-  }
-  try {
-    child.kill(signal)
-  } catch {
-    // The process may have settled already.
-  }
-}
-
-/**
- * Applies the stop contract: the declared signal to the group, the grace
- * period, then SIGKILL, bounded so release can never hang.
- */
-const stopService = (
-  child: NodeChildProcess.ChildProcess,
-  parsed: ParsedSpec,
-  state: ServiceState,
-  exited: Promise<void>
-): Effect.Effect<void> =>
-  Effect.callback<void>((resume) => {
-    state.stopping = true
-    let settled = false
-    const timers: Array<NodeJS.Timeout> = []
-    const finish = (): void => {
-      if (settled) return
-      settled = true
-      for (const timer of timers) clearTimeout(timer)
-      if (child.pid !== undefined) deregisterGroup(child.pid)
-      resume(Effect.void)
-    }
-    if (state.exited) {
-      finish()
-      return Effect.void
-    }
-    signalGroup(child, parsed.stopSignal)
-    timers.push(setTimeout(() => signalGroup(child, "SIGKILL"), parsed.stopGraceMs))
-    timers.push(setTimeout(finish, parsed.stopGraceMs + stopSettleMs))
-    exited.then(finish, finish)
-    return Effect.sync(finish)
-  })
 
 /** Polls the readiness probe until it passes or the deadline expires. */
 const awaitReadiness = (
@@ -1078,24 +997,10 @@ const runInit = (
 ): Effect.Effect<void, ServiceError> =>
   Effect.gen(function*() {
     for (const argv of parsed.spec.init ?? []) {
-      const result = yield* Effect.callback<{ readonly ok: boolean; readonly detail: string }>((resume) => {
-        const child = NodeChildProcess.execFile(
-          argv[0],
-          argv.slice(1),
-          {
-            cwd: parsed.spec.cwd,
-            env: serviceEnvironment(environment),
-            timeout: parsed.readinessTimeoutMs,
-            maxBuffer: 1 << 20
-          },
-          (error, stdout, stderr) =>
-            resume(Effect.succeed({
-              ok: error === null,
-              detail: `${stdout}${stderr}`.trim() || (error === null ? "" : error.message)
-            }))
-        )
-        return Effect.sync(() => child.kill("SIGKILL"))
-      })
+      const result = yield* runServiceCommand(argv, {
+        cwd: parsed.spec.cwd,
+        environment
+      }, parsed.readinessTimeoutMs)
       if (!result.ok) {
         return yield* Effect.fail(
           new ServiceError({
@@ -1120,19 +1025,10 @@ const runBestEffort = (
 ): Effect.Effect<void> =>
   Effect.gen(function*() {
     for (const argv of commands ?? []) {
-      yield* Effect.callback<void>((resume) => {
-        const child = NodeChildProcess.execFile(
-          argv[0],
-          argv.slice(1),
-          {
-            cwd: parsed.spec.cwd,
-            env: serviceEnvironment(environment),
-            timeout: parsed.stopGraceMs + stopSettleMs
-          },
-          () => resume(Effect.void)
-        )
-        return Effect.sync(() => child.kill("SIGKILL"))
-      })
+      yield* runServiceCommand(argv, {
+        cwd: parsed.spec.cwd,
+        environment
+      }, parsed.stopGraceMs + stopSettleMs)
     }
   }).pipe(Effect.asVoid)
 
@@ -1152,7 +1048,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
   Effect.gen(function*() {
     const key = parsed.spec.key
     const unhealthy = yield* Deferred.make<never, ServiceError>()
-    const state: ServiceState = { stopping: false, exited: false }
+    const state: ServiceState = { stopping: false }
     const tail = tailCapture()
     const stdoutDecoder = new TextDecoder("utf-8")
     const stderrDecoder = new TextDecoder("utf-8")
@@ -1165,58 +1061,92 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
     const secretBoundary = yield* serviceSecretBoundary(parsed.spec)
     const environment = { ...parsed.spec.env, ...secretBoundary.environment }
     const observer = (yield* Output)(parsed.spec)
-    yield* Effect.addFinalizer(() => Effect.sync(() => observer?.close()))
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        try {
+          observer?.close()
+        } catch {
+          // Optional progress output cannot change service cleanup or its result.
+        }
+      })
+    )
     // Every hook and the service itself run in the declared cwd under this
     // environment; the probes run there too.
     const probeContext: ProbeContext = { cwd: parsed.spec.cwd, environment }
     yield* runPrepare(parsed, environment)
-    const child = yield* Effect.try({
-      try: () =>
-        NodeChildProcess.spawn(secretBoundary.argv[0], secretBoundary.argv.slice(1), {
-          cwd: parsed.spec.cwd,
-          detached: true,
-          env: serviceEnvironment(environment),
-          stdio: ["ignore", "pipe", "pipe"]
-        }),
-      catch: (cause) =>
-        new ServiceError({
-          key,
-          reason: "spawn-failed",
-          message: `service ${key} could not be spawned: ${cause instanceof Error ? cause.message : String(cause)}`,
-          outputTail: ""
+    // Cleanup hooks run after the owned process scope closes, including when
+    // readiness or startup fails. They use the same bounded process adapter.
+    yield* Effect.addFinalizer(() => runCleanup(parsed, environment))
+    const handle = yield* ScopedProcess.spawn({
+      command: secretBoundary.argv[0],
+      args: secretBoundary.argv.slice(1),
+      cwd: parsed.spec.cwd,
+      env: serviceEnvironment(environment),
+      stdin: "ignore",
+      killSignal: parsed.stopSignal,
+      forceKillAfter: parsed.stopGraceMs
+    }).pipe(Effect.mapError((cause) =>
+      new ServiceError({
+        key,
+        reason: "spawn-failed",
+        message: `service ${key} could not be spawned: ${processError(cause)}`,
+        outputTail: ""
+      })
+    ))
+    const consume = (source: typeof handle.stdout, decoder: TextDecoder, write: (chunk: Uint8Array) => void) =>
+      source.pipe(Stream.runForEach((chunk) =>
+        Effect.sync(() => {
+          tail.append(chunk, decoder)
+          try {
+            write(chunk)
+          } catch {
+            // Keep draining and capturing after a progress observer fails.
+          }
         })
-    })
-    let resolveExited: () => void = () => {}
-    const exited = new Promise<void>((resolve) => {
-      resolveExited = resolve
-    })
-    child.stdout?.on("data", (chunk: Buffer) => {
-      tail.append(chunk, stdoutDecoder)
-      observer?.onStdout(chunk)
-    })
-    child.stderr?.on("data", (chunk: Buffer) => {
-      tail.append(chunk, stderrDecoder)
-      observer?.onStderr(chunk)
-    })
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      state.exited = true
-      resolveExited()
-      failWith("spawn-failed", `service ${key} could not be spawned: ${error.message}`)
-    })
-    child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
-      state.exited = true
-      resolveExited()
-      if (state.stopping) return
-      failWith(
-        "exited",
-        `service ${key} exited ${signal === null ? `with code ${code}` : `on ${signal}`} while supervised`
-      )
-    })
-    if (child.pid !== undefined) registerGroup(child.pid)
-    // The finalizer is registered before readiness so a failed or interrupted
-    // acquisition still stops the child through the declared stop contract.
+      ))
+    yield* Effect.all([
+      consume(handle.stdout, stdoutDecoder, (chunk) => observer?.onStdout(chunk)),
+      consume(handle.stderr, stderrDecoder, (chunk) => observer?.onStderr(chunk))
+    ], { concurrency: "unbounded" }).pipe(
+      Effect.catch((cause) =>
+        Effect.sync(() => {
+          if (!state.stopping) failWith("exited", `service ${key} output could not be read: ${processError(cause)}`)
+        })
+      ),
+      Effect.forkScoped
+    )
+    // A descendant can inherit stdout without being the service. Observe the
+    // actual service's exit independently so an open pipe cannot report it as
+    // healthy during the owner's cleanup grace.
+    yield* ScopedProcess.status(handle).pipe(
+      Effect.tap((status) =>
+        Effect.sync(() => {
+          if (!state.stopping) {
+            failWith(
+              "exited",
+              `service ${key} exited ${
+                status.signal === null ? `with code ${status.code}` : `on ${status.signal}`
+              } while supervised`
+            )
+          }
+        })
+      ),
+      Effect.catch((cause) =>
+        Effect.sync(() => {
+          if (!state.stopping) failWith("exited", `service ${key} could not be observed: ${processError(cause)}`)
+        })
+      ),
+      Effect.forkScoped
+    )
+    // Stop while observers are still attached. The shared lifecycle waits for
+    // the owned group, even when the target has already exited successfully.
     yield* Effect.addFinalizer(() =>
-      stopService(child, parsed, state, exited).pipe(Effect.andThen(runCleanup(parsed, environment)))
+      Effect.sync(() => {
+        state.stopping = true
+      }).pipe(
+        Effect.andThen(handle.kill({ killSignal: parsed.stopSignal, forceKillAfter: parsed.stopGraceMs })),
+        Effect.orDie
+      )
     )
     if (parsed.spec.readiness !== undefined) {
       yield* Effect.raceFirst(
@@ -1235,7 +1165,7 @@ const startService = (parsed: ParsedSpec): Effect.Effect<RunningService, Service
         healthLoop(parsed, parsed.spec.readiness, parsed.healthIntervalMs, state, unhealthy, tail.read, probeContext)
       )
     }
-    return { key, pid: child.pid ?? -1, unhealthy, tail: tail.read }
+    return { key, pid: handle.targetPid, unhealthy, tail: tail.read }
   })
 
 /**

@@ -67,17 +67,16 @@ other three were built and never asked for.
 
 ## Turn containment on
 
-The plain bundle spawns children the way Effect does: a child dies when the
-scope that holds it closes. That is enough while the host is alive, and it is
-nothing at all after the host crashes, because a dead process runs no
-finalizer.
+The plain bundle signals its target when the scope closes. A target that exits
+first can leave background descendants holding output open, and a crashed
+host cannot run that finalizer.
 
-`BunHost.layerContained` closes that hole. It routes every spawn through the
-kernel's `ContainedSpawner`, which gives each child a process group, a
-`SIGTERM`-then-`SIGKILL` deadline, and a record in a `ProcessLedger` that
-outlives the process holding it. The ledger is a layer requirement rather than
-a default, because only your program knows whether it has a durable one to
-write to.
+`BunHost.layerContained` prepares a supervisor for each command, records its
+identity before target execution, and keeps a `SIGTERM`-then-`SIGKILL` deadline
+for the owned process group even after the target exits. The supervisor's
+private host connection also initiates cleanup on host loss. The required
+`ProcessLedger` lets a later host reconcile cleanup that was not confirmed;
+the memory ledger below deliberately has no persistence across restarts.
 
 Create `contained.ts`:
 
@@ -133,11 +132,12 @@ bun run contained.ts
 }
 ```
 
-Three facts are in that output. The child leads its own process group, so a
-signal reaches its descendants and not just it. The record names the
-incarnation that started it, which is how a later incarnation tells an
-abandoned process from a live one. And the record is gone once the scope
-closed, because the child ended with it.
+The recorded pid is the live supervisor, which leads the owned process group;
+it is not the native `sleep` target's pid. A returned handle's `exitCode`
+describes the target. The record also names the host incarnation that started
+it, and it is gone after verified scope cleanup. See
+[Contain and reap child processes](/guides/contain-child-processes/) for
+the `detached: false`, escaped-session, and unsupported-platform boundaries.
 
 Give it a durable half by swapping `ProcessLedger.makeMemory` for
 `ProcessLedger.layer`, which writes through a [`@smthrs/journal`](https://journal.smithers.sh/reference/api/)

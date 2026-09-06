@@ -76,6 +76,11 @@ const stack = Layer.mergeAll(
 ).pipe(Layer.provideMerge(Action.layerImplementations))
 ```
 
+`fs` and `spawner` above come from a contained host, such as
+`NodeHost.layerContained()` provided with a `ProcessLedger`; the
+[quickstart](../quickstart.md) shows that composition. `DirectorySandbox`
+refuses raw or deadline-only spawners before creating its workspace.
+
 The action execution scope owns the host layer, so completing the action closes
 that scope, releases the session, and removes its workspace. The engine and its
 journal stay open over whatever they were composed with. Swapping

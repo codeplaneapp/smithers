@@ -23,6 +23,42 @@ const readWorkflow = (name: string): string => readFileSync(`${workflowsDir}${na
 
 const workflowNames = readdirSync(workflowsDir).filter((name) => name.endsWith(".yml")).sort()
 
+interface WorkflowStep {
+  readonly name?: string
+  readonly if?: unknown
+  readonly uses?: string
+  readonly run?: string
+  readonly with?: { readonly name?: string }
+}
+
+interface CiWorkflow {
+  readonly jobs: Record<string, { readonly if?: unknown; readonly steps?: ReadonlyArray<WorkflowStep> }>
+}
+
+const evidenceNames = ["ci-test-tier-evidence", "apps-e2e-artifacts"]
+const evidenceFinalizer = (step: WorkflowStep): boolean =>
+  step.if === "always()" && evidenceNames.some((name) =>
+    step.name === `Collect ${name}`
+      ? typeof step.run === "string" && step.uses === undefined
+      : step.name === `Upload ${name}` && step.run === undefined &&
+        /^actions\/upload-artifact@/.test(step.uses ?? "") && step.with?.name === name
+  )
+
+/** Conditional evidence retention cannot make a validation job or step disappear. */
+const conditionalEnforcement = (source: string): ReadonlyArray<string> => {
+  const workflow = Bun.YAML.parse(source) as CiWorkflow
+  const violations: string[] = []
+  for (const [name, job] of Object.entries(workflow.jobs)) {
+    if (job.if !== undefined) violations.push(`${name}: conditional job`)
+    for (const [index, step] of (job.steps ?? []).entries()) {
+      if (step.if !== undefined && !evidenceFinalizer(step)) {
+        violations.push(`${name}: ${step.name ?? `step ${index + 1}`}`)
+      }
+    }
+  }
+  return violations
+}
+
 /*
  * An entry point reads process.argv; a library does not. That is the same
  * split the files themselves document — BuildStamp.ts, workers-manifest.ts,
@@ -94,10 +130,46 @@ describe("canary probes are wired into a gate", () => {
     expect(unlinted).toEqual([])
   })
 
-  it("keeps ci.yml free of step conditions (issue #176)", () => {
-    // packages/smithers/flows/test/vitestCoverageIsolation.test.ts owns this pin.
-    // It is restated here because the apps workspaces run `bun test` and
-    // never load that suite, and this file edits ci.yml.
-    expect(readWorkflow("ci.yml")).not.toMatch(/^\s*if:/m)
+  it("keeps CI enforcement unconditional while retaining evidence after failure (issue #176)", () => {
+    // Match the coverage-isolation policy: the four named evidence finalizers
+    // run after a red gate, while validation jobs and steps cannot be skipped.
+    expect(conditionalEnforcement(readWorkflow("ci.yml"))).toEqual([])
+  })
+
+  it("rejects skipped gates and conditions disguised as evidence retention", () => {
+    expect(conditionalEnforcement(`
+jobs:
+  checks:
+    steps:
+      - name: Unit tests
+        if: false
+        run: bun test
+      - name: Build
+        if: always()
+        run: bun build
+      - name: Collect ci-test-tier-evidence
+        if: failure()
+        run: cp report.json evidence/
+      - name: Upload apps-e2e-artifacts
+        if: always()
+        run: bun test
+      - name: Collect ci-test-tier-evidence
+        if: always()
+        run: cp report.json evidence/
+      - name: Upload apps-e2e-artifacts
+        if: always()
+        uses: actions/upload-artifact@pinned
+        with:
+          name: apps-e2e-artifacts
+  skipped:
+    if: false
+    steps: []
+`)).toEqual([
+      "checks: Unit tests",
+      "checks: Build",
+      "checks: Collect ci-test-tier-evidence",
+      "checks: Upload apps-e2e-artifacts",
+      "skipped: conditional job"
+    ])
   })
 })

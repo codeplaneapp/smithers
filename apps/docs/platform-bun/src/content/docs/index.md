@@ -31,9 +31,9 @@ already has:
   comes back to you as a `302` and the second origin is never contacted. A
   client that follows redirects on its own reaches a host nobody authorized.
 
-The bundle also runs unchanged on Node.js 22.19.0 or later. Bun's child-process
-spawner is Effect's Node spawner re-exported, so there is no runtime detection
-here and nothing to detect. See
+The bundle also runs on Node.js 22.19.0 or later. The raw child-process spawner
+is Effect's Node spawner re-exported; contained POSIX variants use
+`ProcessReaper.layerSpawner` and its prepared native adapter. See
 [Runtime parity with Node](/concepts/runtime-parity/).
 
 ## Install
@@ -83,9 +83,12 @@ Two variants change one slot each. `BunHost.layerAt(root)` binds version control
 to one absolute repository root instead of the process working directory, which
 a long-lived host wants because the working directory is ambient state anything
 can change. `BunHost.layerContained(options)` routes every spawn through a
-process group with a `SIGTERM`-then-`SIGKILL` deadline and records it in a
-process ledger, so a host that crashes without running a finalizer leaves
-something its next incarnation can act on.
+prepared supervisor with a `SIGTERM`-then-`SIGKILL` deadline. The owner is
+recorded before target activation; each pipeline leg has its own record. The
+handle's `pid` names the supervisor, and `exitCode` describes the target. A
+natural target exit still cleans up its owned group, and only verified cleanup
+retires the record. The durable ledger lets a later incarnation reconcile any
+retained records.
 
 ## How this relates to @smthrs/flows
 

@@ -586,6 +586,7 @@
     "@smthrs/build": "1.0.0-rc.0",
     "@smthrs/flow": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
+    "@smthrs/platform-node": "1.0.0-rc.0",
     "ignore": "7.0.8",
     "minimatch": "10.2.6",
     "yaml": "2.9.0"

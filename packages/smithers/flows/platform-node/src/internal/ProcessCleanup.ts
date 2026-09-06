@@ -1,0 +1,115 @@
+/**
+ * Prepared process ownership and bounded release for Node and Bun hosts.
+ * @since 1.0.0
+ */
+import { defaultGraceMs, type Lifecycle } from "@smthrs/kernel/ContainedSpawner"
+import * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import type * as PlatformError from "effect/PlatformError"
+import type * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { makeHandle } from "effect/unstable/process/ChildProcessSpawner"
+import { constants } from "node:os"
+import * as Supervisor from "./ProcessSupervisor.ts"
+
+/**
+ * An operating-system identity observed in a group.
+ * @private
+ * @since 1.0.0
+ */
+export interface Member {
+  readonly pid: number
+  readonly startedAtMs: number
+  readonly zombie: boolean
+}
+
+/**
+ * One bounded observation, including the host group.
+ * @private
+ * @since 1.0.0
+ */
+export interface Snapshot {
+  readonly ownGroup: number
+  readonly members: ReadonlyArray<Member>
+}
+
+/**
+ * Observations can shorten or verify cleanup, but never authorize signals.
+ * @private
+ * @since 1.0.0
+ */
+export interface System {
+  readonly platform: string
+  readonly snapshot: (pgid: number) => Snapshot | undefined
+}
+
+/**
+ * A finite termination deadline understood by the private owner.
+ * @private
+ * @since 1.0.0
+ */
+export interface Policy {
+  readonly killSignal: ChildProcess.Signal
+  readonly graceMs: number
+}
+
+/**
+ * Normalize and validate the deadline before it enters a native timer.
+ * @private
+ * @since 1.0.0
+ */
+export const policy = (
+  options: ChildProcess.KillOptions,
+  defaults: ChildProcess.KillOptions = {}
+): Effect.Effect<Policy, PlatformError.PlatformError> =>
+  Effect.try({
+    try: () => {
+      const killSignal = options.killSignal ?? defaults.killSignal ?? "SIGTERM"
+      if (killSignal === "SIGSTOP" || constants.signals[killSignal] === undefined) {
+        throw new Error(`Unsupported process termination signal ${killSignal}`)
+      }
+      const graceMs = Duration.toMillis(options.forceKillAfter ?? defaults.forceKillAfter ?? defaultGraceMs)
+      // Node/Bun clamp an overflowing timeout to 1 ms. Refuse that policy rather
+      // than silently replacing a caller's grace with immediate termination.
+      if (!Number.isFinite(graceMs) || graceMs < 0 || graceMs > 2_147_483_647) {
+        throw new Error("Process cleanup grace must fit a finite nonnegative native timer")
+      }
+      return { killSignal, graceMs }
+    },
+    catch: (cause) => Supervisor.failure("kill", "process cleanup policy", cause)
+  })
+
+/**
+ * POSIX uses a live owner even for detached:false: direct-target signals then
+ * preserve the group opt-out without upstream nonzero-exit group callbacks.
+ * Windows keeps its existing native process handle and launch behavior.
+ * @private
+ * @since 1.0.0
+ */
+export const lifecycle = (system: System): Lifecycle => (command, spawn) => {
+  if (system.platform !== "win32") return Supervisor.prepare(system, policy)(command, spawn)
+  return Effect.gen(function*() {
+    const original = yield* spawn(command)
+    let settled = false
+    let selected: ChildProcess.KillOptions = command.options
+    let started = false
+    const finish = yield* Effect.cached(Effect.gen(function*() {
+      if (yield* original.isRunning) yield* original.kill(selected)
+      settled = true
+    }))
+    const kill = (options?: ChildProcess.KillOptions) =>
+      Effect.suspend(() => {
+        if (!started) {
+          started = true
+          selected = options ?? command.options
+        }
+        return finish
+      }).pipe(Effect.uninterruptible)
+    yield* Effect.addFinalizer(() =>
+      kill().pipe(
+        Effect.ensuring(Effect.suspend(() => settled ? Effect.void : Effect.asVoid(original.unref)).pipe(Effect.orDie)),
+        Effect.orDie
+      )
+    )
+    return { handle: makeHandle({ ...original, kill }), activate: Effect.void, settled: Effect.sync(() => settled) }
+  })
+}

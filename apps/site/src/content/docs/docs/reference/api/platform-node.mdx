@@ -26,10 +26,10 @@ const program = Effect.gen(function*() {
 ```
 
 :::warning
-Every entry point here is Node-only by construction: the bundle resolves
-`node:child_process` and its siblings, and a build check keeps it that way. For
-a browser host use [@smthrs/platform-browser](/docs/reference/api/platform-browser/); for Bun,
-[@smthrs/platform-bun](/docs/reference/api/platform-bun/).
+These adapters require host APIs such as `node:child_process`; they cannot run
+in a browser. Use [@smthrs/platform-browser](/docs/reference/api/platform-browser/) for a browser
+host and [@smthrs/platform-bun](/docs/reference/api/platform-bun/) for the Bun host bundle.
+`ScopedProcess` supports ordinary Node and Bun runtime executables.
 :::
 
 There is no shell service. Running a command is Effect's `ChildProcess` /
@@ -41,8 +41,8 @@ so leaves every hop visible to [@smthrs/kernel](/docs/reference/api/kernel/).
 
 The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
 layer with one version probe; construction can fail with `JjError`, including
-`not_installed` or `unsupported_version`. The contained bundles route that probe
-through their process spawner and retire its ledger entry when it exits.
+`not_installed` or `unsupported_version`. The version probe runs outside the host process ledger; repository commands
+use the selected process runner.
 
 ## Requirements
 
@@ -71,15 +71,16 @@ const filesystem = AtomicFileSystem.layerWith({ executable: "/usr/local/bin/pyth
 
 ## Entry points
 
-| Import                                   | Source                                                                                                                                    | Platform |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| `@smthrs/platform-node`                  | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/index.ts)                       | Node     |
-| `@smthrs/platform-node/NodeHost`         | [src/NodeHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/NodeHost.ts)                 | Node     |
-| `@smthrs/platform-node/AtomicFileSystem` | [src/AtomicFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/AtomicFileSystem.ts) | Node     |
-| `@smthrs/platform-node/HostLiveness`     | [src/HostLiveness.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/HostLiveness.ts)         | Node     |
-| `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       | Node     |
+| Import                                   | Source                                                                                                                                    | Platform   |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `@smthrs/platform-node`                  | [src/index.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/index.ts)                       | Node       |
+| `@smthrs/platform-node/NodeHost`         | [src/NodeHost.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/NodeHost.ts)                 | Node       |
+| `@smthrs/platform-node/AtomicFileSystem` | [src/AtomicFileSystem.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/AtomicFileSystem.ts) | Node       |
+| `@smthrs/platform-node/HostLiveness`     | [src/HostLiveness.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/HostLiveness.ts)         | Node       |
+| `@smthrs/platform-node/ProcessReaper`    | [src/ProcessReaper.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ProcessReaper.ts)       | Node       |
+| `@smthrs/platform-node/ScopedProcess`    | [src/ScopedProcess.ts](https://github.com/smithersai/smithers/blob/main/packages/smithers/flows/platform-node/src/ScopedProcess.ts)       | Node / Bun |
 
-The barrel exports `NodeHost`, `HostLiveness`, and `ProcessReaper`.
+The barrel exports `NodeHost`, `HostLiveness`, `ProcessReaper`, and `ScopedProcess`.
 `AtomicFileSystem` is reached as `NodeHost.AtomicFileSystem` or through its own
 subpath, never from the barrel.
 
@@ -100,6 +101,12 @@ Host service, so it is not in the closed list, but every durable composition
 needs one and a program that already depends on this package for its host
 should not need a second dependency for the digest.
 
+`NodeHost.implementationIds` is a
+`Readonly<Record<HostServiceIds[number], string>>` naming the five raw bundle
+implementations. Contained factories replace the process runner with
+`ProcessReaper.layerSpawner`; the static identity table does not describe
+that substitution.
+
 ## Layers
 
 | Layer                                       | Jj bound to           | Containment |
@@ -109,18 +116,130 @@ should not need a second dependency for the digest.
 | `NodeHost.layerContained(options?)`         | the process directory | yes         |
 | `NodeHost.layerContainedAt(root, options?)` | one absolute root     | yes         |
 
-The contained pair is what `@smthrs/flows`' `NodeRuntime` composes. Each child
-gets a `SIGTERM`-then-`SIGKILL` deadline and a `ProcessLedger` record, `jj` runs
+The contained pair is what `@smthrs/flows`' `NodeRuntime` composes. Each pipeline leg
+gets a prepared supervisor, a `SIGTERM`-then-`SIGKILL` deadline, and a
+`ProcessLedger` record before activation, `jj` runs
 through that same spawner rather than starting its own children, and
 `ProcessReaper.reap` sweeps the records a crashed incarnation left behind while
 the layer is built. The ledger is a requirement rather than a default: only the
 program knows whether it has a durable one.
 
 `NodeHost.ContainedOptions` is `graceMs` plus the reaper's `ownerPid` and
-`system`. It deliberately omits `ContainedSpawner.Options.platform`: the spawner
-underneath is Effect's, which detaches by the real `process.platform`, so a
-caller-supplied platform would record a process group the child does not lead
-and strand the orphan behind a `no-group` refusal.
+`system`. It deliberately omits `ContainedSpawner.Options.platform`. The
+platform comes from the real `process.platform`, so the native process group
+and recorded identity agree. A caller cannot describe a Windows record for an
+owner that actually leads a POSIX group.
+
+## ScopedProcess
+
+A small scoped process API for transient CLI commands. It uses the same POSIX
+supervisor lifecycle as the contained hosts without requiring a filesystem,
+repository service, or durable process ledger.
+
+```ts
+interface Options extends ChildProcess.KillOptions {
+  readonly command: string
+  readonly args?: ReadonlyArray<string> | undefined
+  readonly cwd?: string | undefined
+  readonly env?: Readonly<Record<string, string | undefined>> | undefined
+  readonly stdin?: "ignore" | "pipe" | undefined
+  readonly windowsVerbatimArguments?: boolean | undefined
+  readonly windowsHide?: boolean | undefined
+}
+
+interface Handle extends ChildProcessHandle {
+  readonly targetPid: number
+}
+
+const spawn: (options: Options) => Effect.Effect<Handle, PlatformError, Scope>
+
+interface Status {
+  readonly code: number | null
+  readonly signal: ChildProcess.Signal | null
+}
+
+const status: (handle: ChildProcessHandle) => Effect.Effect<Status, PlatformError>
+```
+
+`spawn` runs the literal executable and argv with piped stdout/stderr and
+`stdin: "ignore"` by default. When `env` is provided it is the complete target
+environment; when omitted it inherits the host environment. The default
+termination policy is `SIGTERM`, then `SIGKILL` after 2,000 milliseconds.
+`windowsHide` defaults to true. Failed startup cleans up its child scope before
+returning an error.
+
+On POSIX, `handle.pid` identifies the live supervisor and `targetPid` identifies
+the native target for diagnostics. `exitCode` describes the target;
+`status(handle)` preserves a terminating signal as `{ code: null, signal }`.
+A missing or invalid target result remains a platform failure. Use the handle's
+`kill` for cleanup rather than signalling either numeric pid yourself.
+
+Drain stdout, stderr, stdin and status concurrently when using pipes. Keep the
+whole operation inside `Effect.scoped`; a target's natural exit also triggers
+cleanup of children holding those pipes open. The private parent connection
+requests cleanup on host loss. This API has no durable ledger; use
+`NodeHost.layerContained` when a later host must reconcile retained records.
+
+## ProcessReaper.layerSpawner
+
+```ts
+type SpawnerOptions = Omit<ContainedSpawner.Options, "platform">
+
+const layerSpawner: (
+  options?: SpawnerOptions
+) => Layer.Layer<ChildProcessSpawner, never, ChildProcessSpawner | ProcessLedger>
+```
+
+Provides a contained spawner without the complete Node or Bun host. Supply a
+`ProcessLedger` and the underlying runtime spawner. On POSIX this factory uses
+the platform's prepared native adapter, whose pipe error listeners live until
+their descriptors close, including writes interrupted by owner loss. On
+Windows it retains the supplied raw runtime spawner. The platform always comes
+from `process.platform`; `graceMs` defaults to 2,000 milliseconds.
+
+The adapter supports the standard command's stdin/stdout/stderr options and
+additional descriptors named `fdN` for indices 3 through 65,535. Recognized
+indices outside that finite integer range fail before target execution; the
+operating system may impose a lower limit. Names Effect does not recognize
+are ignored. A missing target result fails status and pending I/O; it never
+proves successful cleanup.
+
+`NodeHost.layerContained`, `BunHost.layerContained`, and their rooted variants
+use this factory. It records new owners; `ProcessReaper.layer` separately
+reconciles records inherited from a previous incarnation.
+
+## ProcessReaper.processLifecycle
+
+```ts
+const processLifecycle: ContainedSpawner.Lifecycle
+```
+
+The lower-level Node/Bun platform hook for custom
+`ContainedSpawner.layer(options, lifecycle)` compositions. Prefer
+`ProcessReaper.layerSpawner` for the supplied native adapter as well as the
+lifecycle.
+It prepares a live supervisor, lets the kernel commit the owner identity with
+the original command digest, and activates the target only afterward. The
+supervisor keeps group ownership until cleanup completes, including after a
+natural target exit. Each pipeline leg gets its own owner and ledger record.
+
+The returned handle's `pid` is the supervisor's, while `exitCode` and
+`isRunning` describe the target. `unref` changes liveness references without
+relinquishing cleanup ownership. Scope close and repeated explicit kills share
+one cleanup result; the first accepted policy wins. Failed or unverified
+cleanup fails close and leaves `settled` false so the kernel retains its record.
+
+Default POSIX commands own a separate process group. With `detached: false`,
+the supervisor and target share the caller's group, and cleanup signals only
+the target: group cleanup is explicitly disabled. Explicit stopping of a live
+grouped target also attempts a revalidated ancestry sweep for descendants that
+moved to other groups. That positive-PID sweep is best effort; automatic
+cleanup after natural exit does not promise to reclaim deliberately escaped
+sessions. Windows remains unsupported best effort.
+
+The supervisor starts the current Node or Bun runtime. Compiled Bun
+applications and Node single-executable applications are refused before target
+execution because they do not implement the runtime's eval entry point.
 
 ## Filesystem
 

@@ -499,7 +499,7 @@ const program = Effect.gen(function*() {
 
 ### [@smthrs/sandbox](https://sandbox.smithers.sh)
 
-Runs an Effect program's files and commands on a machine you provision: a container, a microVM, a cloud sandbox, or a scratch directory.
+Runs an Effect program's files and commands on a machine you provision: a container, a microVM, a cloud sandbox, or a scratch directory. `DirectorySandbox` requires a lifecycle-backed spawner, such as `NodeHost.layerContained()` provided with a `ProcessLedger`; its [quickstart](https://sandbox.smithers.sh/quickstart/) shows the host composition.
 
 ```ts
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"

@@ -9,9 +9,11 @@
  * the spawn scope closes.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Permission from "@smthrs/capability/Permission"
 import * as JournalModule from "@smthrs/journal/Journal"
 import { JournalError } from "@smthrs/journal/Journal"
-import { Effect, Layer, Sink, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Sink, Stream } from "effect"
+import * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import {
   ChildProcessSpawner,
@@ -20,11 +22,13 @@ import {
   makeHandle,
   ProcessId
 } from "effect/unstable/process/ChildProcessSpawner"
+import * as GuardedSpawner from "../src/ChildProcessSpawner.ts"
 import * as ContainedSpawner from "../src/ContainedSpawner.ts"
+import { GrantStore } from "../src/GrantStore.ts"
 import * as ProcessLedger from "../src/ProcessLedger.ts"
 
 /**
- * A host spawner that records what it was handed and reports a fixed pid.
+ * A host spawner that records what it was handed and reports consecutive pids.
  *
  * It registers a finalizer of its own, exactly as Effect's Node spawner does:
  * the ORDER of that finalizer against the ledger's release is behavior this
@@ -41,7 +45,7 @@ const hostSpawner = (
         spawned.push(command)
         yield* Effect.addFinalizer(() => Effect.sync(() => events?.push("signalled")))
         return makeHandle({
-          pid: ProcessId(pid),
+          pid: ProcessId(pid + spawned.length - 1),
           exitCode: Effect.succeed(ExitCode(0)),
           isRunning: Effect.succeed(false),
           kill: () => Effect.sync(() => events?.push("killed")),
@@ -77,6 +81,266 @@ const ledgerWithRelease = (
 const options = (command: ChildProcess.Command) => command._tag === "StandardCommand" ? command.options : undefined
 
 describe("ContainedSpawner", () => {
+  for (const verified of [true, false]) {
+    it.effect(`retires a platform-guarded record only after verified cleanup (${verified})`, () =>
+      Effect.gen(function*() {
+        const events: Array<string> = []
+        const ledger = yield* ledgerWithRelease(false, events)
+        const lifecycle: ContainedSpawner.Lifecycle = (command, spawn) =>
+          Effect.gen(function*() {
+            const handle = yield* spawn(command)
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                events.push("checked")
+              })
+            )
+            return { handle, activate: Effect.void, settled: Effect.succeed(verified) }
+          })
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          yield* spawner.spawn(ChildProcess.make("agent"))
+        }).pipe(
+          Effect.provide(ContainedSpawner.layer({}, lifecycle)),
+          Effect.provide(hostSpawner([], 4321, events)),
+          Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+          Effect.scoped
+        )
+        expect(events).toEqual(verified ? ["checked", "signalled", "released"] : ["checked", "signalled"])
+        expect(yield* ledger.live).toHaveLength(verified ? 0 : 1)
+      }))
+  }
+
+  for (const allowed of [true, false]) {
+    it.effect(`authorizes the original command and records its prepared identity before activation (${allowed})`, () =>
+      Effect.gen(function*() {
+        const events: Array<string> = []
+        const spawned: Array<ChildProcess.Command> = []
+        const checks: Array<string> = []
+        const ledger = yield* ledgerWithRelease(false, events)
+        const lifecycle: ContainedSpawner.Lifecycle = (command, spawn) =>
+          Effect.gen(function*() {
+            expect(command.command).toBe("agent")
+            expect(command.args).toEqual(["--run"])
+            expect(command.options).toMatchObject({ forceKillAfter: 50, env: { DECLARED: "value" } })
+            expect(yield* ledger.live).toEqual([])
+            const handle = yield* spawn(ChildProcess.make("prepared-owner"))
+            let settled = false
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                events.push("checked")
+                settled = true
+              })
+            )
+            return {
+              handle,
+              activate: Effect.gen(function*() {
+                expect(yield* ledger.live).toEqual([
+                  expect.objectContaining({ pid: handle.pid, pgid: handle.pid, commandDigest: "agent --run" })
+                ])
+                events.push("activated")
+              }),
+              settled: Effect.sync(() => settled)
+            }
+          })
+        const store = GrantStore.of({
+          check: (capability) => {
+            checks.push(capability.resource)
+            return allowed && capability.resource === "agent --run"
+              ? Effect.void
+              : Effect.fail(Permission.permissionDenied(capability, "original command denied"))
+          },
+          reply: () => Effect.void,
+          list: Effect.succeed([]),
+          grantEnvelope: () => Effect.void
+        })
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const start = spawner.spawn(ChildProcess.make("agent", ["--run"], { env: { DECLARED: "value" } }))
+          if (allowed) {
+            expect((yield* start).pid).toBe(4321)
+          } else {
+            expect((yield* Effect.flip(start)).reason._tag).toBe("PermissionDenied")
+          }
+        }).pipe(
+          Effect.provide(GuardedSpawner.layer),
+          Effect.provide(ContainedSpawner.layer({ graceMs: 50 }, lifecycle)),
+          Effect.provide(hostSpawner(spawned, 4321, events)),
+          Effect.provideService(GrantStore, store),
+          Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+          Effect.scoped
+        )
+        expect(checks).toEqual(["agent --run"])
+        expect(spawned.map((command) => command._tag === "StandardCommand" && command.command)).toEqual(
+          allowed ? ["prepared-owner"] : []
+        )
+        expect(events).toEqual(allowed ? ["activated", "checked", "signalled", "released"] : [])
+        expect(yield* ledger.live).toEqual([])
+      }))
+  }
+
+  it.effect("never activates a prepared command whose durable record fails", () =>
+    Effect.gen(function*() {
+      const events: Array<string> = []
+      const ledger = yield* ProcessLedger.make({ hostId: "prepare-broken", ownerPid: 1 }).pipe(
+        Effect.provide(JournalModule.layerNoop())
+      )
+      const lifecycle: ContainedSpawner.Lifecycle = (_command, spawn) =>
+        Effect.gen(function*() {
+          const handle = yield* spawn(ChildProcess.make("prepared-owner"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => events.push("checked")))
+          return {
+            handle,
+            activate: Effect.sync(() => events.push("activated")),
+            settled: Effect.succeed(true)
+          }
+        })
+      yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        const error = yield* Effect.flip(spawner.spawn(ChildProcess.make("agent")))
+        expect(String(error)).toContain("could not record this spawn durably")
+        // The caller's scope is still open. The failed startup is already closed.
+        expect(events).toEqual(["killed", "checked", "signalled"])
+        expect(yield* ledger.live).toEqual([])
+      }).pipe(
+        Effect.provide(ContainedSpawner.layer({}, lifecycle)),
+        Effect.provide(hostSpawner([], 4321, events)),
+        Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+        Effect.scoped
+      )
+      expect(events).not.toContain("activated")
+    }))
+
+  for (const verified of [true, false]) {
+    it.effect(`closes caught activation failures immediately and retires only verified cleanup (${verified})`, () =>
+      Effect.gen(function*() {
+        const events: Array<string> = []
+        const ledger = yield* ledgerWithRelease(false, events)
+        const failure = PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description: "target does not exist"
+        })
+        const lifecycle: ContainedSpawner.Lifecycle = (_command, spawn) =>
+          Effect.gen(function*() {
+            const handle = yield* spawn(ChildProcess.make("prepared-owner"))
+            let settled = false
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                events.push("checked")
+                settled = verified
+              })
+            )
+            return { handle, activate: Effect.fail(failure), settled: Effect.sync(() => settled) }
+          })
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          expect(yield* Effect.flip(spawner.spawn(ChildProcess.make("missing")))).toBe(failure)
+          expect(events).toEqual(verified ? ["checked", "signalled", "released"] : ["checked", "signalled"])
+          expect(yield* ledger.live).toHaveLength(verified ? 0 : 1)
+          events.push("outer-continues")
+        }).pipe(
+          Effect.provide(ContainedSpawner.layer({}, lifecycle)),
+          Effect.provide(hostSpawner([], 4321, events)),
+          Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+          Effect.scoped
+        )
+        expect(events.at(-1)).toBe("outer-continues")
+      }))
+  }
+
+  for (const phase of ["prepare", "activate"] as const) {
+    it.effect(`closes an interrupted ${phase} before the caller's scope closes`, () =>
+      Effect.gen(function*() {
+        const events: Array<string> = []
+        const entered = yield* Deferred.make<void>()
+        const ledger = yield* ledgerWithRelease(false, events)
+        const pause = Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+        const lifecycle: ContainedSpawner.Lifecycle = (_command, spawn) =>
+          Effect.gen(function*() {
+            const handle = yield* spawn(ChildProcess.make("prepared-owner"))
+            let settled = false
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                events.push("checked")
+                settled = true
+              })
+            )
+            if (phase === "prepare") yield* pause
+            return { handle, activate: pause, settled: Effect.sync(() => settled) }
+          })
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          const fiber = yield* spawner.spawn(ChildProcess.make("agent")).pipe(Effect.forkChild)
+          yield* Deferred.await(entered)
+          yield* Fiber.interrupt(fiber)
+          expect(events).toEqual(
+            phase === "prepare"
+              ? ["checked", "signalled"]
+              : ["checked", "signalled", "released"]
+          )
+          expect(yield* ledger.live).toEqual([])
+          events.push("outer-continues")
+        }).pipe(
+          Effect.provide(ContainedSpawner.layer({}, lifecycle)),
+          Effect.provide(hostSpawner([], 4321, events)),
+          Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+          Effect.scoped
+        )
+        expect(events.at(-1)).toBe("outer-continues")
+      }))
+
+    it.effect(`a caught right-leg ${phase} failure closes both pipeline legs in reverse order`, () =>
+      Effect.gen(function*() {
+        const events: Array<string> = []
+        const ledger = yield* ledgerWithRelease(false, events)
+        const failure = PlatformError.systemError({
+          _tag: "NotFound",
+          module: "ChildProcess",
+          method: "spawn",
+          description: "right leg does not exist"
+        })
+        const lifecycle: ContainedSpawner.Lifecycle = (command, spawn) =>
+          Effect.gen(function*() {
+            const handle = yield* spawn(ChildProcess.make(`${command.command}-owner`))
+            let settled = false
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                events.push(`checked:${command.command}`)
+                settled = true
+              })
+            )
+            if (command.command === "right" && phase === "prepare") return yield* Effect.fail(failure)
+            return {
+              handle,
+              activate: command.command === "right" ? Effect.fail(failure) : Effect.void,
+              settled: Effect.sync(() => settled)
+            }
+          })
+        yield* Effect.gen(function*() {
+          const spawner = yield* ChildProcessSpawner
+          expect(
+            yield* Effect.flip(spawner.spawn(
+              ChildProcess.pipeTo(ChildProcess.make("left"), ChildProcess.make("right"))
+            ))
+          ).toBe(failure)
+          expect(events).toEqual(
+            phase === "prepare"
+              ? ["checked:right", "signalled", "checked:left", "signalled", "released"]
+              : ["checked:right", "signalled", "released", "checked:left", "signalled", "released"]
+          )
+          expect(yield* ledger.live).toEqual([])
+          events.push("outer-continues")
+        }).pipe(
+          Effect.provide(ContainedSpawner.layer({}, lifecycle)),
+          Effect.provide(hostSpawner([], 4321, events)),
+          Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+          Effect.scoped
+        )
+        expect(events.at(-1)).toBe("outer-continues")
+      }))
+  }
+
   it("gives a command an escalation deadline it did not have", () => {
     const contained = ContainedSpawner.withContainment(ChildProcess.make("sleep", ["30"]))
     expect(options(contained)).toMatchObject({ killSignal: "SIGTERM", forceKillAfter: 2000 })

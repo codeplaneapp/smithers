@@ -7,6 +7,19 @@ Most failures here are a refusal, not a fault: the seam declines to pretend it
 did something it cannot do. Find the message and read the matching section. The
 full error shapes are in the [API reference](./api.md).
 
+## "DirectorySandbox requires a contained ChildProcessSpawner with a platform lifecycle"
+
+**What happened.** The supplied spawner is raw or wraps only a kill deadline.
+Acquisition failed with `unavailable` before creating a workspace or starting a
+command.
+
+**What to change.** Supply `NodeHost.layerContained()` or
+`BunHost.layerContained()` with a `ProcessLedger`, as in the
+[quickstart](./quickstart.md). A smaller Node or Bun host can use
+`ProcessReaper.layerSpawner()` with the same ledger. Custom platform authors can
+supply `ContainedSpawner.layer(options, lifecycle)`. Put the permission decorator
+above containment so it checks the original command before preparation.
+
 ## "this remote session cannot supply stdin to a command"
 
 **What happened.** A command fed standard input to a provider that does not

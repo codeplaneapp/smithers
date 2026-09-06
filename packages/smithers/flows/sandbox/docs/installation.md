@@ -49,17 +49,18 @@ Four of the bundled providers are built from Effect's own host services,
 which a platform package supplies. On Node:
 
 ```bash
-pnpm add @effect/platform-node
+pnpm add @smthrs/platform-node@next @smthrs/kernel@next
 ```
 
-`NodeServices.layer` provides `FileSystem`, `Path`, and `ChildProcessSpawner`
-together, which is what `DirectorySandbox`, `ContainerSandbox`,
-`KubernetesSandbox`, and `AwsSandbox` are constructed from. The
-[Quickstart](./quickstart.md) uses it. `JustBashSandbox` also takes a
-`FileSystem`, but one mounted over its interpreter's tree rather than the
-host's.
+`NodeHost.layerContained()` provides the filesystem, path, and lifecycle-backed
+spawner `DirectorySandbox` requires. Provide a `ProcessLedger` underneath it,
+as the [quickstart](./quickstart.md) does. A raw `NodeServices.layer` spawner or
+a wrapper with only a kill deadline is refused before a workspace is created.
 
-Nothing else is required to run a sandbox. Everything below is per provider.
+`ContainerSandbox`, `KubernetesSandbox`, and `AwsSandbox` accept host services
+for their local transports; their machines and guest cleanup are managed by
+the respective providers. `JustBashSandbox` takes a `FileSystem` mounted over
+its interpreter's tree. The remaining prerequisites are listed per provider.
 
 ## What each provider expects
 
@@ -70,7 +71,7 @@ backend needs.
 
 | Provider              | You supply                                                                                                                    | Installed where                                                                     |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `DirectorySandbox`    | An Effect `FileSystem` and `ChildProcessSpawner`.                                                                             | The host process.                                                                   |
+| `DirectorySandbox`    | An Effect `FileSystem` and a lifecycle-backed `ChildProcessSpawner`.                                                          | The host process.                                                                   |
 | `JustBashSandbox`     | A [`just-bash`](https://www.npmjs.com/package/just-bash) `Bash` instance and a `FileSystem` mounted over the same tree.       | The host process, or the browser page.                                              |
 | `ContainerSandbox`    | A `ChildProcessSpawner`, and a Docker-compatible CLI on `PATH` (`docker` by default; `program: "podman"` for Podman).         | The machine running the provider.                                                   |
 | `KubernetesSandbox`   | A `ChildProcessSpawner`, `kubectl` on `PATH`, and a cluster context. The guest image must carry `sh`, `env`, and `base64`.    | The machine running the provider, plus the cluster.                                 |

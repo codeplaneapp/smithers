@@ -10,6 +10,7 @@
  * JavaScript still executes in the engine host.
  */
 import { Action, Flow, Interpreter } from "@smthrs/flow"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
 import * as NodeHost from "@smthrs/platform-node/NodeHost"
 import { DirectorySandbox, Sandbox } from "@smthrs/sandbox"
 import * as Effect from "effect/Effect"
@@ -88,7 +89,11 @@ export const main = (options: MainOptions): Promise<number> =>
         Effect.scoped
       )
     }).pipe(
-      Effect.provide(NodeHost.layer),
+      Effect.provide(
+        NodeHost.layerContained().pipe(
+          Layer.provide(ProcessLedger.layerMemory({ hostId: "examples-sandbox-placement", ownerPid: process.pid }))
+        )
+      ),
       Effect.orDie
     )
   )

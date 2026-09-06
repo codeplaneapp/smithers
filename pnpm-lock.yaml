@@ -3117,6 +3117,9 @@ importers:
       '@smthrs/plan':
         specifier: 1.0.0-rc.0
         version: link:../../flows/plan
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../../flows/platform-node
       '@smthrs/targets':
         specifier: 1.0.0-rc.0
         version: link:../targets
@@ -3236,6 +3239,9 @@ importers:
       '@smthrs/plan':
         specifier: 1.0.0-rc.0
         version: link:../../flows/plan
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../../flows/platform-node
       ignore:
         specifier: 7.0.8
         version: 7.0.8
@@ -4995,6 +5001,9 @@ importers:
       '@smthrs/flow':
         specifier: 1.0.0-rc.0
         version: link:../flow
+      '@smthrs/platform-node':
+        specifier: 1.0.0-rc.0
+        version: link:../platform-node
       '@smthrs/std':
         specifier: 1.0.0-rc.0
         version: link:../../agent/std

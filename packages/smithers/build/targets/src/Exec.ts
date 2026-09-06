@@ -9,10 +9,11 @@
  * @since 0.1.0
  */
 import { Action, type FlowRuntime } from "@smthrs/flow"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as NodeChildProcess from "node:child_process"
+import * as Stream from "effect/Stream"
 import * as NodeFs from "node:fs"
 import * as NodePath from "node:path"
 import * as NodeUtil from "node:util/types"
@@ -981,37 +982,9 @@ interface Spawned {
 }
 
 /**
- * Kills one child and, where the host has process groups, everything it
- * started.
- *
- * The child is spawned detached so it leads its own process group and a single
- * negative-pid signal reaches its descendants too. Windows has no process
- * groups and no signals: `detached` there means a separate console, the
- * negative-pid call fails, and the fallback terminates only the child itself.
- * A grandchild started on Windows outlives the kill, and no Node API changes
- * that.
- */
-const killTree = (child: NodeChildProcess.ChildProcess): void => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, "SIGKILL")
-      return
-    } catch {
-      // Fall through when process groups are unavailable on this host.
-    }
-  }
-  try {
-    child.kill("SIGKILL")
-  } catch {
-    // The process may have settled between the state check and the signal.
-  }
-}
-
-/**
  * Spawns argv in the resolved directory through the shape {@link spawnShape}
- * settles: the declared executable itself everywhere except a Windows batch
- * shim, which only `cmd.exe` can run.
+ * settles. The supervisor keeps cleanup independent of target exit and pipe
+ * EOF; native Windows batch arguments retain their exact existing quoting.
  */
 const spawnTool = (
   cwd: string,
@@ -1022,144 +995,105 @@ const spawnTool = (
   onStderr?: ((chunk: Uint8Array) => void) | undefined,
   base?: ToolEnvironment | undefined
 ): Effect.Effect<Spawned, ExecError> =>
-  Effect.callback<Spawned, ExecError>((resume) => {
-    const env = toolEnvironment(payload.env, sensitiveEnv, secretEnv, base)
-    let child: NodeChildProcess.ChildProcess
-    try {
-      // Resolved against the environment the child itself gets, so a declared
-      // Nix closure's PATH answers rather than the host's.
-      const shape = spawnShape(payload.argv, { env })
-      child = NodeChildProcess.spawn(shape.file, [...shape.args], {
-        cwd,
-        detached: true,
-        env,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsVerbatimArguments: shape.windowsVerbatimArguments
-      })
-    } catch (cause) {
-      resume(Effect.fail(
-        execError({
-          argv: payload.argv,
-          cwd: payload.cwd,
-          exitCode: -1,
-          code: "spawn_failed",
-          stdout: "",
-          stderr: tail(failureMessage(cause))
-        })
-      ))
-      return Effect.void
-    }
+  Effect.suspend(() => {
     const stdout = capture()
     const stderr = capture()
-    // A failed spawn emits `error` and then `close`, and a stream error can
-    // arrive alongside either. Both would resume the same callback twice, which
-    // is a defect rather than a second answer, so the first settlement wins and
-    // every listener is dropped with it.
-    let settled = false
-    const settle = (outcome: Effect.Effect<Spawned, ExecError>): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resume(outcome)
-    }
-    const failure = (
-      message: string,
-      out: string,
-      code: ExecFailureCode,
-      signal?: NodeJS.Signals
-    ): void =>
-      settle(Effect.fail(
-        execError({
-          argv: payload.argv,
-          cwd: payload.cwd,
-          exitCode: -1,
-          code,
-          ...(signal === undefined ? {} : { signal }),
-          stdout: out,
-          stderr: tail(message)
-        })
-      ))
-    // A pipe that fails mid-run would otherwise emit an unhandled `error` and
-    // take the whole process down. The run fails instead: the captured text is
-    // incomplete, and reporting it as a result would cache a truncated stream.
-    let streamFailure: string | undefined
-    const pipeFailed = (stream: "stdout" | "stderr") => (error: NodeJS.ErrnoException): void => {
-      if (settled) return
-      streamFailure ??= `${stream} could not be read: ${error.message}`
-      killTree(child)
-    }
-    const timer = setTimeout(() => {
-      killTree(child)
-      failure(`the tool timed out after ${payload.timeoutMs}ms`, stdout.tail, "timed_out")
-    }, payload.timeoutMs)
-    if (child.stdout === null || child.stderr === null) {
-      killTree(child)
-      failure("the child was spawned without a stdout and stderr pipe", "", "spawn_failed")
-      return Effect.sync(() => killTree(child))
-    }
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (!settled) {
-        append(stdout, chunk)
-        onStdout?.(chunk)
-      }
-    })
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (!settled) {
-        append(stderr, chunk)
-        onStderr?.(chunk)
-      }
-    })
-    child.stdout.on("error", pipeFailed("stdout"))
-    child.stderr.on("error", pipeFailed("stderr"))
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      if (settled) return
-      // Flush both decoders as the close path does, so a trailing partial
-      // sequence shows up as the replacement character instead of vanishing
-      // from the tail the diagnostic carries.
+    const failure = (message: string, code: ExecFailureCode, signal?: string) => {
       finish(stdout)
       finish(stderr)
-      // `spawn <name> ENOENT` has two causes and names only one of them. The
-      // executable may be absent from PATH, or the WORKING DIRECTORY may not
-      // exist: Node reports both by naming the command, so the message sends
-      // every reader after the wrong one. Measured, with pnpm on PATH the
-      // whole time:
-      //
-      //   spawn("pnpm", [...], { cwd: <existing> })  -> exits 0
-      //   spawn("pnpm", [...], { cwd: <missing>  })  -> "spawn pnpm ENOENT"
-      //
-      // A missing directory is reachable here rather than hypothetical:
-      // `resolveWorkspacePath` validates through `realpath`, which resolves
-      // through the nearest EXISTING ancestor and so returns a value for a
-      // path that is not there. So the answer is stated instead of guessed.
-      const detail = error.code === "ENOENT" && !NodeFs.existsSync(cwd)
-        ? `${error.message} (the working directory ${cwd} does not exist)`
-        : error.message
-      failure(detail, stdout.tail, "spawn_failed")
-    })
-    child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return
+      return execError({
+        argv: payload.argv,
+        cwd: payload.cwd,
+        exitCode: -1,
+        code,
+        ...(signal === undefined ? {} : { signal }),
+        stdout: stdout.tail,
+        stderr: tail(message)
+      })
+    }
+    const program = Effect.gen(function*() {
+      const env = toolEnvironment(payload.env, sensitiveEnv, secretEnv, base)
+      const shape = yield* Effect.try({
+        try: () => spawnShape(payload.argv, { env }),
+        catch: (cause) => failure(failureMessage(cause), "spawn_failed")
+      })
+      const handle = yield* ScopedProcess.spawn({
+        command: shape.file,
+        args: shape.args,
+        cwd,
+        env,
+        stdin: "ignore",
+        killSignal: "SIGKILL",
+        forceKillAfter: 0,
+        windowsVerbatimArguments: shape.windowsVerbatimArguments
+      }).pipe(Effect.mapError((cause) => {
+        // ENOENT can describe the cwd as well as the executable. Check the cwd
+        // explicitly so the first-run diagnostic identifies the missing input.
+        const detail = failureMessage(cause.cause ?? cause)
+        return failure(
+          !NodeFs.existsSync(cwd)
+            ? `${detail} (the working directory ${cwd} does not exist)`
+            : detail,
+          "spawn_failed"
+        )
+      }))
+      const consume = (
+        source: typeof handle.stdout,
+        capture: Capture,
+        name: "stdout" | "stderr",
+        observer: ((chunk: Uint8Array) => void) | undefined
+      ) =>
+        source.pipe(
+          Stream.runForEach((chunk) =>
+            Effect.try({
+              try: () => {
+                append(capture, chunk)
+                try {
+                  observer?.(chunk)
+                } catch {
+                  // Optional progress output cannot change the captured result.
+                }
+              },
+              catch: (cause) => failure(`${name} could not be read: ${failureMessage(cause)}`, "stream_failed")
+            })
+          ),
+          Effect.mapError((cause) =>
+            cause._tag === "smithers-build/ExecError" ?
+              cause :
+              failure(`${name} could not be read: ${failureMessage(cause.cause ?? cause)}`, "stream_failed")
+          )
+        )
+      const [status] = yield* Effect.all([
+        ScopedProcess.status(handle).pipe(
+          Effect.mapError((cause) => failure(failureMessage(cause.cause ?? cause), "stream_failed"))
+        ),
+        consume(handle.stdout, stdout, "stdout", onStdout),
+        consume(handle.stderr, stderr, "stderr", onStderr)
+      ], { concurrency: "unbounded" })
       finish(stdout)
       finish(stderr)
-      if (streamFailure !== undefined) return failure(streamFailure, stdout.tail, "stream_failed")
-      // A signalled child has no exit code. Reporting only -1 loses the one
-      // fact that explains the failure, so the signal is its own field and is
-      // named in the tail the diagnostic carries too.
-      if (exitCode === null && signal !== null) {
-        return failure(`${stderr.tail}\nthe tool was terminated by ${signal}`, stdout.tail, "signaled", signal)
+      if (status.signal !== null) {
+        return yield* Effect.fail(failure(
+          `${stderr.tail}\nthe tool was terminated by ${status.signal}`,
+          "signaled",
+          status.signal
+        ))
       }
-      settle(Effect.succeed({
-        exitCode: exitCode ?? -1,
+      return {
+        exitCode: status.code ?? -1,
         stdout: stdout.head,
         stderr: stderr.head,
         stdoutTail: stdout.tail,
         stderrTail: stderr.tail
-      }))
+      }
     })
-    return Effect.sync(() => {
-      settled = true
-      clearTimeout(timer)
-      killTree(child)
-    })
+    return program.pipe(
+      Effect.timeoutOrElse({
+        duration: payload.timeoutMs,
+        orElse: () => Effect.fail(failure(`the tool timed out after ${payload.timeoutMs}ms`, "timed_out"))
+      }),
+      Effect.scoped
+    )
   })
 
 /**

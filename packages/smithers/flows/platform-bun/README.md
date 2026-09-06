@@ -59,8 +59,8 @@ what fills it, so swapping `BunHost.layer` for `NodeHost.layer` from
 
 The complete host bundles require jj 0.39.0 or newer. Each bundle builds its jj
 layer with one version probe; construction can fail with `JjError`, including
-`not_installed` or `unsupported_version`. The contained bundles route that probe
-through their process spawner and retire its ledger entry when it exits.
+`not_installed` or `unsupported_version`. The version probe runs outside the
+host process ledger; repository commands use the selected process runner.
 
 ## Modules
 
@@ -71,10 +71,14 @@ through their process spawner and retire its ledger entry when it exits.
 
 Three variants change one slot each. `BunHost.layerAt(root)` binds version
 control to one absolute repository root instead of the process working
-directory. `BunHost.layerContained(options)` routes every spawn through a
-process group with a `SIGTERM`-then-`SIGKILL` deadline and records it in a
-`ProcessLedger`, so a host that crashes without running a finalizer leaves
-something its next incarnation can act on. `BunHost.layerContainedAt` is both.
+directory. `BunHost.layerContained(options)` prepares and records a supervisor
+before each target starts, then keeps its cleanup deadline after target exit.
+The private host connection also initiates group cleanup on host loss;
+unverified cleanup retains its `ProcessLedger` record for restart
+reconciliation. `BunHost.layerContainedAt` combines both variants. On POSIX,
+handle `pid` names the supervisor while status describes the target; use
+`handle.kill` to stop it. See the [containment guide](./docs/guides/contain-child-processes.md)
+for detached commands, escaped sessions, and unsupported-platform limits.
 
 Two properties are worth knowing before you compose the five slots by hand. The
 filesystem slot carries `@smthrs/platform-node`'s `AtomicFileSystem`, so under
@@ -86,14 +90,15 @@ fetch-backed client configured with `RequestInit { redirect: "manual" }`, so a
 
 ## Runtimes
 
-Bun >=1.4.0 and Node.js >=22.19.0. Bun's child-process spawner is Effect's Node
-spawner re-exported, so there is no runtime detection here and nothing to
-detect; the bundle runs unchanged on either. It falls back to the
+Bun >=1.4.0 and Node.js >=22.19.0. The raw bundle's child-process spawner is
+Effect's Node spawner re-exported. Contained POSIX bundles use the prepared
+native adapter from `@smthrs/platform-node/ProcessReaper`. The bundle falls back to the
 `@effect/platform-node` adapters off Bun and so resolves `node:` built-ins,
 which is what stops it bundling for a browser. A page composes
 `@smthrs/platform-browser` instead.
 
-The host exports `implementationIds` for its five service slots. Its rooted
+The host exports `implementationIds` for its five raw bundle service slots;
+contained factories replace the process runner. Its rooted
 factories reject invalid roots before constructing a layer, using the host's
 own error with code `invalid_repository_root`.
 

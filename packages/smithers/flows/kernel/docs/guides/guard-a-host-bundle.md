@@ -51,11 +51,12 @@ provide it once above both.
 
 ## Contain processes at the same time
 
-Under `NodeHost.layerAt`, a spawned child is signalled when its scope closes
-and then waited for, forever if it ignores `SIGTERM`, and a host that dies
-without closing its scopes abandons every child it started.
-`NodeHost.layerContainedAt` adds the escalation deadline, the ledger, and the
-reaper:
+Under `NodeHost.layerAt`, the raw spawner signals its target at scope close.
+That target can ignore the signal or exit while descendants keep running, and
+a crashed host runs no finalizers. `NodeHost.layerContainedAt` adds a live
+supervisor, a cleanup deadline, a ledger, and restart reconciliation. Keep
+the permission decorator above it so the caller's complete command is
+authorized before platform preparation:
 
 ```ts
 import { ProcessLedger } from "@smthrs/kernel"

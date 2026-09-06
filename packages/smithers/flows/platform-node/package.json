@@ -41,7 +41,8 @@
     "./HostLiveness": "./src/HostLiveness.ts",
     "./NodeHost": "./src/NodeHost.ts",
     "./ProcessReaper": "./src/ProcessReaper.ts",
-    "./index": "./src/index.ts"
+    "./index": "./src/index.ts",
+    "./ScopedProcess": "./src/ScopedProcess.ts"
   },
   "files": [
     "src/**/*.ts",
@@ -91,6 +92,11 @@
         "types": "./dist/esm/index.d.ts",
         "import": "./dist/esm/index.js",
         "require": "./dist/cjs/index.js"
+      },
+      "./ScopedProcess": {
+        "types": "./dist/esm/ScopedProcess.d.ts",
+        "import": "./dist/esm/ScopedProcess.js",
+        "require": "./dist/cjs/ScopedProcess.js"
       }
     }
   },

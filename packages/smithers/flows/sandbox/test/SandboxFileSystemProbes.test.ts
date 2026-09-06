@@ -1,6 +1,5 @@
-import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
+import { Effect, FileSystem, PlatformError } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -8,6 +7,7 @@ import { join } from "node:path"
 import { afterAll } from "vitest"
 import * as DirectorySandbox from "../src/DirectorySandbox/index.ts"
 import * as Sandbox from "../src/Sandbox/index.ts"
+import { platform } from "./helpers/containedPlatform.ts"
 
 // The suite pins the probe dialect to its reference: every operation runs
 // twice on the same real directory tree — once through `Sandbox.fileSystem`'s
@@ -22,11 +22,6 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-fs-probes-")))
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
-
-const platform = Layer.provideMerge(
-  NodeChildProcessSpawner.layer,
-  Layer.merge(NodeFileSystem.layer, Path.layer)
-)
 
 const services = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem

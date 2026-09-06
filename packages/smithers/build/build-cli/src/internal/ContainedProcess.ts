@@ -2,11 +2,10 @@
  * @since 1.0.0-rc.0
  */
 import { NodeChildProcessSpawner, NodeFileSystem, NodePath } from "@effect/platform-node"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import { type ChildProcessHandle, ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
-import { performance } from "node:perf_hooks"
-import { setTimeout as delay } from "node:timers/promises"
+import { type ChildProcessHandle, ChildProcessSpawner, makeHandle } from "effect/unstable/process/ChildProcessSpawner"
 
 /** A bounded process operation failed, with its original cause retained.
  * @category errors
@@ -22,77 +21,40 @@ export class ProcessError extends Error {
   }
 }
 
-const layer = NodeChildProcessSpawner.layer.pipe(Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer)))
 const graceMs = 5000
-const reapMs = 5000
 
-// ESRCH alone proves absence. Permission errors must never report successful cleanup.
-const signalGroup = (pid: number, signal: NodeJS.Signals | 0): boolean => {
-  try {
-    process.kill(-pid, signal)
-    return true
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "ESRCH") return false
-    throw new ProcessError("cleanup_failed", `could not signal process group ${pid}`, cause)
-  }
-}
+const windowsLayer = NodeChildProcessSpawner.layer.pipe(
+  Layer.provide(Layer.merge(NodeFileSystem.layer, NodePath.layer))
+)
 
-/** Waits through TERM, KILL, and group disappearance; unknown liveness fails closed.
- * @category execution
- * @since 1.0.0-rc.0
- */
-export const stopGroup = async (pid: number): Promise<void> => {
-  let lastFailure: unknown
-  const exists = () => {
-    try {
-      return signalGroup(pid, 0)
-    } catch (cause) {
-      lastFailure = cause
-      return true
-    }
-  }
-  const send = async (signal: NodeJS.Signals) => {
-    try {
-      return signalGroup(pid, signal)
-    } catch (cause) {
-      // macOS can report EPERM while the final member is being reaped.
-      // Yield for that exit, then require ESRCH; an extant group still fails.
-      await delay(25)
-      if (!exists()) return false
-      lastFailure = cause
-      return true
-    }
-  }
-  if (!await send("SIGTERM")) return
-  const deadline = performance.now() + graceMs
-  while (exists()) {
-    if (performance.now() >= deadline) {
-      await send("SIGKILL")
-      break
-    }
-    await delay(25)
-  }
-  const reapDeadline = performance.now() + reapMs
-  while (exists()) {
-    if (performance.now() >= reapDeadline) {
-      throw new ProcessError("cleanup_failed", `process group ${pid} still exists after SIGKILL`, lastFailure)
-    }
-    await delay(25)
-  }
-}
-
-const stop = (handle: ChildProcessHandle) =>
-  process.platform === "win32"
-    ? Effect.flatMap(handle.isRunning, (running) =>
-      running
-        ? handle.kill({ killSignal: "SIGTERM", forceKillAfter: graceMs })
-        : Effect.void).pipe(
+// Windows discovery/watch already used Effect's taskkill /T implementation.
+// Preserve that native path; the POSIX owner protocol requires UNIX sockets.
+const spawn = (options: ScopedProcess.Options) => {
+  if (process.platform !== "win32") return ScopedProcess.spawn(options)
+  return Effect.gen(function*() {
+    const spawner = yield* ChildProcessSpawner
+    const handle = yield* spawner.spawn(ChildProcess.make(options.command, options.args ?? [], {
+      cwd: options.cwd,
+      env: options.env,
+      extendEnv: options.env === undefined,
+      detached: false,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      killSignal: "SIGTERM",
+      forceKillAfter: graceMs
+    }))
+    const kill: ChildProcessHandle["kill"] = (options) =>
+      Effect.flatMap(handle.isRunning, (running) => running ? handle.kill(options) : Effect.void).pipe(
         Effect.timeoutOrElse({
-          duration: graceMs + reapMs,
+          duration: graceMs * 2,
           orElse: () => Effect.fail(new ProcessError("cleanup_failed", `could not stop process ${handle.pid}`))
-        })
+        }),
+        Effect.orDie
       )
-    : Effect.tryPromise({ try: () => stopGroup(handle.pid), catch: (cause) => cause })
+    return makeHandle({ ...handle, kill })
+  }).pipe(Effect.provide(windowsLayer))
+}
 
 /** Spawns through the Node service and releases only after the owned group is gone.
  * @category execution
@@ -112,24 +74,21 @@ export const run = async (options: {
 }): Promise<number> => {
   let cleanupFailure: unknown
   const program = Effect.gen(function*() {
-    const spawner = yield* ChildProcessSpawner
     const handle = yield* Effect.uninterruptibleMask(() =>
       Effect.gen(function*() {
-        const handle = yield* spawner.spawn(ChildProcess.make(options.command, options.args, {
+        const handle = yield* spawn({
+          command: options.command,
+          args: options.args,
           cwd: options.cwd,
           env: options.environment,
-          extendEnv: options.environment === undefined,
           stdin: "ignore",
-          stdout: "pipe",
-          stderr: "pipe",
-          detached: process.platform !== "win32",
           killSignal: "SIGTERM",
           forceKillAfter: graceMs
-        }))
+        })
         // Registered after spawn: this runs BEFORE the service releases its handle.
         // Leader exit is insufficient: descendants may have closed all inherited pipes.
         yield* Effect.addFinalizer(() =>
-          stop(handle).pipe(
+          handle.kill({ killSignal: "SIGTERM", forceKillAfter: graceMs }).pipe(
             Effect.tapCause((cause) =>
               Effect.sync(() => {
                 cleanupFailure = Cause.squash(cause)
@@ -163,7 +122,9 @@ export const run = async (options: {
         })))
     }
     const [code] = yield* Effect.all([
-      handle.exitCode.pipe(Effect.catch(() => Effect.succeed(1))),
+      process.platform === "win32"
+        ? handle.exitCode.pipe(Effect.catch(() => Effect.succeed(1)))
+        : ScopedProcess.status(handle).pipe(Effect.map((status) => status.code ?? 1)),
       consume(handle.stdout, options.stdout),
       consume(handle.stderr, options.stderr)
     ], { concurrency: "unbounded" })
@@ -173,7 +134,7 @@ export const run = async (options: {
     duration: options.timeoutMs,
     orElse: () => Effect.fail(new ProcessError("timed_out", `process timed out after ${options.timeoutMs}ms`))
   }))
-  const result = await Effect.runPromiseExit(bounded.pipe(Effect.scoped, Effect.provide(layer)), {
+  const result = await Effect.runPromiseExit(bounded.pipe(Effect.scoped), {
     signal: options.signal
   })
   if (cleanupFailure !== undefined) {

@@ -31,14 +31,16 @@
  * @since 0.1.0
  */
 import type { Action, FlowRuntime } from "@smthrs/flow"
+import * as ScopedProcess from "@smthrs/platform-node/ScopedProcess"
 import * as AgentTarget from "@smthrs/targets/AgentTarget"
 import type * as Input from "@smthrs/targets/Input"
 import type * as Reference from "@smthrs/targets/Reference"
 import * as Effect from "effect/Effect"
 import type * as Layer from "effect/Layer"
+import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import { minimatch } from "minimatch"
-import * as NodeChildProcess from "node:child_process"
 import { createHash } from "node:crypto"
 import * as NodeFs from "node:fs"
 import * as Fs from "node:fs/promises"
@@ -284,23 +286,9 @@ interface Spawned {
   readonly stderr: string
 }
 
-/** Kills the child and, on hosts with process groups, every descendant. */
-const killTree = (child: NodeChildProcess.ChildProcess): void => {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, "SIGKILL")
-      return
-    } catch {
-      // Windows has no negative-pid process-group signaling.
-    }
-  }
-  try {
-    child.kill("SIGKILL")
-  } catch {
-    // The process may have exited between the state observation and the signal.
-  }
-}
+/** Preserves the native subprocess diagnostic beneath the platform wrapper. */
+const subprocessError = (error: PlatformError.PlatformError): Error =>
+  error.cause instanceof Error ? error.cause : new Error(error.reason.description ?? error.message, { cause: error })
 
 /** Builds the subprocess environment while withholding injection hooks. */
 const spawnEnvironment = (sensitiveEnv: ReadonlyArray<string>, git: boolean): NodeJS.ProcessEnv => {
@@ -344,91 +332,70 @@ const spawnText = (
   args: ReadonlyArray<string>,
   options: SpawnOptions
 ): Effect.Effect<Spawned, Error> =>
-  Effect.callback<Spawned, Error>((resume) => {
-    let child: NodeChildProcess.ChildProcess
-    try {
-      child = NodeChildProcess.spawn(executable, args, {
-        cwd,
-        detached: true,
-        env: spawnEnvironment(options.sensitiveEnv, options.git),
-        stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-        windowsHide: true
-      })
-    } catch (cause) {
-      resume(Effect.fail(new Error(messageOf(cause), { cause })))
-      return Effect.void
-    }
+  Effect.gen(function*() {
+    const child = yield* ScopedProcess.spawn({
+      command: executable,
+      args,
+      cwd,
+      env: spawnEnvironment(options.sensitiveEnv, options.git),
+      stdin: options.stdin === undefined ? "ignore" : "pipe",
+      killSignal: "SIGKILL",
+      forceKillAfter: 0,
+      windowsHide: true
+    }).pipe(Effect.mapError(subprocessError))
     const stdout: Array<Buffer> = []
     let stdoutLength = 0
     let stderrTail = ""
     let stdinFailure: Error | undefined
-    let settled = false
-    const settle = (outcome: Effect.Effect<Spawned, Error>): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resume(outcome)
+    const [status] = yield* Effect.all([
+      ScopedProcess.status(child).pipe(Effect.mapError(subprocessError)),
+      child.stdout.pipe(
+        Stream.mapError((error) => new Error(`stdout could not be read: ${subprocessError(error).message}`)),
+        Stream.runForEach((chunk) =>
+          Effect.suspend(() => {
+            stdoutLength += chunk.byteLength
+            if (stdoutLength > options.stdoutBytes) {
+              return Effect.fail(new Error(`agent subprocess stdout exceeded ${options.stdoutBytes} bytes`))
+            }
+            stdout.push(Buffer.from(chunk))
+            return Effect.void
+          })
+        )
+      ),
+      child.stderr.pipe(
+        Stream.mapError((error) => new Error(`stderr could not be read: ${subprocessError(error).message}`)),
+        Stream.runForEach((chunk) =>
+          Effect.sync(() => {
+            stderrTail = (stderrTail + Buffer.from(chunk).toString("utf8")).slice(-maximumStderrTail)
+          })
+        )
+      ),
+      options.stdin === undefined ? Effect.void : Stream.make(Buffer.from(options.stdin, "utf8")).pipe(
+        Stream.run(child.stdin),
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            // Some model CLIs reject a prompt before reading it, yet still emit
+            // a complete response or a useful diagnostic. Preserve that result.
+            stdinFailure = new Error(`stdin could not be written: ${subprocessError(error).message}`)
+          })
+        )
+      )
+    ], { concurrency: "unbounded" })
+    if (stdinFailure !== undefined && stdoutLength === 0 && stderrTail === "") {
+      return yield* Effect.fail(stdinFailure)
     }
-    const timer = setTimeout(() => {
-      killTree(child)
-      settle(Effect.fail(new Error(`agent subprocess timed out after ${options.timeoutMs}ms`)))
-    }, options.timeoutMs)
-    const failPipe = (message: string): void => {
-      killTree(child)
-      settle(Effect.fail(new Error(message)))
+    return {
+      exitCode: status.code ?? -1,
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: status.signal === null ? stderrTail : `${stderrTail}\nsubprocess terminated by ${status.signal}`.trim()
     }
-    if (child.stdout === null || child.stderr === null) {
-      failPipe("the agent subprocess was created without stdout and stderr pipes")
-      return Effect.sync(() => killTree(child))
-    }
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (settled) return
-      stdoutLength += chunk.byteLength
-      if (stdoutLength > options.stdoutBytes) {
-        failPipe(`agent subprocess stdout exceeded ${options.stdoutBytes} bytes`)
-        return
-      }
-      stdout.push(chunk)
-    })
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (settled) return
-      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-maximumStderrTail)
-    })
-    child.stdout.on("error", (error: Error) => failPipe(`stdout could not be read: ${error.message}`))
-    child.stderr.on("error", (error: Error) => failPipe(`stderr could not be read: ${error.message}`))
-    child.on("error", (error: NodeJS.ErrnoException) => settle(Effect.fail(error)))
-    child.on("close", (exitCode: number | null, signal: NodeJS.Signals | null) => {
-      if (settled) return
-      if (stdinFailure !== undefined && stdoutLength === 0 && stderrTail === "") {
-        settle(Effect.fail(stdinFailure))
-        return
-      }
-      settle(Effect.succeed({
-        exitCode: exitCode ?? -1,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: signal === null ? stderrTail : `${stderrTail}\nsubprocess terminated by ${signal}`.trim()
-      }))
-    })
-    if (options.stdin !== undefined) {
-      if (child.stdin === null) {
-        failPipe("the agent subprocess was created without a stdin pipe")
-      } else {
-        child.stdin.on("error", (error: Error) => {
-          if (!settled) stdinFailure = new Error(`stdin could not be written: ${error.message}`)
-        })
-        try {
-          child.stdin.end(options.stdin, "utf8")
-        } catch (cause) {
-          stdinFailure = new Error(`stdin could not be written: ${messageOf(cause)}`)
-        }
-      }
-    }
-    return Effect.sync(() => {
-      settled = true
-      clearTimeout(timer)
-      killTree(child)
-    })
-  })
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: options.timeoutMs,
+      orElse: () => Effect.fail(new Error(`agent subprocess timed out after ${options.timeoutMs}ms`))
+    }),
+    Effect.scoped
+  )
 
 /** Extracts the answer text from one claude CLI JSON envelope. */
 const extractClaudeText = (stdout: string): string => {

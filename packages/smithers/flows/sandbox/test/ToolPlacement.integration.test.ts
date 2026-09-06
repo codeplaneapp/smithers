@@ -13,27 +13,22 @@
  * member of the `faults` tier, and it skips without a container engine the way
  * `RealContainerSandbox.integration.test.ts` beside it does.
  */
-import { NodeChildProcessSpawner, NodeFileSystem } from "@effect/platform-node"
 import * as CommandLine from "@smthrs/kernel/CommandLine"
 import { ContainerSandbox, DirectorySandbox, Sandbox } from "@smthrs/sandbox"
 import { Bash, Edit, Read, Write } from "@smthrs/std"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
+import { platform } from "./helpers/containedPlatform.ts"
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "smthrs-sandbox-tool-placement-")))
 afterAll(() => {
   rmSync(root, { recursive: true, force: true })
 })
-
-const platform = Layer.provideMerge(
-  NodeChildProcessSpawner.layer,
-  Layer.merge(NodeFileSystem.layer, Path.layer)
-)
 
 const original = ["alpha=one", "payload=written unchanged", "omega=three"].join("\n")
 const oldString = "payload=written unchanged"

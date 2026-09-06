@@ -120,6 +120,41 @@ describe("service progress", () => {
     expect(lines.join("")).toContain("ready [REDACTED]")
     expect(lines.join("")).not.toContain("private-value")
   })
+
+  it("keeps draining and capturing when an optional output observer throws", async () => {
+    let closed = false
+    const tail = await run(
+      Effect.scoped(Effect.gen(function*() {
+        const supervisor = yield* ServiceSupervisor.make
+        const handle = yield* supervisor.acquire({
+          key: "//:failed-service-observer",
+          cwd: fixtureDir,
+          argv: [
+            process.execPath,
+            "-e",
+            "console.log('service ready');setTimeout(()=>console.log('still draining'),100);setInterval(()=>{},1000)"
+          ],
+          stop: { signal: "SIGTERM", grace: "100ms" }
+        })
+        yield* handle.whileHealthy(
+          Effect.tryPromise(() => waitFor(() => handle.outputTail().includes("still draining"), 10_000))
+        )
+        return handle.outputTail()
+      })).pipe(Effect.provideService(ServiceSupervisor.Output, () => ({
+        onStdout: () => {
+          throw new Error("observer failed")
+        },
+        onStderr: () => {},
+        close: () => {
+          closed = true
+          throw new Error("observer close failed")
+        }
+      })))
+    )
+    expect(tail).toContain("service ready")
+    expect(tail).toContain("still draining")
+    expect(closed).toBe(true)
+  })
 })
 
 describe("parseDurationMs", () => {

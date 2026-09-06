@@ -1,0 +1,498 @@
+import { describe, expect, it } from "@effect/vitest"
+import * as ContainedSpawner from "@smthrs/kernel/ContainedSpawner"
+import * as ProcessLedger from "@smthrs/kernel/ProcessLedger"
+import { Cause, Effect, Exit, Layer, Sink, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner, ExitCode, make, makeHandle, ProcessId } from "effect/unstable/process/ChildProcessSpawner"
+import { once } from "node:events"
+import * as Fs from "node:fs"
+import * as Net from "node:net"
+import { vi } from "vitest"
+import * as Cleanup from "../src/internal/ProcessCleanup.ts"
+import * as Supervisor from "../src/internal/ProcessSupervisor.ts"
+
+vi.mock("node:fs", async (original) => {
+  const actual = await original<typeof import("node:fs")>()
+  return { ...actual, mkdtempSync: vi.fn(actual.mkdtempSync), chmodSync: vi.fn(actual.chmodSync) }
+})
+vi.mock("node:net", async (original) => {
+  const actual = await original<typeof import("node:net")>()
+  return { ...actual, createServer: vi.fn(actual.createServer) }
+})
+
+const promise = <A>() => {
+  let resolve!: (value: A) => void
+  const promise = new Promise<A>((yes) => {
+    resolve = yes
+  })
+  return { promise, resolve }
+}
+
+const bounded = async <A>(value: Promise<A>): Promise<A> => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      value,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("The test peer did not settle")), 2000)
+      })
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+interface Settings {
+  readonly readiness?: "valid" | "malformed" | "wrong" | "silent" | "absent"
+  readonly stop?: "exit" | "ignore" | "open-channel" | "cleanup-error"
+  readonly snapshot?: "empty" | "survivor" | "own-group" | "owner"
+  readonly endOnDisconnect?: boolean
+}
+
+/**
+ * The real lifecycle talks to a native peer, but no operating-system process
+ * owns this handle. The only cleanup effects are observations and recorded
+ * calls. In particular, none of these failure cases can signal a numeric pid.
+ */
+const fixture = (settings: Settings = {}) => {
+  const owner = promise<ExitCode>()
+  const accepted = promise<void>()
+  let peer: Net.Socket | undefined
+  let ownerDone = false
+  let referenced = true
+  let unrefs = 0
+  let rawKills = 0
+  let rawFinalizerReferenced: boolean | undefined
+  const requests: Array<Record<string, unknown>> = []
+  const commands: Array<ChildProcess.StandardCommand> = []
+  const paths: Array<string> = []
+  const endOwner = () => {
+    ownerDone = true
+    owner.resolve(ExitCode(0))
+  }
+  const send = (message: unknown) => peer?.write(JSON.stringify(message) + "\n")
+  const system: Cleanup.System = {
+    platform: "darwin",
+    snapshot: () => ({
+      ownGroup: settings.snapshot === "own-group" ? 900_001 : 900_002,
+      members: settings.snapshot === "survivor"
+        ? [{ pid: 900_003, startedAtMs: 1, zombie: false }]
+        : settings.snapshot === "owner" && !ownerDone
+        ? [{ pid: 900_001, startedAtMs: 1, zombie: false }]
+        : []
+    })
+  }
+  const spawn = (command: ChildProcess.StandardCommand) =>
+    Effect.gen(function*() {
+      commands.push(command)
+      const path = command.args.at(-2)!
+      paths.push(path)
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          rawFinalizerReferenced = referenced
+          peer?.destroy()
+          endOwner()
+        })
+      )
+      if (settings.readiness === "absent") endOwner()
+      else {
+        yield* Effect.tryPromise({
+          try: async () => {
+            peer = Net.createConnection(path)
+            peer.on("error", () => {})
+            let buffer = ""
+            peer.on("data", (data) => {
+              buffer += String(data)
+              for (;;) {
+                const end = buffer.indexOf("\n")
+                if (end < 0) break
+                const frame = JSON.parse(buffer.slice(0, end)) as Record<string, unknown>
+                buffer = buffer.slice(end + 1)
+                requests.push(frame)
+                if (frame.type === "start") send({ type: "spawned", pid: 900_004 })
+                if (frame.type === "stop" && settings.stop !== "ignore") {
+                  if (settings.stop === "cleanup-error") {
+                    send({ type: "cleanup_error", message: "test escaped child could not be verified" })
+                  }
+                  send({ type: "cleanup" })
+                  endOwner()
+                  if (settings.stop !== "open-channel") peer?.end()
+                }
+              }
+            })
+            peer.once("close", () => {
+              if (settings.endOnDisconnect !== false) endOwner()
+            })
+            await bounded(once(peer, "connect"))
+            if (settings.readiness === "malformed") peer.write("{invalid}\n")
+            else if (settings.readiness !== "silent") {
+              send({ type: "ready", version: 1, pid: settings.readiness === "wrong" ? 900_005 : 900_001 })
+            }
+            accepted.resolve()
+          },
+          catch: (cause) => Supervisor.failure("spawn", "test peer", cause)
+        })
+      }
+      return makeHandle({
+        pid: ProcessId(900_001),
+        exitCode: Effect.promise(() => owner.promise),
+        isRunning: Effect.sync(() => !ownerDone),
+        kill: () =>
+          Effect.sync(() => {
+            rawKills++
+            endOwner()
+          }),
+        unref: Effect.sync(() => {
+          unrefs++
+          referenced = false
+          return Effect.sync(() => {
+            referenced = true
+          })
+        }),
+        stdin: Sink.drain,
+        stdout: Stream.empty,
+        stderr: Stream.empty,
+        all: Stream.empty,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty
+      })
+    })
+  return {
+    system,
+    spawn,
+    paths,
+    requests,
+    commands,
+    exitTarget: () => send({ type: "exit", code: 0, signal: null }),
+    get unrefs() {
+      return unrefs
+    },
+    get rawKills() {
+      return rawKills
+    },
+    get rawFinalizerReferenced() {
+      return rawFinalizerReferenced
+    },
+    disconnect: async () => {
+      await bounded(accepted.promise)
+      const closed = once(peer!, "close")
+      peer!.destroy()
+      await bounded(closed)
+    },
+    dispose: () => {
+      peer?.destroy()
+      endOwner()
+    }
+  }
+}
+
+const run = async (
+  host: ReturnType<typeof fixture>,
+  use: (handle: ReturnType<typeof makeHandle>) => Effect.Effect<unknown, unknown> = () => Effect.void,
+  options: ChildProcess.CommandOptions = {}
+) => {
+  const ledger = await Effect.runPromise(
+    ProcessLedger.makeMemory({ hostId: "failed-supervisor", ownerPid: process.pid })
+  )
+  const outcome = await Effect.runPromise(
+    Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner
+      const handle = yield* spawner.spawn(ChildProcess.make("literal", ["original argument"], {
+        forceKillAfter: 0,
+        ...options
+      }))
+      return yield* use(handle)
+    }).pipe(
+      Effect.provide(ContainedSpawner.layer({}, Cleanup.lifecycle(host.system))),
+      Effect.provide(
+        Layer.succeed(ChildProcessSpawner)(make((command) =>
+          command._tag === "StandardCommand"
+            ? host.spawn(command)
+            : Effect.die("the lifecycle must prepare one standard owner")
+        ))
+      ),
+      Effect.provideService(ProcessLedger.ProcessLedger, ledger),
+      Effect.scoped,
+      Effect.exit
+    )
+  )
+  return { outcome, live: await Effect.runPromise(ledger.live) }
+}
+
+describe("failed process preparation", () => {
+  it("refuses an unavailable Node SEA module before allocating or spawning an owner", async () => {
+    const cause = new Error("the Node SEA module could not load")
+    const bun = Object.getOwnPropertyDescriptor(process.versions, "bun")
+    Object.defineProperty(process.versions, "bun", { value: undefined, configurable: true })
+    vi.doMock("node:sea", () => {
+      throw cause
+    })
+    const host = fixture()
+    try {
+      const result = await run(host)
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      if (Exit.isFailure(result.outcome)) {
+        expect(Cause.hasDies(result.outcome.cause)).toBe(false)
+        const error = Cause.squash(result.outcome.cause)
+        expect(error).toMatchObject({ _tag: "PlatformError", reason: { method: "spawn" } })
+        // Vitest wraps a rejected module factory in its import error. That
+        // exact rejection stays attached to the typed preparation failure.
+        expect(error).toHaveProperty("cause.cause", cause)
+      }
+      expect(host.commands).toEqual([])
+      expect(host.paths).toEqual([])
+      expect(result.live).toEqual([])
+    } finally {
+      host.dispose()
+      vi.doUnmock("node:sea")
+      if (bun === undefined) Reflect.deleteProperty(process.versions, "bun")
+      else Object.defineProperty(process.versions, "bun", bun)
+    }
+  })
+
+  it("selects Bun bootstrap flags without importing Node SEA or changing the target configuration", async () => {
+    const bun = Object.getOwnPropertyDescriptor(process.versions, "bun")
+    Object.defineProperty(process.versions, "bun", { value: "1.4.1-test-seam", configurable: true })
+    vi.doMock("node:sea", () => {
+      throw new Error("the Bun bootstrap must not import Node SEA")
+    })
+    const host = fixture()
+    try {
+      const result = await run(host)
+      expect(Exit.isSuccess(result.outcome)).toBe(true)
+      expect(host.commands).toHaveLength(1)
+      expect(host.commands[0]!.args.slice(0, 3)).toEqual(["--no-env-file", "--config=/dev/null", "-e"])
+      expect(host.commands[0]!.options).toMatchObject({ cwd: "/", extendEnv: false, shell: false })
+      expect(host.requests.find((frame) => frame.type === "configure")).toMatchObject({
+        command: "literal",
+        args: ["original argument"]
+      })
+      expect(result.live).toEqual([])
+      expect(host.rawKills).toBe(0)
+    } finally {
+      host.dispose()
+      vi.doUnmock("node:sea")
+      if (bun === undefined) Reflect.deleteProperty(process.versions, "bun")
+      else Object.defineProperty(process.versions, "bun", bun)
+    }
+  })
+
+  for (const readiness of ["absent", "malformed", "wrong"] as const) {
+    it(`refuses ${readiness} owner readiness without activating or leaving a record`, async () => {
+      const host = fixture({ readiness })
+      try {
+        const result = await run(host)
+        expect(Exit.isFailure(result.outcome)).toBe(true)
+        if (Exit.isFailure(result.outcome)) expect(Cause.hasDies(result.outcome.cause)).toBe(false)
+        expect(host.requests.some((frame) => frame.type === "start")).toBe(false)
+        expect(result.live).toEqual([])
+        expect(host.rawKills).toBe(0)
+        for (const path of host.paths) expect(Fs.existsSync(path)).toBe(false)
+      } finally {
+        host.dispose()
+      }
+    })
+  }
+
+  it("bounds a live owner that never announces readiness and still cleans its preparation", async () => {
+    const host = fixture({ readiness: "silent" })
+    const started = Date.now()
+    try {
+      const result = await run(host)
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      if (Exit.isFailure(result.outcome)) {
+        expect(Cause.hasDies(result.outcome.cause)).toBe(false)
+        expect(String(result.outcome.cause)).toContain("spawn timed out")
+      }
+      expect(Date.now() - started).toBeGreaterThanOrEqual(4900)
+      expect(Date.now() - started).toBeLessThan(8000)
+      expect(host.requests.map((frame) => frame.type)).toEqual(["stop"])
+      expect(result.live).toEqual([])
+      expect(host.rawKills).toBe(0)
+    } finally {
+      host.dispose()
+    }
+  }, 10_000)
+
+  it("refuses excessive private configuration before recording or activating a target", async () => {
+    const host = fixture()
+    try {
+      const result = await run(host, undefined, { env: { LARGE: "x".repeat(4 * 1024 * 1024) } })
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      if (Exit.isFailure(result.outcome)) {
+        expect(Cause.hasDies(result.outcome.cause)).toBe(false)
+        expect(String(result.outcome.cause)).toContain("configuration exceeds")
+      }
+      expect(host.requests.map((frame) => frame.type)).toEqual(["stop"])
+      expect(result.live).toEqual([])
+    } finally {
+      host.dispose()
+    }
+  })
+
+  for (const step of ["directory", "permissions", "server", "listening"] as const) {
+    it(`maps a ${step} failure into the typed channel and removes any owned directory`, async () => {
+      const cause = Object.assign(new Error(`${step} denied`), { code: "EACCES" })
+      if (step === "directory") {
+        vi.mocked(Fs.mkdtempSync).mockImplementationOnce(() => {
+          throw cause
+        })
+      }
+      if (step === "permissions") {
+        vi.mocked(Fs.chmodSync).mockImplementationOnce(() => {
+          throw cause
+        })
+      }
+      if (step === "server") {
+        vi.mocked(Net.createServer).mockImplementationOnce(() => {
+          throw cause
+        })
+      }
+      if (step === "listening") {
+        const server = Net.createServer()
+        vi.spyOn(server, "listen").mockImplementation(() => {
+          queueMicrotask(() => server.emit("error", cause))
+          return server
+        })
+        vi.mocked(Net.createServer).mockReturnValueOnce(server)
+      }
+      const spawn = vi.fn(() => Effect.die("raw spawn must not run"))
+      const outcome = await Effect.runPromise(
+        Supervisor.prepare({ platform: "darwin", snapshot: () => undefined }, Cleanup.policy)(
+          ChildProcess.make("literal"),
+          spawn
+        ).pipe(Effect.scoped, Effect.exit)
+      )
+      expect(Exit.isFailure(outcome)).toBe(true)
+      if (Exit.isFailure(outcome)) {
+        expect(Cause.hasDies(outcome.cause)).toBe(false)
+        expect(String(outcome.cause)).toContain("PermissionDenied")
+      }
+      expect(spawn).not.toHaveBeenCalled()
+      const directory = vi.mocked(Fs.mkdtempSync).mock.results.at(-1)
+      if (directory?.type === "return") expect(Fs.existsSync(directory.value)).toBe(false)
+    })
+  }
+})
+
+describe("failed process shutdown", () => {
+  it("disconnects after an owner-only natural-exit fast-stop write fails and verifies cleanup", async () => {
+    const host = fixture({ snapshot: "owner" })
+    const original = Supervisor.Control.prototype.write
+    const rejected: Array<unknown> = []
+    const write = vi.spyOn(Supervisor.Control.prototype, "write").mockImplementation(
+      function(this: Supervisor.Control, message) {
+        if (typeof message === "object" && message !== null && "fast" in message && message.fast === true) {
+          rejected.push(message)
+          return Promise.reject(new Error("the fast-stop write failed"))
+        }
+        return original.call(this, message)
+      }
+    )
+    try {
+      const result = await run(host, (handle) =>
+        Effect.gen(function*() {
+          host.exitTarget()
+          expect(yield* handle.exitCode).toBe(0)
+        }))
+      expect(Exit.isSuccess(result.outcome)).toBe(true)
+      expect(rejected).toEqual([{ type: "stop", killSignal: "SIGKILL", fast: true }])
+      // The real peer only exits on connection close in this schedule. There
+      // was no accepted stop frame and no raw numerical-pid kill fallback.
+      expect(host.requests.map((frame) => frame.type)).toEqual(["configure", "start"])
+      expect(result.live).toEqual([])
+      expect(host.rawKills).toBe(0)
+      expect(host.unrefs).toBe(0)
+    } finally {
+      write.mockRestore()
+      host.dispose()
+    }
+  })
+
+  it("uses EOF after a failed stop write and retains an unacknowledged explicit cleanup", async () => {
+    const host = fixture()
+    try {
+      const result = await run(host, (handle) =>
+        Effect.gen(function*() {
+          yield* Effect.promise(() => host.disconnect())
+          yield* handle.kill()
+        }))
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      expect(host.requests.map((frame) => frame.type)).toEqual(["configure", "start"])
+      expect(host.rawKills).toBe(0)
+      expect(result.live).toHaveLength(1)
+      expect(host.unrefs).toBe(1)
+    } finally {
+      host.dispose()
+    }
+  })
+
+  it("bounds an unresponsive owner, retains its record, and disables blind raw cleanup", async () => {
+    const host = fixture({ stop: "ignore", endOnDisconnect: false })
+    const started = Date.now()
+    try {
+      const result = await run(host)
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      if (Exit.isFailure(result.outcome)) expect(String(result.outcome.cause)).toContain("kill timed out")
+      expect(Date.now() - started).toBeLessThan(5000)
+      expect(result.live).toHaveLength(1)
+      expect(result.live[0]).toMatchObject({
+        pid: 900_001,
+        pgid: 900_001,
+        commandDigest: "literal 'original argument'"
+      })
+      expect(host.unrefs).toBe(1)
+      expect(host.rawFinalizerReferenced).toBe(false)
+      expect(host.rawKills).toBe(0)
+    } finally {
+      host.dispose()
+    }
+  }, 7000)
+
+  for (const snapshot of ["survivor", "own-group"] as const) {
+    it(`retains the record when the owner exits but the observation reports ${snapshot}`, async () => {
+      const host = fixture({ snapshot })
+      try {
+        const result = await run(host)
+        expect(Exit.isFailure(result.outcome)).toBe(true)
+        if (Exit.isFailure(result.outcome)) {
+          expect(String(result.outcome.cause)).toContain("cleanup could not be verified")
+        }
+        expect(result.live).toHaveLength(1)
+        expect(host.unrefs).toBe(1)
+        expect(host.rawFinalizerReferenced).toBe(false)
+        expect(host.rawKills).toBe(0)
+      } finally {
+        host.dispose()
+      }
+    })
+  }
+
+  it("retains a reported escaped-child cleanup failure despite an empty original group", async () => {
+    const host = fixture({ stop: "cleanup-error" })
+    try {
+      const result = await run(host)
+      expect(Exit.isFailure(result.outcome)).toBe(true)
+      expect(result.live).toHaveLength(1)
+      expect(host.unrefs).toBe(1)
+      expect(host.rawFinalizerReferenced).toBe(false)
+    } finally {
+      host.dispose()
+    }
+  })
+
+  it("bounds a status channel left open after verified raw-owner exit", async () => {
+    const host = fixture({ stop: "open-channel" })
+    const started = Date.now()
+    try {
+      const result = await run(host)
+      expect(Exit.isSuccess(result.outcome)).toBe(true)
+      expect(Date.now() - started).toBeLessThan(2000)
+      expect(result.live).toEqual([])
+      expect(host.unrefs).toBe(0)
+      expect(host.rawKills).toBe(0)
+    } finally {
+      host.dispose()
+    }
+  })
+})
