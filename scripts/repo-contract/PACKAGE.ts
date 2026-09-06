@@ -81,8 +81,14 @@ const testScriptWiring = Smithers.NodeTest({
     Smithers.file("//.github/workflows/ci.yml"),
     Smithers.file("//.github/workflows/reliability.yml"),
     Smithers.file("//apps/ui/PACKAGE.ts"),
+    Smithers.file("//apps/ui/scripts/ensure-devkit.mjs"),
     Smithers.file("//apps/ui/scripts/run-pr-e2e.mjs"),
+    Smithers.file("//apps/ui/package.json"),
+    Smithers.file("//apps/ui/electrobun.config.ts"),
+    Smithers.file("//apps/ui/hutch.config.ts"),
+    Smithers.file("//apps/ui/tsconfig.json"),
     Smithers.file("//package.json"),
+    Smithers.file("//pnpm-lock.yaml"),
     Smithers.file("//pnpm-workspace.yaml")
   ],
   deps: []

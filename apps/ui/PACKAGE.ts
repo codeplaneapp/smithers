@@ -4,9 +4,8 @@
  * Playwright T1 runs in the dedicated PR browser job. Packaged Electrobun
  * remains a separate operator tier; see docs/LOCAL-APP.md "Test tiers".
  *
- * Everything runs under Bun, which is what the app's own scripts use, so the
- * runtime is the root Bun declaration and nothing here spells `bun` into an
- * argv.
+ * The unit suite uses the declared Bun runtime. SDK preparation and typecheck
+ * use the workspace's Node runtime and package manager.
  */
 import { Smithers } from "@smthrs/targets"
 
@@ -36,6 +35,28 @@ const harnessSources = Smithers.glob("//apps/ui/scripts/**/*.ts")
 const suiteSources = Smithers.glob("//apps/ui/e2e/**/*.ts")
 
 /**
+ * Projects the pinned Electrobun SDK before a fresh checkout can typecheck.
+ * CI installs with scripts disabled, and the SDK is generated outside the
+ * build cache, so this prerequisite always checks the local projection.
+ *
+ * @since 1.0.0-rc.0
+ * @category build
+ */
+const devkit = Smithers.NodeBinary({
+  entry: Smithers.file("scripts/ensure-devkit.mjs"),
+  args: [],
+  srcs: [
+    Smithers.file("package.json"),
+    Smithers.file("electrobun.config.ts"),
+    Smithers.file("hutch.config.ts"),
+    Smithers.file("//pnpm-lock.yaml")
+  ],
+  deps: [],
+  env: { HUTCH_NO_UPDATE_CHECK: "1" },
+  cwd
+})
+
+/**
  * Checks the application against its own tsconfig.
  *
  * @since 0.1.0
@@ -58,7 +79,7 @@ const check = Smithers.Typecheck({
     Smithers.file("hutch.config.ts"),
     Smithers.file("playwright.config.ts")
   ],
-  deps: [],
+  deps: [devkit],
   tsconfig: Smithers.file("tsconfig.json"),
   buildMode: false,
   incremental: false,
@@ -93,5 +114,5 @@ const browserE2e = Smithers.NodeTest({
 })
 
 export const Package = Smithers.Package({
-  targets: { check, unitTests, browserE2e }
+  targets: { devkit, check, unitTests, browserE2e }
 })

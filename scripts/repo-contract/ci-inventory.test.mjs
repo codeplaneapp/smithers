@@ -3,7 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { test } from "node:test"
-import { resolveInventory, root, targetInvocation } from "../ci-inventory.mjs"
+import { planned, resolveInventory, root, runnerFor, targetInvocation } from "../ci-inventory.mjs"
+import { openPackageIndex } from "../../packages/smithers/build/build-cli/src/Cli.ts"
+import * as Target from "../../packages/smithers/build/targets/src/Target.ts"
 
 test("CI command discovery retains diagnostic options and refuses unknown selection syntax", () => {
   for (const options of ["--jobs 2 --verbose", "--verbose --jobs 2"]) {
@@ -18,6 +20,25 @@ test("CI command discovery retains diagnostic options and refuses unknown select
   for (const options of ["--include-exclusive", "--jobs", "--jobs 0", "--jobs 2 --jobs 3", "--plan"])
     assert.throws(() => targetInvocation(`pnpm exec smthrs test '//packages/...' ${options}`), /Unrecognized CI target/)
   assert.throws(() => targetInvocation("pnpm exec smthrs test //packages/..."), /Unrecognized CI target/)
+})
+
+test("UI typecheck plans strict devkit preparation as an uncached prerequisite", async () => {
+  const plan = planned("build", "//apps/ui:check")
+  assert.deepEqual(plan.roots, ["//apps/ui:check"])
+  const check = plan.targets.find((target) => target.label === "//apps/ui:check")
+  const devkit = plan.targets.find((target) => target.label === "//apps/ui:devkit")
+  assert.ok(check)
+  assert.ok(devkit, "a clean checkout has no ignored devkit for TypeScript to extend")
+  assert.ok(check.dependencies.includes(devkit.label))
+  assert.equal(devkit.rule, "NodeBinary")
+  assert.equal(devkit.cacheable, false, "a previous result cannot restore the SDK projection")
+  assert.equal(check.cacheable, false)
+  const index = await openPackageIndex({ workspace: root })
+  const declaration = index.targets().find((target) => target.label === devkit.label)
+  assert.ok(declaration)
+  assert.deepEqual(runnerFor(Target.metadata(declaration.target), index.workspace, "build"), [
+    "node", "scripts/ensure-devkit.mjs"
+  ], "the CI prerequisite must use Node and strict preparation, without --soft")
 })
 
 test("required CI resolves package, app, script, evaluation and fault suites to real runners", async () => {
