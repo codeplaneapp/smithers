@@ -400,15 +400,26 @@ describe("generated durable signal inbox histories", () => {
     })
   }
 
-  it("bounds pages and preserves pending fairness through long terminal history and repeated reopen", async () => {
+  // This aggregate durability journey makes 4,093 write calls and opens eight
+  // independent pairs of connections. Keep its full history and page oracles
+  // while allowing a finite minute for shared-runner disk contention.
+  it("bounds pages and preserves pending fairness through long terminal history and repeated reopen", async ({
+    onTestFailed
+  }) => {
     const directory = mkdtempSync(join(tmpdir(), "signal-inbox-history-"))
     const filename = join(directory, "control.sqlite")
     let model: Model = new Map()
+    let phase = "launch"
+    let completedWrites = 0
+    onTestFailed(() => {
+      console.error("Signal inbox history progress", { phase, completedWrites, modelRows: model.size })
+    })
     try {
       const runs = await withPair(filename, ([first]) => Effect.all([launch(first, 0), launch(first, 1)]))
       // Five cohorts cover the 99/100/101 page edge and leave 512 pending rows
       // mixed among 1,023 terminal rows. Every cohort closes both connections.
       for (let batch = 0; batch < 5; batch++) {
+        phase = `cohort ${batch + 1}/5`
         await withPair(filename, (runtimes) =>
           Effect.gen(function*() {
             for (let index = batch * 307; index < Math.min((batch + 1) * 307, 1535); index++) {
@@ -419,6 +430,7 @@ describe("generated durable signal inbox histories", () => {
                 signal: { name: "ready", payload: index }
               }
               yield* runtimes[index % 2]!.admitSignal(operation.id, runs[operation.run]!, operation.signal)
+              completedWrites++
               model = transition(model, operation, runs).model
               if (index % 3 !== 0) {
                 const settle: Mutation = {
@@ -427,6 +439,7 @@ describe("generated durable signal inbox histories", () => {
                   state: index % 2 === 0 ? "rejected" : "delivered"
                 }
                 yield* runtimes[(index + 1) % 2]!.settleSignal(settle.id, settle.state)
+                completedWrites++
                 model = transition(model, settle, runs).model
               }
             }
@@ -436,18 +449,23 @@ describe("generated durable signal inbox histories", () => {
       }
       await withPair(filename, (runtimes) =>
         Effect.gen(function*() {
+          phase = "snapshot before final settlement"
           yield* checkSnapshot(runtimes[0], model)
           yield* checkPending(runtimes[1], model)
+          phase = "final settlement"
           for (const row of model.values()) {
             yield* runtimes[0].settleSignal(row.commandId, "terminal")
+            completedWrites++
             model = transition(model, { kind: "settle", id: row.commandId, state: "terminal" }, runs).model
           }
+          phase = "final snapshot"
           yield* checkPending(runtimes[0], model)
           yield* checkSnapshot(runtimes[1], model)
         }))
+      phase = "final reopen"
       await withPair(filename, (runtimes) => checkPending(runtimes[0], model))
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
-  })
+  }, 60_000)
 })
