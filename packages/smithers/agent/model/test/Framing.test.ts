@@ -163,13 +163,17 @@ describe("framing resource contracts", () => {
       }
     })
 
-    it(`${format} checks the default response ceiling with bounded retained output`, async () => {
-      const prefix = format === "sse" ? "data: " : ""
-      const suffix = format === "sse" ? "\n\n" : "\n"
-      const size = 1024 * 1024
-      const text = "x".repeat(size - prefix.length - suffix.length)
-      const full = encoder.encode(prefix + text + suffix)
-      for (const offset of [-1, 0, 1]) {
+    // Each boundary is an independent 64 MiB stream. Keep all three real
+    // default-limit checks without spending one case's deadline on three
+    // coverage-instrumented byte walks.
+    it.each([-1, 0, 1])(
+      `${format} checks the default response ceiling with bounded retained output (offset %i)`,
+      async (offset) => {
+        const prefix = format === "sse" ? "data: " : ""
+        const suffix = format === "sse" ? "\n\n" : "\n"
+        const size = 1024 * 1024
+        const text = "x".repeat(size - prefix.length - suffix.length)
+        const full = encoder.encode(prefix + text + suffix)
         const finalText = text + (offset > 0 ? "x" : "")
         const final = encoder.encode(prefix + (offset < 0 ? finalText.slice(1) : finalText) + suffix)
         const source = Stream.fromIterable([...Array(63).fill(full) as Array<Uint8Array>, final])
@@ -196,7 +200,7 @@ describe("framing resource contracts", () => {
           expect(records).toBe(63)
         }
       }
-    })
+    )
 
     it(`${format} bounds a long unterminated record and cancels its producer`, async () => {
       let pulls = 0
