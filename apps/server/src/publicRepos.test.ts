@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import worker from "./index"
 import { createPublicReposHandler } from "./publicRepos"
-import { AVAILABLE_REPOS } from "./publicRepoCatalog"
-import type { PublicRepoCatalog, PublicRepository } from "./publicRepoCatalog"
+import { AVAILABLE_REPOS, COMING_SOON_REPOS } from "./publicRepoCatalog"
+import type { PublicComingSoonRepository, PublicRepoCatalog, PublicRepository } from "./publicRepoCatalog"
 
 /** The roster a claimed-repo wave will produce; the launch catalog holds only Smithers. */
 const CLAIMED_ROSTER = [
@@ -11,9 +11,12 @@ const CLAIMED_ROSTER = [
   { name: "example/later", title: "later", url: "https://github.com/example/later", summary: "later is an example." }
 ] as const
 
+/** Every name the handler may fetch, in fetch order: the claimed wave, then the coming-soon roster. */
+const EVERY_NAME: ReadonlyArray<string> = [...CLAIMED_ROSTER.map((repo) => repo.name), ...COMING_SOON_REPOS.map((repo) => repo.name)]
+
 /** GitHub metadata for one roster entry. Stars encode the roster position so order mistakes are visible. */
 const metadataFor = (name: string) => {
-  const index = CLAIMED_ROSTER.findIndex((repo) => repo.name === name)
+  const index = EVERY_NAME.indexOf(name)
   return {
     full_name: name, private: false,
     stargazers_count: 407 + index * 1000, forks_count: 50 + index, open_issues_count: 4 + index,
@@ -31,13 +34,23 @@ const answerEach = (req: Request) => Response.json(metadataFor(repoName(req)))
 const expectedRepos = (stats: (name: string) => PublicRepoCatalog["repos"][number]["stats"]) =>
   AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, summary: repo.summary, stats: stats(repo.name) }))
 
+const expectedComingSoon = (stats: (name: string) => PublicRepoCatalog["repos"][number]["stats"]) =>
+  COMING_SOON_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, stats: stats(repo.name) }))
+
+/** The GitHub metadata URLs one refresh fetches, roster order first and the coming-soon roster after. */
+const fetchedUrls = (repos: ReadonlyArray<{ name: string }> = AVAILABLE_REPOS) =>
+  [...repos, ...COMING_SOON_REPOS].map((repo) => `https://api.github.com/repos/${repo.name}`)
+
+const FETCH_COUNT = AVAILABLE_REPOS.length + COMING_SOON_REPOS.length
+
 const request = (query = "") => new Request(`https://app.test/api/public/repos${query}`, {
   headers: { origin: "https://smithers.sh", cookie: "session=private", authorization: "Bearer private" }
 })
 
 const harness = (
   answer: (req: Request) => Response | Promise<Response> = answerEach,
-  repos: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url" | "summary">> = AVAILABLE_REPOS
+  repos: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url" | "summary">> = AVAILABLE_REPOS,
+  comingSoon: ReadonlyArray<Pick<PublicComingSoonRepository, "name" | "title" | "url">> = COMING_SOON_REPOS
 ) => {
   let now = 1_000
   const requests: Array<Request> = []
@@ -45,7 +58,8 @@ const harness = (
     fetch: async (req) => { requests.push(req); return answer(req) },
     now: () => now,
     cache: () => undefined,
-    repos
+    repos,
+    comingSoon
   })
   return { handler, requests, advance: (ms: number) => { now += ms } }
 }
@@ -64,13 +78,42 @@ describe("the curated catalog", () => {
     for (const repo of catalog.repos) {
       expect(Object.keys(repo).sort()).toEqual(["name", "stats", "summary", "title", "url"])
     }
+    for (const repo of catalog.comingSoon!) {
+      expect(Object.keys(repo).sort()).toEqual(["name", "stats", "title", "url"])
+    }
   })
 
   test("links every entry to the GitHub repository its stats are fetched from", () => {
-    for (const repo of AVAILABLE_REPOS) {
+    for (const repo of [...AVAILABLE_REPOS, ...COMING_SOON_REPOS]) {
       expect(repo.url).toBe(`https://github.com/${repo.name}`)
       expect(repo.title.length).toBeGreaterThan(0)
     }
+  })
+
+  test("shows Smithers' direct dependencies and its VCS as coming soon, in the landing page's order", () => {
+    expect(COMING_SOON_REPOS.map((repo) => [repo.name, repo.title])).toEqual([
+      ["Effect-TS/effect", "Effect"],
+      ["wevm/incur", "incur"],
+      ["bombshell-dev/clack", "clack"],
+      ["jj-vcs/jj", "jj"]
+    ])
+  })
+
+  test("a coming-soon repository is never available, so the Worker never serves its app page", async () => {
+    const available = AVAILABLE_REPOS.map((repo) => repo.name.toLowerCase())
+    for (const repo of COMING_SOON_REPOS) {
+      expect(available).not.toContain(repo.name.toLowerCase())
+    }
+    // The routed owner's app page answers only catalog names; a coming-soon name
+    // under that owner leaves like any unknown repository, never as the app.
+    const served: Array<string> = []
+    const env = {
+      ASSETS: { fetch: async (req: Request) => { served.push(new URL(req.url).pathname); return new Response("app") } },
+      IDENTITY_UPSTREAM_URL: "https://identity.test"
+    }
+    const response = await worker.fetch(new Request("https://smithers.sh/smithersai/effect"), env)
+    expect({ status: response.status, location: response.headers.get("location"), served })
+      .toEqual({ status: 302, location: "https://smithers.sh/", served: [] })
   })
 
   test("explains every entry in one curated sentence the app's welcome can read", () => {
@@ -92,15 +135,18 @@ describe("public available repositories", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("*")
     expect(response.headers.get("cache-control")).toBe("public, max-age=300")
     const catalog = await response.json() as PublicRepoCatalog
-    expect(catalog).toEqual({ repos: expectedRepos((name) => {
+    const statsOf = (name: string) => {
       const github = metadataFor(name)
       return {
         stars: github.stargazers_count, forks: github.forks_count, openIssuesAndPulls: github.open_issues_count,
         language: "TypeScript", license: "MIT"
       }
-    }) })
+    }
+    expect(catalog).toEqual({ repos: expectedRepos(statsOf), comingSoon: expectedComingSoon(statsOf) })
     expect(catalog.repos[0]).toMatchObject({ name: "smithersai/smithers", stats: { stars: 407 } })
-    expect(requests.map((req) => req.url)).toEqual(AVAILABLE_REPOS.map((repo) => `https://api.github.com/repos/${repo.name}`))
+    expect(catalog.comingSoon!.map((repo) => repo.name)).toEqual(["Effect-TS/effect", "wevm/incur", "bombshell-dev/clack", "jj-vcs/jj"])
+    expect(catalog.comingSoon![0]).toMatchObject({ name: "Effect-TS/effect", stats: { stars: 3407 } })
+    expect(requests.map((req) => req.url)).toEqual(fetchedUrls())
     for (const req of requests) {
       expect(req.headers.has("authorization")).toBe(false)
       expect(req.headers.has("cookie")).toBe(false)
@@ -113,10 +159,11 @@ describe("public available repositories", () => {
     const { handler, requests } = harness((req) => new Promise((resolve) => { pending.set(repoName(req), resolve) }), CLAIMED_ROSTER)
     const served = handler(request())
     await Promise.resolve()
-    expect(requests).toHaveLength(CLAIMED_ROSTER.length)
-    expect([...pending.keys()]).toEqual(CLAIMED_ROSTER.map((repo) => repo.name))
+    expect(requests).toHaveLength(CLAIMED_ROSTER.length + COMING_SOON_REPOS.length)
+    expect([...pending.keys()]).toEqual([...CLAIMED_ROSTER.map((repo) => repo.name), ...COMING_SOON_REPOS.map((repo) => repo.name)])
     pending.get("example/later")!(answerEach(requests[2]!))
     pending.get("example/claimed")!(Response.json({ message: "rate limited" }, { status: 403 }))
+    for (const repo of COMING_SOON_REPOS) pending.get(repo.name)!(answerEach(requests[EVERY_NAME.indexOf(repo.name)]!))
     pending.get("smithersai/smithers")!(answerEach(requests[0]!))
     const response = await served
     expect(response.headers.get("cache-control")).toBe("public, max-age=30")
@@ -125,18 +172,31 @@ describe("public available repositories", () => {
     expect(catalog.repos[0]!.stats?.stars).toBe(407)
     expect(catalog.repos[1]!.stats).toBeNull()
     expect(catalog.repos[2]!.stats?.stars).toBe(2407)
+    expect(catalog.comingSoon!.map((repo) => repo.stats?.stars)).toEqual(COMING_SOON_REPOS.map((repo) => 407 + EVERY_NAME.indexOf(repo.name) * 1000))
+  })
+
+  test("a coming-soon repo's metadata outage nulls only its stats and shortens the cache like an available one's", async () => {
+    const { handler } = harness((req) =>
+      repoName(req) === "wevm/incur" ? Response.json({ message: "rate limited" }, { status: 403 }) : answerEach(req))
+    const response = await handler(request())
+    expect(response.headers.get("cache-control")).toBe("public, max-age=30")
+    const catalog = await response.json() as PublicRepoCatalog
+    expect(catalog.repos[0]!.stats?.stars).toBe(407)
+    expect(catalog.comingSoon!.map((repo) => [repo.name, repo.stats === null])).toEqual([
+      ["Effect-TS/effect", false], ["wevm/incur", true], ["bombshell-dev/clack", false], ["jj-vcs/jj", false]
+    ])
   })
 
   test("joins concurrent reads, caches for five minutes, and refreshes after expiry", async () => {
     const { handler, requests, advance } = harness()
     await Promise.all([handler(request()), handler(request("?cache-bust=1")), handler(request())])
-    expect(requests).toHaveLength(AVAILABLE_REPOS.length)
+    expect(requests).toHaveLength(FETCH_COUNT)
     advance(299_000)
     expect((await handler(request())).headers.get("cache-control")).toBe("public, max-age=1")
-    expect(requests).toHaveLength(AVAILABLE_REPOS.length)
+    expect(requests).toHaveLength(FETCH_COUNT)
     advance(1_001)
     await handler(request())
-    expect(requests).toHaveLength(AVAILABLE_REPOS.length * 2)
+    expect(requests).toHaveLength(FETCH_COUNT * 2)
   })
 
   test("the edge cache is reusable across Worker instances and expires", async () => {
@@ -150,11 +210,11 @@ describe("public available repositories", () => {
     const deps = { fetch: async (req: Request) => { calls++; return answerEach(req) }, now: () => now, cache: () => cache }
     await createPublicReposHandler(deps)(request())
     const second = await createPublicReposHandler(deps)(request("?different=1"))
-    expect(calls).toBe(AVAILABLE_REPOS.length)
+    expect(calls).toBe(FETCH_COUNT)
     expect((await second.json() as PublicRepoCatalog).repos[0]?.stats?.stars).toBe(407)
     now += 300_001
     await createPublicReposHandler(deps)(request())
-    expect(calls).toBe(AVAILABLE_REPOS.length * 2)
+    expect(calls).toBe(FETCH_COUNT * 2)
   })
 
   test("outages and invalid or private metadata never invent counts or remove availability", async () => {
@@ -170,12 +230,12 @@ describe("public available repositories", () => {
       const response = await handler(request())
       expect(response.status).toBe(200)
       expect(response.headers.get("cache-control")).toBe("public, max-age=30")
-      expect(await response.json()).toEqual({ repos: expectedRepos(() => null) })
+      expect(await response.json()).toEqual({ repos: expectedRepos(() => null), comingSoon: expectedComingSoon(() => null) })
       await handler(request())
-      expect(requests).toHaveLength(AVAILABLE_REPOS.length)
+      expect(requests).toHaveLength(FETCH_COUNT)
       advance(30_001)
       await handler(request())
-      expect(requests).toHaveLength(AVAILABLE_REPOS.length * 2)
+      expect(requests).toHaveLength(FETCH_COUNT * 2)
     }
   })
 

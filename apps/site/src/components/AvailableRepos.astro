@@ -1,17 +1,22 @@
 ---
-import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
+import { AVAILABLE_REPOS, COMING_SOON_REPOS, PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
 
 /* The app Worker (apps/server) serves the catalog and each repository's app under smithers.sh, beside this static site. */
 const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://smithers.sh${PUBLIC_REPOS_PATH}`
 /* A repository's app lives at <app origin>/<owner>/<name>. */
 const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").replace(/\/+$/, "")
+/* Smithers first, then its coming-soon dependencies; the catalog response follows the same order. */
+const cards = [
+  ...AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: true })),
+  ...COMING_SOON_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: false }))
+]
 ---
 
 <section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
   <h2 id="available-title">Available repos <span class="count">{AVAILABLE_REPOS.length}</span></h2>
   <div class="repo-grid">
-    {AVAILABLE_REPOS.map((repo, index) => (
-      <article class="repo-card" data-repo={repo.name} aria-labelledby={`repo-title-${index}`}>
+    {cards.map((repo, index) => (
+      <article class="repo-card" data-repo={repo.name} data-availability={repo.available ? "available" : "coming-soon"} aria-labelledby={`repo-title-${index}`}>
         <div class="card-art" aria-hidden="true">
           <span class="card-number">{String(index + 1).padStart(2, "0")}</span>
           <div class="grid-floor"></div>
@@ -21,9 +26,14 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").r
           <span class="spark spark-one"></span><span class="spark spark-two"></span><span class="spark spark-three"></span>
         </div>
         <div class="card-body">
-          <h3 id={`repo-title-${index}`}>{repo.title}</h3>
+          <div class="title-row">
+            <h3 id={`repo-title-${index}`}>{repo.title}</h3>
+            {repo.available
+              ? <span class="badge badge-available">Available</span>
+              : <span class="badge badge-soon">Coming soon</span>}
+          </div>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
-          <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>
+          {repo.available && <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>}
           <dl class="stats" aria-busy="true" data-stats>
             <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
             <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>
@@ -37,6 +47,7 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").r
       </article>
     ))}
   </div>
+  <p class="caption">Coming-soon repositories open as their maintainers claim them.</p>
 </section>
 
 <style>
@@ -56,7 +67,14 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").r
   .spark-two { bottom: 53px; left: 57px; transform: scale(.65); }
   .spark-three { bottom: 37px; right: 39px; transform: scale(.45); }
   .card-body { padding: 1.35rem 1.2rem .85rem; border: 1px solid #8664a1; border-top: 0; background: #20182e; }
-  h3 { font-size: 1.6rem; letter-spacing: -.04em; margin: 0 0 .3rem; }
+  .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; margin: 0 0 .3rem; }
+  h3 { font-size: 1.6rem; letter-spacing: -.04em; margin: 0; }
+  .badge { display: inline-block; padding: .2rem .5rem; border: 1px solid; font: 600 .6rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; }
+  .badge-available { color: #251b3a; background: #dfb5ff; border-color: #dfb5ff; }
+  .badge-soon { color: #e3c4ff; background: transparent; border-color: #8664a1; }
+  .repo-card[data-availability="coming-soon"] .card-art { filter: saturate(.55); }
+  .repo-card[data-availability="coming-soon"] .stats { margin-top: 1.1rem; }
+  .caption { margin: 1.25rem 0 0; color: var(--text-muted); font-size: .85rem; line-height: 1.5; }
   .repo-name { display: inline-flex; gap: .6rem; color: #d5bae9; font: .73rem/1.7 var(--font-mono); overflow-wrap: anywhere; }
   .repo-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
   .repo-name:focus-visible { outline-color: #dfb5ff; }
@@ -93,9 +111,11 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").r
         if (!response.ok) throw new Error()
         const data = await response.json() as PublicRepoCatalog
         if (!Array.isArray(data.repos)) throw new Error()
+        // A catalog served before comingSoon shipped leaves those cards at "Stats unavailable".
+        const entries = [...data.repos, ...(Array.isArray(data.comingSoon) ? data.comingSoon : [])]
         showUnavailable()
         for (const card of cards) {
-          const stats = data.repos.find((repo) => repo.name === card.dataset.repo)?.stats
+          const stats = entries.find((repo) => repo.name === card.dataset.repo)?.stats
           if (!stats || !validCount(stats.stars) || !validCount(stats.forks) || !validCount(stats.openIssuesAndPulls)) continue
           for (const key of ["stars", "forks", "openIssuesAndPulls"] as const) {
             const value = card.querySelector<HTMLElement>(`[data-stat="${key}"]`)!

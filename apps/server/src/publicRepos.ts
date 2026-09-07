@@ -1,5 +1,5 @@
-import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
-import type { PublicRepoCatalog, PublicRepoStats, PublicRepository } from "./publicRepoCatalog"
+import { AVAILABLE_REPOS, COMING_SOON_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
+import type { PublicComingSoonRepository, PublicRepoCatalog, PublicRepoStats, PublicRepository } from "./publicRepoCatalog"
 
 interface Dependencies {
   readonly fetch: (request: Request) => Promise<Response>
@@ -7,6 +7,8 @@ interface Dependencies {
   readonly cache: () => Pick<Cache, "match" | "put"> | undefined
   /** The curated roster; tests pass a larger one to exercise the multi-repo fetch. */
   readonly repos?: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url" | "summary">>
+  /** The coming-soon roster; its stats come from the same GitHub resource. */
+  readonly comingSoon?: ReadonlyArray<Pick<PublicComingSoonRepository, "name" | "title" | "url">>
 }
 
 const headers = {
@@ -43,8 +45,23 @@ const parseStats = (value: unknown, name: string): PublicRepoStats | null => {
  */
 export const createPublicReposHandler = (deps: Dependencies) => {
   const roster = deps.repos ?? AVAILABLE_REPOS
+  const comingSoonRoster = deps.comingSoon ?? COMING_SOON_REPOS
   let snapshot: { body: string; expiresAt: number } | undefined
   let pending: Promise<void> | undefined
+
+  const statsFor = async (name: string): Promise<PublicRepoStats | null> => {
+    try {
+      const response = await deps.fetch(new Request(`https://api.github.com/repos/${name}`, {
+        headers: { accept: "application/vnd.github+json", "user-agent": "Smithers-public-repos" },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000)
+      }))
+      if (response.ok) return parseStats(await response.json(), name)
+    } catch {
+      // Availability is curated independently of a transient metadata outage.
+    }
+    return null
+  }
 
   const refresh = async (cacheKey: Request): Promise<void> => {
     const cache = deps.cache()
@@ -56,23 +73,17 @@ export const createPublicReposHandler = (deps: Dependencies) => {
         return
       }
     }
-    const repos = await Promise.all(roster.map(async (repo) => {
-      let stats: PublicRepoStats | null = null
-      try {
-        const response = await deps.fetch(new Request(`https://api.github.com/repos/${repo.name}`, {
-          headers: { accept: "application/vnd.github+json", "user-agent": "Smithers-public-repos" },
-          redirect: "error",
-          signal: AbortSignal.timeout(10_000)
-        }))
-        if (response.ok) stats = parseStats(await response.json(), repo.name)
-      } catch {
-        // Availability is curated independently of a transient metadata outage.
-      }
-      // Only the public fields; the catalog's Cloud mirror path stays server-side.
-      return { name: repo.name, title: repo.title, url: repo.url, summary: repo.summary, stats }
-    }))
-    const body: PublicRepoCatalog = { repos }
-    const ttl = repos.every((repo) => repo.stats !== null) ? 300 : 30
+    const [repos, comingSoon] = await Promise.all([
+      Promise.all(roster.map(async (repo) => ({
+        // Only the public fields; the catalog's Cloud mirror path stays server-side.
+        name: repo.name, title: repo.title, url: repo.url, summary: repo.summary, stats: await statsFor(repo.name)
+      }))),
+      Promise.all(comingSoonRoster.map(async (repo) => ({
+        name: repo.name, title: repo.title, url: repo.url, stats: await statsFor(repo.name)
+      })))
+    ])
+    const body: PublicRepoCatalog = { repos, comingSoon }
+    const ttl = [...repos, ...comingSoon].every((repo) => repo.stats !== null) ? 300 : 30
     snapshot = { body: JSON.stringify(body), expiresAt: deps.now() + ttl * 1000 }
     await cache?.put(cacheKey, new Response(snapshot.body, {
       headers: { ...headers, "cache-control": `public, max-age=${ttl}`, "x-catalog-expires": String(snapshot.expiresAt) }

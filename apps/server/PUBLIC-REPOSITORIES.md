@@ -16,9 +16,21 @@ carries a curated `summary`, the one sentence the app's welcome speaks when the
 repository is opened (`repo.welcome` in apps/ui); it is written in the roster,
 never fetched.
 
+The response also carries `comingSoon`, an array of `{ name, title, url,
+stats }` after `repos`. `COMING_SOON_REPOS` in `src/publicRepoCatalog.ts`
+lists Smithers' direct production dependencies and the VCS the engine runs on
+(`Effect-TS/effect`, `wevm/incur`, `bombshell-dev/clack`, `jj-vcs/jj`), in
+card order. The landing page shows them after Smithers with a "Coming soon"
+badge, a GitHub link, and the same stats slots, but no app link: they are not
+in `AVAILABLE_REPOS`, so the app page redirects for them and the Cloud mirror
+lookup has no entry. They carry no `summary`. Moving a repository from
+`COMING_SOON_REPOS` to `AVAILABLE_REPOS` (with its `summary` and `cloudRepo`)
+is how a maintainer's claim ships. The `repos` array is unchanged by this
+field, so a site built before it shipped keeps working.
+
 The endpoint fetches public GitHub repository metadata on the server, one
-concurrent request per repository, using the same upstream resource as the
-app's account-scoped GitHub metadata route.
+concurrent request per repository in both arrays, using the same upstream
+resource as the app's account-scoped GitHub metadata route.
 It projects only stars, forks, open issues plus pull requests, language, and
 license. GitHub's `open_issues_count` includes pull requests, so the card labels
 that statistic **Issues + PRs**.
@@ -26,7 +38,8 @@ that statistic **Issues + PRs**.
 Successful metadata is cached for five minutes in the Worker and Cloudflare's
 edge cache. Concurrent requests share a fetch. Metadata failures return the
 affected repository with `stats: null` while the other repositories keep their
-counts; the whole catalog is then cached for 30 seconds. Availability does not
+counts; the whole catalog is then cached for 30 seconds, whether the failing
+repository is available or coming soon. Availability does not
 disappear and missing counts are never presented as zero. This endpoint
 allows credential-free cross-origin GETs from the landing page.
 
