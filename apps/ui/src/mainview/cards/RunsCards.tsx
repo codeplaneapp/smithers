@@ -12,6 +12,8 @@
 import { Button, Confirmation, ConfirmationAccepted, ConfirmationAction, ConfirmationActions, ConfirmationRejected, ConfirmationRequest } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
 import { timeLabel as clockLabel } from "../Timestamps"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 /** Why a run is not moving, in words: the control plane's reason, translated. */
 const waitingWords = (waiting: string): string =>
@@ -181,4 +183,16 @@ export const ApprovalsInboxCardBody = ({
       })}
     </div>
   )
+}
+
+/* Lane runs: the inboxes are listings; they settle the moment they render. */
+export const runsCardFamily: CardFamily<"run-list" | "approvals-inbox"> = {
+  "run-list": {
+    render: (card, actions) => <RunListCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  "approvals-inbox": {
+    render: (card, actions) => <ApprovalsInboxCardBody card={card} onDecideApproval={actions.onDecideApproval} />,
+    pill: settledPill
+  }
 }

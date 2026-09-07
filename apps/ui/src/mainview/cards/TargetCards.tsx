@@ -19,6 +19,8 @@ import {
   workspacesOf
 } from "./TargetsTable"
 import type { TargetRow } from "./TargetsTable"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const RepoCardBody = ({ card }: { readonly card: Extract<Card, { kind: "repo" }> }) => {
   const { repo } = card.payload
@@ -972,4 +974,17 @@ export const TargetRunCardBody = ({
       </details>
     </div>
   )
+}
+
+/* Lane L3 (docs/LOCAL-APP.md "Cards"): the payload's own status leads. */
+export const targetCardFamily: CardFamily<"repo" | "targets" | "target-run"> = {
+  repo: { render: (card) => <RepoCardBody card={card} />, pill: settledPill },
+  targets: {
+    render: (card, actions) => <TargetsCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => card.payload.status
+  },
+  "target-run": {
+    render: (card, actions) => <TargetRunCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => card.payload.status
+  }
 }

@@ -7,6 +7,8 @@
 import { Badge, Button, Markdown, RowButton, StatusPill } from "@smthrs/ui"
 import { GitPullRequest, ListChecks, MessageSquare } from "lucide-react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export interface LandingCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -111,3 +113,14 @@ export const LandingCardBody = ({
     </div>
   </div>
 )
+
+export const landingCardFamily: CardFamily<"pr-list" | "pr"> = {
+  "pr-list": {
+    render: (card, actions) => <LandingListCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  pr: {
+    render: (card, actions) => <LandingCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
+}

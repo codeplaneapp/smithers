@@ -11,6 +11,8 @@
 import { Button } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
 import { ACTIVITY_UNAVAILABLE, NO_CONTRIBUTING_GUIDE, welcomeSentence } from "../state/controller/onboarding"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 type OnboardingCard = Extract<Card, { kind: "repo-onboarding" }>
 
@@ -102,4 +104,12 @@ export const RepoOnboardingCardBody = ({ card, onRunCommand }: { readonly card: 
       <p data-testid="onboarding-ask">Ask any question about {repo} in the chat.</p>
     </div>
   )
+}
+
+/* The repository welcome and its answers are read once; their buttons open other flows. */
+export const onboardingCardFamily: CardFamily<"repo-onboarding"> = {
+  "repo-onboarding": {
+    render: (card, actions) => <RepoOnboardingCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
 }

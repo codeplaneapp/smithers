@@ -35,6 +35,8 @@ import { readDesktopStream, subscribeDesktopStream } from "../state/seams/Deskto
 import { DESKTOP_NOT_READY, GUEST_NOT_READY } from "../state/seams/WorkspaceSeam"
 import { timeLabel } from "../Timestamps"
 import { FileListCardBody } from "./FileCards"
+import type { CardFamily } from "./CardFamily"
+import { defaultPill } from "./CardFamily"
 
 export interface WorkspaceCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -731,4 +733,13 @@ export const EnvironmentImagesCardBody = ({
         ))}
     </ul>
   )
+}
+
+export const workspaceCardFamily: CardFamily<"workspace" | "environment-images"> = {
+  /* Lane citc: the workspace's own status is the pill. */
+  workspace: {
+    render: (card, actions) => <WorkspaceCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => card.payload.status
+  },
+  "environment-images": { render: (card) => <EnvironmentImagesCardBody card={card} />, pill: defaultPill }
 }

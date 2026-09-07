@@ -6,6 +6,8 @@
 import { Badge } from "@smthrs/ui"
 import { KeyRound, Terminal } from "lucide-react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const EnvCardBody = ({
   card
@@ -56,3 +58,7 @@ export const EnvCardBody = ({
       null}
   </div>
 )
+
+export const envCardFamily: CardFamily<"env"> = {
+  env: { render: (card) => <EnvCardBody card={card} />, pill: settledPill }
+}

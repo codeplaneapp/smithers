@@ -6,6 +6,7 @@
  */
 import { Button, EmptyState } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
 
 export const AffectedCardBody = ({
   card,
@@ -60,4 +61,12 @@ export const AffectedCardBody = ({
         )}
     </div>
   )
+}
+
+/* The target-graph cards' payloads carry their own read status. */
+export const affectedCardFamily: CardFamily<"affected"> = {
+  affected: {
+    render: (card, actions) => <AffectedCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => card.payload.status
+  }
 }

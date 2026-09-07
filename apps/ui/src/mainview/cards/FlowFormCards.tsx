@@ -1,6 +1,7 @@
 import { Button } from "@smthrs/ui"
 import type { KeyboardEvent } from "react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
 
 /*
  * THE FORM LAW (apps/ui/AGENTS.md; docs/workbench-lanes/flow-forms.md): the
@@ -134,4 +135,12 @@ export const FlowFormCardBody = ({
         null}
     </div>
   )
+}
+
+export const flowFormCardFamily: CardFamily<"flow-form"> = {
+  "flow-form": {
+    render: (card, actions) => <FlowFormCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    /* THE FORM LAW: a form waits on the human until it is submitted (acted) or its submit was refused (error). */
+    pill: (card) => (card.status === "acted" ? "done" : "pending")
+  }
 }

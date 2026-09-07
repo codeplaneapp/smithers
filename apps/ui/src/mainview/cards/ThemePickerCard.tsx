@@ -16,6 +16,8 @@
 import type { CSSProperties } from "react"
 import type { Card, Palette } from "../state/AppState"
 import { PALETTE_METADATA } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 type SwatchVariant = {
   readonly bg: string
@@ -137,3 +139,10 @@ export const ThemePickerCardBody = ({
     })}
   </div>
 )
+
+export const themePickerCardFamily: CardFamily<"theme-picker"> = {
+  "theme-picker": {
+    render: (card, actions) => <ThemePickerCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
+}

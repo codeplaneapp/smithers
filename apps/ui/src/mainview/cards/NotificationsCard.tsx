@@ -2,6 +2,8 @@
 import { Badge, Button } from "@smthrs/ui"
 import { Bell, BellDot } from "lucide-react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const NotificationsCardBody = ({
   card,
@@ -46,3 +48,10 @@ export const NotificationsCardBody = ({
       null}
   </div>
 )
+
+export const notificationsCardFamily: CardFamily<"notifications"> = {
+  notifications: {
+    render: (card, actions) => <NotificationsCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
+}

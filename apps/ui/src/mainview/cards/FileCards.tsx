@@ -15,6 +15,8 @@ import { useLiveQuery } from "@tanstack/react-db"
 import type { Card } from "../state/AppState"
 import type { AppController } from "../state/AppController"
 import { ControllerContext } from "../ControllerContext"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 /*
  * A markdown file renders through the shared WYSIWYG editor the World notes
@@ -381,4 +383,15 @@ export const FileCardBody = ({
         null}
     </div>
   )
+}
+
+export const fileCardFamily: CardFamily<"file-list" | "file"> = {
+  "file-list": {
+    render: (card, actions) => <FileListCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  file: {
+    render: (card, actions) => <FileCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
 }

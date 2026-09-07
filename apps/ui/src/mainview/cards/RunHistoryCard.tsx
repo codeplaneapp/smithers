@@ -8,6 +8,7 @@
 import { Button, EmptyState, StatusPill } from "@smthrs/ui"
 import { timeLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
 
 const durationLabel = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`)
 
@@ -67,4 +68,11 @@ export const RunHistoryCardBody = ({
       </tbody>
     </table>
   )
+}
+
+export const runHistoryCardFamily: CardFamily<"run-history"> = {
+  "run-history": {
+    render: (card, actions) => <RunHistoryCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => card.payload.status
+  }
 }

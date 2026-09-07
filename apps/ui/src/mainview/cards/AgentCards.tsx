@@ -1,5 +1,8 @@
-import { Button } from "@smthrs/ui"
+import { Button, Markdown } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
+import { findAgentRole } from "@smthrs/rpc/AgentRoles"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 /*
  * The agents as data (docs/workbench-lanes/custom-agents.md), as cards in
@@ -110,4 +113,96 @@ export const AgentModelsCardBody = ({ card }: { readonly card: AgentModelsCard }
       {models.length > 0 && reason !== undefined ? <p className="smithers-card-note">{reason}</p> : null}
     </div>
   )
+}
+
+/*
+ * A subagent launched from the `+` menu (docs/LOCAL-APP.md "Tabs"): which
+ * harness, where it runs, whether it is still running, and the way back to
+ * its tab — a registered flow (tab.select), so the card never owns the tab.
+ */
+const AgentCardBody = ({
+  card,
+  onRunCommand
+}: {
+  readonly card: Extract<Card, { kind: "agent" }>
+  readonly onRunCommand: (name: string, args?: string) => void
+}) => {
+  const { displayName, cwd, phase, exitCode, tabId, roleId, task } = card.payload
+  // The purpose rode the card at launch (a custom agent's is in no table); older cards fall back to the built-in row.
+  const purpose = card.payload.purpose ?? (roleId === undefined ? undefined : findAgentRole(roleId)?.purpose)
+  const state = phase === "running"
+    ? `${displayName} is running in ${cwd}.`
+    : exitCode === null
+    ? `${displayName} stopped.`
+    : `${displayName} exited (${exitCode}).`
+  return (
+    <div className="agent-card" data-phase={phase} data-role={roleId}>
+      {purpose !== undefined ? <p className="smithers-card-note agent-card-role">{purpose}</p> : null}
+      {task !== undefined ? <p className="smithers-card-note agent-card-task">Task: {task}</p> : null}
+      <p className="smithers-card-note">{state}</p>
+      {phase === "running" ?
+        (
+          <div className="flow-run-actions">
+            <Button
+              size="sm"
+              variant="outline"
+              data-flow="tab.select"
+              data-testid={`agent-open-tab-${tabId}`}
+              onClick={() => onRunCommand("tab.select", tabId)}
+            >
+              Open tab
+            </Button>
+          </div>
+        ) :
+        null}
+    </div>
+  )
+}
+
+/* The explainer's answer (AgentRoles.ts): streams in place; says who was asked, never who answered. */
+const ExplainCardBody = ({ card }: { readonly card: Extract<Card, { kind: "explain" }> }) => {
+  const { question, answer, phase, answeredBy, error } = card.payload
+  return (
+    <div className="explain-card" data-phase={phase}>
+      <p className="smithers-card-note explain-card-question">{question}</p>
+      {answer !== "" ? <Markdown className="smithers-card-markdown" content={answer} /> : null}
+      {phase === "asking" ? <p className="sui-approval-pending">Explaining…</p> : null}
+      {phase === "failed" && error !== undefined ?
+        (
+          <p className="sui-approval-error" role="alert">
+            {error}
+          </p>
+        ) :
+        null}
+      <p className="smithers-card-note explain-card-by">{answeredBy}</p>
+    </div>
+  )
+}
+
+
+export const agentCardFamily: CardFamily<"agent" | "explain" | "agents" | "agent-models"> = {
+  agent: {
+    render: (card, actions) => <AgentCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    /* A subagent's pill is its process: running, done on a clean exit, failed otherwise. */
+    pill: (card) => {
+      if (card.payload.phase === "running") return "running"
+      return card.payload.exitCode === 0 || card.payload.exitCode === null ? "done" : "failed"
+    }
+  },
+  explain: {
+    render: (card) => <ExplainCardBody card={card} />,
+    pill: (card) => {
+      if (card.payload.phase === "asking") return "running"
+      return card.payload.phase === "answered" ? "done" : "failed"
+    }
+  },
+  /* Agents as data: the listings settle when they render. */
+  agents: {
+    render: (card, actions) => <AgentsCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  "agent-models": {
+    render: (card) => <AgentModelsCardBody card={card} />,
+    pill: settledPill
+  }
 }

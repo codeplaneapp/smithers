@@ -8,6 +8,8 @@
 import { Button } from "@smthrs/ui"
 import { KeyRound } from "lucide-react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const KeysCardBody = ({
   card,
@@ -46,3 +48,10 @@ export const KeysCardBody = ({
     </p>
   </div>
 )
+
+export const keysCardFamily: CardFamily<"keys"> = {
+  keys: {
+    render: (card, actions) => <KeysCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
+}

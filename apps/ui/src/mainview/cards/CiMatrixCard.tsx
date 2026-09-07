@@ -5,6 +5,7 @@
  */
 import { Badge, EmptyState } from "@smthrs/ui"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
 
 export const CiMatrixCardBody = ({ card }: { readonly card: Extract<Card, { kind: "ci-matrix" }> }) => {
   const { repoId, status, result, error } = card.payload
@@ -60,4 +61,8 @@ export const CiMatrixCardBody = ({ card }: { readonly card: Extract<Card, { kind
       ))}
     </div>
   )
+}
+
+export const ciMatrixCardFamily: CardFamily<"ci-matrix"> = {
+  "ci-matrix": { render: (card) => <CiMatrixCardBody card={card} />, pill: (card) => card.payload.status }
 }

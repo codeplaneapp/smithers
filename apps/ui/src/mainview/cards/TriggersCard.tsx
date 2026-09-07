@@ -11,6 +11,8 @@
 import type { Card } from "../state/AppState"
 import { timeLabel as clockLabel } from "../Timestamps"
 import { describeSchedule } from "./TriggerEvents"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const TriggerListCardBody = ({
   card
@@ -51,4 +53,8 @@ export const TriggerListCardBody = ({
       ))}
     </ul>
   )
+}
+
+export const triggersCardFamily: CardFamily<"trigger-list"> = {
+  "trigger-list": { render: (card) => <TriggerListCardBody card={card} />, pill: settledPill }
 }

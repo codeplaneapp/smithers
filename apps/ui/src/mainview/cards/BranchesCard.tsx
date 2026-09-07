@@ -7,6 +7,8 @@
  */
 import { GitBranch } from "lucide-react"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export const BranchesCardBody = ({
   card
@@ -36,3 +38,7 @@ export const BranchesCardBody = ({
       null}
   </div>
 )
+
+export const branchesCardFamily: CardFamily<"branches"> = {
+  branches: { render: (card) => <BranchesCardBody card={card} />, pill: settledPill }
+}

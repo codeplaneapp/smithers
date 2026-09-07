@@ -11,6 +11,8 @@ import { MessageSquare } from "lucide-react"
 import { useController } from "../ControllerContext"
 import type { Card } from "../state/AppState"
 import { trustedHttpsUrl } from "../state/seams/SeamContext"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export interface IssueCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -155,4 +157,15 @@ export const IssueCardBody = ({
       </div>
     </div>
   )
+}
+
+export const issueCardFamily: CardFamily<"issue-list" | "issue"> = {
+  "issue-list": {
+    render: (card, actions) => <IssueListCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  issue: {
+    render: (card, actions) => <IssueCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
 }

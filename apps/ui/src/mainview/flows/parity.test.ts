@@ -175,12 +175,25 @@ describe("launch-law parity: every affordance is a command", () => {
       // 6 = 5 + the empty state's own import affordance (§11.6): with nothing
       // connected the pane stated a fact and offered no move.
       "../ConnectorsSurface.tsx": 6,
-      // 23 − the three recommendation-card affordances the deleted reco
-      // feature carried (accept / edit / dismiss), + the maximized card's
-      // "Open in tab" (docs/LOCAL-APP.md "Cards"), + the run card's lane-runs
-      // acts: the three facet tabs, Resume, Stop, Run again, and the steer
-      // row's send.
-      "../ChatCards.tsx": 24,
+      /*
+       * The card shell: the maximize backdrop, the frame back / forward /
+       * fork, the maximized card's "Open in tab" (docs/LOCAL-APP.md "Cards"),
+       * Restore and Maximize. Every card body lives in its family file under
+       * cards/ and is pinned there.
+       */
+      "../ChatCards.tsx": 7,
+      /* The turn's approval card: approve and deny. */
+      "../cards/ApprovalCard.tsx": 2,
+      /* The admin grant confirm: Post the grant and Cancel. */
+      "../cards/BillingCards.tsx": 2,
+      /* The access-request queue's Approve. */
+      "../cards/AdminCards.tsx": 1,
+      /*
+       * The run card's lane-runs acts: the three facet tabs, Check again and
+       * Stop watching, Resume, Stop, Run again, the steer row's send, the
+       * repository chooser's row and the workflow list's Run.
+       */
+      "../cards/WorkflowCards.tsx": 11,
       "../DevtoolsPanel.tsx": 1,
       "../SurfaceChrome.tsx": 3,
       "../ToastStack.tsx": 1,
@@ -237,7 +250,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/RunHistoryCard.tsx": 1,
       "../cards/AffectedCard.tsx": 1,
       // Agents as data (custom-agents.md): Launch, Edit, Remove, New agent.
-      "../cards/AgentCards.tsx": 4,
+      /* 5 = the Agents card's Launch / Edit / Remove and New agent, + the subagent card's Open tab. */
+      "../cards/AgentCards.tsx": 5,
       // THE FORM LAW (flow-forms.md): the generic form's Cancel (card.dismiss) and Submit (form.submit); fields commit on blur/change.
       "../cards/FlowFormCards.tsx": 2,
       /*

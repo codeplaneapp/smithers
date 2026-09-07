@@ -16,6 +16,8 @@ import { AlertTriangle, FileDiff, GitMerge, GitPullRequest, History, Split } fro
 import { lazy, Suspense } from "react"
 import type { ChangeFacet, ChangeRevision, ChangeThread, LandingBlock } from "@smthrs/rpc/Changes"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 export interface ChangeCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -1110,4 +1112,15 @@ export const DiffCardBody = ({
       })}
     </div>
   )
+}
+
+export const changeCardFamily: CardFamily<"change" | "diff"> = {
+  change: {
+    render: (card, actions) => <ChangeCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  },
+  diff: {
+    render: (card, actions) => <DiffCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: settledPill
+  }
 }

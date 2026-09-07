@@ -20,6 +20,7 @@ import { useCallback, useState, useSyncExternalStore } from "react"
 import { useController } from "../ControllerContext"
 import { ageLabel, timeLabel, untilLabel } from "../Timestamps"
 import type { Card } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
 
 export interface SyncCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -407,4 +408,32 @@ export const SyncOpsCardBody = ({ card, onRunCommand }: { readonly card: SyncOps
       {card.payload.error !== undefined ? <p className="world-card-path">{card.payload.error}</p> : null}
     </div>
   )
+}
+
+/* Lane sync (ADR 0005): the wizard runs, the connected state settles. */
+export const syncCardFamily: CardFamily<"connector-setup" | "sync-ops"> = {
+  "connector-setup": {
+    render: (card, actions) => <ConnectorSetupCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => {
+      if (card.payload.error !== undefined) return "failed"
+      return card.payload.phase === "connected" ? "done" : "running"
+    }
+  },
+  "sync-ops": {
+    render: (card, actions) => <SyncOpsCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => {
+      if (card.payload.error !== undefined) return "failed"
+      /*
+       * The run state comes from the sync-run DTO alone and is that DTO's own
+       * word (`pending | running | completed | failed` for a Linear run,
+       * `queued | running | succeeded | failed` for a mirror run; the shared
+       * status vocabulary tints every one). Null means nothing has answered
+       * yet, which is an outcome the app cannot see: it wears the neutral
+       * pill, never "done" (review finding 3: a sync that had just started
+       * read as finished).
+       */
+      if (card.payload.runState === null) return "pending"
+      return card.payload.runState
+    }
+  }
 }

@@ -3,6 +3,8 @@ import { ExternalLink, GitPullRequest, HardDrive, Server } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import type { Card, WorldDocument } from "../state/AppState"
 import { WORLD_DISPLAY_NAME } from "../state/AppState"
+import type { CardFamily } from "./CardFamily"
+import { settledPill } from "./CardFamily"
 
 const MarkdownEditorSurface = lazy(() =>
   import("../MarkdownEditorSurface").then((module) => ({ default: module.MarkdownEditorSurface }))
@@ -203,3 +205,29 @@ export const BrowserCardBody = ({ card }: { readonly card: Extract<Card, { kind:
   )
 }
 
+
+/* These cards exist once their read has settled, so they wear "done" (§28.3). */
+export const conversationCardFamily: CardFamily<"connect" | "world" | "browser"> = {
+  connect: {
+    render: (card, actions) => (
+      <ConnectCardBody
+        card={card}
+        onConnectGitHub={actions.onConnectGitHub}
+        onConnectLocal={actions.onConnectLocal}
+        onRunCommand={actions.onRunCommand}
+      />
+    ),
+    pill: settledPill
+  },
+  world: {
+    render: (card, actions) => (
+      <WorldCardBody
+        card={card}
+        worldDocuments={actions.worldDocuments}
+        onChangeWorldDocument={actions.onChangeWorldDocument}
+      />
+    ),
+    pill: settledPill
+  },
+  browser: { render: (card) => <BrowserCardBody card={card} />, pill: settledPill }
+}

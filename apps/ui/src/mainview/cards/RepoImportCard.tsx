@@ -11,6 +11,7 @@ import { Badge, Button } from "@smthrs/ui"
 import { CloudDownload, RefreshCw } from "lucide-react"
 import type { Card } from "../state/AppState"
 import { RateLimitLine, useRetryHold } from "./SyncCards"
+import type { CardFamily } from "./CardFamily"
 
 const PHASE_VARIANT = {
   starting: "outline",
@@ -84,4 +85,15 @@ export const RepoImportCardBody = ({
         null}
     </div>
   )
+}
+
+export const repoImportCardFamily: CardFamily<"repo-import"> = {
+  "repo-import": {
+    render: (card, actions) => <RepoImportCardBody card={card} onRunCommand={actions.onRunCommand} />,
+    pill: (card) => {
+      if (card.payload.phase === "done") return "done"
+      if (card.payload.phase === "failed") return "failed"
+      return "running"
+    }
+  }
 }
