@@ -21,10 +21,17 @@ stop the owned group even after the target exits. The default policy is
 when the host disappears.
 
 **A durable record before execution.** The kernel records the prepared
-supervisor's identity and the original command digest before activation starts
-the target. The record carries the owner pid and group, host identity, host
+supervisor's identity and the executable it runs before activation starts the
+target. The record carries the owner pid and group, host identity, host
 incarnation pid, and start time. Only verified cleanup retires it; failed or
 unverified cleanup fails scope release and retains the record.
+
+`commandDigest` names the program and never its arguments, because a
+journal-backed ledger keeps every record permanently and arguments carry
+credentials: `curl -u user:pass`, `mysql -phunter2`, `deploy --token hunter2`.
+Nothing that reads a record needs more, since the reaper matches on pid and
+process group. Keep credentials out of argv anyway, in the environment or on
+stdin: while a child runs, its arguments are readable through `ps`.
 
 **A sweep on the way up.** While the layer is built,
 [`@smthrs/platform-node`](https://platform-node.smithers.sh/reference/api/)'s `ProcessReaper` reads the

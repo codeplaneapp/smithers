@@ -62,6 +62,33 @@ describe("@smthrs/platform-bun barrel", () => {
     expect(await Effect.runPromise(ledger.live)).toEqual([])
   })
 
+  it("records the executable a contained child runs, never a credential in its argv", async () => {
+    // A journal-backed ledger keeps its records permanently, so an argument is
+    // not a safe thing to store: this `--token=` stands for `curl -u`,
+    // `mysql -p`, and every other tool that takes a credential on its line.
+    const secret = "violetMarble6729"
+    const ledger = await Effect.runPromise(
+      ProcessLedger.makeMemory({ hostId: "bun-host", ownerPid: process.pid })
+    )
+    const host = BunHost.layerContained({ graceMs: 250 }).pipe(
+      Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
+    )
+
+    const live = await Effect.runPromise(
+      Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        // `sh -c LINE NAME ARGUMENT...` sets `$0` and the positional
+        // parameters, so the credential really is in argv while `sleep 30`
+        // holds the recorded group open.
+        yield* spawner.spawn(ChildProcess.make("sh", ["-c", "sleep 30", "deploy", `--token=${secret}`]))
+        return yield* ledger.live
+      }).pipe(Effect.provide(host), Effect.scoped)
+    )
+
+    expect(live).toEqual([expect.objectContaining({ commandDigest: "sh" })])
+    expect(JSON.stringify(live)).not.toContain(secret)
+  })
+
   it("names the module actually behind every closed Host slot", () => {
     // A golden vector rather than a spot check: the record is public surface
     // keyed by the closed list, so a renamed value, a swapped pair, or an extra
