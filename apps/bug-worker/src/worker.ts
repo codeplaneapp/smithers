@@ -175,8 +175,17 @@ async function handleGetBug(request: Request, env: BugWorkerEnv, id: string): Pr
  * Build the worker module with explicit deps; tests inject a controllable
  * clock. The default export uses the real clock.
  */
+export function defaultBugWorkerDeps(): BugWorkerDeps {
+  return {
+    now: () => Date.now(),
+    // workerd rejects a host function invoked with a foreign `this` ("Illegal invocation"), so
+    // `fetch: globalThis.fetch` breaks once routes call `deps.fetch(...)`; the arrow keeps `this` clear.
+    fetch: ((input, init) => fetch(input, init)) as typeof fetch,
+  };
+}
+
 export function createBugWorker(overrides?: Partial<BugWorkerDeps>) {
-  const deps: BugWorkerDeps = { now: () => Date.now(), fetch: globalThis.fetch, ...overrides };
+  const deps: BugWorkerDeps = { ...defaultBugWorkerDeps(), ...overrides };
   return {
     async scheduled(_event: unknown, env: BugWorkerEnv): Promise<void> {
       await retryRepoNotifications(env, deps);
