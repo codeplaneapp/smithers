@@ -154,10 +154,16 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
       try {
         response = await deps.fetch(`https://api.github.com/repos/${name}`, {
           headers: { accept: "application/vnd.github+json", "user-agent": "Smithers-repo-requests" },
-          signal: AbortSignal.timeout(10_000), redirect: "error",
+          signal: AbortSignal.timeout(10_000), redirect: "manual",
         });
       } catch { return json(503, { error: "Could not check GitHub. Please try again." }); }
-      if (response.status === 404) return json(400, { error: "That repository was not found. Please use a public GitHub repository." });
+      // workerd refuses redirect: "error" (it throws before the request is sent, so every
+      // new nomination failed with 503 in production while Bun accepted the option locally).
+      // The redirect is requested manually and a 3xx answer means the repository has moved,
+      // which gets the same honest refusal as a 404.
+      if (response.status === 404 || (response.status >= 300 && response.status < 400)) {
+        return json(400, { error: "That repository was not found. Please use a public GitHub repository." });
+      }
       if (!response.ok) return json(503, { error: "GitHub is unavailable or rate limited. Please try again later." });
       const github = await response.json() as { private?: boolean; disabled?: boolean; license?: { spdx_id?: string } };
       if (github.private !== false || github.disabled || !github.license?.spdx_id || github.license.spdx_id === "NOASSERTION") {

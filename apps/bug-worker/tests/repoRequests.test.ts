@@ -9,17 +9,19 @@ function fixture() {
   const calls: { url: string; init?: RequestInit }[] = [];
   let emailStatus = 200;
   let github: unknown = { private: false, license: { spdx_id: "MIT" } };
+  let githubStatus = 200;
   const worker = createBugWorker({ now: () => 1788500000000, fetch: (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     calls.push({ url, init });
-    return Response.json(url.includes("api.github.com") ? github : { id: "email-1" }, { status: url.includes("resend") ? emailStatus : 200 });
+    if (url.includes("api.github.com")) return Response.json(github, { status: githubStatus });
+    return Response.json({ id: "email-1" }, { status: url.includes("resend") ? emailStatus : 200 });
   }) as typeof fetch });
   const call = (body?: unknown, route = "", admin = false, ip = "203.0.113.1") => worker.fetch(new Request(`https://bug.smithers.sh/api/repo-requests${route}`, {
     method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip, ...(admin ? { "x-bug-admin": "test-admin" } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }), env);
   const complete = () => call({ repo: "owner/repo", appUrl: "https://app.smithers.sh/repos/owner/repo" }, "/complete", true);
-  return { env, worker, calls, call, complete, emailStatus: (value: number) => { emailStatus = value; }, github: (value: unknown) => { github = value; } };
+  return { env, worker, calls, call, complete, emailStatus: (value: number) => { emailStatus = value; }, github: (value: unknown, status = 200) => { github = value; githubStatus = status; } };
 }
 
 describe("public repository requests", () => {
@@ -48,6 +50,27 @@ describe("public repository requests", () => {
       expect((await f.call({ repo: "owner/repo" })).status).toBe(400);
     }
     expect((await f.env.BUGS.list!({ prefix: "repo-request:" })).keys).toHaveLength(0);
+  });
+  test("checks GitHub with a manual redirect and refuses a moved repository like a missing one", async () => {
+    // workerd rejects redirect: "error" before sending, so the check must ask for "manual"
+    // and read a 3xx answer itself; "follow" would land on the renamed repository instead.
+    const f = fixture();
+    f.github({ message: "Moved Permanently" }, 301);
+    const moved = await f.call({ repo: "owner/moved" });
+    expect(moved.status).toBe(400);
+    expect(await moved.json()).toEqual({ error: "That repository was not found. Please use a public GitHub repository." });
+    expect(f.calls).toHaveLength(1);
+    expect(f.calls[0]!.url).toBe("https://api.github.com/repos/owner/moved");
+    expect(f.calls[0]!.init?.redirect).toBe("manual");
+    f.github({ message: "Not Found" }, 404);
+    const missing = await f.call({ repo: "owner/missing" });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toEqual({ error: "That repository was not found. Please use a public GitHub repository." });
+    expect((await f.env.BUGS.list!({ prefix: "repo-request:" })).keys).toHaveLength(0);
+    expect((await f.env.BUGS.list!({ prefix: "repo-nominations:" })).keys).toHaveLength(0);
+    f.github({ private: false, license: { spdx_id: "MIT" } }, 200);
+    expect((await f.call({ repo: "owner/repo" })).status).toBe(200);
+    expect((await f.env.BUGS.list!({ prefix: "repo-request:" })).keys).toHaveLength(1);
   });
   test("completion requires authentication and an allowed public app URL", async () => {
     const f = fixture();
