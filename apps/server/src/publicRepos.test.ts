@@ -130,7 +130,7 @@ describe("the curated catalog", () => {
       expect(repo.summary.split(/[.!?]\s/).length).toBe(1)
     }
     expect(AVAILABLE_REPOS[0].summary).toBe(
-      "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     )
   })
 })

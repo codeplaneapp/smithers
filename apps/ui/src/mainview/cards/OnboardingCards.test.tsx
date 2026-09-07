@@ -55,10 +55,10 @@ describe("the welcome card", () => {
     const { host, ran, buttons } = render({
       stage: "welcome",
       repo: REPO,
-      summary: "a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      summary: "a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     })
     expect(host.querySelector('[data-testid="onboarding-welcome"]')?.textContent).toBe(
-      "Welcome to Smithers. smithersai/smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      "Welcome to Smithers. smithersai/smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     )
     expect(host.textContent).toContain("I am")
     expect(buttons().map((button) => [button.dataset.flow, button.textContent])).toEqual([

@@ -12,7 +12,7 @@ export const AVAILABLE_REPOS = [
     title: "Smithers",
     url: "https://github.com/smithersai/smithers",
     // The one-sentence explanation the app's welcome reads. Curated, never fetched.
-    summary: "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository.",
+    summary: "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows.",
     // The Smithers Cloud mirror namespace that answers anonymous reads. The
     // backend serves the public mirror under this path and refuses the GitHub
     // name without credentials. Never part of the public catalog response.

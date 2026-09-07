@@ -1730,7 +1730,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
       z.object({
         stage: z.literal("welcome"),
         repo: z.string(),
-        /** The curated one-sentence predicate ("a durable workflow framework …"); null when the catalog carries none. */
+        /** The curated one-sentence predicate ("a durable framework …"); null when the catalog carries none. */
         summary: z.string().nullable()
       }),
       z.object({

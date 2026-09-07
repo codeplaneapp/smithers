@@ -11,7 +11,7 @@ import type { ControllerContext } from "./state/controller/context"
  * it: the URL is anyone's to type.
  */
 
-const SUMMARY = "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+const SUMMARY = "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
 
 const catalog = {
   repos: [

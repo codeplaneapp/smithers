@@ -37,7 +37,7 @@ const unavailableRepositories: NativeRepositories = {
 }
 
 const REPO = "smithersai/smithers"
-const SUMMARY = "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+const SUMMARY = "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
 
 const WEB: AppBootstrap = {
   apiVersion: 1,
@@ -112,7 +112,7 @@ const lastMessage = (store: AppStore) =>
 describe("the welcome's sentence", () => {
   test("turns the catalog's product sentence into a predicate of the repository", () => {
     expect(summaryPredicate(REPO, SUMMARY)).toBe(
-      "a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      "a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     )
     expect(welcomeSentence(REPO, summaryPredicate(REPO, SUMMARY))).toBe(`Welcome to Smithers. ${REPO} is ${summaryPredicate(REPO, SUMMARY)}`)
     // A sentence that does not open on the repository's name is kept whole.
@@ -143,7 +143,7 @@ describe("repo.welcome", () => {
     expect(card?.payload).toEqual({
       stage: "welcome",
       repo: REPO,
-      summary: "a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      summary: "a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     })
   })
 
@@ -152,7 +152,7 @@ describe("repo.welcome", () => {
     const outcome = await controller.commands.runForAgent("repo.welcome")
     expect(outcome.status).toBe("executed")
     if (outcome.status === "executed") {
-      expect(outcome.value).toContain(`Welcome to Smithers. ${REPO} is a durable workflow framework`)
+      expect(outcome.value).toContain(`Welcome to Smithers. ${REPO} is a durable framework`)
       expect(outcome.value).toContain("repo.maintain")
       expect(outcome.value).toContain("repo.explore")
     }

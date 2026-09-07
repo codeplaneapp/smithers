@@ -265,7 +265,7 @@ describe("auth is a conversation state — the chat is the only page", () => {
         name: "smithers",
         head: null,
         catalog: true,
-        summary: "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+        summary: "Smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
       }]
     })
     store.dispatch({ type: "repo.selected", actor: "user", id: "smithersai/smithers" })
@@ -281,7 +281,7 @@ describe("auth is a conversation state — the chat is the only page", () => {
     expect(host.querySelector(".smithers-chat-message .message-cta")).toBeNull()
     const welcome = host.querySelector<HTMLElement>('[data-testid="onboarding-welcome"]')
     expect(welcome?.textContent).toBe(
-      "Welcome to Smithers. smithersai/smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      "Welcome to Smithers. smithersai/smithers is a durable framework that lets agents plan, run, and review changes to a code repository through flows."
     )
     expect([...host.querySelectorAll<HTMLElement>('.repo-onboarding [data-flow]')].map((button) => button.dataset.flow))
       .toEqual(["repo.maintain", "repo.contribute", "repo.explore"])
