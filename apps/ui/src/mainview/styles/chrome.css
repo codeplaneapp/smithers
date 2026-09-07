@@ -461,10 +461,12 @@
 	background: var(--hover);
 }
 
-/* The download, Secrets, Dispatcher and Account buttons carry an icon; keep each on one line with its label. */
+/* The download button and the six chrome buttons carry an icon; keep each on one line with its label. */
 .chrome-action-download,
-.chrome-action-secrets,
+.chrome-action-wiki,
 .chrome-action-dispatcher,
+.chrome-action-flows,
+.chrome-action-secrets,
 .chrome-action-history,
 .chrome-action-account {
 	display: flex;

@@ -938,6 +938,137 @@ describe("the chrome-actions footer's download button", () => {
 })
 
 /*
+ * The chrome buttons (factory design session 2026-09-07; every screen of
+ * ~/Desktop/smithers-factory/factory-mocks.html shows them): exactly Wiki,
+ * Dispatcher, Flows, Secrets, History, Account, in that order, under the
+ * Sign in line and above the theme corner. Each is the button door of one
+ * registered flow and renders exactly where that flow registers, so the
+ * rendered row is the canonical list filtered by the registry and never a
+ * seventh button, a renamed one, or an invented one.
+ */
+describe("the chrome buttons", () => {
+  /** The canonical row: label, the registered flow the button runs, and its test id. */
+  const CHROME = [
+    { label: "Wiki", flow: "wiki", testid: "chrome-wiki" },
+    { label: "Dispatcher", flow: "triggers.list", testid: "chrome-dispatcher" },
+    { label: "Flows", flow: "flows", testid: "chrome-flows" },
+    { label: "Secrets", flow: "secrets.list", testid: "chrome-secrets" },
+    { label: "History", flow: "history.show", testid: "chrome-history" },
+    { label: "Account", flow: "account.show", testid: "chrome-account" }
+  ] as const
+
+  /** Every `.chrome-action` in the footer that is one of the six, in DOM order. */
+  const rendered = (host: HTMLElement) =>
+    [...host.querySelectorAll<HTMLButtonElement>("[data-testid=chrome-actions] .chrome-action")].filter((button) =>
+      CHROME.some((row) => row.testid === button.dataset.testid)
+    )
+
+  const signedOut = async (store: AppStore): Promise<void> => {
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-out",
+      login: null,
+      allowlisted: false,
+      admin: false,
+      scopesPlain: null
+    })
+  }
+
+  test("host cloud, signed out: all six render in the fixed order, each bound to a registered flow, under Sign in and above the theme toggle", async () => {
+    const { store, controller } = await cloudHarness()
+    await signedOut(store)
+    const { host } = mount(controller)
+    const buttons = rendered(host)
+    expect(buttons.map((button) => button.textContent)).toEqual(["Wiki", "Dispatcher", "Flows", "Secrets", "History", "Account"])
+    expect(buttons.map((button) => button.dataset.flow)).toEqual(CHROME.map((row) => row.flow))
+    expect(buttons.map((button) => button.dataset.testid)).toEqual(CHROME.map((row) => row.testid))
+    for (const button of buttons) {
+      // Parity: the button names a registered flow and carries its icon; the slash door offers the same entry.
+      expect(controller.commands.find(button.dataset.flow ?? "")).toBeDefined()
+      expect(button.querySelector("svg")).not.toBeNull()
+      expect(button.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    }
+    // No word "workflow" reaches a person through the chrome.
+    expect(host.querySelector<HTMLElement>("[data-testid=chrome-actions]")?.textContent?.toLowerCase()).not.toContain("workflow")
+    // The Sign in line stands first; the theme toggle closes the footer; the six sit between them.
+    const flows = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(flows[0]).toBe("auth.sign-in")
+    expect(flows.at(-1)).toBe("appearance.dark-mode")
+    expect(flows.slice(1, 7)).toEqual(CHROME.map((row) => row.flow))
+    // The theme toggle is the corner's, not one of the six.
+    expect(host.querySelector('[data-flow="appearance.dark-mode"]')?.closest(".chrome-corner")).not.toBeNull()
+  })
+
+  test("host cloud, signed in: the same six in the same order, the Sign in line gone", async () => {
+    const { store, controller } = await cloudHarness()
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-in",
+      login: "will",
+      allowlisted: true,
+      admin: false,
+      scopesPlain: null
+    })
+    const { host } = mount(controller)
+    expect(rendered(host).map((button) => button.textContent)).toEqual(["Wiki", "Dispatcher", "Flows", "Secrets", "History", "Account"])
+    expect(host.querySelector("[data-testid=chrome-sign-in]")).toBeNull()
+    const flows = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(flows.slice(0, 6)).toEqual(CHROME.map((row) => row.flow))
+    expect(flows.at(-1)).toBe("appearance.dark-mode")
+  })
+
+  test("host local: the row is the canonical list filtered by the registry, so only Wiki and Flows render, in that order", async () => {
+    const { controller } = await localHarness()
+    const registered = CHROME.filter((row) => controller.commands.find(row.flow) !== undefined)
+    expect(registered.map((row) => row.label)).toEqual(["Wiki", "Flows"])
+    const { host } = mount(controller)
+    const buttons = rendered(host)
+    expect(buttons.map((button) => button.textContent)).toEqual(["Wiki", "Flows"])
+    expect(buttons.map((button) => button.dataset.flow)).toEqual(["wiki", "flows"])
+    for (const row of CHROME) {
+      if (registered.includes(row)) continue
+      expect(host.querySelector(`[data-testid=${row.testid}]`)).toBeNull()
+      expect(host.querySelector(`[data-flow="${row.flow}"]`)).toBeNull()
+    }
+  })
+
+  test("Wiki, signed out, opens the Wiki pane beside the chat and touches no message; a second click returns to the chat", async () => {
+    const { store, controller } = await cloudHarness()
+    await signedOut(store)
+    const { host, act } = mount(controller)
+    const before = [...store.collections.messages.values()].map((message) => message.id)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-wiki]")
+    expect(button?.dataset.flow).toBe("wiki")
+    await act(() => button?.click())
+    expect(store.session().surface).toBe("world")
+    expect([...store.collections.messages.values()].map((message) => message.id)).toEqual(before)
+    // The chrome stays visible with the pane open: every screen of the mock shows it.
+    expect(rendered(host).map((b) => b.textContent)).toEqual(["Wiki", "Dispatcher", "Flows", "Secrets", "History", "Account"])
+    await act(() => host.querySelector<HTMLButtonElement>("[data-testid=chrome-wiki]")?.click())
+    expect(store.session().surface).toBe("chat")
+  })
+
+  test("Flows, signed out, opens the Flows pane and invents no flow rows: the list waits on sign-in", async () => {
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async () => new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
+    })
+    await signedOut(store)
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-flows]")
+    expect(button?.dataset.flow).toBe("flows")
+    await act(() => button?.click())
+    await act(() => {})
+    expect(store.session().surface).toBe("flows")
+    expect(host.querySelector('section[aria-label="Flows on your workspace"]')).not.toBeNull()
+    // Honest state: no workspace was provisioned and no flow list card exists for a signed-out visitor.
+    expect([...store.collections.cards.values()].filter((card) => card.kind === "workflow-list")).toHaveLength(0)
+    expect(host.querySelector(".flows-content")?.children).toHaveLength(0)
+  })
+})
+
+/*
  * The Secrets button: the button door of secrets.list, in the chrome that
  * belongs to no session. It renders exactly where the registry holds
  * secrets.list (the cloud host), and its click runs the same registry entry
@@ -1021,6 +1152,30 @@ describe("the chrome-actions footer's Secrets button", () => {
     expect(host.querySelectorAll('[data-kind="secrets"]')).toHaveLength(1)
   })
 
+  test("signed out, the button still stands and the click renders the sign-in step, never a secrets card", async () => {
+    const { store, controller, listed } = await secretsHarness()
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-out",
+      login: null,
+      allowlisted: false,
+      admin: false,
+      scopesPlain: null
+    })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-secrets]")
+    expect(button).not.toBeNull()
+    await act(() => button?.click())
+    await act(() => {})
+    // secrets.list requires sign-in: the run path parks it and renders the sign-in step; nothing is read and no row is invented.
+    expect(listed()).toBe(0)
+    expect(host.querySelector('[data-kind="secrets"]')).toBeNull()
+    const prompt = [...host.querySelectorAll<HTMLButtonElement>('.message-cta[data-flow="auth.sign-in"]')]
+    expect(prompt.length).toBeGreaterThan(0)
+    expect(prompt.at(-1)?.textContent).toBe("Sign in with GitHub")
+  })
+
   test("host local renders no Secrets button: secrets.list is not registered there", async () => {
     const { controller } = await localHarness()
     expect(controller.commands.find("secrets.list")).toBeUndefined()
@@ -1033,8 +1188,8 @@ describe("the chrome-actions footer's Secrets button", () => {
 /*
  * The Dispatcher button (design session 2026-09-07: the chrome is Wiki,
  * Dispatcher, Flows, Secrets, History, Account). It is the button door of
- * triggers.list, in the chrome that belongs to no session, beside Secrets.
- * It renders exactly where the registry holds triggers.list (the cloud host)
+ * triggers.list, in the chrome that belongs to no session, between Wiki and
+ * Flows. It renders exactly where the registry holds triggers.list (the cloud host)
  * and its click runs the same registry entry the /triggers.list slash and the
  * Flows pane's Triggers button run, so the dispatcher card appears in the
  * chat with the repository's real rows and never an invented one.
@@ -1065,7 +1220,7 @@ describe("the chrome-actions footer's Dispatcher button", () => {
     return { store, controller, listed: () => listed }
   }
 
-  test("host cloud renders it beside Secrets bound to triggers.list, and a signed-in click surfaces the dispatcher card", async () => {
+  test("host cloud renders it between Wiki and Flows bound to triggers.list, and a signed-in click surfaces the dispatcher card", async () => {
     const { store, controller, listed } = await dispatcherHarness()
     await persisted(store, {
       type: "identity.session.loaded",
@@ -1088,9 +1243,10 @@ describe("the chrome-actions footer's Dispatcher button", () => {
     expect(button?.textContent).toBe("Dispatcher")
     expect(button?.querySelector("svg")).not.toBeNull()
     expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
-    // Right after Secrets and above the theme corner, like the other footer doors.
+    // Right after Wiki, right before Flows, and above the theme corner, like the other footer doors.
     const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
-    expect(order.indexOf("triggers.list")).toBe(order.indexOf("secrets.list") + 1)
+    expect(order.indexOf("triggers.list")).toBe(order.indexOf("wiki") + 1)
+    expect(order.indexOf("flows")).toBe(order.indexOf("triggers.list") + 1)
     expect(order.indexOf("triggers.list")).toBeLessThan(order.indexOf("appearance.dark-mode"))
     // The slash door offers the same registry entry the button is bound to.
     const slashNames = controller.slashTree("triggers.list").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
@@ -1331,7 +1487,7 @@ describe("the chrome-actions footer's History button", () => {
     return { store, controller, feedReads: () => feedReads }
   }
 
-  test("host cloud renders it after Secrets bound to history.show, and a signed-out click surfaces the honest empty state with its one door", async () => {
+  test("host cloud renders it between Secrets and Account bound to history.show, and a signed-out click surfaces the honest empty state with its one door", async () => {
     const { store, controller, feedReads } = await historyHarness()
     await persisted(store, {
       type: "repositories.loaded",
@@ -1346,7 +1502,8 @@ describe("the chrome-actions footer's History button", () => {
     expect(button?.querySelector("svg")).not.toBeNull()
     expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
     const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
-    expect(order.indexOf("history.show")).toBeGreaterThan(order.indexOf("secrets.list"))
+    expect(order.indexOf("history.show")).toBe(order.indexOf("secrets.list") + 1)
+    expect(order.indexOf("account.show")).toBe(order.indexOf("history.show") + 1)
     expect(order.indexOf("history.show")).toBeLessThan(order.indexOf("appearance.dark-mode"))
     const slashNames = controller.slashTree("history.show").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
     expect(slashNames).toContain("history.show")

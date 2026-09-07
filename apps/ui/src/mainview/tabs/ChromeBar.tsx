@@ -1,7 +1,7 @@
 import { fileArgs } from "../flows/FileArgs"
 import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { ChevronRight, Download, FolderGit2, History, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, Timer, UserRound, X } from "lucide-react"
+import { BookOpen, ChevronRight, Download, FolderGit2, History, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, Timer, UserRound, Workflow, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
@@ -18,10 +18,15 @@ import { SELECT_REPO_LABEL } from "../Onboarding"
  * existing file card in the chat (files.read, or workspace.file for a
  * workspace copy). The SESSIONS a copy holds: terminals,
  * agents, pinned cards — nest under it after its files. Then `+`, and at the
- * bottom the chrome that must stay visible everywhere: the theme toggle, the
- * admin reset, and "Sign in". Every affordance dispatches a registered flow;
- * the list, the tree, and the `+` menu are projections of the collections
- * and the session row. No user-visible word "tab" lives here.
+ * bottom the chrome that must stay visible everywhere: "Sign in", then the
+ * six chrome buttons the factory design session fixed in this order (mocks
+ * ~/Desktop/smithers-factory/factory-mocks.html, every screen): Wiki,
+ * Dispatcher, Flows, Secrets, History, Account. Each is the button door of
+ * one registered flow and renders exactly where that flow registers; the
+ * theme toggle and the admin reset close the column. Every affordance
+ * dispatches a registered flow; the list, the tree, and the `+` menu are
+ * projections of the collections and the session row. No user-visible word
+ * "tab" lives here.
  */
 
 /* The existing truncated line (cards/FileCards.tsx), so a capped directory says the same thing in both places. */
@@ -94,14 +99,23 @@ export function ChromeBar() {
   // The web app's door to the native app (docs/web-mode/PLAN.md §3): registered on the cloud host only, and
   // rendered only while a native release exists to download (AppLinks.ts — null until one carries an asset).
   const canDownload = controller.commands.find("app.download") !== undefined && controller.downloadUrl !== null
-  // The Secrets door: the same registry entry the /secrets.list slash runs, so it renders only where the flow registers (the cloud host).
-  const canSecrets = controller.commands.find("secrets.list") !== undefined
-  // The Dispatcher door: the registry entry the /triggers.list slash runs; the Flows pane keeps its own door to the same flow.
+  /*
+   * The six chrome buttons, in the design session's order. Each one is the
+   * button door of the registry entry its slash runs, so it renders exactly
+   * where that flow registers and never invents a door.
+   */
+  // Wiki: the `wiki` surface switch (the Wiki pane beside the chat); registered on every host.
+  const canWiki = controller.commands.find("wiki") !== undefined
+  // Dispatcher: triggers.list, the dispatcher card; the Flows pane keeps its own door to the same flow.
   const canDispatcher = controller.commands.find("triggers.list") !== undefined
-  // The Account door (factory mock 21): the same registry entry the /account.show slash runs; it registers where an identity seam exists.
-  const canAccount = controller.commands.find("account.show") !== undefined
-  // The History door: the button door of history.show, the mythical history card in the chat (design session 2026-09-07).
+  // Flows: the `flows` surface switch (the Flows pane); registered on every host.
+  const canFlows = controller.commands.find("flows") !== undefined
+  // Secrets: secrets.list, registered on the cloud host only.
+  const canSecrets = controller.commands.find("secrets.list") !== undefined
+  // History: history.show, the mythical history card (design session 2026-09-07).
   const canHistory = controller.commands.find("history.show") !== undefined
+  // Account (factory mock 21): account.show, registered where an identity seam exists.
+  const canAccount = controller.commands.find("account.show") !== undefined
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canSelectRepo = controller.commands.find("repo.select") !== undefined
   const canTree = controller.commands.find("repo.tree") !== undefined
@@ -710,22 +724,22 @@ export function ChromeBar() {
             </button>
           ) :
           null}
-        {/* The button door of secrets.list: the secrets card in the chat; signed out, the run path defers it behind sign-in. */}
-        {canSecrets ?
+        {/* Wiki: the button door of the `wiki` surface switch; the pane opens beside the chat, signed in or out. */}
+        {canWiki ?
           (
             <button
               type="button"
-              className="chrome-action chrome-action-secrets"
-              data-flow="secrets.list"
-              data-testid="chrome-secrets"
-              onClick={() => controller.runCommand("secrets.list")}
+              className="chrome-action chrome-action-wiki"
+              data-flow="wiki"
+              data-testid="chrome-wiki"
+              onClick={() => controller.runCommand("wiki")}
             >
-              <KeyRound size={14} aria-hidden="true" />
-              Secrets
+              <BookOpen size={14} aria-hidden="true" />
+              Wiki
             </button>
           ) :
           null}
-        {/* The button door of triggers.list: the dispatcher card in the chat; readable signed out from the declaration on the public mirror. */}
+        {/* Dispatcher: the button door of triggers.list; readable signed out from the declaration on the public mirror. */}
         {canDispatcher ?
           (
             <button
@@ -740,7 +754,37 @@ export function ChromeBar() {
             </button>
           ) :
           null}
-        {/* The button door of history.show: the mythical history card in the chat; readable signed out through the public mirror. */}
+        {/* Flows: the button door of the `flows` surface switch; signed out the pane states that flows run on your own workspace. */}
+        {canFlows ?
+          (
+            <button
+              type="button"
+              className="chrome-action chrome-action-flows"
+              data-flow="flows"
+              data-testid="chrome-flows"
+              onClick={() => controller.runCommand("flows")}
+            >
+              <Workflow size={14} aria-hidden="true" />
+              Flows
+            </button>
+          ) :
+          null}
+        {/* Secrets: the button door of secrets.list; signed out, the run path defers it behind the sign-in step. */}
+        {canSecrets ?
+          (
+            <button
+              type="button"
+              className="chrome-action chrome-action-secrets"
+              data-flow="secrets.list"
+              data-testid="chrome-secrets"
+              onClick={() => controller.runCommand("secrets.list")}
+            >
+              <KeyRound size={14} aria-hidden="true" />
+              Secrets
+            </button>
+          ) :
+          null}
+        {/* History: the button door of history.show; readable signed out through the public mirror. */}
         {canHistory ?
           (
             <button
@@ -755,7 +799,7 @@ export function ChromeBar() {
             </button>
           ) :
           null}
-        {/* The button door of account.show: the account card in the chat; signed out, the same flow renders the sign-in step. */}
+        {/* Account: the button door of account.show; signed out, the same flow renders the sign-in step. */}
         {canAccount ?
           (
             <button

@@ -313,7 +313,8 @@ describe("launch-law parity: every affordance is a command", () => {
       /* 26 = 25 + the footer's Dispatcher button, the button door of triggers.list (design session 2026-09-07 chrome; cloud host only). */
       /* 27 = 26 + the footer's Account button, the button door of account.show (factory mock 21; renders where an identity seam exists). */
       /* 28 = 27 + the footer's History button, the button door of history.show (design session 2026-09-07 chrome; cloud host only). */
-      "../tabs/ChromeBar.tsx": 28,
+      /* 30 = 28 + the footer's Wiki and Flows buttons, the button doors of the `wiki` and `flows` surface switches (the chrome is exactly Wiki, Dispatcher, Flows, Secrets, History, Account). */
+      "../tabs/ChromeBar.tsx": 30,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })
