@@ -17,6 +17,10 @@ import * as Schema from "effect/Schema"
  * not a typed failure a body catches. The default `fresh` source instead
  * mints a cryptographic UUID for every unkeyed invocation.
  *
+ * A served resume raises it too: `FlowProxyServer` dies with it when the
+ * `ExecutionIdScope` configured on a layer returns `undefined` for a resume
+ * request, because the client value is not a fallback there.
+ *
  * @category errors
  * @since 0.1.0
  */

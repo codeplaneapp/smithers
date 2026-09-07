@@ -4,7 +4,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, expectTypeOf, it } from "@effect/vitest"
 import { Action, DurableDeferred, Flow, Interpreter } from "@smthrs/flow"
 import { Node } from "@smthrs/plan"
-import { Effect, Exit, FileSystem, Layer, Logger, Option, Path, References, Schema, Scope } from "effect"
+import { Cause, Effect, Exit, FileSystem, Layer, Logger, Option, Path, References, Schema, Scope } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiClient, HttpApiTest } from "effect/unstable/httpapi"
 import { RpcTest } from "effect/unstable/rpc"
@@ -359,9 +359,39 @@ describe("FlowProxyServer.layerRpcHandlers", () => {
             if (input.clientValue === rawId) {
               return `tenant-b:${rawId}`
             }
-            return undefined
+            return input.clientValue
           }
         }).pipe(Layer.provideMerge(layer))
+      )
+    )
+  })
+
+  effect("refuses an RPC resume that the scope declines to namespace", () => {
+    const { layer, suspendsCalls } = makeLayer((value) => Effect.succeed(value))
+    const rawId = "unscoped-resume"
+    const namespacedId = `tenant-a:${rawId}`
+    // A scope that reads its tenant from the authenticated payload, the first
+    // pattern the namespacing guide describes. A resume request carries no
+    // payload, so this scope names no id for it.
+    const scope = ((input) =>
+      input.payload === undefined ? undefined : namespacedId) satisfies FlowProxyServer.ExecutionIdScope
+    return Effect.gen(function*() {
+      const client = yield* RpcTest.makeClient(FlowProxy.toRpcGroup(flows))
+      yield* client["Proxy/SuspendsDiscard"]({ payload: { id: rawId }, executionId: rawId })
+      yield* Effect.yieldNow
+      expect(suspendsCalls()).toBe(1)
+
+      const exit = yield* client["Proxy/SuspendsResume"]({ executionId: namespacedId }).pipe(Effect.exit)
+      yield* Effect.yieldNow
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(Exit.isFailure(exit) && Cause.pretty(exit.cause).includes("ExecutionIdRequired")).toBe(true)
+      // the id never reached the engine, so tenant A's parked body did not re-run
+      expect(suspendsCalls()).toBe(1)
+      const state = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(state) && state.value._tag).toBe("Suspended")
+    }).pipe(
+      Effect.provide(
+        FlowProxyServer.layerRpcHandlers(flows, { executionId: scope }).pipe(Layer.provideMerge(layer))
       )
     )
   })
@@ -634,7 +664,7 @@ describe("FlowProxyServer.layerHttpApi", () => {
       if (input.clientValue === rawId) {
         return `other-tenant:${rawId}`
       }
-      return undefined
+      return input.clientValue
     }) satisfies FlowProxyServer.ExecutionIdScope
     return Effect.gen(function*() {
       const api = yield* client
@@ -692,6 +722,32 @@ describe("FlowProxyServer.layerHttpApi", () => {
           payload: undefined
         }
       ])
+    }).pipe(provide(layer, { executionId: scope }))
+  })
+
+  effect("refuses an HTTP resume that the scope declines to namespace", () => {
+    const { layer, suspendsCalls } = makeLayer((value) => Effect.succeed(value))
+    const rawId = "http-unscoped-resume"
+    const namespacedId = `tenant-http:${rawId}`
+    const scope = ((input) =>
+      input.payload === undefined ? undefined : namespacedId) satisfies FlowProxyServer.ExecutionIdScope
+    return Effect.gen(function*() {
+      const api = yield* client
+      yield* api.flows["Proxy/SuspendsDiscard"]({
+        payload: { payload: { id: rawId }, executionId: rawId }
+      })
+      yield* Effect.yieldNow
+      expect(suspendsCalls()).toBe(1)
+
+      const exit = yield* api.flows["Proxy/SuspendsResume"]({ payload: { executionId: namespacedId } }).pipe(
+        Effect.exit
+      )
+      yield* Effect.yieldNow
+      expect(Exit.isFailure(exit)).toBe(true)
+      // the id never reached the engine, so the parked body did not re-run
+      expect(suspendsCalls()).toBe(1)
+      const state = yield* Suspends.poll(namespacedId)
+      expect(Option.isSome(state) && state.value._tag).toBe("Suspended")
     }).pipe(provide(layer, { executionId: scope }))
   })
 

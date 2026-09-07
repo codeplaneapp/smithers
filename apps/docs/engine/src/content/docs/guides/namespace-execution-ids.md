@@ -54,30 +54,36 @@ payload:
 | `clientValue` | The execution id the client sent, or `undefined`.                                                           |
 | `payload`     | The decoded flow payload for execute and discard. `undefined` for resume, whose request carries only an id. |
 
-Returning `undefined` means two different things, and both are useful:
+Returning `undefined` means two different things:
 
 - For execute and discard, it lets the engine derive the id from the flow's
   idempotency key, which is the right answer when a flow is already
   content-addressed.
-- For resume, it preserves the client's value, because a resume needs a string
-  and there is nothing to derive from.
+- For resume, it is a refusal. The server raises `Flow.ExecutionIdRequired`
+  as a defect and never calls `Flow.resume`. Substituting the client's value there
+  would hand the engine the very id the hook exists to replace, which is how a
+  client resumes across the namespace it was confined to.
 
-Without the option, every client value passes through unchanged.
+So a scope must return a string for every resume. Without the option, every
+client value passes through unchanged.
 
 ## Constraints on the implementation
 
-The hook is a pure function over the flow and the request payload, and it must
-return for every input.
+The hook is a pure function over the flow and the request payload. It must
+return for every input, and a string for every resume.
 
 It receives no request-scoped service, so it cannot read the caller's
 authentication by itself. That is deliberate: the identity it namespaces by has
 to be trusted, and a hook reaching into request context would make it easy to
-namespace by a value the client supplied. Two ways to give it a trusted tenant:
+namespace by a value the client supplied. Build the layer where the tenant is
+already known, so the function closes over a trusted value, as `handlersFor`
+does above.
 
-- Put the tenant in the payload through middleware that authenticates the
-  request, then read it from `payload`.
-- Build the layer where the tenant is already known, so the function closes
-  over a trusted value, as `handlersFor` does above.
+Middleware that authenticates a request can also put the tenant in the flow
+payload, and a scope may read it from `payload` for execute and discard. A
+resume request carries no payload, so a scope written that way has no tenant on
+resume: pair it with a closure over the same trusted namespace, or every resume
+is refused.
 
 ## Related
 

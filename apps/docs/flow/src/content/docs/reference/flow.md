@@ -541,7 +541,7 @@ Whether a flow suspends when it encounters any error. A suspended execution is r
 - **Type:** `Schema.TaggedError` with fields `code: "execution_id_required"` and `flowName: string`
 - **Since:** `0.1.0`
 
-The opt-in `derived` source dies with this defect when the payload has no canonical form. The default source mints a fresh UUID when the caller and declaration do not select an id.
+The opt-in `derived` source dies with this defect when the payload has no canonical form. The default source mints a fresh UUID when the caller and declaration do not select an id. `FlowProxyServer` also dies with it when a configured `ExecutionIdScope` returns `undefined` for a resume request.
 
 ### `Flow.derived`
 
@@ -1424,7 +1424,7 @@ Every failure the package defines is a `Schema.TaggedError` carrying a stable `c
 | `@smthrs/flow/ConcurrentKeylessDispatch`               | Two ordinal-keyed invocations of one allocation scope are in flight at once.                                         | `code`, `actionName`                                                    |
 | `@smthrs/flow/UncanonicalIdempotencyKey`               | A caller-declared object-form `idempotencyKey` carries material canonical serialization rejects.                     | `code`, `actionName`, `reason`, `path`, `message`                       |
 | `@smthrs/flow/DurableDeferred/TokenInvalid`            | A completion token does not parse, or names a different deferred than the surface it was submitted through.          | `code`, `message`                                                       |
-| `@smthrs/flow/ExecutionIdRequired`                     | Opt-in derivation could not canonicalize the payload.                                                                | `code`, `flowName`                                                      |
+| `@smthrs/flow/ExecutionIdRequired`                     | Opt-in derivation could not canonicalize the payload, or a served resume was not scoped to an id.                    | `code`, `flowName`                                                      |
 | `@smthrs/flow/MaxRoundsExceeded`                       | A trampoline lineage opens a round past its flow's `maxRounds` budget.                                               | `code`, `flowName`, `lineageId`, `maxRounds`, `roundOrdinal`, `message` |
 | `@smthrs/flow/CancelRequestFailed`                     | `interrupt` cannot durably record its cancellation request, or a durable engine is asked for `interruptUnsafe`.      | `code`, `executionId`, `reason`                                         |
 | `@smthrs/flow/FlowCycleDetected`                       | Executing a flow would close a cycle in the persisted parent-execution chain.                                        | `code`, `path`                                                          |

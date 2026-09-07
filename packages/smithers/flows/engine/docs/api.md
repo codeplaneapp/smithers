@@ -216,8 +216,9 @@ annotated with the module and the wire operation name.
 
 Returning `undefined` from `ExecutionIdScope` means different things per
 operation: for execute and discard it lets the engine derive the id from the
-flow's idempotency key; for resume it preserves the client value, because
-`Flow.resume` requires a string. See
+flow's idempotency key; for resume it refuses the request with a
+`Flow.ExecutionIdRequired` defect, because passing the client value through would
+let a client resume outside the namespace the scope confines it to. See
 [Namespace execution ids per tenant](./guides/namespace-execution-ids.md).
 
 These modules expose flow transport only. They do not ship a server, a router,

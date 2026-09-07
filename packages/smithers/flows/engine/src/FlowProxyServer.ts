@@ -18,7 +18,8 @@
  *
  * @since 0.1.0
  */
-import type { Flow, FlowRuntime } from "@smthrs/flow"
+import { Flow } from "@smthrs/flow"
+import type { FlowRuntime } from "@smthrs/flow"
 import type { NonEmptyReadonlyArray } from "effect/Array"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -41,13 +42,17 @@ import { renderDiagnostic } from "./internal/Diagnostic.ts"
  * resume inputs use `undefined` because a resume request carries only an
  * execution id. Returning `undefined` for execute or discard lets the engine
  * derive the id from the flow's idempotency key. Returning `undefined` for
- * resume preserves the client value because `Flow.resume` requires a string.
- * Without this option, every client value passes through unchanged.
+ * resume refuses the request with a `Flow.ExecutionIdRequired` defect:
+ * falling back to the client value there would let a client resume outside
+ * the namespace this option confines it to. Without this option, every
+ * client value passes through unchanged.
  *
- * Implementations must be pure and return for every input. The function
- * receives the flow and request payload, but no request-scoped service. Put a
- * trusted tenant in the payload through middleware, or wrap the layer with a
- * mapping that closes over the trusted namespace.
+ * Implementations must be pure, must return for every input, and must return
+ * a string for every resume. The function receives the flow and request
+ * payload, but no request-scoped service. A resume request carries no
+ * payload, so a scope that reads a middleware-authenticated tenant from
+ * `payload` has to close over the trusted namespace for resume; a scope built
+ * where the tenant is already known covers all three operations.
  *
  * @category models
  * @since 1.0.0
@@ -61,26 +66,32 @@ export interface ExecutionIdScope {
   }): string | undefined
 }
 
-function scopeExecutionId(
-  scope: ExecutionIdScope | undefined,
-  input: Parameters<ExecutionIdScope>[0] & {
-    readonly operation: "resume"
-    readonly clientValue: string
-  }
-): string
-function scopeExecutionId(
+const scopeExecutionId = (
   scope: ExecutionIdScope | undefined,
   input: Parameters<ExecutionIdScope>[0]
-): string | undefined
-function scopeExecutionId(
+): string | undefined => scope === undefined ? input.clientValue : scope(input)
+
+/**
+ * Resolves the execution id a resume handler passes to `Flow.resume`, or dies
+ * with `Flow.ExecutionIdRequired` when a configured scope declines to name
+ * one. The client value is never a fallback here: a scope that namespaces
+ * execute and discard but degrades to pass-through on resume would let a
+ * client re-drive an execution in another namespace.
+ */
+const resumeExecutionId = (
   scope: ExecutionIdScope | undefined,
-  input: Parameters<ExecutionIdScope>[0]
-): string | undefined {
-  if (scope === undefined) {
-    return input.clientValue
-  }
-  const scoped = scope(input)
-  return input.operation === "resume" && scoped === undefined ? input.clientValue : scoped
+  flow: Flow.AnyWithProps,
+  clientValue: string
+): Effect.Effect<string> => {
+  const scoped = scopeExecutionId(scope, {
+    flow,
+    operation: "resume",
+    clientValue,
+    payload: undefined
+  })
+  return scoped === undefined
+    ? Effect.die(new Flow.ExecutionIdRequired({ flowName: flow._tag }))
+    : Effect.succeed(scoped)
 }
 
 /**
@@ -219,12 +230,8 @@ export const layerHttpApi = <
           .handle(
             operation.resume,
             ({ payload }: { payload: { readonly executionId: string } }) =>
-              flow.resume(scopeExecutionId(options?.executionId, {
-                flow,
-                operation: "resume",
-                clientValue: payload.executionId,
-                payload: undefined
-              })).pipe(
+              resumeExecutionId(options?.executionId, flow, payload.executionId).pipe(
+                Effect.flatMap((executionId) => flow.resume(executionId)),
                 guardDefects(flow._tag),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
@@ -310,12 +317,8 @@ export const layerRpcHandlers = <
         context,
         tag: tagResume,
         handler: (payload: { readonly executionId: string }) =>
-          flow.resume(scopeExecutionId(options?.executionId, {
-            flow,
-            operation: "resume",
-            clientValue: payload.executionId,
-            payload: undefined
-          })).pipe(
+          resumeExecutionId(options?.executionId, flow, payload.executionId).pipe(
+            Effect.flatMap((executionId) => flow.resume(executionId)),
             guardDefects(flow._tag),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagResume })
           ) as any

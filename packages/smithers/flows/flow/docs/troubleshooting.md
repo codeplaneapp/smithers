@@ -107,11 +107,13 @@ value captured from a different build.
 **Symptom.** A run dies before it starts, naming the flow.
 
 **Cause.** The opt-in derived source is installed and the payload has no canonical form: a non-finite
-number, a lone surrogate, or a cycle.
+number, a lone surrogate, or a cycle. A served resume dies with it for a different reason: the
+`ExecutionIdScope` on the `FlowProxyServer` layer returned `undefined` for the request.
 
 **Fix.** Pass an explicit `executionId`, declare an `idempotencyKey` on the flow,
 or use `Flow.layerExecutionIds(Flow.fresh)` for a new invocation. For intentional
-payload identity, correct the payload so it can be canonicalized.
+payload identity, correct the payload so it can be canonicalized. For a served
+resume, return a string from the scope for every resume.
 
 ### `Action.ConcurrentKeylessDispatch`
 
