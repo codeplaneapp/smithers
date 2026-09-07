@@ -7,8 +7,25 @@ export const PUBLIC_REPOS_PATH = "/api/public/repos"
  * their repositories. The catalog order is the response order.
  */
 export const AVAILABLE_REPOS = [
-  { name: "smithersai/smithers", title: "Smithers", url: "https://github.com/smithersai/smithers" }
+  {
+    name: "smithersai/smithers",
+    title: "Smithers",
+    url: "https://github.com/smithersai/smithers",
+    // The Smithers Cloud mirror namespace that answers anonymous reads. The
+    // backend serves the public mirror under this path and refuses the GitHub
+    // name without credentials. Never part of the public catalog response.
+    cloudRepo: "smithers-canary/smithers"
+  }
 ] as const
+
+/**
+ * Resolves a catalog repository name to its Smithers Cloud mirror path.
+ * GitHub names are case-insensitive. A name outside the catalog has no mirror.
+ */
+export const cloudRepoFor = (name: string): string | undefined => {
+  const lower = name.toLowerCase()
+  return AVAILABLE_REPOS.find((repo) => repo.name.toLowerCase() === lower)?.cloudRepo
+}
 
 export interface PublicRepoStats {
   readonly stars: number

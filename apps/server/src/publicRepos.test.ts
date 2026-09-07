@@ -29,7 +29,7 @@ const repoName = (req: Request) => new URL(req.url).pathname.replace("/repos/", 
 const answerEach = (req: Request) => Response.json(metadataFor(repoName(req)))
 
 const expectedRepos = (stats: (name: string) => PublicRepoCatalog["repos"][number]["stats"]) =>
-  AVAILABLE_REPOS.map((repo) => ({ ...repo, stats: stats(repo.name) }))
+  AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, stats: stats(repo.name) }))
 
 const request = (query = "") => new Request(`https://app.test/api/public/repos${query}`, {
   headers: { origin: "https://smithers.sh", cookie: "session=private", authorization: "Bearer private" }
@@ -53,6 +53,17 @@ const harness = (
 describe("the curated catalog", () => {
   test("lists only Smithers at launch", () => {
     expect(AVAILABLE_REPOS.map((repo) => repo.name)).toEqual(["smithersai/smithers"])
+  })
+
+  test("names the Smithers Cloud mirror for every entry without publishing it", async () => {
+    for (const repo of AVAILABLE_REPOS) {
+      expect(repo.cloudRepo).toMatch(/^[a-z\d-]+\/[a-z\d_.-]+$/)
+    }
+    const { handler } = harness()
+    const catalog = await (await handler(request())).json() as PublicRepoCatalog
+    for (const repo of catalog.repos) {
+      expect(Object.keys(repo).sort()).toEqual(["name", "stats", "title", "url"])
+    }
   })
 
   test("links every entry to the GitHub repository its stats are fetched from", () => {

@@ -49,6 +49,17 @@ backend, so a repository becoming private takes effect on the next request.
 These mutable documents and their refusals use `private, no-store`; upstream
 `Vary` headers are preserved. Only the separate curated catalog is cached.
 
+The Cloud backend serves each catalog repository's public mirror under its
+own namespace, not under the GitHub name: `smithersai/smithers` is mirrored as
+`smithers-canary/smithers`, and the backend refuses the GitHub name without
+credentials. Each `AVAILABLE_REPOS` entry names that mirror in `cloudRepo`,
+and anonymous reads substitute it for the owner and name segments before
+forwarding; the document path and query are unchanged, and the catalog name
+matches case-insensitively. A repository outside the catalog is forwarded
+under the name the browser asked for. `cloudRepo` is server-side only and
+never appears in the `GET /api/public/repos` response. Signed-in requests
+keep the GitHub name and the user's own bearer.
+
 Requests carrying a session use the existing authenticated path, preserving
 access to private repositories. An expired or non-allowlisted session falls
 back to an anonymous repository read. Authenticated answers never enter the public

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createPublicRepositoryReader, isPublicRepositoryRead } from "./publicRepositoryReads"
+import { cloudReadPath, createPublicRepositoryReader, isPublicRepositoryRead } from "./publicRepositoryReads"
 import worker from "./index"
 
 describe("anonymous repository reads", () => {
@@ -37,10 +37,59 @@ describe("anonymous repository reads", () => {
     expect(second.headers.get("cache-control")).toBe("private, no-store")
     expect(seen).toHaveLength(2)
     for (const request of seen) {
-      expect(request.url).toBe("https://cloud.test/api/repos/smithersai/smithers/contents?ref=main")
+      expect(request.url).toBe("https://cloud.test/api/repos/smithers-canary/smithers/contents?ref=main")
       expect(request.headers.has("authorization")).toBe(false)
       expect(request.headers.has("cookie")).toBe(false)
     }
+  })
+
+  test("a catalog read reaches the Smithers Cloud mirror with the same document path and query", async () => {
+    const seen: Array<Request> = []
+    const read = createPublicRepositoryReader({
+      fetch: async (request) => {
+        seen.push(request)
+        return Response.json({ name: "src", type: "dir", mirror: new URL(request.url).pathname })
+      }
+    })
+    const response = await read(new URL("https://app.test/api/repos/smithersai/smithers/contents/src?ref=main&recursive=1"), "https://cloud.test")
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ name: "src", type: "dir", mirror: "/api/repos/smithers-canary/smithers/contents/src" })
+    expect(seen.map((request) => request.url)).toEqual([
+      "https://cloud.test/api/repos/smithers-canary/smithers/contents/src?ref=main&recursive=1"
+    ])
+    expect(seen[0]?.headers.has("authorization")).toBe(false)
+    expect(seen[0]?.headers.has("cookie")).toBe(false)
+  })
+
+  test("a repository outside the catalog is read under the name the browser asked for", async () => {
+    const seen: Array<Request> = []
+    const read = createPublicRepositoryReader({
+      fetch: async (request) => {
+        seen.push(request)
+        return Response.json({ message: "repository not found" }, { status: 404 })
+      }
+    })
+    const response = await read(new URL("https://app.test/api/repos/example/other/issues?state=open"), "https://cloud.test")
+    expect(response.status).toBe(404)
+    expect(seen.map((request) => request.url)).toEqual(["https://cloud.test/api/repos/example/other/issues?state=open"])
+    expect(cloudReadPath("/api/repos/example/other/issues")).toBe("/api/repos/example/other/issues")
+    expect(cloudReadPath("/api/repos/smithersai/smithers-docs")).toBe("/api/repos/smithersai/smithers-docs")
+    expect(cloudReadPath("/api/user/repos")).toBe("/api/user/repos")
+  })
+
+  test("a mixed-case catalog name still reaches the mirror", async () => {
+    const seen: Array<Request> = []
+    const read = createPublicRepositoryReader({
+      fetch: async (request) => {
+        seen.push(request)
+        return Response.json({ full_name: "smithers-canary/smithers" })
+      }
+    })
+    const response = await read(new URL("https://app.test/api/repos/SmithersAI/Smithers/topics"), "https://cloud.test")
+    expect(response.status).toBe(200)
+    expect(seen.map((request) => request.url)).toEqual(["https://cloud.test/api/repos/smithers-canary/smithers/topics"])
+    expect(cloudReadPath("/api/repos/SMITHERSAI/SMITHERS")).toBe("/api/repos/smithers-canary/smithers")
+    expect(cloudReadPath("/api/repos/SmithersAI/Smithers/")).toBe("/api/repos/smithers-canary/smithers/")
   })
 
   test("preserves Vary and forbids storage even when the upstream answer is successful", async () => {
@@ -115,7 +164,7 @@ describe("anonymous repository reads", () => {
         expect((await response.json() as { full_name: string }).full_name).toBe("smithersai/smithers")
       }
       expect(requests).toHaveLength(2)
-      expect(requests.every((request) => request.url.startsWith("https://cloud.test/") && !request.headers.has("authorization"))).toBe(true)
+      expect(requests.every((request) => request.url === "https://cloud.test/api/repos/smithers-canary/smithers" && !request.headers.has("authorization"))).toBe(true)
       for (const session of ["expired", "not-admitted"]) {
         const response = await worker.fetch(new Request("https://app.test/api/repos/smithersai/smithers", {
           headers: { cookie: `smithers_session=${session}` }

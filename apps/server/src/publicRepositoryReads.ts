@@ -1,3 +1,5 @@
+import { cloudRepoFor } from "./publicRepoCatalog"
+
 /** Public repository documents, not account, workspace, gateway, or secret reads. */
 export const isPublicRepositoryRead = (method: string, pathname: string): boolean => {
   if (method !== "GET") return false
@@ -11,6 +13,18 @@ interface Dependencies {
 }
 
 /**
+ * A catalog repository is read from its Smithers Cloud mirror namespace; the
+ * rest of the path and the query are unchanged. Any other repository keeps
+ * the name the browser asked for.
+ */
+export const cloudReadPath = (pathname: string): string => {
+  const match = /^\/api\/repos\/([^/]+)\/([^/]+)(.*)$/.exec(pathname)
+  if (!match) return pathname
+  const cloudRepo = cloudRepoFor(`${match[1]}/${match[2]}`)
+  return cloudRepo === undefined ? pathname : `/api/repos/${cloudRepo}${match[3]}`
+}
+
+/**
  * The Cloud backend remains the authority for public visibility. Anonymous
  * reads carry no credentials. Repository visibility and documents can change,
  * so every read reaches the backend and neither browsers nor the edge retain
@@ -18,7 +32,7 @@ interface Dependencies {
  */
 export const createPublicRepositoryReader = (deps: Dependencies) => {
   return async (url: URL, base: string): Promise<Response> => {
-    const target = new URL(url.pathname + url.search, base)
+    const target = new URL(cloudReadPath(url.pathname) + url.search, base)
     try {
       const upstream = await deps.fetch(new Request(target, {
         headers: { accept: "application/json" },

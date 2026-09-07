@@ -68,7 +68,8 @@ export const createPublicReposHandler = (deps: Dependencies) => {
       } catch {
         // Availability is curated independently of a transient metadata outage.
       }
-      return { ...repo, stats }
+      // Only the public fields; the catalog's Cloud mirror path stays server-side.
+      return { name: repo.name, title: repo.title, url: repo.url, stats }
     }))
     const body: PublicRepoCatalog = { repos }
     const ttl = repos.every((repo) => repo.stats !== null) ? 300 : 30
