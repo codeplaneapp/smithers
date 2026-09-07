@@ -1,0 +1,39 @@
+/*
+ * The `app` flows. One module per namespace: a lane that adds or edits a
+ * flow here touches no other flow module, and Flows.ts registers each block in
+ * the aggregator order.
+ */
+import { Schema } from "effect"
+import { flow, NoPayload } from "./Declare"
+import type { FlowEntry } from "../registry"
+import type { CommandActions } from "./Declare"
+
+/** The `app` flows registered as one aggregator block. */
+export const appFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+  /*
+   * The web app's one door to the native app (docs/web-mode/PLAN.md §3). The
+   * split mirrors auth.sign-in / auth.prompt: `window.open` outside a user
+   * gesture is popup-blocked, so the model renders the card and the click is
+   * the human's. Both exist only on the cloud host — native chrome gains
+   * nothing, and the native model is never told to offer a download.
+   */
+  flow({
+    name: "app.download",
+    summary: "Download the native Smithers app",
+    hosts: ["cloud"],
+    /* The chrome button and the refusal card's action; the prompt flow is the listed door. */
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "a browser handoff the human clicks; the agent renders the step with app.download.prompt",
+    input: NoPayload,
+    handler: () => actions.openDownload()
+  }),
+  flow({
+    name: "app.download.prompt",
+    summary: "Offer the native app download in the chat",
+    hosts: ["cloud"],
+    args: "[flow]",
+    input: Schema.Struct({ flow: Schema.optional(Schema.String) }),
+    handler: ({ flow }) => actions.promptDownload(flow)
+  })
+]

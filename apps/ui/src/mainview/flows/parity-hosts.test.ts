@@ -117,6 +117,15 @@ const STATES: ReadonlyArray<CommandState> = (["chat", "world", "connectors", "fl
 
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
+/**
+ * The registry source: the Flows.ts aggregator plus every namespace module
+ * under ./entries, read together so a flow declared in any module counts.
+ */
+const registrySources = (): string => {
+  const entries = fileURLToPath(new URL("./entries/", import.meta.url))
+  return [read("./Flows.ts"), ...readdirSync(entries).sort().map((file) => read(`./entries/${file}`))].join("\n")
+}
+
 /** Source with block and line comments removed, so a documented example path is not mistaken for a call. */
 const uncommented = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1")
@@ -128,7 +137,7 @@ const uncommented = (source: string): string =>
  * matrix must follow, and a renamed action fails here rather than drifting.
  */
 const seamsByFlow = (): Map<string, ReadonlySet<string>> => {
-  const flows = uncommented(read("./Flows.ts"))
+  const flows = uncommented(registrySources())
   const controller = uncommented(read("../state/AppController.ts"))
   const actionSeam = new Map<string, string>()
   for (const match of controller.matchAll(/^\s+(\w+): (\w+Seam)\.\w+,?$/gm)) {
@@ -141,7 +150,11 @@ const seamsByFlow = (): Map<string, ReadonlySet<string>> => {
     if (imported?.[1] !== undefined) seamFile.set(match[1] as string, imported[1])
   }
   const out = new Map<string, ReadonlySet<string>>()
-  for (const chunk of flows.split(/\n  (?:flow|alias)\(/).slice(1)) {
+  // A chunk is one registered entry. A namespace module's block function
+  // opens with `export const`; the shared declarations it holds before its
+  // `return [` belong to no entry, so that chunk is dropped like the file head.
+  for (const chunk of flows.split(/\n  (?=(?:flow|alias)\()|\nexport const /)) {
+    if (!/^(?:flow|alias)\(/.test(chunk)) continue
     const name = /name:\s*"([^"]+)"/.exec(chunk)?.[1]
     if (name === undefined) continue
     const files = new Set<string>()
@@ -404,7 +417,7 @@ describe("host parity — the web and native catalogs against the servers' own c
   })
 
   test("drift: every capability a flow declares is one the bootstrap schema knows", () => {
-    const source = read("./Flows.ts")
+    const source = registrySources()
     const known = new Set<string>(RuntimeCapabilitySchema.options)
     const named = new Set<string>()
     for (const match of source.matchAll(/\bruntime(?:Any)?:\s*\[([^\]]*)\]/g)) {

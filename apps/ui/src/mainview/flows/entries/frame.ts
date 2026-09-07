@@ -1,0 +1,39 @@
+/*
+ * The `frame` flows. One module per namespace: a lane that adds or edits a
+ * flow here touches no other flow module, and Flows.ts registers each block in
+ * the aggregator order.
+ */
+import { flow, NoPayload } from "./Declare"
+import type { FlowEntry } from "../registry"
+import type { CommandActions } from "./Declare"
+
+/** The `frame` flows registered as one aggregator block. */
+export const frameFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+  flow({
+    name: "frame.back",
+    summary: "Go to the previous frame",
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "frame navigation is the human's browser gesture",
+    input: NoPayload,
+    handler: () => actions.frameBack()
+  }),
+  flow({
+    name: "frame.forward",
+    summary: "Go to the next frame",
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "frame navigation is the human's browser gesture",
+    input: NoPayload,
+    handler: () => actions.frameForward()
+  }),
+  flow({
+    name: "frame.fork",
+    summary: "Fork the current frame",
+    hidden: true,
+    userOnly: true,
+    userOnlyReason: "forking a frame is the human's browser gesture",
+    input: NoPayload,
+    handler: () => actions.forkFrame()
+  })
+]

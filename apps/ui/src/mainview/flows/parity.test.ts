@@ -14,6 +14,15 @@ import { fileURLToPath } from "node:url"
 const read = (relative: string): string => readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8")
 
 /**
+ * The registry source: the Flows.ts aggregator plus every namespace module
+ * under ./entries, read together so a flow declared in any module counts.
+ */
+const registrySources = (): string => {
+  const entries = fileURLToPath(new URL("./entries/", import.meta.url))
+  return [read("./Flows.ts"), ...readdirSync(entries).sort().map((file) => read(`./entries/${file}`))].join("\n")
+}
+
+/**
  * Every component file under src/mainview, discovered rather than listed: a new
  * surface added with a command-less button has to fail this gate, and a
  * hand-maintained list would silently exempt it.
@@ -321,7 +330,7 @@ describe("launch-law parity: every affordance is a command", () => {
       expect(source).not.toContain("prompt: action.prompt")
       expect(source).not.toContain("suggestion.prompt")
     }
-    const registrySource = read("./Flows.ts")
+    const registrySource = registrySources()
     expect(registrySource).not.toContain("\"suggest\"")
     // The pill row binds commands directly (§2a): the suggestion markup
     // carries the command, and the click invokes it — never send().
@@ -342,7 +351,7 @@ describe("launch-law parity: every affordance is a command", () => {
    * summary — exactly what the launch checklist checks against the DOM.
    */
   test("a button with no data-flow binding has a label that resolves to a registered command", () => {
-    const registrySource = read("./Flows.ts")
+    const registrySource = registrySources()
     const names = [...registrySource.matchAll(/\bname:\s*"([^"]+)"/g)].map((match) => match[1] as string)
     const summaries = [...registrySource.matchAll(/\bsummary:\s*"([^"]+)"/g)].map((match) =>
       (match[1] as string).toLowerCase()
@@ -392,7 +401,7 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(app).toContain("data-flows={controller.commands.all()")
     // Registry names from the registry source itself — the same file the
     // runtime registers — so a renamed command fails this gate.
-    const registrySource = read("./Flows.ts")
+    const registrySource = registrySources()
     const declared = new Set(
       [...registrySource.matchAll(/\bname:\s*"([^"]+)"/g)].map((match) => match[1] as string)
     )
@@ -453,7 +462,7 @@ describe("launch-law parity: every affordance is a command", () => {
     expect(chrome).toContain("runCommand(\"appearance.dark-mode\")")
     expect(chrome).not.toContain("runCommand(\"appearance.theme\")")
     expect(files["../App.tsx"] ?? "").not.toContain("runCommand(\"appearance.dark-mode\")")
-    const registrySource = read("./Flows.ts")
+    const registrySource = registrySources()
     // A declaration is a const literal (`const THEME = { ... }`); the slice ends
     // at the literal's close.
     const entry = (name: string): string => {

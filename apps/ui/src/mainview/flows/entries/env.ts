@@ -1,0 +1,31 @@
+/*
+ * The `env` flows. One module per namespace: a lane that adds or edits a
+ * flow here touches no other flow module, and Flows.ts registers each block in
+ * the aggregator order.
+ */
+import { Schema } from "effect"
+import { flow, RepoTarget } from "./Declare"
+import type { FlowEntry } from "../registry"
+import type { CommandActions } from "./Declare"
+
+/** The `env` flows registered as one aggregator block. */
+export const envFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
+  flow({
+    name: "env.view",
+    summary: "Show a repository's agent environment",
+    runtime: ["cloud"],
+    args: "[owner/repo]",
+    requires: ["signed-in"],
+    input: RepoTarget,
+    handler: ({ repo }) => actions.viewEnvironment(repo)
+  }),
+  flow({
+    name: "env.set",
+    summary: "Set an agent-environment variable",
+    runtime: ["cloud"],
+    args: "<NAME=value> [owner/repo]",
+    requires: ["signed-in"],
+    input: Schema.Struct({ assignment: Schema.String, repo: Schema.optional(Schema.String) }),
+    handler: ({ assignment, repo }) => actions.setEnvironmentVar(assignment, repo)
+  })
+]
