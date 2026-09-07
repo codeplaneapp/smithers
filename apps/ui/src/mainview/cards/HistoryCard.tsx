@@ -15,6 +15,14 @@ import type { CardFamily } from "./CardFamily"
 import { settledPill } from "./CardFamily"
 
 type HistoryCard = Extract<Card, { kind: "history" }>
+type NotesState = Extract<HistoryCard["payload"]["mythical"], { state: "present" }>["notes"]
+
+/** The footer's notes pill: the ref, or the honest reason no note on the card is a claim. */
+export const notesStateLabel = (notes: NotesState): string => {
+  if (notes === "read") return "refs/notes/mythical"
+  if (notes === "absent") return "refs/notes/mythical: not in the mirror's ref list"
+  return "refs/notes/mythical: listed, but the mirror did not serve its notes (none shown)"
+}
 
 export interface HistoryCardActions {
   readonly onRunCommand: (name: string, args?: string) => void
@@ -75,18 +83,24 @@ export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: History
         {treeEqualLabel(mythical, payload.defaultBookmark)} · {mythical.epics.length} epic{mythical.epics.length === 1 ? "" : "s"} ·{" "}
         {mythical.commitCount} commit{mythical.commitCount === 1 ? "" : "s"}
       </p>
-      <ol className="world-card-list history-epics" data-testid="history-epics">
+      {/* Each epic stacks: its header row, its note, then its atomic commits under it (mock 13). The li is a column, never a flex row. */}
+      <ol className="history-epics" data-testid="history-epics">
         {mythical.epics.map((epic) => (
-          <li key={epic.sha} className="world-card-row" data-testid={`history-epic-${epic.sha}`}>
-            <span className="world-card-title">{epic.title}</span>
-            <span className="world-card-path">{epic.sha.slice(0, 7)}</span>
+          <li key={epic.sha} className="history-epic" data-testid={`history-epic-${epic.sha}`}>
+            <div className="world-card-row">
+              <span className="world-card-title">{epic.title}</span>
+              <span className="world-card-path">{epic.sha.slice(0, 7)}</span>
+              {epic.commits.length === 0 ? null : <span className="world-card-path history-epic-count">{epic.commits.length}</span>}
+            </div>
             {epic.note === null ? null : <NoteSections note={epic.note} sha={epic.sha} />}
             {epic.commits.length === 0 ? null : (
-              <ol className="world-card-list history-commits">
+              <ol className="history-commits">
                 {epic.commits.map((commit) => (
-                  <li key={commit.sha} className="world-card-row" data-testid={`history-commit-${commit.sha}`}>
-                    <span className="world-card-title">{commit.title}</span>
-                    <span className="world-card-path">{commit.sha.slice(0, 7)}</span>
+                  <li key={commit.sha} className="history-commit" data-testid={`history-commit-${commit.sha}`}>
+                    <div className="world-card-row">
+                      <span className="world-card-title">{commit.title}</span>
+                      <span className="world-card-path">{commit.sha.slice(0, 7)}</span>
+                    </div>
                     {commit.note === null ? null : <NoteSections note={commit.note} sha={commit.sha} />}
                   </li>
                 ))}
@@ -105,9 +119,7 @@ export const HistoryCardBody = ({ card, onRunCommand }: { readonly card: History
         >
           Fold {payload.defaultBookmark ?? "the default bookmark"} into mythical
         </Button>
-        <span className="world-card-path" data-testid="history-notes-state">
-          {mythical.notes === "read" ? "refs/notes/mythical" : "refs/notes/mythical: not in the mirror's ref list"}
-        </span>
+        <span className="world-card-path" data-testid="history-notes-state">{notesStateLabel(mythical.notes)}</span>
       </div>
     </div>
   )

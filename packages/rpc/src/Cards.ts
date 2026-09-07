@@ -1018,7 +1018,12 @@ export const CardSchema = z.discriminatedUnion("kind", [
    * is null when the change feed could not be walked to the default
    * bookmark's root, `mythical` is absent until the bookmark exists,
    * `treeEqual` is unsupported until the mirror serves git commits, and a
-   * note is null when refs/notes/mythical holds none for that commit.
+   * note is null when refs/notes/mythical holds none for that commit. `notes`
+   * says how far the notes read went: "read" means the notes commit's tree was
+   * listed and every note it holds for a commit in the history was decoded,
+   * "absent" means the mirror lists no refs/notes/mythical, and "unread" means
+   * the ref exists but the tree or one of its notes could not be read, in
+   * which case every note is null and no note is a claim of absence.
    */
   z.object({
     ...cardBaseShape,
@@ -1036,7 +1041,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
           mainHead: z.string().nullable(),
           treeEqual: z.enum(["equal", "different", "unsupported"]),
           commitCount: z.number().int().nonnegative(),
-          notes: z.enum(["read", "absent"]),
+          notes: z.enum(["read", "absent", "unread"]),
           epics: z.array(HistoryEpicSchema)
         })
       ])

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { Card } from "@smthrs/rpc/Cards"
-import { HistoryCardBody } from "./HistoryCard"
+import { HistoryCardBody, notesStateLabel } from "./HistoryCard"
 
 /*
  * The history card renders exactly what its payload states: the empty state
@@ -92,5 +92,63 @@ describe("HistoryCard", () => {
     expect(html).not.toContain("<dt>Evidence</dt>")
     expect(html).not.toContain("<dt>Superseded</dt>")
     expect(html).toContain("Fold main into mythical")
+  })
+
+  test("an epic stacks its header row above its commits: the nested list is a sibling of the row, and no list item is itself a flex row (mock 13)", () => {
+    const html = render({
+      repo: "will/flows",
+      defaultBookmark: "main",
+      mainCommits: 2,
+      mythical: {
+        state: "present",
+        head: "e2",
+        mainHead: null,
+        treeEqual: "unsupported",
+        commitCount: 3,
+        notes: "read",
+        epics: [{
+          sha: "e2e2e2e2",
+          title: "02 · Targets",
+          merge: true,
+          note: { tried: "one file", evidence: null, folded: null, superseded: null },
+          commits: [
+            { sha: "b2b2b2b2", title: "feat(targets): declare targets", note: null },
+            { sha: "b1b1b1b1", title: "docs(targets): what a target is", note: { tried: null, evidence: "green", folded: null, superseded: null } }
+          ]
+        }]
+      }
+    })
+    // The epic li is a block container; the flex row is a child div that closes before the note and the nested list open.
+    const epic = /<li class="history-epic" data-testid="history-epic-e2e2e2e2">(.*?)<\/li><\/ol><div class="history-doors">/.exec(html)
+    expect(epic).not.toBeNull()
+    const inner = epic![1]!
+    expect(inner.startsWith('<div class="world-card-row"><span class="world-card-title">02 · Targets</span>')).toBe(true)
+    const headerEnd = inner.indexOf("</div>") + "</div>".length
+    const header = inner.slice(0, headerEnd)
+    expect(header).toContain("e2e2e2e")
+    expect(header).not.toContain("<ol")
+    expect(header).not.toContain("<dl")
+    const rest = inner.slice(headerEnd)
+    expect(rest.startsWith('<dl class="history-note" data-testid="history-note-e2e2e2e2">')).toBe(true)
+    expect(rest).toContain('<ol class="history-commits"><li class="history-commit" data-testid="history-commit-b2b2b2b2"><div class="world-card-row">')
+    // Neither list item carries the flex-row class, so the header, note and commits stack.
+    expect(html).not.toMatch(/<li[^>]*class="[^"]*world-card-row/)
+    // A commit's note sits after its own header row, inside its li.
+    expect(html).toContain(
+      '<li class="history-commit" data-testid="history-commit-b1b1b1b1"><div class="world-card-row"><span class="world-card-title">docs(targets): what a target is</span><span class="world-card-path">b1b1b1b</span></div><dl class="history-note" data-testid="history-note-b1b1b1b1">'
+    )
+  })
+
+  test("the notes pill states how far the notes read went, so a missing note is never read as absence when the tree was not served", () => {
+    expect(notesStateLabel("read")).toBe("refs/notes/mythical")
+    expect(notesStateLabel("absent")).toBe("refs/notes/mythical: not in the mirror's ref list")
+    expect(notesStateLabel("unread")).toBe("refs/notes/mythical: listed, but the mirror did not serve its notes (none shown)")
+    const html = render({
+      repo: "will/flows",
+      defaultBookmark: "main",
+      mainCommits: 2,
+      mythical: { state: "present", head: "e2", mainHead: null, treeEqual: "unsupported", commitCount: 1, notes: "unread", epics: [] }
+    })
+    expect(html).toContain("listed, but the mirror did not serve its notes (none shown)")
   })
 })

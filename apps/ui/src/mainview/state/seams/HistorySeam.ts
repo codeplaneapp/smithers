@@ -13,11 +13,15 @@
  *   GET /api/repos/{o}/{r}/git/blobs/{sha}    no such route on the mirror
  *
  * So the commit graph comes from the change feed (the walk the activity route
- * already does), notes come from /contents against the notes commit, and the
+ * already does), notes come from /contents against the notes commit (a
+ * directory path lists the tree, a file path carries the blob), and the
  * tree-equality badge is a typed "unsupported" until /git/commits answers.
- * Nothing here invents a row: a count the feed could not finish is null, a
- * note the mirror does not hold is null, and the honest empty state is one
- * sentence with one door.
+ * Nothing here invents a row or presents a partial read as the whole: a count
+ * the feed could not finish is null, a history whose chains the feed did not
+ * reach is the typed unsupported state, notes are read for exactly the commits
+ * the notes tree names (never a capped prefix), and a notes tree the mirror
+ * would not list is `notes: "unread"` rather than forty nulls that look like
+ * absence. The honest empty state is one sentence with one door.
  */
 import type { HistoryEpic, HistoryNote } from "@smthrs/rpc/Cards"
 import type { Card } from "../AppState"
@@ -31,8 +35,8 @@ export const MYTHICAL_NOTES_REF = "refs/notes/mythical"
 const PAGE_SIZE = 100
 /** Bounds the change-feed walk, the same bound the activity route uses; a walk that outruns it answers null, never a partial count. */
 export const MAX_CHANGE_PAGES = 20
-/** Bounds the per-commit note reads on one show. */
-const NOTE_READ_CAP = 40
+/** Bounds the notes tree listing: git fans notes out two hex characters per directory, so 40 hex is at most 20 levels. */
+const MAX_NOTES_TREE_DEPTH = 20
 /** Bounds one epic's second-parent chain, so a malformed history cannot spin. */
 const MAX_EPIC_COMMITS = 500
 
@@ -293,20 +297,66 @@ const decodeContent = (body: unknown): string | null => {
   return body.content
 }
 
+const HEX = /^[0-9a-f]+$/
+
 /**
- * The note for one commit: git notes store it at `<sha>` or fanned out at
- * `<2>/<38>` in the notes commit's tree, read through /contents against that
- * commit. Null when neither path exists.
+ * The commits the notes commit's tree names, each with the path its note
+ * lives at: git stores a note at `<sha>` or fans it out as `<2>/<38>` (and
+ * deeper, two characters per directory). The tree is listed through
+ * /contents/<dir>?ref=<notes sha>, one directory at a time. Null when the
+ * mirror would not list a directory, so the caller can say the notes were not
+ * read instead of rendering absence.
  */
-const readNote = async (ctx: SeamContext, base: string, notesSha: string, commitSha: string): Promise<HistoryNote | null> => {
-  const paths = [commitSha, `${commitSha.slice(0, 2)}/${commitSha.slice(2)}`]
-  for (const path of paths) {
-    const answer = await readJson(ctx, `${base}/contents/${path}?ref=${encodeURIComponent(notesSha)}`)
-    if (answer.status !== 200) continue
-    const content = decodeContent(answer.body)
-    if (content !== null) return parseNote(content)
+export const listNotedCommits = async (ctx: SeamContext, base: string, notesSha: string): Promise<ReadonlyMap<string, string> | null> => {
+  const noted = new Map<string, string>()
+  const walk = async (dir: string, prefix: string, depth: number): Promise<boolean> => {
+    const answer = await readJson(ctx, `${base}/contents/${dir}?ref=${encodeURIComponent(notesSha)}`)
+    if (answer.status !== 200 || !Array.isArray(answer.body)) return false
+    for (const entry of answer.body) {
+      if (!isRecord(entry) || typeof entry.name !== "string" || typeof entry.type !== "string") continue
+      const name = entry.name.toLowerCase()
+      if (!HEX.test(name)) continue
+      const sha = prefix + name
+      const path = dir === "" ? entry.name : `${dir}/${entry.name}`
+      if (entry.type === "file" && sha.length === 40) noted.set(sha, path)
+      else if (entry.type === "dir" && sha.length < 40 && depth < MAX_NOTES_TREE_DEPTH) {
+        if (!(await walk(path, sha, depth + 1))) return false
+      }
+    }
+    return true
   }
-  return null
+  return (await walk("", "", 0)) ? noted : null
+}
+
+/** The note at one path of the notes commit's tree, read through /contents; null when the mirror did not answer the blob. */
+const readNoteAt = async (ctx: SeamContext, base: string, notesSha: string, path: string): Promise<HistoryNote | null> => {
+  const answer = await readJson(ctx, `${base}/contents/${path}?ref=${encodeURIComponent(notesSha)}`)
+  if (answer.status !== 200) return null
+  const content = decodeContent(answer.body)
+  return content === null ? null : parseNote(content)
+}
+
+/**
+ * The notes for the commits of the history: exactly the notes the tree names
+ * for those commits, or `unread` when the tree or one of those notes could not
+ * be read. A note the tree does not name is null, and only then.
+ */
+export const readNotes = async (
+  ctx: SeamContext,
+  base: string,
+  notesSha: string,
+  shas: ReadonlyArray<string>
+): Promise<{ readonly state: "read"; readonly notes: ReadonlyMap<string, HistoryNote> } | { readonly state: "unread" }> => {
+  const noted = await listNotedCommits(ctx, base, notesSha)
+  if (noted === null) return { state: "unread" }
+  const wanted = shas.filter((sha) => noted.has(sha.toLowerCase()))
+  const read = await Promise.all(wanted.map(async (sha) => [sha, await readNoteAt(ctx, base, notesSha, noted.get(sha.toLowerCase())!)] as const))
+  const notes = new Map<string, HistoryNote>()
+  for (const [sha, note] of read) {
+    if (note === null) return { state: "unread" }
+    notes.set(sha, note)
+  }
+  return { state: "read", notes }
 }
 
 /* ---- the read ---- */
@@ -345,8 +395,25 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
       mythical: unsupported(`The mirror's change feed did not reach every commit of mythical within ${MAX_CHANGE_PAGES} pages.`)
     }
   }
-  const mainCommits = complete && mainHead !== null ? graph.ancestors(mainHead)?.length ?? null : null
   const lineIds = new Set(line.map((row) => row.changeId))
+  const epicsRaw: Array<{ readonly row: ChangeRow; readonly chain: ReadonlyArray<ChangeRow> }> = []
+  for (const row of line) {
+    const chain = row.parents.length > 1 ? graph.secondParentChain(row, lineIds) : []
+    if (chain === null) {
+      /* The first-parent line resolved but this epic's atomic commits did not: the same honest state, never an epic with zero commits. */
+      return {
+        repo,
+        defaultBookmark,
+        mainCommits: null,
+        mythical: unsupported(
+          `The mirror's change feed did not reach every atomic commit of epic ${row.commitId.slice(0, 7)} within ${MAX_CHANGE_PAGES} pages.`
+        )
+      }
+    }
+    epicsRaw.push({ row, chain })
+  }
+  const mainCommits = complete && mainHead !== null ? graph.ancestors(mainHead)?.length ?? null : null
+  const shas = epicsRaw.flatMap(({ row, chain }) => [row.commitId, ...chain.map((commit) => commit.commitId)])
 
   const [mythicalTree, mainTree] = await Promise.all([
     readTreeSha(ctx, base, mythicalHead),
@@ -354,18 +421,8 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
   ])
   const treeEqual = mythicalTree === null || mainTree === null ? "unsupported" : mythicalTree === mainTree ? "equal" : "different"
 
-  const noteFor = new Map<string, HistoryNote | null>()
-  const shas: Array<string> = []
-  const epicsRaw = line.map((row) => {
-    const chain = row.parents.length > 1 ? graph.secondParentChain(row, lineIds) ?? [] : []
-    shas.push(row.commitId, ...chain.map((commit) => commit.commitId))
-    return { row, chain }
-  })
-  if (refs.notes !== null) {
-    const notesSha = refs.notes
-    const read = await Promise.all(shas.slice(0, NOTE_READ_CAP).map(async (sha) => [sha, await readNote(ctx, base, notesSha, sha)] as const))
-    for (const [sha, note] of read) noteFor.set(sha, note)
-  }
+  const notesRead = refs.notes === null ? { state: "absent" as const } : await readNotes(ctx, base, refs.notes, shas)
+  const noteFor: ReadonlyMap<string, HistoryNote> = notesRead.state === "read" ? notesRead.notes : new Map()
   const epics: Array<HistoryEpic> = epicsRaw.map(({ row, chain }) => ({
     sha: row.commitId,
     title: row.title,
@@ -383,7 +440,7 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
       mainHead,
       treeEqual,
       commitCount: shas.length,
-      notes: refs.notes === null ? "absent" : "read",
+      notes: notesRead.state,
       epics
     }
   }

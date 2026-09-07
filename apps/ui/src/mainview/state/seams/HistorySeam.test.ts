@@ -249,7 +249,17 @@ const NOTE_B2 = [
   ""
 ].join("\n")
 
-const mythicalMirror = (options: { tree?: (sha: string) => Response; notes?: boolean } = {}): AppServices =>
+/** A /contents directory listing as the mirror serves it (probed 2026-09-07: sha, encoding, content and size are empty on listings). */
+const listing = (entries: ReadonlyArray<readonly [name: string, type: "file" | "dir", path: string]>): unknown =>
+  entries.map(([name, type, path]) => ({ name, path, sha: "", type, encoding: "", content: "", size: 0 }))
+
+const file = (path: string, content: string): unknown => ({ name: path.split("/").at(-1), path, type: "file", encoding: "utf-8", content })
+
+/** Answers only when asked against the notes commit; anything else is the mirror's 404. */
+const againstNotes = (answer: unknown): Route => (request) =>
+  new URL(request.url).searchParams.get("ref") === NOTES ? json(200, answer) : json(404, { status: "error", message: "content not found" })
+
+const mythicalMirror = (options: { tree?: (sha: string) => Response; notes?: boolean; routes?: Record<string, Route> } = {}, seen: Array<string> = []): AppServices =>
   backend({
     [REPO]: json(200, { default_bookmark: "main" }),
     [`${REPO}/git/refs`]: json(200, [
@@ -260,12 +270,11 @@ const mythicalMirror = (options: { tree?: (sha: string) => Response; notes?: boo
     [`${REPO}/changes`]: feed(MYTHICAL, 3),
     [`${REPO}/git/commits/${E2}`]: options.tree === undefined ? notImplemented() : options.tree(E2),
     [`${REPO}/git/commits/${M}`]: options.tree === undefined ? notImplemented() : options.tree(M),
-    // git notes: flat `<sha>` in the notes commit's tree, read through /contents against that commit.
-    [`${REPO}/contents/${B2}`]: (request) =>
-      new URL(request.url).searchParams.get("ref") === NOTES
-        ? json(200, { name: B2, path: B2, type: "file", encoding: "utf-8", content: NOTE_B2 })
-        : json(404, { status: "error", message: "content not found" })
-  })
+    // git notes: the notes commit's tree holds a flat `<sha>` for b2 (and a note for a commit outside the history); both listed, one read.
+    [`${REPO}/contents/`]: againstNotes(listing([[B2, "file", B2], ["cafe00000000000000000000000000000000cafe", "file", "cafe00000000000000000000000000000000cafe"]])),
+    [`${REPO}/contents/${B2}`]: againstNotes(file(B2, NOTE_B2)),
+    ...options.routes
+  }, seen)
 
 describe("history seam: the mythical history", () => {
   test("first-parent rows are epics, each merge's second-parent chain is its atomic commits, and the badge is unsupported while git/commits answers 501", async () => {
@@ -302,8 +311,9 @@ describe("history seam: the mythical history", () => {
     expect(different.state === "present" ? different.treeEqual : different).toBe("different")
   })
 
-  test("notes under refs/notes/mythical are read per commit through /contents and parsed into the four sections", async () => {
-    const { store, controller } = await ready(mythicalMirror({ notes: true }))
+  test("notes under refs/notes/mythical are read for exactly the commits the notes tree names, through /contents against the notes commit, and parsed into the four sections", async () => {
+    const seen: Array<string> = []
+    const { store, controller } = await ready(mythicalMirror({ notes: true }, seen))
     expect((await controller.commands.run("history.show")).status).toBe("executed")
     await settled()
     const { mythical } = historyCard(store).payload
@@ -318,6 +328,103 @@ describe("history seam: the mythical history", () => {
     })
     expect(mythical.epics[0]!.note).toBeNull()
     expect(mythical.epics[0]!.commits.find((commit) => commit.sha === B1)?.note).toBeNull()
+    // One listing of the tree, then one read per noted commit of the history: no probe per commit, no read of the note outside the history.
+    expect(seen.filter((path) => path.startsWith(`${REPO}/contents/`))).toEqual([
+      `${REPO}/contents/?ref=${NOTES}`,
+      `${REPO}/contents/${B2}?ref=${NOTES}`
+    ])
+  })
+
+  test("a note on the last of many atomic commits is read: the notes tree, fanned out two characters per directory, says which commits carry one", async () => {
+    // E3 on top of E2 merges a chain of 45 atomic commits; the deepest one carries the only note, stored at cc/<38>.
+    const E3 = "e300000000000000000000000000000000000003"
+    const chainSha = (index: number): string => `cc${String(index).padStart(38, "0")}`
+    const deepest = chainSha(45)
+    const chain = Array.from({ length: 45 }, (_, index) => {
+      const n = index + 1
+      return change(`c-cc${n}`, chainSha(n), `step ${n}`, [n === 45 ? "c-e2" : `c-cc${n + 1}`])
+    })
+    const seen: Array<string> = []
+    const { store, controller } = await ready(
+      backend({
+        [REPO]: json(200, { default_bookmark: "main" }),
+        [`${REPO}/git/refs`]: json(200, [ref("refs/heads/main", M), ref("refs/heads/mythical", E3), ref("refs/notes/mythical", NOTES)]),
+        [`${REPO}/changes`]: feed([change("c-e3", E3, "03 · Forty-five steps", ["c-e2", "c-cc1"]), ...chain, ...MYTHICAL], 100),
+        [`${REPO}/git/commits/${E3}`]: notImplemented(),
+        [`${REPO}/git/commits/${M}`]: notImplemented(),
+        [`${REPO}/contents/`]: againstNotes(listing([["cc", "dir", "cc"]])),
+        [`${REPO}/contents/cc`]: againstNotes(listing([[deepest.slice(2), "file", `cc/${deepest.slice(2)}`]])),
+        [`${REPO}/contents/cc/${deepest.slice(2)}`]: againstNotes(file(`cc/${deepest.slice(2)}`, "## Tried\nthe forty-fifth step\n"))
+      }, seen)
+    )
+    expect((await controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    const { mythical } = historyCard(store).payload
+    if (mythical.state !== "present") throw new Error("expected the mythical history")
+    expect(mythical.commitCount).toBe(6 + 1 + 45)
+    expect(mythical.notes).toBe("read")
+    const epic = mythical.epics[0]!
+    expect(epic.commits.length).toBe(45)
+    expect(epic.commits.at(-1)?.sha).toBe(deepest)
+    expect(epic.commits.at(-1)?.note).toEqual({ tried: "the forty-fifth step", evidence: null, folded: null, superseded: null })
+    expect(epic.commits.slice(0, 44).every((commit) => commit.note === null)).toBe(true)
+    expect(seen.filter((path) => path.startsWith(`${REPO}/contents/`))).toEqual([
+      `${REPO}/contents/?ref=${NOTES}`,
+      `${REPO}/contents/cc?ref=${NOTES}`,
+      `${REPO}/contents/cc/${deepest.slice(2)}?ref=${NOTES}`
+    ])
+  })
+
+  test("a notes tree the mirror will not list, or a listed note it will not serve, is the unread state with every note null, never absence", async () => {
+    const unlisted = await ready(mythicalMirror({ notes: true, routes: { [`${REPO}/contents/`]: json(500, { status: "error", message: "boom" }) } }))
+    expect((await unlisted.controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    const tree = historyCard(unlisted.store).payload.mythical
+    if (tree.state !== "present") throw new Error("expected the mythical history")
+    expect(tree.notes).toBe("unread")
+    expect(tree.epics.flatMap((epic) => [epic.note, ...epic.commits.map((commit) => commit.note)]).every((note) => note === null)).toBe(true)
+
+    const unserved = await ready(mythicalMirror({ notes: true, routes: { [`${REPO}/contents/${B2}`]: json(404, { status: "error", message: "content not found" }) } }))
+    expect((await unserved.controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    const blob = historyCard(unserved.store).payload.mythical
+    if (blob.state !== "present") throw new Error("expected the mythical history")
+    expect(blob.notes).toBe("unread")
+    expect(blob.epics[0]!.commits.find((commit) => commit.sha === B2)?.note).toBeNull()
+  })
+
+  test("a page bound that trips with the first-parent line resolved but an epic's chain unresolved is the typed unsupported state, never an epic with zero commits", async () => {
+    // Page 1 resolves the whole line E2 -> E1 -> R and main, but E2's second parent b1 names a parent every later page defers.
+    const pages: Array<string> = []
+    const { store, controller } = await ready(
+      backend({
+        [REPO]: json(200, { default_bookmark: "main" }),
+        [`${REPO}/git/refs`]: json(200, [ref("refs/heads/main", M), ref("refs/heads/mythical", E2)]),
+        [`${REPO}/changes`]: (request) => {
+          pages.push(new URL(request.url).searchParams.get("cursor") ?? "")
+          const n = pages.length
+          const items = n === 1
+            ? [
+              change("c-e2", E2, "02 · Targets are declared in PACKAGE.ts", ["c-e1", "c-b1"]),
+              change("c-m", M, "🔧 ci: something on main", ["c-r"]),
+              change("c-b1", B1, "docs(targets): what a target is", ["c-deferred-2"]),
+              change("c-e1", E1, "01 · The workspace declares its toolchain", ["c-r"]),
+              change("c-r", R, "root", [])
+            ]
+            : [change(`c-deferred-${n}`, `dd${String(n).padStart(38, "0")}`, `deferred ${n}`, [`c-deferred-${n + 1}`])]
+          return json(200, { items, next_cursor: String(n * 100) })
+        }
+      })
+    )
+    expect((await controller.commands.run("history.show")).status).toBe("executed")
+    await settled()
+    expect(pages.length).toBe(MAX_CHANGE_PAGES)
+    const { payload } = historyCard(store)
+    expect(payload.mainCommits).toBeNull()
+    expect(payload.mythical).toEqual({
+      state: "unsupported",
+      reason: `The mirror's change feed did not reach every atomic commit of epic ${E2.slice(0, 7)} within ${MAX_CHANGE_PAGES} pages.`
+    })
   })
 
   test("a write door on a present history refuses by name until the retell flow exists", async () => {
