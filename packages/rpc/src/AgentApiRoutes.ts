@@ -162,10 +162,12 @@ export const WORKFLOW_PROVISION_PATH = "/api/workflow/provision"
 export const WORKFLOW_RPC_PATH = "/api/workflow/rpc"
 /*
  * The dispatchers a repository's runs wait on: its durable trigger
- * registrations (cron schedules today), one row each with the raw schedule,
- * the flow it launches, and its state. The gateway relays no trigger
- * procedure yet, so the Worker answers an honest empty list with a `reason`
- * until it does; the client renders that reason, never invented rows.
+ * registrations (cron schedules), one row each with the raw schedule, the
+ * flow it launches, and its state; and its registered webhooks, one row each
+ * with the channel name and the flow it starts when known. The gateway
+ * relays no trigger-store procedure and no channel listing yet, so the
+ * Worker answers honest empty lists with a `reason` naming both gaps until
+ * it does; the client renders that reason, never invented rows.
  */
 /**
  * The workflow triggers route shared by server and client.

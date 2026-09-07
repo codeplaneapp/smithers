@@ -52,7 +52,11 @@ export const describeSchedule = (cron: string, timezone?: string): string => {
   if (anyDay && atMinute !== undefined && hour === "*") {
     return atMinute === 0 ? "Every hour" : `Every hour at ${pad(atMinute)} minutes past`
   }
-  if (anyDay && atMinute !== undefined && everyNHours !== null) return `Every ${everyNHours[1]} hours`
+  if (anyDay && atMinute !== undefined && everyNHours !== null) {
+    return atMinute === 0
+      ? `Every ${everyNHours[1]} hours`
+      : `Every ${everyNHours[1]} hours at ${pad(atMinute)} minutes past`
+  }
   if (atMinute === undefined || atHour === undefined) return fallback
   const time = `${pad(atHour)}:${pad(atMinute)}`
   if (dayOfMonth === "*" && month === "*") {

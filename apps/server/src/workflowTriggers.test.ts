@@ -8,8 +8,9 @@ import type { WorkflowTriggersBody } from "./workflowTriggers"
 /*
  * The dispatchers route: what the triggers.list card reads. The gateway
  * relays no trigger procedure yet, so the contract under test is the honest
- * one: a session-gated 200 carrying an empty list AND the reason, with no
- * call to Smithers Cloud at all, never a fabricated row and never a 404.
+ * one: a session-gated 200 carrying empty trigger AND webhook lists AND the
+ * reason naming both gaps, with no call to Smithers Cloud at all, never a
+ * fabricated row and never a 404.
  */
 
 const env: WorkerEnv = {
@@ -52,7 +53,7 @@ const validated = () =>
   })
 
 describe("GET /api/workflow/triggers", () => {
-  test("a signed-in read answers an empty list with its reason and never asks Smithers Cloud", async () => {
+  test("a signed-in read answers empty trigger and webhook lists with their reason and never asks Smithers Cloud", async () => {
     await withUpstreams(validated, async (seen) => {
       const response = await worker.fetch(request("?repo=smithersai/smithers"), env)
       expect(response.status).toBe(200)
@@ -61,9 +62,12 @@ describe("GET /api/workflow/triggers", () => {
         status: "ok",
         repo: "smithersai/smithers",
         triggers: [],
+        webhooks: [],
         reason: TRIGGERS_UNAVAILABLE_REASON
       })
-      expect(body.reason).toContain("trigger")
+      /* The reason names the export each list is waiting on, so nobody reads the empty webhook list as "no webhooks". */
+      expect(body.reason).toContain("List { _tag: \"triggers\" }")
+      expect(body.reason).toContain("Channels.list")
       expect(seen.every((url) => url.includes("identity.test"))).toBe(true)
     })
   })

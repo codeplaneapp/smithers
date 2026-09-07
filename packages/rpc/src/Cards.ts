@@ -663,8 +663,10 @@ export const CardSchema = z.discriminatedUnion("kind", [
   /*
    * The dispatchers a repository's runs wait on (triggers.list): one row per
    * durable trigger registration, carrying the raw schedule the card puts in
-   * words, the flow it launches, and its state. `reason` says why the list is
-   * empty when the store could not be read; rows are never invented.
+   * words, the flow it launches, and its state; and one row per registered
+   * webhook, carrying the channel name and the flow it starts when the
+   * declaration fixes one. `reason` says why the lists are empty when the
+   * registries could not be read; rows are never invented.
    */
   z.object({
     ...cardBaseShape,
@@ -681,7 +683,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
           enabled: z.boolean(),
           lastFiredAt: z.number().optional()
         })
-      )
+      ),
+      /** Optional for cards persisted before webhooks joined the listing. */
+      webhooks: z.array(z.object({ name: z.string(), flowId: z.string().optional() })).optional()
     })
   }),
   /*

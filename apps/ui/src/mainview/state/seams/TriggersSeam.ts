@@ -2,17 +2,19 @@
  * The triggers seam: GET /api/workflow/triggers?repo=owner/repo, the
  * dispatchers waiting on one repository. The answer is the route's own
  * contract (apps/server workflowTriggers.ts): `{ status: "ok", repo,
- * triggers, reason? }`. Only well-formed rows are kept; `reason` is why the
- * list is empty and rides to the card unchanged.
+ * triggers, webhooks, reason? }`. Only well-formed rows are kept; `reason` is
+ * why the lists are empty and rides to the card unchanged.
  */
 import { WORKFLOW_TRIGGERS_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import { readErrorMessage } from "./SeamContext"
 
 export type TriggerRow = Extract<Card, { kind: "trigger-list" }>["payload"]["triggers"][number]
+export type WebhookRow = NonNullable<Extract<Card, { kind: "trigger-list" }>["payload"]["webhooks"]>[number]
 
 export interface TriggerList {
   readonly triggers: ReadonlyArray<TriggerRow>
+  readonly webhooks: ReadonlyArray<WebhookRow>
   readonly reason?: string
 }
 
@@ -32,7 +34,13 @@ const triggerRow = (value: unknown): TriggerRow | undefined => {
   }
 }
 
-/** The repository's triggers, or the honest sentence for why they could not be read. */
+const webhookRow = (value: unknown): WebhookRow | undefined => {
+  const row = asRecord(value)
+  if (typeof row.name !== "string") return undefined
+  return { name: row.name, ...(typeof row.flowId === "string" ? { flowId: row.flowId } : {}) }
+}
+
+/** The repository's triggers and webhooks, or the honest sentence for why they could not be read. */
 export const readTriggers = async (
   http: (url: string, init?: RequestInit) => Promise<Response>,
   baseUrl: string,
@@ -48,5 +56,10 @@ export const readTriggers = async (
   const body = asRecord(await response.json().catch(() => undefined))
   if (body.status !== "ok" || !Array.isArray(body.triggers)) return "The triggers answer was malformed."
   const triggers = body.triggers.map(triggerRow).filter((row): row is TriggerRow => row !== undefined)
-  return typeof body.reason === "string" && body.reason !== "" ? { triggers, reason: body.reason } : { triggers }
+  const webhooks = (Array.isArray(body.webhooks) ? body.webhooks : [])
+    .map(webhookRow)
+    .filter((row): row is WebhookRow => row !== undefined)
+  return typeof body.reason === "string" && body.reason !== ""
+    ? { triggers, webhooks, reason: body.reason }
+    : { triggers, webhooks }
 }

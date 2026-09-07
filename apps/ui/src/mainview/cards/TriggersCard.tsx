@@ -1,10 +1,12 @@
 /*
  * The dispatchers card (triggers.list): the events a repository's runs wait
- * for, one row each, in words. Each row states the event, the flow it runs,
- * and its state: enabled or disabled, and when it last fired if the store
- * recorded it. An empty list carries the seam's own reason when it has one,
- * and never a made-up row. Read-only: a trigger is registered and fired
- * from the CLI today, so the card offers no act.
+ * for, one row each, in words. A trigger row states the schedule, the flow
+ * it runs, and its state: enabled or disabled, and when it last fired if the
+ * store recorded it. A webhook row states the channel and the flow it starts
+ * when the declaration fixed one; a registered channel carries no enabled or
+ * last-fired state, so none is printed. Empty lists carry the seam's own
+ * reason when it has one, and never a made-up row. Read-only: a dispatcher
+ * is registered from the CLI today, so the card offers no act.
  */
 import type { Card } from "../state/AppState"
 import { timeLabel as clockLabel } from "../Timestamps"
@@ -16,10 +18,11 @@ export const TriggerListCardBody = ({
   readonly card: Extract<Card, { kind: "trigger-list" }>
 }) => {
   const { triggers, reason } = card.payload
-  if (triggers.length === 0) {
+  const webhooks = card.payload.webhooks ?? []
+  if (triggers.length === 0 && webhooks.length === 0) {
     return (
       <p className="smithers-card-note" data-testid="trigger-list-empty">
-        {reason ?? "No triggers on this repository yet."}
+        {reason ?? "No triggers or webhooks on this repository yet."}
       </p>
     )
   }
@@ -35,6 +38,14 @@ export const TriggerListCardBody = ({
               {" · "}
               {trigger.lastFiredAt === undefined ? "never fired" : `last fired ${clockLabel(trigger.lastFiredAt)}`}
             </span>
+          </span>
+        </li>
+      ))}
+      {webhooks.map((webhook) => (
+        <li key={`webhook:${webhook.name}`} className="workflow-list-row" data-webhook={webhook.name}>
+          <span className="workflow-list-text">
+            <strong>Webhook {webhook.name}</strong>
+            {webhook.flowId === undefined ? null : <span>runs {webhook.flowId}</span>}
           </span>
         </li>
       ))}

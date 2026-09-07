@@ -385,9 +385,10 @@ export const createWorkflowController = (
   /*
    * The dispatchers (triggers.list): the events the repository's runs wait
    * for. The read is the Worker's own route rather than a relayed gateway
-   * procedure (the gateway relays none for triggers yet), so no workspace is
-   * provisioned for it; the route answers an empty list with its reason on a
-   * deployment that cannot read the store, and the card states that reason.
+   * procedure (the gateway relays none for triggers or webhooks yet), so no
+   * workspace is provisioned for it; the route answers empty lists with its
+   * reason on a deployment that cannot read the registries, and the card
+   * states that reason.
    */
   const listTriggers = async (repoArg?: string): Promise<string | void | { readonly value: string }> => {
     const guard = workflowIdentityGuard()
@@ -406,15 +407,22 @@ export const createWorkflowController = (
       status: "active",
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: nextTranscriptOrdinal(),
-      payload: { repo, ...(list.reason === undefined ? {} : { reason: list.reason }), triggers: [...list.triggers] }
+      payload: {
+        repo,
+        ...(list.reason === undefined ? {} : { reason: list.reason }),
+        triggers: [...list.triggers],
+        webhooks: [...list.webhooks]
+      }
     }
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
+    const rows = [
+      ...list.triggers.map((trigger) => `${trigger.id} runs ${trigger.flowId}`),
+      ...list.webhooks.map((webhook) => `webhook ${webhook.name}${webhook.flowId === undefined ? "" : ` runs ${webhook.flowId}`}`)
+    ]
     return {
-      value: list.triggers.length === 0
-        ? `No triggers on ${repo}.${list.reason === undefined ? "" : ` ${list.reason}`}`
-        : `${list.triggers.length} trigger${list.triggers.length === 1 ? "" : "s"} on ${repo}: ${
-          list.triggers.map((trigger) => `${trigger.id} runs ${trigger.flowId}`).join(", ")
-        }.`
+      value: rows.length === 0
+        ? `No triggers or webhooks on ${repo}.${list.reason === undefined ? "" : ` ${list.reason}`}`
+        : `${rows.length} dispatcher${rows.length === 1 ? "" : "s"} on ${repo}: ${rows.join(", ")}.`
     }
   }
 
