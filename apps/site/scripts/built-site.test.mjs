@@ -105,3 +105,17 @@ export const removedFlags = [{ anchor: "databases" }]
     "https://smithers.sh/changelogs/0.34.0"
   ])
 })
+
+test("social card images are required references, whether emitted by path or by site URL", (t) => {
+  const root = fixture(t, {
+    "index.html":
+      "<meta property=\"og:image\" content=\"https://smithers.sh/media/absent.png\"><meta name=\"twitter:image\" content=\"/media/og.png\">",
+    "docs/index.html":
+      "<meta property=\"og:image\" content=\"https://cdn.example.com/card.png\"><meta name=\"twitter:image\" content=\"https://smithers.sh/media/og.png\">",
+    "media/og.png": "png"
+  })
+  const { failures } = checkBuiltSite(root)
+  assert.deepEqual(failures, [
+    "index.html: missing https://smithers.sh/media/absent.png (resolved to /media/absent.png)"
+  ])
+})

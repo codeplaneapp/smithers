@@ -84,7 +84,12 @@ export function checkBuiltSite(root, requiredReferences = []) {
         const html = readFileSync(path, "utf8")
         pages.set(path, {
           ids: new Set([...html.matchAll(/\bid="([^"]*)"/g)].map((match) => decode(match[1]))),
-          references: [...html.matchAll(/\b(?:href|src)="([^"]*)"/g)].map((match) => decode(match[1]))
+          references: [
+            ...[...html.matchAll(/\b(?:href|src)="([^"]*)"/g)].map((match) => decode(match[1])),
+            // Social crawlers fetch these images; a missing file renders a blank card.
+            ...[...html.matchAll(/<meta\s+(?:property|name)="(?:og|twitter):image"\s+content="([^"]*)"/g)]
+              .map((match) => decode(match[1]))
+          ]
         })
       }
     }
@@ -121,7 +126,8 @@ export function checkBuiltSite(root, requiredReferences = []) {
   }
   for (const [page, { references }] of pages) {
     for (const reference of references) {
-      if (!reference.startsWith("/") || reference.startsWith("//")) continue
+      // Pages link the site by path; the social card is emitted as a full URL.
+      if (!reference.startsWith(origin + "/") && (!reference.startsWith("/") || reference.startsWith("//"))) continue
       check(reference, relative(root, page))
     }
   }
