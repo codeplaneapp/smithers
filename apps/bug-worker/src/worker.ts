@@ -48,6 +48,15 @@ export async function timingSafeStringEqual(a: string, b: string): Promise<boole
 }
 
 /**
+ * Operator check shared by every admin route: the request must carry the
+ * deployed `BUG_ADMIN_TOKEN` in `x-bug-admin`. Unset token means nobody passes.
+ */
+export async function isOperator(request: Request, env: BugWorkerEnv): Promise<boolean> {
+  if (!env.BUG_ADMIN_TOKEN) return false;
+  return timingSafeStringEqual(request.headers.get("x-bug-admin") ?? "", env.BUG_ADMIN_TOKEN);
+}
+
+/**
  * Best-effort per-IP throttle. KV has no atomic increment and up to ~60s of
  * propagation, so this is a read-modify-write that concurrent bursts from one
  * IP can race past — the 20/hour is advisory, a speed bump against accidental
@@ -147,8 +156,7 @@ async function handlePostBug(request: Request, env: BugWorkerEnv, now: number): 
 }
 
 async function handleGetBug(request: Request, env: BugWorkerEnv, id: string): Promise<Response> {
-  const provided = request.headers.get("x-bug-admin") ?? "";
-  if (!env.BUG_ADMIN_TOKEN || !(await timingSafeStringEqual(provided, env.BUG_ADMIN_TOKEN))) {
+  if (!(await isOperator(request, env))) {
     return json(401, { error: "x-bug-admin header required" });
   }
   let stored: string | null;

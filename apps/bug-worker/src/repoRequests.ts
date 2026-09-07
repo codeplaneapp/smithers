@@ -1,6 +1,6 @@
 import type { BugWorkerEnv } from "./env.ts";
 import { forkRepo } from "./repoForks.ts";
-import { checkRateLimit, readBodyBounded, timingSafeStringEqual, type BugWorkerDeps } from "./worker.ts";
+import { checkRateLimit, isOperator, readBodyBounded, type BugWorkerDeps } from "./worker.ts";
 
 const prefix = "repo-request:";
 const cors = {
@@ -110,7 +110,7 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
     }
     const admin = route === "/complete" || route === "/notify";
     if (request.method !== "POST" || (route !== "" && !admin)) return json(404, { error: "Not found." });
-    if (admin && (!env.BUG_ADMIN_TOKEN || !(await timingSafeStringEqual(request.headers.get("x-bug-admin") ?? "", env.BUG_ADMIN_TOKEN)))) {
+    if (admin && !(await isOperator(request, env))) {
       return json(401, { error: "Admin authentication required." });
     }
     if (!admin && !(await checkRateLimit(env, `repos:${request.headers.get("cf-connecting-ip") ?? "unknown"}`, deps.now()))) {

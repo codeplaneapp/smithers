@@ -1,6 +1,6 @@
 import type { BugWorkerEnv } from "./env.ts";
 import { repoName } from "./repoRequests.ts";
-import { checkRateLimit, readBodyBounded, type BugWorkerDeps } from "./worker.ts";
+import { checkRateLimit, isOperator, readBodyBounded, type BugWorkerDeps } from "./worker.ts";
 
 const cors = {
   "access-control-allow-origin": "*",
@@ -21,6 +21,12 @@ function loginName(value: unknown): string | null {
  * Maintainer claims. `POST /api/repo-claims` records who claimed a nominated
  * repository; `GET /api/repo-claims?repo=owner/repo` reads it back. Claiming
  * records the claimant and nothing else yet. Emails stay out of public responses.
+ *
+ * The POST is operator-only (`x-bug-admin`) until `repo.claim` ships on the
+ * product Worker with GitHub OAuth proof of maintainership, per
+ * `~/Desktop/smithers-factory/spec/01-auth-and-access.md` section 5. A typed
+ * login from an anonymous caller proves nothing, so it is refused before any
+ * KV read or write.
  */
 export async function handleRepoClaims(request: Request, env: BugWorkerEnv, deps: BugWorkerDeps): Promise<Response> {
   try {
@@ -34,6 +40,7 @@ export async function handleRepoClaims(request: Request, env: BugWorkerEnv, deps
       return json(200, { repo: name, ...claim });
     }
     if (request.method !== "POST") return json(404, { error: "Not found." });
+    if (!(await isOperator(request, env))) return json(401, { error: "Claims open with GitHub sign-in in the app." });
     if (!(await checkRateLimit(env, `claims:${request.headers.get("cf-connecting-ip") ?? "unknown"}`, deps.now()))) {
       return json(429, { error: "Too many requests. Please try again later." });
     }

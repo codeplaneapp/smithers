@@ -85,11 +85,23 @@ and recorded but never fails the nomination; the repository is still stored as
 A maintainer can claim a nominated repository. Claiming only records who
 claimed it; it does not grant access or start any work yet.
 
-`POST /api/repo-claims` accepts `{ "repo": "owner/repo", "login": "github-login", "email": "optional@example.com" }`.
-It returns `200` with `{ repo, login, claimedAt }` for the first claim, `409`
-if the repository is already claimed, `404` if the repository has never been
-nominated, and `400` for an invalid repository, login, or email. Claims share
-the per-IP throttle used by nominations.
+The claim route is operator-only until `repo.claim` ships on the product
+Worker with OAuth proof. The intended flow: after GitHub sign-in, the product
+Worker calls `GET /repos/{owner}/{repo}` with the claimant's own OAuth token
+and reads `permissions.admin`, or for an org-owned repository reads the
+claimant's org membership role and accepts `admin`. Either proof records the
+claim in Smithers Cloud, never in this Worker's KV. Spec:
+`~/Desktop/smithers-factory/spec/01-auth-and-access.md`, section 5.
+
+`POST /api/repo-claims` requires the `x-bug-admin` secret header and accepts
+`{ "repo": "owner/repo", "login": "github-login", "email": "optional@example.com" }`.
+Anonymous or wrong-token callers get `401` with
+`{ "error": "Claims open with GitHub sign-in in the app." }` before any
+storage read or write. With the header it returns `200` with
+`{ repo, login, claimedAt }` for the first claim, `409` if the repository is
+already claimed, `404` if the repository has never been nominated, and `400`
+for an invalid repository, login, or email. Operator claims share the per-IP
+throttle used by nominations.
 
 `GET /api/repo-claims?repo=owner/repo` returns `{ repo, login, claimedAt }` or
 `404`. Claims live under `repo-claim:<owner/repo>`. The claimant's email is

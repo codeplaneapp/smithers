@@ -3,20 +3,39 @@ import { createBugWorker } from "../src/worker.ts";
 import { memoryKv } from "./helpers/memoryKv.ts";
 import type { BugWorkerEnv } from "../src/env.ts";
 
-function fixture() {
-  const env: BugWorkerEnv = { BUGS: memoryKv(), BUG_ADMIN_TOKEN: "test-admin" };
+function fixture(token = "test-admin") {
+  const kv = memoryKv();
+  const env: BugWorkerEnv = { BUGS: kv, BUG_ADMIN_TOKEN: token };
   const worker = createBugWorker({ now: () => 1788500000000, fetch: (async (_input: string | URL | Request, _init?: RequestInit) => Response.json({ private: false, license: { spdx_id: "MIT" } })) as typeof fetch });
   const nominate = (repo = "owner/repo") => worker.fetch(new Request("https://bug.smithers.sh/api/repo-requests", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repo }),
   }), env);
-  const claim = (body: unknown) => worker.fetch(new Request("https://bug.smithers.sh/api/repo-claims", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  const claim = (body: unknown, headers: Record<string, string> = { "x-bug-admin": "test-admin" }) => worker.fetch(new Request("https://bug.smithers.sh/api/repo-claims", {
+    method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body),
   }), env);
   const read = (query: string) => worker.fetch(new Request(`https://bug.smithers.sh/api/repo-claims${query}`), env);
-  return { env, nominate, claim, read };
+  return { env, kv, nominate, claim, read };
 }
 
 describe("maintainer claims", () => {
+  test("refuses anonymous and wrong-token claims with 401 and writes nothing", async () => {
+    const f = fixture();
+    await f.nominate();
+    const before = new Map(f.kv.dump());
+    const anonymous = await f.claim({ repo: "owner/repo", login: "maintainer" }, {});
+    expect(anonymous.status).toBe(401);
+    expect(await anonymous.json()).toEqual({ error: "Claims open with GitHub sign-in in the app." });
+    expect((await f.claim({ repo: "owner/repo", login: "maintainer" }, { "x-bug-admin": "nope" })).status).toBe(401);
+    expect(f.kv.dump()).toEqual(before);
+    expect(await f.env.BUGS.get("repo-claim:owner/repo")).toBeNull();
+    expect((await f.read("?repo=owner/repo")).status).toBe(404);
+  });
+  test("refuses every claim when no operator token is deployed", async () => {
+    const f = fixture("");
+    await f.nominate();
+    expect((await f.claim({ repo: "owner/repo", login: "maintainer" })).status).toBe(401);
+    expect(await f.env.BUGS.get("repo-claim:owner/repo")).toBeNull();
+  });
   test("records the first claim, returns it without the email, and rejects a second claim", async () => {
     const f = fixture();
     await f.nominate();
