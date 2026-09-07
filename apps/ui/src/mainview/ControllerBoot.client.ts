@@ -28,8 +28,8 @@ const promiseEffect = <A>(label: string, run: () => Promise<A>) =>
 const bootProgram = (session: BootSession | undefined) =>
   Effect.gen(function*() {
     // Read the entry URL before the controller exists: creating it installs the
-    // frame history, which replaces /owner/name with the /w/.../f/... pointer
-    // within the first frame, long before identity has loaded.
+    // frame history, which writes the first history entry within the first
+    // frame, long before identity has loaded.
     const requested = yield* Effect.sync(() => requestedRepo(window.location))
     const http = yield* Effect.sync(() => createAppFetch())
     const bootstrap = yield* promiseEffect("load runtime bootstrap", () => loadBootstrap(http))
@@ -78,15 +78,17 @@ const bootProgram = (session: BootSession | undefined) =>
       if (runtime.bootstrap.capabilities.includes("cloud")) {
         yield* Effect.sync(() => void controller.loadCloudSession())
       }
+      // Both URL rewrites keep the entry's state: on a repository path the
+      // frame history stores the frame location there, not in the URL.
       if (controller.handleAuthReturn(window.location.search)) {
-        window.history.replaceState(null, "", window.location.pathname)
+        window.history.replaceState(window.history.state, "", window.location.pathname)
       }
       // `/owner/name` (or the landing page's `/?repo=owner/name`) preselects a public-catalog repository.
       // The path stays in the address bar; the parameter leaves it.
       if (requested !== null) {
         yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
         if (window.location.search !== "") {
-          window.history.replaceState(null, "", withoutRepoParam(window.location))
+          window.history.replaceState(window.history.state, "", withoutRepoParam(window.location))
         }
       }
       return controller

@@ -1,3 +1,5 @@
+import { pathRepo } from "../RepoLink"
+
 export interface FrameLocation {
   readonly workspaceId: string
   readonly branchId: string
@@ -35,6 +37,7 @@ export const parseFramePath = (pathname: string): FrameLocation | undefined => {
 interface BrowserHistoryHost {
   readonly location: { readonly pathname: string }
   readonly history: {
+    readonly state: unknown
     pushState: (data: unknown, unused: string, url?: string | URL | null) => void
     replaceState: (data: unknown, unused: string, url?: string | URL | null) => void
     back: () => void
@@ -44,16 +47,46 @@ interface BrowserHistoryHost {
   removeEventListener: (type: "popstate", listener: () => void) => void
 }
 
-/** Browser History is an adapter at the composition root, never React state. */
-export const createBrowserFrameHistory = (host: BrowserHistoryHost): FrameHistoryPort => ({
-  current: () => parseFramePath(host.location.pathname),
-  push: (location) => host.history.pushState({ smithersFrame: true }, "", framePath(location)),
-  replace: (location) => host.history.replaceState({ smithersFrame: true }, "", framePath(location)),
-  back: () => host.history.back(),
-  forward: () => host.history.forward(),
-  subscribe: (listener) => {
-    const onPopState = (): void => listener(parseFramePath(host.location.pathname))
-    host.addEventListener("popstate", onPopState)
-    return () => host.removeEventListener("popstate", onPopState)
+const isLocation = (value: unknown): value is FrameLocation =>
+  typeof value === "object" && value !== null &&
+  typeof (value as FrameLocation).workspaceId === "string" &&
+  typeof (value as FrameLocation).branchId === "string" &&
+  typeof (value as FrameLocation).frameId === "string"
+
+/** The frame location a history entry's state carries, or undefined for a foreign or stateless entry. */
+const stateLocation = (state: unknown): FrameLocation | undefined => {
+  const location: unknown = typeof state === "object" && state !== null ? (state as { readonly location?: unknown }).location : undefined
+  return isLocation(location) ? location : undefined
+}
+
+/**
+ * Browser History is an adapter at the composition root, never React state.
+ *
+ * Two address-bar modes, chosen once from the entry URL:
+ * - Booted from `/` or `/w/...`: every entry's URL is the frame pointer
+ *   (`/w/<workspace>/b/<branch>/f/<frame>`) and the location is read back
+ *   from the pathname.
+ * - Booted from a repository path (`/owner/name`, RepoLink.pathRepo): the
+ *   address bar keeps that exact path for the life of the page, so a reload
+ *   or a shared link reselects the repository. Frame navigation still pushes
+ *   history entries and back/forward still fire popstate; the location
+ *   travels in each entry's state instead of its URL.
+ */
+export const createBrowserFrameHistory = (host: BrowserHistoryHost): FrameHistoryPort => {
+  const pinned = pathRepo(host.location.pathname) === null ? undefined : host.location.pathname
+  const current = (): FrameLocation | undefined =>
+    pinned === undefined ? parseFramePath(host.location.pathname) : stateLocation(host.history.state)
+  const url = (location: FrameLocation): string => pinned ?? framePath(location)
+  return {
+    current,
+    push: (location) => host.history.pushState({ smithersFrame: true, location }, "", url(location)),
+    replace: (location) => host.history.replaceState({ smithersFrame: true, location }, "", url(location)),
+    back: () => host.history.back(),
+    forward: () => host.history.forward(),
+    subscribe: (listener) => {
+      const onPopState = (): void => listener(current())
+      host.addEventListener("popstate", onPopState)
+      return () => host.removeEventListener("popstate", onPopState)
+    }
   }
-})
+}
