@@ -14,8 +14,8 @@ function fixture() {
     calls.push({ url, init });
     return Response.json(url.includes("api.github.com") ? github : { id: "email-1" }, { status: url.includes("resend") ? emailStatus : 200 });
   }) as typeof fetch });
-  const call = (body?: unknown, route = "", admin = false) => worker.fetch(new Request(`https://bug.smithers.sh/api/repo-requests${route}`, {
-    method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json", ...(admin ? { "x-bug-admin": "test-admin" } : {}) },
+  const call = (body?: unknown, route = "", admin = false, ip = "203.0.113.1") => worker.fetch(new Request(`https://bug.smithers.sh/api/repo-requests${route}`, {
+    method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json", "cf-connecting-ip": ip, ...(admin ? { "x-bug-admin": "test-admin" } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }), env);
   const complete = () => call({ repo: "owner/repo", appUrl: "https://app.smithers.sh/repos/owner/repo" }, "/complete", true);
@@ -109,24 +109,39 @@ describe("public repository requests", () => {
   });
   test("counts are independent per repo and the public list ranks by count, capped at 20", async () => {
     const f = fixture();
-    for (let i = 0; i < 25; i++) await f.env.BUGS.put(`repo-request:owner/r${String(i).padStart(2, "0")}`, JSON.stringify({ name: `owner/r${i}`, url: `https://github.com/owner/r${i}` }));
-    await f.call({ repo: "owner/second" });
-    await f.call({ repo: "owner/first" });
-    await f.call({ repo: "owner/first" });
-    await f.call({ repo: "owner/second" });
-    await f.call({ repo: "owner/first" });
-    const { repos } = await (await f.call()).json();
+    // Records beyond any fixed scan window: the leaderboard must still rank a late-sorting name first.
+    for (let i = 0; i < 250; i++) await f.env.BUGS.put(`repo-request:owner/r${String(i).padStart(3, "0")}`, JSON.stringify({ name: `owner/r${i}`, url: `https://github.com/owner/r${i}` }));
+    for (let i = 0; i < 22; i++) await f.call({ repo: `owner/r${i}` }, "", false, `10.0.0.${i}`);
+    await f.call({ repo: "owner/second" }, "", false, "10.0.1.1");
+    await f.call({ repo: "owner/zzz" }, "", false, "10.0.1.2");
+    await f.call({ repo: "owner/zzz" }, "", false, "10.0.1.3");
+    await f.call({ repo: "owner/second" }, "", false, "10.0.1.4");
+    await f.call({ repo: "owner/zzz" }, "", false, "10.0.1.5");
+    const response = await f.call();
+    expect(response.headers.get("cache-control")).toBe("public, max-age=60");
+    const { repos } = await response.json();
     expect(repos).toHaveLength(20);
-    expect(repos.slice(0, 2)).toMatchObject([{ name: "owner/first", nominations: 3 }, { name: "owner/second", nominations: 2 }]);
-    expect(repos.slice(2).every((repo: { nominations: number }) => repo.nominations === 0)).toBe(true);
+    expect(repos.slice(0, 3)).toMatchObject([
+      { name: "owner/zzz", url: "https://github.com/owner/zzz", status: "smithering", nominations: 3 },
+      { name: "owner/second", nominations: 2 },
+      { name: "owner/r0", nominations: 1 },
+    ]);
+    expect(repos.slice(2).every((repo: { nominations: number }) => repo.nominations === 1)).toBe(true);
     expect(JSON.stringify(repos)).not.toContain("example.com");
+    // Listing reads the leaderboard and each entry's readiness only, never the whole catalog.
+    let reads = 0;
+    const get = f.env.BUGS.get.bind(f.env.BUGS);
+    f.env.BUGS.get = async (key: string) => { reads++; return get(key); };
+    f.env.BUGS.list = async () => { throw new Error("list must not be used"); };
+    expect((await f.call()).status).toBe(200);
+    expect(reads).toBe(21);
   });
   test("limits payloads, throttles submissions, and reports storage failures", async () => {
     const f = fixture();
     expect((await f.call({ repo: "x".repeat(5000) })).status).toBe(413);
     for (let i = 0; i < 19; i++) await f.call({ repo: "owner/repo" });
     expect((await f.call({ repo: "owner/repo" })).status).toBe(429);
-    f.env.BUGS.list = async () => { throw new Error("offline"); };
+    f.env.BUGS.get = async () => { throw new Error("offline"); };
     expect((await f.call()).status).toBe(503);
   });
 });

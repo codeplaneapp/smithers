@@ -8,12 +8,15 @@ const cors = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
 };
-const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: cors });
+const json = (status: number, body: unknown, headers = cors) => new Response(JSON.stringify(body), { status, headers });
 type Repo = { name: string; url: string };
 type Ready = { appUrl: string; completedAt: string };
-/** Most repositories the public list scans before ranking; bounds KV reads per request. */
-const listScan = 200;
+type Leader = { name: string; count: number };
+/** One key holds the ranked leaderboard, so listing costs one read plus one readiness read per entry. */
+const leaderboardKey = "repo-nominations-top";
 const listTop = 20;
+/** Browsers reuse a list for this long; KV is eventually consistent over the same window. */
+const listCache = { ...cors, "cache-control": "public, max-age=60" };
 
 /** Accept repository roots only; never fetch a user-supplied host. */
 export function repoName(value: unknown): string | null {
@@ -44,19 +47,17 @@ async function publicRepo(env: BugWorkerEnv, repo: Repo, count?: number) {
     nominations: count ?? await nominations(env, repo.name),
   };
 }
-/** Repositories ranked by nominations, most nominated first; ties break on name. */
+/** Rewrite the leaderboard with one repository's new count; ties break on name. */
+async function rank(env: BugWorkerEnv, name: string, count: number) {
+  const leaders = (await read<Leader[]>(env, leaderboardKey) ?? []).filter((leader) => leader.name !== name);
+  leaders.push({ name, count });
+  leaders.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  await env.BUGS.put(leaderboardKey, JSON.stringify(leaders.slice(0, listTop)));
+}
+/** Repositories ranked by nominations, most nominated first, exact at any catalog size. */
 async function mostNominated(env: BugWorkerEnv) {
-  const page = await list(env, prefix, undefined, listScan);
-  const ranked = await Promise.all(page.keys.map(async (key) => {
-    const name = key.name.slice(prefix.length);
-    return { name, count: await nominations(env, name) };
-  }));
-  ranked.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const records = await Promise.all(ranked.slice(0, listTop).map(async (entry) => {
-    const repo = await read<Repo>(env, `${prefix}${entry.name}`);
-    return repo ? publicRepo(env, repo, entry.count) : null;
-  }));
-  return records.filter((repo) => repo !== null);
+  const leaders = await read<Leader[]>(env, leaderboardKey) ?? [];
+  return Promise.all(leaders.map((leader) => publicRepo(env, { name: leader.name, url: `https://github.com/${leader.name}` }, leader.count)));
 }
 async function list(env: BugWorkerEnv, keyPrefix: string, cursor?: string, limit = 50) {
   if (!env.BUGS.list) throw new Error("KV listing unavailable");
@@ -100,7 +101,7 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
     const route = url.pathname.slice("/api/repo-requests".length);
     if (request.method === "GET" && route === "") {
       const query = url.searchParams.get("repo");
-      if (query === null) return json(200, { repos: await mostNominated(env) });
+      if (query === null) return json(200, { repos: await mostNominated(env) }, listCache);
       const name = repoName(query);
       if (!name) return json(400, { error: "Enter a GitHub repository URL or owner/repo." });
       const repo = await read<Repo>(env, `${prefix}${name}`);
@@ -169,9 +170,11 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
       await forkRepo(env, deps, name);
     }
     // A plain counter per repository: KV has no atomic increment, so two simultaneous
-    // nominations can record one. That undercount is acceptable for a public tally.
+    // nominations can record one. That undercount is acceptable for a public tally,
+    // and the leaderboard rewritten beside the counter shares the same trade-off.
     const count = await nominations(env, name) + 1;
     await env.BUGS.put(`repo-nominations:${name}`, String(count));
+    await rank(env, name, count);
     const result = await publicRepo(env, repo, count);
     if (email && result.status !== "ready") await env.BUGS.put(`repo-subscriber:${name}:${await hash(email)}`, email);
     return json(200, { repo: result, subscribed: Boolean(email) && result.status !== "ready" });

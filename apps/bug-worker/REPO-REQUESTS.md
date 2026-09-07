@@ -19,8 +19,9 @@ Each public record has `name`, `url`, `status` (`smithering` or `ready`),
 `appUrl` (null until ready), and `nominations`.
 
 `GET /api/repo-requests` returns `{ repos }`: the 20 most nominated
-repositories, most nominated first, ties by name. The Worker ranks the first
-200 recorded repositories, so a repository beyond that scan is not listed.
+repositories, most nominated first, ties by name, exact at any catalog size.
+The response carries `cache-control: public, max-age=60`, so a browser reuses
+it for a minute; the page bypasses that cache after a submission.
 `GET /api/repo-requests?repo=owner/repo` returns `{ repo }` for one
 repository, 404 when nobody has requested it, and 400 for an invalid name.
 The upcoming app can consume this same public catalog and use ready entries
@@ -34,8 +35,15 @@ writes it back; rejected requests (invalid input, private or unlicensed
 repository, rate limit) never touch it. KV has no atomic increment, so two
 nominations that arrive at the same moment can record as one. The tally is
 public and informational, so that undercount is accepted rather than adding a
-Durable Object. The list endpoint reads one counter per recorded repository,
-then the record and readiness of the top 20 only.
+Durable Object.
+
+The same `POST` then rewrites one leaderboard key, `repo-nominations-top`: a
+JSON array of `{ "name", "count" }` sorted by count, then name, capped at 20.
+It replaces the repository's own entry with the new count and drops anything
+past 20. The list endpoint reads that one key plus each listed repository's
+readiness, 21 KV reads at most, and never scans the catalog. The leaderboard
+shares the counter's read-modify-write, so the same concurrent-write
+undercount applies to it and nothing else.
 
 Once the app supports a repository **and its repository view works for an
 anonymous visitor**, call `POST /api/repo-requests/complete` with the existing
@@ -109,16 +117,17 @@ repositories per invocation to stay within Worker subrequest limits.
 
 KV is eventually consistent. New requests, readiness, and counts may take up
 to a minute to reach other locations; the page loads the most nominated list
-once per visit and again after each submission. Records
-and per-email subscriptions use separate keys so concurrent submissions
-cannot overwrite a subscriber list or reset completed work. Provider keys
+once per visit and again, bypassing the browser cache, after each submission.
+Records and per-email subscriptions use separate keys so concurrent
+submissions cannot overwrite a subscriber list or reset completed work. Provider keys
 protect concurrent delivery retries for 24 hours; if a send succeeds but its
 KV receipt cannot be saved for longer than that, a retry may send a duplicate.
 The existing KV per-IP throttle is advisory, not an atomic rate limiter.
 
 Email addresses never appear in public responses. They live under
 `repo-subscriber:<owner/repo>:<sha256(email)>`, separate from public metadata
-under `repo-request:`, counts under `repo-nominations:`, and completion under
+under `repo-request:`, counts under `repo-nominations:`, the leaderboard under
+`repo-nominations-top`, and completion under
 `repo-ready:`. Notification receipts use `repo-notified:`, forks use
 `repo-fork:`, and claims use `repo-claim:`. There are no additional database
 bindings or migrations.
