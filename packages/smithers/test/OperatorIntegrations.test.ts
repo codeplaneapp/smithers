@@ -60,6 +60,7 @@ describe("integration CLI", () => {
 
   it.each([
     "ftp://example.invalid",
+    "http://example.invalid",
     "https://user:private-fixture@example.invalid",
     "https://example.invalid?token=private-fixture",
     "https://example.invalid#private-fixture"
@@ -219,6 +220,7 @@ describe("integration CLI", () => {
 
   it("lists only credential references and refuses raw secret fields", async () => {
     const directory = await root()
+    vi.stubEnv("SMITHERS_INTEGRATION_TOKEN_ENV", "TEST_MISSING_TOKEN")
     const config = Path.join(directory, ".smithers/integrations.json")
     await Fs.writeFile(
       config,
@@ -268,6 +270,59 @@ describe("integration CLI", () => {
     expect(calls.some((url) => url.endsWith("/getMe"))).toBe(true)
   })
 
+  it("refuses credentials and destinations the host never authorized, and accepts the ones it did", async () => {
+    const directory = await root()
+    const config = Path.join(directory, ".smithers/integrations.json")
+    const declare = (integration: Record<string, unknown>) =>
+      Fs.writeFile(config, JSON.stringify({ version: 1, integrations: [integration] }))
+    const requests: Array<string> = []
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      requests.push(String(input))
+      return Response.json({ resources: { core: { remaining: 5000 } } })
+    })
+    vi.stubGlobal("fetch", fetch)
+    vi.stubEnv("SMITHERS_CREDENTIAL_KEY", "host-encryption-fixture-secret")
+
+    await declare({
+      id: "exfil",
+      provider: "github",
+      tokenEnv: "SMITHERS_CREDENTIAL_KEY",
+      apiBaseUrl: "https://attacker.invalid"
+    })
+    const borrowed = await serve(directory, ["doctor", "exfil"])
+    expect(borrowed.code).toBe(1)
+    expect(borrowed.output).toContain("unauthorized credential variable SMITHERS_CREDENTIAL_KEY")
+    expect(borrowed.output).not.toContain("host-encryption-fixture-secret")
+    expect(fetch).not.toHaveBeenCalled()
+
+    await declare({ id: "exfil", provider: "github", apiBaseUrl: "https://attacker.invalid" })
+    const redirected = await serve(directory, ["doctor", "exfil"])
+    expect(redirected.code).toBe(1)
+    expect(redirected.output).toContain("unauthorized github endpoint https://attacker.invalid")
+    expect(fetch).not.toHaveBeenCalled()
+    await expect(
+      probe({ id: "exfil", provider: "github", apiBaseUrl: "https://attacker.invalid" }, "probe-fixture-secret")
+    ).rejects.toThrow("unauthorized github endpoint")
+    expect(fetch).not.toHaveBeenCalled()
+
+    vi.stubEnv("SMITHERS_INTEGRATION_TOKEN_ENV", "TEAM_GITHUB_TOKEN")
+    vi.stubEnv("SMITHERS_GITHUB_API_BASE_URL", "https://github.example.com/api/v3")
+    vi.stubEnv("TEAM_GITHUB_TOKEN", "authorized-fixture-secret")
+    await declare({
+      id: "enterprise",
+      provider: "github",
+      tokenEnv: "TEAM_GITHUB_TOKEN",
+      apiBaseUrl: "https://github.example.com/api/v3"
+    })
+    const authorized = await serve(directory, ["doctor", "enterprise"])
+    expect(authorized.code, authorized.output).toBe(0)
+    expect(authorized.data.integrations).toEqual([
+      { id: "enterprise", provider: "github", healthy: true, check: "provider-authentication" }
+    ])
+    expect(requests).toEqual(["https://github.example.com/api/v3/rate_limit"])
+    expect(authorized.output).not.toContain("authorized-fixture-secret")
+  })
+
   it("plans GitHub webhook reconciliation without making writes", async () => {
     const directory = await root()
     await Fs.writeFile(
@@ -293,6 +348,7 @@ describe("integration CLI", () => {
         }]
       })
     )
+    vi.stubEnv("SMITHERS_INTEGRATION_TOKEN_ENV", "SMITHERS_TEST_INTEGRATION_TOKEN")
     vi.stubEnv("SMITHERS_TEST_INTEGRATION_TOKEN", "test-token")
     vi.stubEnv("SMITHERS_TEST_WEBHOOK_SECRET", "test-secret")
     const methods: Array<string> = []

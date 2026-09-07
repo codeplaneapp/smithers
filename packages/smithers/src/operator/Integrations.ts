@@ -16,9 +16,10 @@ import { execute, localFields, type LocalOptions, localRoot } from "./Store.ts"
 const provider = z.enum(["github", "linear", "telegram"])
 const endpoint = z.string().url().refine((text) => {
   const url = new URL(text)
-  return ["http:", "https:"].includes(url.protocol) && url.username === "" && url.password === "" &&
-    url.search === "" && url.hash === ""
-}, "API endpoint must be HTTP(S), without credentials, query or fragment")
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+  return (url.protocol === "https:" || (url.protocol === "http:" && loopback)) && url.username === "" &&
+    url.password === "" && url.search === "" && url.hash === ""
+}, "API endpoint must be HTTP(S), over TLS unless loopback, and without credentials, query or fragment")
 const entry = z.strictObject({
   id: z.string().min(1),
   provider,
@@ -37,14 +38,89 @@ const configuration = z.strictObject({ version: z.literal(1), integrations: z.ar
  */
 export type Integration = z.infer<typeof entry>
 
-const defaultTokenEnv = (kind: Integration["provider"]) =>
-  kind === "github" ?
-    "SMITHERS_GITHUB_TOKEN" :
-    kind === "linear"
-    ? "SMITHERS_LINEAR_API_KEY"
-    : "SMITHERS_TELEGRAM_BOT_TOKEN"
+/**
+ * What the host already trusts for each provider: the credential variables the
+ * provider's own client resolves, its public API, and the host variable that
+ * names a self-hosted deployment instead.
+ */
+const authority = {
+  github: {
+    tokenEnv: ["SMITHERS_GITHUB_TOKEN", "GITHUB_TOKEN"],
+    apiBaseUrl: GitHub.Config.DEFAULT_API_BASE_URL,
+    apiBaseUrlEnv: "SMITHERS_GITHUB_API_BASE_URL"
+  },
+  linear: {
+    tokenEnv: ["SMITHERS_LINEAR_API_KEY"],
+    apiBaseUrl: Linear.Config.DEFAULT_API_BASE_URL,
+    apiBaseUrlEnv: "SMITHERS_LINEAR_API_BASE_URL"
+  },
+  telegram: {
+    tokenEnv: ["SMITHERS_TELEGRAM_BOT_TOKEN"],
+    apiBaseUrl: Telegram.Config.DEFAULT_API_BASE_URL,
+    apiBaseUrlEnv: "SMITHERS_TELEGRAM_API_BASE_URL"
+  }
+} as const
 
-/** Reads versioned provider configuration or discovers explicitly configured environment adapters.
+const defaultTokenEnv = (kind: Integration["provider"]) => authority[kind].tokenEnv[0]
+
+/** The credential variables a declaration may read: the provider's own, plus whatever the host authorizes. */
+const authorizedTokenEnv = (kind: Integration["provider"], env: Readonly<Record<string, string | undefined>>) =>
+  new Set<string>([
+    ...authority[kind].tokenEnv,
+    ...(env["SMITHERS_INTEGRATION_TOKEN_ENV"] ?? "").split(",").map((name) => name.trim()).filter((name) =>
+      name.length > 0
+    )
+  ])
+
+const originOf = (text: string | undefined) => {
+  if (text === undefined || text.length === 0) return undefined
+  try {
+    return new URL(text).origin
+  } catch {
+    return undefined
+  }
+}
+
+/** The origins a declaration may send that credential to: the provider's public API and the host's own deployment. */
+const authorizedOrigins = (kind: Integration["provider"], env: Readonly<Record<string, string | undefined>>) =>
+  new Set(
+    [originOf(authority[kind].apiBaseUrl), originOf(env[authority[kind].apiBaseUrlEnv])].filter((origin) =>
+      origin !== undefined
+    )
+  )
+
+/**
+ * Rejects a declaration that pairs a credential or destination the host never authorized.
+ *
+ * Configuration inside the workspace chooses which secret a diagnostic
+ * resolves and which origin receives it, so without this an unreviewed
+ * repository could label an unrelated host secret as a provider token and have
+ * it sent to an endpoint of its own choosing. Repository configuration selects
+ * among host-authorized pairings; it does not create them.
+ */
+const authorize = (item: Integration, env: Readonly<Record<string, string | undefined>>): Integration => {
+  if (item.tokenEnv !== undefined && !authorizedTokenEnv(item.provider, env).has(item.tokenEnv)) {
+    throw new Error(
+      `Integration ${item.id} names unauthorized credential variable ${item.tokenEnv}; list it in SMITHERS_INTEGRATION_TOKEN_ENV to authorize it`
+    )
+  }
+  const target = originOf(item.apiBaseUrl)
+  if (target !== undefined && !authorizedOrigins(item.provider, env).has(target)) {
+    throw new Error(
+      `Integration ${item.id} names unauthorized ${item.provider} endpoint ${target}; set ${
+        authority[item.provider].apiBaseUrlEnv
+      } to authorize it`
+    )
+  }
+  return item
+}
+
+/** Reads versioned provider configuration, or discovers explicitly configured environment adapters.
+ *
+ * Every entry is authorized against the host environment, so configuration
+ * committed to a repository can only select credentials and provider origins
+ * the host itself configured.
+ *
  * @category configuration
  * @since 1.0.0
  */
@@ -76,7 +152,7 @@ export const readIntegrations = (
   }
   const ids = parsed.data.integrations.map((item) => item.id)
   if (new Set(ids).size !== ids.length) throw new Error("Integration IDs must be unique")
-  return parsed.data.integrations
+  return parsed.data.integrations.map((item) => authorize(item, env))
 }
 
 const select = (entries: ReadonlyArray<Integration>, id?: string) => {
@@ -101,10 +177,15 @@ const secret = async (options: LocalOptions, entry: Integration): Promise<string
 }
 
 /** Probes a provider through its real client, returning no credential or provider response body.
+ *
+ * Re-checks host authorization at the point the credential leaves the process,
+ * so a caller holding a hand-built entry cannot reach an unauthorized origin.
+ *
  * @category diagnostics
  * @since 1.0.0
  */
 export const probe = async (entry: Integration, token: string, timeoutMs = 10_000) => {
+  authorize(entry, Environment.ambientEnvironment())
   const operation = entry.provider === "github"
     ? GitHub.GitHubClient.make({ token, apiBaseUrl: entry.apiBaseUrl, maxRetries: 0 }, {}).request("GET", "/rate_limit")
     : entry.provider === "linear"
