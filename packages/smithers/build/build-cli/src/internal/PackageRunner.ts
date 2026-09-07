@@ -391,9 +391,17 @@ export const execute = async (
       expectedExitCodes: [0],
       timeoutMs: node.timeoutMs
     }
+    const ambient = options.environment ?? process.env
+    // A repository child streams to the parent process, which forwards both
+    // pipes verbatim, so its live view is written straight out instead of
+    // through this run's reporter. It stays an observer view either way:
+    // redacted, terminal-injection stripped, and line bounded.
+    const repositoryChild = ambient["SMTHRS_REPO_CHILD"] === "1"
     const output = OutputStream.make({
-      write: (stream, text) => reporter.toolOutput(node.label, stream, text),
-      environment: { ...(options.environment ?? process.env), ...resolved.env },
+      write: repositoryChild
+        ? (stream, text) => void (stream === "stdout" ? process.stdout : process.stderr).write(text)
+        : (stream, text) => reporter.toolOutput(node.label, stream, text),
+      environment: { ...ambient, ...resolved.env },
       sensitiveNames: credentialNames
     })
     const exit = await Effect.runPromiseExit(
@@ -410,12 +418,8 @@ export const execute = async (
             variables: node.nixEnvironment.variables
           }
         }),
-        ...(process.env["SMTHRS_REPO_CHILD"] === "1"
-          ? {
-            onStdout: (chunk: Uint8Array) => process.stdout.write(chunk),
-            onStderr: (chunk: Uint8Array) => process.stderr.write(chunk)
-          }
-          : { onStdout: output.onStdout, onStderr: output.onStderr })
+        onStdout: output.onStdout,
+        onStderr: output.onStderr
       }, payload),
       { signal }
     ).finally(output.close)

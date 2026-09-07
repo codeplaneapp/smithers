@@ -4,12 +4,17 @@
  * the scheduler and none for a node blocked by a failed dependency, one
  * `targetFinished` per node, and the summary last. A `log` sink alone still
  * receives the plain lines.
+ *
+ * The live view keeps its protections wherever it is written. A repository
+ * child streams tool output to the parent process instead of this run's
+ * reporter, and that route is redacted, terminal-injection stripped and line
+ * bounded exactly like the reporter route.
  */
 import * as NodeChildProcess from "node:child_process"
 import * as Fs from "node:fs/promises"
 import * as Os from "node:os"
 import * as NodePath from "node:path"
-import { afterAll, describe, expect, it } from "vitest"
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import type * as Executor from "../src/Executor.ts"
 import * as PackageDiscovery from "../src/PackageDiscovery.ts"
 import * as PackageExec from "../src/PackageExec.ts"
@@ -84,6 +89,27 @@ const recorder = (): Reporter.Reporter & { readonly events: Array<string> } => {
   }
 }
 
+/**
+ * Collects what the run writes to the parent process pipes, so the
+ * repository-child route can be read back as text.
+ */
+const captureStandardStreams = (): { readonly stdout: Array<string>; readonly stderr: Array<string> } => {
+  const stdout: Array<string> = []
+  const stderr: Array<string> = []
+  const record = (sink: Array<string>) => (chunk: string | Uint8Array): boolean => {
+    sink.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk))
+    return true
+  }
+  vi.spyOn(process.stdout, "write").mockImplementation(record(stdout) as typeof process.stdout.write)
+  vi.spyOn(process.stderr, "write").mockImplementation(record(stderr) as typeof process.stderr.write)
+  return { stdout, stderr }
+}
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
+
 const openIndex = async (root: string): Promise<PackageIndex> =>
   PackageIndex.make(await PackageLoader.load(await PackageDiscovery.discover(root)), root)
 
@@ -111,6 +137,71 @@ describe("PackageExec reporter hooks", () => {
     expect(stderr).toBeLessThan(finished)
     expect(events.join("\n")).toContain("hello [REDACTED]")
     expect(events.join("\n")).not.toContain("private-value")
+  })
+
+  it("redacts and strips the child view a repository child writes to the parent process", async () => {
+    const root = await fixture(
+      "printf 'hello private-value\\n'; printf 'ansi \\033[2Jprivate-value\\n'; printf 'error private-value\\n' >&2"
+    )
+    const reporter = recorder()
+    const captured = captureStandardStreams()
+    const summary = await PackageExec.run({
+      index: await openIndex(root),
+      cacheDirectory: ".flows",
+      verb: "auto",
+      pattern: "//:good",
+      readCache: false,
+      reporter,
+      environment: { ...process.env, API_TOKEN: "private-value", SMTHRS_REPO_CHILD: "1" }
+    }) as Executor.Summary
+    expect(summary.ok).toBe(true)
+    const stdout = captured.stdout.join("")
+    const stderr = captured.stderr.join("")
+    expect(stdout).toContain("hello [REDACTED]")
+    expect(stderr).toContain("error [REDACTED]")
+    expect(stdout + stderr).not.toContain("private-value")
+    expect(stdout).not.toContain("\u001b")
+    expect(reporter.events.some((event) => event.startsWith("tool "))).toBe(false)
+  })
+
+  it("bounds the live lines a repository child writes to the parent process", async () => {
+    const root = await fixture("i=0; while [ $i -lt 250 ]; do echo \"line$i\"; i=$((i+1)); done")
+    const reporter = recorder()
+    const captured = captureStandardStreams()
+    const summary = await PackageExec.run({
+      index: await openIndex(root),
+      cacheDirectory: ".flows",
+      verb: "auto",
+      pattern: "//:good",
+      readCache: false,
+      reporter,
+      environment: { ...process.env, SMTHRS_REPO_CHILD: "1" }
+    }) as Executor.Summary
+    expect(summary.ok).toBe(true)
+    const stdout = captured.stdout.join("")
+    expect(stdout).toContain("… live output limit reached")
+    expect(stdout).not.toContain("line249")
+    expect(stdout.split("\n").length).toBeLessThan(210)
+  })
+
+  it("reads the repository-child marker from the injected environment, not the ambient one", async () => {
+    const root = await fixture("printf 'hello private-value\\n'")
+    vi.stubEnv("SMTHRS_REPO_CHILD", "1")
+    const { SMTHRS_REPO_CHILD: _child, ...ambient } = process.env
+    const reporter = recorder()
+    const captured = captureStandardStreams()
+    const summary = await PackageExec.run({
+      index: await openIndex(root),
+      cacheDirectory: ".flows",
+      verb: "auto",
+      pattern: "//:good",
+      readCache: false,
+      reporter,
+      environment: { ...ambient, API_TOKEN: "private-value" }
+    }) as Executor.Summary
+    expect(summary.ok).toBe(true)
+    expect(reporter.events.join("\n")).toContain("tool //:good stdout hello [REDACTED]")
+    expect(captured.stdout.join("") + captured.stderr.join("")).toBe("")
   })
 
   it("reports begin, starts, finishes, and the summary in order and never starts a blocked node", async () => {
