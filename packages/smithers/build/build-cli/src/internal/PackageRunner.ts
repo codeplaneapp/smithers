@@ -62,6 +62,7 @@ import {
   decodeStoredResolve,
   keyMaterialWithGraph,
   managerFilesOf,
+  planEnvironment,
   staticPrefixOf,
   takesExclusiveTreePermit,
   workspaceRootToken
@@ -676,7 +677,8 @@ export const execute = async (
       return DockerExec.serviceSpec({
         label: key,
         cwd: Exec.resolveWorkspacePath(treeRoot, serveNode.cwd),
-        attrs: serveNode.lane.attrs
+        attrs: serveNode.lane.attrs,
+        environment: planEnvironment(options.environment ?? process.env, options.remoteCache)
       })
     }
     if (serveNode.lane?.kind === "anvil-fork") {

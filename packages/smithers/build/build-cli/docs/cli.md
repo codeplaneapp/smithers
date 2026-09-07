@@ -402,7 +402,11 @@ A structured failure carries a code alongside its message.
 entry point and deleted from the environment before any declaration module
 evaluates, so no workspace file can read them. Both names, and every name a
 workspace marks sensitive, are also stripped from the environment of every
-spawned tool.
+spawned tool, in both phases. Planning strips them once, before it captures the
+host environment, so the tools it consults over workspace-controlled input
+never see them either: `forge config`, `go version`, `go env`, `go list`, `nix
+develop`, `docker info`, `docker buildx ls`, and each declared executable's
+version probe.
 
 ## Runtime
 

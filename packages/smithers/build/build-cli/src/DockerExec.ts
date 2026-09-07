@@ -32,11 +32,19 @@ export type DockerTool =
 /**
  * Resolves Docker and verifies that its daemon answers.
  *
+ * `environment` is the environment the plan resolved, already stripped of the
+ * workspace's remote-cache credential names. Without it these three probes
+ * inherited the whole process environment, so `docker info` and `buildx ls` --
+ * and any PATH-resolved impostor of the name -- read credentials every later
+ * spawn withholds.
+ *
  * @category planning
  * @since 0.1.0
  */
-export const resolveDocker = async (): Promise<DockerTool> => {
-  const path = PackageTree.findOnPath("docker")
+export const resolveDocker = async (
+  environment?: Readonly<Record<string, string | undefined>> | undefined
+): Promise<DockerTool> => {
+  const path = PackageTree.findOnPath("docker", environment)
   if (path === undefined) {
     return {
       ok: false,
@@ -44,9 +52,12 @@ export const resolveDocker = async (): Promise<DockerTool> => {
       identity: { tag: "Docker", absent: true }
     }
   }
-  const version = await PackageTree.probeVersion(path)
-  const daemon = await PackageTree.probeCommand(path, ["info", "--format", "{{.ServerVersion}}"])
-  const builders = daemon.exitCode === 0 ? await PackageTree.probeCommand(path, ["buildx", "ls"]) : undefined
+  const probeOptions = environment === undefined ? undefined : { environment }
+  const version = await PackageTree.probeVersion(path, probeOptions)
+  const daemon = await PackageTree.probeCommand(path, ["info", "--format", "{{.ServerVersion}}"], probeOptions)
+  const builders = daemon.exitCode === 0
+    ? await PackageTree.probeCommand(path, ["buildx", "ls"], probeOptions)
+    : undefined
   const builder = builders?.output.match(/^(\S+)\s+docker-container\s*$/m)?.[1]?.replace(/\*$/, "")
   const identity = { tag: "Docker", path, version, daemon, builder: builder ?? null }
   return daemon.exitCode === 0
@@ -112,8 +123,9 @@ export const plan = async (options: {
     | (typeof Docker.BuildAttrs)["Type"]
     | (typeof Docker.BakeAttrs)["Type"]
     | (typeof Docker.PushAttrs)["Type"]
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
 }): Promise<Plan> => {
-  const tool = await resolveDocker()
+  const tool = await resolveDocker(options.environment)
   if (!tool.ok) return { outDirs: [], toolchain: tool.identity, refusal: tool.refusal }
   if (options.rule === "Docker.Push") {
     const attrs = options.attrs as (typeof Docker.PushAttrs)["Type"]
@@ -209,8 +221,9 @@ export const serviceSpec = async (options: {
   readonly label: string
   readonly cwd: string
   readonly attrs: (typeof Docker.ServeAttrs)["Type"]
+  readonly environment?: Readonly<Record<string, string | undefined>> | undefined
 }): Promise<ServiceSupervisor.ServiceSpec | { readonly error: string }> => {
-  const tool = await resolveDocker()
+  const tool = await resolveDocker(options.environment)
   if (!tool.ok) return { error: tool.refusal }
   const name = containerName(options.label)
   const attrs = options.attrs

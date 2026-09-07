@@ -875,6 +875,7 @@ const resolveTool = async (context: PlanContext, reference: Record<string, unkno
       root: context.root,
       packagePath: "",
       workspace: context.index.workspace,
+      environment: context.environment,
       nix: context.nixEnvironment
     })
     outcome = resolved.ok
@@ -1808,7 +1809,8 @@ const visit = async (
         const plannedGo = await GoExec.planRule(rule, attrs as Record<string, unknown>, {
           root: context.root,
           packagePath,
-          workspace: context.index.workspace
+          workspace: context.index.workspace,
+          environment: toolContext.environment
         }, go.path)
         if (plannedGo.refusal !== undefined) noteRefusal(plannedGo.refusal)
         argv = plannedGo.argv === undefined ? undefined : [...plannedGo.argv]
@@ -1854,7 +1856,12 @@ const visit = async (
   }
 
   if (rule === "Docker.Build" || rule === "Docker.Bake" || rule === "Docker.Push") {
-    const planned = await DockerExec.plan({ rule, packagePath, attrs: attrs as never })
+    const planned = await DockerExec.plan({
+      rule,
+      packagePath,
+      attrs: attrs as never,
+      environment: context.environment
+    })
     toolchain.push(planned.toolchain)
     outDirs.push(...planned.outDirs)
     argv = planned.argv === undefined ? undefined : [...planned.argv]
@@ -1870,7 +1877,7 @@ const visit = async (
   }
 
   if (rule === "Docker.Serve" || rule === "Docker.Service") {
-    const resolved = await DockerExec.resolveDocker()
+    const resolved = await DockerExec.resolveDocker(context.environment)
     toolchain.push(resolved.identity)
     sandbox = "none"
     if (!resolved.ok) noteRefusal(resolved.refusal)
@@ -2939,6 +2946,41 @@ const managerBinaryOf = (workspace: PackageIndexModule.PackageIndex["workspace"]
 }
 
 /**
+ * The host environment plan-time tools may see.
+ *
+ * Execution withholds the default cache names and every name the workspace
+ * declares for a remote-cache credential from each spawn. Planning spawns host
+ * tools too, over workspace-controlled input: `forge config` evaluates
+ * `foundry.toml` and its profile, `go env` honours `GOFLAGS` and `GOTOOLCHAIN`,
+ * `nix develop` runs the flake's `shellHook`, and `docker info` talks to the
+ * daemon. Stripping only at execution left a declared write token readable by
+ * all of them, so the strip happens once here, before the environment is
+ * captured, and every plan-time spawn draws from this record rather than from
+ * `process.env`.
+ *
+ * @category planning
+ * @since 0.1.0
+ */
+export const planEnvironment = (
+  environment: Readonly<Record<string, string | undefined>>,
+  remoteCache: Workspace.RemoteCacheAccess | undefined
+): Readonly<Record<string, string | undefined>> => {
+  const key = (name: string): string => process.platform === "win32" ? name.toUpperCase() : name
+  const withheld = new Set(
+    [
+      "SMITHERS_CACHE_URL",
+      "SMITHERS_CACHE_TOKEN",
+      ...(remoteCache === undefined ? [] : Workspace.credentialEnvNames(remoteCache.credentials))
+    ].map(key)
+  )
+  const scrubbed: Record<string, string | undefined> = {}
+  for (const [name, value] of Object.entries(environment)) {
+    if (!withheld.has(key(name))) scrubbed[name] = value
+  }
+  return scrubbed
+}
+
+/**
  * Plans one PACKAGE.ts invocation: resolves roots, walks the graph,
  * resolves tools, and keys every node.
  *
@@ -3000,6 +3042,7 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
   // A declared environment resolves once per plan and fails closed: the
   // host's PATH is never consulted for a tool the workspace said comes from
   // the closure.
+  const hostEnvironment = planEnvironment(options.environment ?? process.env, options.remoteCache)
   const nixDeclaration = WorkspaceDeclaration.nixEnvironment(workspace)
   const nixEnvironment = nixDeclaration === undefined
     ? undefined
@@ -3007,11 +3050,10 @@ export const plan = async (options: RunOptions): Promise<PackagePlan> => {
       root: index.root,
       declaration: nixDeclaration,
       cacheDirectory: options.cacheDirectory,
-      environment: options.environment ?? process.env,
+      environment: hostEnvironment,
       signal: options.signal,
       log
     })
-  const hostEnvironment = options.environment ?? process.env
   const context: PlanContext = {
     root: index.root,
     cacheDirectory: options.cacheDirectory,

@@ -85,6 +85,24 @@ const moduleDirectory = (context: Context): string => {
   return NodePath.join(context.root, NodePath.dirname(mod))
 }
 
+/**
+ * The host environment a plan-time `go` or `nix` runs under.
+ *
+ * The planner hands down an environment it has already stripped of the
+ * workspace's remote-cache credential names. Falling back to `process.env`
+ * *underneath* that record put every one of those names back, so `go env`,
+ * `go list` and `nix develop` -- all of which run workspace-controlled
+ * configuration -- read credentials the same spawn is supposed to withhold.
+ * A caller that supplies no environment is not the CLI, and still inherits the
+ * process environment.
+ */
+const hostEnvironment = (context: Context): Record<string, string> => {
+  const source = context.environment ?? process.env
+  const env: Record<string, string> = {}
+  for (const [name, value] of Object.entries(source)) if (typeof value === "string") env[name] = value
+  return env
+}
+
 const execFile = (
   file: string,
   args: ReadonlyArray<string>,
@@ -95,7 +113,7 @@ const execFile = (
     NodeChildProcess.execFile(
       file,
       [...args],
-      { cwd, maxBuffer: 256 * 1024 * 1024, ...(env === undefined ? {} : { env: { ...process.env, ...env } }) },
+      { cwd, maxBuffer: 256 * 1024 * 1024, ...(env === undefined ? {} : { env: { ...env } }) },
       (error, stdout, stderr) => {
         if (error !== null) reject(new Error(`${file} ${args.join(" ")} failed: ${stderr || error.message}`))
         else resolve(stdout)
@@ -127,7 +145,7 @@ export const resolveGo = async (context: Context): Promise<
   // `go --version` is a usage error; `go version` is the subcommand that
   // reports the toolchain GOTOOLCHAIN actually switched to for this module,
   // which is the resolved version the key must record.
-  const env = { ...process.env, ...toolchainEnvironment(context), ...context.environment }
+  const env = { ...hostEnvironment(context), ...toolchainEnvironment(context), ...context.environment }
   const probe = await PackageTree.probeVersion(path, { cwd, args: ["version"], environment: env })
   // GOTOOLCHAIN can dispatch through an unchanged launcher to a different
   // SDK. Its version string does not identify compiler or linker bytes.
@@ -213,7 +231,7 @@ export const resolveNix = async (name: string, context: Context): Promise<
       }
       : { ok: true, path, identity: { tag: "NixBin", name, path, authority } }
   }
-  const nix = PackageTree.findOnPath("nix")
+  const nix = PackageTree.findOnPath("nix", context.environment)
   const declaration = context.workspace.toolchains?.find((entry) => entry._tag === "NixDevShell") as
     | { readonly flake: Input.File; readonly lock: Input.File }
     | undefined
@@ -234,7 +252,8 @@ export const resolveNix = async (name: string, context: Context): Promise<
     }
   }
   try {
-    const path = (await execFile(nix, ["develop", "--command", "which", name], context.root)).trim()
+    const path = (await execFile(nix, ["develop", "--command", "which", name], context.root, hostEnvironment(context)))
+      .trim()
     if (path === "") throw new Error("which returned no path")
     return { ok: true, path, identity: { tag: "NixBin", name, nix, path, authority } }
   } catch (cause) {
@@ -529,7 +548,7 @@ export const planRule = async (
   goPath: string
 ): Promise<Planned> => {
   const env = environment(context, attrs)
-  const listEnv = graphEnvironment(context, attrs)
+  const listEnv = { ...hostEnvironment(context), ...graphEnvironment(context, attrs) }
   const authority = moduleFiles(context)
   if (rule === "Go.Packages") {
     const packages = await selectedPackages(attrs["pkgs"], context, goPath, listEnv)
