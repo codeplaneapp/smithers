@@ -1,16 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import type { CatalogItem, CommandState } from "../flows/registry"
 import {
+  COMMANDS_MAX,
   isMaterialTransition,
   MAX_RECOMMENDATIONS,
-  parseRecommendations,
-  recommendationPrompt,
-  ruleSuggestions
+  parseRecommendation,
+  recommendRequest,
+  recommendTail,
+  ruleSuggestions,
+  TAIL_MAX_CHARS,
+  TAIL_MAX_MESSAGES
 } from "./Recommend"
 
 /*
- * The recommender's pure half: what triggers it, what it asks, how an answer
- * is validated against the registry, and the rule it falls back to.
+ * The recommender's pure half: what triggers it, the request the contract
+ * fixes, how the server's answer is validated against the registry, and the
+ * rule it falls back to.
  */
 
 const catalog: ReadonlyArray<CatalogItem> = [
@@ -30,7 +35,7 @@ const state: CommandState = {
   identity: "signed-in as will"
 }
 
-describe("recommend — triggers", () => {
+describe("recommend: triggers", () => {
   test("material transitions regenerate; keystrokes, deltas, menus, and its own write do not", () => {
     for (const type of ["repos.loaded", "connector.local.connected", "message.response.completed", "tab.opened"]) {
       expect(isMaterialTransition(type)).toBe(true)
@@ -50,82 +55,102 @@ describe("recommend — triggers", () => {
   })
 })
 
-describe("recommend — the answer contract", () => {
-  test("drops unknown and hidden flows, dedupes, caps, golds the first, keeps args only where the flow takes them", () => {
-    const answer = JSON.stringify({
-      suggestions: [
-        { flow: "/issues.view", label: "Open issue 12", args: "12", why: "you asked about it" },
-        { flow: "card.maximize", label: "hidden" },
-        { flow: "made.up", label: "nope" },
-        { flow: "issues.view", label: "duplicate" },
-        { flow: "world", label: "Notes", args: "ignored" },
-        { flow: "connect", label: "Connect" },
-        { flow: "flow.list", label: "Too many" }
+describe("recommend: the request", () => {
+  test("carries the repo, the tail with wire roles, and every offerable flow with its summary", () => {
+    const request = recommendRequest({
+      repo: "smithersai/smithers",
+      catalog,
+      messages: [
+        { role: "user", text: "what is failing in CI?" },
+        { role: "smithers", text: "Smithers ran /flows", act: "Smithers ran /flows" },
+        { role: "smithers", text: "   " },
+        { role: "smithers", text: "The typecheck target is red.\n" }
       ]
     })
-    const suggestions = parseRecommendations(`Sure:\n\`\`\`json\n${answer}\n\`\`\``, catalog)
-    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["issues.view", "world", "connect"])
-    expect(suggestions.length).toBe(MAX_RECOMMENDATIONS)
-    expect(suggestions[0]).toMatchObject({
-      id: "reco-issues.view",
-      label: "Open issue 12",
-      args: "12",
-      emphasis: "primary",
-      why: "you asked about it"
-    })
-    expect(suggestions[1]?.args).toBeUndefined()
-    expect(suggestions[1]?.emphasis).toBe("secondary")
+    expect(request.repo).toBe("smithersai/smithers")
+    expect(request.tail).toEqual([
+      { role: "user", text: "what is failing in CI?" },
+      { role: "assistant", text: "The typecheck target is red." }
+    ])
+    expect(request.commands).toEqual([
+      { name: "connect", summary: "Connect a repository" },
+      { name: "world", summary: "Open the world notes" },
+      { name: "flow.list", summary: "List the workflows on your workspace" },
+      { name: "issues.view", summary: "View an issue" }
+    ])
+    expect(request.commands.map((command) => command.name)).not.toContain("card.maximize")
+  })
+
+  test("the tail keeps the newest 12 messages and drops the oldest past 4000 characters", () => {
+    const many = Array.from({ length: 20 }, (_, index) => ({ role: "user" as const, text: `m${index}` }))
+    const capped = recommendTail(many)
+    expect(capped.length).toBe(TAIL_MAX_MESSAGES)
+    expect(capped[0]?.text).toBe("m8")
+    expect(capped.at(-1)?.text).toBe("m19")
+
+    const long = "x".repeat(3000)
+    const heavy = recommendTail([
+      { role: "user", text: long },
+      { role: "smithers", text: long },
+      { role: "user", text: "latest" }
+    ])
+    expect(heavy.map((entry) => entry.text)).toEqual([long, "latest"])
+    expect(heavy.reduce((sum, entry) => sum + entry.text.length, 0)).toBeLessThanOrEqual(TAIL_MAX_CHARS)
+
+    const [lone] = recommendTail([{ role: "user", text: `${"a".repeat(4000)}tail` }])
+    expect(lone?.text.length).toBe(TAIL_MAX_CHARS)
+    expect(lone?.text.endsWith("tail")).toBe(true)
+  })
+
+  test("the command list is capped at 300", () => {
+    const wide = Array.from({ length: 350 }, (_, index) => ({ name: `flow.${index}`, summary: `Flow ${index}` }))
+    expect(recommendRequest({ repo: null, catalog: wide, messages: [] }).commands.length).toBe(COMMANDS_MAX)
+  })
+})
+
+describe("recommend: the answer contract", () => {
+  test("drops unknown and hidden flows, dedupes, caps, golds the first, and labels with the summary", () => {
+    const answer = parseRecommendation(
+      {
+        id: "rec-1",
+        model: "gpt-oss-120b",
+        commands: ["/issues.view", "card.maximize", "made.up", "issues.view", "world", 7, "connect", "flow.list"]
+      },
+      catalog
+    )
+    expect(answer?.id).toBe("rec-1")
+    expect(answer?.model).toBe("gpt-oss-120b")
+    expect(answer?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["issues.view", "world", "connect"])
+    expect(answer?.suggestions.length).toBe(MAX_RECOMMENDATIONS)
+    expect(answer?.suggestions[0]).toMatchObject({ id: "reco-issues.view", label: "View an issue", emphasis: "primary" })
+    expect(answer?.suggestions[1]?.emphasis).toBe("secondary")
   })
 
   test("the surface the user is already on is never recommended", () => {
-    // Live answer on the chat: "Continue chat" → /chat, a click that changes nothing.
     const withChat = [...catalog, { name: "chat", summary: "Back to the conversation" }]
-    const answer = JSON.stringify({ suggestions: [{ flow: "chat", label: "Continue chat" }, { flow: "world", label: "Notes" }] })
-    expect(parseRecommendations(answer, withChat, "chat").map((s) => s.flow)).toEqual(["world"])
-    expect(parseRecommendations(answer, withChat, "world").map((s) => s.flow)).toEqual(["chat"])
-    expect(parseRecommendations(JSON.stringify({ suggestions: [{ flow: "connect" }] }), withChat, "connectors")).toEqual([])
+    const body = { id: "rec-2", model: "m", commands: ["chat", "world"] }
+    expect(parseRecommendation(body, withChat, "chat")?.suggestions.map((s) => s.flow)).toEqual(["world"])
+    expect(parseRecommendation(body, withChat, "world")?.suggestions.map((s) => s.flow)).toEqual(["chat"])
+    expect(parseRecommendation({ id: "rec-3", commands: ["connect"] }, withChat, "connectors")?.suggestions).toEqual([])
     // Without a surface the parser keeps its old contract.
-    expect(parseRecommendations(answer, withChat).map((s) => s.flow)).toEqual(["chat", "world"])
+    expect(parseRecommendation(body, withChat)?.suggestions.map((s) => s.flow)).toEqual(["chat", "world"])
   })
 
-  test("a label the model left out falls back to the flow's summary", () => {
-    const [only] = parseRecommendations(`{"suggestions":[{"flow":"world"}]}`, catalog)
-    expect(only?.label).toBe("Open the world notes")
-  })
-
-  test("prose, bad JSON, and a missing list are empty answers, never errors", () => {
-    expect(parseRecommendations("I would click connect.", catalog)).toEqual([])
-    expect(parseRecommendations("{not json", catalog)).toEqual([])
-    expect(parseRecommendations(`{"answer":"world"}`, catalog)).toEqual([])
-    expect(parseRecommendations(`{"suggestions":"world"}`, catalog)).toEqual([])
-  })
-})
-
-describe("recommend — the prompt", () => {
-  test("lists only offerable flows and demands one JSON object", () => {
-    const prompt = recommendationPrompt({
-      state,
-      catalog,
-      repoStep: "none",
-      repos: ["smithers"],
-      connectors: [],
-      tabs: ["Smithers", "Terminal"],
-      messages: [
-        { role: "user", text: "what is failing in CI?" },
-        { role: "smithers", text: "Smithers ran /flows", act: "Smithers ran /flows" }
-      ],
-      cards: [{ kind: "targets", title: "smithers", status: "acted" }]
+  test("an answer naming nothing offerable is an id with no pills; a body without an id or list is no answer", () => {
+    expect(parseRecommendation({ id: "rec-4", model: "m", commands: [] }, catalog)).toEqual({
+      id: "rec-4",
+      model: "m",
+      suggestions: []
     })
-    expect(prompt.instructions).toContain("ONE JSON object")
-    expect(prompt.user).toContain("- issues.view: View an issue (args: <number>)")
-    expect(prompt.user).not.toContain("card.maximize")
-    expect(prompt.user).toContain("user: what is failing in CI?")
-    expect(prompt.user).not.toContain("Smithers ran /flows")
-    expect(prompt.user).toContain("Repositories open: smithers")
+    expect(parseRecommendation({ id: "rec-5", commands: ["made.up"] }, catalog)?.suggestions).toEqual([])
+    expect(parseRecommendation("world", catalog)).toBeUndefined()
+    expect(parseRecommendation(null, catalog)).toBeUndefined()
+    expect(parseRecommendation({ commands: ["world"] }, catalog)).toBeUndefined()
+    expect(parseRecommendation({ id: "rec-6", commands: "world" }, catalog)).toBeUndefined()
   })
 })
 
-describe("recommend — the rule", () => {
+describe("recommend: the rule", () => {
   test("the repo step leads, then the registry's recommendation order, capped", () => {
     const suggestions = ruleSuggestions({ state: { ...state, hasConnectors: false }, catalog, repoStep: "local" })
     expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["repo.open", "connect", "world"])

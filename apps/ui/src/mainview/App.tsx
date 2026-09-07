@@ -686,7 +686,7 @@ function App() {
               autoFocus={authMessage === undefined}
               placeholder="Ask Smithers to work on something…"
             />
-            {/* The next-step pills sit UNDER the chat box; DOM order is focus order: composer, then pills. Feature-flagged (features.suggestionPills), off by default. */}
+            {/* The next-step pills sit UNDER the chat box; DOM order is focus order: composer, then pills. Feature-flagged (features.suggestionPills), on for the cloud host. */}
             {controller.features.suggestionPills ? <SuggestionGroup className="smithers-suggestions">
               {suggestions.map((suggestion) => (
                 <Suggestion

@@ -1,6 +1,5 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
-import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { RECOMMENDATION_ID } from "./AppState"
@@ -8,11 +7,13 @@ import type { Repo } from "./AppState"
 import { createAppController } from "./AppController"
 import type { AppServices } from "./AppController"
 import { createAppStore } from "./AppStore"
+import { RECOMMEND_OUTCOME_PATH, RECOMMEND_PATH } from "./Recommend"
 
 /*
  * The recommender as a workflow: a material change → the `recommend` flow →
- * the rule's pills at once, then a cheap side turn whose validated answer
- * replaces them. No real model is ever asked here — the agent is a recorder.
+ * the rule's pills at once, then ONE POST /api/recommend whose validated
+ * answer replaces them, and the user's next dispatch reported once as the
+ * outcome. No real model is ever asked here: the Worker is a recorder.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -36,6 +37,23 @@ const unavailableRepositories: NativeRepositories = {
 const nativeRepositories: NativeRepositories = {
   available: true,
   pickLocalRepository: async () => ({ status: "cancelled" })
+}
+
+const silentAgent: NativeAgent = {
+  available: true,
+  startTurn: async () => ({ status: "started" }),
+  cancelTurn: async () => {},
+  subscribe: () => () => {}
+}
+
+const cloudBootstrap: AppBootstrap = {
+  apiVersion: 1,
+  host: "cloud",
+  version: "test",
+  buildSha: "cloud",
+  capabilities: ["agent", "identity", "cloud"],
+  authFlow: "redirect",
+  sandbox: null
 }
 
 const localBootstrap: AppBootstrap = {
@@ -63,49 +81,45 @@ const repo: Repo = {
   }
 }
 
-const settle = async (ticks = 4) => {
+const settle = async (ticks = 6) => {
   for (let tick = 0; tick < ticks; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-/** An agent that records every side turn and answers on demand. */
-const recordingAgent = (available = true) => {
-  const launches: StartAgentTurnRequest[] = []
-  const cancelled: string[] = []
-  const listeners = new Set<(frame: AgentTurnFrame) => void>()
-  const agent: NativeAgent = {
-    available,
-    startTurn: async (request) => {
-      launches.push(request)
-      return { status: "started" }
-    },
-    cancelTurn: async (runId) => {
-      cancelled.push(runId)
-    },
-    subscribe: (listener) => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    }
-  }
-  const emit = (frame: AgentTurnFrame) => {
-    for (const listener of listeners) listener(frame)
+const json = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+
+interface Hit {
+  readonly path: string
+  readonly method: string
+  readonly body: Record<string, unknown>
+}
+
+/** A Worker double that records every recommend call and answers from a script, newest answer first. */
+const recorder = (answers: Array<() => Response> = []) => {
+  const hits: Hit[] = []
+  const fetchImpl = async (input: unknown, init?: RequestInit): Promise<Response> => {
+    const url = typeof input === "string" ? input : String(input)
+    const path = new URL(url, "https://app.test").pathname
+    const body = typeof init?.body === "string" && init.body !== "" ? (JSON.parse(init.body) as Record<string, unknown>) : {}
+    hits.push({ path, method: init?.method ?? "GET", body })
+    if (path === RECOMMEND_OUTCOME_PATH) return new Response(null, { status: 204 })
+    if (path === RECOMMEND_PATH) return (answers.shift() ?? (() => json(503, { status: "error", message: "no key" })))()
+    return json(404, { status: "error" })
   }
   return {
-    agent,
-    launches,
-    cancelled,
-    answer: (runId: string, text: string) => {
-      emit({ runId, type: "delta", kind: "text", text })
-      emit({ runId, type: "done", reason: "stop" })
-    },
-    fail: (runId: string) => emit({ runId, type: "done", error: "upstream refused" })
+    fetchImpl,
+    hits,
+    recommends: () => hits.filter((hit) => hit.path === RECOMMEND_PATH),
+    outcomes: () => hits.filter((hit) => hit.path === RECOMMEND_OUTCOME_PATH)
   }
 }
 
-const boot = async (agent: NativeAgent, repositories = nativeRepositories, services: AppServices = {}) => {
+const answer = (id: string, commands: ReadonlyArray<string>) => () => json(200, { id, commands, model: "gpt-oss-120b" })
+
+const boot = async (services: AppServices = {}, repositories = unavailableRepositories) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-  const controller = createAppController(store, repositories, agent, {
-    bootstrap: localBootstrap,
-    features: { suggestionPills: true },
+  const controller = createAppController(store, repositories, silentAgent, {
+    bootstrap: cloudBootstrap,
     recommender: { enabled: true, debounceMs: 0 },
     ...services
   })
@@ -115,9 +129,20 @@ const boot = async (agent: NativeAgent, repositories = nativeRepositories, servi
 const row = (store: Awaited<ReturnType<typeof boot>>["store"]) =>
   store.collections.recommendations.get(RECOMMENDATION_ID)
 
-describe("recommend — the flow", () => {
+const signIn = (store: Awaited<ReturnType<typeof boot>>["store"]) =>
+  store.dispatch({
+    type: "identity.session.loaded",
+    actor: "system",
+    state: "signed-in",
+    login: "will",
+    allowlisted: true,
+    admin: false,
+    scopesPlain: null
+  })
+
+describe("recommend: the flow", () => {
   test("is registered, hidden from the slash menu, and never the model's to call", async () => {
-    const { controller } = await boot(recordingAgent().agent)
+    const { controller } = await boot()
     const entry = controller.commands.find("system.recommend")
     expect(entry).toBeDefined()
     expect(entry?.metadata.hidden).toBe(true)
@@ -125,136 +150,231 @@ describe("recommend — the flow", () => {
     expect(controller.slashItems("recomm").map((item) => item.flow.name)).not.toContain("system.recommend")
   })
 
-  test("opening a repository retires 'Select a repo' at once and asks the cheap tier for the next click", async () => {
-    const recorder = recordingAgent()
-    const { store, controller } = await boot(recorder.agent)
-    // The fresh session's rule: the repo step leads.
-    await controller.recommend()
-    expect(row(store)?.suggestions[0]?.flow).toBe("repo.open")
-
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
-    await settle()
-
-    const current = row(store)
-    expect(current?.source).toBe("rule")
-    expect(current?.suggestions.map((suggestion) => suggestion.flow)).not.toContain("repo.open")
-    const side = recorder.launches.filter((launch) => launch.runId.startsWith("recommend-")).at(-1)
-    expect(side).toBeDefined()
-    expect(side?.tier).toBe("cheap")
-    expect(side?.purpose).toBe("recommend")
-    expect(side?.tools).toBeUndefined()
-    const ask = side?.messages[0]
-    expect(ask !== undefined && "content" in ask ? ask.content : "").toContain("Repositories open: smithers")
-    // The side turn is invisible to the conversation.
-    expect(store.session().phase).toBe("idle")
-    expect([...store.collections.messages.values()].some((message) => message.role === "user")).toBe(false)
+  test("the pills default ON for the cloud host and OFF elsewhere; an explicit value wins", async () => {
+    const cloud = await boot()
+    expect(cloud.controller.features.suggestionPills).toBe(true)
+    const cloudOff = await boot({ features: { suggestionPills: false } })
+    expect(cloudOff.controller.features.suggestionPills).toBe(false)
+    const local = await boot({ bootstrap: localBootstrap }, nativeRepositories)
+    expect(local.controller.features.suggestionPills).toBe(false)
+    const localOn = await boot({ bootstrap: localBootstrap, features: { suggestionPills: true } }, nativeRepositories)
+    expect(localOn.controller.features.suggestionPills).toBe(true)
   })
 
-  test("the agent's validated answer replaces the rule; unknown flows are dropped", async () => {
-    const recorder = recordingAgent()
-    const { store } = await boot(recorder.agent)
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+  test("a material transition writes the rule at once and sends ONE request in the contract's shape", async () => {
+    const worker = recorder([answer("rec-1", ["world", "chat.commands"])])
+    const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
+    store.dispatch({ type: "message.submitted", actor: "user", turnId: "t1", text: "what can you do here?" })
+    store.dispatch({ type: "message.appended", actor: "system", text: "I can list flows and read files." })
+    store.dispatch({ type: "message.response.completed", actor: "smithers", turnId: "t1" })
     await settle()
-    const side = recorder.launches.find((launch) => launch.runId.startsWith("recommend-"))
-    recorder.answer(
-      side?.runId ?? "",
-      JSON.stringify({
-        suggestions: [
-          { flow: "chat.commands", label: "See what I can do", why: "fresh repository" },
-          { flow: "deploy.everything", label: "nope" }
-        ]
-      })
-    )
+
+    const requests = worker.recommends()
+    expect(requests.length).toBe(1)
+    expect(requests[0]?.method).toBe("POST")
+    const body = requests[0]?.body ?? {}
+    expect(body.repo).toBeNull()
+    expect(body.tail).toEqual([
+      { role: "user", text: "what can you do here?" },
+      { role: "assistant", text: "I can list flows and read files." }
+    ])
+    const commands = body.commands as Array<{ name: string; summary: string }>
+    expect(commands.length).toBeGreaterThan(0)
+    expect(commands.length).toBeLessThanOrEqual(300)
+    // Every entry is a flow this session can invoke, listed with the slash menu's one-line summary.
+    for (const command of commands) {
+      const entry = controller.commands.find(command.name)
+      expect(entry).toBeDefined()
+      expect(entry?.metadata.hidden).not.toBe(true)
+      expect(command.summary).toBe(entry?.metadata.summary ?? "")
+    }
+    expect(commands.map((command) => command.name)).toContain("world")
+    expect(commands.map((command) => command.name)).not.toContain("system.recommend")
+
+    const current = row(store)
+    expect(current?.source).toBe("agent")
+    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world", "chat.commands"])
+    expect(current?.suggestions[0]?.emphasis).toBe("primary")
+    // The request is invisible to the conversation.
+    expect(store.session().phase).toBe("idle")
+  })
+
+  test("the request names the selected repository", async () => {
+    const worker = recorder([answer("rec-1", ["world"])])
+    const { store } = await boot({ fetchImpl: worker.fetchImpl })
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: null, catalog: true }]
+    })
+    store.dispatch({ type: "repo.selected", actor: "user", id: "smithersai/smithers" })
+    signIn(store)
+    await settle()
+    expect(worker.recommends().at(-1)?.body.repo).toBe("smithersai/smithers")
+  })
+
+  test("the validated answer drops names the registry does not offer; the pills cap at three", async () => {
+    const worker = recorder([answer("rec-1", ["deploy.everything", "chat.commands", "card.maximize", "world", "connect", "flow.list"])])
+    const { store } = await boot({ fetchImpl: worker.fetchImpl })
+    signIn(store)
     await settle()
     const current = row(store)
     expect(current?.source).toBe("agent")
-    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["chat.commands"])
-    expect(current?.suggestions[0]).toMatchObject({ label: "See what I can do", why: "fresh repository", emphasis: "primary" })
+    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["chat.commands", "world", "connect"])
   })
 
-  test("a refused, failed, or empty answer leaves the rule standing", async () => {
-    const recorder = recordingAgent()
-    const { store } = await boot(recorder.agent)
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
-    await settle()
-    const side = recorder.launches.find((launch) => launch.runId.startsWith("recommend-"))
-    recorder.fail(side?.runId ?? "")
+  test("a 429, a 503, a network failure, or an empty answer leaves the rule standing and never an empty row", async () => {
+    const worker = recorder([
+      () => json(429, { status: "error", code: "turn_rate_limited", message: "spent" }),
+      () => json(503, { status: "error", message: "CEREBRAS_API_KEY is unset" }),
+      () => { throw new Error("network down") },
+      answer("rec-empty", [])
+    ])
+    const { store } = await boot({ fetchImpl: worker.fetchImpl })
+    signIn(store)
     await settle()
     expect(row(store)?.source).toBe("rule")
+    expect(row(store)?.suggestions.length).toBeGreaterThan(0)
+    for (const step of [1, 2, 3]) {
+      store.dispatch({
+        type: "tab.opened",
+        actor: "user",
+        tab: { id: `tab-${step}`, kind: "terminal", title: "Terminal", sessionId: `pty-${step}`, cwd: "/Users/will/smithers" }
+      })
+      await settle()
+      expect(row(store)?.source).toBe("rule")
+      expect(row(store)?.suggestions.length).toBeGreaterThan(0)
+    }
+    expect(worker.recommends().length).toBe(4)
+  })
 
+  test("a newer state supersedes the request in flight; the old answer is dropped", async () => {
+    let releaseFirst: (() => void) | undefined
+    const worker = recorder([
+      () => json(200, { id: "rec-old", commands: ["chat.commands"], model: "m" }),
+      answer("rec-new", ["world"])
+    ])
+    // The first answer waits until the second state has asked.
+    const gated = async (input: unknown, init?: RequestInit) => {
+      const response = await worker.fetchImpl(input, init)
+      const path = new URL(typeof input === "string" ? input : String(input), "https://app.test").pathname
+      if (path === RECOMMEND_PATH && worker.recommends().length === 1) {
+        await new Promise<void>((resolve) => { releaseFirst = resolve })
+      }
+      return response
+    }
+    const { store } = await boot({ fetchImpl: gated })
+    signIn(store)
+    await settle()
+    store.dispatch({ type: "identity.session.cleared", actor: "user" })
+    await settle()
+    expect(worker.recommends().length).toBe(2)
+    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world"])
+    releaseFirst?.()
+    await settle()
+    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world"])
+  })
+
+  test("the next user dispatch reports the outcome exactly once, through any door", async () => {
+    const worker = recorder([answer("rec-1", ["world", "chat.commands"]), answer("rec-2", ["connect"])])
+    const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
+    signIn(store)
+    await settle()
+    expect(worker.outcomes().length).toBe(0)
+
+    // The pill (or the slash line, or a button): the registry's one door.
+    controller.runCommand("chat.commands")
+    await settle()
+    expect(worker.outcomes().map((hit) => hit.body)).toEqual([{ id: "rec-1", command: "chat.commands" }])
+
+    // A second dispatch before a fresh recommendation reports nothing more.
+    controller.runCommand("world")
+    await settle()
+    expect(worker.outcomes().length).toBe(1)
+
+    // A fresh recommendation opens a fresh outcome.
     store.dispatch({
       type: "tab.opened",
       actor: "user",
       tab: { id: "tab-x", kind: "terminal", title: "Terminal", sessionId: "pty-x", cwd: "/Users/will/smithers" }
     })
     await settle()
-    const second = recorder.launches.filter((launch) => launch.runId.startsWith("recommend-"))[1]
-    recorder.answer(second?.runId ?? "", "Just click around.")
+    controller.runCommand("connect")
     await settle()
-    expect(row(store)?.source).toBe("rule")
+    expect(worker.outcomes().map((hit) => hit.body)).toEqual([
+      { id: "rec-1", command: "chat.commands" },
+      { id: "rec-2", command: "connect" }
+    ])
   })
 
-  test("without an agent seam the rule alone writes the row and nothing is launched", async () => {
-    const recorder = recordingAgent(false)
-    const { store } = await boot(recorder.agent, unavailableRepositories)
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+  test("a hidden act, the recommender's own flow, and the agent's door are never the outcome", async () => {
+    const worker = recorder([answer("rec-1", ["world"])])
+    const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
+    signIn(store)
     await settle()
-    expect(row(store)?.source).toBe("rule")
-    expect(recorder.launches.length).toBe(0)
+    await controller.commands.run("system.recommend")
+    await controller.commands.run("card.maximize", "card-none")
+    await controller.commands.runAsAgent("world")
+    await settle()
+    expect(worker.outcomes().length).toBe(0)
+    controller.runCommand("world")
+    await settle()
+    expect(worker.outcomes().map((hit) => hit.body)).toEqual([{ id: "rec-1", command: "world" }])
   })
 
-  test("a newer state supersedes the side turn in flight; the old answer is dropped", async () => {
-    const recorder = recordingAgent()
-    const { store } = await boot(recorder.agent)
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+  test("without a recommendation the user's dispatch reports nothing", async () => {
+    const worker = recorder([() => json(503, { status: "error", message: "CEREBRAS_API_KEY is unset" })])
+    const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
+    signIn(store)
     await settle()
-    const first = recorder.launches.find((launch) => launch.runId.startsWith("recommend-"))
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [] })
+    controller.runCommand("world")
     await settle()
-    const sides = recorder.launches.filter((launch) => launch.runId.startsWith("recommend-"))
-    expect(sides.length).toBe(2)
-    expect(recorder.cancelled).toContain(first?.runId ?? "")
-    recorder.answer(first?.runId ?? "", JSON.stringify({ suggestions: [{ flow: "chat.commands", label: "Stale" }] }))
-    await settle()
-    expect(row(store)?.source).toBe("rule")
-    recorder.answer(sides[1]?.runId ?? "", JSON.stringify({ suggestions: [{ flow: "world", label: "Fresh" }] }))
-    await settle()
-    expect(row(store)?.suggestions.map((suggestion) => suggestion.label)).toEqual(["Fresh"])
+    expect(worker.outcomes().length).toBe(0)
   })
 
   test("a keystroke never regenerates", async () => {
-    const recorder = recordingAgent()
-    const { controller } = await boot(recorder.agent)
+    const worker = recorder()
+    const { controller } = await boot({ fetchImpl: worker.fetchImpl })
     controller.changeDraft("hel")
     controller.changeDraft("hello")
     await settle()
-    expect(recorder.launches.length).toBe(0)
+    expect(worker.recommends().length).toBe(0)
   })
 
-  test("feature flag off (the default): the recommender enabled or not, no side turn launches; the rule row still lands", async () => {
-    const recorder = recordingAgent()
-    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    createAppController(store, nativeRepositories, recorder.agent, {
-      bootstrap: localBootstrap,
-      recommender: { enabled: true, debounceMs: 0 }
-    })
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+  test("pills off: the rule row still lands and no request leaves", async () => {
+    const worker = recorder([answer("rec-1", ["world"])])
+    const { store } = await boot({ fetchImpl: worker.fetchImpl, features: { suggestionPills: false } })
+    signIn(store)
     await settle()
-    expect(recorder.launches.length).toBe(0)
-    expect(store.collections.recommendations.get(RECOMMENDATION_ID)?.source).toBe("rule")
+    expect(worker.recommends().length).toBe(0)
+    expect(row(store)?.source).toBe("rule")
   })
 
-  test("opt-in: a harness that does not enable it gets the rule only and its agent seam is never called", async () => {
-    const recorder = recordingAgent()
+  test("opt-in: a composition root that does not enable the recommender gets the rule only", async () => {
+    const worker = recorder([answer("rec-1", ["world"])])
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
-    createAppController(store, nativeRepositories, recorder.agent, {
-      bootstrap: localBootstrap,
-      features: { suggestionPills: true },
+    createAppController(store, unavailableRepositories, silentAgent, {
+      bootstrap: cloudBootstrap,
+      fetchImpl: worker.fetchImpl,
       recommender: { debounceMs: 0 }
     })
-    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+    signIn(store)
     await settle()
     expect(row(store)?.source).toBe("rule")
-    expect(recorder.launches.length).toBe(0)
+    expect(worker.recommends().length).toBe(0)
+  })
+
+  test("the local host: opening a repository retires 'Select a repo' at once through the rule", async () => {
+    // No key on this origin: every request is a 503, so the rule alone writes the row.
+    const worker = recorder()
+    const { store, controller } = await boot(
+      { bootstrap: localBootstrap, fetchImpl: worker.fetchImpl, features: { suggestionPills: true } },
+      nativeRepositories
+    )
+    await controller.recommend()
+    expect(row(store)?.suggestions[0]?.flow).toBe("repo.open")
+    store.dispatch({ type: "repos.loaded", actor: "system", repos: [repo] })
+    await settle()
+    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).not.toContain("repo.open")
   })
 })

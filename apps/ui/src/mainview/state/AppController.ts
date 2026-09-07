@@ -14,7 +14,7 @@ import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
-import { activeCatalogRepositoryId } from "./RepoContext"
+import { activeCatalogRepositoryId, activeRepositoryId } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
 import { createLspClient } from "./LspClient"
@@ -542,18 +542,20 @@ export interface AppServices {
    */
   readonly seamTimeoutMs?: number
   /**
-   * The next-step recommender (Recommend.ts): the model tier its side turn
-   * asks for (`cheap` by default), the debounce, the timeout, or off.
+   * The next-step recommender (Recommend.ts): whether it asks the server's
+   * POST /api/recommend at all (off by default) and its debounce.
    */
   readonly recommender?: RecommenderConfig
   /** The explainer side turn's timeout (controller/explain.ts). */
   readonly explainer?: ExplainConfig
   /**
-   * Feature flags. `suggestionPills` (default OFF): the next-action pills
-   * under the composer and the recommender's cheap-agent side turns behind
-   * them. Off, the pill row is absent from the DOM and no side turn launches;
-   * the `recommend` flow still writes its rule row so turning the flag on
-   * later works without a schema change.
+   * Feature flags. `suggestionPills`: the next-action pills under the
+   * composer and the recommender's POST /api/recommend requests behind them.
+   * Default ON for the cloud host (the Worker serves the route) and OFF
+   * elsewhere; an explicit value wins, so a test can turn the row off on the
+   * cloud host or on elsewhere. Off, the pill row is absent from the DOM and
+   * no request leaves; the `recommend` flow still writes its rule row so
+   * turning the flag on later works without a schema change.
    */
   readonly features?: AppFeatures
 }
@@ -576,7 +578,9 @@ export const createAppController = (
   const actors = createActorBindings(ctx.onDispose)
   if (store.dispose !== undefined) ctx.onDispose(store.dispose)
   const { baseUrl, http } = ctx
-  const features: Required<AppFeatures> = { suggestionPills: services.features?.suggestionPills === true }
+  const features: Required<AppFeatures> = {
+    suggestionPills: services.features?.suggestionPills ?? services.bootstrap?.host === "cloud"
+  }
   const { withToast, resolveToast, dismissToast, surfaceCommandFailure } = createFailureController(ctx)
   ctx.withToast = withToast
   ctx.resolveToast = resolveToast
@@ -924,7 +928,8 @@ export const createAppController = (
         connectors: [...store.collections.connectors.values()],
         repos: [...store.collections.repos.values()]
       }),
-    // Without the pills there is nowhere for an agent answer to show, so no side turn launches.
+    repo: () => activeRepositoryId(store),
+    // Without the pills there is nowhere for the server's answer to show, so no request leaves.
     config: { ...services.recommender, enabled: (services.recommender?.enabled ?? false) && features.suggestionPills }
   })
   const recommend = recommender.recommend
@@ -1334,7 +1339,19 @@ export const createAppController = (
       }
     }
   }
-  const commands = createCommandRegistry(commandActions, actors.select(commandActions))
+  const registry = createCommandRegistry(commandActions, actors.select(commandActions))
+  /*
+   * The user's one door (slash, button, pill, form submit) also answers the
+   * standing recommendation: the recommender reports the dispatched flow as
+   * its outcome before the flow runs. The agent's doors never pass here.
+   */
+  const commands: CommandRegistry = {
+    ...registry,
+    run: (name, args) => {
+      recommender.noteDispatch(name)
+      return registry.run(name, args)
+    }
+  }
   ctx.commands = commands
 
   subscribeToAgent()
