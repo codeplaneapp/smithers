@@ -30,6 +30,7 @@ import { repoImportCardFamily } from "./RepoImportCard"
 import { runHistoryCardFamily } from "./RunHistoryCard"
 import { runsCardFamily } from "./RunsCards"
 import { runTimelineCardFamily } from "./RunTimelineCard"
+import { secretsCardFamily } from "./SecretsCard"
 import { serviceLogCardFamily } from "./ServiceLogCard"
 import { syncCardFamily } from "./SyncCards"
 import { targetCardFamily } from "./TargetCards"
@@ -55,6 +56,7 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   changeCardFamily,
   notificationsCardFamily,
   envCardFamily,
+  secretsCardFamily,
   repoImportCardFamily,
   syncCardFamily,
   branchesCardFamily,
@@ -88,6 +90,7 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...changeCardFamily,
   ...notificationsCardFamily,
   ...envCardFamily,
+  ...secretsCardFamily,
   ...repoImportCardFamily,
   ...syncCardFamily,
   ...branchesCardFamily,

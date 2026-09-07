@@ -5,11 +5,13 @@ import { createAppController } from "../AppController"
 import type { AppServices } from "../AppController"
 import { createAppStore } from "../AppStore"
 import type { AppStore } from "../AppStore"
+import { parseEnvironment } from "./EnvironmentSeam"
 
 /*
  * The agent-environment seam (EnvironmentSeam.ts) through the real command
  * path: /env.view reads GET /api/repos/{owner}/{repo}/agent-environment and
- * surfaces the "env" card (vars, setup script, secret NAMES only); /env.set
+ * surfaces the "env" card (vars and the setup script; secrets belong to the
+ * secrets card, SecretsSeam.test.ts); /env.set
  * validates one NAME=value pair, merges it into the current answer, PUTs the
  * WHOLE document back, and re-reads. Failures are honest strings, never
  * throws.
@@ -145,7 +147,7 @@ const envCard = (store: AppStore, repo = "will/flows") => {
 }
 
 describe("environment seam — env.view", () => {
-  test("surfaces the env card from the platform answer: vars, setup script, secret NAMES only", async () => {
+  test("surfaces the env card from the platform answer: vars and setup script, no secret", async () => {
     const { store, controller, requests } = await freshController()
     await ready(store)
     const outcome = await controller.commands.run("env.view")
@@ -163,8 +165,8 @@ describe("environment seam — env.view", () => {
     expect(card?.payload.repo).toBe("will/flows")
     expect(card?.payload.vars).toEqual([{ name: "CI", value: "1" }])
     expect(card?.payload.setupScript).toBe("bun install")
-    // Secret NAMES only — no value and no metadata ever reaches the card.
-    expect(card?.payload.secretNames).toEqual(["NPM_TOKEN"])
+    // Secrets are the secrets card's: not even their names ride on the env card.
+    expect(JSON.stringify(card)).not.toContain("NPM_TOKEN")
     expect(JSON.stringify(card)).not.toContain("updated_at")
   })
 
@@ -235,7 +237,6 @@ describe("environment seam — env.set", () => {
       { name: "NODE_ENV", value: "production" }
     ])
     expect(card?.payload.setupScript).toBe("bun install")
-    expect(card?.payload.secretNames).toEqual(["NPM_TOKEN"])
   })
 
   test("an existing name is replaced, not duplicated", async () => {
@@ -329,5 +330,44 @@ describe("environment seam — honest failures", () => {
       )
     }
     expect(envCard(store)).toBeUndefined()
+  })
+})
+
+/*
+ * The parser the secrets seam shares: plue's AgentEnvironmentResponse carries
+ * each secret as {name, hosts, match_headers, updated_at} and never a value.
+ */
+describe("parseEnvironment: secret metadata", () => {
+  const document = {
+    setup_script: "",
+    env: [],
+    secrets: [
+      { name: "NPM_TOKEN", hosts: ["registry.npmjs.org"], match_headers: ["authorization"], updated_at: "2026-08-01T00:00:00Z" },
+      { name: "SETUP_ONLY", hosts: [], match_headers: [], updated_at: "2026-08-02T00:00:00Z" }
+    ]
+  }
+
+  test("reads hosts, match headers and the updated time per secret", () => {
+    expect(parseEnvironment(document)?.secrets).toEqual([
+      { name: "NPM_TOKEN", hosts: ["registry.npmjs.org"], matchHeaders: ["authorization"], updatedAt: "2026-08-01T00:00:00Z" },
+      { name: "SETUP_ONLY", hosts: [], matchHeaders: [], updatedAt: "2026-08-02T00:00:00Z" }
+    ])
+  })
+
+  test("a secret row without binding or time fields is a setup-only secret with no updated time", () => {
+    const config = parseEnvironment({ ...document, secrets: [{ name: "LEGACY" }] })
+    expect(config?.secrets).toEqual([{ name: "LEGACY", hosts: [], matchHeaders: [], updatedAt: null }])
+  })
+
+  test("a value field on the wire is never carried into the config", () => {
+    const config = parseEnvironment({ ...document, secrets: [{ name: "LEAKY", value: "hunter2" }] })
+    expect(JSON.stringify(config)).not.toContain("hunter2")
+  })
+
+  test("off-shape rows null the whole answer: a non-list hosts field, a non-string host, a nameless secret", () => {
+    expect(parseEnvironment({ ...document, secrets: [{ name: "X", hosts: "registry.npmjs.org" }] })).toBeNull()
+    expect(parseEnvironment({ ...document, secrets: [{ name: "X", hosts: [1] }] })).toBeNull()
+    expect(parseEnvironment({ ...document, secrets: [{ hosts: [] }] })).toBeNull()
+    expect(parseEnvironment({ setup_script: "", env: [] })).toBeNull()
   })
 })

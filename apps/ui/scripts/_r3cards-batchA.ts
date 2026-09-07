@@ -9,6 +9,7 @@ const FLOWS: Array<[string, string]> = [
   ["/theme", "theme-picker"],
   ["/notifications.list", "notifications"],
   ["/env.view", "env"],
+  ["/secrets.list", "secrets"],
   ["/branches.list", "branches"],
   ["/files.list", "file-list"],
   ["/issues.list", "issue-list"],

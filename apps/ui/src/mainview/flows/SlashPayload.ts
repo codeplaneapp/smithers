@@ -362,6 +362,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (rest === "") return no("env.set needs a NAME=value pair")
     return ok(repo === undefined ? { assignment: rest } : { assignment: rest, repo })
   },
+  "secrets.list": (args) => repoOnly("secrets.list", args),
   "branches.list": (args) => repoOnly("branches.list", args),
   /*
    * Lane citc: the workspace flows. An id is always one token; fork's and

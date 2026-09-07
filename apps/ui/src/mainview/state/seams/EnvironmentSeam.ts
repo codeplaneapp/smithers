@@ -1,7 +1,8 @@
 /*
  * The agent-environment seam: GET/PUT /api/repos/{owner}/{repo}/
  * agent-environment. Environment VARS and the setup script read and write
- * here; SECRETS are write-only upstream and only their names surface.
+ * here; SECRETS are write-only upstream and only their metadata (name, egress
+ * binding, updated time) is parsed, for the secrets card (SecretsSeam.ts).
  * Reference: multi src/smithersCloud/agentEnvironment.ts.
  */
 import type { Card } from "../AppState"
@@ -23,20 +24,47 @@ interface EnvironmentVariable {
   readonly value: string
 }
 
+/**
+ * One secret's metadata, mirrored from plue's AgentEnvironmentSecretMetadata:
+ * there is no value field upstream, so none exists here. `hosts` and
+ * `matchHeaders` are the egress-proxy binding; both empty means a setup-only
+ * secret the guest holds as a NAME placeholder.
+ */
+export interface SecretMetadata {
+  readonly name: string
+  readonly hosts: ReadonlyArray<string>
+  readonly matchHeaders: ReadonlyArray<string>
+  /** The wire's ISO timestamp, or null when the answer carries none. */
+  readonly updatedAt: string | null
+}
+
 /** The platform's answer, camel-cased; secret VALUES never exist here. */
-interface EnvironmentConfig {
+export interface EnvironmentConfig {
   readonly setupScript: string
   readonly env: ReadonlyArray<EnvironmentVariable>
-  readonly secretNames: ReadonlyArray<string>
+  readonly secrets: ReadonlyArray<SecretMetadata>
+}
+
+/** A list of strings, or null when the field is present with another shape; an absent field is an empty list. */
+const parseStrings = (value: unknown): ReadonlyArray<string> | null => {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)) return null
+  const out: string[] = []
+  for (const entry of value) {
+    if (typeof entry !== "string") return null
+    out.push(entry)
+  }
+  return out
 }
 
 /*
- * The wire answer, mirrored from multi's parseAgentEnvironmentConfig:
- * snake_case fields, env rows {name, value}, secret rows carrying NAMES and
- * timestamps only. Off-shape answers null out rather than throwing — the
- * seam's channel is the honest error string.
+ * The wire answer, mirrored from multi's parseAgentEnvironmentConfig and
+ * plue's AgentEnvironmentResponse: snake_case fields, env rows {name, value},
+ * secret rows {name, hosts, match_headers, updated_at} with no value. Off-shape
+ * answers null out rather than throwing; the seam's channel is the honest
+ * error string. Exported for the secrets seam, which reads the same document.
  */
-const parseEnvironment = (wire: unknown): EnvironmentConfig | null => {
+export const parseEnvironment = (wire: unknown): EnvironmentConfig | null => {
   if (typeof wire !== "object" || wire === null) return null
   const row = wire as { setup_script?: unknown; env?: unknown; secrets?: unknown }
   if (typeof row.setup_script !== "string" || !Array.isArray(row.env) || !Array.isArray(row.secrets)) {
@@ -49,14 +77,50 @@ const parseEnvironment = (wire: unknown): EnvironmentConfig | null => {
     if (typeof pair.name !== "string" || pair.name === "" || typeof pair.value !== "string") return null
     env.push({ name: pair.name, value: pair.value })
   }
-  const secretNames: string[] = []
+  const secrets: SecretMetadata[] = []
   for (const entry of row.secrets) {
-    const secret = entry as { name?: unknown } | null
+    const secret = entry as { name?: unknown; hosts?: unknown; match_headers?: unknown; updated_at?: unknown } | null
     if (typeof secret !== "object" || secret === null) return null
     if (typeof secret.name !== "string" || secret.name === "") return null
-    secretNames.push(secret.name)
+    const hosts = parseStrings(secret.hosts)
+    const matchHeaders = parseStrings(secret.match_headers)
+    if (hosts === null || matchHeaders === null) return null
+    secrets.push({
+      name: secret.name,
+      hosts,
+      matchHeaders,
+      updatedAt: typeof secret.updated_at === "string" && secret.updated_at !== "" ? secret.updated_at : null
+    })
   }
-  return { setupScript: row.setup_script, env, secretNames }
+  return { setupScript: row.setup_script, env, secrets }
+}
+
+/** The one agent-environment document URL for a repository. */
+export const environmentUrl = (ctx: SeamContext, repo: string): string => {
+  const [owner = "", name = ""] = repo.split("/")
+  return `${ctx.baseUrl}/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/agent-environment`
+}
+
+/** GET the environment; an honest string on any failure, the config otherwise. */
+export const readEnvironment = async (ctx: SeamContext, repo: string): Promise<EnvironmentConfig | string> => {
+  let response: Response
+  try {
+    response = await ctx.http(environmentUrl(ctx, repo))
+  } catch {
+    return `The agent environment for ${repo} couldn't be read — the platform didn't answer.`
+  }
+  if (!response.ok) {
+    return readErrorMessage(
+      response,
+      `The agent environment for ${repo} couldn't be read (HTTP ${response.status}).`
+    )
+  }
+  const body: unknown = await response.json().catch(() => null)
+  const config = parseEnvironment(body)
+  if (config === null) {
+    return `The agent-environment answer for ${repo} wasn't in the expected shape.`
+  }
+  return config
 }
 
 /** One `NAME=value` pair, split on the FIRST `=` so values may carry more. */
@@ -99,34 +163,12 @@ export const createEnvironmentSeam = (ctx: SeamContext): EnvironmentSeam => {
       if (writes.get(repo) === current) writes.delete(repo)
     }
   }
-  const environmentUrl = (repo: string): string => {
-    const [owner = "", name = ""] = repo.split("/")
-    return `${ctx.baseUrl}/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/agent-environment`
-  }
+  const fetchEnvironment = (repo: string): Promise<EnvironmentConfig | string> => readEnvironment(ctx, repo)
 
-  /** GET the environment; an honest string on any failure, the config otherwise. */
-  const fetchEnvironment = async (repo: string): Promise<EnvironmentConfig | string> => {
-    let response: Response
-    try {
-      response = await ctx.http(environmentUrl(repo))
-    } catch {
-      return `The agent environment for ${repo} couldn't be read — the platform didn't answer.`
-    }
-    if (!response.ok) {
-      return readErrorMessage(
-        response,
-        `The agent environment for ${repo} couldn't be read (HTTP ${response.status}).`
-      )
-    }
-    const body: unknown = await response.json().catch(() => null)
-    const config = parseEnvironment(body)
-    if (config === null) {
-      return `The agent-environment answer for ${repo} wasn't in the expected shape.`
-    }
-    return config
-  }
-
-  /** The one env card per repo, re-surfaced at the transcript's end on every read. */
+  /**
+   * The one env card per repo, re-surfaced at the transcript's end on every
+   * read. Secrets are not this card's: /secrets.list renders their metadata.
+   */
   const upsertCard = (repo: string, config: EnvironmentConfig): void => {
     const card: Card = {
       id: `env-${repo}`,
@@ -138,9 +180,7 @@ export const createEnvironmentSeam = (ctx: SeamContext): EnvironmentSeam => {
       payload: {
         repo,
         vars: config.env.map((variable) => ({ name: variable.name, value: variable.value })),
-        setupScript: config.setupScript === "" ? null : config.setupScript,
-        // Secret NAMES only — values are write-only upstream and never surface.
-        secretNames: [...config.secretNames]
+        setupScript: config.setupScript === "" ? null : config.setupScript
       }
     }
     ctx.dispatch({ type: "card.upsert", actor: ctx.actor(), card })
@@ -167,7 +207,7 @@ export const createEnvironmentSeam = (ctx: SeamContext): EnvironmentSeam => {
       if (typeof current === "string") return current
       let response: Response
       try {
-        response = await ctx.http(environmentUrl(target.repo), {
+        response = await ctx.http(environmentUrl(ctx, target.repo), {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({

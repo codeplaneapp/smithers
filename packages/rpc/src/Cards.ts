@@ -888,9 +888,30 @@ export const CardSchema = z.discriminatedUnion("kind", [
     payload: z.object({
       repo: z.string(),
       vars: z.array(z.object({ name: z.string(), value: z.string() })),
-      setupScript: z.string().nullable(),
-      /** Secret NAMES only — values are write-only upstream and never surface. */
-      secretNames: z.array(z.string())
+      setupScript: z.string().nullable()
+    })
+  }),
+  /*
+   * The secrets a repository's sessions may use (Secrets L1): the agent
+   * environment's secret METADATA only. plue's AgentEnvironmentSecretMetadata
+   * has no value field; hosts and match_headers are the egress-proxy binding,
+   * empty on both for a setup-only secret. `scope` names whose secrets the
+   * card lists; personal secrets add a second scope in a later lane.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("secrets"),
+    payload: z.object({
+      repo: z.string(),
+      scope: z.literal("repository"),
+      secrets: z.array(
+        z.object({
+          name: z.string(),
+          hosts: z.array(z.string()),
+          matchHeaders: z.array(z.string()),
+          updatedAt: z.string().nullable()
+        })
+      )
     })
   }),
   /*

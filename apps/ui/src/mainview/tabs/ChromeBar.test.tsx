@@ -936,3 +936,96 @@ describe("the chrome-actions footer's download button", () => {
     expect(host.querySelector('[data-flow="app.download"]')).toBeNull()
   })
 })
+
+/*
+ * The Secrets button: the button door of secrets.list, in the chrome that
+ * belongs to no session. It renders exactly where the registry holds
+ * secrets.list (the cloud host), and its click runs the same registry entry
+ * the /secrets.list slash runs, so the secrets card appears in the chat with
+ * the repository's secret metadata and never a value. No settings page exists.
+ */
+describe("the chrome-actions footer's Secrets button", () => {
+  const secretsHarness = async (): Promise<{ store: AppStore; controller: AppControllerType; listed: () => number }> => {
+    let listed = 0
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const path = new URL(url, "https://app.test").pathname
+        if (path === "/api/repos/will/flows/agent-environment") {
+          listed += 1
+          return new Response(
+            JSON.stringify({
+              setup_script: "",
+              env: [],
+              secrets: [{ name: "NPM_TOKEN", hosts: ["registry.npmjs.org"], match_headers: ["authorization"], updated_at: "2026-08-01T00:00:00Z" }]
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        }
+        return new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
+      }
+    })
+    return { store, controller, listed: () => listed }
+  }
+
+  test("host cloud renders it bound to secrets.list, and a signed-in click surfaces the secrets card with metadata only", async () => {
+    const { store, controller, listed } = await secretsHarness()
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-in",
+      login: "will",
+      allowlisted: true,
+      admin: false,
+      scopesPlain: null
+    })
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
+    })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-secrets]")
+    expect(button).not.toBeNull()
+    expect(button?.dataset.flow).toBe("secrets.list")
+    expect(button?.textContent).toBe("Secrets")
+    expect(button?.querySelector("svg")).not.toBeNull()
+    expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    // Above the theme corner, like the other footer doors.
+    const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(order.indexOf("secrets.list")).toBeLessThan(order.indexOf("appearance.dark-mode"))
+    // The slash door offers the same registry entry the button is bound to.
+    const slashNames = controller.slashTree("secrets.list").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
+    expect(slashNames).toContain("secrets.list")
+
+    await act(() => button?.click())
+    await act(() => {})
+    expect(listed()).toBe(1)
+    const card = host.querySelector<HTMLElement>('[data-kind="secrets"]')
+    expect(card).not.toBeNull()
+    expect(card?.querySelector("[data-testid=secrets-scope]")?.textContent).toBe(
+      "Repository secrets: every session in this repository may use them."
+    )
+    const row = card?.querySelector("[data-testid=secret-NPM_TOKEN]")
+    expect(row?.textContent).toContain("NPM_TOKEN")
+    expect(row?.textContent).toContain("registry.npmjs.org")
+    expect(row?.textContent).toContain("authorization")
+    expect(row?.textContent).toContain("2026-08-01")
+
+    // The slash door runs the identical flow: the same card is re-surfaced, never a second one.
+    await act(() => {
+      expect(controller.runCommand("secrets.list")).toBe(true)
+    })
+    await act(() => {})
+    expect(listed()).toBe(2)
+    expect(host.querySelectorAll('[data-kind="secrets"]')).toHaveLength(1)
+  })
+
+  test("host local renders no Secrets button: secrets.list is not registered there", async () => {
+    const { controller } = await localHarness()
+    expect(controller.commands.find("secrets.list")).toBeUndefined()
+    const { host } = mount(controller)
+    expect(host.querySelector("[data-testid=chrome-secrets]")).toBeNull()
+    expect(host.querySelector('[data-flow="secrets.list"]')).toBeNull()
+  })
+})

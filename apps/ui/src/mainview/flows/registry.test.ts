@@ -590,6 +590,7 @@ describe("command registry bindings", () => {
       "notifications.read",
       "env.view",
       "env.set",
+      "secrets.list",
       "branches.list",
       "files.list",
       "files.read",

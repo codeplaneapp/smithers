@@ -1750,3 +1750,27 @@
 	font-family: var(--font-mono);
 	font-size: 0.6875rem;
 }
+
+/* The secrets card (Secrets L1): the scope line and the metadata table; values never exist on the wire. */
+.secrets-scope {
+	margin: 0;
+	font-size: 0.8125rem;
+	color: var(--muted-foreground, #6b6457);
+}
+.secrets-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.8125rem;
+}
+.secrets-table th {
+	text-align: left;
+	font-size: 0.75rem;
+	color: var(--muted-foreground, #6b6457);
+	font-weight: 600;
+	padding: 0.25rem 0.5rem 0.25rem 0;
+}
+.secrets-table td {
+	padding: 0.25rem 0.5rem 0.25rem 0;
+	border-top: 1px solid var(--border, #e4ddcf);
+	vertical-align: top;
+}
