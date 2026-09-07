@@ -1,26 +1,34 @@
 ---
 title: "Run CI on Smithers Cloud"
-description: "Run your existing Smithers targets automatically when code changes, and use the result to gate a merge or landing."
+description: "What runs your PACKAGE.ts checks today, and the planned Smithers Cloud CI that would run them from repository events."
 editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/guides/cloud-ci.mdx"
 sidebar:
   order: 25
 ---
 
-Smithers Cloud runs your checks when their declared triggers match a repository event. Define the checks and triggers in `PACKAGE.ts`, enable CI for the repository, and push. Cloud prepares the workspace, executes the target graph, and attaches the result to the tested revision.
+Smithers Cloud does not yet run your checks when code changes. This page states what runs `PACKAGE.ts` checks today and records the planned event-driven Cloud CI so that the design is visible before it ships. The planned material sits under the [Planned](#planned-event-driven-cloud-ci) heading and nothing in it is available.
 
-Repositories can live in Plue or connect from GitHub. GitHub repositories send events directly through the Smithers GitHub App; no GitHub Actions workflow is required.
+## What runs checks today
 
-## Before you start
+Three shipped paths run the targets declared in `PACKAGE.ts`:
 
-You need a Smithers workspace with exported targets, a Smithers Cloud account, and permission to manage the repository's CI. To create a workspace, follow [Run a target and hit the cache](/docs/tutorials/first-target/).
+| Path | What it does | Where it is documented |
+| --- | --- | --- |
+| `smthrs ci <pattern>` | Runs build, test, lint, and docs targets as one graph on the machine you run it on, with normal cache reuse. | [Build targets](/docs/guides/build-targets/) |
+| `Smithers.GithubCiGen` | A target that generates the GitHub Actions workflow files from declared attrs. GitHub Actions then runs `smthrs ci` on push and pull request events. | [`@smthrs/targets`](/docs/reference/api/targets/) |
+| `smthrs flow start` in a CI job | Launches a durable flow from GitHub Actions and gives the job an exit status when the run completes, fails, or parks. | [Run flows in CI](/docs/guides/ci/) |
 
-The default Cloud API is `https://api.jjhub.tech`, the same service used by the Smithers app. Your Cloud connection supplies the endpoint; `PACKAGE.ts` contains the work to run.
+To start a flow on a schedule instead of from a CI job, register a cron trigger and host the scheduler with `smthrs serve` on a machine you control. See [Define triggers](/docs/guides/triggers/). Smithers Cloud workspaces do not host that scheduler yet.
 
-## Choose what runs and when
+If you are replacing a hand-written GitHub Actions workflow, generate the replacement with `Smithers.GithubCiGen`, verify one passing and one failing run, and then delete the old workflow. Required status checks keep pointing at GitHub Actions.
 
-Create a suite for the checks and an automation that binds it to repository events. This example runs on pushes to `main` and on reviews targeting `main`:
+## Planned: event-driven Cloud CI
 
-```ts title="PACKAGE.ts"
+This section describes work that is not built. `@smthrs/targets` exports no `S.Automation`, `S.Package` accepts no `automations` entry, and Smithers Cloud registers no repository subscriptions. The type-level proof of the intended declaration surface is [`apps/site/examples/cloud-triggers/contract.d.ts`](https://github.com/smithersai/smithers/blob/main/apps/site/examples/cloud-triggers/contract.d.ts); its README states that it does not implement trigger registration, matching, dispatch, or the `S.Automation` runtime.
+
+The intended shape declares a suite and binds it to repository events in `PACKAGE.ts`:
+
+```ts title="PACKAGE.ts (planned; does not compile against the released packages)"
 import { Smithers as S } from "@smthrs/targets"
 import { Trigger as T } from "@smthrs/triggers"
 import { Package as src } from "./src/PACKAGE.js"
@@ -30,10 +38,7 @@ const checks = S.Suite({
 })
 
 const ci = S.Automation({
-  on: [
-    T.push({ branches: ["main"] }),
-    T.review({ base: ["main"] }),
-  ],
+  on: [T.push({ branches: ["main"] }), T.review({ base: ["main"] })],
   run: checks,
 })
 
@@ -43,75 +48,6 @@ export const Package = S.Package({
 })
 ```
 
-The example assumes `src/PACKAGE.ts` exports `lint`, `typeCheck`, and `test`. Replace those entries with your checks and `main` with the branch or bookmark you use. Preserve existing entries when adding to `Package`.
+The planned service would register the declarations from the default branch or bookmark when you enable CI for a connected repository, start a run on each matching push or review event, execute the target graph in an isolated worker with normal cache reuse, and publish a **Smithers CI** result on the tested commit through the Smithers GitHub App or on the Plue landing request, so that the result could be a required check. A newer source revision on a review would cancel its earlier unfinished run. The [Cloud CI reference](/docs/reference/cloud-ci/) records the planned defaults, result meanings, and revision rules under the same disclaimer.
 
-To reuse a suite such as `prePush`, set the automation's `run` to that target:
-
-```ts
-run: prePush,
-```
-
-The `on` entries are alternatives: either event starts the automation. `T.review` covers GitHub pull requests and Plue landing requests. Its `base` filter selects the destination branch or bookmark.
-
-Naming an automation `ci` does not add implicit triggers. To add a schedule or manual launch, see [Define triggers](/docs/guides/triggers/).
-
-Run the target locally before enabling Cloud CI:
-
-```bash
-pnpm exec smthrs target '//:checks'
-```
-
-If you use `prePush`, run `//:prePush` instead. Local target execution runs the checks without subscribing to events. Cloud uses the same target graph: dependencies determine execution order, and independent checks can run concurrently. Tools and package installation come from `.smithers/WORKSPACE.ts` and the repository's lockfiles.
-
-Commit the target declaration to the repository's default branch or bookmark and push it.
-
-## Enable CI for the repository
-
-In Smithers, ask to enable CI for your repository. For example:
-
-> Enable CI for artsy/force.
-
-If the repository is not connected, complete the connection first. For GitHub, install the Smithers GitHub App with access to that repository.
-
-Smithers shows the repository, the `//:ci` automation, and its declared triggers. Confirm the setup. Cloud registers the declarations from the default branch or bookmark and listens for matching events.
-
-The example starts runs for:
-
-- Pushes to `main`.
-- Reviews targeting `main` that are opened, reopened, updated with new code, or marked ready for review.
-
-Draft reviews are excluded by default. Editing a title or description does not start another run. Enabling CI registers the triggers; the next matching event starts the first run.
-
-## Read the result
-
-Open the run from the repository's CI result. In the Smithers app, the run appears in the conversation with its revision, target results, and logs.
-
-The **Smithers CI** result stays pending while work is queued or running. It passes when all checks pass or reuse valid cached results. A failed check makes CI fail; open that check's logs to diagnose it.
-
-To verify the integration, push a change that fails one of your checks. Confirm that Cloud reports a failure for that revision, then fix the check and confirm that the next run passes.
-
-Review runs test the source revision shown on the run. A matching push after merging or landing tests the resulting branch or bookmark revision. For details, see [Revisions and delivery](/docs/reference/triggers/#revisions-and-delivery).
-
-## Require CI before merging or landing
-
-For a Plue repository, make **Smithers CI** a required check on the destination bookmark. For a GitHub repository, add **Smithers CI** to the destination branch's required status checks and select the Smithers GitHub App as its source.
-
-A result from an older revision does not satisfy the requirement for a newer one. A missing `//:ci` automation, an empty suite, or a configuration error fails CI. Keep a review trigger that covers the destination branch when CI is required there.
-
-If you are replacing GitHub Actions, verify a passing and failing Cloud run before changing the requirement. Then remove the replaced workflows. If `S.Github.CiGen` generates those files, remove the corresponding entries from its `workflows` list as well.
-
-## Rerun or cancel work
-
-Open a run in Smithers to rerun or cancel it. You can also ask Smithers to perform either action for a named repository and run.
-
-A rerun creates a new attempt at the same revision and can reuse valid cached target results. To test new code, push the new revision.
-
-When a review receives another source revision, Cloud cancels its earlier unfinished CI run. Runs for separate reviews remain independent. Closing the app does not cancel Cloud execution.
-
-## Change the checks
-
-Edit the `checks` suite and push the change. Cloud loads the checks from the revision being tested, so adding a check requires no separate CI configuration change.
-
-To change when CI runs, edit `on` and commit the change to the default branch or bookmark. Cloud updates the registered triggers after validating that revision. A review cannot remove its own required check by changing the trigger declaration.
-
-Keep inputs and outputs declared on each target so cache decisions reflect the work. For more information, see [How target caching works](/docs/concepts/target-caching/).
+None of that runs today. GitHub Actions remains the shipped way to run checks on repository events.

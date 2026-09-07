@@ -1,81 +1,55 @@
 ---
 title: "Smithers Cloud CI"
-description: "Repository activation, execution, caching, and required results for CI on Smithers Cloud."
+description: "The planned Smithers Cloud CI service: activation, execution, caching, and required results. Not shipped; recorded so the design is visible."
 editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/reference/cloud-ci.mdx"
 ---
 
-Smithers Cloud CI runs an automation's work when its declared triggers match. Plue owns event delivery, run records, worker allocation, and result reporting. For setup instructions, see [Run CI on Smithers Cloud](/docs/guides/cloud-ci/). For selector types and matching, see the [Trigger reference](/docs/reference/triggers/).
+Smithers Cloud CI is not shipped. Smithers Cloud registers no repository subscriptions, starts no runs from repository events, and publishes no **Smithers CI** check. Everything below this paragraph is the planned design, kept here so that the intended contract is reviewable before it is built. For what runs `PACKAGE.ts` checks today, see [Run CI on Smithers Cloud](/docs/guides/cloud-ci/#what-runs-checks-today). For the shipped cron trigger, see the [Trigger reference](/docs/reference/triggers/).
 
-## Defaults
+The declaration surface this design depends on, `S.Automation` and `Package.automations`, exists only as the type-level proof in [`apps/site/examples/cloud-triggers/contract.d.ts`](https://github.com/smithersai/smithers/blob/main/apps/site/examples/cloud-triggers/contract.d.ts). Its README states that it does not implement trigger registration, matching, dispatch, or the `S.Automation` runtime.
 
-Cloud CI uses these defaults:
+## Planned defaults
 
-| Setting | Value |
+| Setting | Planned value |
 | --- | --- |
 | API origin | `https://api.jjhub.tech` |
 | CI automation selected during setup | `//:ci` |
 | Declaration | An `S.Automation` exported through `Package.automations`. |
-| Automatic events | Those declared in `on`; no events are added by the name `ci`. |
+| Automatic events | Those declared in `on`; no events added by the name `ci`. |
 | Workspace | `.smithers/WORKSPACE.ts` and committed dependency lockfiles. |
-| Check name for the configured CI automation | **Smithers CI** |
+| Check name | **Smithers CI** |
 | Execution | Isolated Linux workers on Smithers Cloud's Plue infrastructure. |
 | Target selection | The complete dependency graph of the referenced target, with normal cache reuse. |
 | Review concurrency | A newer source revision cancels earlier unfinished CI for that review. |
 
-The default service shares the Plue API and Microsandbox infrastructure used by the Smithers app. For a separately operated installation, configure its HTTPS API origin on the Cloud connection. The repository's declarations remain the same.
+## Planned repository activation
 
-## Repository activation
+Enabling CI would authorize the repository's automation and register its triggers from the default branch or bookmark. Activation would emit no repository event; the next matching event would start work. A target named `ci` without an automation would acquire no triggers.
 
-Enabling CI authorizes the repository's automation and registers its triggers from the default branch or bookmark. Activation does not itself emit a repository event. The next matching event starts work; declare `T.manual()` if you also want fresh manual launches.
+The selected automation would have to resolve to executable work. Missing references, empty suites, unsupported worker requirements, and invalid declarations would fail CI. An enabled requirement would stay in effect if a revision deleted the automation or changed its triggers to exclude the review.
 
-The default setup selects the root `//:ci` automation. Its `run` points to the existing work. A target named `ci` without an automation does not acquire triggers. The target's own label remains available to local commands.
+Routing would use the trusted registered selectors; the work would load from the event's execution revision, and the run would record both revisions. A review could change its checks but not rewrite its own routing policy or grant itself additional credentials.
 
-The selected CI automation must resolve to executable work. Missing references, empty suites, unsupported worker requirements, and invalid declarations fail CI. An enabled requirement remains in effect if a revision deletes the automation or changes its triggers to exclude the review.
+## Planned execution and caching
 
-Cloud uses trusted registered selectors for routing and loads the work from the event's execution revision. The run records both revisions. A review can change its checks, but it cannot rewrite its own routing policy or grant itself additional credentials. For exact revision rules, see [Revisions and delivery](/docs/reference/triggers/#revisions-and-delivery).
+A worker would prepare the workspace, resolve declared tools, install dependencies from the lockfiles, and evaluate the work in isolation. Target dependencies would determine order; independent checks could execute concurrently within worker capacity. Cached results would be reused only when declared inputs, execution environment, and cache policy permit. Trigger path filters would decide whether to start work and would not replace target dependency tracking.
 
-## Execution and caching
+Repository credentials would come from the Cloud connection and target or flow declarations. Repository code would not receive the service's infrastructure credentials. Fork execution would require an explicitly authorized isolated policy. A lost worker whose work cannot be recovered would fail the attempt; a rerun could reuse valid completed cache entries. The service deadline would bound queue time, execution, and approval waits.
 
-Cloud prepares the workspace in an isolated worker, resolves its declared tools, installs dependencies from the lockfiles, and evaluates the work inside that worker. Target dependencies determine execution order; independent checks can execute concurrently within worker capacity.
+## Planned results and required checks
 
-Target attempts plan the complete selected graph. Cached results are reused only when their declared inputs, execution environment, and cache policy permit reuse. Trigger path filters decide whether to start work; they do not replace target dependency tracking.
+The service would publish **Smithers CI** on the tested commit, on the Plue landing request or through the Smithers GitHub App with a link to the run.
 
-Repository credentials come from the Cloud connection and target or flow declarations. A missing required credential fails the affected work. Repository code does not receive the Cloud service's infrastructure credentials. Fork execution requires an explicitly authorized isolated policy; otherwise the event is refused and cannot satisfy required CI.
-
-Run results, logs, and declared outputs remain associated with the recorded revision. Closing a client does not stop a run. If a worker is lost and the work cannot be recovered, the attempt fails. A rerun can reuse valid completed cache entries. The service's deadline bounds queue time, execution, and approval waits; the run shows the applied deadline.
-
-## Results and required checks
-
-Cloud publishes **Smithers CI** on the tested commit. Plue shows the result on the repository and landing request. For a connected GitHub repository, the Smithers GitHub App publishes the check with a link to the Cloud run.
-
-The result has these meanings:
-
-| Result | Meaning |
+| Result | Planned meaning |
 | --- | --- |
 | Pending | Work is queued, executing, or waiting for an authorized approval. |
-| Passed | Required work completed successfully, including any valid cached target results. |
+| Passed | Required work completed successfully, including valid cached target results. |
 | Failed | Configuration, workspace preparation, a check, or unrecoverable execution failed. |
 | Cancelled | A user cancelled the attempt or a newer review revision superseded it. |
 | Timed out | The run exceeded its deadline. |
 
-Only a passed result satisfies a required check. Admission, missing work, and an empty suite do not count as success. For a review revision where Cloud CI requires this automation, a selector or predicate that excludes it produces a failure explaining the unmatched requirement. This avoids leaving an unexplained pending check or claiming that unexecuted checks passed.
+Only a passed result would satisfy a required check. For a review revision where CI is required, a selector or predicate that excluded it would produce a failure naming the unmatched requirement rather than an unexplained pending check. Results would stay bound to their attempt and commit; a late result from an earlier revision could not replace the current one. Review runs would test the source commit, not a merge result.
 
-Results remain bound to their attempt and commit. A late result from an earlier revision cannot replace the current revision's result. When CI is required on a Plue bookmark, a newer explicit rerun keeps that revision's requirement pending until it finishes. For GitHub, the configured branch rules evaluate the App's checks. Cloud retains the recorded outcome if reporting fails and retries delivery.
+## Status
 
-Review runs test the source commit. A destination-only update does not test a new merge result. Require a separate merge-result check if your repository's policy needs validation of the combined tree before landing.
-
-## Troubleshooting
-
-Common problems have these causes and next steps:
-
-| Problem | Check |
-| --- | --- |
-| No run appears | Confirm CI is enabled, the connection has repository access, and a registered selector matches the event. |
-| A trigger change has no effect | Confirm the change is on the default branch or bookmark and registration succeeded. |
-| The run cannot find its work | Check `Package.automations`, the `run` reference, and target or flow exports at the recorded commit. |
-| A required review is filtered | Inspect `base`, `head`, activity, path, and `when` filters in the registered declaration. |
-| Workspace preparation fails | Check declared tools, committed lockfiles, and dependency access in the logs. |
-| Local checks pass but Cloud checks fail | Compare the tested commit, declared inputs, Linux support, and credentials. |
-| A check stays pending | Inspect the run for a worker queue, approval wait, or reporting failure and its applied deadline. |
-
-For the guide's target example, reproduce the same revision locally with `pnpm exec smthrs target '//:checks'` and inspect the failed target's logs.
+The shipped surfaces that this design would build on are the `PACKAGE.ts` target graph, `smthrs ci`, the `Smithers.GithubCiGen` target, the cron trigger store and scheduler in `@smthrs/triggers`, and the Smithers GitHub App connection used by the app. When the automation declaration and the event subscriptions land, this page drops the planned framing.

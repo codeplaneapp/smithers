@@ -4,6 +4,16 @@ This is a declaration-only proof for documentation-driven development. It does
 not implement trigger registration, matching, dispatch, or the `S.Automation`
 runtime. The runtime APIs documented by these signatures still need to be built.
 
+Status: not shipped. `@smthrs/targets` exports no `S.Automation`, `S.Package`
+accepts no `automations` entry, and `@smthrs/triggers` exports no `push`,
+`review`, `tag`, `schedule`, `manual`, `event`, or `succeeded` constructor. The
+shipped trigger is the cron declaration behind `smthrs triggers` and the
+scheduler in `smthrs serve`; see
+`apps/site/src/content/docs/docs/reference/triggers.mdx`. The site pages that
+describe this design (`guides/triggers.mdx`, `guides/cloud-ci.mdx`,
+`reference/triggers.mdx`, `reference/cloud-ci.mdx`) keep it under a heading
+marked Planned and must keep doing so until the runtime exists.
+
 `contract.d.ts` models the recommended public surface. `typecheck.ts` uses the
 workspace's real Effect schemas and checks inferred event unions, action and
 custom-event narrowing, required flow payloads, completion outputs, and decoded

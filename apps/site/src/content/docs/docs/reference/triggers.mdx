@@ -1,112 +1,104 @@
 ---
 title: "Triggers"
-description: "Typed event selectors, automation bindings, matching rules, schemas, and revision behavior."
+description: "The shipped trigger declaration, its CLI verbs, scheduler behavior, and fire ledger, followed by the planned repository-event selector API marked as unshipped."
 editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/reference/triggers.mdx"
 ---
 
-Import event constructors with `import { Trigger as T } from "@smthrs/triggers"`. Bind them to work with `S.Automation` from `@smthrs/targets`, then export the binding through `Package.automations`. For examples, see [Define triggers](/docs/guides/triggers/).
+A trigger is a durable cron declaration that starts one flow with fixed input. This page records what the released packages do: the declaration schema, the `smthrs triggers` verbs, how the scheduler claims and fires occurrences, and the outcomes it records. The [Planned](#planned-event-selectors-and-automations) section at the end records the repository-event selector design, which is not built. For a walkthrough, see [Define triggers](/docs/guides/triggers/). For every exported symbol, see [`@smthrs/triggers`](/docs/reference/api/triggers/).
 
-## Automation
+## Declaration
 
-An automation binds one or more event selectors to one existing target or flow. Its package export supplies its identity: a root `automations: { ci }` entry has the label `//:ci`. Target and automation labels must be distinct within a package.
+`Trigger.make` from `@smthrs/triggers/Trigger` decodes and validates one declaration. `smthrs triggers register` calls it on the flags or JSON file you pass.
 
-The constructor accepts these fields:
-
-| Field | Requirement | Type and behavior |
+| Field | Requirement | Behavior |
 | --- | --- | --- |
-| `on` | Required | Non-empty array of typed selectors. Any matching selector admits the event. |
-| `run` | Required | One target or flow reference. Use a suite to group targets. |
-| `when` | Optional | Synchronous predicate over the event union inferred from `on`. Runs after selector matching; `false` records a filtered decision. |
-| `input` | Required for a flow with required payload fields | Synchronous mapper from the inferred event to the flow's accepted payload. Targets have no payload mapper. A flow accepting an empty payload can omit it. |
+| `id` | Required, non-empty | The trigger's identity. Registering the same id replaces the row and increments its revision. |
+| `flowId` | Required, non-empty | The flow the scheduler starts. The triggers package never resolves it; Control does at launch. |
+| `input` | Default `{}` | The flow's input as JSON. `undefined`, `NaN`, a `Date`, or a function is refused as `invalid_trigger` with `path: "input"`. |
+| `cron` | Required | A five-field cron expression, minute precision. Refused as `invalid_cron` when malformed and `unsatisfiable_cron` when the calendar never satisfies it. |
+| `timezone` | Optional, default UTC | An IANA timezone name. |
+| `overlap` | Default `"skip"` | `"skip"`, `"buffer-one"`, or `"supersede"`. Applied when an occurrence is due while the trigger's run is active. |
+| `catchUp` | Default `"none"` | `"none"`, `"one"`, or `"all"`. Applied to occurrences missed while no scheduler ran. |
+| `maxCatchUp` | Default `0`, at most `1000` | The most missed occurrences one catch-up replays. |
+| `enabled` | Default `true` | A disabled trigger is listed and never claimed. |
 
-The `run` reference fixes the destination payload type. A mapper cannot widen that type by returning an incompatible value. A flow's schema also validates the mapped value before execution.
+The satisfiability probe searches forward from the current instant for one occurrence, the same search every tick performs, so `0 0 30 2 *` is refused where it is written rather than at the tick that would have fired it. Shape failures name the offending field in `TriggerError.path`.
 
-`when` and `input` are pure functions: they use their arguments and immutable constants. Cloud evaluates them from the registered declaration revision in a bounded sandbox without network access or credentials. Work with side effects belongs in the target or flow. A thrown predicate or mapper fails evaluation; it does not mean the event failed to match.
+## CLI verbs
 
-Importing a declaration starts no work. The Cloud connection supplies the API origin, defaulting to `https://api.jjhub.tech`. Activation, permissions, concurrency, and retries remain separate from event selection.
+All verbs run against the nearest Smithers project, or the one named by `--root`. They store rows in `.flows/control.db` and print JSON.
 
-## Constructors
-
-Each constructor returns a `Selector<Event>` carrying its event type. `T.EventOf<typeof selector>` extracts that type. Filter options accept a non-empty list or an include/exclude object as described under [Matching](#matching).
-
-| Constructor | Options | Event fields in addition to the common fields |
-| --- | --- | --- |
-| `T.push(options?)` | `branches?`, `paths?` | `type: "push"`, `branch`, `commit`, `before: string \| null`. |
-| `T.review(options?)` | `actions?`, `base?`, `head?`, `paths?`, `drafts?` | `type: "review"`, `action`, `review`; labeled events also have `label`. |
-| `T.tag(options?)` | `names?` | `type: "tag"`, `name`, `commit`. |
-| `T.schedule(options)` | Required `cron`; optional `timezone`, `ref`. | `type: "schedule"`, `scheduledAt`, `timezone`. |
-| `T.manual(options?)` | `input?`: runtime schema. | `type: "manual"`, decoded `input`. |
-| `T.event(options)` | Required literal `name` and runtime `input` schema. | `type: "event"`, literal `name`, decoded `input`. |
-| `T.succeeded(automation)` | A direct automation reference. | `type: "succeeded"`, `runId`, `commit`, original `cause`, typed `output`. |
-
-Common fields are `id`, `repository: { id, host }`, and `receivedAt`. `host` is `"plue"` or `"github"`. Timestamps are ISO 8601 strings. The host is the repository connection; it does not imply that an external publisher has repository credentials.
-
-### Repository events
-
-`push` selects updates to branches or Plue bookmarks, including creation. It excludes deletion and tag events. Omitted `branches` matches all branches or bookmarks. `tag` selects tag creation and resolves annotated tags to their commit.
-
-`review` normalizes GitHub pull requests and Plue landing requests. Its `review` object contains `number`, `base`, `head`, `headCommit`, `baseCommit`, and `draft`. The base and head names mean destination and source respectively.
-
-The accepted actions are `"opened"`, `"reopened"`, `"updated"`, `"ready"`, `"labeled"`, `"closed"`, and `"merged"`. The default selects the first four. `updated` means the source commit changed. A destination edit, label change, or other metadata edit is not an `updated` event. `closed` means closed without merging or landing; `merged` covers a completed merge or landing. `drafts` defaults to `false`; `true` includes drafts as well as ready reviews.
-
-Action selection narrows the event type. `actions: ["labeled"]` makes `event.label` available. With both labeled and updated actions, narrow by `event.action` before reading the label. Unsupported actions and filters are TypeScript errors. Cloud rejects a selector the connected host cannot supply rather than silently ignoring it.
-
-### Schedules
-
-`cron` uses five fields, with minute precision. `timezone` defaults to `"UTC"` and accepts an IANA timezone; `ref` defaults to the repository's default branch or bookmark. Registration validates syntax, timezone, and whether the calendar can satisfy the expression. Strings remain subject to runtime validation even when TypeScript accepts them.
-
-`scheduledAt` identifies the due occurrence. It is independent of dispatch and worker start time. A timezone's skipped local times produce no occurrence; repeated local times produce one occurrence at the earlier instant. Missed occurrences during downtime are recorded and skipped by default, with no automatic backlog replay.
-
-### Manual and external input
-
-Input schemas must support decoding and encoding without external services and must encode to JSON. Cloud decodes external data before exposing it as `event.input`. A schema's TypeScript type describes the decoded value; its encoded representation is used for transport and persistence. Cloud schema-encodes a mapper's result before persisting it, preserving values such as decoded dates.
-
-`T.manual()` accepts an empty input object. With a schema, its required fields and literal choices also define the app's input form. A fresh manual launch requires a manual selector; a rerun reuses an existing attempt's event and mapped input.
-
-`T.event` requires a schema and an authenticated publisher registration. Different literal names preserve their payload types in a mixed `on` list. A schema validates data; it does not authenticate the sender. Signature verification operates on the original HTTP request before JSON decoding.
-
-### Successful completion
-
-`succeeded` matches successful runs of the referenced automation and preserves its output type. Flow bindings expose the decoded success schema; target bindings expose a result containing `targets`, with each successful target's `label` and `status` (`"ran"` or `"hit"`). A failure does not fabricate a success output.
-
-`cause` is the upstream run's typed triggering event. Use it to restrict a continuation to an intended branch or event. Completion subscriptions preserve the upstream revision and trust classification; success does not grant additional credentials. Registration rejects cycles between automation completion subscriptions.
-
-## Matching
-
-Matching follows these rules:
-
-1. Entries in `on` combine with OR. One event matching multiple entries starts one run per automation.
-2. Distinct fields within one selector combine with AND.
-3. Values within a filter list combine with OR.
-4. An exclusion wins over every inclusion, regardless of order.
-5. After a selector matches, `when` must return `true` if present.
-
-For an include/exclude object, at least one non-empty list is required. An omitted `include` admits all values before exclusions. Empty lists and objects are rejected. Patterns match the whole branch, tag, or repository-relative path. `*` matches within one path segment; `**` can cross segments. Leading `!` patterns are rejected; use `exclude`.
-
-For paths, at least one changed path must remain after filtering. Changed paths include additions, edits, deletions, and both sides of renames. Pushes compare the recorded before and after commits; reviews compare the recorded head with its merge base against the recorded base. An unavailable or incomplete comparison admits work conservatively and records the fallback.
-
-A filtered decision is distinct from a passed run. If Cloud CI requires the automation for a review revision, a nonmatch fails that requirement with its reason. Prefer target cache reuse to path or arbitrary predicate filters on required checks.
-
-## Revisions and delivery
-
-Cloud registers subscriptions from the trusted default branch or bookmark after repository authorization. Updates replace the registered set atomically; invalid declarations preserve the previous valid set and report a validation error.
-
-Each accepted event records the subscription revision separately from the execution revision:
-
-| Trigger | Execution revision |
+| Verb | Effect |
 | --- | --- |
-| Push | Event's after commit. |
-| Review | Recorded source commit. |
-| Tag | Commit resolved from the created tag. |
-| Schedule | Configured ref resolved when the occurrence is admitted. |
-| Manual | Authorized ref selected at launch, or the default branch or bookmark. |
-| External event | Default branch or bookmark resolved at admission. Payload fields cannot silently select another checkout. |
-| Successful completion | Upstream run's execution commit. |
+| `smthrs triggers list` | Every registration ordered by id, with `revision`, `enabled`, and `lastFiredAt` once an occurrence has been recorded. |
+| `smthrs triggers show <id>` | The registration, `activeRun` (a run id or launch reservation, or `null`), and `activePlan` with the exact `plan.approval` payload when the run is waiting for approval. |
+| `smthrs triggers register [id] --flow <flowId> --cron <expr> [--input <json>] [--timezone <iana>] [--overlap <policy>] [--catch-up <policy>] [--max-catch-up <n>] [--enabled]` | Validates and upserts from flags. |
+| `smthrs triggers register <id> --file <path>` | Validates and upserts from a JSON declaration relative to the project root. The file's `id` must equal the argument. |
+| `smthrs triggers fire <id> [--occurrence <unix-ms>]` | Queues one pending occurrence for a running scheduler. Refuses a disabled trigger. `--occurrence` fixes the retry identity; the default is now. |
+| `smthrs triggers enable <id>`, `smthrs triggers disable <id>` | Flip future occurrences and increment the revision. Neither cancels an active run. |
+| `smthrs triggers serve [--poll-interval-ms <n>]` | Runs the scheduler until interrupted. Default poll interval 1000 ms. |
 
-Cloud pins that commit before queuing work. A moved branch cannot substitute a different checkout. Target or flow code comes from the execution revision; routing and payload-mapping functions come from the recorded subscription revision. Cloud validates the resolved destination's schema again before launching it.
+`smthrs serve` hosts the same scheduler beside the control server, so a project needs one of the two processes for schedules to fire. Every verb refuses `--remote`: triggers are administered on the host that owns the project.
 
-Event delivery can repeat. Cloud deduplicates using repository, source event identity, and automation identity; a schedule uses its registered identity and scheduled instant. Redelivery returns the first recorded receipt, including its subscription revision. A changed subscription does not turn an old delivery into new work.
+## Scheduler
 
-Separate events at the same commit can start separate runs. An explicit rerun creates a distinct attempt and retains the original event, revisions, and input. Idempotent admission does not guarantee that a target's external side effects execute only once.
+The scheduler is `Scheduler.layer` from `@smthrs/triggers/Scheduler` over the SQL trigger store and a Control-backed runner.
 
-The existing [durable scheduler and channel reference](/docs/reference/api/triggers/) covers host services for persistence, occurrence claims, and authenticated delivery.
+On each tick it lists enabled triggers, computes the occurrences due since each trigger's `lastFiredAt` under its catch-up policy, and claims each one in the store. The claim reads the trigger row's current policy and revision inside the same transaction, so a scheduler holding a stale snapshot cannot fire a trigger that was disabled or repointed since it last looked. Claim results are `skip`, `buffer`, `fire`, or `supersede`; only `fire` and `supersede` hand out a reservation, and `supersede` also names the run it displaces.
+
+A fired occurrence starts the flow through Control with the idempotency key `<triggerId>:<occurrence ISO instant>`. Two schedulers that notice the same boundary derive the same key, and a retried `fire` with the same `--occurrence` reuses it, so one occurrence never becomes two runs.
+
+A plan that Control parks for approval is re-offered eight times with a delay that doubles from one second, so the last attempt lands a little over two minutes after the first. The scheduler never approves a plan. An unapproved plan is recorded as `failed` with error `runner`. Waiting plans survive a scheduler restart with the same approval payload; `smthrs triggers show <id>` exposes it and `smthrs approvals approve '<payload>' --scope run` submits it.
+
+Stopping the scheduler cancels nothing. Runs are durable; the next scheduler re-attaches to active runs from the store. Only a `supersede` claim cancels a run.
+
+A catch-up that owes more occurrences than `maxCatchUp` logs a warning annotated with the trigger id, abandons the backlog beyond the bound, and still fires the current occurrence. The bound is a statement about how much history to replay, not a reason to stop scheduling.
+
+## Fire ledger
+
+`recordResult` writes one outcome per occurrence:
+
+| Outcome | Meaning |
+| --- | --- |
+| `launched` | Control accepted the run; it is active. |
+| `completed` | The run settled. |
+| `skipped` | Due while a run was active under `skip`. |
+| `buffered` | Waiting behind an active run under `buffer-one`. A later due occurrence coalesces into the same buffer. |
+| `superseded` | Cancelled the active run under `supersede`. |
+| `failed` | Control refused the launch, or a parked plan exhausted its attempts. `error` carries the reason. |
+
+`lastFiredAt` advances on skipped and buffered occurrences as well as fired ones, so it is the catch-up cursor and not the occurrence an active run owns. `activeOccurrence` answers that question; `smthrs triggers show` prints the active run id.
+
+The ledger has no CLI or app listing yet. Rows are readable in `.flows/control.db`.
+
+## Reading triggers in the app
+
+The `triggers.list` flow (slash command `/triggers.list`, or ask the agent to list the triggers on a repository) renders the Dispatcher card: one row per trigger with the schedule in words, the flow it runs, `enabled` or `disabled`, and the last fire time. The card is read-only; registering and editing happen through the CLI.
+
+The card reads the workspace gateway. A gateway that does not serve its trigger store answers with a reason, and the card prints that reason verbatim instead of an empty list. Smithers Cloud workspaces do not serve the store yet, so the card reports that today. Signed-out visitors get the sign-in door.
+
+## Webhooks
+
+`Webhook.make` from `@smthrs/triggers/Webhook` builds a verified door in code. It requires a credential reference, verifies the signature header over a private copy of the raw request bytes in constant time, refuses an absent or empty signature before computing anything, and hands the decoded payload to Control's channel coordinator. It exposes `register` and `ingest` and no direct execution method. `ingest` does not register the channel; run `register` first.
+
+There is no `smthrs webhooks` verb, no persisted webhook registry, and no webhook row in the Dispatcher card. For the module contract, see [`@smthrs/triggers`](/docs/reference/api/triggers/#webhook).
+
+## Planned: event selectors and automations
+
+This section describes work that is not built. `@smthrs/targets` exports no `S.Automation` and `S.Package` accepts no `automations` entry. `@smthrs/triggers` exports no `Trigger.push`, `review`, `tag`, `schedule`, `manual`, `event`, or `succeeded`. The type-level proof of the intended surface is [`apps/site/examples/cloud-triggers/contract.d.ts`](https://github.com/smithersai/smithers/blob/main/apps/site/examples/cloud-triggers/contract.d.ts); its README states that it does not implement trigger registration, matching, dispatch, or the `S.Automation` runtime, and that the runtime APIs behind these signatures still need to be built.
+
+The design binds typed event selectors to one target or flow with `S.Automation({ on, run, when?, input? })`, exported through `Package.automations` so a root entry `automations: { ci }` has the label `//:ci`.
+
+| Planned constructor | Options | Event fields beyond `id`, `repository`, `receivedAt` |
+| --- | --- | --- |
+| `T.push(options?)` | `branches?`, `paths?` | `type: "push"`, `branch`, `commit`, `before`. |
+| `T.review(options?)` | `actions?`, `base?`, `head?`, `paths?`, `drafts?` | `type: "review"`, `action`, `review`; labeled events also carry `label`. |
+| `T.tag(options?)` | `names?` | `type: "tag"`, `name`, `commit`. |
+| `T.schedule(options)` | `cron`, `timezone?`, `ref?` | `type: "schedule"`, `scheduledAt`, `timezone`. The declared form of today's cron trigger. |
+| `T.manual(options?)` | `input?` schema | `type: "manual"`, decoded `input`. |
+| `T.event(options)` | literal `name`, `input` schema | `type: "event"`, `name`, decoded `input`. |
+| `T.succeeded(automation)` | an automation reference | `type: "succeeded"`, `runId`, `commit`, `cause`, typed `output`. |
+
+Planned matching rules: entries in `on` combine with OR; fields within one selector combine with AND; values in a filter list combine with OR; an exclusion wins over every inclusion; `when` must return `true` after a selector matches. Planned delivery rules: subscriptions register from the default branch or bookmark, each accepted event records the subscription revision separately from the execution revision, and redelivery returns the first receipt.
+
+None of those rules run anywhere today. When they land, this section moves above the fold and the shipped cron trigger becomes `T.schedule`.

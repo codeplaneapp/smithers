@@ -1,28 +1,141 @@
 ---
 title: "Define triggers"
-description: "Start existing targets and flows from repository events, schedules, manual input, and typed external events."
+description: "Register a durable cron trigger that starts a flow, host the scheduler, fire an occurrence by hand, and read the fire ledger. Repository-event triggers are planned."
 editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/guides/triggers.mdx"
 sidebar:
   order: 26
 ---
 
-A trigger selects an event. An automation connects that event to an existing target or flow. Declare both in `PACKAGE.ts` to keep the work and its starting conditions under version control.
+A trigger is a durable rule that starts a flow. The rule that ships today is a cron schedule: `smthrs triggers register` stores it in the project's control database, and the scheduler inside `smthrs serve` or `smthrs triggers serve` fires it while that process runs. Every fire goes through Control, so a flow that requires approval still waits for one.
 
-You need a connected Cloud repository and an existing target or flow. [Run CI on Smithers Cloud](/docs/guides/cloud-ci/) covers repository setup. The default Cloud API is `https://api.jjhub.tech`.
+Repository events (`push`, `review`, `tag`), typed manual input, external events, and completion chaining are not available yet. The [Planned](#planned-repository-events-and-packagets-declarations) section at the end of this page describes that design and marks it as unshipped.
 
-## Run a target when code changes
+You need a Smithers project with at least one flow. `smthrs flow list` prints the flow ids the trigger can name.
 
-Import the trigger constructors and bind them to a target. This example assumes the root package already declares `prePush`:
+## Register a schedule
 
-```ts title="PACKAGE.ts"
+Give the trigger an id, the flow it runs, and a five-field cron expression:
+
+```bash
+smthrs triggers register nightly-lint --flow lint --cron "0 9 * * 1-5" --timezone America/New_York
+```
+
+The command prints the stored row as JSON. A first registration is revision 1; registering the same id again replaces the row and increments the revision.
+
+Registration validates the schedule before it writes anything. A malformed expression fails with `invalid_cron`. An expression the calendar never satisfies, such as `0 0 30 2 *`, fails with `unsatisfiable_cron`; the check searches forward from now for one occurrence, the same search every scheduler tick performs. `--timezone` accepts an IANA name and defaults to UTC.
+
+Pass fixed input for the flow as JSON with `--input '{"branch":"main"}'`. The input must survive `JSON.stringify` unchanged: `undefined`, `NaN`, a `Date`, or a function fails with `invalid_trigger` and names the `input` field.
+
+To keep the declaration in the repository, write it to a file and register from it:
+
+```json title="triggers/nightly-lint.json"
+{
+  "id": "nightly-lint",
+  "flowId": "lint",
+  "input": {},
+  "cron": "0 9 * * 1-5",
+  "timezone": "America/New_York",
+  "overlap": "skip",
+  "catchUp": "none",
+  "maxCatchUp": 0,
+  "enabled": true
+}
+```
+
+```bash
+smthrs triggers register nightly-lint --file triggers/nightly-lint.json
+```
+
+The `id` in the file must match the id on the command line; a mismatch fails and writes nothing. Registering from a file does not watch the file: rerun the command after editing it.
+
+## Choose overlap and catch-up policies
+
+Two policies decide what happens when an occurrence is due at an awkward time. Both default to the conservative choice.
+
+| Policy | Values | Behavior |
+| --- | --- | --- |
+| `--overlap` | `skip` (default), `buffer-one`, `supersede` | What to do when an occurrence is due while the previous run is still active. `skip` records the occurrence and starts nothing. `buffer-one` keeps one pending occurrence and fires it when the active run settles; a second due occurrence coalesces into the same buffer. `supersede` cancels the active run and starts the new occurrence. |
+| `--catch-up` | `none` (default), `one`, `all` | What to do with occurrences missed while no scheduler was running. `none` ignores them. `one` fires the most recent missed occurrence. `all` fires every missed occurrence in order. |
+| `--max-catch-up` | `0` (default) to `1000` | The most missed occurrences a catch-up may replay. With the default `0`, `one` and `all` replay nothing. A backlog beyond the bound is abandoned with a warning, and the current occurrence still fires. |
+
+Disabling a trigger never cancels its active run. Only a `supersede` claim cancels a run.
+
+## Host the scheduler
+
+Schedules fire only while a scheduler process runs against the same project:
+
+```bash
+smthrs serve
+```
+
+`smthrs serve` hosts the control server and the trigger scheduler on one Control service. For a scheduler without the HTTP server, run `smthrs triggers serve`; `--poll-interval-ms` sets the tick period and defaults to 1000.
+
+On each tick the scheduler computes which enabled triggers are due, claims each occurrence in the store, and starts the flow through Control with the idempotency key `<triggerId>:<occurrence ISO instant>`. Two hosts that notice the same boundary derive the same key, so a retry or a second scheduler cannot start the same occurrence twice.
+
+A flow that requires approval parks its plan. The scheduler re-offers the same plan eight times with a doubling delay, so the last attempt lands a little over two minutes after the first; if nobody has approved by then the occurrence is recorded as `failed` with error `runner`. Approve it from the CLI:
+
+```bash
+smthrs triggers show nightly-lint
+smthrs approvals approve '<activePlan.plan.approval>' --scope run
+```
+
+`show` prints `activePlan.plan.approval` when a plan is waiting. Submit it unchanged. Waiting plans survive a scheduler restart without changing their payload.
+
+Stopping the scheduler cancels nothing. Launched runs are durable and outlive the process; the next scheduler re-attaches to them from the store.
+
+## Fire an occurrence by hand
+
+Queue one occurrence for a running scheduler:
+
+```bash
+smthrs triggers fire nightly-lint
+```
+
+The command records a pending occurrence stamped with the current time and prints its idempotency key. The scheduler picks it up on its next tick and applies the trigger's overlap policy exactly as it would for a cron boundary. A disabled trigger refuses to queue; enable it first. `--occurrence <unix-ms>` sets the occurrence instant so a retried command reuses the same key instead of queueing a second fire.
+
+## Inspect triggers and the fire ledger
+
+`smthrs triggers list` prints every registration ordered by id, each with its `revision`, `enabled` flag, and `lastFiredAt` once an occurrence has been recorded. `smthrs triggers show <id>` adds `activeRun`, the run id or launch reservation the trigger holds right now, and `activePlan` when that run is waiting for approval.
+
+Every occurrence ends with one recorded outcome:
+
+| Outcome | Meaning |
+| --- | --- |
+| `launched` | Control accepted the run and it is still active. |
+| `completed` | The run settled. |
+| `skipped` | The occurrence was due while a run was active and the policy is `skip`. |
+| `buffered` | The occurrence is waiting behind an active run under `buffer-one`. |
+| `superseded` | The occurrence cancelled the active run under `supersede`. |
+| `failed` | Control refused the launch, or the parked plan exhausted its attempts. |
+
+`lastFiredAt` is the cursor catch-up resumes from. It advances on skipped and buffered occurrences too, so it does not tell you which occurrence an active run owns; `show` does.
+
+`smthrs triggers enable <id>` and `smthrs triggers disable <id>` flip future occurrences without touching an active run. Both increment the revision.
+
+## Read triggers in the app
+
+Signed in to Smithers, run `/triggers.list` or ask "list the triggers on owner/repo". The Dispatcher card prints one row per trigger: the schedule in words, the flow it runs, whether it is enabled, and when it last fired.
+
+The card reads the workspace's gateway. When that gateway does not serve its trigger store, the card prints the gateway's own reason instead of an empty list, and never a made-up row. Smithers Cloud workspaces do not serve the store yet, so today the card reports that and points you at `smthrs triggers list` on the host that runs the scheduler. Registering and editing triggers from the app is not available; use the CLI.
+
+## Accept a verified webhook
+
+`@smthrs/triggers/Webhook` builds a webhook door in code. `Webhook.make` takes a channel configuration and a required credential reference, verifies the request signature over the raw bytes in constant time, and hands the decoded payload to Control's channel coordinator. It exposes `register` and `ingest` and no direct execution method, so a valid signature and valid JSON never bypass Control.
+
+There is no `smthrs webhooks` verb and no webhook row in the app yet. For the module contract, see [`@smthrs/triggers`](/docs/reference/api/triggers/#webhook). For GitHub webhooks that reconcile against `.smithers/listeners.json`, see `smthrs integrations reconcile` in the [CLI reference](/docs/reference/cli/).
+
+## Planned: repository events and PACKAGE.ts declarations
+
+This section describes work that is not built. Nothing in it is importable today: `@smthrs/targets` exports no `S.Automation`, `S.Package` accepts no `automations` entry, and `@smthrs/triggers` exports no `Trigger.push`, `review`, `tag`, `schedule`, `manual`, `event`, or `succeeded` constructor. The type-level proof of the intended surface lives in [`apps/site/examples/cloud-triggers/contract.d.ts`](https://github.com/smithersai/smithers/blob/main/apps/site/examples/cloud-triggers/contract.d.ts), whose README states that it implements no registration, matching, dispatch, or `S.Automation` runtime.
+
+The intended shape binds typed event selectors to an existing target or flow inside `PACKAGE.ts`:
+
+```ts title="PACKAGE.ts (planned; does not compile against the released packages)"
 import { Smithers as S } from "@smthrs/targets"
 import { Trigger as T } from "@smthrs/triggers"
 
 const ci = S.Automation({
-  on: [
-    T.push({ branches: ["main"] }),
-    T.review({ base: ["main"] }),
-  ],
+  on: [T.push({ branches: ["main"] }), T.review({ base: ["main"] })],
   run: prePush,
 })
 
@@ -32,118 +145,6 @@ export const Package = S.Package({
 })
 ```
 
-Preserve the existing `prePush` declaration and other package entries. `on` is a non-empty list of alternatives. If more than one entry matches the same event, Cloud starts one run and records every matching entry.
+The planned selectors are `T.push` with branch and path filters, `T.review` for GitHub pull requests and Plue landing requests, `T.tag`, `T.schedule` as the declared form of today's cron trigger, `T.manual` with a typed input schema, `T.event` for authenticated external publishers, and `T.succeeded` to chain one automation after another. Filters combine with AND, list values with OR, and an exclusion always wins. The [Trigger reference](/docs/reference/triggers/) records the planned event fields and matching rules under the same disclaimer.
 
-`T.review` handles GitHub pull requests and Plue landing requests. Use `base` for the destination and `head` for the source. By default, it selects non-draft reviews when opened, reopened, updated with new code, or marked ready.
-
-Run `pnpm exec smthrs target '//:prePush'` to execute the same work locally. Importing a package or running its target locally does not register subscriptions.
-
-## Filter events
-
-Filter fields combine with AND. Values within a list combine with OR. This trigger matches a push to `main` or `release/**` that changes an included path:
-
-```ts
-T.push({
-  branches: ["main", "release/**"],
-  paths: {
-    include: ["src/**", "package.json"],
-    exclude: ["src/**/*.md"],
-  },
-})
-```
-
-Exclusions take precedence regardless of list order. Use path filters for optional automation; required CI usually benefits from running its graph and reusing cached results. A filtered event is not evidence that checks passed.
-
-For a condition that needs event data, add a synchronous `when` predicate. This example selects a review that receives the `run-ci` label:
-
-```ts
-const labeled = S.Automation({
-  on: [T.review({ actions: ["labeled"] })],
-  when: event => event.label === "run-ci",
-  run: prePush,
-})
-```
-
-The selected event determines the type of `event`. A push event has no `label`; a labeled review event does. Add `labeled` to `Package.automations` to register it.
-
-## Add a schedule
-
-Add a schedule to the automation's `on` list:
-
-```ts
-T.schedule({
-  cron: "0 9 * * 1-5",
-  timezone: "America/New_York",
-  ref: "main",
-})
-```
-
-This schedule becomes due at 9 AM on weekdays in New York. Omit `timezone` for UTC and `ref` for the default branch or bookmark. Cloud validates the expression and timezone when registering the declaration. Actual start time also depends on worker availability.
-
-## Accept typed manual input
-
-Use a flow's payload schema as the manual input schema. This example assumes `Deploy` is an existing flow whose payload contains `environment: "staging" | "production"` and `version: string`:
-
-```ts
-const deploy = S.Automation({
-  on: [T.manual({ input: Deploy.payloadSchema })],
-  run: Deploy,
-  input: event => event.input,
-})
-```
-
-Import `Deploy` from its module and add `deploy` to `Package.automations`. Keep the flow's existing action implementations and runtime configuration. The app derives its input form from the schema. App, agent, CLI, and API launches all validate the same input before creating work.
-
-The mapper receives the inferred payload type. Returning an unsupported environment or omitting the required version is a TypeScript error. External requests with those values fail schema validation.
-
-Use `T.manual()` for a launch with no input. A manual trigger permits fresh launches; rerunning a recorded attempt uses that attempt's original event and input.
-
-## Accept an external event
-
-Give an external event a name and schema:
-
-```ts
-import * as Schema from "effect/Schema"
-
-const deployRequested = T.event({
-  name: "deploy.requested",
-  input: Schema.Struct({
-    environment: Schema.Literals(["staging", "production"]),
-    version: Schema.String,
-  }),
-})
-
-const deploy = S.Automation({
-  on: [deployRequested],
-  run: Deploy,
-  input: event => event.input,
-})
-```
-
-This is an alternative to the manual-only `deploy` declaration. You can also put both selectors in one `on` list when they supply the same payload.
-
-Register the event's publisher on the Cloud connection. Cloud authenticates the publisher before validating its payload. For an HTTP webhook, the registered source verifies the signature over the original request bytes. A matching event name and valid JSON do not grant permission to start work.
-
-## Continue after another automation succeeds
-
-Reference the automation directly to retain its result type. This example assumes `build` runs a flow that returns `{ artifact: string }` and `Publish` accepts that artifact:
-
-```ts
-const publish = S.Automation({
-  on: [T.succeeded(build)],
-  when: event =>
-    event.cause.type === "push" && event.cause.branch === "main",
-  run: Publish,
-  input: event => ({ artifact: event.output.artifact }),
-})
-```
-
-The condition admits successful builds caused by pushes to `main`. `event.output` is inferred from the upstream flow's success schema. The continuation uses the upstream commit and retains its trust restrictions.
-
-Use dependencies inside a target graph or flow for steps of the same run. Use a completion trigger when you need a separate run with its own result.
-
-## Activate and inspect triggers
-
-Commit the package to the default branch or bookmark, then enable its automations in Smithers. Cloud shows the declarations and their starting conditions before activation. Later changes on that branch update the registered subscriptions; an invalid declaration reports an error and leaves the last valid registration active.
-
-Each run records the event, matching selectors, declaration revision, and execution revision. Inspect those values when a run starts unexpectedly or a filter excludes work. For matching rules and event fields, see the [Trigger reference](/docs/reference/triggers/).
+Until that lands, the shipped way to start work from a repository event is a CI job: [Run flows in CI](/docs/guides/ci/) launches a flow from GitHub Actions, and the [`Smithers.GithubCiGen` target](/docs/reference/api/targets/) generates the workflow files that run `smthrs ci`.
