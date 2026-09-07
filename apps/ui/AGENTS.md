@@ -39,6 +39,7 @@ Nothing user-visible may be added unless the current brief or the canon (`DESIGN
 - A maximized frame keeps Smithers chrome visible: the composer overlays or remains adjacent to the content, and minimize, back, and forward remain available.
 - Every visible frame has a durable identity, parent frame, workspace, branch, and app-state revision. Persist the frame graph in SQLite through the shared transition dispatcher and journal.
 - Put stable frame, workspace, and branch identifiers in the URL. The URL is a pointer into durable state, not the state payload.
+  Exception (will, 2026-09-07): the app for a repository lives at exactly /owner/name; when the page boots from that path the address bar keeps it for the page's life and the frame location travels in history.state (runtime/FrameHistory.ts).
 - Browser back and forward traverse frame history. Forking any historical frame creates a new workspace branch rooted at that frame's recorded revision without mutating the original branch.
 - Frame navigation, maximize, minimize, back, forward, and fork are Flows with the same slash, agent, and button invocation path as every other capability.
 - Deep-link reload, back/forward, historical fork, unchanged embedded/maximized component identity, and composer visibility are mandatory end-to-end tests.

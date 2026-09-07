@@ -127,3 +127,34 @@ test("open-in-tab returns the address bar to the root frame and Escape minimizes
   await expect(page.locator('.smithers-card[data-kind="theme-picker"][data-maximized="true"]')).toHaveCount(0)
   await expect(page.locator(".card-maximize-backdrop")).toHaveCount(0)
 })
+
+test("booted from a repository path, the address bar keeps it while back and forward still switch frames", async ({ page }) => {
+  // The local origin carries no public catalog; the pinned address bar does not depend on the selection.
+  await page.route("**/api/public/repos", (route) => route.fulfill({ status: 404, body: "no catalog" }))
+  await page.goto("/smithersai/smithers")
+  const repoUrl = page.url()
+  expect(new URL(repoUrl).pathname).toBe("/smithersai/smithers")
+  await page.getByTestId("composer-input").fill("/appearance.theme")
+  await page.getByTestId("composer-send").click()
+
+  const card = page.getByTestId("transcript").locator('.smithers-card[data-kind="theme-picker"]')
+  await expect(card).toBeVisible()
+  const cardId = (await card.getAttribute("data-testid"))?.replace(/^card-/, "")
+  expect(cardId).toBeTruthy()
+  await expect(page).toHaveURL(repoUrl)
+
+  await card.getByTestId(`card-maximize-${cardId}`).click()
+  await expect(card).toHaveAttribute("data-maximized", "true")
+  await expect(page).toHaveURL(repoUrl)
+
+  await page.goBack()
+  await expect(card).toHaveAttribute("data-maximized", "false")
+  await expect(page).toHaveURL(repoUrl)
+  await page.goForward()
+  await expect(card).toHaveAttribute("data-maximized", "true")
+  await expect(page).toHaveURL(repoUrl)
+
+  await page.reload()
+  await expect(page).toHaveURL(repoUrl)
+  await expect(page.getByTestId("composer-input")).toBeVisible()
+})
