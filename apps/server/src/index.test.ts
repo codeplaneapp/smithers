@@ -46,6 +46,7 @@ const post = (path: string, body: unknown): Request =>
  */
 describe("routed repository pages", () => {
   const APP_DOCUMENT = "<html><head><meta name=\"smithers-build-sha\" content=\"abc\"></head><body>smithers app</body></html>"
+  const COMING_SOON_PAGE = "<html><body>incur, coming soon</body></html>"
   const siteEnv = () => {
     const served: Array<string> = []
     const env: WorkerEnv = {
@@ -55,6 +56,7 @@ describe("routed repository pages", () => {
           served.push(path)
           const html = { "content-type": "text/html; charset=utf-8" }
           if (path === "/smithersai/smithers/") return new Response(APP_DOCUMENT, { status: 200, headers: html })
+          if (path === "/wevm/incur/") return new Response(COMING_SOON_PAGE, { status: 200, headers: html })
           if (path === "/" || path === "/docs/") return new Response("<html><body>site</body></html>", { status: 200, headers: html })
           if (path === "/_astro/a.js") {
             return new Response("export {}", { status: 200, headers: { "content-type": "text/javascript" } })
@@ -108,10 +110,25 @@ describe("routed repository pages", () => {
     }
   })
 
-  test("a catalog repository under an owner wrangler does not route stays with the assets layer", async () => {
-    const { env, served } = siteEnv()
-    const response = await worker.fetch(new Request("https://smithers.sh/wevm/incur"), env)
-    expect({ status: response.status, served }).toEqual({ status: 404, served: ["/wevm/incur"] })
+  test("a coming-soon repository serves its prerendered site page by canonical path, whatever the case or trailing slash, without the app's isolation headers", async () => {
+    // Its owner is not a routed owner, so live the assets layer answers the
+    // canonical path before the Worker runs; the Worker sees the variants the
+    // assets have no file for and must not leave them to the 404 page.
+    for (const path of ["/wevm/incur", "/WEVM/Incur", "/wevm/incur/"]) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status: 200, served: ["/wevm/incur/"] })
+      expect(isolation(response)).toEqual({ coop: null, coep: null })
+      expect(await response.text()).toBe(COMING_SOON_PAGE)
+    }
+  })
+
+  test("a path beside a coming-soon repository stays with the assets layer", async () => {
+    for (const path of ["/wevm/incur/issues/3", "/wevm/other", "/wevm/"]) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status: 404, served: [path] })
+    }
   })
 
   test("the site's pages and chunks pass through as the assets layer serves them; the Worker adds no isolation headers", async () => {

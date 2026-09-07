@@ -107,18 +107,30 @@ describe("the curated catalog", () => {
     ])
   })
 
-  test("a coming-soon repository is never available, so the Worker never serves its app page", async () => {
+  test("a coming-soon repository is never available: its path is the prerendered coming-soon page, never the app", async () => {
     const available = AVAILABLE_REPOS.map((repo) => repo.name.toLowerCase())
     for (const repo of COMING_SOON_REPOS) {
       expect(available).not.toContain(repo.name.toLowerCase())
     }
+    const siteEnv = () => {
+      const served: Array<string> = []
+      const env = {
+        ASSETS: { fetch: async (req: Request) => { served.push(new URL(req.url).pathname); return new Response("page") } },
+        IDENTITY_UPSTREAM_URL: "https://identity.test"
+      }
+      return { env, served }
+    }
+    // Every coming-soon path serves the site page the build prerenders at its
+    // canonical path, as the assets layer serves it: no app isolation headers.
+    for (const repo of COMING_SOON_REPOS) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh/${repo.name.toLowerCase()}`), env)
+      expect({ name: repo.name, status: response.status, served, coep: response.headers.get("Cross-Origin-Embedder-Policy") })
+        .toEqual({ name: repo.name, status: 200, served: [`/${repo.name}/`], coep: null })
+    }
     // The routed owner's app page answers only catalog names; a coming-soon name
     // under that owner leaves like any unknown repository, never as the app.
-    const served: Array<string> = []
-    const env = {
-      ASSETS: { fetch: async (req: Request) => { served.push(new URL(req.url).pathname); return new Response("app") } },
-      IDENTITY_UPSTREAM_URL: "https://identity.test"
-    }
+    const { env, served } = siteEnv()
     const response = await worker.fetch(new Request("https://smithers.sh/smithersai/effect"), env)
     expect({ status: response.status, location: response.headers.get("location"), served })
       .toEqual({ status: 302, location: "https://smithers.sh/", served: [] })

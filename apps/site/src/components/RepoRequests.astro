@@ -1,16 +1,29 @@
 ---
+/*
+ * The nomination form. On the landing page it is open: a visitor names any
+ * repository. On a coming-soon repository page it is pre-filled with that
+ * repository, so the visitor nominates it and leaves an email in one step.
+ */
+interface Props {
+  repo?: { readonly name: string; readonly title: string; readonly url: string }
+}
+const { repo } = Astro.props
 const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithers.sh/api/repo-requests"
 ---
 
 <section class="requests wrap" aria-labelledby="request-title" data-repo-requests data-endpoint={endpoint}>
   <div class="request-card">
     <div class="intro">
-      <h2 id="request-title">What should we smither next?</h2>
-      <p>Smithers is in private alpha and only available to a select number of open source repos</p>
+      {repo
+        ? <h2 id="request-title">Nominate {repo.title}</h2>
+        : <h2 id="request-title">What should we smither next?</h2>}
+      {repo
+        ? <p>Smithers is in private alpha. Nominations decide which repositories open next; leave an email and we send one message when {repo.title} opens.</p>
+        : <p>Smithers is in private alpha and only available to a select number of open source repos</p>}
     </div>
     <form data-request-form>
       <label for="repo-url">GitHub repository</label>
-      <input id="repo-url" name="repo" type="text" placeholder="https://github.com/owner/repo" required maxlength="250" autocapitalize="none" spellcheck="false" aria-describedby="repo-help" />
+      <input id="repo-url" name="repo" type="text" value={repo?.url} placeholder="https://github.com/owner/repo" required maxlength="250" autocapitalize="none" spellcheck="false" aria-describedby="repo-help" />
       <p class="hint" id="repo-help">A public repo with an open-source license. It doesn’t have to be yours.</p>
       <label for="repo-email">Email <span class="optional">(optional)</span></label>
       <input id="repo-email" name="email" type="email" placeholder="you@example.com" maxlength="254" autocomplete="email" aria-describedby="email-help" />

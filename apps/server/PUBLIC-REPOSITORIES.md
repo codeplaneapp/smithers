@@ -55,6 +55,14 @@ as the active repository in the agent's per-turn runtime context. It strips
 the `repo` parameter from the URL either way, so a reload does not reselect.
 Set `PUBLIC_APP_ORIGIN` at site build time to point the cards at a preview app.
 
+A coming-soon card links to that repository's own page at `/<owner>/<name>`,
+prerendered by the same site build (`src/pages/[owner]/[repo].astro`): the
+repository, its GitHub stats from this endpoint, the sentence that it opens as
+its maintainers claim it, and the nomination form pre-filled with it. The
+Worker serves the app document only for `AVAILABLE_REPOS`; a coming-soon path
+serves that page as the assets layer does, whatever the case of the name
+(`src/appDocument.ts`, `comingSoonDocumentPath`).
+
 ## Existing repository APIs
 
 Anonymous GETs to the app's repository metadata, contents, topics, stargazers,

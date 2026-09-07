@@ -60,7 +60,7 @@ import {
   TurnRateLimiter
 } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
-import { catalogDocumentPath, DEFAULT_APP_DOCUMENT_PATH, isFramePath } from "./appDocument"
+import { catalogDocumentPath, comingSoonDocumentPath, DEFAULT_APP_DOCUMENT_PATH, isFramePath } from "./appDocument"
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
 import { createPublicRepoActivityHandler, parsePublicRepoActivityPath } from "./publicRepoActivity"
@@ -2503,11 +2503,23 @@ const handlePublicRepoActivity = createPublicRepoActivityHandler({
   cache: () => (globalThis as typeof globalThis & { caches?: CacheStorage & { default?: Cache } }).caches?.default
 })
 
-const routedRepoPage = (pathname: string): { readonly document: string } | "unknown" | undefined => {
+/**
+ * What a repository path answers. A coming-soon repository (COMING_SOON_REPOS)
+ * has a prerendered site page and no app, under an owner wrangler does not
+ * route: the assets layer serves its canonical path first, and this branch
+ * catches the variants the assets have no file for so `/effect-ts/effect`
+ * reaches the same page. A catalog repository under a routed owner is the app
+ * document; every other path under a routed owner is nobody's page.
+ */
+const routedRepoPage = (
+  pathname: string
+): { readonly kind: "app" | "coming-soon"; readonly document: string } | "unknown" | undefined => {
+  const comingSoon = comingSoonDocumentPath(pathname)
+  if (comingSoon !== undefined) return { kind: "coming-soon", document: comingSoon }
   const lower = pathname.toLowerCase()
   if (!ROUTED_OWNER_PREFIXES.some((prefix) => lower.startsWith(prefix))) return undefined
   const document = catalogDocumentPath(pathname)
-  return document === undefined ? "unknown" : { document }
+  return document === undefined ? "unknown" : { kind: "app", document }
 }
 
 /*
@@ -2685,6 +2697,11 @@ export default {
     const repoPage = routedRepoPage(url.pathname)
     if (repoPage === "unknown") {
       return new Response(null, { status: 302, headers: { location: `${DEFAULT_APP_ORIGIN}/` } })
+    }
+    if (repoPage !== undefined && repoPage.kind === "coming-soon") {
+      // A page of the site, served as the assets layer serves every other
+      // page: it loads Google Fonts, which the app's COEP would block.
+      return withCanaryRobots(url, await env.ASSETS.fetch(new Request(new URL(repoPage.document, url).toString(), request)))
     }
     if (repoPage !== undefined) {
       return withCanaryRobots(url, await serveAppDocument(request, env, url, repoPage.document))

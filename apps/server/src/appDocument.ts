@@ -1,4 +1,4 @@
-import { AVAILABLE_REPOS } from "./publicRepoCatalog"
+import { AVAILABLE_REPOS, COMING_SOON_REPOS } from "./publicRepoCatalog"
 
 /*
  * The app document. The smithers.sh Astro build (apps/site) prerenders the
@@ -34,10 +34,28 @@ export const FRAME_PATH_PREFIX = "/w/"
 export const isFramePath = (pathname: string): boolean =>
   /^\/w\/[^/]+\/b\/[^/]+\/f\/[^/]+\/?$/.test(pathname)
 
+/** The roster entry a path names, by GitHub's case-insensitive rule; `/owner/name/` is the same page. */
+const rosterEntry = <Repo extends { readonly name: string }>(roster: ReadonlyArray<Repo>, pathname: string): Repo | undefined => {
+  const name = pathname.toLowerCase().replace(/\/$/, "")
+  return roster.find((entry) => `/${entry.name.toLowerCase()}` === name)
+}
+
 /** The canonical app page for a routed path, or undefined when the path names no catalog repository. */
 export const catalogDocumentPath = (pathname: string): string | undefined => {
-  // GitHub names are case-insensitive, and `/owner/name/` is the same page.
-  const name = pathname.toLowerCase().replace(/\/$/, "")
-  const repo = AVAILABLE_REPOS.find((entry) => `/${entry.name.toLowerCase()}` === name)
+  const repo = rosterEntry(AVAILABLE_REPOS, pathname)
+  return repo === undefined ? undefined : appDocumentPath(repo.name)
+}
+
+/**
+ * The prerendered coming-soon page for a path that names a COMING_SOON_REPOS
+ * entry, or undefined. The same build prerenders it at /<owner>/<name>/
+ * (apps/site src/pages/[owner]/[repo].astro) as a page of the site, not the
+ * app: it carries no build stamp and no isolation headers. Its owners are not
+ * routed owners, so the assets layer answers the canonical path itself; the
+ * Worker sees only a variant the assets have no file for (another case, no
+ * trailing slash) and serves the canonical page for it.
+ */
+export const comingSoonDocumentPath = (pathname: string): string | undefined => {
+  const repo = rosterEntry(COMING_SOON_REPOS, pathname)
   return repo === undefined ? undefined : appDocumentPath(repo.name)
 }
