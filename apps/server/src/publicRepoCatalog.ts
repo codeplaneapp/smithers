@@ -34,7 +34,12 @@ export const COMING_SOON_REPOS = [
   { name: "jj-vcs/jj", title: "jj", url: "https://github.com/jj-vcs/jj" },
   // Second-ring dependencies: incur depends on the MCP SDK; jj depends on gitoxide.
   { name: "modelcontextprotocol/typescript-sdk", title: "MCP TypeScript SDK", url: "https://github.com/modelcontextprotocol/typescript-sdk" },
-  { name: "GitoxideLabs/gitoxide", title: "gitoxide", url: "https://github.com/GitoxideLabs/gitoxide" }
+  { name: "GitoxideLabs/gitoxide", title: "gitoxide", url: "https://github.com/GitoxideLabs/gitoxide" },
+  // The web app's own dependencies: its client store, flow canvas, desktop shell, and docs theme.
+  { name: "TanStack/db", title: "TanStack DB", url: "https://github.com/TanStack/db" },
+  { name: "xyflow/xyflow", title: "xyflow", url: "https://github.com/xyflow/xyflow" },
+  { name: "blackboardsh/electrobun", title: "Electrobun", url: "https://github.com/blackboardsh/electrobun" },
+  { name: "withastro/starlight", title: "Starlight", url: "https://github.com/withastro/starlight" }
 ] as const
 
 /**
