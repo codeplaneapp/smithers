@@ -173,7 +173,8 @@ describe("public available repositories", () => {
     for (const req of requests) {
       expect(req.headers.has("authorization")).toBe(false)
       expect(req.headers.has("cookie")).toBe(false)
-      expect(req.redirect).toBe("error")
+      // workerd throws on redirect: "error" before sending; only "follow" and "manual" are accepted.
+      expect(req.redirect).toBe("manual")
     }
   })
 
@@ -280,9 +281,11 @@ describe("public available repositories", () => {
     }
   })
 
-  test("settled non-metadata answers (404, private, invalid) null the stats and cache for the full window", async () => {
+  test("settled non-metadata answers (404, 302, private, invalid) null the stats and cache for the full window", async () => {
     for (const answer of [
       () => Response.json({ message: "Not Found" }, { status: 404 }),
+      // The manual redirect mode hands a 3xx back instead of following it or throwing.
+      () => new Response(null, { status: 302, headers: { location: "https://api.github.com/repositories/1" } }),
       () => Response.json({ ...metadata, private: true }),
       () => Response.json({ ...metadata, full_name: "another/repo" }),
       () => Response.json({ ...metadata, stargazers_count: -1 }),

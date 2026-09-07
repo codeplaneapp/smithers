@@ -86,7 +86,11 @@ export const createPublicReposHandler = (deps: Dependencies) => {
           "user-agent": "Smithers-public-repos",
           ...(token === undefined ? {} : { authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28" })
         },
-        redirect: "error",
+        // workerd refuses redirect: "error" (it throws before the request is
+        // sent, which nulled every card's stats in production while Bun let the
+        // tests pass), so the redirect is requested manually and a 3xx answer
+        // below is a settled non-answer.
+        redirect: "manual",
         signal: AbortSignal.timeout(10_000)
       }))
     } catch {
@@ -94,6 +98,9 @@ export const createPublicReposHandler = (deps: Dependencies) => {
       return { stats: null, transient: true }
     }
     if (response.status >= 500) return { stats: null, transient: true }
+    // GitHub metadata never redirects; a 3xx is not metadata and will not
+    // change in the next few minutes, so it caches for the full window.
+    if (response.status >= 300 && response.status < 400) return { stats: null, transient: false }
     if (!response.ok) return { stats: null, transient: false }
     try {
       return { stats: parseStats(await response.json(), name), transient: false }
