@@ -98,6 +98,12 @@ by `NodeControl.makeConfig` before the parser runs, because the durable layers
 are built from them. They are declared on the command tree as well so the
 parser accepts them.
 
+Over MCP the host owns the connection. A tool argument spelling `remote` or
+`credential` is refused with exit 2, so a connected client cannot aim the
+host's `SMITHERS_API_KEY` at a control plane it chose. An MCP session reaches
+whatever `SMITHERS_REMOTE` and `SMITHERS_API_KEY` name in the server's own
+environment, and nothing else.
+
 `--quiet` never suppresses the stdout document. It is safe to combine with
 `--json` when a script wants the machine document without banners or progress
 on stderr.

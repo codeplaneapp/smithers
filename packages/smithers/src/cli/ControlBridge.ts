@@ -12,6 +12,7 @@ import { Cause, Console, Effect, Exit, Layer, Logger, References, Stream } from 
 import { Command } from "effect/unstable/cli"
 import { z } from "incur"
 import { format } from "node:util"
+import * as CliError from "../CliError.ts"
 import { cli as legacyCli, doctorCli, migrationCli } from "../Command.ts"
 import * as HistoryWorkspace from "../history/History.ts"
 import * as CommandStatus from "../internal/CommandStatus.ts"
@@ -79,13 +80,35 @@ export const connectionArguments = (options: ConnectionOptions): Array<string> =
   return args
 }
 
+// The control plane an MCP session reaches, and the credential it presents,
+// are host configuration. Honouring them as tool arguments would let any
+// connected client aim the host's SMITHERS_API_KEY at a server it chose.
+// Refuse the override rather than silently substituting the host destination,
+// so a caller is never told it queried a plane it did not.
+const hostConnection = (options: ConnectionOptions): ConnectionOptions => {
+  if (Presentation.current()?.transport !== "mcp") return options
+  for (const flag of ["remote", "credential"] as const) {
+    if (options[flag] !== undefined) {
+      throw new CliError.UsageError({
+        message:
+          `--${flag} is not accepted over MCP; the host selects the control plane with SMITHERS_REMOTE and SMITHERS_API_KEY`
+      })
+    }
+  }
+  return options
+}
+
 /**
  * Resolves transport and execution roots for an adapted command.
  * @category constructors
  * @since 1.0.0
  */
 export const configuration = (options: ConnectionOptions, runtime: Runtime) => {
-  const config = NodeControl.makeConfig(connectionArguments(options), runtime.environment ?? process.env, process.cwd())
+  const config = NodeControl.makeConfig(
+    connectionArguments(hostConnection(options)),
+    runtime.environment ?? process.env,
+    process.cwd()
+  )
   if (config.remote === undefined) Project.assertRoot(config.root ?? process.cwd())
   return {
     ...config,

@@ -152,6 +152,30 @@ describe("control bridge configuration and routing", () => {
     )
   })
 
+  it("refuses caller-selected connection overrides over MCP and keeps the host destination", async () => {
+    const environment = { SMITHERS_REMOTE: "https://host.invalid", SMITHERS_API_KEY: "host-bearer" }
+    const host = { ...runtime, environment }
+    await Presentation.scope({ request: {}, command: "flow_list" }, host, async () => {
+      for (const override of [{ remote: "https://attacker.invalid" }, { credential: "caller-chosen" }]) {
+        expect(() => Bridge.configuration({ ...local, ...override }, host)).toThrow(/is not accepted over MCP/)
+        await expect(Bridge.invoke(["ls"], { ...local, ...override }, host)).rejects.toThrow(/is not accepted over MCP/)
+        await expect(Bridge.query(Effect.void, { ...local, ...override }, host)).rejects.toThrow(
+          /is not accepted over MCP/
+        )
+      }
+      expect(ports.control).not.toHaveBeenCalled()
+      expect(receivedArguments).toEqual([])
+      await Bridge.invoke(["ls"], local, host)
+      expect(ports.control).toHaveBeenLastCalledWith(expect.objectContaining({
+        remote: "https://host.invalid",
+        credential: "host-bearer",
+        principal: { id: "mcp", kind: "agent" }
+      }))
+    })
+    expect(Bridge.configuration({ ...local, remote: "https://explicit.invalid", credential: "operator" }, host))
+      .toMatchObject({ remote: "https://explicit.invalid", credential: "operator", principal: undefined })
+  })
+
   it("keeps concurrent CLI and MCP identities separate", async () => {
     await Promise.all([
       Presentation.scope({ agent: true, formatExplicit: true, globals: {} }, runtime, async () => {
