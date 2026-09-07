@@ -1396,6 +1396,12 @@ const validateSession = async (request: Request, env: WorkerEnv): Promise<Sessio
       scopes?: unknown
     } | undefined
     if (body === undefined || typeof body.login !== "string" || body.login === "") {
+      // Identity answers a cookieless validate with a session body that has
+      // no login. That is a signed-out visitor, not a malformed answer, and
+      // the 401 is what opens the anonymous catalog door
+      // (anonymousCatalogTurn). A loginless body for a request that DID
+      // send a cookie is still identity misbehaving.
+      if (cookie === null && body !== undefined) return { status: "invalid" }
       return {
         status: "unavailable",
         response: json(502, { status: "error", message: "The identity service returned a malformed session response." })

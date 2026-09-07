@@ -1065,6 +1065,35 @@ describe("anonymous exploring of a public catalog repository", () => {
   const signedOut = (request: Request): Response | undefined =>
     new URL(request.url).hostname === "identity.test" ? new Response("{}", { status: 401 }) : undefined
 
+  test("identity answering a cookieless validate with a loginless 200 is signed out, not an outage", async () => {
+    // Production identity answers a validate that carries no cookie with 200
+    // and a session body without a login; that must open the anonymous door
+    // exactly like a 401, never the 502 "malformed session" outage.
+    let upstreamCalls = 0
+    await withMockedFetch(
+      (request) => {
+        if (new URL(request.url).hostname === "identity.test") {
+          expect(request.headers.has("cookie")).toBe(false)
+          return Response.json({ state: "signed-out", login: null })
+        }
+        upstreamCalls += 1
+        return ndjsonUpstream([{ type: "delta", kind: "text", text: "It is a monorepo." }, { type: "done" }])
+      },
+      async () => {
+        const response = await worker.fetch(
+          new Request("https://canary.smithers.sh/api/agent/turn", {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: "https://canary.smithers.sh" },
+            body: JSON.stringify(exploring("smithersai/smithers", "run-loginless"))
+          }),
+          identityEnv
+        )
+        expect(response.status).toBe(200)
+        expect(upstreamCalls).toBe(1)
+      }
+    )
+  })
+
   test("a signed-out turn about a catalog repository runs, unattributed to any account", async () => {
     let seen: Headers | undefined
     let upstreamCalls = 0
