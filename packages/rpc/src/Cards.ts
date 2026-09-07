@@ -1776,6 +1776,22 @@ export const CardSchema = z.discriminatedUnion("kind", [
       source: z.enum(["list", "suggestions"]),
       reason: z.string().optional()
     })
+  }),
+  /*
+   * The anonymous turn ceiling's refusal (factory mock 22): a signed-out
+   * visitor's turn the Worker refused with 429 turn_rate_limited. `message`
+   * is the server's own sentence (per-address or deployment-wide wording),
+   * `retryAt` its ISO reset time or null when the body named none. The card
+   * renders only these two fields plus the sign-in door; no count or reset is
+   * invented client-side.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("anonymous-ceiling"),
+    payload: z.object({
+      message: z.string(),
+      retryAt: z.string().nullable()
+    })
   })
 ])
 /**

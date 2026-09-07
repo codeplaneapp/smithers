@@ -863,6 +863,7 @@ export const createAppController = (
     retryLastTurn
   } = createTurnController(ctx, {
     settleTurnBilling,
+    nextOrdinal: nextTranscriptOrdinal,
     surfaceCommandFailure,
     forwardApprovalDecision,
     forwardInboxApprovalDecision

@@ -1,6 +1,6 @@
 import { AGENT_RUNTIME_CONTEXT_VERSION, composeAgentInstructions, renderAgentRuntimeContext } from "@smthrs/rpc/AgentContext"
 import type { AgentRuntimeContext } from "@smthrs/rpc/AgentContext"
-import type { AgentChatMessage, AgentTurnFrame } from "@smthrs/rpc/NativeAgent"
+import type { AgentChatMessage, AgentTurnFrame, TurnRefusal } from "@smthrs/rpc/NativeAgent"
 import { hasCapability } from "@smthrs/rpc/AppBootstrap"
 import { agentVisibleCatalog } from "../../flows/agentTools"
 import type { CommandOutcome } from "../../flows/Commands"
@@ -40,6 +40,8 @@ const CHAIN_SURFACE_CALLS = new Set(["author", "say", "card.show", "card.update"
 
 export interface TurnControllerDependencies {
   readonly settleTurnBilling: () => void
+  /** The next transcript ordinal, so a refusal card lands at the end of the conversation. */
+  readonly nextOrdinal: () => number
   readonly surfaceCommandFailure: (name: string, outcome: CommandOutcome) => void
   readonly forwardApprovalDecision: (
     card: Extract<Card, { kind: "approval" }>,
@@ -67,7 +69,35 @@ export const createTurnController = (
   dependencies: TurnControllerDependencies
 ): TurnController => {
   const { store, repositories, agent } = ctx
-  const { settleTurnBilling, surfaceCommandFailure, forwardApprovalDecision, forwardInboxApprovalDecision } = dependencies
+  const { settleTurnBilling, nextOrdinal, surfaceCommandFailure, forwardApprovalDecision, forwardInboxApprovalDecision } =
+    dependencies
+
+  /*
+   * The anonymous turn ceiling (apps/server turnLimit.ts; factory mock 22):
+   * a signed-out visitor's refused turn is its own card, never the generic
+   * failure line, because the way on is a door (sign in) and not a retry. The
+   * branch is the refusal's CODE plus the session: a signed-out caller can
+   * only be refused by the anonymous buckets, while a signed-in login that
+   * trips its own ceiling has hit a bug and keeps the failure line the server
+   * wrote for it. The card carries the server's sentence and reset time as
+   * sent; the reducer's completion settles the phase without a bubble.
+   */
+  const refuseAnonymousTurn = (turnId: string, refusal: TurnRefusal): boolean => {
+    if (refusal.code !== "turn_rate_limited") return false
+    if (store.collections.identitySessions.get("identity")?.state === "signed-in") return false
+    const card: Card = {
+      id: `anonymous-ceiling-${turnId}`,
+      kind: "anonymous-ceiling",
+      title: "Exploring is paused",
+      status: "active",
+      createdAt: Date.now(),
+      ordinal: nextOrdinal(),
+      payload: { message: refusal.message, retryAt: refusal.retryAt }
+    }
+    store.dispatch({ type: "card.upsert", actor: "system", card })
+    store.dispatch({ type: "message.response.completed", actor: "smithers", turnId })
+    return true
+  }
 
   const handleCardFrame = (frame: Extract<AgentTurnFrame, { type: "card" | "card.update" }>): void => {
     if (frame.type === "card") {
@@ -419,12 +449,14 @@ export const createTurnController = (
         // §1: a leg that never started still ends a turn that launched a
         // run, and a claim streamed before the launch is already on screen.
         settleRunClaims(turn)
-        store.dispatch({
-          type: "message.response.failed",
-          actor: "system",
-          turnId,
-          message: result.message
-        })
+        if (result.refusal === undefined || !refuseAnonymousTurn(turnId, result.refusal)) {
+          store.dispatch({
+            type: "message.response.failed",
+            actor: "system",
+            turnId,
+            message: result.message
+          })
+        }
         settleTurnBilling()
       })
       .catch(() => {

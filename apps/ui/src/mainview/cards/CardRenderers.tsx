@@ -11,6 +11,7 @@ import type { Card } from "../state/AppState"
 import { adminCardFamily } from "./AdminCards"
 import { affectedCardFamily } from "./AffectedCard"
 import { agentCardFamily } from "./AgentCards"
+import { anonymousCeilingCardFamily } from "./AnonymousCeilingCard"
 import { approvalCardFamily } from "./ApprovalCard"
 import { billingCardFamily } from "./BillingCards"
 import { branchesCardFamily } from "./BranchesCard"
@@ -71,7 +72,8 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   agentCardFamily,
   flowFormCardFamily,
   workspaceCardFamily,
-  serviceLogCardFamily
+  serviceLogCardFamily,
+  anonymousCeilingCardFamily
 ]
 
 /** One entry per card kind. Written as a literal so a missing kind fails to compile. */
@@ -105,7 +107,8 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...agentCardFamily,
   ...flowFormCardFamily,
   ...workspaceCardFamily,
-  ...serviceLogCardFamily
+  ...serviceLogCardFamily,
+  ...anonymousCeilingCardFamily
 }
 
 /** The entry for one kind, typed to that kind's card. */

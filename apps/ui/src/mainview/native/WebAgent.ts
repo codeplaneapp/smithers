@@ -1,6 +1,6 @@
 import { CANCEL_PATH, TURN_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { isAgentTurnFrame } from "@smthrs/rpc/NativeAgent"
-import type { AgentTurnFrame, FetchLike, StartAgentTurnResult } from "@smthrs/rpc/NativeAgent"
+import type { AgentTurnFrame, FetchLike, StartAgentTurnResult, TurnRefusal } from "@smthrs/rpc/NativeAgent"
 import type { NativeAgent } from "./NativeBridge"
 
 const MAX_ERROR_BYTES = 320
@@ -61,17 +61,42 @@ const readableDetail = (body: string): string | undefined => {
 }
 
 /** The boundary answers failures as `{ status, message }`; surface that, not raw JSON. */
-const errorDetail = async (response: Response): Promise<string> => {
-  const body = (await response.text().catch(() => "")).trim()
+const errorDetail = (status: number, body: string): string => {
   const detail = readableDetail(body)
-  const classified = statusSentence(response.status)
+  const classified = statusSentence(status)
   if (detail !== undefined) {
     // The upstream wrote for a person: that sentence leads, and the status
     // stays available for a bug report.
-    return `Smithers web agent failed (HTTP ${response.status}): ${detail}`
+    return `Smithers web agent failed (HTTP ${status}): ${detail}`
   }
-  if (classified !== undefined) return `${classified} (HTTP ${response.status})`
-  return `Smithers web agent failed (HTTP ${response.status}).`
+  if (classified !== undefined) return `${classified} (HTTP ${status})`
+  return `Smithers web agent failed (HTTP ${status}).`
+}
+
+/*
+ * The Worker's own turn ceiling (apps/server turnLimit.ts) answers 429 with
+ * `{ code: "turn_rate_limited", message, retryAt }`. That is the one refusal
+ * the app renders as its own card rather than a failure line, so it is
+ * recognised by its code, never by its sentence: a provider's 429 carries no
+ * such code and stays a classified failure.
+ */
+const turnRefusal = (status: number, body: string): TurnRefusal | undefined => {
+  if (status !== 429) return undefined
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (
+      typeof parsed !== "object" || parsed === null || !("code" in parsed) || parsed.code !== "turn_rate_limited" ||
+      !("message" in parsed) || typeof parsed.message !== "string" || parsed.message === ""
+    ) {
+      return undefined
+    }
+    const retryAt = "retryAt" in parsed && typeof parsed.retryAt === "string" && !Number.isNaN(Date.parse(parsed.retryAt))
+      ? parsed.retryAt
+      : null
+    return { code: "turn_rate_limited", message: parsed.message, retryAt }
+  } catch {
+    return undefined
+  }
 }
 
 const streamFrames = async (
@@ -175,11 +200,13 @@ export const createWebAgent = (options: WebAgentOptions = {}): NativeAgent => {
       }
       if (!response.ok || response.body === null) {
         activeTurns.delete(request.runId)
+        if (response.ok) return { status: "error", message: "The Smithers web agent returned no response stream." }
+        const body = (await response.text().catch(() => "")).trim()
+        const refusal = turnRefusal(response.status, body)
         return {
           status: "error",
-          message: response.ok
-            ? "The Smithers web agent returned no response stream."
-            : await errorDetail(response)
+          message: errorDetail(response.status, body),
+          ...(refusal === undefined ? {} : { refusal })
         }
       }
       void streamFrames(response.body, request.runId, publish, () => activeTurns.delete(request.runId))

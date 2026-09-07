@@ -107,7 +107,23 @@ export interface StartAgentTurnRequest {
  */
 export type StartAgentTurnResult =
   | { readonly status: "started" }
-  | { readonly status: "error"; readonly message: string }
+  | { readonly status: "error"; readonly message: string; readonly refusal?: TurnRefusal }
+
+/**
+ * A turn the boundary refused BEFORE it reached a model, stated by code so a
+ * client can branch on what happened rather than on the sentence. Today the
+ * one code is the turn ceiling (`429 turn_rate_limited`, apps/server
+ * turnLimit.ts): `message` is the refusal sentence the server wrote for a
+ * person, and `retryAt` is its ISO reset time when the body carried one.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export interface TurnRefusal {
+  readonly code: "turn_rate_limited"
+  readonly message: string
+  readonly retryAt: string | null
+}
 
 /*
  * Why a turn's stream ended, per the chat tool-loop contract. `cancelled` is

@@ -240,6 +240,49 @@ describe("createWebAgent", () => {
     expect(result.status === "error" ? result.message : "").not.toContain("upgrade")
   })
 
+  /*
+   * The anonymous turn ceiling (apps/server turnLimit.ts) is the one refusal
+   * the app renders as its own card, so the agent states it by CODE beside
+   * the sentence: a 429 that carries `code: "turn_rate_limited"` is a turn
+   * refusal with the server's sentence and reset time, and a 429 from a
+   * provider (no code) or a plain sentence stays a classified failure.
+   */
+  const refused = async (body: string, headers: Record<string, string> = { "content-type": "application/json" }) => {
+    const agent = createWebAgent({ fetchImpl: async () => new Response(body, { status: 429, headers }) })
+    return agent.startTurn(request)
+  }
+
+  test("states the ceiling's per-address refusal by code, with its sentence and reset time", async () => {
+    const message =
+      "That is 20 turns today without signing in, which is as far as exploring goes. Sign in with GitHub to keep going, or come back in about 6 hours. Nothing was charged."
+    const result = await refused(
+      JSON.stringify({ status: "error", code: "turn_rate_limited", message, retryAt: "2026-09-08T00:00:00.000Z" })
+    )
+    expect(result.status).toBe("error")
+    if (result.status !== "error") return
+    expect(result.refusal).toEqual({ code: "turn_rate_limited", message, retryAt: "2026-09-08T00:00:00.000Z" })
+    expect(result.message).toContain("as far as exploring goes")
+  })
+
+  test("states the deployment-wide refusal the same way, with a null reset when the body names none", async () => {
+    const message =
+      "Exploring without signing in has reached its daily limit for everyone, not just you. Sign in with GitHub to keep going, or come back in about 3 hours. Nothing was charged."
+    const result = await refused(JSON.stringify({ status: "error", code: "turn_rate_limited", message }))
+    expect(result.status === "error" ? result.refusal : undefined).toEqual({
+      code: "turn_rate_limited",
+      message,
+      retryAt: null
+    })
+  })
+
+  test("a 429 without the ceiling's code carries no refusal", async () => {
+    const provider = await refused(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "slow down" } }))
+    expect(provider.status === "error" ? provider.refusal : "started").toBeUndefined()
+    const prose = await refused("Too many requests", { "content-type": "text/plain" })
+    expect(prose.status === "error" ? prose.refusal : "started").toBeUndefined()
+    expect(prose.status === "error" ? prose.message : "").toContain("Too many requests")
+  })
+
   test("rejects a duplicate runId while a turn is active", async () => {
     const agent = createWebAgent({
       fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({ start: () => {} }), { status: 200 })
