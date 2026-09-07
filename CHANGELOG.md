@@ -155,10 +155,12 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1605 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1609 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **server:** list the MCP TypeScript SDK and gitoxide as coming soon ([a02bc155f2](https://github.com/smithersai/smithers/commit/a02bc155f25bc2a776f1f44e841162a4fb3f5c62))
+- **server,site:** show Smithers' dependencies as coming soon beside the available card ([3cdd029ae0](https://github.com/smithersai/smithers/commit/3cdd029ae084bc6392819183321d4234a07d5784))
 - **server,rpc,ui:** answer the maintainer's recent-activity sentence from the Cloud mirror ([2710596048](https://github.com/smithersai/smithers/commit/27105960488eedd4760d380102cf2a216df08d56))
 - **ui,server,rpc:** welcome a visitor to the repository with three doors ([46dc83aa7e](https://github.com/smithersai/smithers/commit/46dc83aa7e98b27c2c852a83a7be72011ed70b47))
 - **ui:** drive the next-step pills from POST /api/recommend on the cloud host ([6ac938421e](https://github.com/smithersai/smithers/commit/6ac938421e6c0d70a560d0f5074d2e6fe3d45a64))
@@ -1071,6 +1073,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ♻️ Refactors
 
+- **ui:** read the registry's data tables from the namespace modules ([116d0f5247](https://github.com/smithersai/smithers/commit/116d0f5247a2ebe4c0605a34cdbd12650e81f3a5))
+- **ui:** split Flows.ts into per-namespace modules ([17bfeefce5](https://github.com/smithersai/smithers/commit/17bfeefce533135d64e137b8490ba911594a4d1c))
 - **ui:** render the app through one AppIsland component ([87eebf3e54](https://github.com/smithersai/smithers/commit/87eebf3e5421c031edf15e0588eddd8d14493881))
 - centralize shared policy and derived workspace state ([05f69de9d8](https://github.com/smithersai/smithers/commit/05f69de9d87587ffe47b255c4f1e0e3fa9b42101))
 - **repo-targets:** consolidate package gates and review declarations ([095bde5138](https://github.com/smithersai/smithers/commit/095bde513893ef305046866cee075f41288216ed))
