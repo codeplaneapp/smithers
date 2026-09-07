@@ -8,8 +8,8 @@ import { EvalError } from "@smthrs/evals/EvalError"
 import { Effect } from "effect"
 import { z } from "incur"
 import { randomUUID } from "node:crypto"
-import { link, mkdir, open, readdir, readFile, rename, unlink } from "node:fs/promises"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import { link, mkdir, open, readdir, readFile, realpath, rename, unlink } from "node:fs/promises"
+import { dirname, isAbsolute, join, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import * as Project from "../Project.ts"
 
@@ -78,6 +78,30 @@ export const list = async (root: string) => {
 }
 
 /**
+ * Resolves an explicit file selector inside the project's evals directory.
+ * Loading imports the module, so an escaping selector would execute arbitrary
+ * local code; refuse it before the import rather than after validating the
+ * exports of a module whose top level already ran.
+ */
+const suiteFile = async (root: string, selector: string): Promise<string> => {
+  const directory = join(root, "evals")
+  const file = resolve(root, selector)
+  const refusal = () =>
+    new Error(`${selector} is not a suite module under ${directory}; list the selectable suites first`)
+  if (!modulePattern.test(file)) throw refusal()
+  let contained: boolean
+  try {
+    // Compare real paths so a link inside evals cannot select code outside it.
+    const [real, base] = await Promise.all([realpath(file), realpath(directory)])
+    contained = real.startsWith(base + sep)
+  } catch {
+    throw refusal()
+  }
+  if (!contained) throw refusal()
+  return file
+}
+
+/**
  * Loads and validates one discovered evaluation module.
  * @category constructors
  * @since 1.0.0
@@ -90,7 +114,7 @@ export const load = async (root: string, selector: string): Promise<{
   const files = await list(root)
   const matches = files.filter((entry) => entry.name === selector)
   if (matches.length > 1) throw new Error(`Ambiguous evaluation suite ${selector}; specify its file`)
-  const file = matches[0]?.file ?? resolve(root, selector)
+  const file = matches[0]?.file ?? await suiteFile(root, selector)
   const imported: unknown = await import(pathToFileURL(file).href)
   const exports = imported as Record<string, unknown>
   const candidate = (exports.default ?? exports) as Partial<EvaluationModule>

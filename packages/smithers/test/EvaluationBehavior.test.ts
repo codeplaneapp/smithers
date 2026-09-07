@@ -1,3 +1,4 @@
+import { Cli, Mcp } from "incur"
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, relative } from "node:path"
@@ -175,6 +176,40 @@ describe("evaluation suite discovery and execution", () => {
     await expect(Evaluation.load(root, "same")).rejects.toThrow("Ambiguous evaluation suite same")
     expect((await Evaluation.load(root, relative(root, selected))).file).toBe(selected)
     expect((await Evaluation.load(root, selected)).suite.name).toBe("nested/exact")
+  })
+
+  // Loading imports a module, so selection is an execution primitive: it must
+  // reach only the project's own suite modules, and it must refuse before the
+  // import rather than after validating the exports of code that already ran.
+  it("refuses selectors outside evals/ before importing them", async () => {
+    const root = await fixture()
+    await writeSuite(root)
+    const escape = "globalThis.__evaluationEscape = true\nexport const invalid = true\n"
+    await writeFile(join(root, "outside.eval.mjs"), escape)
+    await writeModule(root, "notes.txt", escape)
+    for (
+      const selector of [
+        "outside.eval.mjs",
+        join(root, "outside.eval.mjs"),
+        "evals/../outside.eval.mjs",
+        "evals/notes.txt",
+        "../outside.eval.mjs"
+      ]
+    ) {
+      await expect(Evaluation.load(root, selector)).rejects.toThrow(/evals/)
+    }
+    expect((globalThis as Record<string, unknown>).__evaluationEscape).toBeUndefined()
+    expect((await Evaluation.load(root, "evals/exact.eval.mjs")).suite.name).toBe("nested/exact")
+  })
+
+  // MCP clients reach every leaf command that is not marked `mcp: false`, so an
+  // executing command is an approval bypass unless the operator invokes it.
+  it("keeps the executing run command out of the MCP tool surface", () => {
+    const commands = Cli.toCommands.get(createEvalCli() as never)
+    const tools = Mcp.collectTools(commands!, ["eval"]).map((tool) => tool.name)
+    expect(tools).toContain("eval_list")
+    expect(tools).toContain("eval_compare")
+    expect(tools).not.toContain("eval_run")
   })
 
   it.each([

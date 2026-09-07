@@ -58,7 +58,7 @@ Nested CLI commands appear with underscore-separated names. The available schema
 | Inspect target declarations | `targets` |
 | Operate agent state | Search for `memory`, `credentials`, `triggers`, or `eval`. |
 
-The long-running `serve` command is excluded from MCP. Launch the control-plane server separately from a shell.
+The long-running `serve` command is excluded from MCP, as is `eval run`, which imports and executes a local project module. Launch the control-plane server and evaluation runs from a shell.
 
 ## Errors and execution boundaries
 

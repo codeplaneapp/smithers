@@ -42,6 +42,9 @@ export const createEvalCli = () =>
     })
     .command("run", {
       description: "Execute a suite's CaseExecutor and bound scorers, then persist its results",
+      // Running imports a project module and executes its flows with the
+      // operator's host privileges, so it stays off the MCP tool surface.
+      mcp: false,
       args: z.object({ suite: z.string().describe("Discovered suite name or module file") }),
       options: z.object({
         ...localOptions,
