@@ -41,7 +41,6 @@ import {
   fetchCloudToken,
   GatewaySessionRegistry,
   isRelayRepoName,
-  peekGatewayRecord,
   upstreamTimeoutMs
 } from "./gateway"
 import {
@@ -2079,11 +2078,14 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
 /**
  * The live dispatchers of one repository (workflowTriggers.ts). The declared
  * rules ride the public contents route, so this route is only the box's
- * answer: a signed-in, allowlisted session that already holds a box gets that
- * box's `List { _tag: "triggers" }` page; everyone and everything else gets
- * `live: false` with empty lists, as a 200, and no box is provisioned to
- * answer a read. The repository is validated before any session is checked,
- * so a malformed name is a 400 for every caller.
+ * answer: a signed-in, allowlisted session that already holds a live box gets
+ * that box's `List { _tag: "triggers" }` page; everyone and everything else
+ * gets `live: false` with empty lists, as a 200. The relay runs with
+ * `provision: false`, so a read never provisions a box, never re-mints a
+ * Cloud token, and never resumes a suspended VM: no record, a record past its
+ * half-life, a 401, or a tunnel failure are all just `live: false`. The
+ * repository is validated before any session is checked, so a malformed name
+ * is a 400 for every caller.
  */
 const handleWorkflowTriggers = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
   const repo = parseWorkflowRepo(url.searchParams.get("repo") ?? undefined)
@@ -2092,12 +2094,10 @@ const handleWorkflowTriggers = async (request: Request, env: WorkerEnv, url: URL
   }
   const session = await requireWorkflowSession(request, env)
   if (session instanceof Response) return json(200, noLiveTriggers(repo))
-  const record = await peekGatewayRecord(env, session.login, repo)
-  if (record === undefined) return json(200, noLiveTriggers(repo))
   const call = await callGateway(env, session.login, repo, GATEWAY_PROCEDURE_MOUNTS.List ?? "/rpc", {
     method: "POST",
     text: encodeGatewayRequest("List", LIST_TRIGGERS_PAYLOAD),
-    replayable: true
+    provision: false
   })
   if (call.status !== "ok" || call.response.status !== 200) {
     if (call.status === "ok") await call.response.body?.cancel()

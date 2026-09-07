@@ -13,7 +13,9 @@ import type { WorkflowTriggersBody } from "./workflowTriggers"
  * existing box answered `List { _tag: "triggers" }`; otherwise a 200 with
  * `live: false` and empty lists, whether the caller is signed out, the
  * deployment has no identity seam, the login holds no box, or the box refuses
- * the listing. No reason is stated as a row, and a read never provisions.
+ * the listing. No reason is stated as a row, and a read never provisions:
+ * whatever the box or its record looks like, no provision POST and no Cloud
+ * token mint leaves the Worker on this route.
  */
 
 const env: WorkerEnv = {
@@ -60,16 +62,24 @@ const validated = () =>
     headers: { "content-type": "application/json" }
   })
 
-const seedBox = (): void =>
+const seedBox = (renewAfter = Date.now() + 20 * 60 * 1000): void =>
   seedMemoryGatewayRecord("will", REPO, {
     gatewayId: "gw-0",
     baseUrl: GATEWAY,
     token: "gateway-token",
     vmId: "msb_0",
     expiresAt: Date.now() + 30 * 60 * 1000,
-    renewAfter: Date.now() + 20 * 60 * 1000,
-    provisionedAt: Date.now()
+    renewAfter,
+    provisionedAt: Date.now() - 60 * 1000
   })
+
+/**
+ * The two calls that provision or resume a box: the Cloud token mint at the
+ * identity door and the provision POST at Smithers Cloud. A read must make
+ * neither, whatever it saw.
+ */
+const provisioning = (seen: ReadonlyArray<string>): ReadonlyArray<string> =>
+  seen.filter((url) => url.includes("/cloud-token") || /\/api\/repos\/[^/]+\/[^/]+\/gateway$/.test(url))
 
 const frame = (exit: unknown): Response =>
   new Response(`${JSON.stringify({ _tag: "Exit", requestId: 1, exit })}\n`, {
@@ -119,8 +129,60 @@ describe("GET /api/workflow/triggers", () => {
       expect(response.status).toBe(200)
       expect(await response.json()).toEqual(noLiveTriggers(REPO))
       /* Only the identity check left the Worker: no Cloud token mint, no gateway POST. */
-      expect(seen.every((url) => url.includes("identity.test"))).toBe(true)
+      expect(seen).toEqual(["https://identity.test/api/identity/validate"])
     })
+  })
+
+  test("a box whose record is past its half-life is not re-provisioned to answer a read: live:false, nothing left the Worker but the identity check", async () => {
+    seedBox(Date.now() - 1)
+    await withUpstreams(
+      validated,
+      async (seen) => {
+        const response = await worker.fetch(request(`?repo=${REPO}`), env)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(noLiveTriggers(REPO))
+        expect(provisioning(seen)).toEqual([])
+        expect(seen).toEqual(["https://identity.test/api/identity/validate"])
+      },
+      () => {
+        throw new Error("a stale record must not be relayed to the box")
+      }
+    )
+  })
+
+  test("a box that answers 401 is not re-provisioned to answer a read: live:false, one relay call, no provision POST", async () => {
+    seedBox()
+    let relayed = 0
+    await withUpstreams(
+      validated,
+      async (seen) => {
+        const response = await worker.fetch(request(`?repo=${REPO}`), env)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(noLiveTriggers(REPO))
+        expect(relayed).toBe(1)
+        expect(provisioning(seen)).toEqual([])
+        expect(seen).toEqual(["https://identity.test/api/identity/validate", `${GATEWAY}/rpc`])
+      },
+      () => {
+        relayed += 1
+        return new Response(JSON.stringify({ message: "invalid gateway credentials" }), { status: 401 })
+      }
+    )
+  })
+
+  test("a relay tunnel failure (the VM idle-suspended) is not resumed by a read: live:false, no provision POST", async () => {
+    seedBox()
+    await withUpstreams(
+      validated,
+      async (seen) => {
+        const response = await worker.fetch(request(`?repo=${REPO}`), env)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(noLiveTriggers(REPO))
+        expect(provisioning(seen)).toEqual([])
+        expect(seen).toEqual(["https://identity.test/api/identity/validate", `${GATEWAY}/rpc`])
+      },
+      () => new Response("bad gateway", { status: 502 })
+    )
   })
 
   test("a signed-in login whose box answers List { _tag: \"triggers\" } gets live:true and the box's rows", async () => {

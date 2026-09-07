@@ -241,15 +241,6 @@ const writeRecord = async (
   }
 }
 
-/**
- * The gateway record a login already holds for a repository, or undefined
- * when none is cached. A lookup and nothing more: it never provisions, so a
- * read route can ask "is there a box to ask?" without spending the caller's
- * Cloud resources on the question.
- */
-export const peekGatewayRecord = (env: GatewayEnv, login: string, repo: string): Promise<GatewayRecord | undefined> =>
-  readRecord(env, login, repo)
-
 /** The unit-test hook: clears the in-isolate fallback between tests. */
 export const clearMemoryGatewayRecords = (): void => {
   memoryRecords.clear()
@@ -551,6 +542,13 @@ export type GatewayCallOutcome =
  * sets the Authorization header (a browser never can). A 401 from the relay
  * forces a re-provision and retries exactly once (§5: the VM can be
  * reprovisioned under a live token; the fresh record is always adopted).
+ *
+ * `provision: false` is the read-only relay: it asks the box the login
+ * already holds and never provisions or resumes one. A missing record, a
+ * record past its half-life, a 401, a tunnel failure, or an unreachable
+ * base_url all answer `unavailable`, so a route that only reads state can
+ * ask "what does the box say?" without spending the caller's Cloud resources
+ * or waking a suspended VM to answer.
  */
 export const callGateway = async (
   env: GatewayEnv,
@@ -565,6 +563,12 @@ export const callGateway = async (
     readonly headers?: Record<string, string>
     /** Whether this call may be replayed onto a re-provisioned gateway. */
     readonly replayable?: boolean
+    /**
+     * Whether this call may provision or resume a box (the default). `false`
+     * relays to the box the login already holds, once, and reports every
+     * stale-record signal as `unavailable` instead of re-provisioning.
+     */
+    readonly provision?: boolean
   }
 ): Promise<GatewayCallOutcome> => {
   // The relay addresses the gateway's own mounts and nothing else. Without
@@ -573,8 +577,6 @@ export const callGateway = async (
   if (!GATEWAY_RELAY_PATHS.includes(path)) {
     return { status: "unavailable", detail: `${path} is not a gateway path this seam relays.` }
   }
-  const gateway = await ensureGateway(env, login, repo)
-  if (gateway.status !== "ready") return gateway
   /** Why the last attempt could not reach the gateway — stated, never swallowed. */
   let reason: string | undefined
   const attempt = async (record: GatewayRecord): Promise<Response | undefined> => {
@@ -602,6 +604,27 @@ export const callGateway = async (
       return undefined
     }
   }
+  if (init.provision === false) {
+    const record = await readRecord(env, login, repo)
+    if (record === undefined || Date.now() >= record.renewAfter) {
+      return { status: "unavailable", detail: "No live workspace holds an answer for this read." }
+    }
+    const response = await attempt(record)
+    if (response === undefined) {
+      return {
+        status: "unavailable",
+        detail: `The workspace gateway is unreachable${reason === undefined ? "." : `: ${reason}`}`
+      }
+    }
+    if (response.status === 401 || isTunnelFailure(response.status)) {
+      // Stale record: the next provisioning call refreshes it. A read does not.
+      await response.body?.cancel()
+      return { status: "unavailable", detail: `The workspace gateway answered HTTP ${response.status} to a read.` }
+    }
+    return { status: "ok", response }
+  }
+  const gateway = await ensureGateway(env, login, repo)
+  if (gateway.status !== "ready") return gateway
   let response = await attempt(gateway.record)
   /*
    * Three things force exactly ONE re-provision, all from §5: a 401 (the VM
