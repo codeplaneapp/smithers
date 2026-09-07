@@ -93,7 +93,12 @@ export const createFactorySeam = (ctx: SeamContext): FactorySeam => {
     return { names: namesOf(body) }
   }
 
-  /** One row per declared file: present in its directory listing, absent from it, or unreadable when the listing was. */
+  /**
+   * One row per declared file: present in its directory listing, absent from
+   * it, or unreadable when the listing was. A 404 says "absent" only once the
+   * root listing proved the tree exists; a tree that was never read cannot
+   * vouch for a missing file, so its rows carry the root's failure instead.
+   */
   const infraRows = (root: Listing, smithers: Listing): ReadonlyArray<InfraRow> => {
     const rowFor = (path: string, listing: Listing, name: string): InfraRow => {
       if ("error" in listing) return { path, state: "unreadable", reason: listing.error }
@@ -107,9 +112,16 @@ export const createFactorySeam = (ctx: SeamContext): FactorySeam => {
     const rootListing: Listing = "absent" in root
       ? { error: "The repository tree could not be found on Smithers Cloud." }
       : root
+    /*
+     * `.smithers` not found means "no such directory" only when the root was
+     * listed. When the root failed, that 404 is the same unread tree, so the
+     * row inherits the root's reason. A `.smithers` listing that was read, or
+     * that failed with its own reason, stands on its own.
+     */
+    const smithersListing: Listing = "absent" in smithers && "error" in rootListing ? rootListing : smithers
     const rows = INFRA_FILES.map((path) =>
       path.startsWith(".smithers/")
-        ? rowFor(path, smithers, path.slice(".smithers/".length))
+        ? rowFor(path, smithersListing, path.slice(".smithers/".length))
         : rowFor(path, rootListing, path)
     )
     const rootWorkspace = "names" in rootListing && rootListing.names.has("WORKSPACE.ts")

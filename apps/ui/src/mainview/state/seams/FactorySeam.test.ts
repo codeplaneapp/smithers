@@ -45,7 +45,15 @@ const json = (status: number, body: unknown): Response =>
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-type Tree = "full" | "no-flake" | "no-smithers-dir" | "root-500" | "root-throw" | "root-404" | "root-file"
+type Tree =
+  | "full"
+  | "no-flake"
+  | "no-smithers-dir"
+  | "root-500"
+  | "root-500-no-smithers-dir"
+  | "root-throw"
+  | "root-404"
+  | "root-file"
 
 /**
  * The platform double: one mirrored repository (will/flows) answering the
@@ -70,13 +78,15 @@ const backend = (tree: Tree = "full") => {
       requests.push({ method: init?.method ?? "GET", url })
       if (url === "/api/repos/will/flows/contents") {
         if (tree === "root-throw") throw new Error("socket hang up")
-        if (tree === "root-500") return json(500, { message: "the mirror is rebuilding" })
+        if (tree === "root-500" || tree === "root-500-no-smithers-dir") return json(500, { message: "the mirror is rebuilding" })
         if (tree === "root-404") return json(404, { code: "not_found", message: "repository not found" })
         if (tree === "root-file") return json(200, { path: "", content: "", encoding: "base64", size: 0 })
         return json(200, rootEntries)
       }
       if (url === "/api/repos/will/flows/contents/.smithers") {
-        if (tree === "no-smithers-dir") return json(404, { message: "Path not found: .smithers" })
+        if (tree === "no-smithers-dir" || tree === "root-500-no-smithers-dir") {
+          return json(404, { message: "Path not found: .smithers" })
+        }
         return json(200, [
           { name: "WORKSPACE.ts", path: ".smithers/WORKSPACE.ts", type: "file" },
           { name: "flows", path: ".smithers/flows", type: "dir" }
@@ -226,8 +236,13 @@ describe("factory seam: factory.show", () => {
       "/api/repos/acme/site/contents",
       "/api/repos/acme/site/contents/.smithers"
     ])
-    // The stub knows no such tree: the root is not found and .smithers is not found.
-    expect(factoryCard(store, "acme/site")?.payload.infra.map((row) => row.state)).toEqual(["absent", "unreadable", "unreadable"])
+    // The stub knows no such tree: the root is not found, so the .smithers 404 is the same unread tree, not an absent file.
+    const reason = "The repository tree could not be found on Smithers Cloud."
+    expect(factoryCard(store, "acme/site")?.payload.infra).toEqual([
+      { path: ".smithers/WORKSPACE.ts", state: "unreadable", reason },
+      { path: "flake.nix", state: "unreadable", reason },
+      { path: "PACKAGE.ts", state: "unreadable", reason }
+    ])
   })
 
   test("with no repository loaded the repo-resolution error answers as-is and nothing is read", async () => {
@@ -256,6 +271,18 @@ describe("factory seam: a root listing the backend refused", () => {
     ])
   })
 
+  test("a 500 root with a .smithers 404 marks the .smithers row unreadable with the root's reason, not absent", async () => {
+    const { store, controller } = await freshController("root-500-no-smithers-dir")
+    await identity(store, "signed-in")
+    await reposLoaded(store)
+    await controller.commands.run("factory.show")
+    expect(factoryCard(store)?.payload.infra[0]).toEqual({
+      path: ".smithers/WORKSPACE.ts",
+      state: "unreadable",
+      reason: "the mirror is rebuilding"
+    })
+  })
+
   test("a network throw is an unreadable row with an honest reason, never a throw", async () => {
     const { store, controller } = await freshController("root-throw")
     await identity(store, "signed-in")
@@ -275,7 +302,7 @@ describe("factory seam: a root listing the backend refused", () => {
     await reposLoaded(store)
     await controller.commands.run("factory.show")
     const rows = factoryCard(store)?.payload.infra ?? []
-    expect(rows.slice(1).map((row) => row.state)).toEqual(["unreadable", "unreadable"])
+    expect(rows.map((row) => row.state)).toEqual(["present", "unreadable", "unreadable"])
     expect(rows[1]?.reason).toBe("The repository tree could not be found on Smithers Cloud.")
   })
 
