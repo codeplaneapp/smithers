@@ -71,7 +71,7 @@ export const createGatewaySeam = (transport: GatewayTransport) => {
       }
       body = (await response.json().catch(() => undefined)) as typeof body
     } catch {
-      return { status: "error", message: "The workspace didn't answer — the workflow service is unreachable." }
+      return { status: "error", message: "The workspace didn't answer: the flow service is unreachable." }
     }
     if (body?.ok === true) return { status: "ok", value: body.payload }
     if (body?.ok === false) {

@@ -19,7 +19,7 @@ describe("slash payload argument counts", () => {
 
   test("flow.run refuses a third token instead of dropping it", () => {
     const parsed = payloadFor("flow.run", "create-workflow will/flows extra")
-    expect(parsed).toEqual({ error: "flow.run takes a workflow name and optionally an owner/repo" })
+    expect(parsed).toEqual({ error: "flow.run takes a flow name and optionally an owner/repo" })
   })
 
   test("flow.run still takes its name and optional repo", () => {
@@ -28,7 +28,7 @@ describe("slash payload argument counts", () => {
       payload: { name: "create-workflow", repo: "will/flows" }
     })
     expect(payloadFor("flow.run", "")).toEqual({
-      error: "flow.run needs a workflow name: /flow.run create-workflow"
+      error: "flow.run needs a flow name: /flow.run create-workflow"
     })
   })
 

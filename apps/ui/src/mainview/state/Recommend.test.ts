@@ -21,7 +21,7 @@ import {
 const catalog: ReadonlyArray<CatalogItem> = [
   { name: "connect", summary: "Connect a repository" },
   { name: "wiki", summary: "Open the wiki notes" },
-  { name: "flow.list", summary: "List the workflows on your workspace" },
+  { name: "flow.list", summary: "List the flows on your workspace" },
   { name: "issues.view", summary: "View an issue", args: "<number>" },
   { name: "card.maximize", summary: "Maximize a card", hidden: true }
 ]
@@ -75,7 +75,7 @@ describe("recommend: the request", () => {
     expect(request.commands).toEqual([
       { name: "connect", summary: "Connect a repository" },
       { name: "wiki", summary: "Open the wiki notes" },
-      { name: "flow.list", summary: "List the workflows on your workspace" },
+      { name: "flow.list", summary: "List the flows on your workspace" },
       { name: "issues.view", summary: "View an issue" }
     ])
     expect(request.commands.map((command) => command.name)).not.toContain("card.maximize")

@@ -485,7 +485,7 @@ describe("the composer's + menu and surface pill", () => {
       card: {
         id: "workflow-list-acme/app",
         kind: "workflow-list",
-        title: "Workflows — acme/app",
+        title: "Flows: acme/app",
         status: "active",
         createdAt: 1,
         ordinal: 4,

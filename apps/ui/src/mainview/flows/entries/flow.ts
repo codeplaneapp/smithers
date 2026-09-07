@@ -9,7 +9,7 @@ import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
 
 /** The `flow` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
-export const namespace: Namespace = { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" }
+export const namespace: Namespace = { id: "flow", label: "Flows", summary: "Create, list, and run flows" }
 
 /** The bare `flows` surface switch, registered first with the other top-level surfaces. */
 export const flowsSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
@@ -42,7 +42,7 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * the target is a genuine user choice, not a guess.
      */
     name: "flow.create",
-    summary: "Create a Smithers workflow from a description",
+    summary: "Create a Smithers flow from a description",
     runtime: ["cloud"],
     args: "<description> [owner/repo]",
     requires: ["signed-in"],
@@ -64,7 +64,7 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
      * user-only keeps it un-executable even by a model that guesses the name.
      */
     name: "flow.repo.choose",
-    summary: "Choose which loaded repository a workflow belongs to",
+    summary: "Choose which loaded repository a flow belongs to",
     runtime: ["cloud"],
     hidden: true,
     userOnly: true,
@@ -106,7 +106,7 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "flow.list",
-    summary: "List the workflows on your workspace",
+    summary: "List the flows on your workspace",
     runtime: ["cloud"],
     requires: ["signed-in"],
     args: "[owner/repo]",
@@ -115,8 +115,8 @@ export const flowFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   }),
   flow({
     name: "flow.run",
-    form: { fields: { name: { label: "Workflow" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
-    summary: "Run a workflow on your workspace",
+    form: { fields: { name: { label: "Flow" }, repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    summary: "Run a flow on your workspace",
     runtime: ["cloud"],
     args: "<name> [owner/repo]",
     requires: ["signed-in"],

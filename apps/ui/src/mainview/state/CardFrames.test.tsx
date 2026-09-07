@@ -318,7 +318,7 @@ describe("server-emitted card frames", () => {
     const runCard = (phase: "running" | "quiet" | "stopped"): Card => ({
       id: "flow-run-run-1",
       kind: "flow-run",
-      title: "Creating a workflow — will/flows",
+      title: "Creating a flow: will/flows",
       status: "active",
       createdAt: 5,
       ordinal: 5,

@@ -50,7 +50,7 @@ export const readTriggers = async (
   try {
     response = await http(`${baseUrl}${WORKFLOW_TRIGGERS_PATH}?repo=${encodeURIComponent(repo)}`)
   } catch {
-    return "The triggers couldn't be listed: the workflow service didn't answer."
+    return "The triggers couldn't be listed: the flow service didn't answer."
   }
   if (!response.ok) return readErrorMessage(response, "The triggers couldn't be listed right now.")
   const body = asRecord(await response.json().catch(() => undefined))

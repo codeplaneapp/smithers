@@ -48,7 +48,7 @@ const settle = async (ticks = 4): Promise<void> => {
 const REPO = "codeplanesmithers/smithers-demo"
 
 const EXHAUSTED_TEXT =
-  "Balance is at $0 — workflow runs pause until more balance is added. Run /billing.upgrade to add balance; chat stays free in the meantime."
+  "Balance is at $0: flow runs pause until more balance is added. Run /billing.upgrade to add balance; chat stays free in the meantime."
 
 /** A backend that answers nothing about workflows — proves the guard never calls it. */
 const noWorkflowSeam = (): AppServices => ({

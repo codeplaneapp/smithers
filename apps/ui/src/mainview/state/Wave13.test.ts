@@ -132,7 +132,7 @@ describe("wave 13 §F — the capability section is generated from the live cata
     expect(prompt).toContain("read arbitrary files off the user's machine")
     expect(prompt).toContain("push to a branch or open a pull request — not directly, and not through a run")
     // A workflow does not launder an impossible effect.
-    expect(prompt).toContain("Offering a workflow never launders an impossible effect")
+    expect(prompt).toContain("Offering a flow never launders an impossible effect")
   })
 
   /*
@@ -151,8 +151,8 @@ describe("wave 13 §F — the capability section is generated from the live cata
       localRepositoriesAvailable: false
     })
     expect(prompt).toContain("This applies to \"we can\" exactly as it applies to \"I can\"")
-    expect(prompt).toContain("a workflow that pushes to main")
-    expect(prompt).toContain("a workflow that creates the PR and returns the link")
+    expect(prompt).toContain("a flow that pushes to main")
+    expect(prompt).toContain("a flow that creates the PR and returns the link")
     expect(prompt).toContain("approval gates acts that already exist, it does not grant new ones")
     // The old sentence taught the laundering: approval as the unlock.
     expect(prompt).not.toContain("any outbound act a run wants pauses for the human's explicit approval")

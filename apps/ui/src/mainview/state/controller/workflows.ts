@@ -65,10 +65,10 @@ export const createWorkflowController = (
   const workflowIdentityGuard = (): string | undefined => {
     const identity = store.collections.identitySessions.get("identity")
     if (identity?.state !== "signed-in") {
-      return "Sign in with GitHub first — workflows run on your own workspace."
+      return "Sign in with GitHub first: flows run on your own workspace."
     }
     if (!identity.allowlisted) {
-      return "Workflows open up with the closed alpha — your account isn't allowlisted yet."
+      return "Flows open up with the closed alpha: your account isn't allowlisted yet."
     }
     return undefined
   }
@@ -164,7 +164,7 @@ export const createWorkflowController = (
         }
         body = (await response.json().catch(() => undefined)) as typeof body
       } catch {
-        return "The workspace couldn't be prepared — the workflow service didn't answer in time."
+        return "The workspace couldn't be prepared: the flow service didn't answer in time."
       }
       if (body?.status === "ready") return true
       /*
@@ -282,7 +282,7 @@ export const createWorkflowController = (
      * what it should; the value carries the question to the model, and the
      * card carries it to the human (§2b — values never render raw).
      */
-    return { value: `You have ${repos.length} repositories loaded — choose the one this workflow belongs to.` }
+    return { value: `You have ${repos.length} repositories loaded. Choose the one this flow belongs to.` }
   }
 
   const chooseWorkflowRepo = async (fullName: string): Promise<string | void | { readonly value: string }> => {
@@ -322,7 +322,7 @@ export const createWorkflowController = (
       ? splitDescriptionAndRepo(rawDescription)
       : { description: rawDescription.trim(), repo: repoArg }
     const description = split.description
-    if (description === "") return "flow.create needs a description of what the workflow should do"
+    if (description === "") return "flow.create needs a description of what the flow should do"
     const target = workflowTargetRepoOrAsk(split.repo, true)
     if ("error" in target) return target.error
     if ("ask" in target) return askWhichRepo(description, target.ask)
@@ -341,7 +341,7 @@ export const createWorkflowController = (
       repo,
       workflow: "create-workflow",
       input: { prompt: description },
-      title: `Creating a workflow — ${repo}`
+      title: `Creating a flow: ${repo}`
     })
     if (typeof launched === "string") return launched
     /*
@@ -368,7 +368,7 @@ export const createWorkflowController = (
     const card: Card = {
       id: `workflow-list-${repo}`,
       kind: "workflow-list",
-      title: `Workflows — ${repo}`,
+      title: `Flows: ${repo}`,
       status: "active",
       createdAt: existing?.createdAt ?? Date.now(),
       ordinal: nextTranscriptOrdinal(),
@@ -377,8 +377,8 @@ export const createWorkflowController = (
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
     return {
       value: workflows.length === 0
-        ? `No workflows on ${repo} yet.`
-        : `Workflows on ${repo}: ${workflows.map((workflow) => workflow.key).join(", ")}.`
+        ? `No flows on ${repo} yet.`
+        : `Flows on ${repo}: ${workflows.map((workflow) => workflow.key).join(", ")}.`
     }
   }
 
@@ -471,8 +471,8 @@ export const createWorkflowController = (
       const available = list.status === "ok"
         ? list.value.map((flow) => flow.flowId).slice(0, 8).join(", ")
         : ""
-      return `There's no workflow called ${name} on ${repo}${
-        available === "" ? "." : ` — the workspace has: ${available}.`
+      return `There's no flow called ${name} on ${repo}${
+        available === "" ? "." : `. The workspace has: ${available}.`
       }`
     }
     // The same minimal acknowledgment (§1): the card is the claim surface.

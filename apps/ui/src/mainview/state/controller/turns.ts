@@ -255,7 +255,7 @@ export const createTurnController = (
           : []),
         "Run app commands through the \"commands\" tool — the same code path as the UI buttons and slash commands.",
         "Render structured cards (plans, approvals, statuses, recommendations) in the transcript.",
-        "Create, list, and run Smithers workflows on the user's loaded repositories (flow.create, flow.list, flow.run) — runs report live as embedded cards in this chat.",
+        "Create, list, and run Smithers flows on the user's loaded repositories (flow.create, flow.list, flow.run). Runs report live as embedded cards in this chat.",
         ...(store.collections.repos.size > 0
           ? [
             "Read the open repositories listed above: files.list <path> [repo] lists a directory and files.read <path> [repo] renders a file as a card in this chat (a bare call means the active repository); target.list shows a repository's Smithers targets."
@@ -275,9 +275,9 @@ export const createTurnController = (
         ...(exploring === null
           ? []
           : [
-            `The visitor is signed out, exploring ${exploring}: anything that writes (pull requests, issues, workspaces, workflow runs, secrets) needs GitHub sign-in, so when they ask for one execute auth.prompt instead.`
+            `The visitor is signed out, exploring ${exploring}: anything that writes (pull requests, issues, workspaces, flow runs, secrets) needs GitHub sign-in, so when they ask for one execute auth.prompt instead.`
           ]),
-        "Workflow runs execute on the user's workspace gateway; any outbound act a run wants (pushes, PRs) pauses for the human's explicit approval — never promise one landed without it.",
+        "Flow runs execute on the user's workspace gateway; any outbound act a run wants (pushes, PRs) pauses for the human's explicit approval. Never promise one landed without it.",
         repositories.available
           ? "Can only touch repositories the user explicitly connected, listed above."
           : "This pure-web client cannot connect local repositories (the native app can); none are connected unless listed above."

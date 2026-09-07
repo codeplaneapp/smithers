@@ -244,10 +244,10 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "triggers.list": (args) => repoOnly("triggers.list", args),
   "flow.run": (args) => {
     const tokens = tokensOf(args)
-    if (tokens.length > 2) return no("flow.run takes a workflow name and optionally an owner/repo")
+    if (tokens.length > 2) return no("flow.run takes a flow name and optionally an owner/repo")
     const [name, repo] = tokens
     if (name === undefined) {
-      return no("flow.run needs a workflow name: /flow.run create-workflow")
+      return no("flow.run needs a flow name: /flow.run create-workflow")
     }
     return ok(repo === undefined ? { name } : { name, repo })
   },

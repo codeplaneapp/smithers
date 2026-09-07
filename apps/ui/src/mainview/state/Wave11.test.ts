@@ -681,7 +681,7 @@ describe("wave 11 — workflows are presented", () => {
     await signIn(store)
 
     const outcome = await controller.commands.run("flow.run", "nope")
-    expect(said(outcome)).toContain("There's no workflow called nope")
+    expect(said(outcome)).toContain("There's no flow called nope")
     expect(said(outcome)).toContain("create-workflow")
     expect(double.state.launched).toHaveLength(0)
   })

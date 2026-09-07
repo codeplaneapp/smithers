@@ -9,7 +9,7 @@ import type { ControllerContext } from "./context"
  * it). Names the upgrade path per the definition of done: "how to proceed".
  */
 export const ZERO_BALANCE_EXHAUSTED_TEXT =
-  "Balance is at $0 — workflow runs pause until more balance is added. Run /billing.upgrade to add balance; chat stays free in the meantime."
+  "Balance is at $0: flow runs pause until more balance is added. Run /billing.upgrade to add balance; chat stays free in the meantime."
 
 export interface FailureController {
   readonly withToast: <T>(

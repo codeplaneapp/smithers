@@ -408,7 +408,7 @@ export const WorkflowListCardBody = ({
 }) => {
   const { workflows } = card.payload
   if (workflows.length === 0) {
-    return <p className="smithers-card-note">No workflows on this workspace yet — ask for one and I'll create it.</p>
+    return <p className="smithers-card-note">No flows on this workspace yet. Ask for one and I'll create it.</p>
   }
   return (
     <ul className="workflow-list">

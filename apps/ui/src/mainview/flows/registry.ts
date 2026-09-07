@@ -508,7 +508,7 @@ export const matches = (command: CatalogItem, needle: string): boolean => {
  * Matching on the summary is what makes the menu searchable ("/repo" finds the
  * flows that talk about repositories), but it must never outrank a name. Before
  * this rank existed, `/flows` listed `flow.list` first — its summary reads
- * "List the workflows on your workspace" and it is declared 450 lines earlier
+ * "List the flows on your workspace" and it is declared 450 lines earlier
  * in the registry — so Enter ran a different flow than the one the user typed.
  */
 const nameRank = (command: CatalogItem, query: string): number => {
