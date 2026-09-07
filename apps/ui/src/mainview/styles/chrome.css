@@ -465,6 +465,7 @@
 .chrome-action-download,
 .chrome-action-secrets,
 .chrome-action-dispatcher,
+.chrome-action-history,
 .chrome-action-account {
 	display: flex;
 	align-items: center;

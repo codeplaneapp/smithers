@@ -240,6 +240,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * onRunCommand).
        */
       "../cards/GraphCard.tsx": 4,
+      "../cards/HistoryCard.tsx": 2,
       "../cards/RunTimelineCard.tsx": 1,
       /*
        * Lane runs: the run inbox's Open per row, its All/status filter chips,
@@ -296,7 +297,8 @@ describe("launch-law parity: every affordance is a command", () => {
       /* 25 = 24 + the footer's Secrets button, the button door of secrets.list (renders only where the flow registers, the cloud host). */
       /* 26 = 25 + the footer's Dispatcher button, the button door of triggers.list (design session 2026-09-07 chrome; cloud host only). */
       /* 27 = 26 + the footer's Account button, the button door of account.show (factory mock 21; renders where an identity seam exists). */
-      "../tabs/ChromeBar.tsx": 27,
+      /* 28 = 27 + the footer's History button, the button door of history.show (design session 2026-09-07 chrome; cloud host only). */
+      "../tabs/ChromeBar.tsx": 28,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })

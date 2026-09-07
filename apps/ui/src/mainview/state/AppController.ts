@@ -66,6 +66,8 @@ import { createEnvironmentSeam } from "./seams/EnvironmentSeam"
 import type { EnvironmentSeam } from "./seams/EnvironmentSeam"
 import { createFilesSeam } from "./seams/FilesSeam"
 import { createSecretsSeam } from "./seams/SecretsSeam"
+import { createHistorySeam } from "./seams/HistorySeam"
+import type { HistorySeam } from "./seams/HistorySeam"
 import type { SecretsSeam } from "./seams/SecretsSeam"
 import { createOnboardingController } from "./controller/onboarding"
 import type { OnboardingController } from "./controller/onboarding"
@@ -370,6 +372,8 @@ export interface AppController {
   readonly viewEnvironment: EnvironmentSeam["viewEnvironment"]
   readonly setEnvironmentVar: EnvironmentSeam["setEnvironmentVar"]
   readonly listSecrets: SecretsSeam["listSecrets"]
+  readonly showHistory: HistorySeam["showHistory"]
+  readonly retellHistory: HistorySeam["retellHistory"]
   readonly importRepository: RepoImportSeam["importRepository"]
   readonly retryImport: RepoImportSeam["retryImport"]
   readonly listBookmarks: BookmarksSeam["listBookmarks"]
@@ -629,6 +633,7 @@ export const createAppController = (
   const notificationsSeam = actors.pair(seamCtx, (context) => createNotificationsSeam(context))
   const environmentSeam = actors.pair(seamCtx, (context) => createEnvironmentSeam(context))
   const secretsSeam = actors.pair(seamCtx, (context) => createSecretsSeam(context))
+  const historySeam = actors.pair(seamCtx, (context) => createHistorySeam(context))
   const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
   const bookmarksSeam = actors.pair(seamCtx, (context) => createBookmarksSeam(context))
   const filesSeam = actors.pair(seamCtx, (context) => createFilesSeam(context))
@@ -1271,6 +1276,8 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     listSecrets: secretsSeam.listSecrets,
+    showHistory: historySeam.showHistory,
+    retellHistory: historySeam.retellHistory,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,
@@ -1599,6 +1606,8 @@ export const createAppController = (
     viewEnvironment: environmentSeam.viewEnvironment,
     setEnvironmentVar: environmentSeam.setEnvironmentVar,
     listSecrets: secretsSeam.listSecrets,
+    showHistory: historySeam.showHistory,
+    retellHistory: historySeam.retellHistory,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,

@@ -1289,3 +1289,78 @@ describe("the chrome-actions footer's Account button", () => {
     expect(host.querySelector('[data-flow="account.show"]')).toBeNull()
   })
 })
+/*
+ * The History button: the button door of history.show, in the chrome that
+ * belongs to no session (design session 2026-09-07: Wiki, Dispatcher, Flows,
+ * Secrets, History, Account). It renders where the registry holds
+ * history.show (the cloud host), its click runs the same registry entry the
+ * /history.show slash runs, and the card appears in the chat signed out,
+ * because the mythical history is a public mirror read.
+ */
+describe("the chrome-actions footer's History button", () => {
+  const historyHarness = async (): Promise<{ store: AppStore; controller: AppControllerType; feedReads: () => number }> => {
+    let feedReads = 0
+    const answer = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+    const change = (changeId: string, commitId: string, description: string, parents: ReadonlyArray<string>) => ({
+      change_id: changeId, commit_id: commitId, description, timestamp: "2026-09-07T00:00:00Z", parent_change_ids: parents
+    })
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const path = new URL(url, "https://app.test").pathname
+        if (path === "/api/repos/will/flows") return answer({ default_bookmark: "main" })
+        if (path === "/api/repos/will/flows/git/refs") {
+          return answer([{ ref: "refs/heads/main", object: { sha: "aaa3000000000000000000000000000000000003", type: "commit" } }])
+        }
+        if (path === "/api/repos/will/flows/changes") {
+          feedReads += 1
+          return answer({
+            items: [
+              change("c-m3", "aaa3000000000000000000000000000000000003", "third", ["c-m2"]),
+              change("c-m2", "aaa2000000000000000000000000000000000002", "second", ["c-m1"]),
+              change("c-m1", "aaa1000000000000000000000000000000000001", "first", [])
+            ],
+            next_cursor: ""
+          })
+        }
+        return answer({ status: "error" }, 404)
+      }
+    })
+    return { store, controller, feedReads: () => feedReads }
+  }
+
+  test("host cloud renders it after Secrets bound to history.show, and a signed-out click surfaces the honest empty state with its one door", async () => {
+    const { store, controller, feedReads } = await historyHarness()
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
+    })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-history]")
+    expect(button).not.toBeNull()
+    expect(button?.dataset.flow).toBe("history.show")
+    expect(button?.textContent).toBe("History")
+    expect(button?.querySelector("svg")).not.toBeNull()
+    expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(order.indexOf("history.show")).toBeGreaterThan(order.indexOf("secrets.list"))
+    expect(order.indexOf("history.show")).toBeLessThan(order.indexOf("appearance.dark-mode"))
+    const slashNames = controller.slashTree("history.show").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
+    expect(slashNames).toContain("history.show")
+
+    await act(() => button?.click())
+    for (let tick = 0; tick < 50 && !store.collections.cards.has("history-will/flows"); tick += 1) await act(() => {})
+    await act(() => {})
+    expect(feedReads()).toBe(1)
+    const card = host.querySelector<HTMLElement>('[data-kind="history"]')
+    expect(card).not.toBeNull()
+    expect(card?.querySelector("[data-testid=history-empty]")?.textContent).toBe("No mythical history yet. main has 3 commits.")
+    const door = card?.querySelector<HTMLElement>("[data-testid=history-bootstrap]")
+    expect(door?.dataset.flow).toBe("history.bootstrap")
+    // The one door is the only button in the empty state; no fold or amend door is invented.
+    expect(card?.querySelectorAll("[data-flow^=history]").length).toBe(1)
+    controller.dispose()
+  })
+})

@@ -592,6 +592,11 @@ describe("command registry bindings", () => {
       "env.view",
       "env.set",
       "secrets.list",
+      // The mythical history (design session 2026-09-07 §3): the read and its three refusing write doors.
+      "history.show",
+      "history.bootstrap",
+      "history.amend",
+      "history.fold",
       "branches.list",
       "files.list",
       "files.read",

@@ -65,6 +65,7 @@ import { reviewFlows } from "./entries/review"
 import { runsFlows } from "./entries/runs"
 import { smithersFlows } from "./entries/smithers"
 import { secretsFlows } from "./entries/secrets"
+import { historyFlows } from "./entries/history"
 import { storageFlows } from "./entries/storage"
 import { syncFlows } from "./entries/sync"
 import { systemFlows } from "./entries/system"
@@ -144,6 +145,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...notificationsFlows(actions),
   ...envFlows(actions),
   ...secretsFlows(actions),
+  ...historyFlows(actions),
   ...branchesFlows(actions),
   ...filesFlows(actions),
   ...codeFlows(actions),

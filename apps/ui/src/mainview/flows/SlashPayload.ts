@@ -363,6 +363,10 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { assignment: rest } : { assignment: rest, repo })
   },
   "secrets.list": (args) => repoOnly("secrets.list", args),
+  "history.show": (args) => repoOnly("history.show", args),
+  "history.bootstrap": (args) => repoOnly("history.bootstrap", args),
+  "history.amend": (args) => repoOnly("history.amend", args),
+  "history.fold": (args) => repoOnly("history.fold", args),
   "branches.list": (args) => repoOnly("branches.list", args),
   /*
    * Lane citc: the workspace flows. An id is always one token; fork's and

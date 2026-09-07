@@ -24,6 +24,7 @@ import { envCardFamily } from "./EnvCard"
 import { fileCardFamily } from "./FileCards"
 import { flowFormCardFamily } from "./FlowFormCards"
 import { graphCardFamily } from "./GraphCardLazy"
+import { historyCardFamily } from "./HistoryCard"
 import { issueCardFamily } from "./IssueCards"
 import { landingCardFamily } from "./LandingCards"
 import { notificationsCardFamily } from "./NotificationsCard"
@@ -60,6 +61,7 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   envCardFamily,
   secretsCardFamily,
   accountCardFamily,
+  historyCardFamily,
   repoImportCardFamily,
   syncCardFamily,
   branchesCardFamily,
@@ -96,6 +98,7 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...envCardFamily,
   ...secretsCardFamily,
   ...accountCardFamily,
+  ...historyCardFamily,
   ...repoImportCardFamily,
   ...syncCardFamily,
   ...branchesCardFamily,

@@ -1,7 +1,7 @@
 import { fileArgs } from "../flows/FileArgs"
 import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { ChevronRight, Download, FolderGit2, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, Timer, UserRound, X } from "lucide-react"
+import { ChevronRight, Download, FolderGit2, History, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, Timer, UserRound, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
@@ -100,6 +100,8 @@ export function ChromeBar() {
   const canDispatcher = controller.commands.find("triggers.list") !== undefined
   // The Account door (factory mock 21): the same registry entry the /account.show slash runs; it registers where an identity seam exists.
   const canAccount = controller.commands.find("account.show") !== undefined
+  // The History door: the button door of history.show, the mythical history card in the chat (design session 2026-09-07).
+  const canHistory = controller.commands.find("history.show") !== undefined
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canSelectRepo = controller.commands.find("repo.select") !== undefined
   const canTree = controller.commands.find("repo.tree") !== undefined
@@ -738,6 +740,21 @@ export function ChromeBar() {
             </button>
           ) :
           null}
+        {/* The button door of history.show: the mythical history card in the chat; readable signed out through the public mirror. */}
+        {canHistory ?
+          (
+            <button
+              type="button"
+              className="chrome-action chrome-action-history"
+              data-flow="history.show"
+              data-testid="chrome-history"
+              onClick={() => controller.runCommand("history.show")}
+            >
+              <History size={14} aria-hidden="true" />
+              History
+            </button>
+          ) :
+          null}
         {/* The button door of account.show: the account card in the chat; signed out, the same flow renders the sign-in step. */}
         {canAccount ?
           (
@@ -754,31 +771,31 @@ export function ChromeBar() {
           ) :
           null}
         <div className="chrome-corner">
-        {/* The bare reset is admin-only dev tooling (§2); users get /clear. */}
-        {isAdmin ?
-          (
-            <button
-              type="button"
-              className="chrome-icon-action corner-reset-btn"
-              data-flow="admin.reset.ask"
-              aria-label="Reset conversation"
-              title="Reset conversation"
-              onClick={() => controller.runCommand("admin.reset.ask")}
-            >
-              <RotateCcw size={14} aria-hidden="true" />
-            </button>
-          ) :
-          null}
-        <button
-          type="button"
-          className="chrome-icon-action corner-theme-btn"
-          data-flow="appearance.dark-mode"
-          aria-label="Toggle light and dark mode"
-          title="Toggle light and dark mode"
-          onClick={() => controller.runCommand("appearance.dark-mode")}
-        >
-          {dark ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
-        </button>
+      {/* The bare reset is admin-only dev tooling (§2); users get /clear. */}
+      {isAdmin ?
+        (
+          <button
+            type="button"
+            className="chrome-icon-action corner-reset-btn"
+            data-flow="admin.reset.ask"
+            aria-label="Reset conversation"
+            title="Reset conversation"
+            onClick={() => controller.runCommand("admin.reset.ask")}
+          >
+            <RotateCcw size={14} aria-hidden="true" />
+          </button>
+        ) :
+        null}
+      <button
+        type="button"
+        className="chrome-icon-action corner-theme-btn"
+        data-flow="appearance.dark-mode"
+        aria-label="Toggle light and dark mode"
+        title="Toggle light and dark mode"
+        onClick={() => controller.runCommand("appearance.dark-mode")}
+      >
+        {dark ? <Sun size={14} aria-hidden="true" /> : <Moon size={14} aria-hidden="true" />}
+      </button>
       </div>
       </div>
     </aside>
