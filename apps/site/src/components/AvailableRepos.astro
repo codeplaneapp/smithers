@@ -1,9 +1,10 @@
 ---
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
 
-const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://canary.smithers.sh${PUBLIC_REPOS_PATH}`
-/* The web app reads `?repo=owner/name` at boot and preselects that repository (apps/ui RepoLink.ts). */
-const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://canary.smithers.sh").replace(/\/+$/, "")
+/* The app Worker (apps/server) serves the catalog and each repository's app under smithers.sh, beside this static site. */
+const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://smithers.sh${PUBLIC_REPOS_PATH}`
+/* A repository's app lives at <app origin>/<owner>/<name>. */
+const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").replace(/\/+$/, "")
 ---
 
 <section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
@@ -22,7 +23,7 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://canary.smithers
         <div class="card-body">
           <h3 id={`repo-title-${index}`}>{repo.title}</h3>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
-          <a class="open-link" href={`${appOrigin}/?repo=${repo.name}`}>Open in Smithers <span aria-hidden="true">→</span></a>
+          <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open in Smithers <span aria-hidden="true">→</span></a>
           <dl class="stats" aria-busy="true" data-stats>
             <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
             <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>

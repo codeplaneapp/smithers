@@ -78,6 +78,19 @@ test("page links and assets retain their existing checks", (t) => {
   assert.ok(failures.some((failure) => /missing \/missing\.png/.test(failure)))
 })
 
+test("app-served paths are exempt only when named, and only at that exact path", (t) => {
+  const root = fixture(t, {
+    "index.html":
+      "<a href=\"https://smithers.sh/smithersai/smithers\">Open in Smithers</a><a href=\"/api/public/repos\">Catalog</a><a href=\"https://smithers.sh/smithersai/smithers/issues\">Issues</a>"
+  })
+  const unnamed = checkBuiltSite(root).failures
+  assert.equal(unnamed.length, 3)
+  assert.ok(unnamed.some((failure) => /missing https:\/\/smithers\.sh\/smithersai\/smithers /.test(failure)))
+  assert.deepEqual(checkBuiltSite(root, [], ["/api/public/repos", "/smithersai/smithers"]).failures, [
+    "index.html: missing https://smithers.sh/smithersai/smithers/issues (resolved to /smithersai/smithers/issues)"
+  ])
+})
+
 test("release URLs use the emitted removal table and exclude canonical verbs and prose punctuation", async (t) => {
   const root = fixture(t, {
     "packages/smithers/src/Unsupported.ts": `

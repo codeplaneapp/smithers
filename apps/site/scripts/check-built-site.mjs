@@ -72,7 +72,12 @@ export async function releaseReferences(repoRoot) {
   ]
 }
 
-export function checkBuiltSite(root, requiredReferences = []) {
+/**
+ * `appPaths` are same-site paths the static build cannot contain: smithers.sh
+ * routes them to the app Worker (apps/server, `smithers-mvp-web`), which serves
+ * the public repo catalog and each catalog repository's app at /<owner>/<name>.
+ */
+export function checkBuiltSite(root, requiredReferences = [], appPaths = []) {
   const pages = new Map()
   const failures = new Set()
   const redirects = readRedirects(root)
@@ -102,6 +107,7 @@ export function checkBuiltSite(root, requiredReferences = []) {
       failures.add(`${source}: required URL leaves the site: ${reference}`)
       return
     }
+    if (appPaths.includes(url.pathname)) return
     const visited = new Set()
     while (true) {
       if (visited.has(url.pathname) || visited.size >= 32) {
@@ -144,10 +150,19 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   // The captured sitemap is independent of _redirects, so deleting an alias
   // cannot silently remove the URL from this check as well.
   const legacy = JSON.parse(readFileSync(join(siteRoot, "src/data/mintlify-paths.json"), "utf8"))
-  const result = checkBuiltSite(root, [
-    ...await releaseReferences(resolve(siteRoot, "../..")),
-    ...legacy.paths.flatMap((path) => path === "/" ? [path] : [path, path + "/"])
-  ])
+  // The landing page links each catalog repository's app and reads the catalog
+  // at the same origin; the app Worker (apps/server) serves both, not this build.
+  const { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } = await import(
+    pathToFileURL(resolve(siteRoot, "../server/src/publicRepoCatalog.ts"))
+  )
+  const result = checkBuiltSite(
+    root,
+    [
+      ...await releaseReferences(resolve(siteRoot, "../..")),
+      ...legacy.paths.flatMap((path) => path === "/" ? [path] : [path, path + "/"])
+    ],
+    [PUBLIC_REPOS_PATH, ...AVAILABLE_REPOS.map((repo) => `/${repo.name}`)]
+  )
   for (const name of ["llms.txt", "llms-full.txt"]) {
     if (
       !existsSync(join(root, name)) ||
