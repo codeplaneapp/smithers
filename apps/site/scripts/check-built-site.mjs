@@ -34,6 +34,61 @@ function readRedirects(root) {
   })
 }
 
+/*
+ * The static-asset headers file, as Cloudflare reads it: a path rule line
+ * followed by indented `Name: value` lines. Only the /_astro/* block is
+ * checked; the site adds no other rule.
+ * https://developers.cloudflare.com/workers/static-assets/headers/
+ */
+function readHeaders(root) {
+  const path = join(root, "_headers")
+  if (!existsSync(path)) return new Map()
+  const rules = new Map()
+  let current
+  for (const [index, line] of readFileSync(path, "utf8").split("\n").entries()) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#")) continue
+    if (!/^\s/.test(line)) {
+      current = new Map()
+      rules.set(trimmed, current)
+      continue
+    }
+    const separator = trimmed.indexOf(":")
+    if (current === undefined || separator === -1) throw new Error(`_headers:${index + 1}: unsupported header line: ${trimmed}`)
+    current.set(trimmed.slice(0, separator).trim().toLowerCase(), trimmed.slice(separator + 1).trim())
+  }
+  return rules
+}
+
+/**
+ * The headers every /_astro chunk must carry. The app page is served with COEP
+ * require-corp (apps/server/src/index.ts, ISOLATION_HEADERS), and the OPFS
+ * SQLite persistence starts a dedicated module worker from a chunk under
+ * /_astro: a worker script whose response lacks an embedder policy at least as
+ * strict as its owner document's is refused (net::ERR_BLOCKED_BY_RESPONSE),
+ * and the app silently falls back to localStorage. COOP belongs on the
+ * document only, so a chunk must not carry it.
+ */
+export const ASSET_HEADERS = Object.freeze({
+  "cross-origin-embedder-policy": "require-corp",
+  "cross-origin-resource-policy": "same-origin"
+})
+
+export function checkAssetHeaders(root) {
+  const rules = readHeaders(root)
+  const astro = rules.get("/_astro/*")
+  if (astro === undefined) return ["_headers: missing the /_astro/* rule"]
+  const failures = []
+  for (const [name, value] of Object.entries(ASSET_HEADERS)) {
+    const got = astro.get(name)
+    if (got !== value) failures.push(`_headers: /_astro/* must set ${name}: ${value} (got ${got ?? "nothing"})`)
+  }
+  if (astro.has("cross-origin-opener-policy")) {
+    failures.push("_headers: /_astro/* must not set cross-origin-opener-policy; the app Worker sets it on the document")
+  }
+  return failures
+}
+
 export async function releaseReferences(repoRoot) {
   const { migrationUrl, removedVerbs, removedFlags } = await import(
     pathToFileURL(join(repoRoot, "packages/smithers/src/Unsupported.ts"))
@@ -175,6 +230,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   for (const file of [...AVAILABLE_REPOS.map((repo) => `${repo.name}/index.html`), "404.html", "__build.json"]) {
     if (!existsSync(join(root, file))) result.failures.push(`${file}: missing from the build`)
   }
+  result.failures.push(...checkAssetHeaders(root))
   for (const name of ["llms.txt", "llms-full.txt"]) {
     if (
       !existsSync(join(root, name)) ||

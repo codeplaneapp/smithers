@@ -1,5 +1,16 @@
 # Every file under /_astro carries a content hash in its name, so a browser can
-# keep it for a year. Isolation headers (COOP, COEP) are the app Worker's job
-# (apps/server), not this file's.
+# keep it for a year.
+#
+# The app page (apps/server serves it with COOP same-origin and COEP
+# require-corp, so OPFS SQLite can run) starts a dedicated module worker from
+# a chunk under /_astro. A worker script's response must carry a
+# Cross-Origin-Embedder-Policy at least as strict as its owner document's, or
+# the browser refuses it (net::ERR_BLOCKED_BY_RESPONSE) and the app falls back
+# to localStorage. Both headers are inert on a script or stylesheet a docs page
+# loads, so every chunk carries them. COOP and the HTML headers stay the app
+# Worker's job (apps/server/src/index.ts, ISOLATION_HEADERS).
+# apps/site/scripts/check-built-site.mjs holds the built copy to these values.
 /_astro/*
   Cache-Control: public, max-age=31536000, immutable
+  Cross-Origin-Embedder-Policy: require-corp
+  Cross-Origin-Resource-Policy: same-origin

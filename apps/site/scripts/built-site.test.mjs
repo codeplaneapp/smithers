@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import test from "node:test"
-import { checkBuiltSite, releaseReferences } from "./check-built-site.mjs"
+import { ASSET_HEADERS, checkAssetHeaders, checkBuiltSite, releaseReferences } from "./check-built-site.mjs"
 
 function fixture(t, files) {
   const root = mkdtempSync(join(tmpdir(), "smithers-built-site-"))
@@ -131,4 +131,62 @@ test("social card images are required references, whether emitted by path or by 
   assert.deepEqual(failures, [
     "index.html: missing https://smithers.sh/media/absent.png (resolved to /media/absent.png)"
   ])
+})
+
+/*
+ * The app page is cross-origin isolated (COEP require-corp), and its OPFS
+ * SQLite persistence starts a dedicated module worker from a /_astro chunk.
+ * The browser refuses a worker script whose response lacks a matching embedder
+ * policy, so the headers file the build ships must give every chunk one. Live
+ * regression after the site and the app became one build: /_astro/opfs-worker-*.js
+ * answered net::ERR_BLOCKED_BY_RESPONSE and the app fell back to localStorage.
+ */
+test("the built _headers gives every /_astro chunk the embedder and resource policies the OPFS worker needs", (t) => {
+  const root = fixture(t, {
+    "_headers": [
+      "# hashed chunks",
+      "/_astro/*",
+      "  Cache-Control: public, max-age=31536000, immutable",
+      "  Cross-Origin-Embedder-Policy: require-corp",
+      "  Cross-Origin-Resource-Policy: same-origin",
+      ""
+    ].join("\n")
+  })
+  assert.deepEqual(checkAssetHeaders(root), [])
+})
+
+test("a _headers that only caches the chunks fails, naming each missing header", (t) => {
+  const root = fixture(t, { "_headers": "/_astro/*\n  Cache-Control: public, max-age=31536000, immutable\n" })
+  assert.deepEqual(checkAssetHeaders(root), [
+    "_headers: /_astro/* must set cross-origin-embedder-policy: require-corp (got nothing)",
+    "_headers: /_astro/* must set cross-origin-resource-policy: same-origin (got nothing)"
+  ])
+  assert.deepEqual(checkAssetHeaders(fixture(t, {})), ["_headers: missing the /_astro/* rule"])
+  const cors = fixture(t, {
+    "_headers": "/_astro/*\n  Cross-Origin-Embedder-Policy: require-corp\n  Cross-Origin-Resource-Policy: cross-origin\n"
+  })
+  assert.deepEqual(checkAssetHeaders(cors), [
+    "_headers: /_astro/* must set cross-origin-resource-policy: same-origin (got cross-origin)"
+  ])
+})
+
+test("a chunk rule that sets COOP fails: the opener policy is the app Worker's, on the document", (t) => {
+  const root = fixture(t, {
+    "_headers": [
+      "/_astro/*",
+      "  Cross-Origin-Opener-Policy: same-origin",
+      "  Cross-Origin-Embedder-Policy: require-corp",
+      "  Cross-Origin-Resource-Policy: same-origin",
+      ""
+    ].join("\n")
+  })
+  assert.deepEqual(checkAssetHeaders(root), [
+    "_headers: /_astro/* must not set cross-origin-opener-policy; the app Worker sets it on the document"
+  ])
+})
+
+test("the source public/_headers the build copies into dist already passes, so the build check is not the first to see it", () => {
+  const publicDir = resolve(import.meta.dirname, "../public")
+  assert.deepEqual(checkAssetHeaders(publicDir), [])
+  assert.deepEqual(Object.keys(ASSET_HEADERS), ["cross-origin-embedder-policy", "cross-origin-resource-policy"])
 })

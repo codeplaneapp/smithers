@@ -10,8 +10,11 @@
  *   the site      / and /docs/ answer 200, /nope answers 404 (the build's 404
  *                 page, not a SPA shell), /llms.txt and /sitemap-index.xml exist
  *   the app       the catalog repository page answers 200 with the isolation
- *                 headers OPFS needs, a frame path answers 200 (a reload inside
- *                 the app), and the Worker, not the assets layer, answers /api/*
+ *                 headers OPFS needs, the /_astro chunk that page loads answers
+ *                 200 with the embedder and resource policies the OPFS module
+ *                 worker script needs, a frame path answers 200 (a reload
+ *                 inside the app), and the Worker, not the assets layer,
+ *                 answers /api/*
  *   the aliases   every path the former Mintlify site indexed answers 200, or
  *                 redirects to a path that answers 200 within a few hops
  */
@@ -22,6 +25,8 @@ import { BUILD_STAMP_PATH } from "./BuildStamp.ts"
 export interface Observed {
   readonly status: number
   readonly headers: Readonly<Record<string, string>>
+  /** The response text, when the fetcher read it; the app document's is scanned for its chunks. */
+  readonly body?: string
 }
 
 /** One fetch, redirects NOT followed: a redirect is a verdict of its own. */
@@ -61,8 +66,7 @@ const expectStatus = async (fetch: Fetcher, origin: string, path: string, status
   return check(path, `${status}`, observed.status === status, describeStatus(observed))
 }
 
-const expectAppDocument = async (fetch: Fetcher, origin: string, path: string): Promise<SiteCheck> => {
-  const observed = await fetch(`${origin}${path}`)
+const expectAppDocument = (path: string, observed: Observed): SiteCheck => {
   const coop = header(observed, "cross-origin-opener-policy")
   const coep = header(observed, "cross-origin-embedder-policy")
   const ok = observed.status === 200 && coop === "same-origin" && coep === "require-corp"
@@ -72,6 +76,35 @@ const expectAppDocument = async (fetch: Fetcher, origin: string, path: string): 
     ok,
     `${describeStatus(observed)} + COOP ${coop ?? "absent"} + COEP ${coep ?? "absent"}`
   )
+}
+
+/** The first script chunk the app document loads from the build's hashed-asset directory. */
+export const appChunkPath = (document: string): string | undefined =>
+  /<script[^>]*\ssrc="(\/_astro\/[^"]+\.js)"/.exec(document)?.[1]
+
+export const APP_CHUNK_EXPECTATION = "200 + COEP require-corp + CORP same-origin (a /_astro chunk, as the OPFS worker script)"
+
+/*
+ * The app document is cross-origin isolated, and its OPFS SQLite persistence
+ * starts a dedicated module worker from a chunk under /_astro. The browser
+ * refuses a worker script whose response carries no embedder policy at least
+ * as strict as its owner's (net::ERR_BLOCKED_BY_RESPONSE), and the app falls
+ * back to localStorage without failing. The worker chunk is named only inside
+ * another chunk, so the probe grades the first chunk the document itself
+ * loads: apps/site/public/_headers gives every /_astro path the same headers,
+ * so one chunk stands for all of them, the worker script included.
+ */
+const expectAppChunk = async (fetch: Fetcher, origin: string, documentPath: string, document: Observed): Promise<SiteCheck> => {
+  const path = document.body === undefined ? undefined : appChunkPath(document.body)
+  if (path === undefined) {
+    const got = document.body === undefined ? "the fetcher read no document body" : "no /_astro script in the app document"
+    return check(`${documentPath} -> /_astro chunk`, APP_CHUNK_EXPECTATION, false, got)
+  }
+  const observed = await fetch(`${origin}${path}`)
+  const coep = header(observed, "cross-origin-embedder-policy")
+  const corp = header(observed, "cross-origin-resource-policy")
+  const ok = observed.status === 200 && coep === "require-corp" && corp === "same-origin"
+  return check(path, APP_CHUNK_EXPECTATION, ok, `${describeStatus(observed)} + COEP ${coep ?? "absent"} + CORP ${corp ?? "absent"}`)
 }
 
 const expectWorkerJson = async (fetch: Fetcher, origin: string, path: string): Promise<SiteCheck> => {
@@ -116,11 +149,13 @@ export interface SiteProbeInput {
 
 export const runSiteChecks = async (fetch: Fetcher, input: SiteProbeInput): Promise<ReadonlyArray<SiteCheck>> => {
   const { origin } = input
+  const appDocument = await fetch(`${origin}${APP_DOCUMENT_CHECK_PATH}`)
   const fixed = await Promise.all([
     expectStatus(fetch, origin, "/", 200),
     expectStatus(fetch, origin, "/docs/", 200),
     expectStatus(fetch, origin, "/nope", 404),
-    expectAppDocument(fetch, origin, APP_DOCUMENT_CHECK_PATH),
+    expectAppDocument(APP_DOCUMENT_CHECK_PATH, appDocument),
+    expectAppChunk(fetch, origin, APP_DOCUMENT_CHECK_PATH, appDocument),
     expectStatus(fetch, origin, FRAME_PATH_SAMPLE, 200),
     expectWorkerJson(fetch, origin, "/api/bootstrap"),
     expectWorkerJson(fetch, origin, PUBLIC_REPOS_PATH),

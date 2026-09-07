@@ -46,7 +46,13 @@ Worker fetches that page from the assets layer for a catalog repository path
 and for a frame path (`/w/<workspace>/b/<branch>/f/<frame>`, listed in
 `run_worker_first` as `/w/*`) and adds the isolation headers; every other path
 passes through as the site serves it, and the canary hostname marks HTML
-`noindex`. The name, routes, Durable Objects and migrations are untouched
+`noindex`. The `/_astro/*` chunks carry `Cross-Origin-Embedder-Policy:
+require-corp` and `Cross-Origin-Resource-Policy: same-origin` from the build's
+own `apps/site/public/_headers`, because the app's OPFS SQLite module worker is
+one of those chunks and a browser refuses a worker script whose embedder policy
+is weaker than its owner document's (`net::ERR_BLOCKED_BY_RESPONSE`, then a
+silent fall back to localStorage). `scripts/canary/site-probe.ts` grades one
+such chunk on every deploy. The name, routes, Durable Objects and migrations are untouched
 (`src/workerIdentity.test.ts` pins them), so state is unaffected. Rollback:
 restore `"directory": "../ui/dist"` and
 `"not_found_handling": "single-page-application"`, build `apps/ui` (`bun run

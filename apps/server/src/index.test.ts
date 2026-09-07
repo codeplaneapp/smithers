@@ -114,8 +114,12 @@ describe("routed repository pages", () => {
     expect({ status: response.status, served }).toEqual({ status: 404, served: ["/wevm/incur"] })
   })
 
-  test("the site's pages and chunks pass through as the assets layer serves them, without isolation headers", async () => {
-    // The docs load Google Fonts and Pagefind, which COEP require-corp would block.
+  test("the site's pages and chunks pass through as the assets layer serves them; the Worker adds no isolation headers", async () => {
+    // The docs load Google Fonts and Pagefind, which COEP require-corp would
+    // block. The /_astro chunks do carry COEP and CORP live, from the build's
+    // own apps/site/public/_headers (the OPFS module worker script needs its
+    // owner document's embedder policy), which this fake assets layer does not
+    // model: the claim here is only that the Worker adds nothing of its own.
     for (const [path, status] of [["/", 200], ["/docs/", 200], ["/_astro/a.js", 200], ["/nope", 404]] as const) {
       const { env, served } = siteEnv()
       const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
