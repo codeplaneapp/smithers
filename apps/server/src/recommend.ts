@@ -52,6 +52,24 @@ export const CEREBRAS_CHAT_COMPLETIONS_URL = "https://api.cerebras.ai/v1/chat/co
 export const RECOMMEND_BODY_MAX_BYTES = 256 * 1024
 
 /**
+ * The outcome body's byte cap. An outcome is an id and a command name, so a
+ * body past a few KiB is not a client reporting what the user ran.
+ */
+export const RECOMMEND_OUTCOME_BODY_MAX_BYTES = 4 * 1024
+
+/**
+ * `repo` is "owner/name" or null, and nothing else: a GitHub owner is up to
+ * 39 characters of letters, digits and hyphens, a name up to 100 of letters,
+ * digits, dots, underscores and hyphens. The log holds the repo verbatim and
+ * admins and the scorer read it, so it only ever holds a repository name.
+ */
+export const RECOMMEND_REPO_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/
+/** The most characters a command name may carry, in a request and in an outcome. */
+export const RECOMMEND_COMMAND_NAME_MAX_CHARS = 100
+/** The most characters a command's one-line summary may carry. */
+export const RECOMMEND_COMMAND_SUMMARY_MAX_CHARS = 300
+
+/**
  * Recommendations one address, or one login, may ask for per day. A pill
  * refresh follows each turn, and a hard day of chatting is about a hundred
  * turns, so three hundred is headroom, not a ration.
@@ -296,7 +314,7 @@ export const parseRecommendRequest = async (request: Request): Promise<Parsed> =
     return { ok: false, status: 400, message: "The recommendation request must be a JSON object." }
   }
   const { repo, tail, commands } = value as { repo?: unknown; tail?: unknown; commands?: unknown }
-  if (repo !== null && typeof repo !== "string") {
+  if (repo !== null && (typeof repo !== "string" || !RECOMMEND_REPO_PATTERN.test(repo))) {
     return { ok: false, status: 400, message: "repo must be \"owner/name\" or null." }
   }
   if (!Array.isArray(tail) || !tail.every(isTailMessage)) {
@@ -304,6 +322,12 @@ export const parseRecommendRequest = async (request: Request): Promise<Parsed> =
   }
   if (!Array.isArray(commands) || !commands.every(isCommand)) {
     return { ok: false, status: 400, message: "commands must be a list of { name, summary } entries." }
+  }
+  if (commands.some((command) => command.name.length > RECOMMEND_COMMAND_NAME_MAX_CHARS)) {
+    return { ok: false, status: 400, message: `A command name may carry at most ${RECOMMEND_COMMAND_NAME_MAX_CHARS} characters.` }
+  }
+  if (commands.some((command) => command.summary.length > RECOMMEND_COMMAND_SUMMARY_MAX_CHARS)) {
+    return { ok: false, status: 400, message: `A command summary may carry at most ${RECOMMEND_COMMAND_SUMMARY_MAX_CHARS} characters.` }
   }
   if (tail.length > RECOMMEND_TAIL_MAX_ENTRIES) {
     return { ok: false, status: 413, message: `tail may carry at most ${RECOMMEND_TAIL_MAX_ENTRIES} messages.` }
@@ -524,9 +548,30 @@ export const handleRecommendOutcome = async (
   env: RecommendEnv,
   headers: Record<string, string>
 ): Promise<Response> => {
-  const body = (await request.json().catch(() => undefined)) as { readonly id?: unknown; readonly command?: unknown } | undefined
-  if (body === undefined || typeof body.id !== "string" || body.id === "" || typeof body.command !== "string" || body.command === "") {
+  const declared = Number(request.headers.get("content-length") ?? "0")
+  if (declared > RECOMMEND_OUTCOME_BODY_MAX_BYTES) return jsonWith(413, { status: "error", message: "The outcome is too large." }, headers)
+  const text = await request.text().catch(() => undefined)
+  if (text === undefined) return jsonWith(400, { status: "error", message: "The outcome could not be read." }, headers)
+  if (new TextEncoder().encode(text).byteLength > RECOMMEND_OUTCOME_BODY_MAX_BYTES) {
+    return jsonWith(413, { status: "error", message: "The outcome is too large." }, headers)
+  }
+  let body: { readonly id?: unknown; readonly command?: unknown } | undefined
+  try {
+    body = JSON.parse(text) as typeof body
+  } catch {
+    body = undefined
+  }
+  if (
+    body === undefined || body === null || typeof body !== "object" ||
+    typeof body.id !== "string" || body.id === "" || typeof body.command !== "string" || body.command === ""
+  ) {
     return jsonWith(400, { status: "error", message: "An outcome is { id, command }, both strings." }, headers)
+  }
+  if (body.command.length > RECOMMEND_COMMAND_NAME_MAX_CHARS) {
+    return jsonWith(400, {
+      status: "error",
+      message: `An outcome's command is a command name of at most ${RECOMMEND_COMMAND_NAME_MAX_CHARS} characters.`
+    }, headers)
   }
   if (env.RECOMMEND_LOG === undefined) {
     return jsonWith(404, { status: "error", message: "No recommendation log on this deployment: no recommendation has that id." }, headers)

@@ -8,7 +8,10 @@ import {
   RECOMMEND_ALL_KEY,
   RECOMMEND_ALL_MAX,
   RECOMMEND_ANSWER_MAX,
+  RECOMMEND_COMMAND_NAME_MAX_CHARS,
+  RECOMMEND_COMMAND_SUMMARY_MAX_CHARS,
   RECOMMEND_LOG_LIMIT,
+  RECOMMEND_OUTCOME_BODY_MAX_BYTES,
   RECOMMEND_TAIL_MAX_CHARS,
   RECOMMEND_TAIL_MAX_ENTRIES,
   RECOMMEND_TIMEOUT_MS,
@@ -248,6 +251,41 @@ describe("POST /api/recommend", () => {
     )
   })
 
+  test("repo is owner/name or null, and a command name or summary past its cap is 400, so the log and the prompt hold only what the contract names", async () => {
+    await withNetwork(
+      async () => {
+        throw new Error("must not be called")
+      },
+      async (calls) => {
+        const badRepos = ["smithers", "a/b/c", "owner/na me", "-owner/name", `${"o".repeat(40)}/name`, `owner/${"n".repeat(101)}`, "x".repeat(4000)]
+        for (const repo of badRepos) {
+          const response = await worker.fetch(post("/api/recommend", { ...goodBody, repo }), env())
+          expect(response.status).toBe(400)
+          expect(((await response.json()) as { message: string }).message).toContain("owner/name")
+        }
+        const longName = [{ name: "c".repeat(RECOMMEND_COMMAND_NAME_MAX_CHARS + 1), summary: "s" }]
+        const longSummary = [{ name: "c", summary: "s".repeat(RECOMMEND_COMMAND_SUMMARY_MAX_CHARS + 1) }]
+        for (const commands of [longName, longSummary]) {
+          const response = await worker.fetch(post("/api/recommend", { ...goodBody, commands }), env())
+          expect(response.status).toBe(400)
+        }
+        expect(calls.length).toBe(0)
+      }
+    )
+    // The shape admits real repositories at the caps, with dots, underscores and hyphens.
+    await withNetwork(
+      async () => completion(JSON.stringify({ commands: ["help"] })),
+      async () => {
+        for (const repo of ["smithersai/smithers", "my-org/my.repo_v2", `${"o".repeat(39)}/${"n".repeat(100)}`, null]) {
+          const response = await worker.fetch(post("/api/recommend", { ...goodBody, repo }), env())
+          expect(response.status).toBe(200)
+        }
+        const atCaps = [{ name: "c".repeat(RECOMMEND_COMMAND_NAME_MAX_CHARS), summary: "s".repeat(RECOMMEND_COMMAND_SUMMARY_MAX_CHARS) }]
+        expect((await worker.fetch(post("/api/recommend", { ...goodBody, commands: atCaps }), env())).status).toBe(200)
+      }
+    )
+  })
+
   test("an oversize body is 413: too many tail messages, too much tail text, too many commands", async () => {
     await withNetwork(
       async () => {
@@ -433,6 +471,43 @@ describe("POST /api/recommend/outcome", () => {
     expect(malformed.status).toBe(400)
     const unbound = await worker.fetch(post("/api/recommend/outcome", { id: "1-abc", command: "help" }), env())
     expect(unbound.status).toBe(404)
+  })
+
+  test("an oversize outcome is 413 and a command longer than a name is 400, before the log is touched", async () => {
+    const logs = memoryLog()
+    let touched = 0
+    const counted: RecommendLogNamespace = {
+      idFromName: (name) => logs.idFromName(name),
+      get: (id) => {
+        const stub = logs.get(id)
+        return {
+          fetch: (request) => {
+            touched += 1
+            return stub.fetch(request)
+          }
+        }
+      }
+    }
+    await withNetwork(
+      async () => completion(JSON.stringify({ commands: ["help"] })),
+      async () => {
+        const recommended = await worker.fetch(post("/api/recommend", goodBody), env({ RECOMMEND_LOG: counted }))
+        const { id } = (await recommended.json()) as { id: string }
+        expect(touched).toBe(1)
+        const huge = { id, command: "h".repeat(RECOMMEND_OUTCOME_BODY_MAX_BYTES + 1) }
+        expect((await worker.fetch(post("/api/recommend/outcome", huge), env({ RECOMMEND_LOG: counted }))).status).toBe(413)
+        const declared = post("/api/recommend/outcome", { id, command: "help" }, { "content-length": String(RECOMMEND_OUTCOME_BODY_MAX_BYTES + 1) })
+        expect((await worker.fetch(declared, env({ RECOMMEND_LOG: counted }))).status).toBe(413)
+        const long = { id, command: "h".repeat(RECOMMEND_COMMAND_NAME_MAX_CHARS + 1) }
+        expect((await worker.fetch(post("/api/recommend/outcome", long), env({ RECOMMEND_LOG: counted }))).status).toBe(400)
+        expect((await worker.fetch(post("/api/recommend/outcome", "null"), env({ RECOMMEND_LOG: counted }))).status).toBe(400)
+        expect(touched).toBe(1)
+        // The row is untouched: the real outcome still lands once.
+        const real = await worker.fetch(post("/api/recommend/outcome", { id, command: "help" }), env({ RECOMMEND_LOG: counted }))
+        expect(real.status).toBe(204)
+        expect((await readRows(logs))[0]!.outcome?.command).toBe("help")
+      }
+    )
   })
 
   test("an id with the right sequence but the wrong random tail is 404, so ids cannot be guessed", async () => {
