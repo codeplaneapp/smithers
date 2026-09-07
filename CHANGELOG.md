@@ -155,10 +155,17 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1623 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1639 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **ui:** render the anonymous ceiling refusal as its own card ([26e9f72d4d](https://github.com/smithersai/smithers/commit/26e9f72d4d17b06d31d3b3c039288e9b060c407c))
+- **site,server:** give every coming-soon repository its own page at /<owner>/<name> ([610aa45496](https://github.com/smithersai/smithers/commit/610aa45496d46195424e1d3163651c63a8d98bff))
+- **ui:** label the workspace namespace Boxes and add the Dispatcher chrome button ([43a451181c](https://github.com/smithersai/smithers/commit/43a451181c538b75cc39d66805c29d4335ab326a))
+- **targets,build-cli,cli:** declare featured flows in PACKAGE.ts and project them into flows/catalog.json ([36d9e0d830](https://github.com/smithersai/smithers/commit/36d9e0d830ec6d9ae8f347d5f72f97b7c812670d))
+- **ui,rpc:** list a repository's secrets as a card behind a Secrets chrome button ([9a9546f43c](https://github.com/smithersai/smithers/commit/9a9546f43c3317f6821cd04c32980d6618ec629f))
+- **ui:** rename World to Wiki with wiki.* flows and hidden world.* aliases ([b29abeef59](https://github.com/smithersai/smithers/commit/b29abeef59d7ef47166ea6b8930384df38787f2a))
+- **ui,rpc:** Smithers names itself: init greeting, /smithers.who, Wiki prose ([b40c1562c8](https://github.com/smithersai/smithers/commit/b40c1562c8699e327ab2dabc22aad2e8684931c7))
 - **control:** list registered triggers and their fires through a DispatchReader port ([31031e1ab7](https://github.com/smithersai/smithers/commit/31031e1ab7a27090b9bf451aaf38eece1afecdfd))
 - **server:** route the whole smithers.sh apex to one Worker ([6ce75b056b](https://github.com/smithersai/smithers/commit/6ce75b056b354341ea4c2fc43dd5694ff418c3eb))
 - **server,rpc:** serve the librarian and flows roles on Cerebras from the Worker ([30ab22b559](https://github.com/smithersai/smithers/commit/30ab22b55969b026048e96e7b4cb0201e94983f6))
@@ -367,6 +374,12 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **cli:** keep the Next actions on the human `smthrs flow list` ([9a16544abe](https://github.com/smithersai/smithers/commit/9a16544abe2756ce2c9306a78e2875e961713bc2))
+- **server:** the catalog summary says flows, never workflow ([fab55714b4](https://github.com/smithersai/smithers/commit/fab55714b4d75a5a0d966abd9a2203335e3efdb8))
+- **ui:** smithers.who names the selected repository ([f401a27514](https://github.com/smithersai/smithers/commit/f401a275146b779bd3ad16701bebcd8b40c28272))
+- **ui,site:** say flows, never workflows, in product copy ([9d81943621](https://github.com/smithersai/smithers/commit/9d81943621cbbaeabc59c67c5ddda1b0fb77aad7))
+- **site:** give every /_astro chunk the embedder policy the OPFS worker script needs ([8d940fc24d](https://github.com/smithersai/smithers/commit/8d940fc24d081a98e4b6bba1bb996a6a9be84bc7))
+- **ui:** stop telling a failed box to wait for the tree to settle ([696433940b](https://github.com/smithersai/smithers/commit/696433940b2765b582da448ee465fa34c44aedb1))
 - **build-cli:** let a candidate gate read the candidate it judges ([4b9a5e4b8a](https://github.com/smithersai/smithers/commit/4b9a5e4b8a1c43266764775040ec60efb7490a66))
 - **server:** stop the public catalog from feeding a GitHub rate limit ([c2bbf5d387](https://github.com/smithersai/smithers/commit/c2bbf5d38790f127e86a93610f58b82861137019))
 - **scripts:** keep a withdrawn release tag from shrinking the changelog range ([b3997f9666](https://github.com/smithersai/smithers/commit/b3997f966623ccc86c2b3813142c3deeefc09a35))
@@ -1136,6 +1149,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **site:** reposition the project description around repository automation ([38ed1d3399](https://github.com/smithersai/smithers/commit/38ed1d33991cbf7ca468d86cdba78c3ade42e041))
+- **ui:** rewrite the wiki coverage gap for the Wiki namespace ([49d51ca763](https://github.com/smithersai/smithers/commit/49d51ca763d73a8f63ab86b94df199fbf556620b))
 - **site:** describe the shipped cron trigger and mark S.Automation as planned ([e66cfecedf](https://github.com/smithersai/smithers/commit/e66cfecedf21a924d541238bc8f7c0b2ac333c43))
 - **ui:** record the pinned repository URL exception and prove it end to end ([c4ad2147ea](https://github.com/smithersai/smithers/commit/c4ad2147ea413975eaf0706bac6f0a983994695c))
 - **site:** add Smithers Cloud CI and triggers guides and references ([a940e06dcc](https://github.com/smithersai/smithers/commit/a940e06dcc36a698165cc45ce7828d811fddba4e))
@@ -1493,6 +1508,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **build:** refresh bun.lock for the site island dependencies ([64660abee8](https://github.com/smithersai/smithers/commit/64660abee8a1f925be489cadb6675fb66f0b2017))
 - **test(flows):** pin the flows workspace and the release scripts in the conformance roster ([207d4ae2e2](https://github.com/smithersai/smithers/commit/207d4ae2e2a5f0e5dfaa6833cccdcaddb35fd769))
 - **style(rpc):** format the repo-onboarding activity counts schema ([e5e48629ad](https://github.com/smithersai/smithers/commit/e5e48629ad0d8ca802ef75b56afbb1a0c06ee0a2))
 - **ci(release):** lint release-auth.yml in the release workflow's actionlint step ([e57560b17e](https://github.com/smithersai/smithers/commit/e57560b17e2e5318fdb1e9d8e659ae3268d66e75))
