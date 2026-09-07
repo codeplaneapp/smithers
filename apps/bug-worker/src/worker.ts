@@ -1,6 +1,7 @@
 import type { BugWorkerEnv } from "./env.ts";
 import { bugReportSchema } from "./bugReportSchema.ts";
 import { newBugId } from "./newBugId.ts";
+import { handleRepoClaims } from "./repoClaims.ts";
 import { handleRepoRequests, retryRepoNotifications } from "./repoRequests.ts";
 
 export type { BugWorkerEnv, BugKv } from "./env.ts";
@@ -183,6 +184,9 @@ export function createBugWorker(overrides?: Partial<BugWorkerDeps>) {
       }
       if (url.pathname === "/api/repo-requests" || url.pathname.startsWith("/api/repo-requests/")) {
         return handleRepoRequests(request, env, deps);
+      }
+      if (url.pathname === "/api/repo-claims") {
+        return handleRepoClaims(request, env, deps);
       }
       if (request.method === "POST" && url.pathname === "/api/bugs") {
         return handlePostBug(request, env, deps.now());

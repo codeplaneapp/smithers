@@ -23,4 +23,6 @@ export interface BugWorkerEnv {
   /** Transactional completion emails. Missing configuration keeps them pending. */
   RESEND_API_KEY?: string;
   NOTIFICATION_FROM?: string;
+  /** GitHub token that forks nominated repositories into smithers-community. Missing token records "skipped". */
+  GITHUB_FORK_TOKEN?: string;
 }

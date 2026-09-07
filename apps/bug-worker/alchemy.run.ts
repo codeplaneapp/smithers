@@ -13,6 +13,8 @@
  * first deployment; importing old Alchemy 1 state is not automatic.
  *
  * Required env: CLOUDFLARE_API_TOKEN, ALCHEMY_PASSWORD, BUG_ADMIN_TOKEN.
+ * Optional env: GITHUB_FORK_TOKEN forks nominated repositories into the
+ * smithers-community organization; without it forks are recorded as skipped.
  * Optional env: CLOUDFLARE_SMITHERS_ZONE_ID (alchemy resolves the zone from
  * the domain when omitted, same convention as apps/telegram-summary).
  */
@@ -40,6 +42,7 @@ export const workerProps = {
     BUGS: bugs,
     ...(process.env.RESEND_API_KEY ? { RESEND_API_KEY: Config.redacted("RESEND_API_KEY") } : {}),
     ...(process.env.NOTIFICATION_FROM ? { NOTIFICATION_FROM: process.env.NOTIFICATION_FROM } : {}),
+    ...(process.env.GITHUB_FORK_TOKEN ? { GITHUB_FORK_TOKEN: Config.redacted("GITHUB_FORK_TOKEN") } : {}),
     BUG_ADMIN_TOKEN: adminToken,
     PUBLIC_BASE_URL: process.env.BUG_PUBLIC_BASE_URL?.trim() || "https://bug.smithers.sh",
   },

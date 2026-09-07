@@ -1,4 +1,5 @@
 import type { BugWorkerEnv } from "./env.ts";
+import { forkRepo } from "./repoForks.ts";
 import { checkRateLimit, readBodyBounded, timingSafeStringEqual, type BugWorkerDeps } from "./worker.ts";
 
 const prefix = "repo-request:";
@@ -136,6 +137,7 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
       // from resetting completed work. Each subscriber also has an independent key.
       repo = { name, url: `https://github.com/${name}` };
       await env.BUGS.put(`${prefix}${name}`, JSON.stringify(repo));
+      await forkRepo(env, deps, name);
     }
     const result = await publicRepo(env, repo);
     if (email && result.status !== "ready") await env.BUGS.put(`repo-subscriber:${name}:${await hash(email)}`, email);

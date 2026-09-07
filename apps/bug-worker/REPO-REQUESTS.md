@@ -39,6 +39,34 @@ All visitors then see **Smithered / Open in Smithers**. The current app is still
 being built; this change supplies the intake, public catalog, and completion
 contract, not the repository view inside that app.
 
+## Community forks
+
+The first accepted nomination of a repository forks it into the
+[smithers-community](https://github.com/smithers-community) GitHub
+organization with `POST https://api.github.com/repos/{owner}/{repo}/forks` and
+the body `{ "organization": "smithers-community" }`. Set `GITHUB_FORK_TOKEN`
+when deploying the Worker to a token that can create forks in that
+organization. The outcome is stored under `repo-fork:<owner/repo>` as
+`{ "status": "forked", "forkedAt": "..." }`, `{ "status": "failed", "error": "..." }`,
+or `{ "status": "skipped" }` when the token is unset. A fork failure is logged
+and recorded but never fails the nomination; the repository is still stored as
+`smithering`. Fork status is not part of the public listing.
+
+## Maintainer claims
+
+A maintainer can claim a nominated repository. Claiming only records who
+claimed it; it does not grant access or start any work yet.
+
+`POST /api/repo-claims` accepts `{ "repo": "owner/repo", "login": "github-login", "email": "optional@example.com" }`.
+It returns `200` with `{ repo, login, claimedAt }` for the first claim, `409`
+if the repository is already claimed, `404` if the repository has never been
+nominated, and `400` for an invalid repository, login, or email. Claims share
+the per-IP throttle used by nominations.
+
+`GET /api/repo-claims?repo=owner/repo` returns `{ repo, login, claimedAt }` or
+`404`. Claims live under `repo-claim:<owner/repo>`. The claimant's email is
+stored with the claim and never appears in responses.
+
 ## Notifications
 
 Configure `RESEND_API_KEY` and `NOTIFICATION_FROM` (a verified sender) when
@@ -70,7 +98,7 @@ The existing KV per-IP throttle is advisory, not an atomic rate limiter.
 Email addresses never appear in public responses. They live under
 `repo-subscriber:<owner/repo>:<sha256(email)>`, separate from public metadata
 under `repo-request:` and completion under `repo-ready:`. Notification receipts
-use `repo-notified:`. There are no additional database bindings or migrations.
+use `repo-notified:`, forks use `repo-fork:`, and claims use `repo-claim:`. There are no additional database bindings or migrations.
 
 ## Validation and deployment
 
@@ -79,4 +107,5 @@ Worker before the site; otherwise the new form gets a visible API error.
 Use the package's existing deployment command after resolving the repository's
 Alchemy version mismatch: the checked-in deployment scripts use Alchemy 1.x
 imports while the workspace currently installs 2.x. Deployment needs that
-existing migration, the email bindings above, and the ten-minute cron.
+existing migration, the email bindings above, `GITHUB_FORK_TOKEN` for community
+forks, and the ten-minute cron.
