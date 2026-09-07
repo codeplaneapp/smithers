@@ -467,9 +467,12 @@ describe("unified control dispatch", () => {
     expect(result.codes).toEqual([])
     expect(result.stdout).toBe("")
     expect(terminal).toBe(
-      `* ${"review".padEnd("create-flow/scaffold".length)}  Review the change.\n` +
-        "  create-flow/scaffold  Writes the flow file.\n"
+      "flow list\n" +
+        `* ${"review".padEnd("create-flow/scaffold".length)}  Review the change.\n` +
+        "  create-flow/scaffold  Writes the flow file.\n" +
+        "Next:\nsmthrs flow show review\nsmthrs flow plan --help\n"
     )
+    expect(terminal).not.toContain("flowId")
   })
 
   it("keeps the flow page document for agents and --json", async () => {

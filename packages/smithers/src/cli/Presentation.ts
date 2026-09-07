@@ -179,12 +179,26 @@ const linesOf = (value: unknown, indent = "", depth = 0): Array<string> => {
 }
 
 /**
+ * How a handler wants its result shown to a person. Agents and explicit
+ * formats never see it: the returned document stays the contract.
+ * @category models
+ * @since 1.0.0
+ */
+export interface Rendering {
+  /**
+   * A body already written for a person, printed in place of the generic
+   * key/value summary. The command title and the Next actions still frame it.
+   */
+  readonly human?: string | undefined
+}
+
+/**
  * Preserve data for agents; render a bounded Clack result for humans.
  * Explicit JSON/format always keeps the original machine-readable document.
  * @category formatting
  * @since 1.0.0
  */
-export const finish = <A>(context: Context, value: A): A => {
+export const finish = <A>(context: Context, value: A, rendering: Rendering = {}): A => {
   const session = current()
   if (session === undefined || context.ok === undefined || value === undefined) return value
   const actions = nextActions(session.command, value, context)
@@ -193,7 +207,9 @@ export const finish = <A>(context: Context, value: A): A => {
     // existing array result contracts rather than changing their shape.
     return actions.length === 0 || Array.isArray(value) ? value : context.ok(value, { cta: { commands: actions } })
   }
-  const summary = linesOf(Redaction.redact(value)).slice(0, 80).join("\n") || "Done"
+  const summary = rendering.human === undefined
+    ? linesOf(Redaction.redact(value)).slice(0, 80).join("\n") || "Done"
+    : rendering.human.trimEnd()
   if (session.policy.progress === "live") clack.note(summary, session.command, { output: session.stdout })
   else session.stdout.write(`${session.command}\n${summary}\n`)
   if (actions.length > 0) {

@@ -31,9 +31,14 @@ interface ErrorContext extends Presentation.Context {
  * @category constructors
  * @since 1.0.0
  */
-export const safe = async <A>(context: ErrorContext, body: () => Promise<A>): Promise<A> => {
+export const safe = async <A>(
+  context: ErrorContext,
+  body: () => Promise<A>,
+  rendering: (value: A) => Presentation.Rendering = () => ({})
+): Promise<A> => {
   try {
-    return Presentation.finish(context, await body())
+    const value = await body()
+    return Presentation.finish(context, value, rendering(value))
   } catch (cause) {
     const error = cause as { _tag?: string; message?: string }
     return context.error({
@@ -61,16 +66,15 @@ export const createFlowCli = (runtime: Bridge.Runtime = {}) =>
       description: "List project flows",
       options,
       run: (c) =>
-        safe(c, async () => {
-          const page = await Bridge.invoke(["ls"], c.options, runtime)
+        safe(
+          c,
+          () => Bridge.invoke(["ls"], c.options, runtime),
           // A person reads one line per flow, featured rows starred, so the
-          // recommended set is visible without a table. Agents and `--json`
-          // keep the flow page document unchanged.
-          const session = Presentation.current()
-          if (session === undefined || session.policy.structured || !FeaturedFlows.isFlowPage(page)) return page
-          session.stdout.write(FeaturedFlows.human(page.items))
-          return undefined
-        })
+          // recommended set is visible without a table, then the same Next
+          // actions every listing offers. Agents and `--json` keep the flow
+          // page document unchanged.
+          (page) => FeaturedFlows.isFlowPage(page) ? { human: FeaturedFlows.human(page.items) } : {}
+        )
     })
     .command("show", {
       description: "Show a discovered flow's identity and description",

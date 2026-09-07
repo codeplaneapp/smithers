@@ -66,6 +66,32 @@ describe("shared command presentation", () => {
     expect(host.progress).toEqual([])
     expect(result).toMatchObject({ data: undefined })
   })
+  it("prints a supplied human body in place of the summary and keeps the next actions", async () => {
+    const host = fixture("human", true, true)
+    let result: unknown
+    await Presentation.scope({ command: "flow list" }, host.runtime, async () => {
+      result = Presentation.finish({ ok }, { _tag: "flows", items: [{ flowId: "review", description: "Reviews." }] }, {
+        human: "* review  Review the change.\n"
+      })
+    })
+    expect(host.output.join("")).toBe(
+      "flow list\n* review  Review the change.\nNext:\nsmthrs flow show review\nsmthrs flow plan --help\n"
+    )
+    expect(result).toMatchObject({ data: undefined })
+  })
+  it("ignores a human body for agents and keeps the document with its CTAs", async () => {
+    const host = fixture("agent")
+    let result: unknown
+    const page = { _tag: "flows", items: [{ flowId: "review", description: "Reviews." }] }
+    await Presentation.scope({ command: "flow list" }, host.runtime, async () => {
+      result = Presentation.finish({ ok }, page, { human: "* review  Review the change.\n" })
+    })
+    expect(host.output).toEqual([])
+    expect(result).toMatchObject({
+      data: page,
+      meta: { cta: { commands: [{ command: "flow show review" }, { command: "flow plan --help" }] } }
+    })
+  })
   it("never changes explicit JSON data or array response shapes", async () => {
     const host = fixture("human")
     const list = [{ key: "hello", value: "world" }]

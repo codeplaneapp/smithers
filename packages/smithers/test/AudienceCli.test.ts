@@ -62,7 +62,7 @@ describe("audience-aware public CLI", { timeout: 90_000 }, () => {
     })
     expect(result.code, result.stderr + result.stdout).toBe(0)
     expect(result.stdout).toContain("flow list")
-    expect(result.stdout).toContain("items: none")
+    expect(result.stdout).toContain("No flows discovered under flows/.")
     expect(result.stdout).toContain("Next:")
     expect(result.stdout).not.toContain("cta:")
     expect(result.stderr).toBe("")
