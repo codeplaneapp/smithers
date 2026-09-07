@@ -35,6 +35,74 @@ const post = (path: string, body: unknown): Request =>
     body: JSON.stringify(body)
   })
 
+/*
+ * The app under the apex: smithers.sh/<owner>/<name>. wrangler.jsonc routes
+ * `smithers.sh/smithersai/*` here and runs the Worker first for it, so this
+ * handler, not the assets layer's SPA fallback, decides what a repository
+ * path answers.
+ */
+describe("routed repository pages", () => {
+  const spaEnv = () => {
+    const served: Array<string> = []
+    const env: WorkerEnv = {
+      ASSETS: {
+        fetch: async (request) => {
+          served.push(new URL(request.url).pathname)
+          return new URL(request.url).pathname === "/"
+            ? new Response("<html><body>smithers</body></html>", { status: 200 })
+            : new Response("not found", { status: 404 })
+        }
+      }
+    }
+    return { env, served }
+  }
+
+  test("a catalog repository serves the SPA document, whatever the case or trailing slash", async () => {
+    for (const path of ["/smithersai/smithers", "/SmithersAI/Smithers", "/smithersai/smithers/"]) {
+      const { env, served } = spaEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status: 200, served: ["/"] })
+      expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin")
+      expect(await response.text()).toContain("smithers")
+    }
+  })
+
+  test("any other path under the routed owner redirects to the site without touching the assets", async () => {
+    for (const path of ["/smithersai/unknown", "/smithersai/smithers/issues/3", "/smithersai/"]) {
+      const { env, served } = spaEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, location: response.headers.get("location"), served }).toEqual({
+        path, status: 302, location: "https://smithers.sh/", served: []
+      })
+    }
+  })
+
+  test("a catalog repository under an owner wrangler does not route stays with the assets layer", async () => {
+    const { env, served } = spaEnv()
+    const response = await worker.fetch(new Request("https://smithers.sh/wevm/incur"), env)
+    expect({ status: response.status, served }).toEqual({ status: 404, served: ["/wevm/incur"] })
+  })
+
+  test("wrangler runs the Worker first for every routed owner, and routes the apex prefixes beside the canary", async () => {
+    // Without the run_worker_first entry the assets layer answers /smithersai/*
+    // before this Worker sees it, and the handler above is dead on Cloudflare.
+    const wrangler = await Bun.file(new URL("../wrangler.jsonc", import.meta.url)).text()
+    const config = JSON.parse(wrangler.replace(/^\s*\/\/.*$/gm, "")) as {
+      routes: Array<{ pattern: string; custom_domain?: boolean; zone_id?: string }>
+      assets: { run_worker_first: Array<string> }
+    }
+    expect(config.assets.run_worker_first).toContain("/smithersai/*")
+    expect(config.routes.map((route) => route.pattern)).toEqual([
+      "canary.smithers.sh",
+      "smithers.sh/smithersai/*",
+      "smithers.sh/api/*",
+      "smithers.sh/assets/*"
+    ])
+    expect(config.routes[0]).toEqual({ pattern: "canary.smithers.sh", custom_domain: true })
+    for (const route of config.routes.slice(1)) expect(route.zone_id).toBe("8ebd98d2f0dc7d8db2e61f31ebc19c14")
+  })
+})
+
 describe("smithers mvp worker", () => {
   test("serves the SPA with the cross-origin isolation headers OPFS needs", async () => {
     const response = await worker.fetch(new Request("https://mvp.test/"), assetsEnv())

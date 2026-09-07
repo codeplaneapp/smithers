@@ -18,7 +18,7 @@
 /**
  * The asset `vite build` emits into the bundle. Served straight from the
  * Cloudflare assets layer: `wrangler.jsonc` runs the Worker first only for
- * `/api/*`, `/v1/*` and `/workflows/*`, so this path needs no Worker route and
+ * `/api/*`, `/v1/*`, `/workflows/*` and `/smithersai/*`, so this path needs no Worker route and
  * no credential to read.
  */
 export const BUILD_STAMP_PATH = "/__build.json"

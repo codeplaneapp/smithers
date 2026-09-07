@@ -22,6 +22,19 @@ Never edit `wrangler.jsonc`'s `name` or `routes` as part of a routine deploy.
 If the identity or domain genuinely needs to change, that is a separate,
 deliberate decision — not a side effect of a deploy.
 
+One such deliberate change is on record. The product for a repository lives at
+`https://smithers.sh/<owner>/<name>`, and `smithers.sh` itself is the marketing
+site, a separate assets-only Worker (`apps/site`), so `routes` also carries
+three zone routes beside the canary custom domain: `smithers.sh/smithersai/*`,
+`smithers.sh/api/*`, and `smithers.sh/assets/*` (zone
+`8ebd98d2f0dc7d8db2e61f31ebc19c14`). `run_worker_first` lists `/smithersai/*`
+so the Worker, not the assets layer's SPA fallback, answers a repository path:
+a catalog repository serves the SPA document and any other path under that
+owner redirects to `https://smithers.sh/`. The Worker name and the canary
+domain are unchanged, so Durable Object state is unaffected. Rollback is to
+delete the three zone routes and deploy; `canary.smithers.sh` keeps serving
+throughout.
+
 ## Scripted deploy (this repo's one repeatable path)
 
 `scripts/deploy.ts` builds the SPA (`vite build` in `apps/ui`), then runs

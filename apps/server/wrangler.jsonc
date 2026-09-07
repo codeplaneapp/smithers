@@ -7,7 +7,16 @@
 	// the POC worker `smithers-ui-canary` (rollback: redeploy that worker from a
 	// `smithersai/ui` checkout — `bun x wrangler deploy` — and the domain
 	// re-attaches; its last POC version was bd819f28-8c25-4443-b3b2-13d1e18cd09d).
-	"routes": [{ "pattern": "canary.smithers.sh", "custom_domain": true }],
+	// The app under the apex (wave "smithers.sh is the product"): smithers.sh
+	// itself is the marketing site, a separate assets-only Worker, so this Worker
+	// claims only the three prefixes it owns there. Rollback: delete the three
+	// zone routes; the canary custom domain is untouched either way.
+	"routes": [
+		{ "pattern": "canary.smithers.sh", "custom_domain": true },
+		{ "pattern": "smithers.sh/smithersai/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" },
+		{ "pattern": "smithers.sh/api/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" },
+		{ "pattern": "smithers.sh/assets/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" }
+	],
 	// The SPA lives in the sibling `smithers-ui` package: this directory is its
 	// Vite build output, so `bun run build` there must run before `wrangler dev`
 	// or `wrangler deploy` here — an unbuilt `../ui/dist` is an empty site.
@@ -15,7 +24,11 @@
 		"directory": "../ui/dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/v1/*", "/workflows/*"]
+		// `/smithersai/*` runs the Worker first so a catalog repository page serves
+		// the SPA document and any other path under that owner redirects to the
+		// site, instead of the assets layer's SPA fallback answering both
+		// (src/index.ts, routedRepoPage).
+		"run_worker_first": ["/api/*", "/v1/*", "/workflows/*", "/smithersai/*"]
 	},
 	// Server-side turn kill (B-3): cancellation state per runId lives in this
 	// Durable Object; the cancel route flips it and the streaming turn handler
