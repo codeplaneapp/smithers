@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, RepoTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `linear` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "linear", label: "Linear", summary: "Linear teams and sync (ADR 0005)" }
 
 /** The `linear` flows registered as one aggregator block. */
 export const linearFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

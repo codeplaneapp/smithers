@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `egress` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "egress", label: "Egress", summary: "What a computer or an agent session called out to" }
 
 /** The `egress` flows registered as one aggregator block. */
 export const egressFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

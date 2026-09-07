@@ -6,8 +6,16 @@
 import { Schema } from "effect"
 import { WORLD_DISPLAY_NAME } from "../../state/AppState"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace, Recommendation } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `world` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "world", label: "World", summary: "What Smithers understands" }
+
+/** World leads connect once something is connected. */
+export const recommendations: ReadonlyArray<Recommendation> = [
+  { name: "world", when: () => true, rank: (state) => (state.hasConnectors ? 1 : 2) }
+]
 
 /** The bare `world` surface switch, registered first with the other top-level surfaces. */
 export const worldSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

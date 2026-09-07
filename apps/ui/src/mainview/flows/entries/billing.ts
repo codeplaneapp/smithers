@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `billing` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "billing", label: "Billing", summary: "Balance and plan" }
 
 /** `billing.balance`, the one billing flow every session registers. */
 export const billingBalanceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

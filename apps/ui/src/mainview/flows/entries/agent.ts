@@ -7,8 +7,11 @@ import { Schema } from "effect"
 import { isAgentRoleId } from "@smthrs/rpc/AgentRoles"
 import { flag, line, text } from "../FlowForms"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `agent` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "agent", label: "Agents", summary: "Delegate a task to an agent role" }
 
 /** The `agent.*` flows: roles, delegation, the explainer, the list. */
 export const agentFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {

@@ -5,8 +5,17 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace, Recommendation } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `chat` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "chat", label: "Chat", summary: "The conversation: send, stop, retry, clear" }
+
+/** While the model types, stopping is the only next step; away from the chat, returning to it leads. */
+export const recommendations: ReadonlyArray<Recommendation> = [
+  { name: "chat.stop", when: (state) => state.typing, exclusive: true, rank: () => 0 },
+  { name: "chat", when: (state) => state.surface !== "chat", rank: () => 0 }
+]
 
 /** `chat.surfaces`, the composer's surfaces menu, registered beside the appearance flows. */
 export const chatSurfacesFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {

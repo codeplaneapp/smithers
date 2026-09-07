@@ -4,8 +4,11 @@
  * the aggregator order.
  */
 import { flow, CardTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `approval` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "approval", label: "Approvals", summary: "Approve or deny requests" }
 
 /** The `approval` flows registered as one aggregator block. */
 export const approvalFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

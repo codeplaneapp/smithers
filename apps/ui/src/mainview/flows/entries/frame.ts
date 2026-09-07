@@ -4,8 +4,11 @@
  * the aggregator order.
  */
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `frame` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "frame", label: "Frames", summary: "Navigate and fork frames" }
 
 /** The `frame` flows registered as one aggregator block. */
 export const frameFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

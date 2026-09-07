@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, RepoTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `github` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "github", label: "GitHub", summary: "The GitHub App and the mirror (ADR 0005)" }
 
 /** The `github` flows registered as one aggregator block. */
 export const githubFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

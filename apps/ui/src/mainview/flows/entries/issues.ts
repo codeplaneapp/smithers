@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NumberedTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `issues` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "issues", label: "Issues", summary: "GitHub issues" }
 
 /** The `issues.*` flows: GitHub issues. */
 export const issuesFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

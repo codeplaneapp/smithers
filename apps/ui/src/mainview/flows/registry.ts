@@ -11,12 +11,55 @@
  * its projected descriptor. Everything below is UI-catalog copy about a flow
  * that already exists, which is why it can stay a plain structural record.
  *
- * The one import is type-only, so this module still carries no runtime
- * dependency on Effect or the harness.
+ * The namespace rows, the requirement rows and the recommendation rows are
+ * data each namespace module under ./entries exports beside its flows; this
+ * module aggregates them in display order. Those are the only value imports,
+ * so a lane that adds a namespace, a requirement or a recommendation edits
+ * its own module plus one line here.
  */
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 import type { Schema } from "effect"
+import * as admin from "./entries/admin"
+import * as agent from "./entries/agent"
+import * as app from "./entries/app"
+import * as appearance from "./entries/appearance"
+import * as approval from "./entries/approval"
+import * as approvals from "./entries/approvals"
+import * as auth from "./entries/auth"
+import * as billing from "./entries/billing"
+import * as branches from "./entries/branches"
+import * as browser from "./entries/browser"
+import * as card from "./entries/card"
+import * as change from "./entries/change"
+import * as chat from "./entries/chat"
+import * as cloud from "./entries/cloud"
+import * as connector from "./entries/connector"
+import * as debug from "./entries/debug"
+import * as egress from "./entries/egress"
+import * as env from "./entries/env"
+import * as feature from "./entries/feature"
+import * as files from "./entries/files"
+import * as findings from "./entries/findings"
+import * as flow from "./entries/flow"
+import * as frame from "./entries/frame"
+import * as github from "./entries/github"
+import * as issues from "./entries/issues"
+import * as keys from "./entries/keys"
+import * as linear from "./entries/linear"
+import * as notifications from "./entries/notifications"
+import * as prs from "./entries/prs"
+import * as repo from "./entries/repo"
+import * as repos from "./entries/repos"
+import * as review from "./entries/review"
+import * as runs from "./entries/runs"
+import * as sync from "./entries/sync"
+import * as system from "./entries/system"
+import * as tab from "./entries/tab"
+import * as target from "./entries/target"
+import * as toast from "./entries/toast"
+import * as workspace from "./entries/workspace"
+import * as world from "./entries/world"
 import type { FormHints } from "./FlowForms"
 
 /**
@@ -214,31 +257,11 @@ export interface FlowRequirement {
  * the table stays unit-testable; every entry's `fulfill` names a registered
  * flow, gated by parity.test.ts. A seam that can SATISFY a requirement
  * (identity load) calls resumeDeferredCommand — adding
- * a requirement here means wiring its satisfying seam there.
+ * a requirement here means wiring its satisfying seam there. The rows live in
+ * the namespace module whose flow fulfills them (auth.ts today).
  */
 export const flowRequirements: ReadonlyArray<FlowRequirement> = [
-  {
-    id: "signed-in",
-    // Only the definitive signed-out answer defers; unknown/unavailable
-    // identity never blocks a command (the seam discipline: gate on
-    // answers, not on silence).
-    satisfied: (state) => !state.signedOut,
-    fulfill: "auth.sign-in",
-    reason: "Sign in with GitHub first"
-  },
-  {
-    /*
-     * Repository reads have three sources: the GitHub session (Cloud
-     * repositories), a repository opened in this app, or the public catalog
-     * repository a signed-out visitor is exploring (its files are anonymous
-     * reads on the server). Any one satisfies the reads on its own; signed
-     * out with none of them, sign-in is the step.
-     */
-    id: "repo-source",
-    satisfied: (state) => !state.signedOut || state.hasOpenRepos === true || state.publicRepo === true,
-    fulfill: "auth.sign-in",
-    reason: "Sign in with GitHub, or open a local repository first"
-  }
+  ...auth.requirements
 ]
 
 /** The flow's unmet requirements for a state, in declaration order. */
@@ -278,18 +301,45 @@ export interface CommandState {
   readonly identity?: string
 }
 
+/** One row of the recommendation table a namespace module exports. */
+export interface Recommendation {
+  /** The flow to offer. */
+  readonly name: string
+  /** True when the state calls for the flow. */
+  readonly when: (state: CommandState) => boolean
+  /**
+   * An exclusive recommendation is the whole answer when it applies; the
+   * first applicable one in table order wins (typing beats signed-out).
+   */
+  readonly exclusive?: true
+  /** The position among the applicable non-exclusive rows; lower leads. */
+  readonly rank: (state: CommandState) => number
+}
+
+/*
+ * The recommendation table, in precedence order: the exclusive rows resolve
+ * in this order, and the rest sort by rank. Each row lives in the namespace
+ * module that owns the flow it offers.
+ */
+export const recommendations: ReadonlyArray<Recommendation> = [
+  ...chat.recommendations,
+  ...auth.recommendations,
+  ...world.recommendations,
+  ...connector.recommendations
+]
+
 /**
  * The ordered recommendations for an app state — the next-action output the
  * slash menu reads. The first entry is gold: signed-out, sign-in is the only
  * step; away from the chat, returning to it leads.
  */
 export const recommendedNames = (state: CommandState): ReadonlyArray<string> => {
-  if (state.typing) return ["chat.stop"]
-  if (state.signedOut) return ["auth.sign-in"]
-  const base = state.hasConnectors
-    ? (["world", "connect"] as const)
-    : (["connect", "world"] as const)
-  return state.surface === "chat" ? [...base] : ["chat", ...base]
+  const exclusive = recommendations.find((row) => row.exclusive === true && row.when(state))
+  if (exclusive !== undefined) return [exclusive.name]
+  return recommendations
+    .filter((row) => row.exclusive !== true && row.when(state))
+    .sort((left, right) => left.rank(state) - right.rank(state))
+    .map((row) => row.name)
 }
 
 /*
@@ -312,46 +362,46 @@ export interface Namespace {
 
 /** The namespaces in display order; one the table lacks lists last, by id. */
 export const NAMESPACES: ReadonlyArray<Namespace> = [
-  { id: "chat", label: "Chat", summary: "The conversation: send, stop, retry, clear" },
-  { id: "appearance", label: "Appearance", summary: "Theme and colors" },
-  { id: "repo", label: "Repository", summary: "Open and inspect local repositories" },
-  { id: "repos", label: "Repositories", summary: "GitHub and Smithers Cloud repositories" },
-  { id: "feature", label: "Feature requests", summary: "Sketch a feature against a repository" },
-  { id: "connector", label: "Connectors", summary: "Local repository connections" },
-  { id: "world", label: "World", summary: "What Smithers understands" },
-  { id: "tab", label: "Sessions", summary: "Terminals, agents, and cards in the sidebar" },
-  { id: "target", label: "Targets", summary: "Build targets, runs, graph, CI" },
-  { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" },
-  { id: "runs", label: "Runs", summary: "The runs on your workspace: open, resume, steer, stop" },
-  { id: "approvals", label: "Run approvals", summary: "The workspace's pending gates" },
-  { id: "issues", label: "Issues", summary: "GitHub issues" },
-  { id: "prs", label: "Pull requests", summary: "GitHub pull requests" },
-  { id: "linear", label: "Linear", summary: "Linear teams and sync (ADR 0005)" },
-  { id: "github", label: "GitHub", summary: "The GitHub App and the mirror (ADR 0005)" },
-  { id: "sync", label: "Sync", summary: "Sync ops and retries (ADR 0005)" },
-  { id: "change", label: "Changes", summary: "Changes and diffs — the change is the unit (ADR 0003)" },
-  { id: "review", label: "Review", summary: "Review threads, requests, and the diff since your last one (ADR 0004)" },
-  { id: "findings", label: "Findings", summary: "What the analyzers raised on a change (ADR 0004)" },
-  { id: "workspace", label: "Computers", summary: "Cloud computers: open, stream, snapshot, and inspect (ADR 0002)" },
-  { id: "egress", label: "Egress", summary: "What a computer or an agent session called out to" },
-  { id: "agent", label: "Agents", summary: "Delegate a task to an agent role" },
-  { id: "files", label: "Files", summary: "Read repository files" },
-  { id: "branches", label: "Branches", summary: "Repository branches" },
-  { id: "env", label: "Environment", summary: "Workspace environment variables" },
-  { id: "keys", label: "Keys", summary: "Provider API keys" },
-  { id: "notifications", label: "Notifications", summary: "GitHub notifications" },
-  { id: "browser", label: "Browser", summary: "Read web pages" },
-  { id: "auth", label: "Account", summary: "Sign in and out" },
-  { id: "cloud", label: "Cloud", summary: "Smithers Cloud" },
-  { id: "billing", label: "Billing", summary: "Balance and plan" },
-  { id: "card", label: "Cards", summary: "Maximize and minimize cards" },
-  { id: "frame", label: "Frames", summary: "Navigate and fork frames" },
-  { id: "approval", label: "Approvals", summary: "Approve or deny requests" },
-  { id: "debug", label: "Debug", summary: "Observability and dev tooling" },
-  { id: "app", label: "App", summary: "The Smithers app itself" },
-  { id: "admin", label: "Admin", summary: "Operator tooling" },
-  { id: "system", label: "System", summary: "Background flows" },
-  { id: "toast", label: "Toasts", summary: "Notifications on screen" }
+  chat.namespace,
+  appearance.namespace,
+  repo.namespace,
+  repos.namespace,
+  feature.namespace,
+  connector.namespace,
+  world.namespace,
+  tab.namespace,
+  target.namespace,
+  flow.namespace,
+  runs.namespace,
+  approvals.namespace,
+  issues.namespace,
+  prs.namespace,
+  linear.namespace,
+  github.namespace,
+  sync.namespace,
+  change.namespace,
+  review.namespace,
+  findings.namespace,
+  workspace.namespace,
+  egress.namespace,
+  agent.namespace,
+  files.namespace,
+  branches.namespace,
+  env.namespace,
+  keys.namespace,
+  notifications.namespace,
+  browser.namespace,
+  auth.namespace,
+  cloud.namespace,
+  billing.namespace,
+  card.namespace,
+  frame.namespace,
+  approval.namespace,
+  debug.namespace,
+  app.namespace,
+  admin.namespace,
+  system.namespace,
+  toast.namespace
 ]
 
 /** The namespace a flow name belongs to; a bare name has none. */

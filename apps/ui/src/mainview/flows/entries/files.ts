@@ -7,8 +7,11 @@ import { Schema } from "effect"
 import { fileArgs } from "../FileArgs"
 import { text } from "../FlowForms"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `files` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "files", label: "Files", summary: "Read repository files" }
 
 /** `files.list` and `files.read`. */
 export const filesFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

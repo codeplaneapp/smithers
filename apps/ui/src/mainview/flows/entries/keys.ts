@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `keys` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "keys", label: "Keys", summary: "Provider API keys" }
 
 /** The `keys` flows registered as one aggregator block. */
 export const keysFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

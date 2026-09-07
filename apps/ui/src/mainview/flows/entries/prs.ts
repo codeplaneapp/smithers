@@ -6,8 +6,11 @@
 import { Schema } from "effect"
 import { line, text } from "../FlowForms"
 import { flow, RepoTarget, NumberedTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `prs` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "prs", label: "Pull requests", summary: "GitHub pull requests" }
 
 /** The `prs` flows registered as one aggregator block. */
 export const prsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

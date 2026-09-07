@@ -6,8 +6,11 @@
 import { Schema } from "effect"
 import { PALETTES } from "../../state/AppState"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `appearance` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "appearance", label: "Appearance", summary: "Theme and colors" }
 
 /** The `appearance` flows registered as one aggregator block. */
 export const appearanceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {

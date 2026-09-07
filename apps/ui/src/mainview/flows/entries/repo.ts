@@ -6,8 +6,11 @@
 import { Schema } from "effect"
 import { text } from "../FlowForms"
 import { flow, RepoTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `repo` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "repo", label: "Repository", summary: "Open and inspect local repositories" }
 
 /** The repository starters, registered after `prs.*`. */
 export const repoStarterFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

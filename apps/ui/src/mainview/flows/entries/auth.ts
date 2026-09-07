@@ -4,8 +4,42 @@
  * the aggregator order.
  */
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, FlowRequirement, Namespace, Recommendation } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `auth` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "auth", label: "Account", summary: "Sign in and out" }
+
+/** The requirements `auth.sign-in` fulfills; registry.ts flowRequirements aggregates them. */
+export const requirements: ReadonlyArray<FlowRequirement> = [
+  {
+    id: "signed-in",
+    // Only the definitive signed-out answer defers; unknown/unavailable
+    // identity never blocks a command (the seam discipline: gate on
+    // answers, not on silence).
+    satisfied: (state) => !state.signedOut,
+    fulfill: "auth.sign-in",
+    reason: "Sign in with GitHub first"
+  },
+  {
+    /*
+     * Repository reads have three sources: the GitHub session (Cloud
+     * repositories), a repository opened in this app, or the public catalog
+     * repository a signed-out visitor is exploring (its files are anonymous
+     * reads on the server). Any one satisfies the reads on its own; signed
+     * out with none of them, sign-in is the step.
+     */
+    id: "repo-source",
+    satisfied: (state) => !state.signedOut || state.hasOpenRepos === true || state.publicRepo === true,
+    fulfill: "auth.sign-in",
+    reason: "Sign in with GitHub, or open a local repository first"
+  }
+]
+
+/** Signed out, sign-in is the only next step. */
+export const recommendations: ReadonlyArray<Recommendation> = [
+  { name: "auth.sign-in", when: (state) => state.signedOut, exclusive: true, rank: () => 0 }
+]
 
 /** The `auth` flows registered as one aggregator block. */
 export const authFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

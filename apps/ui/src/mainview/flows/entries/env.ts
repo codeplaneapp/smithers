@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, RepoTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `env` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "env", label: "Environment", summary: "Workspace environment variables" }
 
 /** The `env` flows registered as one aggregator block. */
 export const envFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

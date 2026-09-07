@@ -6,8 +6,11 @@
 import { Schema } from "effect"
 import { line, text } from "../FlowForms"
 import { flow, TargetRef } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `target` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "target", label: "Targets", summary: "Build targets, runs, graph, CI" }
 
 /** The `target` flows registered as one aggregator block. */
 export const targetFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

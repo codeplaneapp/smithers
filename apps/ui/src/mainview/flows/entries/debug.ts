@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `debug` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "debug", label: "Debug", summary: "Observability and dev tooling" }
 
 /** `debug.verbose`, the one debug flow every session registers. */
 export const debugVerboseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => {

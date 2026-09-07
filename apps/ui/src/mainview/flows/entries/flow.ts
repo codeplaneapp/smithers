@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload, RepoTarget, CardTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `flow` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "flow", label: "Workflows", summary: "Create, list, and run workflows" }
 
 /** The bare `flows` surface switch, registered first with the other top-level surfaces. */
 export const flowsSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

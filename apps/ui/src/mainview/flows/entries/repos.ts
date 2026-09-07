@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, RepoTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `repos` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "repos", label: "Repositories", summary: "GitHub and Smithers Cloud repositories" }
 
 /** `repos.import`, registered after billing. */
 export const reposImportFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

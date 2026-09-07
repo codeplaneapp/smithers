@@ -4,8 +4,11 @@
  * the aggregator order.
  */
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `cloud` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "cloud", label: "Cloud", summary: "Smithers Cloud" }
 
 /** The `cloud` flows registered as one aggregator block. */
 export const cloudFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

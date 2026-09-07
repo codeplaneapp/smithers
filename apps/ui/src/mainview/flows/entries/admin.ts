@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload, CardTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `admin` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "admin", label: "Admin", summary: "Operator tooling" }
 
 /** The reset confirm dialog's ask and cancel. */
 export const adminResetFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

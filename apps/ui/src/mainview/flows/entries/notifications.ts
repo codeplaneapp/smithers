@@ -4,8 +4,11 @@
  * the aggregator order.
  */
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `notifications` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "notifications", label: "Notifications", summary: "GitHub notifications" }
 
 /** The `notifications` flows registered as one aggregator block. */
 export const notificationsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [

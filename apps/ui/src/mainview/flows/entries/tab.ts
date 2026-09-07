@@ -5,8 +5,11 @@
  */
 import { Schema } from "effect"
 import { flow, NoPayload, CardTarget } from "./Declare"
-import type { FlowEntry } from "../registry"
+import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
+
+/** The `tab` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
+export const namespace: Namespace = { id: "tab", label: "Sessions", summary: "Terminals, agents, and cards in the sidebar" }
 
 /** The terminal, read and harness tabs, registered after `chat.reload`. */
 export const tabHarnessFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
