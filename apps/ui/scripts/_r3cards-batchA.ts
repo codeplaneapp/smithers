@@ -7,7 +7,6 @@ const FLOWS: Array<[string, string]> = [
   ["/connect", "connect"],
   ["/world", "world"],
   ["/theme", "theme-picker"],
-  ["/keys.list", "keys"],
   ["/notifications.list", "notifications"],
   ["/env.view", "env"],
   ["/branches.list", "branches"],

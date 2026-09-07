@@ -762,7 +762,7 @@ export const CardSchema = z.discriminatedUnion("kind", [
   }),
   /*
    * The multi-parity domain cards (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
-   * landings ("PRs" — landing is QUEUED, never "merged"), BYOK keys,
+   * landings ("PRs" — landing is QUEUED, never "merged"),
    * notifications, the agent environment, and the repo import job. Payloads
    * mirror the platform answers trimmed to what the card states; bodies live
    * in src/mainview/cards/*.
@@ -863,13 +863,6 @@ export const CardSchema = z.discriminatedUnion("kind", [
         })
       ),
       checks: z.array(z.object({ context: z.string(), state: z.string() }))
-    })
-  }),
-  z.object({
-    ...cardBaseShape,
-    kind: z.literal("keys"),
-    payload: z.object({
-      keys: z.array(z.object({ provider: z.string(), masked: z.string() }))
     })
   }),
   z.object({

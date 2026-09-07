@@ -55,7 +55,6 @@ import { formFlows } from "./entries/form"
 import { frameFlows } from "./entries/frame"
 import { githubFlows } from "./entries/github"
 import { issuesFlows, issuesLinearFlows } from "./entries/issues"
-import { keysFlows } from "./entries/keys"
 import { linearFlows } from "./entries/linear"
 import { notificationsFlows } from "./entries/notifications"
 import { prsFlows } from "./entries/prs"
@@ -135,7 +134,6 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...prsFlows(actions),
   ...repoStarterFlows(actions),
   ...featureFlows(actions),
-  ...keysFlows(actions),
   ...notificationsFlows(actions),
   ...envFlows(actions),
   ...branchesFlows(actions),

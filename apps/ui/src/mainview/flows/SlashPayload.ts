@@ -353,7 +353,6 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     return ok(repo === undefined ? { number, verdict: type, text } : { number, verdict: type, text, repo })
   },
   "billing.upgrade": (args) => optional("plan", args),
-  "keys.remove": (args) => required("provider", args, "keys.remove needs the provider name"),
   "env.view": (args) => repoOnly("env.view", args),
   "env.set": (args) => {
     const { rest, repo } = splitTrailingRepo(args)

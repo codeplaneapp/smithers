@@ -71,8 +71,6 @@ import type { CodeIntelSeam } from "./seams/CodeIntelSeam"
 import { createRepoTreeSeam } from "./seams/RepoTreeSeam"
 import { createIssuesSeam } from "./seams/IssuesSeam"
 import type { IssuesSeam } from "./seams/IssuesSeam"
-import { createKeysSeam } from "./seams/KeysSeam"
-import type { KeysSeam } from "./seams/KeysSeam"
 import { createLandingsSeam } from "./seams/LandingsSeam"
 import type { LandingsSeam } from "./seams/LandingsSeam"
 import { createNotificationsSeam } from "./seams/NotificationsSeam"
@@ -341,7 +339,7 @@ export interface AppController {
   readonly prototypeFeature: OnboardingController["prototypeFeature"]
   /*
    * The multi-parity domain seams (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
-   * PRs/landings, billing checkout, BYOK keys, notifications, the agent
+   * PRs/landings, billing checkout, notifications, the agent
    * environment, and repo import. One method per command; each seam owns its
    * backend domain in state/seams/*.
    */
@@ -359,8 +357,6 @@ export interface AppController {
   readonly reviewLanding: LandingsSeam["reviewLanding"]
   readonly startCheckout: BillingSeam["startCheckout"]
   readonly openBillingPortal: BillingSeam["openBillingPortal"]
-  readonly listKeys: KeysSeam["listKeys"]
-  readonly removeKey: KeysSeam["removeKey"]
   readonly listNotifications: NotificationsSeam["listNotifications"]
   readonly markNotificationsRead: NotificationsSeam["markNotificationsRead"]
   readonly viewEnvironment: EnvironmentSeam["viewEnvironment"]
@@ -621,7 +617,6 @@ export const createAppController = (
   const issuesSeam = actors.pair(seamCtx, (context) => createIssuesSeam(context))
   const landingsSeam = actors.pair(seamCtx, (context) => createLandingsSeam(context))
   const billingSeam = actors.pair(seamCtx, (context) => createBillingSeam(context))
-  const keysSeam = actors.pair(seamCtx, (context) => createKeysSeam(context))
   const notificationsSeam = actors.pair(seamCtx, (context) => createNotificationsSeam(context))
   const environmentSeam = actors.pair(seamCtx, (context) => createEnvironmentSeam(context))
   const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
@@ -1251,8 +1246,6 @@ export const createAppController = (
     reviewLanding: landingsSeam.reviewLanding,
     startCheckout: billingSeam.startCheckout,
     openBillingPortal: billingSeam.openBillingPortal,
-    listKeys: keysSeam.listKeys,
-    removeKey: keysSeam.removeKey,
     listNotifications: notificationsSeam.listNotifications,
     markNotificationsRead: notificationsSeam.markNotificationsRead,
     viewEnvironment: environmentSeam.viewEnvironment,
@@ -1578,8 +1571,6 @@ export const createAppController = (
     reviewLanding: landingsSeam.reviewLanding,
     startCheckout: billingSeam.startCheckout,
     openBillingPortal: billingSeam.openBillingPortal,
-    listKeys: keysSeam.listKeys,
-    removeKey: keysSeam.removeKey,
     listNotifications: notificationsSeam.listNotifications,
     markNotificationsRead: notificationsSeam.markNotificationsRead,
     viewEnvironment: environmentSeam.viewEnvironment,

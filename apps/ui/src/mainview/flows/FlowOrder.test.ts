@@ -105,8 +105,6 @@ const PRE_SPLIT_BASE: ReadonlyArray<string> = [
   "repo.contribute",
   "repo.explore",
   "feature.prototype",
-  "keys.list",
-  "keys.remove",
   "notifications.list",
   "notifications.read",
   "env.view",

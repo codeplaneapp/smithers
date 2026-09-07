@@ -43,7 +43,6 @@ const validArgs: Record<string, string> = {
   "prs.land": "2 codeplanesmithers/canary-sandbox",
   "prs.review": "2 comment round3-flow-sweep-probe codeplanesmithers/canary-sandbox",
   "billing.upgrade": "pro",
-  "keys.remove": "openai",
   "env.view": "codeplanesmithers/canary-sandbox",
   "env.set": "ROUND3_FLOW_SWEEP=probe codeplanesmithers/canary-sandbox",
   "branches.list": "codeplanesmithers/canary-sandbox",

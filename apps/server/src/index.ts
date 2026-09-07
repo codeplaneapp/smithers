@@ -2151,7 +2151,6 @@ export const PLATFORM_PROXY_RULES: ReadonlyArray<{
   { prefix: "/api/user/repos", methods: ["GET"] },
   /* Source-only repo metadata (import-readiness fallback): reads only. */
   { prefix: "/api/user/github-repos/", methods: ["GET"] },
-  { prefix: "/api/user/byok-keys", methods: ["GET", "POST", "DELETE"] },
   /*
    * Per-user cloud reads the app renders as trees and rows (RepositoriesSeam,
    * WorkspaceSeam). Every row below names only the methods a seam under
@@ -2189,29 +2188,6 @@ const CHECKOUT_PATHS: ReadonlyArray<string> = ["/api/billing/checkout", "/api/bi
 const checkoutEnabled = (env: WorkerEnv): boolean => env.BILLING_CHECKOUT_ENABLED?.trim() === "1"
 
 const PLATFORM_PROXY_MAX_BODY = 256 * 1024
-
-/*
- * Families the Smithers Cloud platform does not implement. The proxy used to
- * forward them anyway and hand the browser the Go router's own plain-text
- * `404 page not found`, which the product rendered verbatim into a user's
- * toast (repro apps/ui/canary-repros/admin/28.5) and to the console as a 404
- * on every ordinary session (repro admin/28.12). Neither told the user
- * anything. An honest 501 that names the state is the contract the rest of
- * this Worker already keeps for a seam it cannot serve.
- *
- * A row here is a statement about the PLATFORM, not about this Worker: delete
- * the row the day the upstream route ships and the forward resumes unchanged.
- */
-const PLATFORM_UNIMPLEMENTED: ReadonlyArray<{ readonly prefix: string; readonly message: string }> = [
-  {
-    prefix: "/api/user/byok-keys",
-    message:
-      "Bring-your-own provider keys aren't part of this preview. Smithers Cloud has no key store yet, so there is nothing to list, add, or remove — turns run on the included allowance instead."
-  }
-]
-
-const platformUnimplemented = (pathname: string): string | undefined =>
-  PLATFORM_UNIMPLEMENTED.find((rule) => pathname.startsWith(rule.prefix))?.message
 
 /**
  * What to tell a reader when Smithers Cloud refuses. The upstream's own body is
@@ -2349,10 +2325,6 @@ const handlePlatformProxy = async (request: Request, env: WorkerEnv, url: URL): 
         "There is nothing to buy during the closed alpha: your balance is comped, so there is no checkout and no billing portal. You'll be told before that changes."
     })
   }
-  // A doomed forward is not more honest than a refusal, and it costs the user
-  // a raw upstream body they cannot read. Refuse before spending the token.
-  const unimplemented = platformUnimplemented(url.pathname)
-  if (unimplemented !== undefined) return json(501, { status: "error", message: unimplemented })
   const token = await fetchCloudToken(env, gate.login)
   if (token.status !== "ok") {
     return json(503, {

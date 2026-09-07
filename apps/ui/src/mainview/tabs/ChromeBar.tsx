@@ -1,7 +1,7 @@
 import { fileArgs } from "../flows/FileArgs"
 import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { ChevronRight, Download, FolderGit2, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, X } from "lucide-react"
+import { ChevronRight, Download, FolderGit2, Moon, Pencil, Plus, RotateCcw, Sun, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
@@ -92,8 +92,6 @@ export function ChromeBar() {
   // The web app's door to the native app (docs/web-mode/PLAN.md §3): registered on the cloud host only, and
   // rendered only while a native release exists to download (AppLinks.ts — null until one carries an asset).
   const canDownload = controller.commands.find("app.download") !== undefined && controller.downloadUrl !== null
-  // The Secrets door: the same registry entry the /keys.list slash runs, so it renders only where `keys.byok` is emitted.
-  const canSecrets = controller.commands.find("keys.list") !== undefined
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canSelectRepo = controller.commands.find("repo.select") !== undefined
   const canTree = controller.commands.find("repo.tree") !== undefined
@@ -685,21 +683,6 @@ export function ChromeBar() {
             >
               <Download size={14} aria-hidden="true" />
               Download the app
-            </button>
-          ) :
-          null}
-        {/* The button door of keys.list: the provider keys card in the chat, which names the way to the agent environment. */}
-        {canSecrets ?
-          (
-            <button
-              type="button"
-              className="chrome-action chrome-action-secrets"
-              data-flow="keys.list"
-              data-testid="chrome-secrets"
-              onClick={() => controller.runCommand("keys.list")}
-            >
-              <KeyRound size={14} aria-hidden="true" />
-              Secrets
             </button>
           ) :
           null}

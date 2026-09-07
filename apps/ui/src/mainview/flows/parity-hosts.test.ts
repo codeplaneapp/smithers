@@ -439,8 +439,9 @@ describe("host parity — the web and native catalogs against the servers' own c
     ])
     /*
      * Pinned orphans: capabilities the schema names that NO host emits today.
-     * `keys.byok` gates keys.list / keys.remove, which therefore register on
-     * no host; the row is exact so a second orphan fails here.
+     * `keys.byok` gated the deleted keys.list / keys.remove; no flow names it
+     * now, and the Secrets lanes replace the literal with the secrets store
+     * capability. The row is exact so a second orphan fails here.
      */
     const ORPHANS: ReadonlyArray<RuntimeCapability> = ["keys.byok"]
     const orphans = RuntimeCapabilitySchema.options.filter((capability) => !everything.has(capability))

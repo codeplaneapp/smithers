@@ -202,7 +202,6 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/IssueCards.tsx": 3,
       "../cards/LandingCards.tsx": 4,
       "../cards/FileCards.tsx": 3,
-      "../cards/KeysCard.tsx": 1,
       /* Mark-all-read. */
       "../cards/NotificationsCard.tsx": 1,
       /* 2 = Try again + the done state's Open the workspace (lane sync). */
@@ -291,8 +290,7 @@ describe("launch-law parity: every affordance is a command", () => {
        * every tab).
        */
       /* 23 = 22 + the chrome-actions footer's Download the app (docs/web-mode/PLAN.md §3; renders only where app.download is registered, the cloud host). */
-      /* 25 = 24 + the footer's Secrets button, the button door of keys.list (renders only where keys.byok is emitted). */
-      "../tabs/ChromeBar.tsx": 25,
+      "../tabs/ChromeBar.tsx": 24,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })

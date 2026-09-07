@@ -457,7 +457,6 @@ describe("command registry bindings", () => {
     expect(cloudNames).not.toContain("repo.open")
     expect(cloudNames).not.toContain("target.run")
     expect(cloudNames).not.toContain("tab.terminal")
-    expect(cloudNames).not.toContain("keys.list")
     const withoutBrowser = await freshController({
       apiVersion: 1, host: "cloud", version: "test", buildSha: "cloud",
       capabilities: ["agent", "identity", "cloud"], authFlow: "redirect", sandbox: null
@@ -557,8 +556,6 @@ describe("command registry bindings", () => {
       "feature.prototype",
       // §17.4: billing.upgrade / billing.portal register in the ADMIN plugin
       // only — no checkout is exposed to an MVP account.
-      "keys.list",
-      "keys.remove",
       "notifications.list",
       "notifications.read",
       "env.view",

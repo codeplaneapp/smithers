@@ -88,7 +88,7 @@ Priority: P0 blocks the workbench or a daily task; P1 next; P2 later. Effort S/M
 ### agents / seats · Per-run budget (tokens, latency) from the envelope, provider key add, seat resolution state (anthropic/openai/openrouter/cerebras), ChatGPT-subscription mode for openai seats (SMITHERS_OPENAI_AUTH=chatgpt)
 
 - Source: both · coverage: partial · effort: S
-- Exists: keys card lists masked keys with keys.list/keys.remove only (packages/rpc/src/Cards.ts:435; Flows.ts:920-937); balance card is USD (Cards.ts:149); no budget, no add-key, no ChatGPT mode.
+- Exists: no keys card (keys.list/keys.remove were deleted; provider keys return as personal secrets bound to provider hosts); balance card is USD (Cards.ts:149); no budget, no add-key, no ChatGPT mode.
 - UI: keys card gains Add key rows per provider with a resolution glyph and an `OpenAI via ChatGPT subscription` toggle row; flow-plan budget row is editable before Run and the flow-run facts strip reads `tokens used / budget`.
 - Flows: `keys.set <provider> <key>; keys.openai-auth <chatgpt|api>; flow.plan --budget <tokens>`
 

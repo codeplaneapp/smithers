@@ -45,7 +45,6 @@ import * as flow from "./entries/flow"
 import * as frame from "./entries/frame"
 import * as github from "./entries/github"
 import * as issues from "./entries/issues"
-import * as keys from "./entries/keys"
 import * as linear from "./entries/linear"
 import * as notifications from "./entries/notifications"
 import * as prs from "./entries/prs"
@@ -388,7 +387,6 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   files.namespace,
   branches.namespace,
   env.namespace,
-  keys.namespace,
   notifications.namespace,
   browser.namespace,
   auth.namespace,
@@ -561,7 +559,7 @@ export const slashItems = <C extends CatalogItem>(
   /*
    * §1.2: signed out, sign-in is the one step, so the listing offers only
    * what works signed out. The whole registry used to be listed —
-   * `/auth.sign-out`, `/billing.upgrade`, `/keys.list`, `/issues.create`,
+   * `/auth.sign-out`, `/billing.upgrade`, `/issues.create`,
    * every one of which needs a session. Nothing is un-invokable: typing a
    * name still defers through sign-in (§6.2). What changes is what the app
    * PRESENTS as available.

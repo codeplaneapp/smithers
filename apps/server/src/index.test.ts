@@ -2333,7 +2333,6 @@ describe("the browser tool route (§2d)", () => {
       ["POST", "/api/repos/will/flows/issues"],
       ["POST", "/api/github/import"],
       ["GET", "/api/user/repos"],
-      ["GET", "/api/user/byok-keys"],
       ["GET", "/api/user/workspaces?limit=100"],
       ["GET", "/api/user/orgs"],
       ["GET", "/api/orgs/smithersai/provider-connections"],
@@ -2358,7 +2357,9 @@ describe("the browser tool route (§2d)", () => {
     const cases: ReadonlyArray<readonly [string, string]> = [
       ["DELETE", "/api/notifications/list"],
       ["POST", "/api/user/repos"],
-      ["PATCH", "/api/user/byok-keys"],
+      /* The BYOK key family was deleted with keys.list / keys.remove: nothing forwards, nothing answers 501. */
+      ["GET", "/api/user/byok-keys"],
+      ["DELETE", "/api/user/byok-keys/anthropic"],
       ["PATCH", "/api/user/workspaces"],
       ["PUT", "/api/orgs/smithersai/provider-connections"],
       ["PUT", "/api/linear/7"],
@@ -2430,52 +2431,6 @@ describe("the browser tool route (§2d)", () => {
       expect(body.status).toBe("error")
       expect(body.message).not.toContain("404 page not found")
       expect(body.message).toContain("Smithers Cloud")
-    } finally {
-      globalThis.fetch = original
-    }
-  })
-
-  /*
-   * Repro apps/ui/canary-repros/money/18.1 and flow-sweep/A.59: the platform
-   * ships no BYOK key store, so the forward could only ever come back a 404.
-   * The honest answer is the seam's own 501 naming the state, and NO forward
-   * at all — a doomed request is also a 4xx on every ordinary session
-   * (repro admin/28.12).
-   */
-  test("a platform family the upstream does not implement answers an honest 501 and never forwards", async () => {
-    const env: WorkerEnv = {
-      ...assetsEnv(),
-      IDENTITY_UPSTREAM_URL: "https://identity.test",
-      IDENTITY_SERVICE_TOKEN: "svc",
-      SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test"
-    }
-    const seen: Array<string> = []
-    const original = globalThis.fetch
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-      seen.push(url)
-      if (url.includes("/api/identity/validate")) {
-        return new Response(JSON.stringify({ login: "will", allowlisted: true, admin: false, scopes: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        })
-      }
-      return new Response("404 page not found\n", { status: 404 })
-    }) as unknown as typeof fetch
-    try {
-      for (
-        const request of [
-          new Request("https://mvp.test/api/user/byok-keys"),
-          new Request("https://mvp.test/api/user/byok-keys/anthropic", { method: "DELETE" })
-        ]
-      ) {
-        const response = await worker.fetch(request, env)
-        expect(response.status).toBe(501)
-        const body = (await response.json()) as { message: string }
-        expect(body.message).toContain("provider keys")
-        expect(body.message).not.toContain("404")
-      }
-      expect(seen.every((url) => url.includes("identity.test"))).toBe(true)
     } finally {
       globalThis.fetch = original
     }

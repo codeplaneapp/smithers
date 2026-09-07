@@ -104,7 +104,7 @@ Notes:
 
 | Proposed mvp command                                        | Requires                  | Route(s)                                                                                | Multi reference                         |
 | ----------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------- |
-| `keys.list` / `keys.add` / `keys.remove` (BYOK)             | signed-in                 | `GET/POST /api/user/byok-keys`, `DELETE …/{provider}`                                   | `src/smithersCloud/byokKeys.ts`         |
+| `keys.list` / `keys.add` / `keys.remove` (BYOK): deleted 2026-09-07, provider keys return as personal secrets bound to provider hosts | signed-in                 | `GET/POST /api/user/byok-keys`, `DELETE …/{provider}`                                   | `src/smithersCloud/byokKeys.ts`         |
 | `env.view` / `env.save`                                     | signed-in, repos-selected | `GET/PUT /api/repos/{o}/{r}/agent-environment`                                          | `src/smithersCloud/agentEnvironment.ts` |
 | `env.secret.set` / `env.secret.delete`                      | signed-in, repos-selected | `PUT/DELETE …/agent-environment/secrets/{name}`                                         | same                                    |
 | `notifications.list` / `notifications.read`                 | signed-in                 | `GET /api/notifications/list`, `PUT /api/notifications/mark-read`                       | `src/smithersCloud/notifications.ts`    |

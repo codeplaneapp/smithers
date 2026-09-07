@@ -461,9 +461,8 @@
 	background: var(--hover);
 }
 
-/* The download and Secrets buttons carry an icon; keep each on one line with its label. */
-.chrome-action-download,
-.chrome-action-secrets {
+/* The download button carries an icon; keep it on one line with its label. */
+.chrome-action-download {
 	display: flex;
 	align-items: center;
 	gap: 6px;

@@ -229,11 +229,6 @@ describe("explainAbsent — an exact miss classified against the unfiltered cata
     const { controller } = await freshController(WEB)
     // The W4 relay is off: cloud.terminal is absent, and the native app is not the answer.
     expect(controller.commands.explainAbsent("workspace.terminal")).toEqual({ door: "origin", reason: ORIGIN_REFUSAL })
-    // keys.byok is a capability no host emits today (parity-hosts pins the orphan).
-    expect(controller.commands.explainAbsent("keys.list")).toEqual({
-      door: "origin",
-      reason: "/keys.list is not available on this origin yet."
-    })
     // A Worker without the Smithers Cloud upstream lacks every Smithers Cloud flow the same way.
     const offline = await freshController({
       ...WEB,
