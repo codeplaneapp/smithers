@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync, readlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import * as Schema from "effect/Schema";
@@ -855,6 +855,35 @@ function parseDiffText(diffText: string): DiffRecord[] {
   return records;
 }
 
+/**
+ * Reads one untracked path the way Git records it, never following a symlink.
+ *
+ * A symlink contributes its target text, so a link that points outside the
+ * repository can never copy the linked file's bytes into a review diff.
+ * Anything that is not a regular file (directory, fifo, socket, device)
+ * contributes nothing.
+ */
+function readUntrackedBody(fullPath: string): { isSymlink: boolean; text: string } | null {
+  const entry = lstatSync(fullPath, { throwIfNoEntry: false });
+  if (entry === undefined) return null;
+  if (entry.isSymbolicLink()) return { isSymlink: true, text: readlinkSync(fullPath) };
+  if (!entry.isFile()) return null;
+  // O_NOFOLLOW closes the window between lstat and open: a path swapped for a
+  // symlink after the check fails to open instead of reading the link target.
+  let fd: number;
+  try {
+    fd = openSync(fullPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    return null;
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return null;
+    return { isSymlink: false, text: readFileSync(fd).toString("utf8") };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 async function workspaceDiffText(repoDir: string) {
   let tracked = "";
   const trackedResult = await runCommand(
@@ -874,22 +903,15 @@ async function workspaceDiffText(repoDir: string) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)) {
-    const fullPath = join(repoDir, relPath);
-    if (!existsSync(fullPath)) continue;
-    const stat = statSync(fullPath);
-    if (stat.isDirectory()) continue;
-    const content = readFileSync(fullPath);
-    const text = content.toString("utf8");
+    const body = readUntrackedBody(join(repoDir, relPath));
+    if (body === null) continue;
+    const text = body.text;
     const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
     const lineCount = text.length === 0 ? 0 : lines.length;
     const addedLines = text.length > 0 ? lines.map((line) => `+${line}`) : [];
-    const diffLines = [
-      `diff --git a/${relPath} b/${relPath}`,
-      "--- /dev/null",
-      `+++ b/${relPath}`,
-      `@@ -0,0 +1,${lineCount} @@`,
-      ...addedLines,
-    ];
+    const diffLines = [`diff --git a/${relPath} b/${relPath}`];
+    if (body.isSymlink) diffLines.push("new file mode 120000");
+    diffLines.push("--- /dev/null", `+++ b/${relPath}`, `@@ -0,0 +1,${lineCount} @@`, ...addedLines);
     pieces.push(diffLines.join("\n"));
   }
   return pieces.filter(Boolean).join("\n\n");
