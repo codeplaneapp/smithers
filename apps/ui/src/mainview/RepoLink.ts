@@ -1,0 +1,92 @@
+import type { FetchLike } from "@smthrs/rpc/NativeAgent"
+import type { AppController } from "./state/AppController"
+
+/*
+ * The landing page's "Open in Smithers" link lands on the web app as
+ * `/?repo=owner/name`. The name is honoured only when the public catalog
+ * (GET /api/public/repos, the same list the landing page renders) carries it:
+ * the catalog row enters the repositories collection and becomes the active
+ * selection, so the first turn is about that repository. The parameter is
+ * removed from the URL either way, so a reload does not reselect.
+ */
+
+export const REPO_PARAM = "repo"
+export const PUBLIC_REPOS_PATH = "/api/public/repos"
+
+const REPO_NAME = /^[\w.-]+\/[\w.-]+$/
+
+/** The `owner/name` the URL asks for, or null when absent or not a repository name. */
+export const requestedRepo = (search: string): string | null => {
+  const value = new URLSearchParams(search).get(REPO_PARAM)?.trim() ?? ""
+  return REPO_NAME.test(value) ? value : null
+}
+
+export interface CatalogRepository {
+  /** `owner/name`, in the catalog's spelling. */
+  readonly id: string
+  readonly org: string
+  readonly name: string
+}
+
+/** The catalog entry the request names (GitHub names are case-insensitive); the catalog's spelling wins. */
+export const catalogRepository = (catalog: unknown, requested: string): CatalogRepository | null => {
+  if (typeof catalog !== "object" || catalog === null) return null
+  const repos: unknown = (catalog as { readonly repos?: unknown }).repos
+  if (!Array.isArray(repos)) return null
+  const wanted = requested.toLowerCase()
+  for (const entry of repos) {
+    const name: unknown = typeof entry === "object" && entry !== null ? (entry as { readonly name?: unknown }).name : undefined
+    if (typeof name !== "string" || !REPO_NAME.test(name) || name.toLowerCase() !== wanted) continue
+    const slash = name.indexOf("/")
+    return { id: name, org: name.slice(0, slash), name: name.slice(slash + 1) }
+  }
+  return null
+}
+
+/** The same location without the repo parameter; other parameters and the fragment stay. */
+export const withoutRepoParam = (location: Pick<Location, "pathname" | "search" | "hash">): string => {
+  const params = new URLSearchParams(location.search)
+  params.delete(REPO_PARAM)
+  const search = params.toString()
+  return `${location.pathname}${search === "" ? "" : `?${search}`}${location.hash}`
+}
+
+/**
+ * Select the requested repository when the public catalog carries it. The
+ * catalog row joins the repositories collection beside whatever the cloud
+ * inventory already loaded, then `repo.select` makes it the active one.
+ * Returns the refusal when the request could not be honoured.
+ */
+export const openRequestedRepo = async (
+  controller: Pick<AppController, "store" | "selectRepo">,
+  http: FetchLike,
+  requested: string
+): Promise<string | void> => {
+  let catalog: unknown
+  try {
+    const response = await http(PUBLIC_REPOS_PATH, { headers: { accept: "application/json" } })
+    if (!response.ok) return `The public repository catalog answered HTTP ${response.status}.`
+    catalog = await response.json()
+  } catch (cause) {
+    return `The public repository catalog could not be read: ${cause instanceof Error ? cause.message : String(cause)}`
+  }
+  const repository = catalogRepository(catalog, requested)
+  if (repository === null) return `${requested} is not in the public repository catalog.`
+  const { repositories } = controller.store.collections
+  if (repositories.get(repository.id) === undefined) {
+    controller.store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [
+        ...[...repositories.values()].map(({ id, org, ownerKind, name, head }) => ({ id, org, ownerKind, name, head })),
+        /*
+         * The catalog carries no owner kind and no head. "user" is the
+         * conservative reading: the one consumer (the org changesets read)
+         * treats it as "no org changesets", never as a fabricated org.
+         */
+        { ...repository, ownerKind: "user" as const, head: null }
+      ]
+    })
+  }
+  return controller.selectRepo(repository.id)
+}

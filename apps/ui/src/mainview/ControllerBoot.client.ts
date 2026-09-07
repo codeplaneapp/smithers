@@ -3,6 +3,7 @@ import type { BootSession } from "./BootSession"
 import { createAgentSeat } from "./chain/ChainRuntime"
 import { nativeOpenExternal, nativeRepositories, nativeShellAvailable } from "./native/NativeBridge"
 import { createAppFetch } from "./runtime/LocalSession"
+import { openRequestedRepo, requestedRepo, withoutRepoParam } from "./RepoLink"
 import { createBrowserFrameHistory } from "./runtime/FrameHistory"
 import { createRuntime, loadBootstrap, unavailableAgent, unavailableRepositories } from "./runtime/Runtime"
 import { createAppController } from "./state/AppController"
@@ -75,6 +76,12 @@ const bootProgram = (session: BootSession | undefined) =>
       }
       if (controller.handleAuthReturn(window.location.search)) {
         window.history.replaceState(null, "", window.location.pathname)
+      }
+      // The landing page's "Open in Smithers" link: `?repo=owner/name` preselects a public-catalog repository.
+      const requested = requestedRepo(window.location.search)
+      if (requested !== null) {
+        yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
+        window.history.replaceState(null, "", withoutRepoParam(window.location))
       }
       return controller
     }

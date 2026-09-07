@@ -2,6 +2,8 @@
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "../../../server/src/publicRepoCatalog"
 
 const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://canary.smithers.sh${PUBLIC_REPOS_PATH}`
+/* The web app reads `?repo=owner/name` at boot and preselects that repository (apps/ui RepoLink.ts). */
+const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://canary.smithers.sh").replace(/\/+$/, "")
 ---
 
 <section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
@@ -20,6 +22,7 @@ const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://canary.s
         <div class="card-body">
           <h3 id={`repo-title-${index}`}>{repo.title}</h3>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
+          <a class="open-link" href={`${appOrigin}/?repo=${repo.name}`}>Open in Smithers <span aria-hidden="true">→</span></a>
           <dl class="stats" aria-busy="true" data-stats>
             <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
             <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>
@@ -56,6 +59,9 @@ const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://canary.s
   .repo-name { display: inline-flex; gap: .6rem; color: #d5bae9; font: .73rem/1.7 var(--font-mono); overflow-wrap: anywhere; }
   .repo-name:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
   .repo-name:focus-visible { outline-color: #dfb5ff; }
+  .open-link { display: inline-flex; align-items: center; gap: .5rem; margin-top: 1.1rem; padding: .6rem 1rem; color: #251b3a; background: #dfb5ff; font-size: .85rem; font-weight: 600; box-shadow: 3px 3px 0 #331745; text-decoration: none; }
+  .open-link:hover { background: #f5e9ff; transform: translate(-1px, -1px); box-shadow: 4px 4px 0 #331745; }
+  .open-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
   .stats { display: grid; grid-template-columns: 1fr 1fr 1.2fr; margin: 1.35rem 0 0; padding: 1rem 0; border-top: 1px solid #594169; border-bottom: 1px solid #594169; }
   .stats > div + div { border-left: 1px solid #594169; padding-left: .9rem; }
   dt { font: .6rem/1.4 var(--font-mono); text-transform: uppercase; letter-spacing: .04em; color: #c8b7d7; }
