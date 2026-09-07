@@ -188,6 +188,88 @@ const validatePath = (path: Path.Path, relative: string): Effect.Effect<void, Fl
     ? Effect.fail(error("invalid_path", `"${relative}" is not a path inside the flows root.`))
     : Effect.void
 
+/** The components a relative path walks, dropping the ones that stand still. */
+const segmentsOf = (relative: string): ReadonlyArray<string> =>
+  relative.split("/").filter((segment) => segment !== "" && segment !== ".")
+
+/** Whether a path is a symbolic link, reading one that cannot be read at all as not one. */
+const isLink = (fs: FileSystem.FileSystem, target: string): Effect.Effect<boolean> =>
+  fs.readLink(target).pipe(Effect.map(() => true), Effect.orElseSucceed(() => false))
+
+/**
+ * Refuses a path that reaches its file through a symbolic link.
+ *
+ * A lexically clean path is not yet a path inside the root. The workspace a run
+ * saves into is a checkout the agent did not write, so the entry at
+ * `flows/<id>/flow.ts`, or any directory above it, can already be a link to
+ * somewhere else on the host, and an ordinary write follows the link rather
+ * than the path. Every component below the root is read before anything is
+ * created, so a planted link is reported back to the model instead of
+ * overwriting the file it points at.
+ */
+const validateConfinement = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  relative: string
+): Effect.Effect<void, FlowStoreError> =>
+  Effect.gen(function*() {
+    const walked: Array<string> = []
+    for (const segment of segmentsOf(relative)) {
+      walked.push(segment)
+      if (yield* isLink(fs, path.join(root, ...walked))) {
+        return yield* Effect.fail(error(
+          "invalid_path",
+          `"${relative}" leaves the flows root through the symbolic link at "${
+            walked.join("/")
+          }". Remove the link and save the flow again.`
+        ))
+      }
+    }
+  })
+
+/**
+ * Writes one file below the root, creating the directories it needs.
+ *
+ * The directories are made one component at a time rather than in a single
+ * recursive call, and the file is created exclusively rather than truncated, so
+ * a link that appears after {@link validateConfinement} has read the path is
+ * refused by the write itself instead of followed out of the root.
+ */
+const writeUnder = (
+  fs: FileSystem.FileSystem,
+  path: Path.Path,
+  root: string,
+  relative: string,
+  source: string
+): Effect.Effect<void, FlowStoreError> =>
+  Effect.gen(function*() {
+    const segments = segmentsOf(relative)
+    let directory = root
+    for (const segment of segments.slice(0, -1)) {
+      const child = path.join(directory, segment)
+      yield* fs.makeDirectory(child).pipe(
+        // A directory that is already there is the ordinary case. Anything
+        // else standing in its place is not a directory the write can use, and
+        // `makeDirectory` never follows a link on the name it is creating.
+        Effect.catch((cause) =>
+          fs.stat(child).pipe(
+            Effect.flatMap((info) => info.type === "Directory" ? Effect.void : Effect.fail(cause)),
+            Effect.mapError(() => error("write_failed", `could not create the directory for ${relative}`, cause))
+          )
+        )
+      )
+      directory = child
+    }
+    const target = path.join(root, ...segments)
+    // Removing the entry first is what lets the write be exclusive, and
+    // removing a link removes the link, never the file it points at.
+    yield* fs.remove(target, { force: true }).pipe(
+      Effect.flatMap(() => fs.writeFileString(target, source, { flag: "wx" })),
+      Effect.mapError((cause) => error("write_failed", `could not write ${relative}`, cause))
+    )
+  })
+
 /**
  * Constructs a store over a directory on the host filesystem.
  *
@@ -203,17 +285,17 @@ export const makeFileSystem = (
     write: (id, files) =>
       Effect.gen(function*() {
         yield* validateId(id)
-        for (const relative of Object.keys(files)) yield* validatePath(path, relative)
         // Every path is checked before the first byte is written, so a
         // rejected file cannot leave a half-saved flow on disk.
+        for (const relative of Object.keys(files)) {
+          yield* validatePath(path, relative)
+          yield* validateConfinement(fs, path, root, relative)
+        }
+        yield* fs.makeDirectory(root, { recursive: true }).pipe(
+          Effect.mapError((cause) => error("write_failed", "could not create the flows root", cause))
+        )
         for (const [relative, source] of Object.entries(files)) {
-          const target = path.join(root, relative)
-          yield* fs.makeDirectory(path.dirname(target), { recursive: true }).pipe(
-            Effect.mapError((cause) => error("write_failed", `could not create the directory for ${relative}`, cause))
-          )
-          yield* fs.writeFileString(target, source).pipe(
-            Effect.mapError((cause) => error("write_failed", `could not write ${relative}`, cause))
-          )
+          yield* writeUnder(fs, path, root, relative, source)
         }
         return { files: Object.keys(files) }
       }),

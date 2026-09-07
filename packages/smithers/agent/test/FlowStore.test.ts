@@ -169,6 +169,50 @@ describe("FlowStore.layerFileSystem", () => {
     expect(existsSync(join(directory, "flows/triage/flow.ts"))).toBe(false)
   })
 
+  it("refuses to write through a file the checkout linked outside the root", async () => {
+    const directory = root()
+    const outside = root()
+    const victim = join(outside, "victim.ts")
+    writeFileSync(victim, "original")
+    // The path is the one a saved flow takes; the entry it names is a link the
+    // agent never wrote, which a plain write would follow out of the root.
+    mkdirSync(join(directory, "flows/triage"), { recursive: true })
+    symlinkSync(victim, join(directory, "flows/triage/flow.ts"))
+
+    const result = await onDisk(directory, (store) => store.write("triage", files("triage")))
+
+    expect(refused(result).code).toBe("invalid_path")
+    expect(readFileSync(victim, "utf8")).toBe("original")
+    expect(existsSync(join(directory, "flows/triage/flow.e2e.ts"))).toBe(false)
+  })
+
+  it("refuses to write through a directory the checkout linked outside the root", async () => {
+    const directory = root()
+    const outside = root()
+    writeFileSync(join(outside, "flow.ts"), "original")
+    mkdirSync(join(directory, "flows"), { recursive: true })
+    symlinkSync(outside, join(directory, "flows/triage"))
+
+    const result = await onDisk(directory, (store) => store.write("triage", files("triage")))
+
+    expect(refused(result).code).toBe("invalid_path")
+    expect(readFileSync(join(outside, "flow.ts"), "utf8")).toBe("original")
+    expect(existsSync(join(outside, "flow.e2e.ts"))).toBe(false)
+  })
+
+  it("replaces the files a flow already saved", async () => {
+    const directory = root()
+    await onDisk(directory, (store) => store.write("triage", files("triage")))
+
+    const result = await onDisk(
+      directory,
+      (store) => store.write("triage", { ...files("triage"), "flows/triage/flow.ts": "saved again" })
+    )
+
+    expect(Exit.isSuccess(result)).toBe(true)
+    expect(readFileSync(join(directory, "flows/triage/flow.ts"), "utf8")).toBe("saved again")
+  })
+
   it("reports a directory it could not create rather than claiming the write", async () => {
     const directory = root()
     // A root that is a file: every directory the write needs is under it.
@@ -176,6 +220,17 @@ describe("FlowStore.layerFileSystem", () => {
     writeFileSync(file, "")
 
     const result = await onDisk(file, (store) => store.write("triage", files("triage")))
+
+    expect(refused(result).code).toBe("write_failed")
+  })
+
+  it("reports a directory the flows tree could not make room for", async () => {
+    const directory = root()
+    // A file where the flows directory has to be: the component can be neither
+    // created nor descended into.
+    writeFileSync(join(directory, "flows"), "")
+
+    const result = await onDisk(directory, (store) => store.write("triage", files("triage")))
 
     expect(refused(result).code).toBe("write_failed")
   })

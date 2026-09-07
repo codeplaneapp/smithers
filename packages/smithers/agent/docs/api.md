@@ -1474,7 +1474,10 @@ const layerFileSystem: (root: string) => Layer.Layer<FlowStore, never, FileSyste
 
 A store over a directory on the host filesystem. Every path is checked before
 the first byte is written, so a rejected file cannot leave a half-saved flow on
-disk. `PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
+disk. A path that reaches its file through a symbolic link is refused with
+`FlowStoreError { code: "invalid_path" }` rather than followed, so a link
+already in the checkout cannot redirect a save outside the root.
+`PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
 
 ### FlowStore.makeMemory, FlowStore.layerMemory
 
