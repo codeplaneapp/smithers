@@ -38,9 +38,10 @@ The remaining rules have no useful SQL spelling and are enforced by the store
 alone, before the write:
 
 - `reason` is at most `maxReasonBytes` UTF-8 bytes and `meta` at most
-  `maxMetadataBytes` encoded. Producers inside this package truncate on a
-  code-point boundary; a direct caller is told rather than silently trimmed. A
-  legacy row over either bound still reads back, so neither is a poison vector.
+  `maxMetadataBytes` encoded, measured on the redacted text the row stores.
+  Producers inside this package truncate on a code-point boundary; a direct
+  caller is told rather than silently trimmed. A legacy row over either bound
+  still reads back, so neither is a poison vector.
 - `meta` must be losslessly representable as canonical JSON, the same rule
   `Scorer.make` applies to a scorer configuration. A nested function, symbol, or
   explicit `undefined`, a non-enumerable own property, a value nested more than
@@ -55,6 +56,32 @@ alone, before the write:
 A read decodes every row against that same contract and names the row id in the
 failure, so a hand-edited database produces an actionable error rather than an
 anonymous one.
+
+## Redaction
+
+`reason` and `meta` are scrubbed with the journal's redaction rules
+([`@smthrs/journal`](/api/journal)) before the `INSERT`, and are otherwise
+stored verbatim. The store shares a database with the journal and nothing
+prunes `flows_scores`, so a credential that reached a score row would outlive
+every other copy of it: rows are read back by `observations()`, by eval
+reports, and by gate summaries printed in CI. A scorer earns those strings from
+places nobody controls, a judge client whose failure message quotes the request
+it sent, or a judge whose prose quotes the agent output it graded, and the byte
+bounds do not help because a bearer token or a URL with embedded credentials
+fits inside the first kilobyte.
+
+The rule set is the journal's, so both durable prose surfaces of the database
+scrub the same shapes: URL credentials, `Bearer` and `Basic` values, JWTs,
+private-key blocks, common API-key and token spellings, and any member whose
+key names a secret. It is a best-effort net over credential shapes, not a
+guarantee: a value that must never persist belongs in a `Redacted` field of the
+caller's own schema rather than in a scorer reason.
+
+A placeholder can be longer than the credential it replaces. A `reason` the
+scrub grows past `maxReasonBytes` is truncated again on a code-point boundary,
+because refusing it would lose exactly the diagnostic that carried the
+credential. `meta` has no truncation that leaves valid JSON, so a payload the
+scrub grows past `maxMetadataBytes` is refused with `invalid_observation`.
 
 ## Idempotency
 
@@ -101,7 +128,8 @@ target has no observations of either kind.
 ## Retention
 
 Nothing prunes `flows_scores` or `flows_score_jobs`; there is no `gc` path for
-them and no automatic expiry. A deployment that scores every step of a
+them and no automatic expiry. A stored row is permanent, which is why `reason`
+and `meta` are redacted on the way in rather than at each reader. A deployment that scores every step of a
 long-running flow owns that growth. Both tables are keyed by strings the caller
 supplies, so bounding identity and key length is the caller's job as well as
 this package's.

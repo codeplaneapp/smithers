@@ -751,6 +751,76 @@ describe("ScoreStore", () => {
     expect(after.observations).toEqual([score({ score: 0.5, at: 7 })])
   })
 
+  describe("redaction", () => {
+    const bearer = "Bearer sk-ant-api03-SECRET7f3aXYZ"
+    const url = "https://judge:hunter2@judge.example/v1/score"
+
+    it("scrubs credentials out of a stored reason and metadata", async () => {
+      const output = await run(Effect.gen(function*() {
+        const sql = yield* SqlClient.SqlClient
+        const store = yield* ScoreStore.ScoreStore
+        yield* store.record(score({ reason: `called ${url} with ${bearer}`, meta: { authorization: bearer, url } }))
+        yield* store.record({
+          kind: "inconclusive",
+          targetStepKey: "a",
+          scorerKey: "s",
+          reason: `Scorer execution was inconclusive: Error: 401 ${url} with ${bearer}`,
+          code: "inconclusive",
+          at: 2
+        })
+        const rows = yield* sql<{ reason: string | null; metadata_json: string | null }>`SELECT reason, metadata_json
+          FROM flows_scores ORDER BY id`.pipe(Effect.orDie)
+        return { rows, observations: yield* store.observations("a") }
+      }))
+      const stored = JSON.stringify(output)
+      expect(stored).not.toContain("SECRET7f3a")
+      expect(stored).not.toContain("hunter2")
+      expect(output.rows[0]?.reason).toBe(
+        "called https://judge:[REDACTED]@judge.example/v1/score with Bearer [REDACTED_TOKEN]"
+      )
+      expect(output.rows[0]?.metadata_json).toBe(
+        `{"authorization":"[REDACTED]","url":"https://judge:[REDACTED]@judge.example/v1/score"}`
+      )
+      expect(output.rows[1]?.reason).toBe(
+        "Scorer execution was inconclusive: Error: 401 https://judge:[REDACTED]@judge.example/v1/score"
+          + " with Bearer [REDACTED_TOKEN]"
+      )
+    })
+
+    // A placeholder is longer than a short credential, so a reason already at
+    // the bound grows past it. The store truncates instead of refusing: the
+    // alternative loses exactly the diagnostic that carried the credential.
+    it("keeps a reason the scrub lengthens inside the byte bound", async () => {
+      const short = "Bearer abcd"
+      const reason = `${short} ${"x".repeat(ScoreStore.maxReasonBytes - short.length - 1)}`
+      expect(Buffer.byteLength(reason, "utf8")).toBe(ScoreStore.maxReasonBytes)
+      const output = await run(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        yield* store.record(score({ reason }))
+        return yield* store.observations("a")
+      }))
+      const stored = output[0]?.kind === "score" ? output[0].reason ?? "" : ""
+      expect(stored.startsWith("Bearer [REDACTED_TOKEN] ")).toBe(true)
+      expect(stored).not.toContain("abcd")
+      expect(Buffer.byteLength(stored, "utf8")).toBe(ScoreStore.maxReasonBytes)
+    })
+
+    // JSON has no truncation that leaves JSON, so the metadata bound is
+    // measured on the stored text and a payload the scrub grows past it is
+    // refused rather than stored oversized or silently emptied.
+    it("refuses metadata the scrub grows past the byte bound", async () => {
+      const short = "Bearer abcd"
+      const meta = Object.fromEntries(Array.from({ length: 2_400 }, (_value, index) => [`k${index}`, short]))
+      expect(Buffer.byteLength(JSON.stringify(meta), "utf8")).toBeLessThan(ScoreStore.maxMetadataBytes)
+      const failure = await failed(Effect.gen(function*() {
+        const store = yield* ScoreStore.ScoreStore
+        return yield* store.record(score({ meta }))
+      }))
+      expect(failure.code).toBe("invalid_observation")
+      expect(failure.message).toContain(`exceeds ${ScoreStore.maxMetadataBytes} UTF-8 bytes`)
+    })
+  })
+
   describe("makeNoop", () => {
     it("accepts writes and reports nothing", async () => {
       const output = await Effect.runPromise(

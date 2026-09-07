@@ -20,6 +20,11 @@ import { ScorerError, ScorerErrorCode } from "./ScorerError.ts"
  * `record` and `recordOnce` reject anything longer so a direct caller is told
  * rather than silently trimmed.
  *
+ * The bound limits size and does not remove a credential: a bearer token or a
+ * URL with embedded credentials fits inside a kilobyte. `SqlScoreStore`
+ * therefore scrubs every stored `reason` and `meta` with the journal's
+ * redaction rules before the insert.
+ *
  * @category models
  * @since 0.1.0
  */

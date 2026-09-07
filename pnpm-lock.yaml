@@ -2883,6 +2883,9 @@ importers:
       '@smthrs/database':
         specifier: 1.0.0-rc.0
         version: link:../../flows/database
+      '@smthrs/journal':
+        specifier: 1.0.0-rc.0
+        version: link:../../flows/journal
     devDependencies:
       '@effect/language-service':
         specifier: 0.87.2

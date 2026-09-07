@@ -78,6 +78,14 @@ the published `1.0.0-rc.0` packages, so every `@since` tag in `src/` reads
 
 ### Fixed
 
+- `SqlScoreStore` now scrubs `reason` and `meta` with the journal's redaction
+  rules before the `INSERT`. `flows_scores` is never pruned and is read back
+  into eval reports and CI gate summaries, so a judge failure quoting its own
+  request, or a reason quoting the agent output it graded, wrote a bearer token
+  or a URL password into the database in clear and kept it there. A reason the
+  scrub lengthens past `maxReasonBytes` is truncated again rather than refused;
+  metadata the scrub grows past `maxMetadataBytes` is refused, because JSON has
+  no truncation that leaves JSON.
 - The four migration modules export their effect as the named binding
   `migration` and `Migrations` imports each one by name; the default exports
   are gone. The CommonJS build (`scripts/build.mjs`, esbuild under
