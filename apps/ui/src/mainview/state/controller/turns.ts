@@ -79,12 +79,18 @@ export const createTurnController = (
    * branch is the refusal's CODE plus the session: a signed-out caller can
    * only be refused by the anonymous buckets, while a signed-in login that
    * trips its own ceiling has hit a bug and keeps the failure line the server
-   * wrote for it. The card carries the server's sentence and reset time as
-   * sent; the reducer's completion settles the phase without a bubble.
+   * wrote for it. Only a session the app KNOWS is signed out takes the card:
+   * "unknown" (the seam has not answered yet) and "unavailable" (the seam
+   * failed) may belong to a signed-in login, and a Sign in door beside a
+   * sentence about a login ceiling would contradict itself, so those keep the
+   * failure line, whose server sentence carries its own sign-in instruction
+   * for the anonymous wordings. The card carries the server's sentence and
+   * reset time as sent; the reducer's completion settles the phase without a
+   * bubble.
    */
   const refuseAnonymousTurn = (turnId: string, refusal: TurnRefusal): boolean => {
     if (refusal.code !== "turn_rate_limited") return false
-    if (store.collections.identitySessions.get("identity")?.state === "signed-in") return false
+    if (store.collections.identitySessions.get("identity")?.state !== "signed-out") return false
     const card: Card = {
       id: `anonymous-ceiling-${turnId}`,
       kind: "anonymous-ceiling",

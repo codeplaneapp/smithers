@@ -13,7 +13,9 @@ import type { AppStore } from "./AppStore"
  * time, with no generic failure bubble, and the composer settles to idle. The
  * branch is the refusal's code plus the session, never the sentence: both
  * server wordings take the card, a signed-in login's ceiling keeps the failure
- * line, and every other failure keeps today's message.
+ * line, a session the app has not confirmed signed out (identity still
+ * loading, or the seam unavailable) keeps the failure line, and every other
+ * failure keeps today's message.
  */
 
 const memoryStorage = (): StorageApi => {
@@ -47,8 +49,12 @@ const refusingAgent = (result: StartAgentTurnResult): NativeAgent => ({
   subscribe: () => () => {}
 })
 
-const storeWith = async (state: "signed-out" | "signed-in"): Promise<AppStore> => {
+type IdentityFixture = "signed-out" | "signed-in" | "unavailable" | "never-loaded"
+
+const storeWith = async (state: IdentityFixture): Promise<AppStore> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+  // Boot leaves the identity row at "unknown" until the seam answers; never dispatching models a turn typed before it did.
+  if (state === "never-loaded") return store
   store.dispatch({
     type: "identity.session.loaded",
     actor: "system",
@@ -61,7 +67,7 @@ const storeWith = async (state: "signed-out" | "signed-in"): Promise<AppStore> =
   return store
 }
 
-const sendRefused = async (state: "signed-out" | "signed-in", result: StartAgentTurnResult) => {
+const sendRefused = async (state: IdentityFixture, result: StartAgentTurnResult) => {
   const store = await storeWith(state)
   const controller = createAppController(store, repositories, refusingAgent(result), {
     fetchImpl: async () => new Response("{}", { status: 200 })
@@ -115,6 +121,34 @@ describe("every other refused turn keeps today's failure line", () => {
     expect(ceilingCards).toEqual([])
     expect(failedMessages.map((message) => message.text)).toEqual([
       `I couldn't complete that turn. Smithers web agent failed (HTTP 429): ${LOGIN_CEILING}`
+    ])
+    expect(store.session().phase).toBe("idle")
+  })
+
+  test("a ceiling refusal before the identity seam answered keeps the failure line: the session may be signed in", async () => {
+    const { ceilingCards, failedMessages, store } = await sendRefused("never-loaded", {
+      status: "error",
+      message: `Smithers web agent failed (HTTP 429): ${LOGIN_CEILING}`,
+      refusal: { code: "turn_rate_limited", message: LOGIN_CEILING, retryAt: "2026-09-07T13:00:00.000Z" }
+    })
+    expect(store.collections.identitySessions.get("identity")?.state).toBe("unknown")
+    expect(ceilingCards).toEqual([])
+    expect(failedMessages.map((message) => message.text)).toEqual([
+      `I couldn't complete that turn. Smithers web agent failed (HTTP 429): ${LOGIN_CEILING}`
+    ])
+    expect(store.session().phase).toBe("idle")
+  })
+
+  test("a ceiling refusal while the identity seam is unavailable keeps the failure line, never the sign-in card", async () => {
+    const { ceilingCards, failedMessages, store } = await sendRefused("unavailable", {
+      status: "error",
+      message: `Smithers web agent failed (HTTP 429): ${PER_ADDRESS}`,
+      refusal: { code: "turn_rate_limited", message: PER_ADDRESS, retryAt: "2026-09-08T00:00:00.000Z" }
+    })
+    expect(store.collections.identitySessions.get("identity")?.state).toBe("unavailable")
+    expect(ceilingCards).toEqual([])
+    expect(failedMessages.map((message) => message.text)).toEqual([
+      `I couldn't complete that turn. Smithers web agent failed (HTTP 429): ${PER_ADDRESS}`
     ])
     expect(store.session().phase).toBe("idle")
   })
