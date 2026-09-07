@@ -14,6 +14,7 @@ import { localSocketProtocols } from "../runtime/LocalSession"
 import type { FrameHistoryPort } from "../runtime/FrameHistory"
 import type { AppTransition } from "./AppState"
 import type { AppStore } from "./AppStore"
+import { activeCatalogRepositoryId } from "./RepoContext"
 import { createPtyClient, pageSocketUrl } from "./PtyClient"
 import type { PtyClient } from "./PtyClient"
 import { createLspClient } from "./LspClient"
@@ -1323,6 +1324,7 @@ export const createAppController = (
           (import.meta.env?.DEV as boolean | string | undefined) === true,
         signedOut: identity?.state === "signed-out",
         hasOpenRepos: store.collections.repos.size > 0,
+        publicRepo: activeCatalogRepositoryId(store) !== null,
         recent: store.session().recentCommands ?? [],
         identity: identity === undefined
           ? "unknown"

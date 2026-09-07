@@ -70,6 +70,34 @@ Workspace sessions, gateway provisioning, account data, secrets, and write
 methods remain outside the anonymous read routes. The app's existing UI
 sign-in requirements are independent of this API policy.
 
+## Anonymous turns
+
+A signed-out visitor at `https://smithers.sh/smithersai/smithers` talks to
+Smithers about that repository without an account. `POST /api/agent/turn`
+admits a request with no valid session only when the turn's runtime context
+names a catalog repository (`context.activeRepository`, the selection the
+`/owner/name` path made); any other signed-out turn keeps the `401` sign-in
+refusal. The turn carries no login, so the chat upstream meters it to the
+deployment and it never reaches a user's billing account.
+
+Anonymous turns spend from a bucket keyed by a salted SHA-256 of the client
+address (`cf-connecting-ip`, salted with the `ANONYMOUS_TURN_SALT` secret),
+in the same `TURN_LIMITS` Durable Object as the per-login ceiling. The
+ceiling is `ANONYMOUS_TURN_MAX` turns per day (`turnLimit.ts`); the refusal
+is the existing `429 turn_rate_limited` response, worded to name sign-in as
+the way to keep going. `POST /api/agent/turn/cancel` answers a signed-out
+caller too, because cancelling spends nothing and an owned turn refuses
+anyone but its owner.
+
+The model's tool calls run in the browser, against this Worker. What a
+signed-out turn can therefore reach is exactly the anonymous surface above:
+the public repository reads. The model relay (`/api/model/stream`), the
+workflow seam, the browser tool, and every write method through the
+platform proxy still answer `401` without a session. In the web app the
+visitor's file reads (`files.list`, `files.read`) are open on the selected
+catalog repository; every flow that writes keeps its sign-in requirement and
+renders the sign-in step instead.
+
 ## Checks
 
 ```sh

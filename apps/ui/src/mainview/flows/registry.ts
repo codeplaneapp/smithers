@@ -228,13 +228,14 @@ export const flowRequirements: ReadonlyArray<FlowRequirement> = [
   },
   {
     /*
-     * Repository reads have two sources: the GitHub session (Cloud
-     * repositories) or a repository opened in this app. An open local
-     * repository satisfies the reads on its own; signed out with nothing
-     * open, sign-in is the step.
+     * Repository reads have three sources: the GitHub session (Cloud
+     * repositories), a repository opened in this app, or the public catalog
+     * repository a signed-out visitor is exploring (its files are anonymous
+     * reads on the server). Any one satisfies the reads on its own; signed
+     * out with none of them, sign-in is the step.
      */
     id: "repo-source",
-    satisfied: (state) => !state.signedOut || state.hasOpenRepos === true,
+    satisfied: (state) => !state.signedOut || state.hasOpenRepos === true || state.publicRepo === true,
     fulfill: "auth.sign-in",
     reason: "Sign in with GitHub, or open a local repository first"
   }
@@ -262,6 +263,8 @@ export interface CommandState {
   readonly signedOut: boolean
   /** A repository is open in the local app (the repos collection); optional so fixtures stay minimal. */
   readonly hasOpenRepos?: boolean
+  /** The selected repository came from the public catalog: readable signed out. Optional like hasOpenRepos. */
+  readonly publicRepo?: boolean
   /**
    * The user's recently run commands, most recent first (session
    * recentCommands). Optional so state fixtures stay minimal; missing = [].

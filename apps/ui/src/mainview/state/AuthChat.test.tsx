@@ -238,6 +238,69 @@ describe("auth is a conversation state — the chat is the only page", () => {
     expect(host.querySelector(".landing-surface")).toBeNull()
   })
 
+  /*
+   * Anonymous exploring (apps/server/PUBLIC-REPOSITORIES.md): at
+   * smithers.sh/smithersai/smithers the catalog row is selected before the
+   * session answers signed-out. The chat opens on that fact, the sign-in
+   * door stays, and the web gate never reads.
+   */
+  const CATALOG_OPENING = "You are exploring smithersai/smithers. Ask about the code, or sign in with GitHub to make changes."
+
+  test("signed-out on the web with a catalog repository selected: the chat opens on the exploring message, sign-in still the door", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      bootstrap: WEB,
+      ...backend({
+        "/api/auth/session": json(401, { status: "error" }),
+        "/api/auth/scopes": json(200, { scopes: [] })
+      })
+    })
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: null, catalog: true }]
+    })
+    store.dispatch({ type: "repo.selected", actor: "user", id: "smithersai/smithers" })
+    await controller.loadSession()
+    await settled()
+
+    const { host, markup } = mount(controller)
+    const messages = [...host.querySelectorAll<HTMLElement>(".smithers-chat-message")]
+    expect(messages.map((message) => message.textContent?.includes(CATALOG_OPENING))).toEqual([true])
+    expect(markup()).not.toContain(WEB_OPENING)
+    const cta = messages[0]?.querySelector<HTMLButtonElement>(".message-cta")
+    expect(cta?.dataset.flow).toBe("auth.sign-in")
+    expect(cta?.textContent).toBe("Sign in with GitHub")
+    // Repository reads are open to the visitor; a write still waits on sign-in.
+    expect(controller.commands.state().publicRepo).toBe(true)
+    expect(host.querySelector(".smithers-composer")).not.toBeNull()
+  })
+
+  test("signed-out on the web with a repository the catalog did not supply: the gate stands exactly as before", async () => {
+    const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
+    const controller = createAppController(store, unavailableRepositories, silentAgent, {
+      bootstrap: WEB,
+      ...backend({
+        "/api/auth/session": json(401, { status: "error" }),
+        "/api/auth/scopes": json(200, { scopes: [] })
+      })
+    })
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "acme/private", org: "acme", ownerKind: "org", name: "private", head: null }]
+    })
+    store.dispatch({ type: "repo.selected", actor: "user", id: "acme/private" })
+    await controller.loadSession()
+    await settled()
+
+    const { host, markup } = mount(controller)
+    const messages = [...host.querySelectorAll<HTMLElement>(".smithers-chat-message")]
+    expect(messages.map((message) => message.textContent?.includes(WEB_OPENING))).toEqual([true])
+    expect(markup()).not.toContain("You are exploring")
+    expect(controller.commands.state().publicRepo).toBe(false)
+  })
+
   test("signed-out on the native host (host local) never reads the web opening message", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent, {

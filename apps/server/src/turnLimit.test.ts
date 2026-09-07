@@ -1,7 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
-import { spendTurn, TURN_WINDOW_MAX, TURN_WINDOW_MS, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
+import {
+  ANONYMOUS_CEILING,
+  ANONYMOUS_TURN_MAX,
+  anonymousTurnKey,
+  spendTurn,
+  TURN_WINDOW_MAX,
+  TURN_WINDOW_MS,
+  turnLimitResponse,
+  TurnRateLimiter
+} from "./turnLimit"
 import type { TurnBudget, TurnLimitNamespace, TurnLimitStorage } from "./turnLimit"
 
 /*
@@ -260,5 +269,134 @@ describe("the turn routes under the ceiling", () => {
         }
       }
     })
+  })
+})
+
+/*
+ * The anonymous ceiling (PUBLIC-REPOSITORIES.md): a signed-out visitor
+ * exploring a catalog repository spends the deployment's credential, so the
+ * bucket is a salted hash of the address, the ceiling is a day's worth of
+ * questions, and the refusal names sign-in as the way on.
+ */
+describe("the anonymous ceiling", () => {
+  const identityEnv = (limits: TurnLimitNamespace): WorkerEnv => ({
+    ASSETS: { fetch: async () => new Response("<html></html>", { status: 200 }) },
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    SMITHERS_CHAT_URL: "https://upstream.test/chat",
+    ANONYMOUS_TURN_SALT: "test-salt",
+    TURN_LIMITS: limits
+  })
+
+  const exploring = (ip: string, runId: string): Request =>
+    new Request("https://mvp.test/api/agent/turn", {
+      method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+      body: JSON.stringify({
+        runId,
+        messages: [{ role: "user", content: "what is this repo?" }],
+        instructions: "Be brief.",
+        context: {
+          version: 1,
+          product: "smithers",
+          capturedAt: 1786223000000,
+          revision: 1,
+          surface: "chat",
+          theme: "light",
+          selectedWorldDocument: null,
+          connectors: [],
+          activeRepository: "smithersai/smithers",
+          github: { connected: false, login: null, repositories: null },
+          worldState: { documentCount: 0, documents: [] },
+          capabilities: [],
+          limitations: []
+        }
+      })
+    })
+
+  const withSignedOutSeams = async (run: (upstreamCalls: () => number) => Promise<void>): Promise<void> => {
+    const original = globalThis.fetch
+    let calls = 0
+    globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+      const request = typeof input === "string" ? new Request(input, init) : (input as Request)
+      if (new URL(request.url).hostname === "identity.test") return new Response("{}", { status: 401 })
+      calls += 1
+      return new Response("{\"type\":\"done\"}\n", { status: 200, headers: { "content-type": "application/x-ndjson" } })
+    }) as typeof fetch
+    try {
+      await run(() => calls)
+    } finally {
+      globalThis.fetch = original
+    }
+  }
+
+  test("one address gets a day of questions, then the sign-in refusal, and nothing more is spent", async () => {
+    const limits = memoryLimits()
+    const env = identityEnv(limits)
+    await withSignedOutSeams(async (upstreamCalls) => {
+      for (let turn = 0; turn < ANONYMOUS_TURN_MAX; turn += 1) {
+        const response = await worker.fetch(exploring("203.0.113.7", `anon-day-${turn}`), env)
+        expect(response.status).toBe(200)
+        await response.text()
+      }
+      expect(upstreamCalls()).toBe(ANONYMOUS_TURN_MAX)
+      const refused = await worker.fetch(exploring("203.0.113.7", "anon-day-over"), env)
+      expect(refused.status).toBe(429)
+      expect(refused.headers.get("retry-after")).not.toBeNull()
+      const body = (await refused.json()) as { code: string; message: string }
+      expect(body.code).toBe("turn_rate_limited")
+      expect(body.message).toContain("Sign in with GitHub")
+      expect(body.message).not.toContain("looping")
+      expect(upstreamCalls()).toBe(ANONYMOUS_TURN_MAX)
+      // Another address is another bucket.
+      const other = await worker.fetch(exploring("198.51.100.9", "anon-day-other"), env)
+      expect(other.status).toBe(200)
+      await other.text()
+    })
+    // The buckets are hashes under the anonymous prefix: no address, no login.
+    expect(limits.logins()).toHaveLength(2)
+    for (const key of limits.logins()) {
+      expect(key).toMatch(/^anonymous:[0-9a-f]{64}$/)
+      expect(key).not.toContain("203.0.113.7")
+    }
+  })
+
+  test("the bucket key is salted and never a user's login", async () => {
+    const request = new Request("https://mvp.test/api/agent/turn", { headers: { "cf-connecting-ip": "203.0.113.7" } })
+    const salted = await anonymousTurnKey(request, "salt-a")
+    expect(salted).toMatch(/^anonymous:[0-9a-f]{64}$/)
+    expect(await anonymousTurnKey(request, "salt-a")).toBe(salted)
+    expect(await anonymousTurnKey(request, "salt-b")).not.toBe(salted)
+    expect(await anonymousTurnKey(new Request("https://mvp.test/", { headers: { "cf-connecting-ip": "198.51.100.9" } }), "salt-a"))
+      .not.toBe(salted)
+  })
+
+  test("the anonymous refusal names the day and sign-in, never a bug or a bill", async () => {
+    const response = turnLimitResponse(
+      { allowed: false, remaining: 0, retryAt: Date.now() + 5 * 60 * 60 * 1000 },
+      {},
+      ANONYMOUS_CEILING
+    )
+    expect(response.status).toBe(429)
+    const body = (await response.json()) as { message: string; code: string }
+    expect(body.code).toBe("turn_rate_limited")
+    expect(body.message).toContain(`${ANONYMOUS_TURN_MAX} turns today`)
+    expect(body.message).toContain("Sign in with GitHub")
+    expect(body.message).toContain("hours")
+    for (const word of ["looping", "upgrade", "billing", "pay", "plan", "$"]) {
+      expect(body.message.toLowerCase()).not.toContain(word)
+    }
+  })
+
+  test("a login's budget keeps its own ceiling beside the anonymous one", async () => {
+    const limits = memoryLimits()
+    for (let turn = 0; turn < ANONYMOUS_TURN_MAX; turn += 1) {
+      expect((await spendTurn(limits, "will")).allowed).toBe(true)
+    }
+    // Twenty is nothing to a login; the same twenty spends an anonymous bucket.
+    expect((await spendTurn(limits, "will")).remaining).toBe(TURN_WINDOW_MAX - ANONYMOUS_TURN_MAX - 1)
+    for (let turn = 0; turn < ANONYMOUS_TURN_MAX; turn += 1) {
+      expect((await spendTurn(limits, "anonymous:abc", ANONYMOUS_CEILING)).allowed).toBe(true)
+    }
+    expect((await spendTurn(limits, "anonymous:abc", ANONYMOUS_CEILING)).allowed).toBe(false)
   })
 })

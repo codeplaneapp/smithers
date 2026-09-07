@@ -20,7 +20,7 @@ import {
   runLaunchCommandOf,
   toolResultLaunchedRun
 } from "../RunClaims"
-import { activeRepositoryId } from "../RepoContext"
+import { activeCatalogRepositoryId, activeRepositoryId } from "../RepoContext"
 import { WORLD_BODY_BUDGET, worldContextDocuments } from "../WorldContext"
 import { downloadUrlOf } from "./app"
 import type { ActiveTurn, ControllerContext, PendingToolCall } from "./context"
@@ -139,6 +139,12 @@ export const createTurnController = (
     const identity = store.collections.identitySessions.get("identity")
     const loadedRepoIds = [...store.collections.repositories.keys()]
     const billingAccount = store.collections.billingAccounts.get("billing")
+    /*
+     * Anonymous exploring (apps/server/PUBLIC-REPOSITORIES.md): signed out
+     * with a public catalog repository selected, the visitor reads and asks
+     * about it; anything that writes is one sign-in away.
+     */
+    const exploring = identity?.state === "signed-out" ? activeCatalogRepositoryId(store) : null
     const selected = current.selectedWorldDocumentId === null
       ? undefined
       : store.collections.worldDocuments.get(current.selectedWorldDocumentId)
@@ -255,12 +261,22 @@ export const createTurnController = (
             "Read the open repositories listed above: files.list <path> [repo] lists a directory and files.read <path> [repo] renders a file as a card in this chat (a bare call means the active repository); target.list shows a repository's Smithers targets."
           ]
           : []),
+        ...(exploring === null
+          ? []
+          : [
+            `Read the public repository ${exploring} the visitor is exploring signed out: files.list <path> lists a directory and files.read <path> renders a file as a card in this chat, no sign-in needed.`
+          ]),
         ...(repositories.available
           ? ["Connect a local repository the user picks in the native picker."]
           : [])
       ],
       limitations: [
         "Cannot see or control the host environment beyond what this context block states.",
+        ...(exploring === null
+          ? []
+          : [
+            `The visitor is signed out, exploring ${exploring}: anything that writes (pull requests, issues, workspaces, workflow runs, secrets) needs GitHub sign-in, so when they ask for one execute auth.prompt instead.`
+          ]),
         "Workflow runs execute on the user's workspace gateway; any outbound act a run wants (pushes, PRs) pauses for the human's explicit approval — never promise one landed without it.",
         repositories.available
           ? "Can only touch repositories the user explicitly connected, listed above."

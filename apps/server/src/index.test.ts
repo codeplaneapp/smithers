@@ -851,10 +851,13 @@ describe("turn seam session gate", () => {
         return ndjsonUpstream([{ type: "done" }])
       },
       async () => {
-        for (const path of ["/api/agent/turn", "/api/agent/turn/cancel"]) {
-          const response = await worker.fetch(post(path, turnBody), identityEnv)
-          expect(response.status).toBe(401)
-        }
+        const response = await worker.fetch(post("/api/agent/turn", turnBody), identityEnv)
+        expect(response.status).toBe(401)
+        // Killing a turn spends nothing, so a signed-out caller may ask; an
+        // unknown run is an honest not-found, never a sign-in demand.
+        const cancel = await worker.fetch(post("/api/agent/turn/cancel", { runId: "run-nobody" }), identityEnv)
+        expect(cancel.status).toBe(200)
+        expect(((await cancel.json()) as { status: string }).status).toBe("not-found")
       }
     )
     expect(upstreamCalls).toBe(0)
@@ -1021,6 +1024,122 @@ describe("turn seam session gate", () => {
         expect(response.status).toBe(200)
       }
     )
+  })
+})
+
+/*
+ * Anonymous exploring (PUBLIC-REPOSITORIES.md): at smithers.sh/smithersai/smithers
+ * a signed-out visitor talks to Smithers about that repository. The door is
+ * the turn's own runtime context naming a catalog repository; nothing else a
+ * signed-out caller can send opens it, and no write route moves.
+ */
+describe("anonymous exploring of a public catalog repository", () => {
+  const identityEnv: WorkerEnv = {
+    ...assetsEnv(),
+    IDENTITY_UPSTREAM_URL: "https://identity.test",
+    SMITHERS_CHAT_URL: "https://upstream.test/chat",
+    CHAT_PRODUCT_SERVICE_TOKEN: "chat-product-token-123",
+    SMITHERS_CHAT_AUTH_TOKEN: "chat-bearer-123"
+  }
+
+  const exploring = (activeRepository: string | null, runId: string) => ({
+    ...turnBody,
+    runId,
+    context: {
+      version: 1,
+      product: "smithers",
+      capturedAt: 1786223000000,
+      revision: 3,
+      surface: "chat",
+      theme: "light",
+      selectedWorldDocument: null,
+      connectors: [],
+      activeRepository,
+      github: { connected: false, login: null, repositories: null },
+      worldState: { documentCount: 0, documents: [] },
+      capabilities: [],
+      limitations: []
+    }
+  })
+
+  const signedOut = (request: Request): Response | undefined =>
+    new URL(request.url).hostname === "identity.test" ? new Response("{}", { status: 401 }) : undefined
+
+  test("a signed-out turn about a catalog repository runs, unattributed to any account", async () => {
+    let seen: Headers | undefined
+    let upstreamCalls = 0
+    await withMockedFetch(
+      (request) => {
+        const refusal = signedOut(request)
+        if (refusal !== undefined) return refusal
+        upstreamCalls += 1
+        seen = request.headers
+        return ndjsonUpstream([{ type: "delta", kind: "text", text: "It is a monorepo." }, { type: "done" }])
+      },
+      async () => {
+        const response = await worker.fetch(
+          post("/api/agent/turn", exploring("SmithersAI/Smithers", "explore-catalog-1")),
+          identityEnv
+        )
+        expect(response.status).toBe(200)
+        expect(await response.text()).toContain("It is a monorepo.")
+      }
+    )
+    expect(upstreamCalls).toBe(1)
+    // The deployment credential runs the turn; no login is vouched, so the
+    // chat upstream meters it to the deployment and never to a person.
+    expect(seen?.get("authorization")).toBe("Bearer chat-bearer-123")
+    expect(seen?.get("x-user-login")).toBeNull()
+    expect(seen?.get("x-smithers-service-token")).toBeNull()
+  })
+
+  test("a signed-out turn about anything else, or about nothing, keeps the sign-in 401", async () => {
+    let upstreamCalls = 0
+    await withMockedFetch(
+      (request) => {
+        const refusal = signedOut(request)
+        if (refusal !== undefined) return refusal
+        upstreamCalls += 1
+        return ndjsonUpstream([{ type: "done" }])
+      },
+      async () => {
+        for (const body of [exploring("someone/private", "explore-private"), exploring(null, "explore-none"), turnBody]) {
+          const response = await worker.fetch(post("/api/agent/turn", body), identityEnv)
+          expect(response.status).toBe(401)
+          expect(((await response.json()) as { message: string }).message).toBe("Sign in to run a Smithers turn.")
+        }
+      }
+    )
+    expect(upstreamCalls).toBe(0)
+  })
+
+  test("every write route still answers the sign-in 401 to a signed-out caller", async () => {
+    let upstreamCalls = 0
+    await withMockedFetch(
+      (request) => {
+        const refusal = signedOut(request)
+        if (refusal !== undefined) return refusal
+        upstreamCalls += 1
+        return ndjsonUpstream([{ type: "done" }])
+      },
+      async () => {
+        const env: WorkerEnv = { ...identityEnv, SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test" }
+        const writes: ReadonlyArray<[string, unknown]> = [
+          ["/api/model/stream", { messages: [{ role: "user", content: "hi" }] }],
+          ["/api/workflow/rpc", { repo: "smithersai/smithers", procedure: "Run.Start", payload: {} }],
+          ["/api/workflow/provision", { repo: "smithersai/smithers" }],
+          ["/api/repos/smithersai/smithers/issues", { title: "anonymous write" }],
+          ["/api/cloud/api/repos/smithersai/smithers/issues", { title: "anonymous write" }],
+          ["/api/tools/browser-fetch", { url: "https://example.com" }]
+        ]
+        for (const [path, body] of writes) {
+          const response = await worker.fetch(post(path, body), env)
+          expect([path, response.status]).toEqual([path, 401])
+          expect(((await response.json()) as { message: string }).message).toMatch(/^Sign in /)
+        }
+      }
+    )
+    expect(upstreamCalls).toBe(0)
   })
 })
 

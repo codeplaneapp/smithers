@@ -95,6 +95,8 @@
 		//                              (billing reads no x-user-* claim; unset = the seam answers 501, never a doomed forward)
 		//   CHAT_PRODUCT_SERVICE_TOKEN — the chat worker's PRODUCT_SERVICE_TOKEN: a session-gated turn vouches
 		//                              the validated login so the turn's comped charge lands on the user's OWN account
+		//   ANONYMOUS_TURN_SALT      (secret) salts the per-address buckets under the anonymous turn ceiling
+		//                              (PUBLIC-REPOSITORIES.md "Anonymous turns"); unset = unsalted hashes, still no raw address
 		// The identity and billing workers both gate on the browser Origin, so their
 		// ALLOWED_ORIGINS must list this Worker's own origin — it is what the proxy sends.
 		// The legacy GATEWAY_UPSTREAM_URL / GATEWAY_AUTH_TOKEN / GATEWAY_SESSION_USER_*

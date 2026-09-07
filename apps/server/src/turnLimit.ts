@@ -44,6 +44,43 @@ export const TURN_WINDOW_MAX = 1000
 /** The window the ceiling applies over. */
 export const TURN_WINDOW_MS = 60 * 60 * 1000
 
+/**
+ * A ceiling: how many model calls one bucket may start per window, and whose
+ * bucket it is. The kind picks the refusal's wording, because a login that
+ * trips its ceiling has hit a bug and a visitor who trips theirs has reached
+ * the end of what exploring offers.
+ */
+export interface TurnCeiling {
+  readonly kind: "login" | "anonymous"
+  readonly max: number
+  readonly windowMs: number
+}
+
+/** The per-login ceiling above. */
+export const LOGIN_CEILING: TurnCeiling = { kind: "login", max: TURN_WINDOW_MAX, windowMs: TURN_WINDOW_MS }
+
+/**
+ * Turns one signed-out visitor may start per day while exploring a public
+ * catalog repository (smithers.sh/smithersai/smithers, PUBLIC-REPOSITORIES.md).
+ *
+ * An anonymous turn spends the deployment's own model credential and is never
+ * attributed to an account, so unlike the login ceiling this is a COST cap,
+ * not an abuse guard: twenty questions is a real look at a codebase, and the
+ * refusal names sign-in as the way to keep going. The bucket is a salted hash
+ * of the client IP (`anonymousTurnKey`): a visitor cannot name their own
+ * bucket, and the store never holds a raw address.
+ */
+export const ANONYMOUS_TURN_MAX = 20
+
+/** The anonymous window: one day. */
+export const ANONYMOUS_TURN_WINDOW_MS = 24 * 60 * 60 * 1000
+
+export const ANONYMOUS_CEILING: TurnCeiling = {
+  kind: "anonymous",
+  max: ANONYMOUS_TURN_MAX,
+  windowMs: ANONYMOUS_TURN_WINDOW_MS
+}
+
 export interface TurnLimitStorage {
   readonly get: <T>(key: string) => Promise<T | undefined>
   readonly put: (key: string, value: unknown) => Promise<void>
@@ -74,32 +111,44 @@ export interface TurnBudget {
   readonly retryAt?: number
 }
 
+/** A positive integer ceiling parameter, or the default when absent or malformed. */
+const ceilingParam = (url: URL, name: string, fallback: number): number => {
+  const value = Number(url.searchParams.get(name))
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
 export class TurnRateLimiter {
   constructor(private readonly ctx: { readonly storage: TurnLimitStorage }) {}
 
   async fetch(request: Request): Promise<Response> {
     const now = Date.now()
+    const url = new URL(request.url)
+    // The caller names the ceiling with each request; the login ceiling is
+    // the default so an unadorned call keeps its old meaning. One bucket
+    // only ever sees one ceiling, because the key already says whose it is.
+    const max = ceilingParam(url, "max", TURN_WINDOW_MAX)
+    const windowMs = ceilingParam(url, "windowMs", TURN_WINDOW_MS)
     const stored = await this.ctx.storage.get<TurnLimitWindow>(WINDOW_KEY)
-    const open = stored !== undefined && now - stored.start < TURN_WINDOW_MS ? stored : { start: now, count: 0 }
+    const open = stored !== undefined && now - stored.start < windowMs ? stored : { start: now, count: 0 }
     const answer = (body: TurnBudget): Response =>
       new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
 
-    switch (new URL(request.url).pathname) {
+    switch (url.pathname) {
       case "/spend": {
-        if (open.count >= TURN_WINDOW_MAX) {
+        if (open.count >= max) {
           // Refused turns do not extend the window: a client that keeps
           // hammering cannot push its own reset further away.
-          return answer({ allowed: false, remaining: 0, retryAt: open.start + TURN_WINDOW_MS })
+          return answer({ allowed: false, remaining: 0, retryAt: open.start + windowMs })
         }
         const next = { start: open.start, count: open.count + 1 }
         await this.ctx.storage.put(WINDOW_KEY, next)
-        return answer({ allowed: true, remaining: TURN_WINDOW_MAX - next.count })
+        return answer({ allowed: true, remaining: max - next.count })
       }
       case "/peek":
         return answer({
-          allowed: open.count < TURN_WINDOW_MAX,
-          remaining: Math.max(0, TURN_WINDOW_MAX - open.count),
-          ...(open.count >= TURN_WINDOW_MAX ? { retryAt: open.start + TURN_WINDOW_MS } : {})
+          allowed: open.count < max,
+          remaining: Math.max(0, max - open.count),
+          ...(open.count >= max ? { retryAt: open.start + windowMs } : {})
         })
       default:
         return new Response("not found", { status: 404 })
@@ -118,30 +167,59 @@ export class TurnRateLimiter {
  */
 export const spendTurn = async (
   limits: TurnLimitNamespace | undefined,
-  login: string
+  key: string,
+  ceiling: TurnCeiling = LOGIN_CEILING
 ): Promise<TurnBudget> => {
-  if (limits === undefined) return { allowed: true, remaining: TURN_WINDOW_MAX }
-  const stub = limits.get(limits.idFromName(login))
-  const response = await stub.fetch(new Request("https://turn-limit.internal/spend", { method: "POST" }))
+  if (limits === undefined) return { allowed: true, remaining: ceiling.max }
+  const stub = limits.get(limits.idFromName(key))
+  const response = await stub.fetch(
+    new Request(`https://turn-limit.internal/spend?max=${ceiling.max}&windowMs=${ceiling.windowMs}`, { method: "POST" })
+  )
   const budget = (await response.json().catch(() => undefined)) as TurnBudget | undefined
   // An unreadable answer from our own Durable Object is an infrastructure
   // fault, not a signal about this user: admit the turn and let it be seen in
   // the logs rather than locking a real person out of the alpha.
-  return budget ?? { allowed: true, remaining: TURN_WINDOW_MAX }
+  return budget ?? { allowed: true, remaining: ceiling.max }
 }
 
-/** The refusal a spent budget answers with: a bug report, never a sales pitch. */
-export const turnLimitResponse = (budget: TurnBudget, isolationHeaders: Record<string, string>): Response => {
-  const retryAt = budget.retryAt ?? Date.now() + TURN_WINDOW_MS
+/**
+ * The bucket an anonymous turn spends from: a salted SHA-256 of the client
+ * IP Cloudflare reports. The `anonymous:` prefix can never collide with a
+ * GitHub login, so a visitor's bucket is never a user's. `salt` is the
+ * deployment's ANONYMOUS_TURN_SALT secret; without one the hash is still
+ * not an address, only linkable across deployments that also have none.
+ */
+export const anonymousTurnKey = async (request: Request, salt: string | undefined): Promise<string> => {
+  const ip = request.headers.get("cf-connecting-ip") ?? ""
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt ?? ""}\n${ip}`))
+  return `anonymous:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`
+}
+
+const waitLabel = (seconds: number): string =>
+  seconds >= 2 * 60 * 60 ? `${Math.ceil(seconds / 3600)} hours` : `${Math.ceil(seconds / 60)} minutes`
+
+/**
+ * The refusal a spent budget answers with. For a login: a bug report, never a
+ * sales pitch. For a visitor: the end of exploring, and the one way on.
+ */
+export const turnLimitResponse = (
+  budget: TurnBudget,
+  isolationHeaders: Record<string, string>,
+  ceiling: TurnCeiling = LOGIN_CEILING
+): Response => {
+  const retryAt = budget.retryAt ?? Date.now() + ceiling.windowMs
   const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000))
   return new Response(
     JSON.stringify({
       status: "error",
       code: "turn_rate_limited",
-      message:
-        `That is more than ${TURN_WINDOW_MAX} model calls in an hour, which no conversation reaches by hand — something is looping. Chat resumes on its own in about ${
-          Math.ceil(seconds / 60)
-        } minutes. Nothing was charged and your balance is untouched.`,
+      message: ceiling.kind === "anonymous"
+        ? `That is ${ceiling.max} turns today without signing in, which is as far as exploring goes. Sign in with GitHub to keep going, or come back in about ${
+          waitLabel(seconds)
+        }. Nothing was charged.`
+        : `That is more than ${ceiling.max} model calls in an hour, which no conversation reaches by hand — something is looping. Chat resumes on its own in about ${
+          waitLabel(seconds)
+        }. Nothing was charged and your balance is untouched.`,
       retryAt: new Date(retryAt).toISOString()
     }),
     {

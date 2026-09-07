@@ -41,6 +41,7 @@ import type { Card, Message, Suggestion as SuggestionBinding } from "./state/App
 import { WORLD_DISPLAY_NAME } from "./state/AppState"
 import { scrubToolEcho } from "./state/MessageScrub"
 import { conversationTabIdOf, inConversation, MAIN_TAB_ID } from "./state/AppState"
+import { catalogRepositoryOf } from "./state/RepoContext"
 import { ConfirmDialog, SurfaceHeader } from "./SurfaceChrome"
 import { ChromeBar } from "./tabs/ChromeBar"
 import { TabBodies } from "./tabs/TabBodies"
@@ -139,7 +140,8 @@ function App() {
       tabMenuOpen: session.tabMenuOpen,
       addMenuOpen: session.addMenuOpen,
       resetConfirmOpen: session.resetConfirmOpen,
-      verbose: session.verbose
+      verbose: session.verbose,
+      activeRepoKey: session.activeRepoKey
     }))
   )
   const { data: worldDocumentRows } = useLiveQuery(collections.worldDocuments)
@@ -152,6 +154,7 @@ function App() {
   const { data: harnessRows } = useLiveQuery(collections.harnesses)
   const { data: connectorRows } = useLiveQuery(collections.connectors)
   const { data: repoRows } = useLiveQuery(collections.repos)
+  const { data: repositoryRows } = useLiveQuery(collections.repositories)
   const { data: recommendationRows } = useLiveQuery(collections.recommendations)
   /*
    * §10.6: the delete question lives in the store, not here — a component is
@@ -242,12 +245,22 @@ function App() {
    * in the shape auth.prompt renders (message + CTA bound to auth.sign-in).
    * Only the cloud host: local keeps its opening read (sign-in is an option
    * there), and a build with no identity seam is "unavailable", not this.
+   *
+   * With a public catalog repository selected (the /owner/name path,
+   * apps/server/PUBLIC-REPOSITORIES.md) the signed-out visitor is not gated:
+   * the same card says what they are exploring, reads and chat work, and the
+   * sign-in door stays the one act that unlocks writes.
    */
+  const exploringRepo = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
+    ? catalogRepositoryOf(session.activeRepoKey, repositoryRows)
+    : null
   const authMessage: Message | undefined = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
     ? {
       id: "auth-state",
       role: "smithers",
-      text: "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here.",
+      text: exploringRepo === null
+        ? "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here."
+        : `You are exploring ${exploringRepo}. Ask about the code, or sign in with GitHub to make changes.`,
       status: "complete",
       action: { flow: "auth.sign-in", label: "Sign in with GitHub" },
       createdAt: 0,

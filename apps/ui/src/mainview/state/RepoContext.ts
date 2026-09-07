@@ -8,6 +8,7 @@
  */
 import type { Repo } from "@smthrs/rpc/LocalApp"
 import { activeRepoOf, parseRepoSelection } from "./AppState"
+import type { CloudRepository } from "./AppState"
 import type { AppStore } from "./AppStore"
 
 const REPO_TOKEN = /^[\w.-]+\/[\w.-]+$/
@@ -39,6 +40,27 @@ export const activeRepositoryId = (store: AppStore): string | null => {
   const copy = store.collections.workingCopies.get(selection.localCopyId)
   return copy !== undefined && REPO_TOKEN.test(copy.repoId) ? copy.repoId : null
 }
+
+/**
+ * The `owner/name` the selection names when the public catalog supplied it
+ * (apps/server/PUBLIC-REPOSITORIES.md): the one repository a signed-out
+ * visitor reads and talks about. Null for any other selection.
+ */
+export const catalogRepositoryOf = (
+  activeRepoKey: string | null | undefined,
+  repositories: Iterable<Pick<CloudRepository, "id" | "catalog">>
+): string | null => {
+  const selection = activeRepoKey === undefined || activeRepoKey === null ? null : parseRepoSelection(activeRepoKey)
+  if (selection === null || !("repoId" in selection)) return null
+  for (const repository of repositories) {
+    if (repository.id === selection.repoId) return repository.catalog === true ? selection.repoId : null
+  }
+  return null
+}
+
+/** {@link catalogRepositoryOf} read from the store. */
+export const activeCatalogRepositoryId = (store: AppStore): string | null =>
+  catalogRepositoryOf(store.session().activeRepoKey, store.collections.repositories.values())
 
 /** The resolved target repository, or the honest error stating the choice. */
 export const resolveTargetRepo = (

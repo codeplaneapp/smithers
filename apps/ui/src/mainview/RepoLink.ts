@@ -92,13 +92,16 @@ export const openRequestedRepo = async (
       type: "repositories.loaded",
       actor: "system",
       repositories: [
-        ...[...repositories.values()].map(({ id, org, ownerKind, name, head }) => ({ id, org, ownerKind, name, head })),
+        ...[...repositories.values()].map(({ id, org, ownerKind, name, head, catalog }) => ({
+          id, org, ownerKind, name, head, ...(catalog === undefined ? {} : { catalog })
+        })),
         /*
          * The catalog carries no owner kind and no head. "user" is the
          * conservative reading: the one consumer (the org changesets read)
          * treats it as "no org changesets", never as a fabricated org.
+         * `catalog` records where the row came from: readable signed out.
          */
-        { ...repository, ownerKind: "user" as const, head: null }
+        { ...repository, ownerKind: "user" as const, head: null, catalog: true }
       ]
     })
   }

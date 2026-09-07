@@ -137,7 +137,9 @@ describe("openRequestedRepo", () => {
     expect(store.collections.repositories.get("smithersai/smithers")).toMatchObject({
       org: "smithersai",
       name: "smithers",
-      head: null
+      head: null,
+      // Provenance: the row is readable signed out, and the chat opens on it.
+      catalog: true
     })
   })
 

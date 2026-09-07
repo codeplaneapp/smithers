@@ -138,6 +138,12 @@ export const CloudRepositorySchema = z.object({
   name: z.string(),
   /** The default bookmark's head; null while unloaded or when the repo declares none. */
   head: RepoHeadSchema.nullable(),
+  /**
+   * True for a row the public catalog (GET /api/public/repos) supplied: a
+   * repository anyone reads signed out (apps/server/PUBLIC-REPOSITORIES.md).
+   * Absent on the signed-in inventory.
+   */
+  catalog: z.boolean().optional(),
   updatedAt: z.number(),
   revision: z.number().int().nonnegative()
 })
@@ -1344,7 +1350,7 @@ export type AppTransition =
   | {
     type: "repositories.loaded"
     actor: "system"
-    repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head">>
+    repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head" | "catalog">>
   }
   | {
     type: "workingcopies.workspaces.loaded"

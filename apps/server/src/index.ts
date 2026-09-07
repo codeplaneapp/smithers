@@ -43,7 +43,7 @@ import {
   NON_REPLAYABLE_GATEWAY_PROCEDURES
 } from "./gatewayRpc"
 import type { GatewaySessionNamespace } from "./gateway"
-import { spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
+import { ANONYMOUS_CEILING, anonymousTurnKey, spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
@@ -388,6 +388,13 @@ export interface WorkerEnv {
    */
   readonly TURN_LIMITS?: TurnLimitNamespace
   /**
+   * The salt under the anonymous turn buckets (turnLimit.ts
+   * `anonymousTurnKey`): a deployment secret, so a bucket name is never a
+   * reversible index of a visitor's address. Unset in unit tests and the
+   * stub stack.
+   */
+  readonly ANONYMOUS_TURN_SALT?: string
+  /**
    * The bounded client-error log (one Durable Object for the deployment),
    * read back through GET /api/admin/errors. Unset in unit tests, where the
    * handler keeps its console.error and nothing is stored.
@@ -685,11 +692,8 @@ const chatUpstreamHeaders = (
   return headers
 }
 
-const handleTurn = async (
-  request: Request,
-  env: WorkerEnv,
-  turnSession?: ValidatedIdentity
-): Promise<Response> => {
+/** The turn request, or the refusal its body earns. Read once: the router reads it before the gate decides. */
+const readStartTurn = async (request: Request): Promise<StartAgentTurnRequest | Response> => {
   let body: unknown
   try {
     body = await readTurnBody(request)
@@ -710,6 +714,17 @@ const handleTurn = async (
       message: "Body must be { runId, messages, instructions } with optional tools and context."
     })
   }
+  return body
+}
+
+const handleTurn = async (
+  request: Request,
+  env: WorkerEnv,
+  turnSession?: ValidatedIdentity,
+  parsed?: StartAgentTurnRequest
+): Promise<Response> => {
+  const body = parsed ?? await readStartTurn(request)
+  if (body instanceof Response) return body
   const registry = turnCancelStub(env, body.runId)
   if (registry !== undefined) {
     // The registry is the cross-isolate authority on duplicate turns; the
@@ -1410,6 +1425,10 @@ const validateSession = async (request: Request, env: WorkerEnv): Promise<Sessio
  *
  * When IDENTITY_UPSTREAM_URL is unset there is no seam that could authenticate
  * anyone (the local dev/stub stack, the e2e), so the gate stays out of the way.
+ *
+ * The one exception is decided by the router, not here: a signed-out turn
+ * about a public catalog repository (`anonymousCatalogTurn`) runs under the
+ * anonymous per-address ceiling. Every other route keeps this 401.
  */
 const requireTurnSession = async (
   request: Request,
@@ -2393,6 +2412,39 @@ const handleCloudProxy = async (request: Request, env: WorkerEnv, url: URL): Pro
  */
 const ROUTED_OWNER_PREFIXES: ReadonlyArray<string> = ["/smithersai/"]
 
+/** Whether `owner/name` is in the public catalog; GitHub names are case-insensitive. */
+const isCatalogRepository = (name: unknown): boolean =>
+  typeof name === "string" && AVAILABLE_REPOS.some((repo) => repo.name.toLowerCase() === name.toLowerCase())
+
+/*
+ * Anonymous exploring (PUBLIC-REPOSITORIES.md): a visitor at
+ * smithers.sh/smithersai/smithers talks to Smithers about that repository
+ * without an account. The turn names its repository in the runtime context
+ * the client derives each turn (`context.activeRepository`); only a catalog
+ * repository opens the door, and it opens onto the anonymous ceiling keyed by
+ * the caller's address, never onto a user's budget or billing account: the
+ * turn carries no login, so the chat upstream meters it to the deployment.
+ *
+ * What the turn can reach is what the client can reach signed out: the
+ * model's tool calls run in the browser, against this Worker, where every
+ * write route and the workflow seam still answer 401 without a session and
+ * only the public repository reads are open. The turn route forwards the
+ * client's messages, instructions, and tool spec to the chat upstream as it
+ * does for a login; the ceiling is what bounds the spend.
+ */
+const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: Response): Promise<Response> => {
+  const body = await readStartTurn(request)
+  if (body instanceof Response) return body
+  if (!isCatalogRepository(body.context?.activeRepository)) return refusal
+  const budget = await spendTurn(
+    env.TURN_LIMITS,
+    await anonymousTurnKey(request, env.ANONYMOUS_TURN_SALT),
+    ANONYMOUS_CEILING
+  )
+  if (!budget.allowed) return turnLimitResponse(budget, ISOLATION_HEADERS, ANONYMOUS_CEILING)
+  return handleTurn(request, env, undefined, body)
+}
+
 const routedRepoPage = (pathname: string): "catalog" | "unknown" | undefined => {
   // GitHub names are case-insensitive, and `/owner/name/` is the same page.
   const lower = pathname.toLowerCase()
@@ -2439,8 +2491,11 @@ export default {
         return json(405, { status: "error", message: "Method not allowed." })
       }
       const refusal = await requireTurnSession(request, env)
-      if (refusal instanceof Response) return refusal
-      return handleCancel(request, env, refusal)
+      // A signed-out caller may kill its own anonymous turn: the registry
+      // refuses an owned registration to anyone but its owner, and cancelling
+      // spends nothing.
+      if (refusal instanceof Response && refusal.status !== 401) return refusal
+      return handleCancel(request, env, refusal instanceof Response ? undefined : refusal)
     }
     // The two routes that spend a model credential. Both gate on the
     // session first and then on the login's turn ceiling, so a refusal
@@ -2452,7 +2507,9 @@ export default {
         return json(405, { status: "error", message: "Method not allowed." })
       }
       const gate = await requireTurnSession(request, env)
-      if (gate instanceof Response) return gate
+      if (gate instanceof Response) {
+        return gate.status === 401 ? anonymousCatalogTurn(request, env, gate) : gate
+      }
       if (gate !== undefined) {
         const budget = await spendTurn(env.TURN_LIMITS, gate.login)
         if (!budget.allowed) return turnLimitResponse(budget, ISOLATION_HEADERS)
