@@ -172,24 +172,42 @@ export const sandboxRequest = (
   above(node.packagePath)
   reads.add(`${cacheDirectory}/tmp`)
   reads.add(`${cacheDirectory}/store`)
+  // The two write channels are the node's own distinction, not a guess about
+  // the path: `writes` names directories the tool fills, `writeFiles` names
+  // output files whose parent directory the confinement opens. A directory
+  // that does not exist yet keeps its own name here, so a declared
+  // `.cargo-home` or `dist.new` never widens the bind to its parent.
   const writes = new Set<string>([cacheDirectory, ...node.outDirs, ...node.cleanOutDirs])
+  const writeFiles = new Set<string>([...node.outFiles, ...node.cleanPaths])
   if (node.declaredOutputs !== undefined) {
     for (const path of node.declaredOutputs.paths) {
-      writes.add(Input.resolvePath(node.declaredOutputs.cwd, path))
+      const resolved = Input.resolvePath(node.declaredOutputs.cwd, path)
+      // A declared output the node also declares as a directory, or that holds
+      // one, is a directory; every other declared product is a file, the way
+      // the emitting targets (a lockfile, a tsconfig, a fetched archive) mean
+      // it.
+      const directory = writes.has(resolved) ||
+        [...writes].some((write) => write.startsWith(`${resolved}/`))
+      if (!directory) writeFiles.add(resolved)
     }
   }
-  for (const path of node.outFiles) writes.add(NodePath.posix.dirname(path))
-  for (const path of node.cleanPaths) writes.add(NodePath.posix.dirname(path))
-  for (const pattern of node.writeSet) writes.add(staticPrefixOf(pattern) || ".")
+  for (const pattern of node.writeSet) {
+    const prefix = staticPrefixOf(pattern) || "."
+    // A pattern with a glob names the directory its static prefix ends at; a
+    // pattern that is a literal path names the file the tool rewrites.
+    if (prefix === pattern) writeFiles.add(prefix)
+    else writes.add(prefix)
+  }
   if (node.lane?.kind === "cargo") {
     writes.add(node.packagePath === "" ? "target" : `${node.packagePath}/target`)
-    for (const path of node.lane.outFiles) writes.add(NodePath.posix.dirname(path))
+    for (const path of node.lane.outFiles) writeFiles.add(path)
   }
   return {
     policy: node.sandbox,
     mechanism: workspace.sandboxes?.sandboxes["default"],
     reads: [...reads],
     writes: [...writes],
+    writeFiles: [...writeFiles],
     readOnly: [`${cacheDirectory}/cache`],
     externalReads: node.externalReads
   }

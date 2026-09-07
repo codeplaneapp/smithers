@@ -42,7 +42,8 @@ const windows = host("win32", { docker: "C:\\docker.exe" })
 const request: ExecSandbox.Request = {
   policy: {},
   reads: ["src/a.ts", "node_modules", "missing.txt", "../outside"],
-  writes: ["dist", "out/bundle.js"],
+  writes: ["dist"],
+  writeFiles: ["out/bundle.js"],
   readOnly: [".flows/cache"]
 }
 
@@ -150,6 +151,29 @@ describe("plan", () => {
   })
 
   /**
+   * A declared output directory that the target has not created yet keeps its
+   * own name. Reading a dot in the base name as a file extension would bind
+   * the parent instead, and for a top-level `.cargo-home`, `.astro` or
+   * `dist.new` that parent is the workspace root: bubblewrap then skips the
+   * read-only remount and the whole workspace is writable for the run, on the
+   * first run only, before the directory exists.
+   */
+  it("binds a not-yet-created write directory by its own name, dot in it or not", () => {
+    const bare = host("linux", { bwrap: "/usr/bin/bwrap" }, [], ["/work/ws", "/work/ws/apps/site"])
+    for (const write of [".cargo-home", ".astro", ".turbo", "dist.new"]) {
+      const plan = planned(bare, { reads: [], writes: [write], writeFiles: [], readOnly: [] })
+      expect(plan.writes).toEqual([`/work/ws/${write}`])
+      expect(plan.writes).not.toContain("/work/ws")
+      expect(ExecSandbox.bubblewrap(plan, ["true"]).join(" ")).toContain("--remount-ro /work/ws")
+    }
+    const nested = planned(bare, { reads: [], writes: ["apps/site/.astro"], writeFiles: [], readOnly: [] })
+    expect(nested.writes).toEqual(["/work/ws/apps/site/.astro"])
+    // A declared output file keeps opening its parent, existing or not.
+    const file = planned(bare, { reads: [], writes: [], writeFiles: ["apps/site/dist/index.js"], readOnly: [] })
+    expect(file.writes).toEqual(["/work/ws/apps/site/dist"])
+  })
+
+  /**
    * A write is the one declaration that would open a hole: binding a path
    * that resolves outside the root would give the tool a writable window on
    * the host. It is dropped, not anchored back inside and not refused, which
@@ -158,6 +182,7 @@ describe("plan", () => {
   it("drops a declared write and a read-only path that escape the root", () => {
     const plan = planned(linux, {
       writes: ["dist", "../outside", "../../etc/passwd"],
+      writeFiles: ["../outside/out.txt"],
       readOnly: [".flows/cache", "../outside"]
     })
     expect(plan.writes).toEqual(["/work/ws/dist"])
@@ -173,6 +198,7 @@ describe("plan", () => {
   it("drops a declared write and a read-only path that escape the root", () => {
     const plan = planned(linux, {
       writes: ["dist", "../outside", "../../etc/passwd"],
+      writeFiles: ["../outside/out.txt"],
       readOnly: [".flows/cache", "../outside"]
     })
     expect(plan.writes).toEqual(["/work/ws/dist"])
@@ -188,6 +214,7 @@ describe("plan", () => {
   it("drops a declared write and a read-only path that escape the root", () => {
     const plan = planned(linux, {
       writes: ["dist", "../outside", "../../etc/passwd"],
+      writeFiles: ["../outside/out.txt"],
       readOnly: [".flows/cache", "../outside"]
     })
     expect(plan.writes).toEqual(["/work/ws/dist"])
@@ -285,7 +312,8 @@ describe("bubblewrap argv", () => {
     // A declared output file at the top level opens its parent, the root.
     const rootWrite = planned(host("linux", { bwrap: "/usr/bin/bwrap" }, [], ["/work/ws"]), {
       reads: [],
-      writes: ["out.txt"],
+      writes: [],
+      writeFiles: ["out.txt"],
       readOnly: []
     })
     expect(rootWrite.writes).toEqual(["/work/ws"])
@@ -725,7 +753,7 @@ describe("diagnose", () => {
     try {
       NodeFs.symlinkSync(elsewhere, NodePath.join(root, "linkdir"))
       const plan: ExecSandbox.Plan = {
-        ...planned(linux, { reads: [], writes: ["out.txt"] }),
+        ...planned(linux, { reads: [], writes: [], writeFiles: ["out.txt"] }),
         workspaceRoot: root,
         cwd: root,
         writes: [root]

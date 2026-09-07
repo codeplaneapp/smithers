@@ -80,6 +80,16 @@ export interface Request {
   readonly mechanism?: WorkspaceDeclaration.SandboxDeclaration | undefined
   readonly reads: ReadonlyArray<string>
   readonly writes: ReadonlyArray<string>
+  /**
+   * Declared outputs whose leaf is a file rather than a directory. A file
+   * cannot be bound writable on its own and does not exist before the tool
+   * writes it, so its parent directory becomes the writable bind. Kept apart
+   * from `writes` because only the caller knows which of the two a
+   * declaration meant: inferring it from the path would hand a not-yet-created
+   * `.cargo-home` or `dist.new` its parent, and a parent that is the
+   * workspace root opens the whole workspace for the run.
+   */
+  readonly writeFiles?: ReadonlyArray<string> | undefined
   readonly readOnly?: ReadonlyArray<string> | undefined
   /**
    * Absolute host paths outside the workspace the tool reads: a git
@@ -519,18 +529,28 @@ export const plan = (
     if (!NodePath.isAbsolute(path) || insideRoot(root, path) || !hostFacts.exists(path)) continue
     externalReads.push(hostFacts.realpath?.(path) ?? path)
   }
-  // A write names a directory the tool may fill. A declared output that is a
-  // file, existing or not yet, opens its parent: a file cannot be bound
-  // before it exists, and a tool that writes by rename needs the directory.
+  // A write names a directory the tool may fill, and is bound as declared
+  // whether or not it exists yet: a name is never read as a file, because a
+  // dot in `.cargo-home` or `dist.new` would otherwise widen the bind to the
+  // parent, and a parent that is the workspace root opens every file in it.
+  // A path that is already a file on the host is the one exception, since a
+  // file cannot be bound as a writable directory.
   const writes: Array<string> = []
+  const add = (absolute: string | undefined): void => {
+    if (absolute === undefined || !insideRoot(root, absolute)) return
+    writes.push(absolute)
+  }
   for (const relative of request.writes) {
     const absolute = anchor(relative)
     if (absolute === undefined) continue
-    const isFile = hostFacts.exists(absolute)
-      ? !hostFacts.isDirectory(absolute)
-      : NodePath.basename(absolute).includes(".")
-    const directory = isFile ? NodePath.dirname(absolute) : absolute
-    if (insideRoot(root, directory)) writes.push(directory)
+    add(hostFacts.exists(absolute) && !hostFacts.isDirectory(absolute) ? NodePath.dirname(absolute) : absolute)
+  }
+  // A declared output file opens its parent: a file cannot be bound before it
+  // exists, and a tool that writes by rename needs the directory anyway.
+  for (const relative of request.writeFiles ?? []) {
+    const absolute = anchor(relative)
+    if (absolute === undefined) continue
+    add(hostFacts.exists(absolute) && hostFacts.isDirectory(absolute) ? absolute : NodePath.dirname(absolute))
   }
   const readOnly: Array<string> = []
   for (const relative of request.readOnly ?? []) {
