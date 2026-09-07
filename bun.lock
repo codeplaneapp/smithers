@@ -913,6 +913,16 @@
         "typescript": "5.9.3",
       },
     },
+    "evals/recommend": {
+      "name": "@smthrs/eval-recommend",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@smthrs/targets": "workspace:*",
+        "@types/node": "26.4.1",
+        "bun-types": "^1.4.0",
+        "typescript": "5.9.3",
+      },
+    },
     "evals/review-seeded-bugs": {
       "name": "@smthrs/eval-review-seeded-bugs",
       "version": "0.0.0",
@@ -4168,6 +4178,8 @@
     "@smthrs/eval-agent": ["@smthrs/eval-agent@workspace:evals/agent"],
 
     "@smthrs/eval-authoring": ["@smthrs/eval-authoring@workspace:evals/authoring"],
+
+    "@smthrs/eval-recommend": ["@smthrs/eval-recommend@workspace:evals/recommend"],
 
     "@smthrs/eval-review-seeded-bugs": ["@smthrs/eval-review-seeded-bugs@workspace:evals/review-seeded-bugs"],
 

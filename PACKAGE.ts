@@ -265,6 +265,19 @@ const ci = Smithers.GithubCiGen({
           verb: Smithers.Verb.Build,
           pattern: "//evals/review-seeded-bugs:check"
         },
+        // The command-recommender scorer: hit@5, top-1, and coverage over the
+        // server's recommendation log. Offline: it scores a checked-in
+        // fixture and gates on its baseline; the live pull is operator-run.
+        {
+          name: "Recommend eval suite (offline, baseline-gated)",
+          verb: Smithers.Verb.Test,
+          pattern: "//evals/recommend/..."
+        },
+        {
+          name: "Recommend eval typecheck",
+          verb: Smithers.Verb.Build,
+          pattern: "//evals/recommend:check"
+        },
         // The fault matrix no longer typechecks here. It used to need its own
         // step because it was its own workspace member with its own tsconfig;
         // every case now lives in the package it tests, under `test/faults`,

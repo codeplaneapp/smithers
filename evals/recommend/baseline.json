@@ -1,0 +1,39 @@
+{
+  "coverage": 0.8125,
+  "hitRate": 0.6923076923076923,
+  "hits": 9,
+  "k": 5,
+  "perRepo": {
+    "(no repo)": {
+      "coverage": 1,
+      "hitRate": 0.6666666666666666,
+      "hits": 2,
+      "rows": 3,
+      "top1": 1,
+      "top1Rate": 0.3333333333333333,
+      "withOutcome": 3
+    },
+    "acme/widgets": {
+      "coverage": 0.6,
+      "hitRate": 0.6666666666666666,
+      "hits": 2,
+      "rows": 5,
+      "top1": 1,
+      "top1Rate": 0.3333333333333333,
+      "withOutcome": 3
+    },
+    "smithersai/smithers": {
+      "coverage": 0.875,
+      "hitRate": 0.7142857142857143,
+      "hits": 5,
+      "rows": 8,
+      "top1": 3,
+      "top1Rate": 0.42857142857142855,
+      "withOutcome": 7
+    }
+  },
+  "rows": 16,
+  "top1": 5,
+  "top1Rate": 0.38461538461538464,
+  "withOutcome": 13
+}

@@ -58,6 +58,7 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
     ["//evals/agent:check", "test"], ["//evals/authoring:check", "test"], ["//evals/swebench:check", "test"],
     ["//evals/review-seeded-bugs:suite", "test"], ["//evals/review-seeded-bugs:test", "test"],
     ["//evals/review-seeded-bugs:check", "test"],
+    ["//evals/recommend:suite", "test"], ["//evals/recommend:test", "test"], ["//evals/recommend:check", "test"],
     ["//scripts/repo-contract:ciInventory", "test"], ["//scripts:mutationGate", "test"], ["//scripts:benchmarkGate", "test"],
     ["//scripts:tierContracts", "test"],
     ["//scripts:webBundleContract", "browser"],
