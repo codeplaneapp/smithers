@@ -1,0 +1,274 @@
+import { publicRepoActivityPath } from "@smthrs/rpc/AgentApiRoutes"
+import { AVAILABLE_REPOS, cloudRepoFor } from "./publicRepoCatalog"
+import { createPublicRepositoryReader } from "./publicRepositoryReads"
+
+/*
+ * GET /api/public/repos/<owner>/<name>/activity: one sentence about the last
+ * seven days of a catalog repository, computed from the Smithers Cloud mirror
+ * the anonymous public reads already use. The Worker never calls GitHub and
+ * carries no credential; every count comes from the mirror's own feeds, and a
+ * feed the mirror cannot answer becomes an honest "not available" clause, never
+ * a zero.
+ */
+
+interface Dependencies {
+  readonly fetch: (request: Request) => Promise<Response>
+  readonly now: () => number
+  readonly cache: () => Pick<Cache, "match" | "put"> | undefined
+}
+
+export interface PublicRepoActivity {
+  readonly sentence: string
+  /** A null count is one the mirror could not answer; the sentence says so. */
+  readonly counts: {
+    readonly commits: number | null
+    readonly pullRequests: number | null
+    readonly issues: number | null
+  }
+  /** The window's start, ISO 8601. */
+  readonly since: string
+}
+
+export const ACTIVITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+/** The mirror's page ceiling; the walk stops early once a page is entirely older than the window. */
+const PAGE_SIZE = 100
+/** Bounds upstream traffic on a cache miss; a window that outruns the bound is reported as unavailable. */
+const MAX_COMMIT_PAGES = 20
+const MAX_LIST_PAGES = 5
+
+const headers = {
+  "content-type": "application/json; charset=utf-8",
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, HEAD, OPTIONS",
+  "x-content-type-options": "nosniff"
+}
+
+/** `owner/name` when the path is the activity route, else undefined. */
+export const parsePublicRepoActivityPath = (pathname: string): string | undefined => {
+  const match = /^\/api\/public\/repos\/([a-z\d][a-z\d-]{0,38})\/([a-z\d_.-]{1,100})\/activity\/?$/i.exec(pathname)
+  if (match === null || match[2] === "." || match[2] === "..") return undefined
+  return `${match[1]}/${match[2]}`
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+
+const parseTime = (value: unknown): number | null => {
+  if (typeof value !== "string") return null
+  const time = Date.parse(value)
+  return Number.isFinite(time) ? time : null
+}
+
+/** The cursor of the mirror's `rel="next"` link, or undefined when the feed is exhausted. */
+const nextCursor = (response: Response): string | undefined => {
+  const link = response.headers.get("link") ?? ""
+  const next = /<([^>]+)>\s*;\s*rel="next"/.exec(link)?.[1]
+  if (next === undefined) return undefined
+  const cursor = new URL(next, "https://cursor.invalid").searchParams.get("cursor")
+  return cursor === null || cursor === "" ? undefined : cursor
+}
+
+interface Change {
+  readonly changeId: string
+  readonly commitId: string
+  readonly timestamp: number
+  readonly parents: ReadonlyArray<string>
+}
+
+const parseChange = (value: unknown): Change | null => {
+  if (!isRecord(value) || typeof value.change_id !== "string" || typeof value.commit_id !== "string") return null
+  const timestamp = parseTime(value.timestamp)
+  if (timestamp === null) return null
+  const parents = Array.isArray(value.parent_change_ids)
+    ? value.parent_change_ids.filter((id): id is string => typeof id === "string")
+    : []
+  return { changeId: value.change_id, commitId: value.commit_id, timestamp, parents }
+}
+
+const pluralize = (count: number, noun: string, verb: { one: string; many: string }): string =>
+  count === 0
+    ? `no ${noun}s ${verb.many}`
+    : count === 1
+    ? `1 ${noun} ${verb.one}`
+    : `${count} ${noun}s ${verb.many}`
+
+const joinClauses = (clauses: ReadonlyArray<string>): string =>
+  clauses.length <= 1
+    ? clauses.join("")
+    : clauses.length === 2
+    ? `${clauses[0]} and ${clauses[1]}`
+    : `${clauses.slice(0, -1).join(", ")}, and ${clauses[clauses.length - 1]}`
+
+/**
+ * The deterministic sentence for a set of counts. A null count drops out of
+ * the main sentence and is named in its own honest sentence after it.
+ */
+export const activitySentence = (counts: PublicRepoActivity["counts"], bookmark: string | null): string => {
+  const clauses: Array<string> = []
+  const missing: Array<string> = []
+  if (counts.commits === null) missing.push("Commit activity is not available.")
+  else clauses.push(pluralize(counts.commits, "commit", { one: `landed on ${bookmark ?? "the default bookmark"}`, many: `landed on ${bookmark ?? "the default bookmark"}` }))
+  if (counts.pullRequests === null) missing.push("Pull request activity is not available.")
+  else clauses.push(pluralize(counts.pullRequests, "pull request", { one: "was opened", many: "were opened" }))
+  if (counts.issues === null) missing.push("Issue activity is not available.")
+  else clauses.push(pluralize(counts.issues, "issue", { one: "was filed", many: "were filed" }))
+  if (clauses.length === 0) return "Recent activity is not available."
+  return [`In the last 7 days, ${joinClauses(clauses)}.`, ...missing].join(" ")
+}
+
+export const createPublicRepoActivityHandler = (deps: Dependencies) => {
+  const read = createPublicRepositoryReader({ fetch: deps.fetch })
+  const snapshots = new Map<string, { body: string; expiresAt: number }>()
+  const pending = new Map<string, Promise<void>>()
+
+  /** One mirror document, parsed, or null when the mirror could not answer it. */
+  const document = async (appPath: string, origin: string, base: string): Promise<{ body: unknown; response: Response } | null> => {
+    const response = await read(new URL(appPath, origin), base)
+    if (!response.ok) return null
+    const body: unknown = await response.json().catch(() => undefined)
+    return body === undefined ? null : { body, response }
+  }
+
+  /** Counts `created_at` within the window across a keyset-paginated array feed. */
+  const countCreated = async (appPath: string, origin: string, base: string, since: number): Promise<number | null> => {
+    let count = 0
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_LIST_PAGES; page++) {
+      const answer = await document(`${appPath}?limit=${PAGE_SIZE}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`, origin, base)
+      if (answer === null || !Array.isArray(answer.body)) return null
+      let oldestInWindow = true
+      for (const item of answer.body) {
+        const created = isRecord(item) ? parseTime(item.created_at) : null
+        if (created === null) return null
+        if (created >= since) count++
+        else oldestInWindow = false
+      }
+      cursor = nextCursor(answer.response)
+      if (cursor === undefined || !oldestInWindow || answer.body.length < PAGE_SIZE) return count
+    }
+    // The window holds more than the bound reads; a partial count would be a lie.
+    return null
+  }
+
+  /**
+   * Commits reachable from the default bookmark's head that were made inside
+   * the window. The mirror's change feed is every visible change in jj index
+   * order (newest first), so the pages are read until one falls entirely
+   * outside the window and the bookmark's ancestry is walked inside them.
+   */
+  const countCommits = async (repo: string, origin: string, base: string, since: number): Promise<{ count: number | null; bookmark: string | null }> => {
+    const [root, refs] = await Promise.all([
+      document(`/api/repos/${repo}`, origin, base),
+      document(`/api/repos/${repo}/git/refs`, origin, base)
+    ])
+    const bookmark = root !== null && isRecord(root.body) && typeof root.body.default_bookmark === "string" && root.body.default_bookmark !== ""
+      ? root.body.default_bookmark
+      : null
+    if (bookmark === null || refs === null || !Array.isArray(refs.body)) return { count: null, bookmark }
+    const head = refs.body.find((ref) => isRecord(ref) && ref.ref === `refs/heads/${bookmark}`)
+    const sha = head !== undefined && isRecord(head) && isRecord(head.object) && typeof head.object.sha === "string" ? head.object.sha : null
+    if (sha === null) return { count: null, bookmark }
+
+    const byChange = new Map<string, Change>()
+    const byCommit = new Map<string, Change>()
+    let cursor: string | undefined
+    let exhausted = false
+    for (let page = 0; page < MAX_COMMIT_PAGES; page++) {
+      const answer = await document(`/api/repos/${repo}/changes?limit=${PAGE_SIZE}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`, origin, base)
+      if (answer === null || !isRecord(answer.body) || !Array.isArray(answer.body.items)) return { count: null, bookmark }
+      let anyInWindow = false
+      for (const item of answer.body.items) {
+        const change = parseChange(item)
+        if (change === null) return { count: null, bookmark }
+        byChange.set(change.changeId, change)
+        byCommit.set(change.commitId, change)
+        if (change.timestamp >= since) anyInWindow = true
+      }
+      cursor = nextCursor(answer.response)
+      if (cursor === undefined || !anyInWindow || answer.body.items.length < PAGE_SIZE) {
+        exhausted = true
+        break
+      }
+    }
+    if (!exhausted) return { count: null, bookmark }
+
+    let count = 0
+    const seen = new Set<string>()
+    const queue: Array<Change> = []
+    const start = byCommit.get(sha)
+    if (start !== undefined) queue.push(start)
+    while (queue.length > 0) {
+      const change = queue.pop()!
+      if (seen.has(change.changeId)) continue
+      seen.add(change.changeId)
+      if (change.timestamp >= since) count++
+      for (const parent of change.parents) {
+        const next = byChange.get(parent)
+        if (next !== undefined) queue.push(next)
+      }
+    }
+    return { count, bookmark }
+  }
+
+  const compute = async (repo: string, origin: string, base: string): Promise<PublicRepoActivity> => {
+    const since = deps.now() - ACTIVITY_WINDOW_MS
+    const [commits, pullRequests, issues] = await Promise.all([
+      countCommits(repo, origin, base, since),
+      countCreated(`/api/repos/${repo}/landings`, origin, base, since),
+      countCreated(`/api/repos/${repo}/issues`, origin, base, since)
+    ])
+    const counts = { commits: commits.count, pullRequests, issues }
+    return { sentence: activitySentence(counts, commits.bookmark), counts, since: new Date(since).toISOString() }
+  }
+
+  const refresh = async (repo: string, cacheKey: Request, base: string): Promise<void> => {
+    const cache = deps.cache()
+    const cached = await cache?.match(cacheKey).catch(() => undefined)
+    if (cached) {
+      const ttl = Math.max(0, Number(cached.headers.get("x-activity-expires")) - deps.now()) / 1000
+      if (ttl > 0) {
+        snapshots.set(repo, { body: await cached.text(), expiresAt: deps.now() + ttl * 1000 })
+        return
+      }
+    }
+    const activity = await compute(repo, cacheKey.url, base)
+    // A count the mirror could not answer is retried sooner than a complete answer is kept.
+    const ttl = Object.values(activity.counts).every((count) => count !== null) ? 300 : 30
+    const snapshot = { body: JSON.stringify(activity), expiresAt: deps.now() + ttl * 1000 }
+    snapshots.set(repo, snapshot)
+    await cache?.put(cacheKey, new Response(snapshot.body, {
+      headers: { ...headers, "cache-control": `public, max-age=${ttl}`, "x-activity-expires": String(snapshot.expiresAt) }
+    })).catch(() => undefined)
+  }
+
+  /** `base` is the Smithers Cloud API origin the mirror is read from. */
+  return async (request: Request, base: string): Promise<Response> => {
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers })
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response(JSON.stringify({ message: "Method not allowed." }), {
+        status: 405, headers: { ...headers, allow: "GET, HEAD, OPTIONS" }
+      })
+    }
+    const name = parsePublicRepoActivityPath(new URL(request.url).pathname)
+    if (name === undefined || cloudRepoFor(name) === undefined) {
+      return new Response(JSON.stringify({ message: "Repository is not in the public catalog." }), { status: 404, headers })
+    }
+    // The catalog's spelling is the cache key, so a mixed-case request shares the answer.
+    const repo = AVAILABLE_REPOS.find((entry) => entry.name.toLowerCase() === name.toLowerCase())!.name
+    const snapshot = snapshots.get(repo)
+    if (snapshot === undefined || snapshot.expiresAt <= deps.now()) {
+      // Query strings and visitor headers never change the public cache key.
+      const key = new Request(new URL(publicRepoActivityPath(repo), request.url))
+      let join = pending.get(repo)
+      if (join === undefined) {
+        join = refresh(repo, key, base).finally(() => { pending.delete(repo) })
+        pending.set(repo, join)
+      }
+      await join
+    }
+    const current = snapshots.get(repo)!
+    return new Response(request.method === "HEAD" ? null : current.body, {
+      headers: { ...headers, "cache-control": `public, max-age=${Math.max(0, Math.ceil((current.expiresAt - deps.now()) / 1000))}` }
+    })
+  }
+}

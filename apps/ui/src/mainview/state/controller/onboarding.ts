@@ -88,8 +88,9 @@ export const summaryPredicate = (repo: string, summary: string | undefined): str
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
-const asCount = (value: unknown): number | null =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null
+/** A count as the route states it: a non-negative integer, or null when the mirror could not answer. */
+const asCount = (value: unknown): number | null | undefined =>
+  value === null ? null : typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined
 
 /** The activity answer as the card carries it, or null when the body is not the route's contract. */
 export const parseActivity = (body: unknown): Activity | null => {
@@ -98,7 +99,7 @@ export const parseActivity = (body: unknown): Activity | null => {
   const commits = asCount(body.counts.commits)
   const pullRequests = asCount(body.counts.pullRequests)
   const issues = asCount(body.counts.issues)
-  if (commits === null || pullRequests === null || issues === null) return null
+  if (commits === undefined || pullRequests === undefined || issues === undefined) return null
   return {
     sentence: body.sentence.trim(),
     counts: { commits, pullRequests, issues },

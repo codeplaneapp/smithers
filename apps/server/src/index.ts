@@ -60,6 +60,7 @@ import {
 import type { TurnLimitNamespace } from "./turnLimit"
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
+import { createPublicRepoActivityHandler, parsePublicRepoActivityPath } from "./publicRepoActivity"
 import { isPublicRepositoryRead, readPublicRepository } from "./publicRepositoryReads"
 import { workflowTriggers } from "./workflowTriggers"
 
@@ -2492,6 +2493,12 @@ const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: R
   return handleTurn(request, env, undefined, body)
 }
 
+const handlePublicRepoActivity = createPublicRepoActivityHandler({
+  fetch: (request) => fetch(request),
+  now: () => Date.now(),
+  cache: () => (globalThis as typeof globalThis & { caches?: CacheStorage & { default?: Cache } }).caches?.default
+})
+
 const routedRepoPage = (pathname: string): "catalog" | "unknown" | undefined => {
   // GitHub names are case-insensitive, and `/owner/name/` is the same page.
   const lower = pathname.toLowerCase()
@@ -2506,6 +2513,11 @@ export default {
     // This one curated, read-only catalog is public to the marketing site.
     // Every authenticated API continues through the same-origin guard below.
     if (url.pathname === PUBLIC_REPOS_PATH) return handlePublicRepos(request)
+    // The catalog's recent-activity sentence (src/publicRepoActivity.ts): a
+    // public read computed from the Cloud mirror, never from GitHub.
+    if (parsePublicRepoActivityPath(url.pathname) !== undefined) {
+      return handlePublicRepoActivity(request, env.SMITHERS_CLOUD_API_BASE_URL?.trim() || DEFAULT_CLOUD_API_BASE_URL)
+    }
     // Retired mounts never forward, even on WebSocket upgrade or when legacy
     // deployment credentials are still configured.
     const retiredGatewayRoute = isRetiredGatewayRoute(url.pathname)

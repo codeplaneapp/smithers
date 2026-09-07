@@ -124,6 +124,9 @@ describe("the welcome's sentence", () => {
   test("the activity answer is read only in the route's shape", () => {
     expect(parseActivity({ sentence: "2 commits this week.", counts: { commits: 2, pullRequests: 0, issues: 0 }, since: "2026-08-31" }))
       .toEqual({ sentence: "2 commits this week.", counts: { commits: 2, pullRequests: 0, issues: 0 }, since: "2026-08-31" })
+    // A count the mirror could not answer is null and rides the card as null, never as a zero.
+    expect(parseActivity({ sentence: "Pull request activity is not available.", counts: { commits: 2, pullRequests: null, issues: 0 } }))
+      .toEqual({ sentence: "Pull request activity is not available.", counts: { commits: 2, pullRequests: null, issues: 0 }, since: "" })
     expect(parseActivity({ sentence: "", counts: { commits: 2, pullRequests: 0, issues: 0 } })).toBeNull()
     expect(parseActivity({ sentence: "x", counts: { commits: -1, pullRequests: 0, issues: 0 } })).toBeNull()
     expect(parseActivity("nope")).toBeNull()

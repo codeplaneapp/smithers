@@ -207,8 +207,9 @@ export const PUBLIC_REPOS_PATH = "/api/public/repos"
 /**
  * The recent-activity read of one catalog repository:
  * `GET /api/public/repos/<owner>/<name>/activity`, answering
- * `{ sentence, counts: { commits, pullRequests, issues }, since }`. A 404 means
- * the deployment does not serve it yet; the client says so rather than
+ * `{ sentence, counts: { commits, pullRequests, issues }, since }`. A count the
+ * mirror could not answer is null and the sentence says so. A 404 means the
+ * repository is not in the public catalog; the client says so rather than
  * inventing a sentence.
  *
  * @since 1.0.0
