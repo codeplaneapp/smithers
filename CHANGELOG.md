@@ -155,7 +155,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1604 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1605 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
@@ -1477,6 +1477,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **ci(release):** lint release-auth.yml in the release workflow's actionlint step ([e57560b17e](https://github.com/smithersai/smithers/commit/e57560b17e2e5318fdb1e9d8e659ae3268d66e75))
 - **build(site):** add the React island dependencies ([862ce94cad](https://github.com/smithersai/smithers/commit/862ce94cad8d2325a5cda4864be13e780ac386a0))
 - **ci:** lint release-auth.yml with the other workflows ([7220acead2](https://github.com/smithersai/smithers/commit/7220acead2cb7ecbef60d390a476cb2eb3529c88))
 - **ci(release):** verify the npm credential before first publication ([9d552af043](https://github.com/smithersai/smithers/commit/9d552af043bf424011230b2ed58b0c66a4cda4e9))
