@@ -53,8 +53,15 @@ const diagnosticTextLimit = 512
 
 const sanitizeDiagnosticText = (value: string): string =>
   value.slice(0, diagnosticTextLimit)
-    .replace(/(bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
-    .replace(/((?:token|secret|password|api[-_]?key)\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/(bearer\s+)[^\s,;"'\\]+/gi, "$1[REDACTED]")
+    // An HTTP client error embeds the upstream response body in its message, so
+    // the key arrives quoted (`"apiKey":"..."`) or escaped (`\"apiKey\":\"..."`)
+    // rather than as the bare `apiKey=...` pair. Quotes and backslashes around
+    // the separator are skipped and also end the value.
+    .replace(
+      /((?:token|secret|password|api[-_]?key)["'\\]*\s*[=:]\s*["'\\]*)[^\s,;"'\\]+/gi,
+      "$1[REDACTED]"
+    )
 
 const primitiveDiagnostic = (value: unknown): unknown => {
   switch (typeof value) {

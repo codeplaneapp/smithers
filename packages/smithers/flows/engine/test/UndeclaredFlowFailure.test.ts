@@ -132,6 +132,28 @@ describe("a flow body failure outside the declared error schema", () => {
       expect(line?.annotations.error).not.toContain("operator-secret")
     }))
 
+  effect("redacts a credential the upstream response body quotes inside a message", () =>
+    Effect.gen(function*() {
+      // An HTTP client error embeds the response body verbatim, so the key
+      // reaches the sanitizer quoted (`"apiKey":"..."`) or escaped, never as
+      // the bare `apiKey=...` pair the object-field redaction already covers.
+      const secret = "sk-live-9f8e7d6c5b4a"
+      const error = {
+        code: "upstream_failed",
+        message: `POST /v1/keys failed 401: {"error":"unauthorized","apiKey":"${secret}",`
+          + `"token":"${secret}","authorization":"Bearer ${secret}",`
+          + `"body":"{\\"secret\\":\\"${secret}\\"}"}`
+      }
+
+      const { exit, logs } = yield* failWith(error, "undeclared-json-body")
+
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      const line = logs.find((entry) => String(entry.message).includes("outside its declared error schema"))
+      expect(line?.annotations.error).not.toContain(secret)
+      expect(line?.annotations.error).toContain("[REDACTED]")
+      expect(line?.annotations.error).toContain("upstream_failed")
+    }))
+
   effect("handles cycles, depth bounds, and hostile proxies without invoking user code", () =>
     Effect.gen(function*() {
       const cycle: { cause?: unknown } = {}
