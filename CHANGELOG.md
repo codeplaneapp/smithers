@@ -155,10 +155,17 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1609 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1623 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **control:** list registered triggers and their fires through a DispatchReader port ([31031e1ab7](https://github.com/smithersai/smithers/commit/31031e1ab7a27090b9bf451aaf38eece1afecdfd))
+- **server:** route the whole smithers.sh apex to one Worker ([6ce75b056b](https://github.com/smithersai/smithers/commit/6ce75b056b354341ea4c2fc43dd5694ff418c3eb))
+- **server,rpc:** serve the librarian and flows roles on Cerebras from the Worker ([30ab22b559](https://github.com/smithersai/smithers/commit/30ab22b55969b026048e96e7b4cb0201e94983f6))
+- **ui:** expand a cloud workspace row to its box's file tree ([ae73a648e5](https://github.com/smithersai/smithers/commit/ae73a648e58b5707c9a878e2738d870eb5426789))
+- **server:** serve the smithers.sh site build as the app Worker's assets ([5a7a82ab98](https://github.com/smithersai/smithers/commit/5a7a82ab989b7cef284c4ebe804becd70531eeec))
+- **site:** prerender the product app at /<owner>/<repo> as a React island ([8f17fae9f9](https://github.com/smithersai/smithers/commit/8f17fae9f93899b04bda706a11e710c50c376412))
+- **server:** list the web app's dependencies as coming soon ([9e0588f3cc](https://github.com/smithersai/smithers/commit/9e0588f3cc818cfb5b6b9f213c9d46373f331d44))
 - **server:** list the MCP TypeScript SDK and gitoxide as coming soon ([a02bc155f2](https://github.com/smithersai/smithers/commit/a02bc155f25bc2a776f1f44e841162a4fb3f5c62))
 - **server,site:** show Smithers' dependencies as coming soon beside the available card ([3cdd029ae0](https://github.com/smithersai/smithers/commit/3cdd029ae084bc6392819183321d4234a07d5784))
 - **server,rpc,ui:** answer the maintainer's recent-activity sentence from the Cloud mirror ([2710596048](https://github.com/smithersai/smithers/commit/27105960488eedd4760d380102cf2a216df08d56))
@@ -360,6 +367,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **build-cli:** let a candidate gate read the candidate it judges ([4b9a5e4b8a](https://github.com/smithersai/smithers/commit/4b9a5e4b8a1c43266764775040ec60efb7490a66))
+- **server:** stop the public catalog from feeding a GitHub rate limit ([c2bbf5d387](https://github.com/smithersai/smithers/commit/c2bbf5d38790f127e86a93610f58b82861137019))
 - **scripts:** keep a withdrawn release tag from shrinking the changelog range ([b3997f9666](https://github.com/smithersai/smithers/commit/b3997f966623ccc86c2b3813142c3deeefc09a35))
 - **server:** bound what a recommendation and its outcome may carry ([bbed344df9](https://github.com/smithersai/smithers/commit/bbed344df904fbb7ee2e0f9f76d8137a3c912de0))
 - **ui:** keep the repository path in the address bar for the page's life ([e842d4bcb3](https://github.com/smithersai/smithers/commit/e842d4bcb38aff0ef323927c9f571c42c2697875))
@@ -1073,6 +1082,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ♻️ Refactors
 
+- **ui,server,rpc:** delete the BYOK keys flows, card, seam and Worker route ([a30acb41eb](https://github.com/smithersai/smithers/commit/a30acb41eb804cc33eab2680ef7f92f5989434c7))
+- **ui:** render chat cards through a per-family renderer map ([ffc67a4c7c](https://github.com/smithersai/smithers/commit/ffc67a4c7c389d9cdf4518ef1ecebe0a4116cc83))
 - **ui:** read the registry's data tables from the namespace modules ([116d0f5247](https://github.com/smithersai/smithers/commit/116d0f5247a2ebe4c0605a34cdbd12650e81f3a5))
 - **ui:** split Flows.ts into per-namespace modules ([17bfeefce5](https://github.com/smithersai/smithers/commit/17bfeefce533135d64e137b8490ba911594a4d1c))
 - **ui:** render the app through one AppIsland component ([87eebf3e54](https://github.com/smithersai/smithers/commit/87eebf3e5421c031edf15e0588eddd8d14493881))
@@ -1125,6 +1136,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **site:** describe the shipped cron trigger and mark S.Automation as planned ([e66cfecedf](https://github.com/smithersai/smithers/commit/e66cfecedf21a924d541238bc8f7c0b2ac333c43))
 - **ui:** record the pinned repository URL exception and prove it end to end ([c4ad2147ea](https://github.com/smithersai/smithers/commit/c4ad2147ea413975eaf0706bac6f0a983994695c))
 - **site:** add Smithers Cloud CI and triggers guides and references ([a940e06dcc](https://github.com/smithersai/smithers/commit/a940e06dcc36a698165cc45ce7828d811fddba4e))
 - **platform-bun:** say the ledger records the executable, never argv ([3a0749eb55](https://github.com/smithersai/smithers/commit/3a0749eb55b62db61555fbd69f395721bc34afa8))
@@ -1481,6 +1493,8 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **test(flows):** pin the flows workspace and the release scripts in the conformance roster ([207d4ae2e2](https://github.com/smithersai/smithers/commit/207d4ae2e2a5f0e5dfaa6833cccdcaddb35fd769))
+- **style(rpc):** format the repo-onboarding activity counts schema ([e5e48629ad](https://github.com/smithersai/smithers/commit/e5e48629ad0d8ca802ef75b56afbb1a0c06ee0a2))
 - **ci(release):** lint release-auth.yml in the release workflow's actionlint step ([e57560b17e](https://github.com/smithersai/smithers/commit/e57560b17e2e5318fdb1e9d8e659ae3268d66e75))
 - **build(site):** add the React island dependencies ([862ce94cad](https://github.com/smithersai/smithers/commit/862ce94cad8d2325a5cda4864be13e780ac386a0))
 - **ci:** lint release-auth.yml with the other workflows ([7220acead2](https://github.com/smithersai/smithers/commit/7220acead2cb7ecbef60d390a476cb2eb3529c88))
