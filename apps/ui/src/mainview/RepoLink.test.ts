@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { catalogRepository, openRequestedRepo, requestedRepo, withoutRepoParam } from "./RepoLink"
+import { catalogRepository, openRequestedRepo, paramRepo, pathRepo, requestedRepo, withoutRepoParam } from "./RepoLink"
 import { createAppStore } from "./state/AppStore"
 import { createTabsController } from "./state/controller/tabs"
 import type { ControllerContext } from "./state/controller/context"
 
 /*
- * The landing page's "Open in Smithers" link lands on `/?repo=owner/name`.
- * The visitor should arrive with that repository already selected, and only
- * when the public catalog carries it: the URL is anyone's to type.
+ * A repository's app lives at `/owner/name`; the landing page's older "Open in
+ * Smithers" link lands on `/?repo=owner/name`. The visitor should arrive with
+ * that repository already selected, and only when the public catalog carries
+ * it: the URL is anyone's to type.
  */
 
 const catalog = {
@@ -38,18 +39,57 @@ const fixture = async () => {
   return { store, controller: { store, selectRepo: tabs.selectRepo } }
 }
 
-describe("requestedRepo", () => {
+describe("paramRepo", () => {
   test("reads an owner/name from the repo parameter", () => {
-    expect(requestedRepo("?repo=smithersai/smithers")).toBe("smithersai/smithers")
-    expect(requestedRepo("?auth=failed&repo=smithersai/smithers")).toBe("smithersai/smithers")
+    expect(paramRepo("?repo=smithersai/smithers")).toBe("smithersai/smithers")
+    expect(paramRepo("?auth=failed&repo=smithersai/smithers")).toBe("smithersai/smithers")
   })
 
   test("ignores an absent, empty, or malformed value", () => {
-    expect(requestedRepo("")).toBeNull()
-    expect(requestedRepo("?repo=")).toBeNull()
-    expect(requestedRepo("?repo=smithers")).toBeNull()
-    expect(requestedRepo("?repo=../../etc")).toBeNull()
-    expect(requestedRepo("?repo=https://github.com/smithersai/smithers")).toBeNull()
+    expect(paramRepo("")).toBeNull()
+    expect(paramRepo("?repo=")).toBeNull()
+    expect(paramRepo("?repo=smithers")).toBeNull()
+    expect(paramRepo("?repo=../../etc")).toBeNull()
+    expect(paramRepo("?repo=https://github.com/smithersai/smithers")).toBeNull()
+  })
+})
+
+describe("pathRepo", () => {
+  test("reads an owner/name from a two-segment path", () => {
+    expect(pathRepo("/smithersai/smithers")).toBe("smithersai/smithers")
+    expect(pathRepo("/SmithersAI/smithers.js")).toBe("SmithersAI/smithers.js")
+  })
+
+  test("answers null for the root, one segment, a trailing slash, or deeper paths", () => {
+    expect(pathRepo("/")).toBeNull()
+    expect(pathRepo("")).toBeNull()
+    expect(pathRepo("/smithersai")).toBeNull()
+    expect(pathRepo("/smithersai/")).toBeNull()
+    expect(pathRepo("/smithersai/smithers/")).toBeNull()
+    expect(pathRepo("/smithersai/smithers/issues")).toBeNull()
+    expect(pathRepo("/w/ws-1/b/main/f/frame-1")).toBeNull()
+    expect(pathRepo("/a%20b/c")).toBeNull()
+  })
+})
+
+describe("requestedRepo", () => {
+  test("the path names the repository", () => {
+    expect(requestedRepo({ pathname: "/smithersai/smithers", search: "" })).toBe("smithersai/smithers")
+  })
+
+  test("the path wins over the repo parameter", () => {
+    expect(requestedRepo({ pathname: "/smithersai/smithers", search: "?repo=someone/else" })).toBe("smithersai/smithers")
+  })
+
+  test("the repo parameter is read at the root only", () => {
+    expect(requestedRepo({ pathname: "/", search: "?repo=smithersai/smithers" })).toBe("smithersai/smithers")
+    expect(requestedRepo({ pathname: "/w/ws-1/b/main/f/frame-1", search: "?repo=smithersai/smithers" })).toBeNull()
+    expect(requestedRepo({ pathname: "/smithersai", search: "?repo=smithersai/smithers" })).toBeNull()
+  })
+
+  test("nothing is requested at the root without the parameter", () => {
+    expect(requestedRepo({ pathname: "/", search: "" })).toBeNull()
+    expect(requestedRepo({ pathname: "/", search: "?auth=failed" })).toBeNull()
   })
 })
 
@@ -73,6 +113,13 @@ describe("withoutRepoParam", () => {
   test("drops only the repo parameter and keeps the rest of the location", () => {
     expect(withoutRepoParam({ pathname: "/", search: "?repo=smithersai/smithers", hash: "" })).toBe("/")
     expect(withoutRepoParam({ pathname: "/app", search: "?tab=main&repo=a/b", hash: "#top" })).toBe("/app?tab=main#top")
+  })
+
+  test("keeps the repository path in the address bar", () => {
+    expect(withoutRepoParam({ pathname: "/smithersai/smithers", search: "", hash: "" })).toBe("/smithersai/smithers")
+    expect(withoutRepoParam({ pathname: "/smithersai/smithers", search: "?repo=someone/else", hash: "" })).toBe(
+      "/smithersai/smithers"
+    )
   })
 })
 

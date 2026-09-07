@@ -77,8 +77,9 @@ const bootProgram = (session: BootSession | undefined) =>
       if (controller.handleAuthReturn(window.location.search)) {
         window.history.replaceState(null, "", window.location.pathname)
       }
-      // The landing page's "Open in Smithers" link: `?repo=owner/name` preselects a public-catalog repository.
-      const requested = requestedRepo(window.location.search)
+      // `/owner/name` (or the landing page's `/?repo=owner/name`) preselects a public-catalog repository.
+      // The path stays in the address bar; the parameter leaves it.
+      const requested = requestedRepo(window.location)
       if (requested !== null) {
         yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
         window.history.replaceState(null, "", withoutRepoParam(window.location))

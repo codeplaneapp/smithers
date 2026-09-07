@@ -2,12 +2,14 @@ import type { FetchLike } from "@smthrs/rpc/NativeAgent"
 import type { AppController } from "./state/AppController"
 
 /*
- * The landing page's "Open in Smithers" link lands on the web app as
- * `/?repo=owner/name`. The name is honoured only when the public catalog
- * (GET /api/public/repos, the same list the landing page renders) carries it:
- * the catalog row enters the repositories collection and becomes the active
- * selection, so the first turn is about that repository. The parameter is
- * removed from the URL either way, so a reload does not reselect.
+ * A repository's app lives at `/owner/name` (https://smithers.sh/smithersai/smithers).
+ * The landing page's older "Open in Smithers" link lands on `/?repo=owner/name`.
+ * The path wins; the parameter is read only at `/`. The name is honoured only
+ * when the public catalog (GET /api/public/repos, the same list the landing
+ * page renders) carries it: the catalog row enters the repositories collection
+ * and becomes the active selection, so the first turn is about that
+ * repository. The path stays in the address bar, so a reload reselects; the
+ * parameter is removed from the URL either way, so a reload does not.
  */
 
 export const REPO_PARAM = "repo"
@@ -15,11 +17,23 @@ export const PUBLIC_REPOS_PATH = "/api/public/repos"
 
 const REPO_NAME = /^[\w.-]+\/[\w.-]+$/
 
-/** The `owner/name` the URL asks for, or null when absent or not a repository name. */
-export const requestedRepo = (search: string): string | null => {
+/** The `owner/name` a `/owner/name` path names (exactly two segments), or null for any other path. */
+export const pathRepo = (pathname: string): string | null => {
+  const match = /^\/([^/]+)\/([^/]+)$/.exec(pathname)
+  if (match === null) return null
+  const value = `${match[1]}/${match[2]}`
+  return REPO_NAME.test(value) ? value : null
+}
+
+/** The `owner/name` the `repo` parameter names, or null when absent or not a repository name. */
+export const paramRepo = (search: string): string | null => {
   const value = new URLSearchParams(search).get(REPO_PARAM)?.trim() ?? ""
   return REPO_NAME.test(value) ? value : null
 }
+
+/** The `owner/name` the URL asks for: the `/owner/name` path first, else the `repo` parameter at `/`. */
+export const requestedRepo = (location: Pick<Location, "pathname" | "search">): string | null =>
+  pathRepo(location.pathname) ?? (location.pathname === "/" ? paramRepo(location.search) : null)
 
 export interface CatalogRepository {
   /** `owner/name`, in the catalog's spelling. */
