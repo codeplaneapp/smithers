@@ -1,12 +1,12 @@
 # Smithers
 
 
-> Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
+> Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 
 
 ## Start here
 
-- [Smithers docs](https://smithers.sh/docs/): Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
+- [Smithers docs](https://smithers.sh/docs/): Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 - [Installation](https://smithers.sh/docs/installation/): Install the Smithers CLI or library, keep Effect pinned, and verify the install.
 - [Quickstart](https://smithers.sh/docs/quickstart/): Install the CLI, scaffold a flow, choose its model, and run it in your project.
 

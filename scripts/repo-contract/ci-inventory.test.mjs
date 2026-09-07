@@ -108,8 +108,8 @@ test("required CI resolves package, app, script, evaluation and fault suites to 
   }
 })
 
-test("public project copy keeps the support contract out of the one-sentence description", () => {
-  const description = "Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably."
+test("public project copy keeps the support contract out of the short description", () => {
+  const description = "Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code."
   const project = JSON.parse(readFileSync(join(root, "apps/site/src/data/project.json"), "utf8"))
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
   assert.equal(project.description, description)

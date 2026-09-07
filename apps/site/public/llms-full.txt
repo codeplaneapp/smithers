@@ -3,7 +3,7 @@
 # Smithers docs
 https://smithers.sh/docs/
 
-Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
+Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 
 Smithers is an evolution of monorepo tools like Turborepo, Nx, and Bazel: it helps make work across a codebase fast and efficient.
 

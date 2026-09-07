@@ -11,7 +11,7 @@
 
 <p align="center"><strong>Smithers enables automations to make maintaining a repository in the agentic era effortless.</strong></p>
 
-Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
+Smithers instruments and automates a code repository so changes get cheaper, faster, and smarter. Agents plan, run, and review changes through flows declared beside the code.
 
 <p align="center">
   <picture>
