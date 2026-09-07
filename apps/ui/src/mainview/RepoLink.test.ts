@@ -74,12 +74,19 @@ describe("pathRepo", () => {
     expect(pathRepo("/SmithersAI/smithers.js")).toBe("SmithersAI/smithers.js")
   })
 
-  test("answers null for the root, one segment, a trailing slash, or deeper paths", () => {
+  test("a trailing slash names the same repository", () => {
+    // A prerendered /owner/name/index.html is served at /owner/name/ too.
+    expect(pathRepo("/smithersai/smithers/")).toBe("smithersai/smithers")
+    expect(requestedRepo({ pathname: "/smithersai/smithers/", search: "" })).toBe("smithersai/smithers")
+  })
+
+  test("answers null for the root, one segment, an empty segment, or deeper paths", () => {
     expect(pathRepo("/")).toBeNull()
     expect(pathRepo("")).toBeNull()
     expect(pathRepo("/smithersai")).toBeNull()
     expect(pathRepo("/smithersai/")).toBeNull()
-    expect(pathRepo("/smithersai/smithers/")).toBeNull()
+    expect(pathRepo("/smithersai//")).toBeNull()
+    expect(pathRepo("/smithersai/smithers//")).toBeNull()
     expect(pathRepo("/smithersai/smithers/issues")).toBeNull()
     expect(pathRepo("/w/ws-1/b/main/f/frame-1")).toBeNull()
     expect(pathRepo("/a%20b/c")).toBeNull()

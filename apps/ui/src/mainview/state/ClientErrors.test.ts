@@ -20,8 +20,8 @@ import {
  *
  * The half that matters is the CONTRACT with the Worker: the path the page
  * posts to is the path the Worker routes, the biggest body this reporter can
- * build is one the route will accept — measured in the Worker's unit, UTF-8
- * bytes on the wire — and main.tsx reports through THIS module rather than
+ * build is one the route will accept, measured in the Worker's unit (UTF-8
+ * bytes on the wire), and AppIsland.tsx reports through THIS module rather than
  * through a copy of it. Every one of those can break from a change made in a
  * different file, in a way nothing else in the suite would notice: the sink
  * would simply go quiet, which looks exactly like no crashes.
@@ -38,6 +38,7 @@ const readSource = (relative: string): string => readFileSync(fileURLToPath(new 
  */
 const serverIndex = readSource("../../bun/server.ts")
 const mainSource = readSource("../main.tsx")
+const islandSource = readSource("../AppIsland.tsx")
 const watchdogSource = readSource("../StartupWatchdog.ts")
 
 /** A `const NAME = "value";` declaration in the Worker, or undefined. */
@@ -139,7 +140,9 @@ describe("the client-error reporter's contract with the local origin", () => {
     // The defect this pins: main.tsx once carried its own copy of the
     // reporter, with its own limit and its own truncation, so everything
     // asserted above was asserted about code the app never ran.
-    expect(mainSource).toContain("from \"./StartupWatchdog\"")
+    // main.tsx renders AppIsland, and AppIsland is where the watchdog is built.
+    expect(mainSource).toContain("from \"./AppIsland\"")
+    expect(islandSource).toContain("from \"./StartupWatchdog\"")
     expect(watchdogSource).toContain("from \"./state/ClientErrors\"")
     expect(watchdogSource).toContain("createClientErrorReporter(")
     expect(watchdogSource).not.toMatch(/const CLIENT_ERROR/)

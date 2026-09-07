@@ -17,9 +17,14 @@ export const PUBLIC_REPOS_PATH = "/api/public/repos"
 
 const REPO_NAME = /^[\w.-]+\/[\w.-]+$/
 
-/** The `owner/name` a `/owner/name` path names (exactly two segments), or null for any other path. */
+/**
+ * The `owner/name` a `/owner/name` path names (exactly two segments), or null
+ * for any other path. A trailing slash is the same repository: a prerendered
+ * `/owner/name/index.html` is served at `/owner/name/` by hosts that do not
+ * strip it.
+ */
 export const pathRepo = (pathname: string): string | null => {
-  const match = /^\/([^/]+)\/([^/]+)$/.exec(pathname)
+  const match = /^\/([^/]+)\/([^/]+)\/?$/.exec(pathname)
   if (match === null) return null
   const value = `${match[1]}/${match[2]}`
   return REPO_NAME.test(value) ? value : null

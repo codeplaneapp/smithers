@@ -424,27 +424,33 @@ describe("the probe's exit code moves with the deployment", () => {
 })
 
 /*
- * The producer of the stamp is apps/ui/vite.config.ts and the reader is this
- * directory; apps/ui does not depend on apps/server, so the two constants are
- * spelled twice. This holds them equal: renaming the meta tag or the asset in
- * the vite plugin reds here instead of silently retiring the probe.
+ * The producer of the stamp is apps/ui/scripts/build-stamp.ts (wired into
+ * apps/ui/vite.config.ts) and the reader is this directory; apps/ui does not
+ * depend on apps/server, so the two constants are spelled twice. This holds
+ * them equal: renaming the meta tag or the asset in the plugin reds here
+ * instead of silently retiring the probe.
  */
 describe("the probe reads what the build writes", () => {
+  const stampSource = readFileSync(
+    fileURLToPath(new URL("../../../ui/scripts/build-stamp.ts", import.meta.url)),
+    "utf8"
+  )
   const viteConfig = readFileSync(
     fileURLToPath(new URL("../../../ui/vite.config.ts", import.meta.url)),
     "utf8"
   )
 
-  test("the vite plugin emits the asset this probe fetches", () => {
-    expect(viteConfig).toContain(`const BUILD_STAMP_ASSET = "${BUILD_STAMP_PATH.slice(1)}"`)
+  test("the plugin emits the asset this probe fetches", () => {
+    expect(stampSource).toContain(`const BUILD_STAMP_ASSET = "${BUILD_STAMP_PATH.slice(1)}"`)
   })
 
-  test("the vite plugin injects the meta tag this probe reads", () => {
-    expect(viteConfig).toContain(`const BUILD_STAMP_META = "${BUILD_STAMP_META}"`)
+  test("the plugin injects the meta tag this probe reads", () => {
+    expect(stampSource).toContain(`const BUILD_STAMP_META = "${BUILD_STAMP_META}"`)
+    expect(stampSource).toContain("apply: \"build\"")
   })
 
   test("the plugin is wired into the build", () => {
+    expect(viteConfig).toContain("from \"./scripts/build-stamp\"")
     expect(viteConfig).toContain("buildStamp()")
-    expect(viteConfig).toContain("apply: \"build\"")
   })
 })

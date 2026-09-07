@@ -1,10 +1,10 @@
 import react from "@vitejs/plugin-react"
-import { execFileSync } from "node:child_process"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
 import { electrobunViteAliases } from "./.hutch/devkit/api/config/electrobun-vite"
+import { buildStamp, resolveBuildSha } from "./scripts/build-stamp"
 import { assertAcyclicChunks } from "./scripts/chunk-graph"
 
 /*
@@ -25,48 +25,11 @@ import { assertAcyclicChunks } from "./scripts/chunk-graph"
 export const here = fileURLToPath(new URL(".", import.meta.url))
 
 /*
- * CN-1: the build stamp. The built SPA is the artifact that goes stale, so it
- * must be able to state which commit it was built from. The stamp is written
- * by the build and travels inside the bundle: a meta tag on the served HTML
- * and a `__build.json` asset next to the hashed chunks.
- *
- * SMITHERS_BUILD_SHA wins so a release script stamps the sha it records;
- * GITHUB_SHA covers a CI build; otherwise the local checkout is asked. A tree
- * with no git answers "unknown".
+ * CN-1: the build stamp lives in scripts/build-stamp.ts so the smithers.sh
+ * site build can stamp the island the same way; this build wires it in below
+ * and keeps exporting it for the scripts that imported it from here.
  */
-const BUILD_STAMP_ASSET = "__build.json"
-const BUILD_STAMP_META = "smithers-build-sha"
-
-export const resolveBuildSha = (): string => {
-  const fromEnv = process.env.SMITHERS_BUILD_SHA ?? process.env.GITHUB_SHA
-  if (fromEnv !== undefined && fromEnv.trim() !== "") return fromEnv.trim()
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: here, encoding: "utf8" }).trim()
-  } catch {
-    return "unknown"
-  }
-}
-
-export const buildStamp = (): Plugin => {
-  const gitSha = resolveBuildSha()
-  const builtAt = new Date().toISOString()
-  return {
-    name: "smithers-build-stamp",
-    apply: "build",
-    transformIndexHtml: () => [
-      { tag: "meta", attrs: { name: BUILD_STAMP_META, content: gitSha }, injectTo: "head" as const },
-      { tag: "meta", attrs: { name: "smithers-build-at", content: builtAt }, injectTo: "head" as const }
-    ],
-    generateBundle() {
-      this.emitFile({
-        type: "asset",
-        fileName: BUILD_STAMP_ASSET,
-        source: `${JSON.stringify({ app: "smithers-ui", gitSha, builtAt }, null, "\t")}\n`
-      })
-    }
-  }
-}
-
+export { buildStamp, resolveBuildSha }
 
 /*
  * Guard every static output cycle, not only imports back to the entry. The
