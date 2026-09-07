@@ -1,6 +1,7 @@
 /**
- * Targets for smithers.sh: the Astro site with the landing page, the
- * download page, and the Starlight documentation under /docs.
+ * Targets for smithers.sh: the Astro site with the landing page, the /demo
+ * request page, the Starlight documentation under /docs, and the release
+ * changelogs under /changelogs.
  *
  * The media the hero plays (public/media) is recorded, not built:
  * `scripts/record-tape.sh` runs real flows through vhs, and

@@ -4,8 +4,9 @@ import starlight from "@astrojs/starlight"
 import project from "./src/data/project.json" with { type: "json" }
 
 /**
- * smithers.sh: the landing page at `/` (src/pages/index.astro), the downloads
- * page at `/download`, and the Starlight documentation at `/docs/**`.
+ * smithers.sh: the landing page at `/` (src/pages/index.astro), the demo
+ * request page at `/demo`, and the Starlight documentation at `/docs/**` with
+ * the release changelogs under `/changelogs/**`.
  *
  * Starlight content is authored under src/content/docs/docs/ so every route
  * carries the /docs prefix and the root stays a plain Astro page. Add a page

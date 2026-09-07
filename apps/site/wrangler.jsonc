@@ -4,8 +4,9 @@
   "compatibility_date": "2026-07-02",
   "workers_dev": false,
   // The whole site is static output from `astro build`: the landing page, the
-  // download page, and the Starlight docs under /docs. Assets-only, no Worker
-  // script, so a deploy is `pnpm run build && wrangler deploy`.
+  // /demo request page, the Starlight docs under /docs, and the changelogs
+  // under /changelogs. Assets-only, no Worker script, so a deploy is
+  // `pnpm run build && wrangler deploy`.
   "assets": {
     "directory": "dist",
     "not_found_handling": "404-page",
