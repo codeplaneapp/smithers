@@ -252,6 +252,10 @@ export const summarise = (options) => {
     waits: waitRows.length,
     waitSeconds: waitRows.length === 0 ? 0 : Math.max(...waitRows.map((waitRow) => waitRow.waitedSeconds ?? 0)),
     torn: manifest.torn,
+    // Interior lines that do not parse. A record torn by a kill becomes one of
+    // these the moment the next append closes it, so a reader that drops them
+    // silently is a reader that hides the crash and the row it cost.
+    malformed: manifest.malformed,
     notes: manifest.notes,
     sessions: manifest.headers.length,
     freeMiB: options.freeMiB,
@@ -441,6 +445,15 @@ export const renderReport = (summary) => {
       "> The manifest's last line was torn by a kill and could not be parsed. Every complete row",
       "> before it is intact and this report is built from those; the instance that line belonged to",
       "> re-runs on the next resume.",
+      ""
+    )
+  }
+  if (summary.malformed.length > 0) {
+    lines.push(
+      `> **${summary.malformed.length} manifest line(s) could not be parsed** and are not counted anywhere in`,
+      `> this report: ${summary.malformed.map((entry) => `line ${entry.line}`).join(", ")}. A record torn by a`,
+      "> kill reads this way once the next append closes it, and so does a hand edit. The bytes are",
+      "> still in `manifest.jsonl`; every row before and after them is intact.",
       ""
     )
   }

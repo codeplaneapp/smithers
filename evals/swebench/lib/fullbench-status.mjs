@@ -83,6 +83,11 @@ if (summary.notes.length > 0) out.push(`  notes      ${summary.notes.length} (se
 if (summary.torn > 0) {
   out.push("  ledger     the last line was torn by a kill; that instance re-runs on resume")
 }
+if (summary.malformed.length > 0) {
+  out.push(
+    `  ledger     ${summary.malformed.length} unparseable line(s); nothing counts them (see fullbench/report.md)`
+  )
+}
 out.push("")
 out.push(`  report     ${manifestPath.replace(/manifest\.jsonl$/, "report.md")}`)
 out.push(`  progress   ${manifestPath.replace(/manifest\.jsonl$/, "progress.md")}`)

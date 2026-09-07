@@ -1251,7 +1251,11 @@ rather than merging into them, so a patch size or a verdict from the attempt tha
 died cannot survive into the attempt that replaced it.
 
 A line torn in half by a `kill -9` is read as no line at all; every complete row
-before it keeps its meaning, and the instance that line belonged to re-runs.
+before it keeps its meaning, and the instance that line belonged to re-runs. The
+next append closes that fragment with a newline before it writes, so the resumed
+driver's own row is a whole line rather than the second half of a broken one, and
+the fragment is then reported as an unparseable line in `report.md` and on the
+status screen rather than dropped in silence.
 
 A re-run also deletes the evaluator's own log directory for that instance. The
 official evaluator skips any instance that already has a `report.json` under the

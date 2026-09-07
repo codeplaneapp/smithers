@@ -99,6 +99,60 @@ try {
   assert.deepEqual(read(join(temporary, "absent.jsonl")).states.size, 0)
 
   // -----------------------------------------------------------------------
+  // Appending after a torn tail
+  // -----------------------------------------------------------------------
+  // The kill that tore the last line does not end the benchmark; the resumed
+  // driver appends to the same file. A row written straight after an
+  // unterminated fragment fuses with it into one line that parses as neither,
+  // and the row that was just fsynced — a verdict, or an attempt the card was
+  // charged for — is the half that disappears from every reader while the
+  // fragment survives. The appender closes the fragment first, and the report
+  // says the line is there rather than dropping it in silence.
+  const appendPath = join(temporary, "append.jsonl")
+  const append = (path, row) =>
+    spawnSync(
+      "node",
+      [join(root, "lib", "manifest-append.mjs"), path, JSON.stringify(row)],
+      { encoding: "utf8" }
+    )
+  writeFileSync(
+    appendPath,
+    [
+      JSON.stringify({ kind: "header", at: NOW, subject: "s1", jobs: 2, budgetUsd: 600 }),
+      JSON.stringify({ kind: "instance", id: "c__1", state: "ran", at: NOW + 1, cost: { usd: 7 } }),
+      // Torn by the kill: the record stops mid-write, with no newline after it.
+      "{\"kind\":\"instance\",\"id\":\"d__2\",\"state\":"
+    ].join("\n")
+  )
+  assert.equal(read(appendPath).torn, 1, "the fixture starts from a torn tail")
+  const resumed = append(appendPath, { kind: "instance", id: "e__3", state: "ran", at: NOW + 2, cost: { usd: 20 } })
+  assert.equal(resumed.status, 0, resumed.stderr)
+  const afterTear = read(appendPath)
+  assert.ok(afterTear.states.has("e__3"), "the row appended after a torn tail is still a row")
+  assert.equal(afterTear.states.get("e__3").cost.usd, 20)
+  assert.equal(afterTear.torn, 0, "the fragment is closed, so nothing is torn any more")
+  assert.deepEqual(afterTear.malformed.map((entry) => entry.line), [3], "the fragment is reported, not hidden")
+  const tornBill = summarise({ manifest: appendPath, now: NOW + 3 * HOUR, total: 3 })
+  assert.equal(tornBill.spentUsd, 27, "both paid attempts are on the bill")
+  assert.deepEqual(tornBill.malformed.map((entry) => entry.line), [3])
+  assert.match(renderReport(tornBill), /\*\*1 manifest line\(s\) could not be parsed\*\*/)
+
+  // A file that already ends in a newline gets no blank line, so no line number
+  // shifts under the reader that just reported one.
+  const afterNote = append(appendPath, { kind: "note", at: NOW + 4, note: "resumed" })
+  assert.equal(afterNote.status, 0, afterNote.stderr)
+  const noted = read(appendPath)
+  assert.equal(noted.notes.length, 1)
+  assert.deepEqual(noted.malformed.map((entry) => entry.line), [3], "no line was inserted or shifted")
+
+  // A ledger that does not exist yet starts with the row, not with a newline.
+  const freshPath = join(temporary, "fresh.jsonl")
+  const header = { kind: "header", at: NOW, subject: "s1", jobs: 1 }
+  const fresh = append(freshPath, header)
+  assert.equal(fresh.status, 0, fresh.stderr)
+  assert.equal(readFileSync(freshPath, "utf8"), `${JSON.stringify(header)}\n`)
+
+  // -----------------------------------------------------------------------
   // The bill counts attempts; the fold counts instances
   // -----------------------------------------------------------------------
   // The same replacement that keeps a dead attempt's verdict out of the ledger
