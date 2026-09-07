@@ -139,7 +139,16 @@ export const AuditDetail = Schema.Struct({
    * dropped. Optional so a detail written before this field still decodes.
    */
   pendingChildren: Schema.optionalKey(Schema.Array(Schema.NonEmptyString)),
-  failure: Schema.optionalKey(Schema.String)
+  failure: Schema.optionalKey(Schema.String),
+  /**
+   * The rollback error written with the `terminal_failure` phase, when the
+   * failure branch could not undo the compensations it had already performed.
+   *
+   * Its presence is the machine-readable form of "the `compensation` on this
+   * detail is still applied to the outside world": a `rolled_back` detail has
+   * had its receipts undone and drops them, while this one keeps them.
+   */
+  rollbackFailure: Schema.optionalKey(Schema.String)
 })
 /**
  * The value form of {@link AuditDetail}.
@@ -1103,12 +1112,21 @@ export const rewind = (
               const failureMessage = rollbackFailure === undefined
                 ? failure.message
                 : `${failure.message}; rollback failed: ${String(rollbackFailure)}`
-              const { compensation: _, ...rolledBack } = currentDetail
+              // A rollback that SUCCEEDED already stripped `compensation` above,
+              // before the restoration that can fail. A rollback that FAILED
+              // leaves those receipts applied, so they stay on the detail. This
+              // audit closes terminal, recovery only drains `in_progress` rows,
+              // and the only writer of the receipt table, `archiveAndTruncate`,
+              // never ran on this path. Stripping them here deleted the sole
+              // durable record of which compensations still stand and which
+              // pre-rewind change id to restore, so a later rewind at the same
+              // frame compensated the same effect a second time.
               detail = {
-                ...rolledBack,
+                ...currentDetail,
                 phase: rollbackFailure === undefined ? "rolled_back" : "terminal_failure",
                 cancelledChildren: [...cancelledChildren],
-                failure: failureMessage
+                failure: failureMessage,
+                ...(rollbackFailure === undefined ? {} : { rollbackFailure: String(rollbackFailure) })
               }
               yield* Effect.ignore(
                 store.updateAudit(auditId, {

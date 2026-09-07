@@ -103,6 +103,14 @@ was rolled back before the failure escaped.
 **What to change.** Fix the handler or the workspace, then rewind again. The
 audit row records the phase it reached and the receipts it had collected.
 
+When the rollback itself fails, the audit closes `failed` at phase
+`terminal_failure`, records the rollback error in `rollbackFailure`, and keeps
+its `compensation` receipts. Those compensations are still applied to the
+outside world. Undo them from the receipts before rewinding the same frame
+again, or the next rewind compensates the same effects a second time. A
+`rolled_back` audit is the opposite case: its receipts were undone, so the
+detail no longer carries them.
+
 ## fence_lost
 
 **What happened.** Ownership of the run, or of an attached child, was

@@ -983,6 +983,16 @@ describe("Rewind protocol fault matrix", () => {
         status: "failed",
         detail: { phase: "terminal_failure", failure: expect.stringContaining("rollback failed") }
       })
+      // The rollback failed, so the revert this rewind performed STANDS. The
+      // terminal audit is the only durable record of it: recovery drains
+      // `in_progress` rows and `archiveAndTruncate`, the only writer of the
+      // receipt table, never ran. Stripping `compensation` here left an
+      // operator no way to see which compensations are still applied.
+      const terminal = store.state().audits[0]!.detail as Rewind.AuditDetail
+      expect(terminal.compensation?.handlerReceipts).toHaveLength(1)
+      expect(terminal.compensation?.handlerReceipts[0]?.effect.id).toBe("send")
+      expect(terminal.rollbackFailure).toContain("rewind rollback operation(s) failed")
+      expect(terminal.failure).toContain(`rollback failed: ${terminal.rollbackFailure}`)
       expect(store.state().records).toEqual(records())
     }))
 
