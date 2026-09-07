@@ -1,10 +1,12 @@
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
-import type { PublicRepoCatalog, PublicRepoStats } from "./publicRepoCatalog"
+import type { PublicRepoCatalog, PublicRepoStats, PublicRepository } from "./publicRepoCatalog"
 
 interface Dependencies {
   readonly fetch: (request: Request) => Promise<Response>
   readonly now: () => number
   readonly cache: () => Pick<Cache, "match" | "put"> | undefined
+  /** The curated roster; tests pass a larger one to exercise the multi-repo fetch. */
+  readonly repos?: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url">>
 }
 
 const headers = {
@@ -40,6 +42,7 @@ const parseStats = (value: unknown, name: string): PublicRepoStats | null => {
  * Edge caching and an in-flight join bound GitHub traffic on this public page.
  */
 export const createPublicReposHandler = (deps: Dependencies) => {
+  const roster = deps.repos ?? AVAILABLE_REPOS
   let snapshot: { body: string; expiresAt: number } | undefined
   let pending: Promise<void> | undefined
 
@@ -53,7 +56,7 @@ export const createPublicReposHandler = (deps: Dependencies) => {
         return
       }
     }
-    const repos = await Promise.all(AVAILABLE_REPOS.map(async (repo) => {
+    const repos = await Promise.all(roster.map(async (repo) => {
       let stats: PublicRepoStats | null = null
       try {
         const response = await deps.fetch(new Request(`https://api.github.com/repos/${repo.name}`, {

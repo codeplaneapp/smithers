@@ -9,8 +9,8 @@ never borrow a user's bearer token or cookie.
 
 `GET /api/public/repos` is the public site's catalog, served by the app Worker
 at `https://canary.smithers.sh`. The shared roster in
-`src/publicRepoCatalog.ts` lists `smithersai/smithers` first, then its direct
-production dependencies (`wevm/incur`, `Effect-TS/effect`). The response keeps
+`src/publicRepoCatalog.ts` lists `smithersai/smithers` alone at launch. The
+roster grows as maintainers claim their repositories, and the response keeps
 the roster order. Repository requests do not change this roster.
 
 The endpoint fetches public GitHub repository metadata on the server, one
