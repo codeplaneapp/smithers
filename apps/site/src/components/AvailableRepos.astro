@@ -23,7 +23,7 @@ const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").r
         <div class="card-body">
           <h3 id={`repo-title-${index}`}>{repo.title}</h3>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
-          <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open in Smithers <span aria-hidden="true">→</span></a>
+          <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>
           <dl class="stats" aria-busy="true" data-stats>
             <div><dt>Stars</dt><dd data-stat="stars">—</dd></div>
             <div><dt>Forks</dt><dd data-stat="forks">—</dd></div>

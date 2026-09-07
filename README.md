@@ -9,7 +9,7 @@
 ╚══════╝╚═╝     ╚═╝╚═╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
 </pre>
 
-<p align="center"><strong>Smithers instruments and automates your code repo so changes get cheaper, faster, and smarter.</strong></p>
+<p align="center"><strong>Smithers enables automations to make maintaining a repository in the agentic era effortless.</strong></p>
 
 Smithers is an agentic workflow framework for defining workflows in simple TypeScript configuration files and executing them quickly, durably, and reliably.
 

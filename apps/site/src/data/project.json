@@ -6,7 +6,7 @@
     "uiCoverage": "Offline Chromium tests cover the included web UI.",
     "separateAcceptance": "Packaged desktop and hosted deployments require separate acceptance evidence."
   },
-  "tagline": "Smithers instruments and automates your code repo so changes get cheaper, faster, and smarter.",
+  "tagline": "Smithers enables automations to make maintaining a repository in the agentic era effortless.",
   "animation": {
     "dark": "/images/how-smithers-works.gif",
     "light": "/images/how-smithers-works-light.gif",
