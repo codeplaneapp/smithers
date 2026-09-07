@@ -134,7 +134,14 @@ export function checkBuiltSite(root, requiredReferences = []) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const root = join(siteRoot, "dist")
-  const result = checkBuiltSite(root, await releaseReferences(resolve(siteRoot, "../..")))
+  // Keep links indexed by the former Mintlify site working after the cutover.
+  // The captured sitemap is independent of _redirects, so deleting an alias
+  // cannot silently remove the URL from this check as well.
+  const legacy = JSON.parse(readFileSync(join(siteRoot, "src/data/mintlify-paths.json"), "utf8"))
+  const result = checkBuiltSite(root, [
+    ...await releaseReferences(resolve(siteRoot, "../..")),
+    ...legacy.paths.flatMap((path) => path === "/" ? [path] : [path, path + "/"])
+  ])
   for (const name of ["llms.txt", "llms-full.txt"]) {
     if (
       !existsSync(join(root, name)) ||
@@ -145,7 +152,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   for (const failure of result.failures) console.error(failure)
   console.log(
-    `check-built-site: ${result.pageCount} pages, ${result.requiredReferenceCount} release URLs, ${result.failures.length} failures`
+    `check-built-site: ${result.pageCount} pages, ${result.requiredReferenceCount} required URLs, ${result.failures.length} failures`
   )
   if (result.failures.length) process.exitCode = 1
 }
