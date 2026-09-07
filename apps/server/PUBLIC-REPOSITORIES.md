@@ -31,6 +31,14 @@ The Astro card fetches at runtime. Set `PUBLIC_AVAILABLE_REPOS_URL` at site
 build time to select a preview app backend. Deploy the app Worker before the
 site so the public endpoint is present when the card loads.
 
+Each card's primary link opens the repository in the web app at
+`<PUBLIC_APP_ORIGIN>/?repo=owner/name`; the default origin is
+`https://canary.smithers.sh`. The web app honours the name only when this
+catalog carries it, makes that repository the active selection, and states it
+as the active repository in the agent's per-turn runtime context. It strips
+the `repo` parameter from the URL either way, so a reload does not reselect.
+Set `PUBLIC_APP_ORIGIN` at site build time to point the cards at a preview app.
+
 ## Existing repository APIs
 
 Anonymous GETs to the app's repository metadata, contents, topics, stargazers,

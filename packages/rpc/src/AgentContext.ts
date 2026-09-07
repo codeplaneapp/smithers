@@ -147,6 +147,14 @@ export const AgentRuntimeContextSchema = z.object({
     )
     .optional(),
   /*
+   * The selected repository, as `owner/name`: the one `repo.select` or the
+   * landing page's `?repo=owner/name` link chose. A bare repo-scoped command
+   * acts on it, and "this repo" in a first message means it. Null when
+   * nothing is selected; optional so a boundary built before this field
+   * still validates the payload.
+   */
+  activeRepository: z.string().nullable().optional(),
+  /*
    * Sign-in IS the GitHub connector — one act, one truth (Wave 10, §2a′):
    * a valid GitHub session means the GitHub connector IS connected, so the
    * model never routes a signed-in user toward "connecting GitHub" again.
@@ -269,6 +277,13 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
         }`
       )
     }
+  }
+  if (context.activeRepository !== undefined) {
+    lines.push(
+      context.activeRepository === null
+        ? "- Active repository: none selected."
+        : `- Active repository: ${context.activeRepository}. This is the selected repository: a bare repo-scoped command acts on it, and "this repo" in the user's message means it.`
+    )
   }
   if (context.github.connected) {
     const loaded = typeof context.github.repositories === "number"

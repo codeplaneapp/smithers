@@ -26,6 +26,20 @@ export const splitTrailingRepo = (
   return { rest: text }
 }
 
+/**
+ * The `owner/name` the active selection names: the selected repository, or
+ * the repository behind the selected working copy. Null when nothing is
+ * selected or the selection is a local-only checkout.
+ */
+export const activeRepositoryId = (store: AppStore): string | null => {
+  const key = store.session().activeRepoKey ?? null
+  const selection = key === null ? null : parseRepoSelection(key)
+  if (selection === null) return null
+  if ("repoId" in selection) return selection.repoId
+  const copy = store.collections.workingCopies.get(selection.localCopyId)
+  return copy !== undefined && REPO_TOKEN.test(copy.repoId) ? copy.repoId : null
+}
+
 /** The resolved target repository, or the honest error stating the choice. */
 export const resolveTargetRepo = (
   store: AppStore,
@@ -42,13 +56,8 @@ export const resolveTargetRepo = (
    * repository, the selected repository, or a local-only checkout. A
    * single loaded repository is the target when nothing is selected.
    */
-  const key = store.session().activeRepoKey ?? null
-  const selection = key === null ? null : parseRepoSelection(key)
-  if (selection !== null) {
-    if ("repoId" in selection) return { repo: selection.repoId }
-    const copy = store.collections.workingCopies.get(selection.localCopyId)
-    if (copy !== undefined && REPO_TOKEN.test(copy.repoId)) return { repo: copy.repoId }
-  }
+  const active = activeRepositoryId(store)
+  if (active !== null) return { repo: active }
   const loaded = [...store.collections.repositories.values()]
   if (loaded.length === 1) return { repo: loaded[0]!.id }
   if (loaded.length === 0) {

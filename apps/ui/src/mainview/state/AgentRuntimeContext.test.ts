@@ -157,6 +157,30 @@ describe("per-turn runtime context", () => {
     expect(limitations.some((line) => line.includes("pure-web client cannot connect"))).toBe(true)
   })
 
+  test("the selected repository rides the context, so a plain first message can be about it", async () => {
+    const store = await webStore()
+    const requests: StartAgentTurnRequest[] = []
+    const controller = createAppController(store, unavailableRepositories, recordingAgent(requests))
+
+    controller.send("what is this?")
+    await settled()
+    expect(requests[0]?.context?.activeRepository).toBeNull()
+    expect(renderAgentRuntimeContext(requests[0]?.context as AgentRuntimeContext)).toContain("- Active repository: none selected.")
+
+    // The landing page's `?repo=` boot path: the catalog row joins the inventory, then repo.select names it.
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: null }]
+    })
+    expect(await controller.selectRepo("smithersai/smithers")).toBeUndefined()
+    controller.send("what does this repo do?")
+    await settled()
+
+    expect(requests[1]?.context?.activeRepository).toBe("smithersai/smithers")
+    expect(renderAgentRuntimeContext(requests[1]?.context as AgentRuntimeContext)).toContain("- Active repository: smithersai/smithers.")
+  })
+
   test("Smithers is the first tab and sees every other one: the context lists the tabs and their status", async () => {
     const store = await webStore()
     const requests: StartAgentTurnRequest[] = []

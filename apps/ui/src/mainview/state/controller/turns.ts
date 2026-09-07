@@ -20,6 +20,7 @@ import {
   runLaunchCommandOf,
   toolResultLaunchedRun
 } from "../RunClaims"
+import { activeRepositoryId } from "../RepoContext"
 import { WORLD_BODY_BUDGET, worldContextDocuments } from "../WorldContext"
 import { downloadUrlOf } from "./app"
 import type { ActiveTurn, ControllerContext, PendingToolCall } from "./context"
@@ -164,6 +165,12 @@ export const createTurnController = (
         branch: repo.git?.branch ?? null,
         smithers: repo.smithers.detected
       })),
+      /*
+       * The selection `repo.select` (or the landing page's `?repo=` link)
+       * made. Without it the model learned the choice only through
+       * repo-scoped tool calls, never from a plain first message.
+       */
+      activeRepository: activeRepositoryId(store),
       /*
        * Sign-in IS the GitHub connector (§2a′): connection truth derives
        * from the validated session, never from the legacy local-connector

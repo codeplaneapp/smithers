@@ -151,6 +151,18 @@ describe("renderAgentRuntimeContext", () => {
     ).toBe(true)
   })
 
+  test("names the active repository, says when none is selected, and stays silent for a client without the field", () => {
+    expect(renderAgentRuntimeContext(contextFixture({ activeRepository: "smithersai/smithers" }))).toContain(
+      "- Active repository: smithersai/smithers."
+    )
+    expect(renderAgentRuntimeContext(contextFixture({ activeRepository: null }))).toContain(
+      "- Active repository: none selected."
+    )
+    expect(renderAgentRuntimeContext(contextFixture())).not.toContain("Active repository")
+    expect(AgentRuntimeContextSchema.safeParse(contextFixture({ activeRepository: "smithersai/smithers" })).success)
+      .toBe(true)
+  })
+
   test("carries the honest capabilities and limitations verbatim", () => {
     const rendered = renderAgentRuntimeContext(contextFixture())
     expect(rendered).toContain("Hold a streaming conversation in this chat")
