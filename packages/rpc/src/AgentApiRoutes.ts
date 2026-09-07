@@ -161,6 +161,20 @@ export const WORKFLOW_PROVISION_PATH = "/api/workflow/provision"
  */
 export const WORKFLOW_RPC_PATH = "/api/workflow/rpc"
 /*
+ * The dispatchers a repository's runs wait on: its durable trigger
+ * registrations (cron schedules today), one row each with the raw schedule,
+ * the flow it launches, and its state. The gateway relays no trigger
+ * procedure yet, so the Worker answers an honest empty list with a `reason`
+ * until it does; the client renders that reason, never invented rows.
+ */
+/**
+ * The workflow triggers route shared by server and client.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const WORKFLOW_TRIGGERS_PATH = "/api/workflow/triggers"
+/*
  * The chain backend's model relay (DESIGN.md §14, decision D1): the browser
  * runs the real @smthrs/model provider wire against this path; the Worker
  * session-gates the call, injects the provider key, and streams the provider's

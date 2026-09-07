@@ -2,11 +2,14 @@ import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import { resolveTargetRepo } from "../RepoContext"
+import { readTriggers } from "../seams/TriggersSeam"
 import { ZERO_BALANCE_EXHAUSTED_TEXT } from "./failures"
 
 export interface WorkflowController {
   readonly createWorkflow: (description: string, repo?: string) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
+  /** The dispatchers waiting on the repository: its triggers, as an embedded card. */
+  readonly listTriggers: (repo?: string) => Promise<string | void | { readonly value: string }>
   /** The Flows pane: the surface switch, and the same listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -380,6 +383,42 @@ export const createWorkflowController = (
   }
 
   /*
+   * The dispatchers (triggers.list): the events the repository's runs wait
+   * for. The read is the Worker's own route rather than a relayed gateway
+   * procedure (the gateway relays none for triggers yet), so no workspace is
+   * provisioned for it; the route answers an empty list with its reason on a
+   * deployment that cannot read the store, and the card states that reason.
+   */
+  const listTriggers = async (repoArg?: string): Promise<string | void | { readonly value: string }> => {
+    const guard = workflowIdentityGuard()
+    if (guard !== undefined) return guard
+    const target = workflowTargetRepo(repoArg)
+    if ("error" in target) return target.error
+    const repo = target.repo
+    const list = await readTriggers(boundedFetch, baseUrl, repo)
+    if (typeof list === "string") return list
+    const cardId = `trigger-list-${repo}`
+    const existing = store.collections.cards.get(cardId)
+    const card: Card = {
+      id: cardId,
+      kind: "trigger-list",
+      title: `Triggers — ${repo}`,
+      status: "active",
+      createdAt: existing?.createdAt ?? Date.now(),
+      ordinal: nextTranscriptOrdinal(),
+      payload: { repo, ...(list.reason === undefined ? {} : { reason: list.reason }), triggers: [...list.triggers] }
+    }
+    store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
+    return {
+      value: list.triggers.length === 0
+        ? `No triggers on ${repo}.${list.reason === undefined ? "" : ` ${list.reason}`}`
+        : `${list.triggers.length} trigger${list.triggers.length === 1 ? "" : "s"} on ${repo}: ${
+          list.triggers.map((trigger) => `${trigger.id} runs ${trigger.flowId}`).join(", ")
+        }.`
+    }
+  }
+
+  /*
    * Ask 5 (will, 2026-09-02): "where it says connect chat and world an option
    * should also be flows which should allow us to look at flows". The pane is
    * the flow.list card's rows, so opening it IS running that list — one seam,
@@ -535,6 +574,7 @@ export const createWorkflowController = (
   return {
     createWorkflow,
     listWorkspaceWorkflows,
+    listTriggers,
     showFlows,
     runWorkflow,
     chooseWorkflowRepo,

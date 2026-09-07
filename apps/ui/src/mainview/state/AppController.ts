@@ -147,6 +147,8 @@ export interface AppController {
     repo?: string
   ) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
+  /** The dispatchers waiting on the repository (triggers.list). */
+  readonly listTriggers: WorkflowController["listTriggers"]
   /** Ask 5: the Flows pane — the surface switch and the listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -830,6 +832,7 @@ export const createAppController = (
   const {
     createWorkflow,
     listWorkspaceWorkflows,
+    listTriggers,
     showFlows,
     runWorkflow,
     chooseWorkflowRepo,
@@ -1087,6 +1090,7 @@ export const createAppController = (
     openBrowser,
     createWorkflow,
     listWorkspaceWorkflows,
+    listTriggers,
     showFlows,
     runWorkflow,
     chooseWorkflowRepo,
@@ -1395,6 +1399,7 @@ export const createAppController = (
     openBrowser,
     createWorkflow,
     listWorkspaceWorkflows,
+    listTriggers,
     showFlows,
     runWorkflow,
     chooseWorkflowRepo,

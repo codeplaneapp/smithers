@@ -520,6 +520,16 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     }),
     handler: ({ name, repo }) => actions.runWorkflow(name, repo)
   }),
+  flow({
+    /* The dispatchers: what the repository's runs wait for. A read, so the agent lists it freely. */
+    name: "triggers.list",
+    summary: "List the triggers waiting on your workspace",
+    runtime: ["cloud"],
+    requires: ["signed-in"],
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.listTriggers(repo)
+  }),
   /*
    * Lane runs — the run lifecycle beyond launch.
    *

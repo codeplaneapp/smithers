@@ -491,6 +491,7 @@ describe("command registry bindings", () => {
       "flow.run.retry",
       "flow.list",
       "flow.run",
+      "triggers.list",
       "runs.list",
       "runs.open",
       "runs.resume",

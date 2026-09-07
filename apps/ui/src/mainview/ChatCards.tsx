@@ -43,6 +43,7 @@ import { RunTimelineCardBody } from "./cards/RunTimelineCard"
 import { ApprovalsInboxCardBody, RunListCardBody } from "./cards/RunsCards"
 import { RepoCardBody, TargetRunCardBody, TargetsCardBody } from "./cards/TargetCards"
 import { ThemePickerCardBody } from "./cards/ThemePickerCard"
+import { TriggerListCardBody } from "./cards/TriggersCard"
 import type { Card, WorldDocument } from "./state/AppState"
 import { timeLabel as clockLabel } from "./Timestamps"
 
@@ -107,7 +108,7 @@ export const pillStatus = (card: Card): string => {
     if (card.payload.phase === "quiet" || card.payload.phase === "stopped") return card.payload.phase
     return "running"
   }
-  if (card.kind === "workflow-list") return "done"
+  if (card.kind === "workflow-list" || card.kind === "trigger-list") return "done"
   /* Lane runs: the inboxes are listings — they settle the moment they render. */
   if (card.kind === "run-list" || card.kind === "approvals-inbox") return "done"
   if (card.kind === "repo-import") {
@@ -1117,6 +1118,7 @@ export function CardView({
             <ApprovalsInboxCardBody card={card} onDecideApproval={onDecideApproval} /> :
             null}
           {card.kind === "workflow-list" ? <WorkflowListCardBody card={card} onRunWorkflow={onRunWorkflow} /> : null}
+          {card.kind === "trigger-list" ? <TriggerListCardBody card={card} /> : null}
           {card.kind === "workflow-repo" ?
             <WorkflowRepoCardBody card={card} onChooseWorkflowRepo={onChooseWorkflowRepo} /> :
             null}

@@ -16,7 +16,8 @@ import {
   TOOLS_BROWSER_FETCH_PATH,
   TURN_PATH,
   WORKFLOW_PROVISION_PATH,
-  WORKFLOW_RPC_PATH
+  WORKFLOW_RPC_PATH,
+  WORKFLOW_TRIGGERS_PATH
 } from "@smthrs/rpc/AgentApiRoutes"
 import { APP_API_VERSION, APP_BOOTSTRAP_PATH } from "@smthrs/rpc/AppBootstrap"
 import { AgentRuntimeContextSchema, composeAgentInstructions } from "@smthrs/rpc/AgentContext"
@@ -47,6 +48,7 @@ import type { TurnLimitNamespace } from "./turnLimit"
 import { PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
 import { isPublicRepositoryRead, readPublicRepository } from "./publicRepositoryReads"
+import { workflowTriggers } from "./workflowTriggers"
 
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
@@ -1984,6 +1986,21 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
   return json(200, frame)
 }
 
+/**
+ * The dispatchers waiting on one repository. The same session gate as every
+ * workflow route: the list is the caller's own workspace state. See
+ * workflowTriggers.ts for why the answer is empty on this deployment.
+ */
+const handleWorkflowTriggers = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
+  const session = await requireWorkflowSession(request, env)
+  if (session instanceof Response) return session
+  const repo = parseWorkflowRepo(url.searchParams.get("repo") ?? undefined)
+  if (repo === undefined) {
+    return json(400, { status: "error", message: "Query must name the repository as ?repo=owner/repo." })
+  }
+  return json(200, workflowTriggers(repo))
+}
+
 const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") || isRetiredGatewayRoute(pathname)
 
 /*
@@ -2444,6 +2461,12 @@ export default {
         return json(405, { status: "error", message: "Method not allowed." })
       }
       return handleWorkflowRpc(request, env)
+    }
+    if (url.pathname === WORKFLOW_TRIGGERS_PATH) {
+      if (request.method !== "GET") {
+        return json(405, { status: "error", message: "Method not allowed." })
+      }
+      return handleWorkflowTriggers(request, env, url)
     }
     if (url.pathname === TOOLS_BROWSER_FETCH_PATH) {
       if (request.method !== "POST") {

@@ -661,6 +661,30 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
+   * The dispatchers a repository's runs wait on (triggers.list): one row per
+   * durable trigger registration, carrying the raw schedule the card puts in
+   * words, the flow it launches, and its state. `reason` says why the list is
+   * empty when the store could not be read; rows are never invented.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("trigger-list"),
+    payload: z.object({
+      repo: z.string(),
+      reason: z.string().optional(),
+      triggers: z.array(
+        z.object({
+          id: z.string(),
+          flowId: z.string(),
+          cron: z.string(),
+          timezone: z.string().optional(),
+          enabled: z.boolean(),
+          lastFiredAt: z.number().optional()
+        })
+      )
+    })
+  }),
+  /*
    * Lane runs §2 — the run inbox: every run on the workspace, one summary row
    * each, with the filters the listing was cut at so the card states what it
    * shows. A row opens its run card; the filters are the flow's arguments,

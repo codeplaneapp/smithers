@@ -20,12 +20,14 @@ import {
   Plus,
   RotateCcw,
   Sparkles,
+  Timer,
   Trash2,
   Workflow
 } from "lucide-react"
 import { lazy, Suspense, useRef, useState } from "react"
 import type { PointerEvent as ReactPointerEvent } from "react"
 import { CardView, WorkflowListCardBody } from "./ChatCards"
+import { TriggerListCardBody } from "./cards/TriggersCard"
 import { Composer } from "./Composer"
 import { ConnectorsSurface } from "./ConnectorsSurface"
 import { useController } from "./ControllerContext"
@@ -184,6 +186,14 @@ function App() {
       (latest, card) => (latest === undefined || card.ordinal > latest.ordinal ? card : latest),
       undefined
     )
+  /* The dispatchers beside the flows: the newest triggers.list card, rendered through its own rows. */
+  const triggersCard = cardRows
+    .filter((card): card is Extract<Card, { kind: "trigger-list" }> => card.kind === "trigger-list")
+    .reduce<Extract<Card, { kind: "trigger-list" }> | undefined>(
+      (latest, card) => (latest === undefined || card.ordinal > latest.ordinal ? card : latest),
+      undefined
+    )
+  const canListTriggers = controller.commands.find("triggers.list") !== undefined
   const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
   const pendingWorldDelete = worldDocuments.find(
     (document) => document.id === (session.pendingWorldDeleteId ?? null)
@@ -813,7 +823,23 @@ function App() {
                 subtitle={flowsCard?.payload.repo ?? ""}
                 closeCommand="chat"
                 onClose={() => controller.runCommand("chat")}
-              />
+              >
+                {/* The button door of triggers.list: the same registry entry the slash and the agent run. */}
+                {canListTriggers ?
+                  (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-flow="triggers.list"
+                      data-testid="flows-triggers"
+                      onClick={() => controller.runCommand("triggers.list")}
+                    >
+                      <Timer size={14} aria-hidden="true" />
+                      Triggers
+                    </Button>
+                  ) :
+                  null}
+              </SurfaceHeader>
               <div className="flows-content">
                 {flowsCard === undefined ?
                   null :
@@ -823,6 +849,7 @@ function App() {
                       onRunWorkflow={(name) => controller.runCommandArgs("flow.run", name)}
                     />
                   )}
+                {triggersCard === undefined ? null : <TriggerListCardBody card={triggersCard} />}
               </div>
             </section>
           ) :

@@ -241,6 +241,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "flow.run.stop-all": (args) => repoOnly("flow.run.stop-all", args),
   "approvals.open": (args) => required("runId", args, "approvals.open needs a run id"),
   "flow.list": (args) => repoOnly("flow.list", args),
+  "triggers.list": (args) => repoOnly("triggers.list", args),
   "flow.run": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("flow.run takes a workflow name and optionally an owner/repo")
