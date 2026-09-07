@@ -27,6 +27,10 @@ const promiseEffect = <A>(label: string, run: () => Promise<A>) =>
  */
 const bootProgram = (session: BootSession | undefined) =>
   Effect.gen(function*() {
+    // Read the entry URL before the controller exists: creating it installs the
+    // frame history, which replaces /owner/name with the /w/.../f/... pointer
+    // within the first frame, long before identity has loaded.
+    const requested = yield* Effect.sync(() => requestedRepo(window.location))
     const http = yield* Effect.sync(() => createAppFetch())
     const bootstrap = yield* promiseEffect("load runtime bootstrap", () => loadBootstrap(http))
     const runtime = yield* Effect.sync(() => createRuntime({
@@ -79,10 +83,11 @@ const bootProgram = (session: BootSession | undefined) =>
       }
       // `/owner/name` (or the landing page's `/?repo=owner/name`) preselects a public-catalog repository.
       // The path stays in the address bar; the parameter leaves it.
-      const requested = requestedRepo(window.location)
       if (requested !== null) {
         yield* Effect.sync(() => void openRequestedRepo(controller, runtime.http, requested))
-        window.history.replaceState(null, "", withoutRepoParam(window.location))
+        if (window.location.search !== "") {
+          window.history.replaceState(null, "", withoutRepoParam(window.location))
+        }
       }
       return controller
     }

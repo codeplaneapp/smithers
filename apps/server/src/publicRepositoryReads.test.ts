@@ -61,6 +61,23 @@ describe("anonymous repository reads", () => {
     expect(seen[0]?.headers.has("cookie")).toBe(false)
   })
 
+  test("the upstream request asks for a manual redirect and a 3xx answer is unavailable", async () => {
+    // workerd rejects redirect: "error" before sending anything, which made
+    // every production public read a 502; "manual" is the accepted mode.
+    const seen: Array<Request> = []
+    const read = createPublicRepositoryReader({
+      fetch: async (request) => {
+        seen.push(request)
+        return new Response(null, { status: 302, headers: { location: "https://elsewhere.test/login" } })
+      }
+    })
+    const response = await read(new URL("https://app.test/api/repos/smithersai/smithers/contents/README.md"), "https://cloud.test")
+    expect(seen[0]?.redirect).toBe("manual")
+    expect(response.status).toBe(502)
+    expect(response.headers.get("location")).toBeNull()
+    expect(await response.json()).toEqual({ message: "Repository data is temporarily unavailable." })
+  })
+
   test("a repository outside the catalog is read under the name the browser asked for", async () => {
     const seen: Array<Request> = []
     const read = createPublicRepositoryReader({

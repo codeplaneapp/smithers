@@ -30,22 +30,29 @@ export const cloudReadPath = (pathname: string): string => {
  * so every read reaches the backend and neither browsers nor the edge retain
  * an answer that could outlive its public visibility.
  */
+const unavailable = (): Response =>
+  Response.json({ message: "Repository data is temporarily unavailable." }, {
+    status: 502, headers: { "cache-control": "private, no-store" }
+  })
+
 export const createPublicRepositoryReader = (deps: Dependencies) => {
   return async (url: URL, base: string): Promise<Response> => {
     const target = new URL(cloudReadPath(url.pathname) + url.search, base)
     try {
       const upstream = await deps.fetch(new Request(target, {
         headers: { accept: "application/json" },
-        redirect: "error", signal: AbortSignal.timeout(15_000)
+        redirect: "manual", signal: AbortSignal.timeout(15_000)
       }))
+      // workerd refuses redirect: "error" (it throws before the request is
+      // sent, which read as a 502 for every public read in production), so
+      // the redirect is requested manually and a 3xx answer is unavailable.
+      if (upstream.status >= 300 && upstream.status < 400) return unavailable()
       const headers = new Headers(upstream.headers)
       headers.delete("set-cookie")
       headers.set("cache-control", "private, no-store")
       return new Response(upstream.body, { status: upstream.status, headers })
     } catch {
-      return Response.json({ message: "Repository data is temporarily unavailable." }, {
-        status: 502, headers: { "cache-control": "private, no-store" }
-      })
+      return unavailable()
     }
   }
 }
