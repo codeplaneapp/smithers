@@ -9,19 +9,22 @@ never borrow a user's bearer token or cookie.
 
 `GET /api/public/repos` is the public site's catalog, served by the app Worker
 at `https://canary.smithers.sh`. The shared roster in
-`src/publicRepoCatalog.ts` currently contains only `smithersai/smithers`.
-Repository requests do not change this roster.
+`src/publicRepoCatalog.ts` lists `smithersai/smithers` first, then its direct
+production dependencies (`wevm/incur`, `Effect-TS/effect`). The response keeps
+the roster order. Repository requests do not change this roster.
 
-The endpoint fetches public GitHub repository metadata on the server, using
-the same upstream resource as the app's account-scoped GitHub metadata route.
+The endpoint fetches public GitHub repository metadata on the server, one
+concurrent request per repository, using the same upstream resource as the
+app's account-scoped GitHub metadata route.
 It projects only stars, forks, open issues plus pull requests, language, and
 license. GitHub's `open_issues_count` includes pull requests, so the card labels
 that statistic **Issues + PRs**.
 
 Successful metadata is cached for five minutes in the Worker and Cloudflare's
 edge cache. Concurrent requests share a fetch. Metadata failures return the
-curated repository with `stats: null`, cached for 30 seconds; availability does
-not disappear and missing counts are never presented as zero. This endpoint
+affected repository with `stats: null` while the other repositories keep their
+counts; the whole catalog is then cached for 30 seconds. Availability does not
+disappear and missing counts are never presented as zero. This endpoint
 allows credential-free cross-origin GETs from the landing page.
 
 The Astro card fetches at runtime. Set `PUBLIC_AVAILABLE_REPOS_URL` at site
