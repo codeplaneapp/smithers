@@ -113,6 +113,26 @@ const browserE2e = Smithers.NodeTest({
   cwd
 })
 
+/**
+ * Everything a web host needs to bundle the app as a React island: the
+ * mainview tree (AppIsland.tsx and the CSS it imports), the Tailwind config
+ * index.css names, the build stamp both builds share, and package.json for
+ * the pinned react version. apps/site's build target lists it as an input so
+ * the site rebuilds when the app changes.
+ *
+ * @since 1.0.0
+ * @category build
+ */
+const webSources = Smithers.Filegroup({
+  srcs: [
+    Smithers.glob("src/mainview/**/*"),
+    Smithers.file("tailwind.config.js"),
+    Smithers.file("scripts/build-stamp.ts"),
+    Smithers.file("package.json")
+  ],
+  cwd
+})
+
 export const Package = Smithers.Package({
-  targets: { devkit, check, unitTests, browserE2e }
+  targets: { devkit, check, unitTests, browserE2e, webSources }
 })

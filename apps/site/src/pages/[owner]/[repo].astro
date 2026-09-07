@@ -1,0 +1,25 @@
+---
+/*
+ * The product app for one catalog repository, prerendered at /<owner>/<repo>
+ * so https://smithers.sh/smithersai/smithers is a page of this site and the
+ * address bar keeps that path for the page's life. The app itself renders
+ * only in the browser (`client:only`): it reads the session, the repository
+ * and the chat from the app Worker (apps/server), which serves this build's
+ * dist as its assets and answers /api/* first.
+ */
+import AppIsland from "../../AppIsland"
+import AppShell from "../../layouts/AppShell.astro"
+import { AVAILABLE_REPOS } from "../../../../server/src/publicRepoCatalog"
+
+export function getStaticPaths() {
+  return AVAILABLE_REPOS.map((repo) => {
+    const [owner, name] = repo.name.split("/")
+    return { params: { owner, repo: name }, props: { title: repo.title } }
+  })
+}
+const { title } = Astro.props
+---
+
+<AppShell title={title}>
+  <div id="root"><AppIsland client:only="react" /></div>
+</AppShell>

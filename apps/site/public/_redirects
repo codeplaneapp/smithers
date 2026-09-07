@@ -789,13 +789,9 @@
 /changelogs/1.0.0-rc.0/  /changelogs/100-rc0/  301
 
 # Recover the pre-Starlight routes while preserving their fragments.
-# Order is load-bearing because Cloudflare uses the first matching rule. Explicit
-# compatibility routes must precede the API splat that would swallow them.
-/api/patterns-teams  /docs/reference/api/patterns/  301
-/api/patterns-teams/ /docs/reference/api/patterns/  301
-/api/patterns-loops  /docs/reference/api/patterns/  301
-/api/patterns-loops/ /docs/reference/api/patterns/  301
-/api/*        /docs/reference/api/:splat/       301
+# Order is load-bearing because Cloudflare uses the first matching rule.
+# /api/* has no rule here: the app Worker answers that prefix before assets
+# (see scripts/check-built-site.mjs).
 /reference/*  /docs/reference/:splat/           301
 
 # Concept slugs are explicit because renamed or removed concepts must not be

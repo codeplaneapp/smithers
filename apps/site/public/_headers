@@ -1,0 +1,5 @@
+# Every file under /_astro carries a content hash in its name, so a browser can
+# keep it for a year. Isolation headers (COOP, COEP) are the app Worker's job
+# (apps/server), not this file's.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

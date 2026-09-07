@@ -1,0 +1,52 @@
+---
+/*
+ * The document around the product app at /<owner>/<repo>. It is the
+ * apps/ui/src/mainview/index.html shell, not Base.astro: no site header or
+ * footer, no site.css, no Google Fonts (the island bundles its own Inter and
+ * IBM Plex Mono), the site's favicon, and the build stamp the canary probe
+ * reads. The appearance bootstrap is copied from that index.html and stays an
+ * inline script on purpose: a deferred stamp paints the wrong theme first.
+ */
+import { metaTags } from "virtual:smithers-build-stamp"
+interface Props {
+  title: string
+}
+const { title } = Astro.props
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.png" />
+    <title>{title}</title>
+    {metaTags.map((attrs) => <meta name={attrs.name} content={attrs.content} />)}
+    <script is:inline>
+      (function (window, document) {
+        try {
+          var storage = window.localStorage;
+          var theme = storage && storage.getItem("smithers-mvp.theme");
+          var palette = storage && storage.getItem("smithers-mvp.palette");
+          if (theme !== "light" && theme !== "dark") {
+            theme =
+              window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          }
+          document.documentElement.setAttribute("data-theme", theme);
+          if (typeof palette === "string" && /^[a-z][a-z-]*$/.test(palette)) {
+            document.documentElement.setAttribute("data-palette", palette);
+          }
+        } catch (error) {
+          // A storage the browser refuses (private mode, disabled cookies) is
+          // not a reason to paint nothing: light is the built-in default.
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })(window, document);
+    </script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

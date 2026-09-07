@@ -1,7 +1,8 @@
 /**
  * Targets for smithers.sh: the Astro site with the landing page, the /demo
- * request page, the Starlight documentation under /docs, and the release
- * changelogs under /changelogs.
+ * request page, the Starlight documentation under /docs, the release
+ * changelogs under /changelogs, and the product app prerendered at
+ * /<owner>/<repo> for every catalog repository.
  *
  * The media the hero plays (public/media) is recorded, not built:
  * `scripts/record-tape.sh` runs real flows through vhs, and
@@ -63,6 +64,7 @@ import { Package as cliPackage } from "../../packages/smithers/PACKAGE.ts"
 import { Package as testingPackage } from "../../packages/testing/PACKAGE.ts"
 import { workspacePackages } from "../../scripts/workspace-packages.mjs"
 import { sites as docsSites } from "../docs/shared/manifest.mjs"
+import { Package as uiPackage } from "../ui/PACKAGE.ts"
 
 const cwd = "apps/site"
 
@@ -78,33 +80,47 @@ const supportDocs = Smithers.Generate({
   ]
 })
 
-/** The pages, docs content, components, layouts, styles, scripts, public assets, and Astro config. */
+/** The pages, docs content, components, layouts, styles, scripts, public assets, Astro config, and tsconfig. */
 const sources = [
   Smithers.glob("//apps/site/src/**/*"),
   Smithers.glob("//apps/site/scripts/**/*"),
   Smithers.glob("//apps/site/public/**/*"),
   Smithers.file("//apps/server/src/publicRepoCatalog.ts"),
   Smithers.file("//apps/site/astro.config.mjs"),
-  Smithers.file("//apps/site/package.json")
+  Smithers.file("//apps/site/package.json"),
+  Smithers.file("//apps/site/tsconfig.json")
 ]
 
-/** `astro check`: the pages and components typecheck against the package tsconfig. */
+/**
+ * The app the /<owner>/<repo> page bundles as an island. A filegroup is a
+ * dependency edge, not a declared input, and its digest reaches this
+ * package's keys the same way, so the site rebuilds when the app changes.
+ */
+const appSources = uiPackage.webSources
+
+/** `astro check`: the pages, components and the island's app sources typecheck against the package tsconfig. */
 const check = Smithers.ToolRun({
   command: "pnpm",
   args: ["run", "check"],
   inputs: sources,
-  deps: [],
+  deps: [appSources],
   cwd
 })
 
-/** Build the site and verify its links against the CLI and release changelog. */
+/**
+ * Build the site and verify its links against the CLI and release changelog.
+ * Vite transforms the island's apps/ui sources under apps/ui/tsconfig.json,
+ * which extends the projected Electrobun devkit, so a fresh checkout fails
+ * with "Tsconfig not found .hutch/devkit/tsconfig.json" until that projection
+ * exists: it is a prerequisite here as it is for the app's own typecheck.
+ */
 const build = Smithers.ToolBuild({
   tool: "astro",
   command: "pnpm",
   args: ["run", "build"],
   inputs: [...sources, Smithers.file("//CHANGELOG.md")],
   outputs: ["dist"],
-  deps: [cliPackage.docsSources],
+  deps: [cliPackage.docsSources, appSources, uiPackage.devkit],
   env: {},
   cache: true,
   cwd

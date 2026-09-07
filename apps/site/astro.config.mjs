@@ -1,16 +1,29 @@
 // @ts-check
-import { defineConfig } from "astro/config"
+import react from "@astrojs/react"
 import starlight from "@astrojs/starlight"
+import tailwindcss from "@tailwindcss/vite"
+import { defineConfig } from "astro/config"
+import { fileURLToPath } from "node:url"
+import { buildStamp } from "./scripts/build-stamp-integration.ts"
 import project from "./src/data/project.json" with { type: "json" }
 
 /**
  * smithers.sh: the landing page at `/` (src/pages/index.astro), the demo
- * request page at `/demo`, and the Starlight documentation at `/docs/**` with
- * the release changelogs under `/changelogs/**`.
+ * request page at `/demo`, the Starlight documentation at `/docs/**` with
+ * the release changelogs under `/changelogs/**`, and the product app at
+ * `/<owner>/<repo>` for every catalog repository (src/pages/[owner]/[repo].astro).
  *
  * Starlight content is authored under src/content/docs/docs/ so every route
  * carries the /docs prefix and the root stays a plain Astro page. Add a page
  * there and list it in the sidebar below.
+ *
+ * The app page mounts apps/ui's AppIsland as a `client:only="react"` island,
+ * so this build also carries the app's Vite settings: its Tailwind entry
+ * (apps/ui/src/mainview/index.css) builds through @tailwindcss/vite and stays
+ * inside the island's CSS chunk; react, react-dom and effect are deduped so
+ * the app and the site share one copy of each; `electrobun/view` resolves to
+ * a web shim because no Electrobun SDK exists here; the Vue flags are the
+ * ones apps/ui/vite.config.ts injects for the Milkdown editor.
  *
  * @since 1.0.0
  * @category configuration
@@ -18,7 +31,28 @@ import project from "./src/data/project.json" with { type: "json" }
 export default defineConfig({
   site: "https://smithers.sh",
   output: "static",
+  vite: {
+    plugins: [tailwindcss()],
+    resolve: {
+      dedupe: ["react", "react-dom", "effect"],
+      alias: {
+        "electrobun/view": fileURLToPath(new URL("../ui/src/mainview/native/electrobun-view.web.ts", import.meta.url))
+      }
+    },
+    define: {
+      __VUE_OPTIONS_API__: "true",
+      __VUE_PROD_DEVTOOLS__: "false",
+      __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false"
+    },
+    build: {
+      // Milkdown ships one indivisible 818 kB module behind the World editor's
+      // dynamic import; keep the size warning meaningful for every other chunk.
+      chunkSizeWarningLimit: 900
+    }
+  },
   integrations: [
+    react(),
+    buildStamp(),
     starlight({
       title: "Smithers",
       routeMiddleware: "../docs/shared/release-notice.mjs",

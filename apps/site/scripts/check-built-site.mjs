@@ -73,9 +73,14 @@ export async function releaseReferences(repoRoot) {
 }
 
 /**
- * `appPaths` are same-site paths the static build cannot contain: smithers.sh
- * routes them to the app Worker (apps/server, `smithers-mvp-web`), which serves
- * the public repo catalog and each catalog repository's app at /<owner>/<name>.
+ * `appPaths` are same-site paths the static build cannot contain: the app
+ * Worker (apps/server, `smithers-mvp-web`) answers /api/* before it looks at
+ * this build's files, which is also why public/_redirects carries no /api/
+ * rule: an asset-layer redirect under that prefix would never run, and the
+ * pre-Starlight /api/<package> docs URLs it used to recover now belong to the
+ * catalog and app endpoints. Each catalog repository's app at /<owner>/<name>
+ * is a page of this build (src/pages/[owner]/[repo].astro), so it is checked
+ * like every other page.
  */
 export function checkBuiltSite(root, requiredReferences = [], appPaths = []) {
   const pages = new Map()
@@ -150,8 +155,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   // The captured sitemap is independent of _redirects, so deleting an alias
   // cannot silently remove the URL from this check as well.
   const legacy = JSON.parse(readFileSync(join(siteRoot, "src/data/mintlify-paths.json"), "utf8"))
-  // The landing page links each catalog repository's app and reads the catalog
-  // at the same origin; the app Worker (apps/server) serves both, not this build.
+  // The landing page reads the catalog at the same origin; the app Worker
+  // (apps/server) answers it, not this build. Each catalog repository's app
+  // page is this build's, so its link is checked like any other.
   const { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } = await import(
     pathToFileURL(resolve(siteRoot, "../server/src/publicRepoCatalog.ts"))
   )
@@ -161,8 +167,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       ...await releaseReferences(resolve(siteRoot, "../..")),
       ...legacy.paths.flatMap((path) => path === "/" ? [path] : [path, path + "/"])
     ],
-    [PUBLIC_REPOS_PATH, ...AVAILABLE_REPOS.map((repo) => `/${repo.name}`)]
+    [PUBLIC_REPOS_PATH]
   )
+  // The files the app Worker's assets need beyond the pages: one prerendered
+  // app page per catalog repository, the 404 page the asset host serves for an
+  // unknown path, and the build stamp apps/server's canary build probe reads.
+  for (const file of [...AVAILABLE_REPOS.map((repo) => `${repo.name}/index.html`), "404.html", "__build.json"]) {
+    if (!existsSync(join(root, file))) result.failures.push(`${file}: missing from the build`)
+  }
   for (const name of ["llms.txt", "llms-full.txt"]) {
     if (
       !existsSync(join(root, name)) ||

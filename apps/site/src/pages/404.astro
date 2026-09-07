@@ -1,0 +1,19 @@
+---
+/*
+ * The page the asset host serves for a path this build has no file for.
+ * Starlight's own 404 is disabled in astro.config.mjs so the docs and the
+ * landing pages share this one.
+ */
+import Base from "../layouts/Base.astro"
+
+const title = "Page not found"
+const description = "There is no page at this address on smithers.sh."
+---
+
+<Base title={title} description={description}>
+  <main class="wrap hero">
+    <h1>{title}</h1>
+    <p class="sub">{description}</p>
+    <p><a href="/">Go to the home page</a></p>
+  </main>
+</Base>
