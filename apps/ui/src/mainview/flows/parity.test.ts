@@ -232,6 +232,13 @@ describe("launch-law parity: every affordance is a command", () => {
       // THE FORM LAW (flow-forms.md): the generic form's Cancel (card.dismiss) and Submit (form.submit); fields commit on blur/change.
       "../cards/FlowFormCards.tsx": 2,
       /*
+       * The repository welcome and its three answers (controller/onboarding.ts):
+       * every door (the welcome's three, the maintainer's reads, the
+       * contributor's three, the explore card's guide rows) is one shared
+       * handler through onRunCommand with data-flow set.
+       */
+      "../cards/OnboardingCards.tsx": 1,
+      /*
        * Lane change (ADR 0003) + lane L1 (ADR 0004, the live plue routes):
        * the change card's facet tabs, Land / Split ready / Revert / Full
        * diff, the conflict rows' Resolve, the Diff facet's two pickers, its

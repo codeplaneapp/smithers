@@ -1702,6 +1702,51 @@ export const CardSchema = z.discriminatedUnion("kind", [
       error: z.string().optional()
     })
   }),
+  /*
+   * The repository welcome and its three answers (apps/ui
+   * controller/onboarding.ts): the opener a repository shows when it is
+   * opened, and the maintain / contribute / explore cards its buttons open.
+   * `activity` is null until the public activity route answers; `guides` are
+   * the guide documents the repository actually holds, never invented.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("repo-onboarding"),
+    payload: z.discriminatedUnion("stage", [
+      z.object({
+        stage: z.literal("welcome"),
+        repo: z.string(),
+        /** The curated one-sentence predicate ("a durable workflow framework …"); null when the catalog carries none. */
+        summary: z.string().nullable()
+      }),
+      z.object({
+        stage: z.literal("maintain"),
+        repo: z.string(),
+        activity: z.object({
+          sentence: z.string(),
+          counts: z.object({ commits: z.number().int(), pullRequests: z.number().int(), issues: z.number().int() }),
+          since: z.string()
+        }).nullable(),
+        /** Why `activity` is null: the route is not deployed yet, or its answer could not be read. */
+        reason: z.string().optional(),
+        /** The maintainer's read flows this host registers, in button order. */
+        flows: z.array(z.string())
+      }),
+      z.object({
+        stage: z.literal("contribute"),
+        repo: z.string(),
+        /** The contributing guide's path when the repository holds one. */
+        guide: z.string().nullable(),
+        reason: z.string().optional()
+      }),
+      z.object({
+        stage: z.literal("explore"),
+        repo: z.string(),
+        guides: z.array(z.object({ path: z.string() })),
+        reason: z.string().optional()
+      })
+    ])
+  }),
   z.object({
     ...cardBaseShape,
     kind: z.literal("agent-models"),

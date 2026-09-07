@@ -192,6 +192,30 @@ export const WORKFLOW_TRIGGERS_PATH = "/api/workflow/triggers"
  */
 export const MODEL_STREAM_PATH = "/api/model/stream"
 
+/*
+ * The public catalog and its read-only companions (apps/server
+ * publicRepoCatalog.ts): anonymous, credential-free reads about the curated
+ * repositories anyone can explore signed out.
+ */
+/**
+ * The public repository catalog route shared by the site, the server, and the client.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const PUBLIC_REPOS_PATH = "/api/public/repos"
+/**
+ * The recent-activity read of one catalog repository:
+ * `GET /api/public/repos/<owner>/<name>/activity`, answering
+ * `{ sentence, counts: { commits, pullRequests, issues }, since }`. A 404 means
+ * the deployment does not serve it yet; the client says so rather than
+ * inventing a sentence.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const publicRepoActivityPath = (repo: string): string => `${PUBLIC_REPOS_PATH}/${repo}/activity`
+
 /**
  * The admin route prefix route shared by server and client.
  *

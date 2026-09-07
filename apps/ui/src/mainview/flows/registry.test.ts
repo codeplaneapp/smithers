@@ -549,6 +549,12 @@ describe("command registry bindings", () => {
       "prs.create",
       "prs.land",
       "prs.review",
+      // The repository welcome and its three answers, and the read-only feature sketch (controller/onboarding.ts).
+      "repo.welcome",
+      "repo.maintain",
+      "repo.contribute",
+      "repo.explore",
+      "feature.prototype",
       // §17.4: billing.upgrade / billing.portal register in the ADMIN plugin
       // only — no checkout is exposed to an MVP account.
       "keys.list",

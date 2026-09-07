@@ -6,7 +6,7 @@ interface Dependencies {
   readonly now: () => number
   readonly cache: () => Pick<Cache, "match" | "put"> | undefined
   /** The curated roster; tests pass a larger one to exercise the multi-repo fetch. */
-  readonly repos?: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url">>
+  readonly repos?: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url" | "summary">>
 }
 
 const headers = {
@@ -69,7 +69,7 @@ export const createPublicReposHandler = (deps: Dependencies) => {
         // Availability is curated independently of a transient metadata outage.
       }
       // Only the public fields; the catalog's Cloud mirror path stays server-side.
-      return { name: repo.name, title: repo.title, url: repo.url, stats }
+      return { name: repo.name, title: repo.title, url: repo.url, summary: repo.summary, stats }
     }))
     const body: PublicRepoCatalog = { repos }
     const ttl = repos.every((repo) => repo.stats !== null) ? 300 : 30

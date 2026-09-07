@@ -144,6 +144,12 @@ export const CloudRepositorySchema = z.object({
    * Absent on the signed-in inventory.
    */
   catalog: z.boolean().optional(),
+  /**
+   * The catalog's curated one-sentence explanation of the repository, the
+   * welcome's source (controller/onboarding.ts). Absent on the signed-in
+   * inventory, which carries no such sentence.
+   */
+  summary: z.string().optional(),
   updatedAt: z.number(),
   revision: z.number().int().nonnegative()
 })
@@ -1351,7 +1357,7 @@ export type AppTransition =
   | {
     type: "repositories.loaded"
     actor: "system"
-    repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head" | "catalog">>
+    repositories: ReadonlyArray<Pick<CloudRepository, "id" | "org" | "ownerKind" | "name" | "head" | "catalog" | "summary">>
   }
   | {
     type: "workingcopies.workspaces.loaded"

@@ -327,27 +327,43 @@ export const createTurnController = (
    * The floor under the budget. The catalog degrades first (stages 0→2 keep
    * every command's name); when the namespace list plus this turn's context
    * still exceeds the cap, the World bodies give way (each cut note says so
-   * in the context, and the pane still holds it); only with no body left
-   * does the catalog fall to stage 3 (namespaces and counts, every name
-   * behind the list action). A turn fails on size only past that — a context
+   * in the context, and the pane still holds it); only when even bodiless
+   * notes do not fit does the catalog fall to stage 3 (namespaces and
+   * counts, every name behind the list action). A turn fails on size only past that: a context
    * whose tabs and repositories alone pass the cap, which no session has
    * produced.
    */
   const composeTurn = (): { readonly context: AgentRuntimeContext; readonly instructions: string } => {
     const limit = CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES
-    let worldBodyBudget = WORLD_BODY_BUDGET
-    let context = agentRuntimeContext(worldBodyBudget)
-    let instructions = turnInstructions(context, 2)
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const over = bytesOf(composeAgentInstructions(instructions, context)) - limit
-      if (over <= 0) return { context, instructions }
-      if (worldBodyBudget === 0) break
-      // A character is at least one byte: cutting `over` characters of note text cuts at least `over` bytes.
-      worldBodyBudget = Math.max(0, worldBodyBudget - over)
-      context = agentRuntimeContext(worldBodyBudget)
-      instructions = turnInstructions(context, 2)
+    const render = (worldBodyBudget: number) => {
+      const context = agentRuntimeContext(worldBodyBudget)
+      const instructions = turnInstructions(context, 2)
+      return { context, instructions, over: bytesOf(composeAgentInstructions(instructions, context)) - limit }
     }
-    return { context, instructions: turnInstructions(context, 3) }
+    const whole = render(WORLD_BODY_BUDGET)
+    if (whole.over <= 0) return { context: whole.context, instructions: whole.instructions }
+    /*
+     * The bodies give way to the largest budget that still fits, found by
+     * bisection in a bounded number of renders. Cutting the budget by the
+     * overshoot in one step landed on zero whenever the overshoot exceeded
+     * the budget (a full catalog beside three notes at budget), which left
+     * hundreds of bytes of room unused and every note bodiless.
+     */
+    let fit = render(0)
+    if (fit.over > 0) return { context: fit.context, instructions: turnInstructions(fit.context, 3) }
+    let low = 0
+    let high = WORLD_BODY_BUDGET
+    for (let round = 0; round < 8 && high - low > 16; round += 1) {
+      const middle = Math.floor((low + high) / 2)
+      const candidate = render(middle)
+      if (candidate.over <= 0) {
+        low = middle
+        fit = candidate
+      } else {
+        high = middle
+      }
+    }
+    return { context: fit.context, instructions: fit.instructions }
   }
 
   /*

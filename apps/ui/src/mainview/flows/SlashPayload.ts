@@ -288,6 +288,20 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (rest === "") return no("issues.create needs a title")
     return ok(repo === undefined ? { title: rest } : { title: rest, repo })
   },
+  /*
+   * The repository welcome and its three answers (controller/onboarding.ts):
+   * each takes only its optional target. `feature.prototype` reads like
+   * issues.create: the request is the line, a trailing owner/repo the target.
+   */
+  "repo.welcome": (args) => repoOnly("repo.welcome", args),
+  "repo.maintain": (args) => repoOnly("repo.maintain", args),
+  "repo.contribute": (args) => repoOnly("repo.contribute", args),
+  "repo.explore": (args) => repoOnly("repo.explore", args),
+  "feature.prototype": (args) => {
+    const { rest, repo } = splitTrailingRepo(args)
+    if (rest === "") return no("feature.prototype needs what the feature should do")
+    return ok(repo === undefined ? { request: rest } : { request: rest, repo })
+  },
   "issues.close": (args) => numbered(args, "issues.close needs an issue number"),
   "issues.reopen": (args) => numbered(args, "issues.reopen needs an issue number"),
   "issues.comment": (args) => {

@@ -40,6 +40,8 @@ export interface CatalogRepository {
   readonly id: string
   readonly org: string
   readonly name: string
+  /** The catalog's curated one-sentence explanation, when it carries one. */
+  readonly summary?: string
 }
 
 /** The catalog entry the request names (GitHub names are case-insensitive); the catalog's spelling wins. */
@@ -52,7 +54,13 @@ export const catalogRepository = (catalog: unknown, requested: string): CatalogR
     const name: unknown = typeof entry === "object" && entry !== null ? (entry as { readonly name?: unknown }).name : undefined
     if (typeof name !== "string" || !REPO_NAME.test(name) || name.toLowerCase() !== wanted) continue
     const slash = name.indexOf("/")
-    return { id: name, org: name.slice(0, slash), name: name.slice(slash + 1) }
+    const summary: unknown = (entry as { readonly summary?: unknown }).summary
+    return {
+      id: name,
+      org: name.slice(0, slash),
+      name: name.slice(slash + 1),
+      ...(typeof summary === "string" && summary.trim() !== "" ? { summary: summary.trim() } : {})
+    }
   }
   return null
 }
@@ -65,14 +73,23 @@ export const withoutRepoParam = (location: Pick<Location, "pathname" | "search" 
   return `${location.pathname}${search === "" ? "" : `?${search}`}${location.hash}`
 }
 
+/** Whether the transcript already opens on this repository's welcome card (controller/onboarding.ts). */
+const welcomed = (controller: Pick<AppController, "store">, repo: string): boolean => {
+  for (const card of controller.store.collections.cards.values()) {
+    if (card.kind === "repo-onboarding" && card.payload.stage === "welcome" && card.payload.repo === repo) return true
+  }
+  return false
+}
+
 /**
  * Select the requested repository when the public catalog carries it. The
  * catalog row joins the repositories collection beside whatever the cloud
- * inventory already loaded, then `repo.select` makes it the active one.
- * Returns the refusal when the request could not be honoured.
+ * inventory already loaded, then `repo.select` makes it the active one, and
+ * the welcome (`repo.welcome`) opens the transcript unless a reload finds it
+ * already there. Returns the refusal when the request could not be honoured.
  */
 export const openRequestedRepo = async (
-  controller: Pick<AppController, "store" | "selectRepo">,
+  controller: Pick<AppController, "store" | "selectRepo" | "runCommand">,
   http: FetchLike,
   requested: string
 ): Promise<string | void> => {
@@ -92,8 +109,8 @@ export const openRequestedRepo = async (
       type: "repositories.loaded",
       actor: "system",
       repositories: [
-        ...[...repositories.values()].map(({ id, org, ownerKind, name, head, catalog }) => ({
-          id, org, ownerKind, name, head, ...(catalog === undefined ? {} : { catalog })
+        ...[...repositories.values()].map(({ id, org, ownerKind, name, head, catalog, summary }) => ({
+          id, org, ownerKind, name, head, ...(catalog === undefined ? {} : { catalog }), ...(summary === undefined ? {} : { summary })
         })),
         /*
          * The catalog carries no owner kind and no head. "user" is the
@@ -105,5 +122,7 @@ export const openRequestedRepo = async (
       ]
     })
   }
-  return controller.selectRepo(repository.id)
+  const refusal = await controller.selectRepo(repository.id)
+  if (refusal !== undefined) return refusal
+  if (!welcomed(controller, repository.id)) controller.runCommand("repo.welcome")
 }

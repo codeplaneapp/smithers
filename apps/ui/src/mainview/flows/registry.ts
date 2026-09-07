@@ -316,6 +316,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   { id: "appearance", label: "Appearance", summary: "Theme and colors" },
   { id: "repo", label: "Repository", summary: "Open and inspect local repositories" },
   { id: "repos", label: "Repositories", summary: "GitHub and Smithers Cloud repositories" },
+  { id: "feature", label: "Feature requests", summary: "Sketch a feature against a repository" },
   { id: "connector", label: "Connectors", summary: "Local repository connections" },
   { id: "world", label: "World", summary: "What Smithers understands" },
   { id: "tab", label: "Sessions", summary: "Terminals, agents, and cards in the sidebar" },

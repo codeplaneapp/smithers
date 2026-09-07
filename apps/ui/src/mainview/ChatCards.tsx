@@ -36,6 +36,7 @@ import { IssueCardBody, IssueListCardBody } from "./cards/IssueCards"
 import { KeysCardBody } from "./cards/KeysCard"
 import { LandingCardBody, LandingListCardBody } from "./cards/LandingCards"
 import { NotificationsCardBody } from "./cards/NotificationsCard"
+import { RepoOnboardingCardBody } from "./cards/OnboardingCards"
 import { RepoImportCardBody } from "./cards/RepoImportCard"
 import { ConnectorSetupCardBody, SyncOpsCardBody } from "./cards/SyncCards"
 import { RunHistoryCardBody } from "./cards/RunHistoryCard"
@@ -109,6 +110,8 @@ export const pillStatus = (card: Card): string => {
     return "running"
   }
   if (card.kind === "workflow-list" || card.kind === "trigger-list") return "done"
+  /* The repository welcome and its answers are read once; their buttons open other flows. */
+  if (card.kind === "repo-onboarding") return "done"
   /* Lane runs: the inboxes are listings — they settle the moment they render. */
   if (card.kind === "run-list" || card.kind === "approvals-inbox") return "done"
   if (card.kind === "repo-import") {
@@ -1119,6 +1122,7 @@ export function CardView({
             null}
           {card.kind === "workflow-list" ? <WorkflowListCardBody card={card} onRunWorkflow={onRunWorkflow} /> : null}
           {card.kind === "trigger-list" ? <TriggerListCardBody card={card} /> : null}
+          {card.kind === "repo-onboarding" ? <RepoOnboardingCardBody card={card} onRunCommand={onRunCommand} /> : null}
           {card.kind === "workflow-repo" ?
             <WorkflowRepoCardBody card={card} onChooseWorkflowRepo={onChooseWorkflowRepo} /> :
             null}

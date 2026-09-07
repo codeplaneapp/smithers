@@ -1179,6 +1179,65 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     }),
     handler: ({ number, verdict, text, repo }) => actions.reviewLanding(number, verdict, text, repo)
   }),
+  /*
+   * The repository welcome (controller/onboarding.ts): the opener a
+   * repository shows when it is opened, and the three answers its buttons
+   * are doors onto. Maintaining and contributing gate themselves on the
+   * definitive signed-out answer: a human's invocation parks and renders the
+   * sign-in step (auth.prompt), resuming as the signed-in user; the model's
+   * invocation renders the step and fails honestly. Exploring is anonymous.
+   */
+  flow({
+    name: "repo.welcome",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    summary: "Welcome to the repository: what it is and how you can work on it",
+    runtime: ["cloud"],
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.welcomeRepo(repo)
+  }),
+  flow({
+    name: "repo.maintain",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    summary: "Maintain the repository: recent activity and the maintainer's reads",
+    runtime: ["cloud"],
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.maintainRepo(repo)
+  }),
+  flow({
+    name: "repo.contribute",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    summary: "Contribute to the repository: report an issue, sketch a feature, read the contributing guide",
+    runtime: ["cloud"],
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.contributeRepo(repo)
+  }),
+  flow({
+    name: "repo.explore",
+    form: { fields: { repo: { optionsFrom: "cloud-repos", kind: "text" } } },
+    summary: "Explore the repository: its guide documents, then ask anything",
+    runtime: ["cloud"],
+    args: "[owner/repo]",
+    input: RepoTarget,
+    handler: ({ repo }) => actions.exploreRepo(repo)
+  }),
+  flow({
+    /* Read-only: a chat turn that sketches the feature; no workspace, no branch, no pull request. */
+    name: "feature.prototype",
+    form: {
+      fields: {
+        request: { label: "What should it do?" },
+        repo: { optionsFrom: "cloud-repos", kind: "text" }
+      }
+    },
+    summary: "Sketch a feature request against the repository, read-only",
+    runtime: ["cloud"],
+    args: "<what it should do> [owner/repo]",
+    input: Schema.Struct({ request: Schema.String, repo: Schema.optional(Schema.String) }),
+    handler: ({ request, repo }) => actions.prototypeFeature(request, repo)
+  }),
   flow({
     name: "keys.list",
     summary: "List your provider API keys (masked)",

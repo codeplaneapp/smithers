@@ -63,6 +63,8 @@ import type { CloudSeam } from "./seams/CloudSeam"
 import { createEnvironmentSeam } from "./seams/EnvironmentSeam"
 import type { EnvironmentSeam } from "./seams/EnvironmentSeam"
 import { createFilesSeam } from "./seams/FilesSeam"
+import { createOnboardingController } from "./controller/onboarding"
+import type { OnboardingController } from "./controller/onboarding"
 import type { FilesSeam } from "./seams/FilesSeam"
 import { createCodeIntelSeam } from "./seams/CodeIntelSeam"
 import type { CodeIntelSeam } from "./seams/CodeIntelSeam"
@@ -331,6 +333,12 @@ export interface AppController {
   readonly openDownload: AppShellController["openDownload"]
   /** Render the native-only refusal card with the download action (app.download.prompt — the agent's door). */
   readonly promptDownload: AppShellController["promptDownload"]
+  /* The repository welcome and its three answers (controller/onboarding.ts). */
+  readonly welcomeRepo: OnboardingController["welcomeRepo"]
+  readonly maintainRepo: OnboardingController["maintainRepo"]
+  readonly contributeRepo: OnboardingController["contributeRepo"]
+  readonly exploreRepo: OnboardingController["exploreRepo"]
+  readonly prototypeFeature: OnboardingController["prototypeFeature"]
   /*
    * The multi-parity domain seams (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
    * PRs/landings, billing checkout, BYOK keys, notifications, the agent
@@ -1000,6 +1008,19 @@ export const createAppController = (
   }
 
   /*
+   * The repository welcome and its three answers: the sign-in gate rides the
+   * requirement axis' park (deferCommand) and the auth.prompt step; the
+   * feature sketch rides the composer's own submit as the human's turn.
+   */
+  const onboarding = actors.pair(ctx, (context, select) =>
+    createOnboardingController(context, {
+      nextOrdinal: nextTranscriptOrdinal,
+      deferCommand,
+      promptSignIn,
+      send: select(send)
+    }))
+
+  /*
    * The /chat.commands answer: the LIVE visible catalog as one chat message —
    * the slash menu caps at 8 for calm, so this is where "all of it" lives.
    * Referenced before `commands` initializes; only ever called after.
@@ -1211,6 +1232,11 @@ export const createAppController = (
     reloadApp,
     openDownload,
     promptDownload,
+    welcomeRepo: onboarding.welcomeRepo,
+    maintainRepo: onboarding.maintainRepo,
+    contributeRepo: onboarding.contributeRepo,
+    exploreRepo: onboarding.exploreRepo,
+    prototypeFeature: onboarding.prototypeFeature,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,
     createIssue: issuesSeam.createIssue,
@@ -1533,6 +1559,11 @@ export const createAppController = (
     reloadApp,
     openDownload,
     promptDownload,
+    welcomeRepo: onboarding.welcomeRepo,
+    maintainRepo: onboarding.maintainRepo,
+    contributeRepo: onboarding.contributeRepo,
+    exploreRepo: onboarding.exploreRepo,
+    prototypeFeature: onboarding.prototypeFeature,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,
     createIssue: issuesSeam.createIssue,

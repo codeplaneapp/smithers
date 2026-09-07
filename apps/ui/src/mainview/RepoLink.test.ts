@@ -11,9 +11,11 @@ import type { ControllerContext } from "./state/controller/context"
  * it: the URL is anyone's to type.
  */
 
+const SUMMARY = "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+
 const catalog = {
   repos: [
-    { name: "smithersai/smithers", title: "Smithers", url: "https://github.com/smithersai/smithers", stats: null }
+    { name: "smithersai/smithers", title: "Smithers", url: "https://github.com/smithersai/smithers", summary: SUMMARY, stats: null }
   ]
 }
 
@@ -36,7 +38,19 @@ const fixture = async () => {
     commandActor: "user",
     repositories: { available: false }
   } as unknown as ControllerContext)
-  return { store, controller: { store, selectRepo: tabs.selectRepo } }
+  const ran: Array<string> = []
+  return {
+    store,
+    ran,
+    controller: {
+      store,
+      selectRepo: tabs.selectRepo,
+      runCommand: (name: string) => {
+        ran.push(name)
+        return true
+      }
+    }
+  }
 }
 
 describe("paramRepo", () => {
@@ -98,8 +112,16 @@ describe("catalogRepository", () => {
     expect(catalogRepository(catalog, "SmithersAI/Smithers")).toEqual({
       id: "smithersai/smithers",
       org: "smithersai",
-      name: "smithers"
+      name: "smithers",
+      summary: SUMMARY
     })
+  })
+
+  test("a catalog without the curated sentence yields a row without one, never a made-up sentence", () => {
+    const bare = { repos: [{ name: "smithersai/smithers", title: "Smithers", url: "https://github.com/smithersai/smithers", stats: null }] }
+    expect(catalogRepository(bare, "smithersai/smithers")).toEqual({ id: "smithersai/smithers", org: "smithersai", name: "smithers" })
+    const blank = { repos: [{ ...catalog.repos[0], summary: "   " }] }
+    expect(catalogRepository(blank, "smithersai/smithers")?.summary).toBeUndefined()
   })
 
   test("answers null for a name outside the catalog or a malformed catalog", () => {
@@ -124,8 +146,8 @@ describe("withoutRepoParam", () => {
 })
 
 describe("openRequestedRepo", () => {
-  test("a catalog repository becomes the active selection", async () => {
-    const { store, controller } = await fixture()
+  test("a catalog repository becomes the active selection, and the welcome opens the transcript", async () => {
+    const { store, controller, ran } = await fixture()
     const requests: Array<string> = []
     const http = async (input: RequestInfo | URL) => {
       requests.push(String(input))
@@ -139,16 +161,40 @@ describe("openRequestedRepo", () => {
       name: "smithers",
       head: null,
       // Provenance: the row is readable signed out, and the chat opens on it.
-      catalog: true
+      catalog: true,
+      // The curated sentence the welcome reads (controller/onboarding.ts).
+      summary: SUMMARY
     })
+    expect(ran).toEqual(["repo.welcome"])
+  })
+
+  test("a reload that finds the welcome already in the transcript does not repeat it", async () => {
+    const { store, controller, ran } = await fixture()
+    store.dispatch({
+      type: "card.upsert",
+      actor: "user",
+      card: {
+        id: "repo-welcome-smithersai/smithers",
+        kind: "repo-onboarding",
+        title: "Welcome · smithersai/smithers",
+        status: "active",
+        createdAt: 1,
+        ordinal: 0,
+        payload: { stage: "welcome", repo: "smithersai/smithers", summary: null }
+      }
+    })
+    expect(await openRequestedRepo(controller, async () => jsonResponse(catalog), "smithersai/smithers")).toBeUndefined()
+    expect(store.session().activeRepoKey).toBe("smithersai/smithers")
+    expect(ran).toEqual([])
   })
 
   test("a name outside the catalog is refused and selects nothing", async () => {
-    const { store, controller } = await fixture()
+    const { store, controller, ran } = await fixture()
     const refusal = await openRequestedRepo(controller, async () => jsonResponse(catalog), "someone/else")
     expect(refusal).toBe("someone/else is not in the public repository catalog.")
     expect(store.session().activeRepoKey ?? null).toBeNull()
     expect(store.collections.repositories.size).toBe(0)
+    expect(ran).toEqual([])
   })
 
   test("an unreachable catalog is a refusal, not a selection", async () => {

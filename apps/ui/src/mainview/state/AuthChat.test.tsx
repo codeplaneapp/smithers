@@ -241,12 +241,12 @@ describe("auth is a conversation state — the chat is the only page", () => {
   /*
    * Anonymous exploring (apps/server/PUBLIC-REPOSITORIES.md): at
    * smithers.sh/smithersai/smithers the catalog row is selected before the
-   * session answers signed-out. The chat opens on that fact, the sign-in
-   * door stays, and the web gate never reads.
+   * session answers signed-out. The web gate never reads: the transcript
+   * belongs to the repository's welcome card (repo.welcome, rendered by the
+   * open path in RepoLink.ts), whose maintain and contribute doors render
+   * the sign-in step only when it is needed.
    */
-  const CATALOG_OPENING = "You are exploring smithersai/smithers. Ask about the code, or sign in with GitHub to make changes."
-
-  test("signed-out on the web with a catalog repository selected: the chat opens on the exploring message, sign-in still the door", async () => {
+  test("signed-out on the web with a catalog repository selected: no gate, no exploring line; the welcome card is the opener", async () => {
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     const controller = createAppController(store, unavailableRepositories, silentAgent, {
       bootstrap: WEB,
@@ -258,19 +258,33 @@ describe("auth is a conversation state — the chat is the only page", () => {
     store.dispatch({
       type: "repositories.loaded",
       actor: "system",
-      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "user", name: "smithers", head: null, catalog: true }]
+      repositories: [{
+        id: "smithersai/smithers",
+        org: "smithersai",
+        ownerKind: "user",
+        name: "smithers",
+        head: null,
+        catalog: true,
+        summary: "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+      }]
     })
     store.dispatch({ type: "repo.selected", actor: "user", id: "smithersai/smithers" })
     await controller.loadSession()
     await settled()
 
+    expect((await controller.commands.run("repo.welcome")).status).toBe("executed")
+    await settled()
+
     const { host, markup } = mount(controller)
-    const messages = [...host.querySelectorAll<HTMLElement>(".smithers-chat-message")]
-    expect(messages.map((message) => message.textContent?.includes(CATALOG_OPENING))).toEqual([true])
     expect(markup()).not.toContain(WEB_OPENING)
-    const cta = messages[0]?.querySelector<HTMLButtonElement>(".message-cta")
-    expect(cta?.dataset.flow).toBe("auth.sign-in")
-    expect(cta?.textContent).toBe("Sign in with GitHub")
+    expect(markup()).not.toContain("You are exploring")
+    expect(host.querySelector(".smithers-chat-message .message-cta")).toBeNull()
+    const welcome = host.querySelector<HTMLElement>('[data-testid="onboarding-welcome"]')
+    expect(welcome?.textContent).toBe(
+      "Welcome to Smithers. smithersai/smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+    )
+    expect([...host.querySelectorAll<HTMLElement>('.repo-onboarding [data-flow]')].map((button) => button.dataset.flow))
+      .toEqual(["repo.maintain", "repo.contribute", "repo.explore"])
     // Repository reads are open to the visitor; a write still waits on sign-in.
     expect(controller.commands.state().publicRepo).toBe(true)
     expect(host.querySelector(".smithers-composer")).not.toBeNull()

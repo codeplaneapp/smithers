@@ -120,6 +120,14 @@ describe("the instructions budget", () => {
     expect(notes.some((note) => note.bodyTruncated === true)).toBe(true)
     expect(notes.reduce((sum, note) => sum + (note.body?.length ?? 0), 0)).toBeGreaterThan(0)
     expect(notes.reduce((sum, note) => sum + (note.body?.length ?? 0), 0)).toBeLessThan(Math.min(WORLD_BODY_BUDGET, 3 * WORLD_BODY_PER_DOCUMENT))
+    /*
+     * The cut spends the room it has: a one-step cut by the overshoot used to
+     * land on a zero budget with hundreds of bytes unused (and passed this
+     * floor by a single line only while the catalog stayed small enough).
+     * Bisection stops within a few characters, so the slack under the cap is
+     * bounded by one note line plus the search's resolution.
+     */
+    expect(CHAT_INSTRUCTIONS_CAP_BYTES - INSTRUCTIONS_HEADROOM_BYTES - bytes(composed)).toBeLessThan(256)
     console.info(`instructions budget: World notes at budget land in stage ${instructionStageOf(instructions)} (${bytes(instructions)} prompt bytes, ${bytes(composed)} composed)`)
   })
 

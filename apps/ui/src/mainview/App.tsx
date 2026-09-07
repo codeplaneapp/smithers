@@ -248,24 +248,25 @@ function App() {
    *
    * With a public catalog repository selected (the /owner/name path,
    * apps/server/PUBLIC-REPOSITORIES.md) the signed-out visitor is not gated:
-   * the same card says what they are exploring, reads and chat work, and the
-   * sign-in door stays the one act that unlocks writes.
+   * the transcript opens on the repository's welcome card instead
+   * (repo.welcome, controller/onboarding.ts), whose maintain and contribute
+   * doors render the sign-in step when it is needed. Reads and chat work.
    */
   const exploringRepo = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
     ? catalogRepositoryOf(session.activeRepoKey, repositoryRows)
     : null
   const authMessage: Message | undefined = identity?.state === "signed-out" && controller.bootstrap?.host === "cloud"
-    ? {
-      id: "auth-state",
-      role: "smithers",
-      text: exploringRepo === null
-        ? "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here."
-        : `You are exploring ${exploringRepo}. Ask about the code, or sign in with GitHub to make changes.`,
-      status: "complete",
-      action: { flow: "auth.sign-in", label: "Sign in with GitHub" },
-      createdAt: 0,
-      ordinal: 0
-    }
+    ? exploringRepo === null
+      ? {
+        id: "auth-state",
+        role: "smithers",
+        text: "This is the Smithers web app. Sign in with GitHub to open one of your repositories and read its files here.",
+        status: "complete",
+        action: { flow: "auth.sign-in", label: "Sign in with GitHub" },
+        createdAt: 0,
+        ordinal: 0
+      }
+      : undefined
     : identity?.state === "signed-in" && !identity.allowlisted
     ? {
       id: "auth-state",

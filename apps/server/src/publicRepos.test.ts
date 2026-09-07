@@ -7,8 +7,8 @@ import type { PublicRepoCatalog, PublicRepository } from "./publicRepoCatalog"
 /** The roster a claimed-repo wave will produce; the launch catalog holds only Smithers. */
 const CLAIMED_ROSTER = [
   ...AVAILABLE_REPOS,
-  { name: "example/claimed", title: "claimed", url: "https://github.com/example/claimed" },
-  { name: "example/later", title: "later", url: "https://github.com/example/later" }
+  { name: "example/claimed", title: "claimed", url: "https://github.com/example/claimed", summary: "claimed is an example." },
+  { name: "example/later", title: "later", url: "https://github.com/example/later", summary: "later is an example." }
 ] as const
 
 /** GitHub metadata for one roster entry. Stars encode the roster position so order mistakes are visible. */
@@ -29,7 +29,7 @@ const repoName = (req: Request) => new URL(req.url).pathname.replace("/repos/", 
 const answerEach = (req: Request) => Response.json(metadataFor(repoName(req)))
 
 const expectedRepos = (stats: (name: string) => PublicRepoCatalog["repos"][number]["stats"]) =>
-  AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, stats: stats(repo.name) }))
+  AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, summary: repo.summary, stats: stats(repo.name) }))
 
 const request = (query = "") => new Request(`https://app.test/api/public/repos${query}`, {
   headers: { origin: "https://smithers.sh", cookie: "session=private", authorization: "Bearer private" }
@@ -37,7 +37,7 @@ const request = (query = "") => new Request(`https://app.test/api/public/repos${
 
 const harness = (
   answer: (req: Request) => Response | Promise<Response> = answerEach,
-  repos: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url">> = AVAILABLE_REPOS
+  repos: ReadonlyArray<Pick<PublicRepository, "name" | "title" | "url" | "summary">> = AVAILABLE_REPOS
 ) => {
   let now = 1_000
   const requests: Array<Request> = []
@@ -62,7 +62,7 @@ describe("the curated catalog", () => {
     const { handler } = harness()
     const catalog = await (await handler(request())).json() as PublicRepoCatalog
     for (const repo of catalog.repos) {
-      expect(Object.keys(repo).sort()).toEqual(["name", "stats", "title", "url"])
+      expect(Object.keys(repo).sort()).toEqual(["name", "stats", "summary", "title", "url"])
     }
   })
 
@@ -71,6 +71,16 @@ describe("the curated catalog", () => {
       expect(repo.url).toBe(`https://github.com/${repo.name}`)
       expect(repo.title.length).toBeGreaterThan(0)
     }
+  })
+
+  test("explains every entry in one curated sentence the app's welcome can read", () => {
+    for (const repo of AVAILABLE_REPOS) {
+      expect(repo.summary).toMatch(/^[A-Z].*\.$/)
+      expect(repo.summary.split(/[.!?]\s/).length).toBe(1)
+    }
+    expect(AVAILABLE_REPOS[0].summary).toBe(
+      "Smithers is a durable workflow framework that lets agents plan, run, and review changes to a code repository."
+    )
   })
 })
 

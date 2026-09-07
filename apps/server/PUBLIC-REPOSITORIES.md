@@ -11,7 +11,10 @@ never borrow a user's bearer token or cookie.
 at `https://canary.smithers.sh`. The shared roster in
 `src/publicRepoCatalog.ts` lists `smithersai/smithers` alone at launch. The
 roster grows as maintainers claim their repositories, and the response keeps
-the roster order. Repository requests do not change this roster.
+the roster order. Repository requests do not change this roster. Each entry
+carries a curated `summary`, the one sentence the app's welcome speaks when the
+repository is opened (`repo.welcome` in apps/ui); it is written in the roster,
+never fetched.
 
 The endpoint fetches public GitHub repository metadata on the server, one
 concurrent request per repository, using the same upstream resource as the
