@@ -57,7 +57,7 @@ describe("@smthrs/platform-bun barrel", () => {
       }).pipe(Effect.provide(host), Effect.scoped)
     )
 
-    expect(live).toEqual([expect.objectContaining({ commandDigest: "sleep 30" })])
+    expect(live).toEqual([expect.objectContaining({ commandDigest: "sleep" })])
     // The scope closed, so the record is retired with the process.
     expect(await Effect.runPromise(ledger.live)).toEqual([])
   })

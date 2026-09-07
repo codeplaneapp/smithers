@@ -235,7 +235,7 @@ export const layer = (
                     slot.current = yield* ledger.record({
                       pid,
                       pgid: groupOf(command, pid, options?.platform),
-                      commandDigest: CommandLine.render(command)
+                      commandDigest: CommandLine.executable(command)
                     }).pipe(
                       // A spawn whose record did not commit is precisely the child this
                       // module exists to make discoverable, so it is not started: the

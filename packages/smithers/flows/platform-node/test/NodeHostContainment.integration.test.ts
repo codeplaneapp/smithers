@@ -113,7 +113,7 @@ describe("NodeHost.layerContained", () => {
       }).pipe(Effect.provide(host), Effect.scoped)
 
       expect(observed.live).toEqual([
-        expect.objectContaining({ pid: observed.pid, pgid: observed.pid, commandDigest: "sleep 30" })
+        expect.objectContaining({ pid: observed.pid, pgid: observed.pid, commandDigest: "sleep" })
       ])
       // The scope closed with the fiber, so the process is gone and the
       // ledger no longer claims it.
@@ -186,7 +186,7 @@ describe("NodeHost.layerContained", () => {
         const status = yield* Effect.flatMap(Jj, (jj) => jj.status()).pipe(Effect.provide(host), Effect.scoped)
 
         expect(status.trim()).toBe(realpathSync(directory))
-        expect(recorded).toEqual(["jj status --config snapshot.max-new-file-size=0"])
+        expect(recorded).toEqual(["jj"])
         // The invocation finished, so the record was retired with it.
         expect(yield* ledger.live).toEqual([])
       } finally {

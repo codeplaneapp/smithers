@@ -146,7 +146,8 @@ describe("ContainedSpawner", () => {
         // A detached child leads its own group, so the group id is its pid.
         pgid: observed.pid,
         hostId: "contained",
-        commandDigest: "sleep 30"
+        // The executable, never the arguments a journal would keep forever.
+        commandDigest: "sleep"
       })
     }))
 
@@ -194,8 +195,10 @@ describe("ContainedSpawner", () => {
       ).pipe(Effect.scoped)
 
       expect(observed.live).toHaveLength(2)
-      expect(observed.live[0]?.commandDigest).toBe("printf 'a\\nb\\n'")
-      expect(observed.live[1]).toMatchObject({ pid: observed.pid, pgid: observed.pid, commandDigest: "wc -l" })
+      // Each leg is recorded by the program it runs; its arguments stay out of
+      // the durable record.
+      expect(observed.live[0]?.commandDigest).toBe("printf")
+      expect(observed.live[1]).toMatchObject({ pid: observed.pid, pgid: observed.pid, commandDigest: "wc" })
     }))
 
   it("gives every leg of a pipeline the same kill policy", () => {

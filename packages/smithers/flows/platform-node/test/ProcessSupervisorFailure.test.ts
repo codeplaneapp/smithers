@@ -465,7 +465,7 @@ describe("failed process shutdown", () => {
       expect(result.live[0]).toMatchObject({
         pid: 900_001,
         pgid: 900_001,
-        commandDigest: "literal 'original argument'"
+        commandDigest: "literal"
       })
       expect(host.unrefs).toBe(1)
       expect(host.rawFinalizerReferenced).toBe(false)

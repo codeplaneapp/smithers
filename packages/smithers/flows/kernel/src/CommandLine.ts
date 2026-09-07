@@ -72,6 +72,38 @@ export const render = (command: ChildProcess.Command): string =>
       : `${quote(command.options.shell)} -c ${quote([command.command, ...command.args].join(" "))}`
     : `${render(command.left)} | ${render(command.right)}`
 
+/** The leading token of a shell line, which is the program the line runs. */
+const program = (line: string): string => {
+  const trimmed = line.trimStart()
+  const end = trimmed.search(/\s/)
+  return end === -1 ? trimmed : trimmed.slice(0, end)
+}
+
+/**
+ * The executable a command runs, without its arguments.
+ *
+ * A durable record of a spawned process names its program with this rather
+ * than with {@link render}: arguments carry credentials (`curl -u user:pass`,
+ * `mysql -phunter2`), and a journal that keeps them keeps them permanently.
+ * Nothing that reads such a record needs more than the program name; a reaper
+ * matches processes by pid and process group.
+ *
+ * Without `shell`, `command` is the executable itself, spaces and all. With a
+ * shell, the line is what runs, so the program is its first token: both
+ * `make("mysql -phunter2", [], { shell: true })` and
+ * `make("mysql", ["-phunter2"])` yield `mysql`. A pipeline names one
+ * executable per stage, joined the way {@link render} joins the stages.
+ *
+ * @category rendering
+ * @since 1.0.0-rc.0
+ */
+export const executable = (command: ChildProcess.Command): string =>
+  command._tag === "StandardCommand"
+    ? command.options.shell === undefined || command.options.shell === false
+      ? command.command
+      : program(command.command)
+    : `${executable(command.left)} | ${executable(command.right)}`
+
 /**
  * The working directory a command runs in, taking the leftmost stage of a
  * pipeline, which is the stage `setCwd` and the spawners agree to treat as the

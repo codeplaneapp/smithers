@@ -103,6 +103,33 @@ describe("CommandLine.render", () => {
   })
 })
 
+describe("CommandLine.executable", () => {
+  it("drops the arguments, which are where a credential rides", () => {
+    expect(CommandLine.executable(ChildProcess.make("curl", ["-u", "user:password"]))).toBe("curl")
+    expect(CommandLine.executable(ChildProcess.make("mysql", ["-phunter2"], { shell: false }))).toBe("mysql")
+  })
+
+  it("keeps an executable path whole, spaces included, when no shell parses it", () => {
+    expect(CommandLine.executable(ChildProcess.make("/opt/My Agent/bin/agent", ["--token", "hunter2"])))
+      .toBe("/opt/My Agent/bin/agent")
+  })
+
+  it("takes the leading token of a shell line, where the arguments are part of the command", () => {
+    expect(CommandLine.executable(ChildProcess.make("mysql -phunter2", [], { shell: true }))).toBe("mysql")
+    expect(CommandLine.executable(ChildProcess.make("  curl -u user:password", [], { shell: true }))).toBe("curl")
+    expect(CommandLine.executable(ChildProcess.make("agent", ["--token", "hunter2"], { shell: true }))).toBe("agent")
+    expect(CommandLine.executable(ChildProcess.make("mysql -phunter2", [], { shell: "/bin/zsh" }))).toBe("mysql")
+  })
+
+  it("names one executable per pipeline stage", () => {
+    const pipeline = ChildProcess.make("printf", ["a\nb\n"]).pipe(
+      ChildProcess.pipeTo(ChildProcess.make("grep -e secret", [], { shell: true }))
+    )
+
+    expect(CommandLine.executable(pipeline)).toBe("printf | grep")
+  })
+})
+
 describe("CommandLine.cwd and CommandLine.env", () => {
   it("reads the options off a standard command", () => {
     const command = ChildProcess.make("ls", [], { cwd: "/work", env: { A: "1" } })

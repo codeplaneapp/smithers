@@ -12,6 +12,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Permission from "@smthrs/capability/Permission"
 import * as JournalModule from "@smthrs/journal/Journal"
 import { JournalError } from "@smthrs/journal/Journal"
+import * as TestJournal from "@smthrs/journal/test/TestJournal"
 import { Deferred, Effect, Fiber, Layer, Sink, Stream } from "effect"
 import * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -135,7 +136,7 @@ describe("ContainedSpawner", () => {
               handle,
               activate: Effect.gen(function*() {
                 expect(yield* ledger.live).toEqual([
-                  expect.objectContaining({ pid: handle.pid, pgid: handle.pid, commandDigest: "agent --run" })
+                  expect.objectContaining({ pid: handle.pid, pgid: handle.pid, commandDigest: "agent" })
                 ])
                 events.push("activated")
               }),
@@ -406,10 +407,10 @@ describe("ContainedSpawner", () => {
       )
 
       // The host spawner saw the rewritten command, and the ledger saw the
-      // process the handle reported, keyed by the command line a grant names.
+      // process the handle reported, named by the executable a grant names.
       expect(options(spawned[0]!)).toMatchObject({ forceKillAfter: 50 })
       expect(live).toEqual([
-        expect.objectContaining({ pid: 4321, pgid: 4321, commandDigest: "agent --run" })
+        expect.objectContaining({ pid: 4321, pgid: 4321, commandDigest: "agent" })
       ])
       // The scope closed, so the record is retired: nothing may reap a pid
       // this host already released.
@@ -499,4 +500,36 @@ describe("ContainedSpawner", () => {
       // which is why this one place logs instead of failing the scope close.
       expect(events).toEqual(["signalled", "released", "released", "released"])
     }))
+
+  it.effect("keeps credential-bearing arguments out of the durable record", () =>
+    Effect.gen(function*() {
+      // A journal entry is permanent and broadly readable, so an argument that
+      // holds a password may never reach one. The executable still does: the
+      // row has to name the program a reaper may have to signal.
+      const ledger = yield* ProcessLedger.make({ hostId: "contained", ownerPid: 7 })
+      const live = yield* Effect.gen(function*() {
+        const spawner = yield* ChildProcessSpawner
+        yield* spawner.spawn(ChildProcess.make("curl", ["-u", "probe-user:probe-password"]))
+        yield* spawner.spawn(ChildProcess.make("mysql -phunter2", [], { shell: true }))
+        return yield* ledger.live
+      }).pipe(
+        Effect.provide(
+          ContainedSpawner.layer({ graceMs: 50 }).pipe(
+            Layer.provide(hostSpawner([])),
+            Layer.provide(Layer.succeed(ProcessLedger.ProcessLedger)(ledger))
+          )
+        ),
+        Effect.scoped
+      )
+
+      expect(live.map((record) => record.commandDigest)).toEqual(["curl", "mysql"])
+      const journal = yield* JournalModule.Journal
+      const page = yield* journal.entries({ runId: ProcessLedger.hostRunId("contained"), limit: 16 })
+      // Both the spawn and the exit of each process are written, so the whole
+      // page is searched rather than the first row.
+      expect(page.entries).toHaveLength(4)
+      const written = JSON.stringify(page.entries)
+      expect(written).not.toContain("probe-password")
+      expect(written).not.toContain("hunter2")
+    }).pipe(Effect.provide(TestJournal.layer()), Effect.scoped))
 })

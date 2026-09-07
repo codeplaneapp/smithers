@@ -206,7 +206,7 @@ describe("a host that was killed", () => {
         pid: pgid,
         pgid,
         hostId: "orphan-host",
-        commandDigest: "sh -c 'sleep 300 & sleep 300'"
+        commandDigest: "sh"
       })
     ])
     expect(orphans[0]?.ownerPid).not.toBe(process.pid)

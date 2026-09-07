@@ -126,14 +126,16 @@ bun run contained.ts
       "hostId": "quickstart",
       "ownerPid": 51230,
       "startedAtMs": 1756900000000,
-      "commandDigest": "sleep 30"
+      "commandDigest": "sleep"
     }
   ]
 }
 ```
 
 The recorded pid is the live supervisor, which leads the owned process group;
-it is not the native `sleep` target's pid. A returned handle's `exitCode`
+it is not the native `sleep` target's pid. `commandDigest` names the executable
+and never its arguments: journal entries are permanent, and arguments carry
+credentials. A returned handle's `exitCode`
 describes the target. The record also names the host incarnation that started
 it, and it is gone after verified scope cleanup. See
 [Contain and reap child processes](/guides/contain-child-processes/) for

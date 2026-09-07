@@ -789,7 +789,7 @@ type Lifecycle = (
 
 Preparation owns cleanup before it can fail or be interrupted. It returns an
 identity to record and an idempotent `activate` effect. The kernel records
-that identity with the original command digest before activation can execute
+that identity with the executable it prepared before activation can execute
 the target. Failed startup closes its child scope immediately; successful
 startup attaches the whole logical command to the caller's scope. Only
 `settled === true` permits ledger retirement. A target exit alone does not
@@ -892,6 +892,11 @@ const ProcessRecord: Schema.Struct<{
 type ProcessRecord = typeof ProcessRecord.Type
 ```
 
+`commandDigest` is the executable alone, as `CommandLine.executable` renders
+it. Arguments carry credentials and these records are permanent, so the ledger
+never writes one down; a reader that acts on a record matches it by pid and
+process group.
+
 ### ProcessLedger.Service and ProcessLedger.ProcessLedger
 
 ```ts
@@ -961,6 +966,18 @@ renders its tokens verbatim; a custom shell renders as an explicit
 `PipedCommand` renders with `|` between its sides. `from` and `to` pipe options
 are not expressible this way and are ignored, so capability checks see the
 commands and never the plumbing. The rendering is POSIX-only by contract.
+
+### CommandLine.executable
+
+```ts
+const executable: (command: ChildProcess.Command) => string
+```
+
+The program a command runs, without its arguments: `command` itself when no
+shell parses it, the leading token of the line when one does, and one name per
+stage of a pipeline joined with `|`. Durable process records name their program
+this way rather than with `render`, because arguments carry credentials and a
+journal entry is permanent.
 
 ### CommandLine.cwd and CommandLine.env
 

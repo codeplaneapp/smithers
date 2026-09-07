@@ -105,6 +105,13 @@ export const hostRunId = (hostId: string): JournalEvent.RunId => `flows.host:${h
  * host itself — so the ledger records the absence rather than a number a
  * reaper could misread.
  *
+ * `commandDigest` names the executable and nothing else, as
+ * `CommandLine.executable` renders it. Arguments carry credentials
+ * (`curl -u user:password`, `mysql -phunter2`) and these records are permanent
+ * journal entries, so the ledger never writes an argument down. A reader that
+ * has to act on a record matches it by pid and process group; the program name
+ * is there to make the row legible.
+ *
  * @category models
  * @since 1.0.0-rc.0
  */
