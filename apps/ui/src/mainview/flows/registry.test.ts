@@ -64,7 +64,7 @@ const chatState: CommandState = {
 describe("command registry pure model", () => {
   test("connect leads the recommendations until work is connected", () => {
     expect(recommendedNames(chatState)[0]).toBe("connect")
-    expect(recommendedNames({ ...chatState, hasConnectors: true })[0]).toBe("world")
+    expect(recommendedNames({ ...chatState, hasConnectors: true })[0]).toBe("wiki")
     expect(recommendedNames({ ...chatState, surface: "world" })[0]).toBe("chat")
     expect(recommendedNames({ ...chatState, typing: true })).toEqual(["chat.stop"])
   })
@@ -138,7 +138,7 @@ describe("command registry pure model", () => {
 
   test("the slash listing puts the recommended command first", () => {
     const commands = [
-      { name: "world", summary: "w" },
+      { name: "wiki", summary: "w" },
       { name: "connect", summary: "c" }
     ]
     const items = slashItems(chatState, "", commands)
@@ -157,10 +157,10 @@ describe("command registry pure model", () => {
       { name: "auth.sign-in", summary: "Sign in with GitHub" },
       { name: "auth.sign-out", summary: "Sign out", requires: ["signed-in"] },
       { name: "issues.create", summary: "Create an issue", requires: ["signed-in"] },
-      { name: "world", summary: "What Smithers understands" }
+      { name: "wiki", summary: "What Smithers understands" }
     ]
     const signedOut = slashItems({ ...chatState, signedOut: true }, "", commands)
-    expect(signedOut.map((item) => item.flow.name)).toEqual(["auth.sign-in", "world"])
+    expect(signedOut.map((item) => item.flow.name)).toEqual(["auth.sign-in", "wiki"])
     const signedIn = slashItems(chatState, "", commands)
     expect(signedIn.map((item) => item.flow.name)).toContain("issues.create")
   })
@@ -213,6 +213,30 @@ describe("command registry pure model", () => {
    * The namespace tree. A flow's namespace is its dotted head; the only bare
    * names are the four surface switches.
    */
+  /*
+   * Will renamed World to Wiki (2026-09-07). The wiki.* names are canonical
+   * and the world.* names stay registered as hidden aliases, so a saved
+   * transcript or a parked command still resolves while nothing lists them.
+   */
+  test("/wiki is the visible surface switch and /world its hidden alias", async () => {
+    const { controller } = await freshController()
+    const visibleNames = visibleItems(controller.commands).map((command) => command.name)
+    expect(visibleNames).toContain("wiki")
+    expect(visibleNames).toContain("wiki.new-note")
+    expect(visibleNames.filter((name) => name === "world" || name.startsWith("world."))).toEqual([])
+    for (const name of ["world", "world.new-note", "world.select", "world.delete", "world.delete.confirm", "world.delete.cancel"]) {
+      const alias = controller.commands.find(name)
+      expect(alias).toBeDefined()
+      expect(alias?.metadata.hidden).toBe(true)
+    }
+    const rows = controller.slashTree("wi").map((row) => (row.kind === "flow" ? row.flow.name : `${row.namespace.id}/`))
+    expect(rows).toContain("wiki")
+    expect(rows).toContain("wiki.new-note")
+    expect(rows.some((row) => row === "world" || row.startsWith("world"))).toBe(false)
+    expect(controller.slashTree("world").filter((row) => row.kind === "flow").map((row) => row.kind === "flow" ? row.flow.name : "")).toEqual([])
+    expect(parseSubmit("/world", controller.commands.all())).toEqual({ kind: "command", name: "world" })
+  })
+
   test("every visible flow lives in a namespace, except the surface switches", async () => {
     const { controller } = await freshController()
     const orphans = visibleItems(controller.commands)
@@ -241,7 +265,7 @@ describe("command registry pure model", () => {
   test("a bare / is the tree's top level: recommendations, surfaces, then namespace rows", () => {
     const commands = [
       { name: "connect", summary: "Connect" },
-      { name: "world", summary: "World" },
+      { name: "wiki", summary: "Wiki" },
       { name: "chat", summary: "Chat" },
       { name: "appearance.dark-mode", summary: "Toggle" },
       { name: "appearance.theme", summary: "Theme" },
@@ -251,7 +275,7 @@ describe("command registry pure model", () => {
     const rows = slashTree(chatState, "", commands)
     expect(rows.map((row) => (row.kind === "flow" ? row.flow.name : `${row.namespace.id}/`))).toEqual([
       "connect",
-      "world",
+      "wiki",
       "chat",
       "chat/",
       "appearance/",
@@ -471,6 +495,7 @@ describe("command registry bindings", () => {
     const names = controller.commands.all().map((command) => command.name)
     expect(names).toEqual([
       "connect",
+      "wiki",
       "world",
       "flows",
       "appearance.theme",
@@ -520,6 +545,11 @@ describe("command registry bindings", () => {
       "connector.remove.ask",
       "connector.remove",
       "connector.remove.cancel",
+      "wiki.new-note",
+      "wiki.select",
+      "wiki.delete",
+      "wiki.delete.confirm",
+      "wiki.delete.cancel",
       "world.new-note",
       "world.select",
       "world.delete",
@@ -692,10 +722,11 @@ describe("command registry bindings", () => {
     // Toggles toggle (§2c): invoking the open pane's command returns to chat.
     expect((await controller.commands.run("connect")).status).toBe("executed")
     expect(store.session().surface).toBe("chat")
-    expect((await controller.commands.run("world")).status).toBe("executed")
+    expect((await controller.commands.run("wiki")).status).toBe("executed")
     expect(store.session().surface).toBe("world")
-    expect((await controller.commands.run("world")).status).toBe("executed")
+    expect((await controller.commands.run("wiki")).status).toBe("executed")
     expect(store.session().surface).toBe("chat")
+    // The hidden `world` alias toggles the same pane.
     expect((await controller.commands.run("world")).status).toBe("executed")
     expect(store.session().surface).toBe("world")
     expect((await controller.commands.run("chat")).status).toBe("executed")
@@ -705,23 +736,24 @@ describe("command registry bindings", () => {
     expect((await controller.commands.run("appearance.dark-mode")).status).toBe("executed")
     expect(store.session().theme).not.toBe(before)
 
-    expect((await controller.commands.run("world.new-note")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.new-note")).status).toBe("executed")
     const note = [...store.collections.worldDocuments.values()].find((document) => document.path.startsWith("Untitled"))
     expect(note).toBeDefined()
     // §10.6: deleting ASKS. The question is the flow's whole effect; the
     // answer is an act of its own, from the composer as from the trash button.
-    expect((await controller.commands.run("world.delete", note?.id ?? "")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.delete", note?.id ?? "")).status).toBe("executed")
     expect(store.session().pendingWorldDeleteId).toBe(note?.id ?? "")
     expect(store.collections.worldDocuments.get(note?.id ?? "")).toBeDefined()
-    expect((await controller.commands.run("world.delete.cancel")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.delete.cancel")).status).toBe("executed")
     expect(store.session().pendingWorldDeleteId).toBeNull()
     expect(store.collections.worldDocuments.get(note?.id ?? "")).toBeDefined()
+    // The hidden world.* aliases ask and answer through the same state.
     expect((await controller.commands.run("world.delete", note?.id ?? "")).status).toBe("executed")
-    expect((await controller.commands.run("world.delete.confirm")).status).toBe("executed")
+    expect((await controller.commands.run("wiki.delete.confirm")).status).toBe("executed")
     expect(store.collections.worldDocuments.get(note?.id ?? "")).toBeUndefined()
     expect(store.session().pendingWorldDeleteId).toBeNull()
     // Nothing waiting: answering is refused rather than guessing a target.
-    expect((await controller.commands.run("world.delete.confirm")).status).toBe("failed")
+    expect((await controller.commands.run("wiki.delete.confirm")).status).toBe("failed")
 
     expect((await controller.commands.run("does-not-exist")).status).toBe("unknown-command")
     // THE FORM LAW: a flow run without its required input renders its form; no door answers with a usage sentence.

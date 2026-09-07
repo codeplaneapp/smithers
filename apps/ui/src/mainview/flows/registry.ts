@@ -58,8 +58,8 @@ import * as system from "./entries/system"
 import * as tab from "./entries/tab"
 import * as target from "./entries/target"
 import * as toast from "./entries/toast"
+import * as wiki from "./entries/wiki"
 import * as workspace from "./entries/workspace"
-import * as world from "./entries/world"
 import type { FormHints } from "./FlowForms"
 
 /**
@@ -324,7 +324,7 @@ export interface Recommendation {
 export const recommendations: ReadonlyArray<Recommendation> = [
   ...chat.recommendations,
   ...auth.recommendations,
-  ...world.recommendations,
+  ...wiki.recommendations,
   ...connector.recommendations
 ]
 
@@ -347,12 +347,13 @@ export const recommendedNames = (state: CommandState): ReadonlyArray<string> => 
  *
  * A flow's namespace is its dotted head (`auth.sign-in` → `auth`). Every
  * Namespaced flows live in one; the only bare names are the four surface
- * switches (`chat`, `world`, `connect`, `flows`), which ARE the top level of
- * the app and read wrong under any prefix.
+ * switches (`chat`, `wiki`, `connect`, `flows`), which ARE the top level of
+ * the app and read wrong under any prefix. The hidden `world` alias of `wiki`
+ * (entries/world.ts) never lists, so it needs no place here.
  */
 
 /** The surface switches: the one legitimate top-level leaves. */
-export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "world", "connect", "flows"]
+export const SURFACE_FLOWS: ReadonlyArray<string> = ["chat", "wiki", "connect", "flows"]
 
 export interface Namespace {
   readonly id: string
@@ -368,7 +369,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   repos.namespace,
   feature.namespace,
   connector.namespace,
-  world.namespace,
+  wiki.namespace,
   tab.namespace,
   target.namespace,
   flow.namespace,

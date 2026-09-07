@@ -162,7 +162,7 @@ describe("recommend: the flow", () => {
   })
 
   test("a material transition writes the rule at once and sends ONE request in the contract's shape", async () => {
-    const worker = recorder([answer("rec-1", ["world", "chat.commands"])])
+    const worker = recorder([answer("rec-1", ["wiki", "chat.commands"])])
     const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
     store.dispatch({ type: "message.submitted", actor: "user", turnId: "t1", text: "what can you do here?" })
     store.dispatch({ type: "message.appended", actor: "system", text: "I can list flows and read files." })
@@ -188,19 +188,19 @@ describe("recommend: the flow", () => {
       expect(entry?.metadata.hidden).not.toBe(true)
       expect(command.summary).toBe(entry?.metadata.summary ?? "")
     }
-    expect(commands.map((command) => command.name)).toContain("world")
+    expect(commands.map((command) => command.name)).toContain("wiki")
     expect(commands.map((command) => command.name)).not.toContain("system.recommend")
 
     const current = row(store)
     expect(current?.source).toBe("agent")
-    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world", "chat.commands"])
+    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["wiki", "chat.commands"])
     expect(current?.suggestions[0]?.emphasis).toBe("primary")
     // The request is invisible to the conversation.
     expect(store.session().phase).toBe("idle")
   })
 
   test("the request names the selected repository", async () => {
-    const worker = recorder([answer("rec-1", ["world"])])
+    const worker = recorder([answer("rec-1", ["wiki"])])
     const { store } = await boot({ fetchImpl: worker.fetchImpl })
     store.dispatch({
       type: "repositories.loaded",
@@ -214,13 +214,13 @@ describe("recommend: the flow", () => {
   })
 
   test("the validated answer drops names the registry does not offer; the pills cap at three", async () => {
-    const worker = recorder([answer("rec-1", ["deploy.everything", "chat.commands", "card.maximize", "world", "connect", "flow.list"])])
+    const worker = recorder([answer("rec-1", ["deploy.everything", "chat.commands", "card.maximize", "wiki", "connect", "flow.list"])])
     const { store } = await boot({ fetchImpl: worker.fetchImpl })
     signIn(store)
     await settle()
     const current = row(store)
     expect(current?.source).toBe("agent")
-    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["chat.commands", "world", "connect"])
+    expect(current?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["chat.commands", "wiki", "connect"])
   })
 
   test("a 429, a 503, a network failure, or an empty answer leaves the rule standing and never an empty row", async () => {
@@ -252,7 +252,7 @@ describe("recommend: the flow", () => {
     let releaseFirst: (() => void) | undefined
     const worker = recorder([
       () => json(200, { id: "rec-old", commands: ["chat.commands"], model: "m" }),
-      answer("rec-new", ["world"])
+      answer("rec-new", ["wiki"])
     ])
     // The first answer waits until the second state has asked.
     const gated = async (input: unknown, init?: RequestInit) => {
@@ -269,14 +269,14 @@ describe("recommend: the flow", () => {
     store.dispatch({ type: "identity.session.cleared", actor: "user" })
     await settle()
     expect(worker.recommends().length).toBe(2)
-    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world"])
+    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["wiki"])
     releaseFirst?.()
     await settle()
-    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["world"])
+    expect(row(store)?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["wiki"])
   })
 
   test("the next user dispatch reports the outcome exactly once, through any door", async () => {
-    const worker = recorder([answer("rec-1", ["world", "chat.commands"]), answer("rec-2", ["connect"])])
+    const worker = recorder([answer("rec-1", ["wiki", "chat.commands"]), answer("rec-2", ["connect"])])
     const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
     signIn(store)
     await settle()
@@ -288,7 +288,7 @@ describe("recommend: the flow", () => {
     expect(worker.outcomes().map((hit) => hit.body)).toEqual([{ id: "rec-1", command: "chat.commands" }])
 
     // A second dispatch before a fresh recommendation reports nothing more.
-    controller.runCommand("world")
+    controller.runCommand("wiki")
     await settle()
     expect(worker.outcomes().length).toBe(1)
 
@@ -308,18 +308,18 @@ describe("recommend: the flow", () => {
   })
 
   test("a hidden act, the recommender's own flow, and the agent's door are never the outcome", async () => {
-    const worker = recorder([answer("rec-1", ["world"])])
+    const worker = recorder([answer("rec-1", ["wiki"])])
     const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
     signIn(store)
     await settle()
     await controller.commands.run("system.recommend")
     await controller.commands.run("card.maximize", "card-none")
-    await controller.commands.runAsAgent("world")
+    await controller.commands.runAsAgent("wiki")
     await settle()
     expect(worker.outcomes().length).toBe(0)
-    controller.runCommand("world")
+    controller.runCommand("wiki")
     await settle()
-    expect(worker.outcomes().map((hit) => hit.body)).toEqual([{ id: "rec-1", command: "world" }])
+    expect(worker.outcomes().map((hit) => hit.body)).toEqual([{ id: "rec-1", command: "wiki" }])
   })
 
   test("without a recommendation the user's dispatch reports nothing", async () => {
@@ -327,7 +327,7 @@ describe("recommend: the flow", () => {
     const { store, controller } = await boot({ fetchImpl: worker.fetchImpl })
     signIn(store)
     await settle()
-    controller.runCommand("world")
+    controller.runCommand("wiki")
     await settle()
     expect(worker.outcomes().length).toBe(0)
   })
@@ -342,7 +342,7 @@ describe("recommend: the flow", () => {
   })
 
   test("pills off: the rule row still lands and no request leaves", async () => {
-    const worker = recorder([answer("rec-1", ["world"])])
+    const worker = recorder([answer("rec-1", ["wiki"])])
     const { store } = await boot({ fetchImpl: worker.fetchImpl, features: { suggestionPills: false } })
     signIn(store)
     await settle()
@@ -351,7 +351,7 @@ describe("recommend: the flow", () => {
   })
 
   test("opt-in: a composition root that does not enable the recommender gets the rule only", async () => {
-    const worker = recorder([answer("rec-1", ["world"])])
+    const worker = recorder([answer("rec-1", ["wiki"])])
     const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
     createAppController(store, unavailableRepositories, silentAgent, {
       bootstrap: cloudBootstrap,

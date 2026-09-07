@@ -283,7 +283,7 @@ describe("chat-first shell: panes never replace the conversation", () => {
     for (
       const [command, paneClass] of [
         ["connect", "connectors-surface"],
-        ["world", "world-surface"]
+        ["wiki", "world-surface"]
       ] as const
     ) {
       // The surface buttons collapsed into ONE dropdown (§2c′): open it,

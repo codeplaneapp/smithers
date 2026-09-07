@@ -1,12 +1,12 @@
 import { parseWikilinks } from "@smthrs/ui/vault"
 import type { AppTransition, WorldDocument } from "./AppState"
-import { WORLD_DISPLAY_NAME } from "./AppState"
+import { WIKI_DISPLAY_NAME } from "./AppState"
 
 export const archiveNotice = (kept: number, previous: string, temporary: boolean): string =>
   `${
     kept === 0
       ? "Started a new conversation."
-      : `Saved ${kept} new note${kept === 1 ? "" : "s"} to ${WORLD_DISPLAY_NAME} and started a new conversation.`
+      : `Saved ${kept} new note${kept === 1 ? "" : "s"} to ${WIKI_DISPLAY_NAME} and started a new conversation.`
   } [Open the archived conversation](${previous}).${
     temporary ? " This archive is only available until this session closes; local storage is unavailable." : ""
   }`

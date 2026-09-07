@@ -60,7 +60,7 @@ export const chatFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
    */
   const CLEAR = {
     name: "chat.clear",
-    summary: "Archive this conversation and start fresh; optionally summarize into World notes",
+    summary: "Archive this conversation and start fresh; optionally summarize into Wiki notes",
     confirm: "archive this conversation and start a new one",
     args: "[--summarize]",
     input: Schema.Struct({ summarize: Schema.optional(Schema.Boolean) }),

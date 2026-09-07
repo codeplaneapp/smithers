@@ -1,6 +1,6 @@
 import { TOOLS_BROWSER_FETCH_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { foldLineages } from "../../chain/DebugFolds"
-import { DEFAULT_PALETTE, isPalette, PALETTES, WORLD_DISPLAY_NAME } from "../AppState"
+import { DEFAULT_PALETTE, isPalette, PALETTES, WIKI_DISPLAY_NAME } from "../AppState"
 import type { Card, Palette } from "../AppState"
 import { THEME_PICKER_CARD_ID } from "../AppStore"
 import type { ControllerContext } from "./context"
@@ -54,7 +54,7 @@ export const createPresentationController = (
       const card: Card = {
         id: "world-embedded",
         kind: "world",
-        title: WORLD_DISPLAY_NAME,
+        title: WIKI_DISPLAY_NAME,
         status: "active",
         createdAt: Date.now(),
         ordinal: highest + 1,

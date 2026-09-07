@@ -1,6 +1,6 @@
 import { MODEL_STREAM_PATH } from "@smthrs/rpc/AgentApiRoutes"
 import { parseWikilinks, restoreWikilinks } from "@smthrs/ui/vault"
-import { DEFAULT_BRANCH_ID, DEFAULT_WORKSPACE_ID, rootFrameId, WORLD_DISPLAY_NAME } from "../AppState"
+import { DEFAULT_BRANCH_ID, DEFAULT_WORKSPACE_ID, rootFrameId, WIKI_DISPLAY_NAME } from "../AppState"
 import type { WorldDocument } from "../AppState"
 import type { AppStore } from "../AppStore"
 import type { ControllerContext } from "./context"
@@ -46,7 +46,7 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
     pendingClear?.abort()
   })
 
-  // Toasts and unrelated World edits must not invalidate a summary. Changes
+  // Toasts and unrelated Wiki edits must not invalidate a summary. Changes
   // to the conversation, its owner or identity do: never clear unseen input.
   const conversationVersion = (): string =>
     JSON.stringify({
@@ -142,7 +142,7 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
                 detail: "This turn stopped while trying to archive the conversation; the archive was not saved."
               }).isPersisted.promise.catch(() => {})
             }
-            return "The archive could not be saved. Your conversation and World notes were not cleared; check local storage and reload before retrying."
+            return "The archive could not be saved. Your conversation and Wiki notes were not cleared; check local storage and reload before retrying."
           }
           for (const [cardId, pump] of pumps) {
             pump.stopped = true
@@ -184,7 +184,7 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
    */
   const selectWorldDocument = (id: string): string | void => {
     if (ctx.store.collections.worldDocuments.get(id) === undefined) {
-      return `There is no ${WORLD_DISPLAY_NAME} note with id ${id}.`
+      return `There is no ${WIKI_DISPLAY_NAME} note with id ${id}.`
     }
     ctx.store.dispatch({ type: "world.document.selected", actor: "user", id })
   }
@@ -213,10 +213,10 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
       }
     })
     /*
-     * A note created from the chat (`/world.new-note` typed, or the agent's
+     * A note created from the chat (`/wiki.new-note` typed, or the agent's
      * call) used to land in a pane that stayed closed: the act "executed"
      * and nothing on screen changed. The new note is the selected document
-     * of the World pane, so the pane opens to show it — for the USER's act
+     * of the Wiki pane, so the pane opens to show it, for the USER's act
      * only: the agent's output embeds (THE EMBED LAW), never opens a pane.
      */
     if (ctx.commandActor === "user" && ctx.store.session().surface !== "world") {
@@ -225,14 +225,14 @@ export const createWorldController = (ctx: ControllerContext): WorldController =
   }
 
   /*
-   * §10.6 / §28.4 / A.34: deleting a note is not undoable, so `/world.delete`
+   * §10.6 / §28.4 / A.34: deleting a note is not undoable, so `/wiki.delete`
    * ASKS — from the trash button and from the composer alike. It used to
    * delete outright whenever it was typed, because the only confirm lived in
    * a component's local state and the flow bypassed it.
    */
   const removeWorldDocument = (id: string): string | void => {
     if (ctx.store.collections.worldDocuments.get(id) === undefined) {
-      return `There is no ${WORLD_DISPLAY_NAME} note with id ${id} to delete.`
+      return `There is no ${WIKI_DISPLAY_NAME} note with id ${id} to delete.`
     }
     ctx.store.dispatch({ type: "world.delete.asked", actor: ctx.commandActor, id })
   }

@@ -442,16 +442,16 @@ describe("the composer's + menu and surface pill", () => {
     expect(store.session().addMenuOpen).toBe(false)
   })
 
-  test("the surface pill lists Chat, Connect, World and Flows, and reads the pane it opened", async () => {
+  test("the surface pill lists Chat, Connect, Wiki and Flows, and reads the pane it opened", async () => {
     const { store, controller } = await localController()
     const view = mount(controller)
 
     await view.act(() => byTestId(view.host, "composer-surface-trigger")?.click())
     const items = [...view.host.querySelectorAll<HTMLElement>(".composer-surfaces [role=\"menuitem\"]")]
-    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "world", "flows"])
+    expect(items.map((item) => item.dataset.flow)).toEqual(["chat", "connect", "wiki", "flows"])
     await view.act(() => items[2]?.click())
     expect(store.session().surface).toBe("world")
-    expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("World")
+    expect(text(byTestId(view.host, "composer-surface-trigger"))).toBe("Wiki")
   })
 
   /*

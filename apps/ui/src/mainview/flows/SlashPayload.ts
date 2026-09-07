@@ -268,6 +268,9 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "connector.downgrade": (args) => required("connectorId", args, "connector.downgrade needs the connector id"),
   "connector.remove.ask": (args) => required("connectorId", args, "connector.remove.ask needs the connector id"),
   "connector.remove": (args) => required("connectorId", args, "connector.remove needs the connector id"),
+  "wiki.select": (args) => required("documentId", args, "wiki.select needs the document id"),
+  "wiki.delete": (args) => required("documentId", args, "wiki.delete needs the document id"),
+  /* Hidden aliases of the two above (entries/world.ts). */
   "world.select": (args) => required("documentId", args, "world.select needs the document id"),
   "world.delete": (args) => required("documentId", args, "world.delete needs the document id"),
   "toast.dismiss": (args) => required("toastId", args, "toast.dismiss needs the toast id"),

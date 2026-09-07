@@ -38,7 +38,7 @@ import { INIT_GREETING, INIT_TITLE, initMessage, repoStep, repoSuggestion } from
 import type { InitMessage } from "./Onboarding"
 import { RichMarkdown } from "./RichMarkdown"
 import type { Card, Message, Suggestion as SuggestionBinding } from "./state/AppState"
-import { WORLD_DISPLAY_NAME } from "./state/AppState"
+import { WIKI_DISPLAY_NAME } from "./state/AppState"
 import { scrubToolEcho } from "./state/MessageScrub"
 import { conversationTabIdOf, inConversation, MAIN_TAB_ID } from "./state/AppState"
 import { catalogRepositoryOf } from "./state/RepoContext"
@@ -159,7 +159,7 @@ function App() {
   /*
    * §10.6: the delete question lives in the store, not here — a component is
    * a projection, never an authority, and the local-state version was
-   * bypassed entirely by `/world.delete <id>` typed into the composer.
+   * bypassed entirely by `/wiki.delete <id>` typed into the composer.
    */
   /* The surfaces trigger, refocused by this shell's Escape and by the menu itself. */
   const surfacesTriggerRef = useRef<HTMLButtonElement>(null)
@@ -718,10 +718,10 @@ function App() {
 
         {session.surface === "world" ?
           (
-            <section className="world-surface embedded-pane" aria-label={`Smithers ${WORLD_DISPLAY_NAME} state`}>
+            <section className="world-surface embedded-pane" aria-label={`Smithers ${WIKI_DISPLAY_NAME} state`}>
               <SurfaceHeader
                 icon={<BookOpen size={17} aria-hidden="true" />}
-                title={WORLD_DISPLAY_NAME}
+                title={WIKI_DISPLAY_NAME}
                 subtitle="What Smithers currently understands"
                 closeCommand="chat"
                 onClose={() => controller.runCommand("chat")}
@@ -729,8 +729,8 @@ function App() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  data-flow="world.new-note"
-                  onClick={() => controller.runCommand("world.new-note")}
+                  data-flow="wiki.new-note"
+                  onClick={() => controller.runCommand("wiki.new-note")}
                 >
                   <Plus size={14} aria-hidden="true" />
                   New note
@@ -740,8 +740,8 @@ function App() {
               <div className="world-workspace">
                 <aside
                   className="world-sidebar"
-                  aria-label={`${WORLD_DISPLAY_NAME} notes`}
-                  ref={stampFlows([["button", "world.select"]])}
+                  aria-label={`${WIKI_DISPLAY_NAME} notes`}
+                  ref={stampFlows([["button", "wiki.select"]])}
                 >
                   <FileTree
                     nodes={worldDocuments.map((document) => ({
@@ -751,7 +751,7 @@ function App() {
                     selected={selectedWorldDocument?.path}
                     onSelect={(path) => {
                       const document = worldDocuments.find((candidate) => candidate.path === path)
-                      if (document) controller.runCommandArgs("world.select", document.id)
+                      if (document) controller.runCommandArgs("wiki.select", document.id)
                     }}
                   />
                 </aside>
@@ -774,10 +774,10 @@ function App() {
                               variant="ghost"
                               size="icon"
                               className="world-delete-btn"
-                              data-flow="world.delete"
+                              data-flow="wiki.delete"
                               aria-label={`Delete ${selectedWorldDocument.title}`}
                               title="Delete note"
-                              onClick={() => controller.runCommandArgs("world.delete", selectedWorldDocument.id)}
+                              onClick={() => controller.runCommandArgs("wiki.delete", selectedWorldDocument.id)}
                             >
                               <Trash2 size={13} />
                             </Button>
@@ -812,9 +812,9 @@ function App() {
                     (
                       <EmptyState
                         icon={<BookOpen size={20} />}
-                        title={`No ${WORLD_DISPLAY_NAME} notes yet`}
+                        title={`No ${WIKI_DISPLAY_NAME} notes yet`}
                         description="Smithers will keep what it learns here."
-                        action={<Button onClick={() => controller.runCommand("world.new-note")}>Create a note</Button>}
+                        action={<Button onClick={() => controller.runCommand("wiki.new-note")}>Create a note</Button>}
                       />
                     )}
                 </main>
@@ -822,11 +822,11 @@ function App() {
               <ConfirmDialog
                 open={pendingWorldDelete !== undefined}
                 title={`Delete ${pendingWorldDelete?.title ?? "note"}?`}
-                body="This note leaves Smithers' world. You can write it again, but Smithers will treat it as new."
+                body={`This note leaves the ${WIKI_DISPLAY_NAME}. You can write it again, but Smithers will treat it as new.`}
                 confirmLabel="Delete"
                 destructive
-                onConfirm={() => controller.runCommand("world.delete.confirm")}
-                onCancel={() => controller.runCommand("world.delete.cancel")}
+                onConfirm={() => controller.runCommand("wiki.delete.confirm")}
+                onCancel={() => controller.runCommand("wiki.delete.cancel")}
               />
             </section>
           ) :

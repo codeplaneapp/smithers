@@ -20,7 +20,7 @@ import {
 
 const catalog: ReadonlyArray<CatalogItem> = [
   { name: "connect", summary: "Connect a repository" },
-  { name: "world", summary: "Open the world notes" },
+  { name: "wiki", summary: "Open the wiki notes" },
   { name: "flow.list", summary: "List the workflows on your workspace" },
   { name: "issues.view", summary: "View an issue", args: "<number>" },
   { name: "card.maximize", summary: "Maximize a card", hidden: true }
@@ -74,7 +74,7 @@ describe("recommend: the request", () => {
     ])
     expect(request.commands).toEqual([
       { name: "connect", summary: "Connect a repository" },
-      { name: "world", summary: "Open the world notes" },
+      { name: "wiki", summary: "Open the wiki notes" },
       { name: "flow.list", summary: "List the workflows on your workspace" },
       { name: "issues.view", summary: "View an issue" }
     ])
@@ -114,13 +114,13 @@ describe("recommend: the answer contract", () => {
       {
         id: "rec-1",
         model: "gpt-oss-120b",
-        commands: ["/issues.view", "card.maximize", "made.up", "issues.view", "world", 7, "connect", "flow.list"]
+        commands: ["/issues.view", "card.maximize", "made.up", "issues.view", "wiki", 7, "connect", "flow.list"]
       },
       catalog
     )
     expect(answer?.id).toBe("rec-1")
     expect(answer?.model).toBe("gpt-oss-120b")
-    expect(answer?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["issues.view", "world", "connect"])
+    expect(answer?.suggestions.map((suggestion) => suggestion.flow)).toEqual(["issues.view", "wiki", "connect"])
     expect(answer?.suggestions.length).toBe(MAX_RECOMMENDATIONS)
     expect(answer?.suggestions[0]).toMatchObject({ id: "reco-issues.view", label: "View an issue", emphasis: "primary" })
     expect(answer?.suggestions[1]?.emphasis).toBe("secondary")
@@ -128,12 +128,13 @@ describe("recommend: the answer contract", () => {
 
   test("the surface the user is already on is never recommended", () => {
     const withChat = [...catalog, { name: "chat", summary: "Back to the conversation" }]
-    const body = { id: "rec-2", model: "m", commands: ["chat", "world"] }
-    expect(parseRecommendation(body, withChat, "chat")?.suggestions.map((s) => s.flow)).toEqual(["world"])
+    const body = { id: "rec-2", model: "m", commands: ["chat", "wiki"] }
+    expect(parseRecommendation(body, withChat, "chat")?.suggestions.map((s) => s.flow)).toEqual(["wiki"])
+    // The pane's persisted surface id stays "wiki"; the flow that opens it is "wiki".
     expect(parseRecommendation(body, withChat, "world")?.suggestions.map((s) => s.flow)).toEqual(["chat"])
     expect(parseRecommendation({ id: "rec-3", commands: ["connect"] }, withChat, "connectors")?.suggestions).toEqual([])
     // Without a surface the parser keeps its old contract.
-    expect(parseRecommendation(body, withChat)?.suggestions.map((s) => s.flow)).toEqual(["chat", "world"])
+    expect(parseRecommendation(body, withChat)?.suggestions.map((s) => s.flow)).toEqual(["chat", "wiki"])
   })
 
   test("an answer naming nothing offerable is an id with no pills; a body without an id or list is no answer", () => {
@@ -143,23 +144,23 @@ describe("recommend: the answer contract", () => {
       suggestions: []
     })
     expect(parseRecommendation({ id: "rec-5", commands: ["made.up"] }, catalog)?.suggestions).toEqual([])
-    expect(parseRecommendation("world", catalog)).toBeUndefined()
+    expect(parseRecommendation("wiki", catalog)).toBeUndefined()
     expect(parseRecommendation(null, catalog)).toBeUndefined()
-    expect(parseRecommendation({ commands: ["world"] }, catalog)).toBeUndefined()
-    expect(parseRecommendation({ id: "rec-6", commands: "world" }, catalog)).toBeUndefined()
+    expect(parseRecommendation({ commands: ["wiki"] }, catalog)).toBeUndefined()
+    expect(parseRecommendation({ id: "rec-6", commands: "wiki" }, catalog)).toBeUndefined()
   })
 })
 
 describe("recommend: the rule", () => {
   test("the repo step leads, then the registry's recommendation order, capped", () => {
     const suggestions = ruleSuggestions({ state: { ...state, hasConnectors: false }, catalog, repoStep: "local" })
-    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["repo.open", "connect", "world"])
+    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["repo.open", "connect", "wiki"])
     expect(suggestions[0]?.emphasis).toBe("primary")
   })
 
   test("with a repository open the repo step is gone and the first recommendation is gold", () => {
     const suggestions = ruleSuggestions({ state, catalog, repoStep: "none" })
-    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["world", "connect"])
+    expect(suggestions.map((suggestion) => suggestion.flow)).toEqual(["wiki", "connect"])
     expect(suggestions[0]?.emphasis).toBe("primary")
   })
 

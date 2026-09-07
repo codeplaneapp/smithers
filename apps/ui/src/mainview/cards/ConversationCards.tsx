@@ -2,7 +2,7 @@ import { Badge, Button, FileTree } from "@smthrs/ui"
 import { ExternalLink, GitPullRequest, HardDrive, Server } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import type { Card, WorldDocument } from "../state/AppState"
-import { WORLD_DISPLAY_NAME } from "../state/AppState"
+import { WIKI_DISPLAY_NAME } from "../state/AppState"
 import type { CardFamily } from "./CardFamily"
 import { settledPill } from "./CardFamily"
 
@@ -96,7 +96,7 @@ export const WorldCardBody = ({
   if (card.payload.documents.length === 0) {
     return (
       <ul className="world-card-list">
-        <li className="world-card-empty">{WORLD_DISPLAY_NAME} is empty so far.</li>
+        <li className="world-card-empty">{WIKI_DISPLAY_NAME} is empty so far.</li>
       </ul>
     )
   }
@@ -107,7 +107,7 @@ export const WorldCardBody = ({
   )
   return (
     <div className="world-card-workspace">
-      <aside className="world-card-sidebar" aria-label={`${WORLD_DISPLAY_NAME} documents`}>
+      <aside className="world-card-sidebar" aria-label={`${WIKI_DISPLAY_NAME} documents`}>
         <FileTree
           nodes={card.payload.documents.map((document) => ({
             path: document.path,
@@ -142,7 +142,7 @@ export const WorldCardBody = ({
           ) :
           (
             <p className="world-card-empty">
-              This note has left {WORLD_DISPLAY_NAME} since the answer was written.
+              This note has left {WIKI_DISPLAY_NAME} since the answer was written.
             </p>
           )}
       </div>

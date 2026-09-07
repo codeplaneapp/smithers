@@ -134,7 +134,7 @@ export const recommendRequest = (input: Pick<RecommendInput, "repo" | "messages"
 
 /** The flow that opens the surface the user is already on: a no-op click, never a recommendation. */
 export const currentSurfaceFlow = (surface: CommandState["surface"]): string =>
-  surface === "world" ? "world" : surface === "connectors" ? "connect" : "chat"
+  surface === "world" ? "wiki" : surface === "connectors" ? "connect" : "chat"
 
 const asString = (value: unknown): string | undefined => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined)
 

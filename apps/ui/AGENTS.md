@@ -7,7 +7,7 @@
 This binds BOTH agent populations:
 
 1. **Agents building this app:** every capability's output renders as a card/embed inside the transcript at conversation width, composer visible below. Building a surface that opens as a takeover/full-screen/second view by default is a defect — the diff gets rejected. Full-screen exists only as a _presentation transition of the same embedded component_ (maximize), entered only by the user's explicit act.
-2. **The agent inside the app (encode this in its system prompt and tool projection):** when the user asks about something ("what is in world?"), the agent ANSWERS IN THE CHAT — with an embedded card when a surface is involved — and never opens a full-screen view. Surface-maximizing commands are user-triggered only (`trigger: user` on the axis); the agent's invocation of any surface command renders its embedded form. Full-screen happens only when the user explicitly asks for it, in those words.
+2. **The agent inside the app (encode this in its system prompt and tool projection):** when the user asks about something ("what is in the wiki?"), the agent ANSWERS IN THE CHAT — with an embedded card when a surface is involved — and never opens a full-screen view. Surface-maximizing commands are user-triggered only (`trigger: user` on the axis); the agent's invocation of any surface command renders its embedded form. Full-screen happens only when the user explicitly asks for it, in those words.
 
 The user has stated this law repeatedly; violations keep shipping. Treat any full-screen-by-default behavior — new or existing — as a bug to fix on sight, not legacy to preserve.
 
@@ -29,7 +29,7 @@ Nothing user-visible may be added unless the current brief or the canon (`DESIGN
 - React components are projections, never authorities for application state. Store all application state in TanStack DB collections.
 - Human, Smithers, and system changes must enter through the shared Flux transition dispatcher with their actor recorded.
 - Persist local collections with SQLite. Preserve the collection boundary so Electric can become the synced authority without rewriting UI consumers.
-- Keep Smithers' world state as Markdown-native, linked documents in its own TanStack DB collection. Record provenance, confidence, actor, and revision; do not present inferred world state as ground truth.
+- Keep Smithers' Wiki (its world state; the `world` ids persist under the Wiki label) as Markdown-native, linked documents in its own TanStack DB collection. Record provenance, confidence, actor, and revision; do not present inferred world state as ground truth.
 - Build every agent context from a fresh versioned world-state snapshot. React does not assemble or own agent context.
 
 ## Frames are the navigation model

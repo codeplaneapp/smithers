@@ -263,7 +263,7 @@ describe("/chat.clear — optional summaries and atomic local archives", () => {
     // The chat is cleared and the one line states what was kept.
     const messages = [...store.collections.messages.values()]
     expect(messages).toHaveLength(1)
-    expect(messages[0]?.text).toContain("Saved 1 new note to World")
+    expect(messages[0]?.text).toContain("Saved 1 new note to Wiki")
     expect(messages[0]?.text).toContain("Open the archived conversation")
   })
 

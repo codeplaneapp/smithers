@@ -70,6 +70,7 @@ import { tabFlows, tabHarnessFlows } from "./entries/tab"
 import { targetFlows } from "./entries/target"
 import { toastFlows } from "./entries/toast"
 import { triggersFlows } from "./entries/triggers"
+import { wikiFlows, wikiSurfaceFlows } from "./entries/wiki"
 import { workspaceFlows, workspaceRenameFlows } from "./entries/workspace"
 import { worldFlows, worldSurfaceFlows } from "./entries/world"
 
@@ -105,6 +106,7 @@ export const USER_ONLY_VISIBLE: ReadonlyArray<{ readonly name: string; readonly 
 
 export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   ...connectSurfaceFlows(actions),
+  ...wikiSurfaceFlows(actions),
   ...worldSurfaceFlows(actions),
   ...flowsSurfaceFlows(actions),
   ...appearanceFlows(actions),
@@ -123,6 +125,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...chatCopyFlows(actions),
   ...approvalFlows(actions),
   ...connectorFlows(actions),
+  ...wikiFlows(actions),
   ...worldFlows(actions),
   ...authFlows(actions),
   ...appFlows(actions),

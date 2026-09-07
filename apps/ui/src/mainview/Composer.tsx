@@ -22,7 +22,7 @@ import { roleMenuEntries } from "./AgentRoleMenu"
 import { useController } from "./ControllerContext"
 import { composeRefs, stampFlows, stampTestIds } from "./FlowStamp"
 import { SELECT_REPO_LABEL } from "./Onboarding"
-import { activeRepoOf, parseRepoSelection, repoKeyOf, WORLD_DISPLAY_NAME } from "./state/AppState"
+import { activeRepoOf, parseRepoSelection, repoKeyOf, WIKI_DISPLAY_NAME } from "./state/AppState"
 
 /** Stable Playwright handle; spread past ChatComposer's excess-property check. */
 const COMPOSER_INPUT_TEST_ID: Record<string, string> = { "data-testid": "composer-input" }
@@ -32,7 +32,7 @@ type Surface = "chat" | "world" | "connectors" | "flows"
 /* The surface pill's label: what the composer is currently pointed at. */
 const SURFACE_LABELS: Readonly<Record<Surface, string>> = {
   chat: "Chat",
-  world: WORLD_DISPLAY_NAME,
+  world: WIKI_DISPLAY_NAME,
   connectors: "Connect",
   flows: "Flows"
 }
@@ -93,7 +93,7 @@ function ComposerMenu({
       active: surface === "connectors"
     },
     {
-      flow: "world",
+      flow: "wiki",
       label: SURFACE_LABELS.world,
       icon: <BookOpen size={14} aria-hidden="true" />,
       active: surface === "world"

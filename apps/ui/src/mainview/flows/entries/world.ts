@@ -1,44 +1,41 @@
 /*
- * The `world` flows. One module per namespace: a lane that adds or edits a
- * flow here touches no other flow module, and Flows.ts registers each block in
- * the aggregator order.
+ * The `world.*` names: hidden aliases of the `wiki.*` flows in entries/wiki.ts.
+ *
+ * Will renamed World to Wiki (2026-09-07). The old names stay registered so a
+ * parked `command.deferred` row, a recommender answer, a saved transcript or a
+ * script written before the rename still resolves, but every one is hidden:
+ * the slash menu, the agent's taught catalog and the recommender list only the
+ * wiki.* names. Each alias calls the same controller action its wiki.* twin
+ * calls; the summaries name the canonical flow so a caller learns the new name.
  */
 import { Schema } from "effect"
-import { WORLD_DISPLAY_NAME } from "../../state/AppState"
 import { flow, NoPayload } from "./Declare"
-import type { FlowEntry, Namespace, Recommendation } from "../registry"
+import type { FlowEntry } from "../registry"
 import type { CommandActions } from "./Declare"
 
-/** The `world` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
-export const namespace: Namespace = { id: "world", label: "World", summary: "What Smithers understands" }
-
-/** World leads connect once something is connected. */
-export const recommendations: ReadonlyArray<Recommendation> = [
-  { name: "world", when: () => true, rank: (state) => (state.hasConnectors ? 1 : 2) }
-]
-
-/** The bare `world` surface switch, registered first with the other top-level surfaces. */
+/** The bare `world` alias of `wiki`, registered beside the other surface switches. */
 export const worldSurfaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
     name: "world",
-    summary: `See what Smithers understands (${WORLD_DISPLAY_NAME})`,
+    summary: "Alias of wiki",
+    hidden: true,
     input: NoPayload,
     handler: () => actions.showWorld()
   })
 ]
 
-/** The `world.*` flows: notes and their confirms. */
+/** The `world.*` aliases of the `wiki.*` flows. */
 export const worldFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   flow({
     name: "world.new-note",
-    summary: "Create a world note",
+    summary: "Alias of wiki.new-note",
     hidden: true,
     input: NoPayload,
     handler: () => actions.createWorldDocument()
   }),
   flow({
     name: "world.select",
-    summary: "Open a world note",
+    summary: "Alias of wiki.select",
     hidden: true,
     args: "<documentId>",
     input: Schema.Struct({ documentId: Schema.String }),
@@ -46,20 +43,15 @@ export const worldFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   }),
   flow({
     name: "world.delete",
-    summary: "Delete a world note",
+    summary: "Alias of wiki.delete",
     hidden: true,
     args: "<documentId>",
     input: Schema.Struct({ documentId: Schema.String }),
     handler: ({ documentId }) => actions.removeWorldDocument(documentId)
   }),
   flow({
-    /*
-     * §10.6 / §28.4: deleting a note asks first, and the answer is an act of
-     * its own — the same shape `admin.grant` uses. The agent may ASK (it can
-     * offer to tidy a note) and may never answer for the human.
-     */
     name: "world.delete.confirm",
-    summary: "Delete the note Smithers asked about",
+    summary: "Alias of wiki.delete.confirm",
     hidden: true,
     userOnly: true,
     userOnlyReason: "a confirm-dialog answer is the human's",
@@ -68,7 +60,7 @@ export const worldFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> =>
   }),
   flow({
     name: "world.delete.cancel",
-    summary: "Keep the note Smithers asked about",
+    summary: "Alias of wiki.delete.cancel",
     hidden: true,
     userOnly: true,
     userOnlyReason: "a confirm-dialog answer is the human's",

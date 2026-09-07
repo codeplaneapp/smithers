@@ -44,6 +44,9 @@ const USER_ONLY_ALLOWLIST: Readonly<Record<string, string>> = {
   "frame.fork": "forking a frame is the human's browser gesture",
   "connector.remove.ask": "opens the human's confirm dialog; the act itself is connector.remove",
   "connector.remove.cancel": "a confirm-dialog answer is the human's",
+  "wiki.delete.confirm": "a confirm-dialog answer is the human's",
+  "wiki.delete.cancel": "a confirm-dialog answer is the human's",
+  // The hidden world.* aliases (entries/world.ts) carry their wiki.* twins' reason.
   "world.delete.confirm": "a confirm-dialog answer is the human's",
   "world.delete.cancel": "a confirm-dialog answer is the human's",
   "auth.sign-in": "the GitHub OAuth redirect is the human's browser gesture; the agent renders the step with auth.prompt",

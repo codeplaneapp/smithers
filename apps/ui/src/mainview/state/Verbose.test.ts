@@ -111,8 +111,8 @@ describe("/verbose", () => {
   test("agent invocations trace as Smithers", async () => {
     const { store, controller } = await fresh()
     await controller.commands.run("debug.verbose")
-    await controller.commands.runForAgent("world")
-    expect(traces(store).some((line) => line.startsWith("Smithers ran /world → executed"))).toBe(true)
+    await controller.commands.runForAgent("wiki")
+    expect(traces(store).some((line) => line.startsWith("Smithers ran /wiki → executed"))).toBe(true)
   })
 
   test("background and system transitions trace; keystrokes and deltas never do", async () => {

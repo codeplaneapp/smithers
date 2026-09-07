@@ -513,11 +513,12 @@ export const ToastSchema = z.object({
 export type Toast = z.infer<typeof ToastSchema>
 
 /*
- * The world's display name, centralized (will is renaming "world"; the rename
- * is a one-line change HERE when he names it — `world` stays the internal id).
- * Every user-visible label and command summary reads this constant.
+ * The Wiki's display name, centralized. Will renamed World to Wiki on
+ * 2026-09-07: every user-visible label and flow summary reads this constant,
+ * while `world` stays the persisted surface id, the card kind, the store
+ * event prefix and the CSS class prefix, so no session migration is needed.
  */
-export const WORLD_DISPLAY_NAME = "World"
+export const WIKI_DISPLAY_NAME = "Wiki"
 
 /*
  * Wave 10 (§2a/§2f) — pills are flow BINDINGS, never prompt strings: a
