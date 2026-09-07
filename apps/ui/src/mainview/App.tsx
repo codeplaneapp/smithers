@@ -16,6 +16,7 @@ import {
   BookOpen,
   CheckCircle2,
   Copy,
+  Factory,
   HelpCircle,
   Plus,
   RotateCcw,
@@ -197,6 +198,7 @@ function App() {
       undefined
     )
   const canListTriggers = controller.commands.find("triggers.list") !== undefined
+  const canShowFactory = controller.commands.find("factory.show") !== undefined
   const worldDocuments = [...worldDocumentRows].sort((left, right) => left.path.localeCompare(right.path))
   const pendingWorldDelete = worldDocuments.find(
     (document) => document.id === (session.pendingWorldDeleteId ?? null)
@@ -735,6 +737,21 @@ function App() {
                   <Plus size={14} aria-hidden="true" />
                   New note
                 </Button>
+                {/* The button door of factory.show: the same registry entry the slash and the agent run. */}
+                {canShowFactory ?
+                  (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-flow="factory.show"
+                      data-testid="wiki-factory"
+                      onClick={() => controller.runCommand("factory.show")}
+                    >
+                      <Factory size={14} aria-hidden="true" />
+                      Factory
+                    </Button>
+                  ) :
+                  null}
               </SurfaceHeader>
 
               <div className="world-workspace">

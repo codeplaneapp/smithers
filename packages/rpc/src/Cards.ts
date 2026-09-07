@@ -751,6 +751,41 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
+   * The factory card (factory.show, Factory design session 2026-09-07 §4):
+   * how a repository builds itself, in two sections. Wiki: the generated
+   * wiki's stats when a generated wiki exists (null until one does), the
+   * count of Wiki notes the store holds, and the Librarian's answers and
+   * misses when a log serves them (null until one does). Infra: the box's
+   * infra-as-code files as read from the repository tree, each present,
+   * absent from the tree, or unreadable with the reason. An absent file is
+   * a row, never a silent omission; nothing here is ever invented.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("factory"),
+    payload: z.object({
+      repo: z.string(),
+      wiki: z.object({
+        generated: z.object({
+          pages: z.number().int().nonnegative(),
+          sha: z.string(),
+          coverage: z.string().optional(),
+          generatedAt: z.number().optional()
+        }).nullable(),
+        notes: z.number().int().nonnegative(),
+        librarian: z.object({
+          answers: z.number().int().nonnegative(),
+          misses: z.number().int().nonnegative()
+        }).nullable()
+      }),
+      infra: z.array(z.object({
+        path: z.string(),
+        state: z.enum(["present", "absent", "unreadable"]),
+        reason: z.string().optional()
+      }))
+    })
+  }),
+  /*
    * Lane runs §2 — the run inbox: every run on the workspace, one summary row
    * each, with the filters the listing was cut at so the card states what it
    * shows. A row opens its run card; the filters are the flow's arguments,

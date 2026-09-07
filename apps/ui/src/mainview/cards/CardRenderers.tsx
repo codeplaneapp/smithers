@@ -21,6 +21,7 @@ import { changeCardFamily } from "./ChangeCards"
 import { ciMatrixCardFamily } from "./CiMatrixCard"
 import { conversationCardFamily } from "./ConversationCards"
 import { envCardFamily } from "./EnvCard"
+import { factoryCardFamily } from "./FactoryCard"
 import { fileCardFamily } from "./FileCards"
 import { flowFormCardFamily } from "./FlowFormCards"
 import { graphCardFamily } from "./GraphCardLazy"
@@ -53,6 +54,7 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   conversationCardFamily,
   workflowCardFamily,
   triggersCardFamily,
+  factoryCardFamily,
   runsCardFamily,
   onboardingCardFamily,
   homeCardFamily,
@@ -91,6 +93,7 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...conversationCardFamily,
   ...workflowCardFamily,
   ...triggersCardFamily,
+  ...factoryCardFamily,
   ...runsCardFamily,
   ...onboardingCardFamily,
   ...homeCardFamily,

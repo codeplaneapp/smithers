@@ -48,6 +48,7 @@ import { connectSurfaceFlows, connectorFlows } from "./entries/connector"
 import { debugFlows, debugVerboseFlows } from "./entries/debug"
 import { egressFlows } from "./entries/egress"
 import { envFlows } from "./entries/env"
+import { factoryFlows } from "./entries/factory"
 import { featureFlows } from "./entries/feature"
 import { filesAddFlows, filesFlows } from "./entries/files"
 import { findingsFlows } from "./entries/findings"
@@ -120,6 +121,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...browserFlows(actions),
   ...flowFlows(actions),
   ...triggersFlows(actions),
+  ...factoryFlows(actions),
   ...runsFlows(actions),
   ...flowRunStopAllFlows(actions),
   ...approvalsFlows(actions),

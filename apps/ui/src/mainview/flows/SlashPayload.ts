@@ -242,6 +242,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "approvals.open": (args) => required("runId", args, "approvals.open needs a run id"),
   "flow.list": (args) => repoOnly("flow.list", args),
   "triggers.list": (args) => repoOnly("triggers.list", args),
+  "factory.show": (args) => repoOnly("factory.show", args),
   "flow.run": (args) => {
     const tokens = tokensOf(args)
     if (tokens.length > 2) return no("flow.run takes a flow name and optionally an owner/repo")

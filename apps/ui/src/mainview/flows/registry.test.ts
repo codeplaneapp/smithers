@@ -516,6 +516,7 @@ describe("command registry bindings", () => {
       "flow.list",
       "flow.run",
       "triggers.list",
+      "factory.show",
       "runs.list",
       "runs.open",
       "runs.resume",

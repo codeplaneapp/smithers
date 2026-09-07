@@ -65,6 +65,8 @@ import type { CloudSeam } from "./seams/CloudSeam"
 import { createEnvironmentSeam } from "./seams/EnvironmentSeam"
 import type { EnvironmentSeam } from "./seams/EnvironmentSeam"
 import { createFilesSeam } from "./seams/FilesSeam"
+import { createFactorySeam } from "./seams/FactorySeam"
+import type { FactorySeam } from "./seams/FactorySeam"
 import { createSecretsSeam } from "./seams/SecretsSeam"
 import { createHistorySeam } from "./seams/HistorySeam"
 import type { HistorySeam } from "./seams/HistorySeam"
@@ -375,6 +377,8 @@ export interface AppController {
   readonly listSecrets: SecretsSeam["listSecrets"]
   readonly showHistory: HistorySeam["showHistory"]
   readonly retellHistory: HistorySeam["retellHistory"]
+  /** The repository's factory (factory.show): wiki stats and the box's infra-as-code files. */
+  readonly showFactory: FactorySeam["showFactory"]
   readonly importRepository: RepoImportSeam["importRepository"]
   readonly retryImport: RepoImportSeam["retryImport"]
   readonly listBookmarks: BookmarksSeam["listBookmarks"]
@@ -635,6 +639,7 @@ export const createAppController = (
   const environmentSeam = actors.pair(seamCtx, (context) => createEnvironmentSeam(context))
   const secretsSeam = actors.pair(seamCtx, (context) => createSecretsSeam(context))
   const historySeam = actors.pair(seamCtx, (context) => createHistorySeam(context))
+  const factorySeam = actors.pair(seamCtx, (context) => createFactorySeam(context))
   const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
   const bookmarksSeam = actors.pair(seamCtx, (context) => createBookmarksSeam(context))
   const filesSeam = actors.pair(seamCtx, (context) => createFilesSeam(context))
@@ -1280,6 +1285,7 @@ export const createAppController = (
     listSecrets: secretsSeam.listSecrets,
     showHistory: historySeam.showHistory,
     retellHistory: historySeam.retellHistory,
+    showFactory: factorySeam.showFactory,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,
@@ -1611,6 +1617,7 @@ export const createAppController = (
     listSecrets: secretsSeam.listSecrets,
     showHistory: historySeam.showHistory,
     retellHistory: historySeam.retellHistory,
+    showFactory: factorySeam.showFactory,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,

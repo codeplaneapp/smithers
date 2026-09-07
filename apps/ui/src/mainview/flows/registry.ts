@@ -39,6 +39,7 @@ import * as connector from "./entries/connector"
 import * as debug from "./entries/debug"
 import * as egress from "./entries/egress"
 import * as env from "./entries/env"
+import * as factory from "./entries/factory"
 import * as feature from "./entries/feature"
 import * as files from "./entries/files"
 import * as findings from "./entries/findings"
@@ -376,6 +377,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   tab.namespace,
   target.namespace,
   flow.namespace,
+  factory.namespace,
   runs.namespace,
   approvals.namespace,
   issues.namespace,

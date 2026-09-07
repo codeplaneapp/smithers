@@ -168,7 +168,8 @@ describe("launch-law parity: every affordance is a command", () => {
       // 15 − the corner balance chip: the balance is one act away (/balance), never main-page chrome.
       // +1 (ask 5): the Flows pane's back-to-conversation close, like World's.
       // +1: the Flows pane's Triggers button, the button door of triggers.list.
-      "../App.tsx": 15,
+      // +1: the Wiki pane's Factory button, the button door of factory.show.
+      "../App.tsx": 16,
       "../StorageRecoveryButton.tsx": 1,
       /* 11 = 10 + the origin chip's "rev N exists · view" (lane change step 4; renders only when both seqs are known). */
       "../Composer.tsx": 11,
@@ -292,6 +293,8 @@ describe("launch-law parity: every affordance is a command", () => {
        * card's Explain — all through onRunCommand.
        */
       "../cards/TargetCards.tsx": 26,
+      /* The factory card: one Open per present infra file, one shared handler through onRunCommand (files.read). */
+      "../cards/FactoryCard.tsx": 1,
       /*
        * The sidebar (docs/LOCAL-APP.md "Tabs"): the list's select and close
        * per tab, the Repos section's empty "Select a repo" row, each repo

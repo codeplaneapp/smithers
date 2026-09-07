@@ -1798,3 +1798,16 @@
 	border-top: 1px solid var(--border, #e4ddcf);
 	vertical-align: top;
 }
+
+/* The factory card (cards/FactoryCard.tsx): two stacked sections, each a titled list. */
+.factory-card {
+	display: flex;
+	flex-direction: column;
+	gap: 0.875rem;
+}
+.factory-section-title {
+	margin: 0 0 0.375rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--muted-foreground, #6b6457);
+}
