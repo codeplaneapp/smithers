@@ -45,10 +45,11 @@ describe("renderAgentRuntimeContext", () => {
     }
   })
 
-  test("states connectors and world-state summaries only when they actually exist", () => {
+  test("states connectors and wiki note summaries only when they actually exist, labelled Wiki in prose with the wire fields unchanged", () => {
     const empty = renderAgentRuntimeContext(contextFixture())
     expect(empty).toContain("Connectors: none connected")
-    expect(empty).toContain("World state: no documents yet.")
+    expect(empty).toContain("Wiki: no notes yet.")
+    expect(empty).not.toContain("World state")
 
     const populated = renderAgentRuntimeContext(
       contextFixture({
@@ -75,9 +76,9 @@ describe("renderAgentRuntimeContext", () => {
     expect(populated).toContain(
       "local-repository \"smithers\" (connected, read-write access) at /Users/will/smithers, branch main"
     )
-    expect(populated).toContain("World state: 2 document(s)")
+    expect(populated).toContain("Wiki: 2 note(s)")
     expect(populated).toContain("Roadmap.md — \"Roadmap\" (confidence 0.6)")
-    expect(populated).toContain("world document open: \"Roadmap.md\"")
+    expect(populated).toContain("wiki note open: \"Roadmap.md\"")
   })
 
   /*

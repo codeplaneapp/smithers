@@ -7,7 +7,7 @@ import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
 import App from "../App"
 import { ControllerTestProvider } from "../ControllerContext"
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
-import { initMessage, repoStep, repoSuggestion } from "../Onboarding"
+import { identityMessage, INIT_GREETING, INIT_TITLE, initMessage, repoStep, repoSuggestion, SMITHERS_HELPERS } from "../Onboarding"
 import { createAppController } from "./AppController"
 import type { AppController as AppControllerType } from "./AppController"
 import { createAppStore } from "./AppStore"
@@ -143,9 +143,12 @@ describe("onboarding — the opening entry", () => {
     const messages = [...host.querySelectorAll(SMITHERS_MESSAGES)].map(text)
     expect(messages).toHaveLength(1)
     const opening = messages[0] ?? ""
-    expect(opening.startsWith("Smithers initialized successfully")).toBe(true)
+    // The agent names itself before it reports anything: the greeting leads, the title follows.
+    expect(opening.startsWith("Smithers here.")).toBe(true)
+    expect(opening).toContain("Smithers initialized successfully")
     const init = host.querySelector<HTMLElement>("[data-testid=\"init-message\"]")
     expect(init?.querySelector(".message-init-check")).not.toBeNull()
+    expect(text(init?.querySelector(".message-init-greeting") ?? null)).toBe("Smithers here.")
     const title = init?.querySelector(".message-init-title") ?? null
     const prompt = init?.querySelector(".message-init-prompt") ?? null
     const details = init?.querySelector<HTMLDetailsElement>("details.message-init-details") ?? null
@@ -261,7 +264,8 @@ describe("onboarding — the opening entry", () => {
     const host = mount(controller)
     const messages = [...host.querySelectorAll(SMITHERS_MESSAGES)].map(text)
     expect(messages).toHaveLength(1)
-    expect((messages[0] ?? "").startsWith("Smithers initialized successfully")).toBe(true)
+    expect((messages[0] ?? "").startsWith("Smithers here.")).toBe(true)
+    expect(messages[0] ?? "").toContain("Smithers initialized successfully")
     expect(host.querySelector("[data-flow=\"repo.open\"]")).not.toBeNull()
   })
 
@@ -331,5 +335,40 @@ describe("onboarding — the pure rules", () => {
     expect(message.text).toContain("Host: unknown")
     expect(message.text).toContain("Harnesses: none detected")
     expect(message.text).toContain("Repositories: smithers, flows @ main")
+  })
+
+  test("the opening text names Smithers on its first line and keeps the title as the second", () => {
+    const lines = initMessage({ bootstrap: undefined, flowCount: 0, harnesses: [], connectors: [], repos: [], repoStep: "none" }).text.split("\n")
+    expect(INIT_GREETING).toBe("Smithers here.")
+    expect(lines[0]).toBe(`**${INIT_GREETING}**`)
+    expect(lines[1]).toBe(`**${INIT_TITLE}**`)
+  })
+
+  test("the identity line is a constant over live facts: honest about an empty host, names only registered helpers", () => {
+    const none = identityMessage({ bootstrap: undefined, harnesses: [], connectors: [], repos: [], registered: () => false })
+    expect(none.startsWith("I am Smithers, the concierge of an unknown host; no repository is open yet.")).toBe(true)
+    expect(none).toContain("No local harness is detected.")
+    expect(none).not.toContain("Librarian")
+    expect(none).not.toContain("Flows agent")
+    // One word, never a first name.
+    expect(none).not.toMatch(/\bSmith Smithers\b/)
+
+    const full = identityMessage({
+      bootstrap: {
+        apiVersion: 1,
+        host: "cloud",
+        version: "test",
+        buildSha: "cloud",
+        capabilities: [],
+        authFlow: "redirect",
+        sandbox: null
+      },
+      harnesses: [],
+      connectors: [{ name: "flows", branch: "main" }],
+      repos: [{ name: "smithers" }],
+      registered: (flow) => SMITHERS_HELPERS.some((helper) => helper.flow === flow)
+    })
+    expect(full).toContain("I am Smithers, the concierge for smithers, flows in the Smithers web app.")
+    for (const helper of SMITHERS_HELPERS) expect(full).toContain(helper.line)
   })
 })

@@ -16,6 +16,7 @@
  */
 import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
 import { downloadAnswers } from "../../flows/Commands"
+import { identityMessage } from "../../Onboarding"
 import type { AppServices } from "../AppController"
 import type { ControllerContext } from "./context"
 
@@ -31,6 +32,13 @@ export interface AppShellController {
    * answer. Blank or prose renders the generic card.
    */
   readonly promptDownload: (flow?: string) => string | void
+  /**
+   * The `smithers.who` handler: the identity line (Onboarding.ts
+   * identityMessage) rendered as a Smithers message and handed back as the
+   * value, so the human's slash, a button and the agent's tool call all read
+   * the same sentence.
+   */
+  readonly introduce: () => { readonly value: string }
 }
 
 /** The sentence a local-door refusal card carries after the flow it names. */
@@ -82,5 +90,18 @@ export const createAppShellController = (ctx: ControllerContext): AppShellContro
     })
   }
 
-  return { downloadUrl, openDownload, promptDownload }
+  const introduce = (): { readonly value: string } => {
+    const { collections } = ctx.store
+    const value = identityMessage({
+      bootstrap: ctx.services.bootstrap,
+      harnesses: [...collections.harnesses.values()],
+      connectors: [...collections.connectors.values()],
+      repos: [...collections.repos.values()],
+      registered: (flow) => ctx.commands.find(flow) !== undefined
+    })
+    ctx.store.dispatch({ type: "message.appended", actor: "smithers", text: value })
+    return { value }
+  }
+
+  return { downloadUrl, openDownload, promptDownload, introduce }
 }

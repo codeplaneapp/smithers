@@ -683,7 +683,8 @@ describe("command registry bindings", () => {
       "target.run.scrub",
       "target.affected",
       "target.ci",
-      "target.source.open"
+      "target.source.open",
+      "smithers.who"
     ])
 
     expect((await controller.commands.run("connect")).status).toBe("executed")

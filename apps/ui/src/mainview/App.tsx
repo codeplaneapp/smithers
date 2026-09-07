@@ -34,7 +34,7 @@ import { useController } from "./ControllerContext"
 import { DevtoolsPanel } from "./DevtoolsPanel"
 import { stampFlows } from "./FlowStamp"
 import { tabOutOf } from "./FocusRing"
-import { INIT_TITLE, initMessage, repoStep, repoSuggestion } from "./Onboarding"
+import { INIT_GREETING, INIT_TITLE, initMessage, repoStep, repoSuggestion } from "./Onboarding"
 import type { InitMessage } from "./Onboarding"
 import { RichMarkdown } from "./RichMarkdown"
 import type { Card, Message, Suggestion as SuggestionBinding } from "./state/AppState"
@@ -567,6 +567,10 @@ function App() {
                         <div className="message-init" data-testid="init-message">
                           <CheckCircle2 size={16} className="message-init-check" aria-label="Initialized" />
                           <div className="message-init-body">
+                            <RichMarkdown
+                              className="message-markdown message-init-greeting"
+                              content={`**${INIT_GREETING}**`}
+                            />
                             <RichMarkdown
                               className="message-markdown message-init-title"
                               content={`**${INIT_TITLE}**`}

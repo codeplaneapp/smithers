@@ -14,7 +14,7 @@ import type { AgentTurnFrame, StartAgentTurnRequest } from "@smthrs/rpc/NativeAg
 import type { NativeAgent, NativeRepositories } from "../native/NativeBridge"
 import { createAppController } from "./AppController"
 import { createAppStore } from "./AppStore"
-import { NO_DOWNLOAD_LINE, smithersInstructions, WEB_HOST_LINE } from "./Instructions"
+import { IDENTITY_LINE, NO_DOWNLOAD_LINE, smithersInstructions, WEB_HOST_LINE } from "./Instructions"
 import type { InstructionHonesty } from "./Instructions"
 
 const honesty = (host: InstructionHonesty["host"], nativeDownloadable?: boolean): InstructionHonesty => ({
@@ -120,7 +120,7 @@ const bootstrapFor = (host: AppBootstrap["host"]): AppBootstrap =>
       sandbox: { platform: "darwin", mode: "enforced" }
     }
 
-const firstTurnInstructions = async (host: AppBootstrap["host"]): Promise<string> => {
+const firstTurnInstructions = async (host: AppBootstrap["host"], prompt = "hello"): Promise<string> => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const { agent, requests } = recordingAgent()
   const controller = createAppController(store, unavailableRepositories, agent, { bootstrap: bootstrapFor(host) })
@@ -134,11 +134,34 @@ const firstTurnInstructions = async (host: AppBootstrap["host"]): Promise<string
     scopesPlain: null
   })
   await settle(2)
-  controller.send("hello")
+  controller.send(prompt)
   await settle()
   expect(requests.length).toBeGreaterThan(0)
   return requests[0]?.instructions ?? ""
 }
+
+/*
+ * The name proof (Concierge L1). A live model answered "Smith Smithers"; the
+ * fix is not another adjective in the prompt but a registered flow the model
+ * executes, so the sentence it reads and the line the app renders share one
+ * constant. The test asks the question a user asks and reads what the model
+ * is told on that turn: the one-word name and the flow that answers it, on
+ * both hosts.
+ */
+describe("a turn asking who you are is answered with the name", () => {
+  for (const host of ["cloud", "local"] as const) {
+    test(`${host}: the instructions pin the one-word name, name smithers.who, and the catalog lists it`, async () => {
+      const instructions = await firstTurnInstructions(host, "who are you?")
+      expect(instructions).toContain(IDENTITY_LINE)
+      expect(IDENTITY_LINE).toContain("answer with the single word Smithers")
+      expect(IDENTITY_LINE).toContain("execute smithers.who")
+      expect(instructions).toContain("/smithers.who")
+      expect(instructions).toContain("Your name is exactly \"Smithers\"")
+      // The wiki is what the notes are called in the prompt; the flow ids keep their names.
+      expect(instructions).toContain("keep the Wiki notes")
+    })
+  }
+})
 
 describe("the turn passes the host from the bootstrap", () => {
   test("a cloud bootstrap's turn carries the web line and the flow it names", async () => {

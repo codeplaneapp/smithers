@@ -52,6 +52,7 @@ import * as repo from "./entries/repo"
 import * as repos from "./entries/repos"
 import * as review from "./entries/review"
 import * as runs from "./entries/runs"
+import * as smithers from "./entries/smithers"
 import * as sync from "./entries/sync"
 import * as system from "./entries/system"
 import * as tab from "./entries/tab"
@@ -397,6 +398,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   approval.namespace,
   debug.namespace,
   app.namespace,
+  smithers.namespace,
   admin.namespace,
   system.namespace,
   toast.namespace

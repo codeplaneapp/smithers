@@ -331,6 +331,8 @@ export interface AppController {
   readonly openDownload: AppShellController["openDownload"]
   /** Render the native-only refusal card with the download action (app.download.prompt — the agent's door). */
   readonly promptDownload: AppShellController["promptDownload"]
+  /** Render and return the identity line (smithers.who). */
+  readonly introduce: AppShellController["introduce"]
   /* The repository welcome and its three answers (controller/onboarding.ts). */
   readonly welcomeRepo: OnboardingController["welcomeRepo"]
   readonly maintainRepo: OnboardingController["maintainRepo"]
@@ -687,7 +689,7 @@ export const createAppController = (
     settleTurnBilling,
     watchIdentityAcrossTabs
   } = actors.pair(ctx, (context) => createAuthBillingController(context, nextTranscriptOrdinal))
-  const { downloadUrl, openDownload, promptDownload } = actors.pair(ctx, (context) => createAppShellController(context))
+  const { downloadUrl, openDownload, promptDownload, introduce } = actors.pair(ctx, (context) => createAppShellController(context))
   const { storageRecoveryState, promptStorageRecovery, exportStorageRecovery } = actors.pair(ctx, createStorageRecoveryController)
 
   const {
@@ -1227,6 +1229,7 @@ export const createAppController = (
     reloadApp,
     openDownload,
     promptDownload,
+    introduce,
     welcomeRepo: onboarding.welcomeRepo,
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,
@@ -1552,6 +1555,7 @@ export const createAppController = (
     reloadApp,
     openDownload,
     promptDownload,
+    introduce,
     welcomeRepo: onboarding.welcomeRepo,
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,

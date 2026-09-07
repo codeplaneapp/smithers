@@ -11,7 +11,7 @@ import { z } from "zod"
  * it anew from live collections on EVERY turn (never cached, never persisted into
  * the visible transcript), sends it alongside the turn, and the server boundary
  * renders it into the instructions the upstream model sees. It states only state
- * the client genuinely holds — surface, connectors, world-state summaries — and
+ * the client genuinely holds — surface, connectors, wiki note summaries — and
  * honest limitations, so the model answers "what app am I in" from fact instead
  * of pleading ignorance about the host environment.
  */
@@ -243,7 +243,7 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
     `- Current surface: ${context.surface}${
       context.selectedWorldDocument === null
         ? ""
-        : ` (world document open: "${context.selectedWorldDocument}")`
+        : ` (wiki note open: "${context.selectedWorldDocument}")`
     }${
       // Chat-first: world and connectors are panes embedded in the chat shell,
       // not pages that replaced it. Saying only "Current surface: world" would
@@ -333,10 +333,10 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
     )
   }
   if (context.worldState.documentCount === 0) {
-    lines.push("- World state: no documents yet.")
+    lines.push("- Wiki: no notes yet.")
   } else {
     lines.push(
-      `- World state: ${context.worldState.documentCount} document(s). These notes ARE what Smithers understands about this workspace — when the user asks about something a note records, answer from the note below, never from a repository read and never with "I can't retrieve that":`
+      `- Wiki: ${context.worldState.documentCount} note(s). These notes ARE what Smithers understands about this workspace — when the user asks about something a note records, answer from the note below, never from a repository read and never with "I can't retrieve that":`
     )
     for (const document of context.worldState.documents) {
       lines.push(`  - ${document.path} — "${document.title}" (confidence ${document.confidence})`)
@@ -345,7 +345,7 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
       if (body === "") {
         lines.push(
           document.bodyTruncated === true
-            ? "    | (this note's text did not fit this turn's context budget — read it in the World pane)"
+            ? "    | (this note's text did not fit this turn's context budget — read it in the Wiki pane)"
             : "    (empty note)"
         )
         continue
@@ -354,7 +354,7 @@ export const renderAgentRuntimeContext = (context: AgentRuntimeContext): string 
       // an instruction line of this block.
       for (const line of body.split("\n")) lines.push(`    | ${line}`)
       if (document.bodyTruncated === true) {
-        lines.push("    | … (note truncated here — read the rest in the World pane)")
+        lines.push("    | … (note truncated here — read the rest in the Wiki pane)")
       }
     }
   }

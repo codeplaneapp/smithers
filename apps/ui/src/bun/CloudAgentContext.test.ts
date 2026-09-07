@@ -53,7 +53,7 @@ describe("createCloudAgent runtime context", () => {
     expect(instructions.startsWith("Be brief.")).toBe(true)
     expect(instructions).toContain("running INSIDE the Smithers product")
     expect(instructions).toContain("Current surface: world")
-    expect(instructions).toContain("world document open: \"Notes.md\"")
+    expect(instructions).toContain("wiki note open: \"Notes.md\"")
     expect(upstreamBody?.messages).toEqual([{ role: "user", content: "hey smithers what app am I in" }])
     expect(upstreamBody && "context" in upstreamBody).toBe(false)
   })

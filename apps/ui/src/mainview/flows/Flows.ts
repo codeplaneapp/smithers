@@ -62,6 +62,7 @@ import { repoFlows, repoOpenFlows, repoStarterFlows } from "./entries/repo"
 import { reposImportFlows, reposImportRetryFlows } from "./entries/repos"
 import { reviewFlows } from "./entries/review"
 import { runsFlows } from "./entries/runs"
+import { smithersFlows } from "./entries/smithers"
 import { storageFlows } from "./entries/storage"
 import { syncFlows } from "./entries/sync"
 import { systemFlows } from "./entries/system"
@@ -160,7 +161,8 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...composerFlows(actions),
   ...filesAddFlows(actions),
   ...repoOpenFlows(actions),
-  ...targetFlows(actions)
+  ...targetFlows(actions),
+  ...smithersFlows(actions)
 ]
 
 /*
