@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { FRAME_PATH_PREFIX } from "./appDocument"
+import { COMING_SOON_WORKER_FIRST, FRAME_PATH_PREFIX } from "./appDocument"
 import { ROUTED_OWNER_PREFIXES } from "./index"
 import { readWranglerConfig, workerFirstPrefix } from "./wranglerConfig"
 
@@ -77,7 +77,11 @@ describe("run_worker_first covers every prefix the Worker routes", () => {
     expect(prefixes).toContain("/api/")
   })
 
-  test("every entry is a prefix wildcard", () => {
-    for (const entry of config.assets.run_worker_first) expect(entry).toMatch(/^\/[a-z0-9]+\/\*$/)
+  test("every coming-soon owner, in its GitHub case and in lowercase (wrangler matches case-sensitively)", () => {
+    for (const entry of COMING_SOON_WORKER_FIRST) expect(config.assets.run_worker_first).toContain(entry)
+  })
+
+  test("every entry is a one-segment prefix wildcard", () => {
+    for (const entry of config.assets.run_worker_first) expect(entry).toMatch(/^\/[A-Za-z0-9-]+\/\*$/)
   })
 })

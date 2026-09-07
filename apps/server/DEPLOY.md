@@ -32,7 +32,10 @@ assets-only Worker; since this Worker serves the whole site build, one route,
 `smithers.sh/*`, claims every apex path (see the cutover log below).
 `run_worker_first` lists `/smithersai/*` so the Worker, not the assets layer,
 answers a repository path: a catalog repository serves the app document and
-any other path under that owner redirects to `https://smithers.sh/`. The
+any other path under that owner redirects to `https://smithers.sh/`. It also
+lists every coming-soon owner, in GitHub case and in lowercase, so a
+coming-soon path in any repository case serves its prerendered page
+(PUBLIC-REPOSITORIES.md, `COMING_SOON_WORKER_FIRST`). The
 Worker name and the canary domain are unchanged, so Durable Object state is
 unaffected. Rollback is to delete the zone route and deploy;
 `canary.smithers.sh` keeps serving throughout.

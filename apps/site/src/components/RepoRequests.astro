@@ -18,7 +18,7 @@ const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithe
         ? <h2 id="request-title">Nominate {repo.title}</h2>
         : <h2 id="request-title">What should we smither next?</h2>}
       {repo
-        ? <p>Smithers is in private alpha. Nominations decide which repositories open next; leave an email and we send one message when {repo.title} opens.</p>
+        ? <p>Smithers is in private alpha. Nominate {repo.title} and leave an email for one message when it opens.</p>
         : <p>Smithers is in private alpha and only available to a select number of open source repos</p>}
     </div>
     <form data-request-form>

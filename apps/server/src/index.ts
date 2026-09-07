@@ -2505,11 +2505,12 @@ const handlePublicRepoActivity = createPublicRepoActivityHandler({
 
 /**
  * What a repository path answers. A coming-soon repository (COMING_SOON_REPOS)
- * has a prerendered site page and no app, under an owner wrangler does not
- * route: the assets layer serves its canonical path first, and this branch
- * catches the variants the assets have no file for so `/effect-ts/effect`
- * reaches the same page. A catalog repository under a routed owner is the app
- * document; every other path under a routed owner is nobody's page.
+ * has a prerendered site page and no app. wrangler runs the Worker first for
+ * its owner (COMING_SOON_WORKER_FIRST in wrangler.jsonc), so this branch sees
+ * the canonical path and the variants the assets have no file for, and
+ * `/effect-ts/effect` reaches the same page instead of the 404 page. A catalog
+ * repository under a routed owner is the app document; every other path under
+ * a routed owner is nobody's page.
  */
 const routedRepoPage = (
   pathname: string

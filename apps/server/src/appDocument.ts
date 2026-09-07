@@ -50,12 +50,30 @@ export const catalogDocumentPath = (pathname: string): string | undefined => {
  * The prerendered coming-soon page for a path that names a COMING_SOON_REPOS
  * entry, or undefined. The same build prerenders it at /<owner>/<name>/
  * (apps/site src/pages/[owner]/[repo].astro) as a page of the site, not the
- * app: it carries no build stamp and no isolation headers. Its owners are not
- * routed owners, so the assets layer answers the canonical path itself; the
- * Worker sees only a variant the assets have no file for (another case, no
- * trailing slash) and serves the canonical page for it.
+ * app: it carries no build stamp and no isolation headers. The Worker runs
+ * first for its owners (COMING_SOON_WORKER_FIRST), so a variant the assets
+ * have no file for (the name in another case, no trailing slash) reaches this
+ * branch and serves the canonical page instead of the 404 page.
  */
 export const comingSoonDocumentPath = (pathname: string): string | undefined => {
   const repo = rosterEntry(COMING_SOON_REPOS, pathname)
   return repo === undefined ? undefined : appDocumentPath(repo.name)
 }
+
+/**
+ * The `run_worker_first` entries wrangler.jsonc must carry for the coming-soon
+ * pages: one per owner in the owner's GitHub case and one in lowercase when
+ * they differ. wrangler matches the patterns case-sensitively (live,
+ * /SmithersAI/Smithers is the 404 page while /smithersai/Smithers is the app),
+ * and with the 2026-08-01 compatibility date a browser navigation to a path
+ * the build has no file for is the assets layer's 404 page before the Worker
+ * runs; the repository segment and the trailing slash are the Worker's to
+ * normalise once the owner is listed. An owner typed in a third case
+ * (/Effect-Ts/effect) is still the 404 page.
+ */
+export const COMING_SOON_WORKER_FIRST: ReadonlyArray<string> = [
+  ...new Set(COMING_SOON_REPOS.flatMap((repo) => {
+    const owner = repo.name.slice(0, repo.name.indexOf("/"))
+    return [`/${owner}/*`, `/${owner.toLowerCase()}/*`]
+  }))
+]

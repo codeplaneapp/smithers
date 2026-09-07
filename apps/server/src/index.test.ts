@@ -3,6 +3,7 @@ import { AppBootstrapSchema } from "@smthrs/rpc/AppBootstrap"
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
+import { COMING_SOON_WORKER_FIRST } from "./appDocument"
 import worker, { PLATFORM_PROXY_RULES, TurnCancelRegistry } from "./index"
 import type { TurnCancelNamespace, TurnCancelStorage, WorkerEnv } from "./index"
 import type { TurnLimitNamespace } from "./turnLimit"
@@ -110,10 +111,10 @@ describe("routed repository pages", () => {
     }
   })
 
-  test("a coming-soon repository serves its prerendered site page by canonical path, whatever the case or trailing slash, without the app's isolation headers", async () => {
-    // Its owner is not a routed owner, so live the assets layer answers the
-    // canonical path before the Worker runs; the Worker sees the variants the
-    // assets have no file for and must not leave them to the 404 page.
+  test("a coming-soon repository serves its prerendered site page by canonical path, whatever the case of the repository or trailing slash, without the app's isolation headers", async () => {
+    // wrangler runs the Worker first for the owner (the test on run_worker_first
+    // below), so the Worker sees the canonical path and the variants the assets
+    // have no file for, and must not leave the variants to the 404 page.
     for (const path of ["/wevm/incur", "/WEVM/Incur", "/wevm/incur/"]) {
       const { env, served } = siteEnv()
       const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
@@ -159,10 +160,13 @@ describe("routed repository pages", () => {
     expect(apex.headers.get("X-Robots-Tag")).toBeNull()
   })
 
-  test("wrangler runs the Worker first for every routed owner and the frame prefix, and routes the whole apex beside the canary", async () => {
+  test("wrangler runs the Worker first for every routed owner, every coming-soon owner in its GitHub case and in lowercase, and the frame prefix, and routes the whole apex beside the canary", async () => {
     // Without the run_worker_first entries the assets layer answers /smithersai/*
     // and /w/* before this Worker sees them, and the handlers above are dead on
-    // Cloudflare.
+    // Cloudflare. The coming-soon branch is dead the same way: wrangler matches
+    // the patterns case-sensitively and a navigation to a path the build has no
+    // file for is the 404 page before the Worker runs, so a lowercase
+    // /effect-ts/effect is the 404 page unless its owner is listed both ways.
     const wrangler = await Bun.file(new URL("../wrangler.jsonc", import.meta.url)).text()
     const config = JSON.parse(wrangler.replace(/^\s*\/\/.*$/gm, "")) as {
       routes: Array<{ pattern: string; custom_domain?: boolean; zone_id?: string }>
@@ -170,6 +174,10 @@ describe("routed repository pages", () => {
     }
     expect(config.assets.run_worker_first).toContain("/smithersai/*")
     expect(config.assets.run_worker_first).toContain("/w/*")
+    expect(COMING_SOON_WORKER_FIRST).toContain("/Effect-TS/*")
+    expect(COMING_SOON_WORKER_FIRST).toContain("/effect-ts/*")
+    expect(COMING_SOON_WORKER_FIRST).toContain("/wevm/*")
+    for (const entry of COMING_SOON_WORKER_FIRST) expect(config.assets.run_worker_first).toContain(entry)
     // One apex route: the page HTML and its /_astro chunks come from the same
     // build. Splitting the apex by prefix once served the chunks from the old
     // assets-only Worker (404), see DEPLOY.md "Cutover log".

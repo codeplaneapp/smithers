@@ -60,8 +60,12 @@ prerendered by the same site build (`src/pages/[owner]/[repo].astro`): the
 repository, its GitHub stats from this endpoint, the sentence that it opens as
 its maintainers claim it, and the nomination form pre-filled with it. The
 Worker serves the app document only for `AVAILABLE_REPOS`; a coming-soon path
-serves that page as the assets layer does, whatever the case of the name
-(`src/appDocument.ts`, `comingSoonDocumentPath`).
+serves that page as the assets layer does. `wrangler.jsonc` runs the Worker
+first for every coming-soon owner, in the owner's GitHub case and in lowercase
+(wrangler matches those patterns case-sensitively), and the Worker then
+serves the canonical page for the repository segment in any case, with or
+without the trailing slash (`src/appDocument.ts`, `comingSoonDocumentPath` and
+`COMING_SOON_WORKER_FIRST`). An owner typed in a third case is the 404 page.
 
 ## Existing repository APIs
 

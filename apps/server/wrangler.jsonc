@@ -39,7 +39,29 @@
 		// (/w/<workspace>/b/<branch>/f/<frame>) serves the app document instead of
 		// the 404 page (src/index.ts, routedRepoPage and isFramePath).
 		// src/workerIdentity.test.ts holds this list to the prefixes the code routes.
-		"run_worker_first": ["/api/*", "/v1/*", "/workflows/*", "/smithersai/*", "/w/*"]
+		//
+		// Every COMING_SOON_REPOS owner runs the Worker first too, in the owner's
+		// GitHub case and in lowercase (wrangler matches these patterns
+		// case-sensitively: live, /SmithersAI/Smithers is the 404 page while
+		// /smithersai/Smithers is the app). With the 2026-08-01 compatibility
+		// date a browser navigation to a path the build has no file for is
+		// answered by the assets layer's 404 page before the Worker runs, so
+		// without these entries /effect-ts/effect and /Effect-TS/Effect are the
+		// 404 page and only the canonical /Effect-TS/effect/ is the coming-soon
+		// page (src/appDocument.ts, COMING_SOON_WORKER_FIRST).
+		"run_worker_first": [
+			"/api/*", "/v1/*", "/workflows/*", "/smithersai/*", "/w/*",
+			"/Effect-TS/*", "/effect-ts/*",
+			"/wevm/*",
+			"/bombshell-dev/*",
+			"/jj-vcs/*",
+			"/modelcontextprotocol/*",
+			"/GitoxideLabs/*", "/gitoxidelabs/*",
+			"/TanStack/*", "/tanstack/*",
+			"/xyflow/*",
+			"/blackboardsh/*",
+			"/withastro/*"
+		]
 	},
 	// Server-side turn kill (B-3): cancellation state per runId lives in this
 	// Durable Object; the cancel route flips it and the streaming turn handler
