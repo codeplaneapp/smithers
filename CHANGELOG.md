@@ -155,10 +155,27 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 <!-- commits:1.0.0-rc.0 -->
 
-1547 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
+1604 commits since [v0.35.0](https://github.com/smithersai/smithers/commit/369a03babf).
 
 ### ✨ Features
 
+- **server,rpc,ui:** answer the maintainer's recent-activity sentence from the Cloud mirror ([2710596048](https://github.com/smithersai/smithers/commit/27105960488eedd4760d380102cf2a216df08d56))
+- **ui,server,rpc:** welcome a visitor to the repository with three doors ([46dc83aa7e](https://github.com/smithersai/smithers/commit/46dc83aa7e98b27c2c852a83a7be72011ed70b47))
+- **ui:** drive the next-step pills from POST /api/recommend on the cloud host ([6ac938421e](https://github.com/smithersai/smithers/commit/6ac938421e6c0d70a560d0f5074d2e6fe3d45a64))
+- **evals:** score the command recommender from its log ([a95614c029](https://github.com/smithersai/smithers/commit/a95614c0299b520514c01e3f0ead6f6bbc4cc2e3))
+- **server,rpc:** recommend the next command from the chat tail ([d1f81a0eb6](https://github.com/smithersai/smithers/commit/d1f81a0eb6c49259afdee47742a594562c3cd206))
+- **site:** rename the hero to "Smither your repo" and simplify the card link ([73fcb42109](https://github.com/smithersai/smithers/commit/73fcb42109a6d3c395ea767063fd3da7784cd231))
+- **server,ui:** let a signed-out visitor explore a catalog repository ([4274c5f400](https://github.com/smithersai/smithers/commit/4274c5f400f38258c83255f79c5bd3beaedabd83))
+- **server:** answer the apex repository routes beside the canary ([ba809aa541](https://github.com/smithersai/smithers/commit/ba809aa541f1ce5e6245971112b2763f97dae8c6))
+- **ui:** select the repository named by the /owner/name path ([9a5a7daef4](https://github.com/smithersai/smithers/commit/9a5a7daef44897d8fbb5ff7301554e39093aa53a))
+- **ui,server:** list the dispatchers waiting on a repository as a triggers card ([6c8cdfd8f9](https://github.com/smithersai/smithers/commit/6c8cdfd8f936107bf3514a4b0336f7ff88147f14))
+- **ui:** add the Secrets button door for keys.list in the chrome footer ([be975dec61](https://github.com/smithersai/smithers/commit/be975dec61cc5e768d319a8d05708447ba2ca555))
+- **site,ui:** open an available repo in Smithers from the landing page ([f0b9992ee0](https://github.com/smithersai/smithers/commit/f0b9992ee014d0b9ab1f8b3939a6321da8b53dd0))
+- **bug-worker:** count repo nominations and rank the public list ([805922c71a](https://github.com/smithersai/smithers/commit/805922c71a5c69ac126580f369f991cb89d1bb4e))
+- **site:** relaunch the hero as "Smithers your repo" ([e8de90b5e7](https://github.com/smithersai/smithers/commit/e8de90b5e7e2cbb400de7b438e28999746e508fa))
+- **bug-worker:** fork nominated repos into smithers-community and record maintainer claims ([13e192e54f](https://github.com/smithersai/smithers/commit/13e192e54fb3f554f9cd2a8da9d5e10aa4697d95))
+- **server:** list Smithers' direct production dependencies in the public catalog ([e383c3f6bf](https://github.com/smithersai/smithers/commit/e383c3f6bf07fcd460c8af16ee2d91eaa7ec16cc))
+- restore release workflows with modern Smithers APIs ([f58130a950](https://github.com/smithersai/smithers/commit/f58130a9501e1a63c7ef024bc3a93b1c9e44d74a))
 - **init:** scaffold explicit editing capabilities and drop the ignored name key ([c25353157c](https://github.com/smithersai/smithers/commit/c25353157ca695e187325e4d8c3cdb37575727e0))
 - **cli:** report the recorded provider cause when an attached run fails ([bd7c06886f](https://github.com/smithersai/smithers/commit/bd7c06886f09c91fe390412aded34043a1cfd0e2))
 - **agent:** lead a failed run's recorded cause with the innermost typed refusal ([cf844e3c54](https://github.com/smithersai/smithers/commit/cf844e3c545bb52b1f66f386e49b1f25fc9774e6))
@@ -341,6 +358,38 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🐛 Bug fixes
 
+- **scripts:** keep a withdrawn release tag from shrinking the changelog range ([b3997f9666](https://github.com/smithersai/smithers/commit/b3997f966623ccc86c2b3813142c3deeefc09a35))
+- **server:** bound what a recommendation and its outcome may carry ([bbed344df9](https://github.com/smithersai/smithers/commit/bbed344df904fbb7ee2e0f9f76d8137a3c912de0))
+- **ui:** keep the repository path in the address bar for the page's life ([e842d4bcb3](https://github.com/smithersai/smithers/commit/e842d4bcb38aff0ef323927c9f571c42c2697875))
+- **server:** read a loginless cookieless session as signed out ([6d40cbc3cd](https://github.com/smithersai/smithers/commit/6d40cbc3cdae14fc1a8b65c5ecbc0f01966b468c))
+- **server,ui:** serve anonymous repo reads and keep the entry repo through boot ([e501a55724](https://github.com/smithersai/smithers/commit/e501a55724a0c1b651d0984b6e495c990a6a20ce))
+- **server:** cap anonymous turns per IPv6 /64 and per deployment ([8837eaec11](https://github.com/smithersai/smithers/commit/8837eaec112d9b5d176701981b1611ea777879a5))
+- **server:** read catalog repositories from their Smithers Cloud mirror ([ef60587156](https://github.com/smithersai/smithers/commit/ef60587156b2d876b14ea2b8ed53c9d2fe923473))
+- **site:** open available repos in the app under smithers.sh ([1cf29232ae](https://github.com/smithersai/smithers/commit/1cf29232ae9f183a77036865715fe96d4c10e19d))
+- **ui,server:** list webhooks beside triggers and keep the minute on step-hour schedules ([fbd7edf340](https://github.com/smithersai/smithers/commit/fbd7edf3403aa5d0d0372614d8b836ab8f14db21))
+- **server:** list only smithersai/smithers in the public catalog at launch ([71cd49fcee](https://github.com/smithersai/smithers/commit/71cd49fceef8bc21757727138996ef9a85230955))
+- **ui,rpc:** tell the model which repository is selected ([772e81fd27](https://github.com/smithersai/smithers/commit/772e81fd272bbca9bc77dc6480b54efde93c1afc))
+- **bug-worker:** rank nominations from one leaderboard key ([b2710b8fca](https://github.com/smithersai/smithers/commit/b2710b8fca20b85db35a8e8a6b584a7162304275))
+- **site:** ship the social card image and require it in the built-site check ([b0ef17601a](https://github.com/smithersai/smithers/commit/b0ef17601addf2580a70c482cfbf2551bf3d28a3))
+- **time-travel:** keep the compensation receipts when rewind rollback fails ([85dfe4ef8b](https://github.com/smithersai/smithers/commit/85dfe4ef8b2ee5da7c329d9b235009921869b98b))
+- **engine:** refuse a served resume the execution-id scope does not namespace ([8e54ae6c0e](https://github.com/smithersai/smithers/commit/8e54ae6c0eb442e8ee8216e0f1f1ef6b8de1125e))
+- **smithers:** keep eval run off MCP and confine suite selection to evals/ ([4715881178](https://github.com/smithersai/smithers/commit/47158811781a2f95f7447786f163de5d9fa1c453))
+- **kernel:** record the executable, not the argv, in the process ledger ([9a3eb38a78](https://github.com/smithersai/smithers/commit/9a3eb38a78014a64eed0351d1a4d8a68a61c3de8))
+- **engine:** stop the flow proxy republishing a raw defect ([847cc9f874](https://github.com/smithersai/smithers/commit/847cc9f874ee7fbaf5c1f0702ce7e8a393cfa11b))
+- **targets:** bind a declared write directory by name, never by a dot in it ([5c12f9632f](https://github.com/smithersai/smithers/commit/5c12f9632ff45cb54dc33718fde78b0af0bf2922))
+- **cli:** bind repository integration declarations to host-authorized credentials and origins ([87d0cfb24a](https://github.com/smithersai/smithers/commit/87d0cfb24a5a81ea09d9dd60622ccc3baae53451))
+- **build-cli:** redact the live output a repository child writes to its parent ([cf789571b4](https://github.com/smithersai/smithers/commit/cf789571b41bc8a2960c0130fcbec99023689071))
+- **engine:** redact quoted credential keys inside diagnostic message strings ([d89858dcb7](https://github.com/smithersai/smithers/commit/d89858dcb7fb68181dd31f137f9efdce435b97c4))
+- **eval-swebench:** close a torn manifest line before appending the next row ([8b0c5fb468](https://github.com/smithersai/smithers/commit/8b0c5fb468cdf4d509e8b0b4c4bba6e49e4ba7a0))
+- **cli:** refuse caller-selected control-plane overrides over MCP ([80ff5cb45c](https://github.com/smithersai/smithers/commit/80ff5cb45c6ebe9afc0e416c48b9c026c874955b))
+- **build-cli:** withhold declared cache credentials from plan-time tool spawns ([a9b9eae083](https://github.com/smithersai/smithers/commit/a9b9eae083cd8e7cbc6b0034ba5ac3f1c0db794b))
+- **agent:** bind child await and send to the calling run's own children ([05a4df81d6](https://github.com/smithersai/smithers/commit/05a4df81d635106e603b1c97f2a8b1246ce62a58))
+- **scorers:** redact credentials out of durable score reasons and metadata ([eae9041327](https://github.com/smithersai/smithers/commit/eae9041327a23ee715faf4ea4407f91b1fe6b14d))
+- **agent:** confine FlowStore writes to real paths under the flows root ([601a0388f3](https://github.com/smithersai/smithers/commit/601a0388f3390970f3ffa2ac2ce15d81bfed5739))
+- **review:** forward only POST /v1/messages through the metered proxy ([03d662aa82](https://github.com/smithersai/smithers/commit/03d662aa826bb1e701120f44b6e1605dded46e2a))
+- **apps/review:** never follow untracked symlinks when building a workspace diff ([a3a37d846c](https://github.com/smithersai/smithers/commit/a3a37d846cc62fcb6f1534d875756b4445beec8a))
+- **server:** read the client-error body before the log, not between read and write ([a0ccbd2f5c](https://github.com/smithersai/smithers/commit/a0ccbd2f5c53453a68a38933ba5d2e277d912fbe))
+- **triggers:** refuse unsigned webhooks when the expected signature is empty ([70b3b90743](https://github.com/smithersai/smithers/commit/70b3b9074313f39d5fef7f7d69144f22339b905c))
 - **build:** retain one-shot launcher version in cache identity ([062643ffd3](https://github.com/smithersai/smithers/commit/062643ffd340f944c2fcaa4e1cf8d8dc90cf2be2))
 - **build:** honor and verify declared workspace toolchains ([461c19fadc](https://github.com/smithersai/smithers/commit/461c19fadc2dae0f6f9b1383a56f24fab4a9c3e3))
 - **ci:** retain failure summaries and run UI checks early ([fd47a04159](https://github.com/smithersai/smithers/commit/fd47a0415921afdb502c26bc89c22540d417b604))
@@ -1022,6 +1071,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### ♻️ Refactors
 
+- **ui:** render the app through one AppIsland component ([87eebf3e54](https://github.com/smithersai/smithers/commit/87eebf3e5421c031edf15e0588eddd8d14493881))
 - centralize shared policy and derived workspace state ([05f69de9d8](https://github.com/smithersai/smithers/commit/05f69de9d87587ffe47b255c4f1e0e3fa9b42101))
 - **repo-targets:** consolidate package gates and review declarations ([095bde5138](https://github.com/smithersai/smithers/commit/095bde513893ef305046866cee075f41288216ed))
 - **errors:** standardize public error contracts ([aa48b1de60](https://github.com/smithersai/smithers/commit/aa48b1de60bbd171451a76fd827ef5799cf43e66))
@@ -1071,6 +1121,9 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📝 Documentation
 
+- **ui:** record the pinned repository URL exception and prove it end to end ([c4ad2147ea](https://github.com/smithersai/smithers/commit/c4ad2147ea413975eaf0706bac6f0a983994695c))
+- **site:** add Smithers Cloud CI and triggers guides and references ([a940e06dcc](https://github.com/smithersai/smithers/commit/a940e06dcc36a698165cc45ce7828d811fddba4e))
+- **platform-bun:** say the ledger records the executable, never argv ([3a0749eb55](https://github.com/smithersai/smithers/commit/3a0749eb55b62db61555fbd69f395721bc34afa8))
 - correct release-candidate quickstart dependencies ([5352cb2ba2](https://github.com/smithersai/smithers/commit/5352cb2ba2897ba354e7d02e7237fcaa61e4343c))
 - **flow:** describe the fresh execution-ID default and the derived opt-in ([b5a900ba05](https://github.com/smithersai/smithers/commit/b5a900ba05c93c75429a974064b2c84199be4c59))
 - **readme:** link the API cheat sheet to its source file ([48e2710dea](https://github.com/smithersai/smithers/commit/48e2710dea0c30d59b591b70ba2e6140988c51a0))
@@ -1315,6 +1368,7 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 🧹 Chores
 
+- **site:** redirect captured Mintlify URLs and require them in the built-site check ([2eb77a97c9](https://github.com/smithersai/smithers/commit/2eb77a97c9a3b8abca24346edaa0571548492b50))
 - gitignore the dated release review ledgers ([4062eea14d](https://github.com/smithersai/smithers/commit/4062eea14d9c3e344e036ece22f1d1ee51964a2a))
 - **deps:** align workspace toolchains and regenerate both lockfiles ([3466f91d5a](https://github.com/smithersai/smithers/commit/3466f91d5a4942cff6098ff4ac0d423a811bbc38))
 - **release:** integrate immutable artifacts and preserve registry retry policy ([44bafddb20](https://github.com/smithersai/smithers/commit/44bafddb20c84e8d13594215305b8f4e8d5f1857))
@@ -1423,6 +1477,9 @@ https://smithers.sh/changelogs/1.0.0-rc.0, the README, and the migration guide.
 
 ### 📦 Other changes
 
+- **build(site):** add the React island dependencies ([862ce94cad](https://github.com/smithersai/smithers/commit/862ce94cad8d2325a5cda4864be13e780ac386a0))
+- **ci:** lint release-auth.yml with the other workflows ([7220acead2](https://github.com/smithersai/smithers/commit/7220acead2cb7ecbef60d390a476cb2eb3529c88))
+- **ci(release):** verify the npm credential before first publication ([9d552af043](https://github.com/smithersai/smithers/commit/9d552af043bf424011230b2ed58b0c66a4cda4e9))
 - **test(release):** complete toolchain fixtures and bound durable history ([b434bf4e0b](https://github.com/smithersai/smithers/commit/b434bf4e0b716ac185b2f6051bbc9f27b48fce55))
 - **test(ui):** delimit PTY readiness across interactive shells ([9198508262](https://github.com/smithersai/smithers/commit/9198508262017a2d5fe724c2aeddf5270ccf90bc))
 - **test(release):** verify contained consumers and order inventory after builds ([2f436a502d](https://github.com/smithersai/smithers/commit/2f436a502d0df82a2fe4d5f8535741d48bfbcaad))
