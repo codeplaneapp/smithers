@@ -204,6 +204,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/FileCards.tsx": 3,
       /* Mark-all-read. */
       "../cards/NotificationsCard.tsx": 1,
+      /* The account card's Sign out door (auth.sign-out through onRunCommand). */
+      "../cards/AccountCard.tsx": 1,
       /* 2 = Try again + the done state's Open the workspace (lane sync). */
       "../cards/RepoImportCard.tsx": 2,
       /*
@@ -293,7 +295,8 @@ describe("launch-law parity: every affordance is a command", () => {
       /* 23 = 22 + the chrome-actions footer's Download the app (docs/web-mode/PLAN.md §3; renders only where app.download is registered, the cloud host). */
       /* 25 = 24 + the footer's Secrets button, the button door of secrets.list (renders only where the flow registers, the cloud host). */
       /* 26 = 25 + the footer's Dispatcher button, the button door of triggers.list (design session 2026-09-07 chrome; cloud host only). */
-      "../tabs/ChromeBar.tsx": 26,
+      /* 27 = 26 + the footer's Account button, the button door of account.show (factory mock 21; renders where an identity seam exists). */
+      "../tabs/ChromeBar.tsx": 27,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })

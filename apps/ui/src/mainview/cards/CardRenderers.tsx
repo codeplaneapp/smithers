@@ -8,6 +8,7 @@
  * is one import plus one spread line here.
  */
 import type { Card } from "../state/AppState"
+import { accountCardFamily } from "./AccountCard"
 import { adminCardFamily } from "./AdminCards"
 import { affectedCardFamily } from "./AffectedCard"
 import { agentCardFamily } from "./AgentCards"
@@ -58,6 +59,7 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   notificationsCardFamily,
   envCardFamily,
   secretsCardFamily,
+  accountCardFamily,
   repoImportCardFamily,
   syncCardFamily,
   branchesCardFamily,
@@ -93,6 +95,7 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...notificationsCardFamily,
   ...envCardFamily,
   ...secretsCardFamily,
+  ...accountCardFamily,
   ...repoImportCardFamily,
   ...syncCardFamily,
   ...branchesCardFamily,

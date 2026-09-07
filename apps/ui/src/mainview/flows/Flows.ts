@@ -27,6 +27,7 @@
  */
 import type { FlowEntry } from "./registry"
 import type { CommandActions } from "./entries/Declare"
+import { accountFlows } from "./entries/account"
 import { adminOperatorFlows, adminResetFlows, adminToolFlows } from "./entries/admin"
 import { agentEditFlows, agentFlows } from "./entries/agent"
 import { appFlows } from "./entries/app"
@@ -129,6 +130,7 @@ export const baseFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   ...wikiFlows(actions),
   ...worldFlows(actions),
   ...authFlows(actions),
+  ...accountFlows(actions),
   ...appFlows(actions),
   ...storageFlows(actions),
   ...cloudFlows(actions),

@@ -8,7 +8,7 @@ import type { FlowEntry, FlowRequirement, Namespace, Recommendation } from "../r
 import type { CommandActions } from "./Declare"
 
 /** The `auth` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
-export const namespace: Namespace = { id: "auth", label: "Account", summary: "Sign in and out" }
+export const namespace: Namespace = { id: "auth", label: "Sign in", summary: "Sign in and out" }
 
 /** The requirements `auth.sign-in` fulfills; registry.ts flowRequirements aggregates them. */
 export const requirements: ReadonlyArray<FlowRequirement> = [

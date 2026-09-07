@@ -915,6 +915,28 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
+   * The account card (factory mock 21, design session §6c): who is signed in
+   * and what the identity seam knows about them. Every row is a seam fact:
+   * the GitHub login, the scopes the identity worker states (GET
+   * /api/auth/scopes), the allowlist answer, and the boxes the workspaces
+   * seam has listed across repositories. No billing, usage or seat rows
+   * exist because no seam holds them; a row with no seam is absent, never
+   * invented.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("account"),
+    payload: z.object({
+      login: z.string(),
+      /** GET /api/auth/scopes rows, one plain sentence per scope; empty when the seam did not answer, and the section is then absent. */
+      scopes: z.array(z.object({ scope: z.string(), plain: z.string() })),
+      allowlisted: z.boolean(),
+      accessRequested: z.boolean(),
+      /** The cloudWorkspaces rows at render time: the person's boxes across every repository this app has listed. */
+      boxes: z.array(z.object({ id: z.string(), repoId: z.string(), name: z.string(), status: z.string() }))
+    })
+  }),
+  /*
    * Lane sync (ADR 0005): the import becomes a job card. `stage`, `counts`,
    * `error`, `repository`, and `workspaceId` are the progress fields of
    * plue#471 — all optional, parsed only when the wire carries them, never

@@ -24,6 +24,8 @@ import type { CloudTerminalClient } from "./CloudTerminalClient"
 import { createTargetRunClient } from "./TargetRunClient"
 import { createAppShellController } from "./controller/app"
 import type { AppShellController } from "./controller/app"
+import { createAccountController } from "./controller/account"
+import type { AccountController } from "./controller/account"
 import { createAuthBillingController } from "./controller/auth-billing"
 import { createConnectorController } from "./controller/connectors"
 import { createControllerContext } from "./controller/context"
@@ -335,6 +337,8 @@ export interface AppController {
   readonly promptDownload: AppShellController["promptDownload"]
   /** Render and return the identity line (smithers.who). */
   readonly introduce: AppShellController["introduce"]
+  /** Render the account card, or the sign-in step signed out (account.show). */
+  readonly showAccount: AccountController["showAccount"]
   /* The repository welcome and its three answers (controller/onboarding.ts). */
   readonly welcomeRepo: OnboardingController["welcomeRepo"]
   readonly maintainRepo: OnboardingController["maintainRepo"]
@@ -1023,6 +1027,13 @@ export const createAppController = (
     }))
 
   /*
+   * The account card (mock 21): seam facts about the signed-in person, or the
+   * sign-in step when no one is, through auth.prompt's renderer.
+   */
+  const account = actors.pair(ctx, (context) =>
+    createAccountController(context, { nextOrdinal: nextTranscriptOrdinal, promptSignIn }))
+
+  /*
    * The /chat.commands answer: the LIVE visible catalog as one chat message —
    * the slash menu caps at 8 for calm, so this is where "all of it" lives.
    * Referenced before `commands` initializes; only ever called after.
@@ -1235,6 +1246,7 @@ export const createAppController = (
     openDownload,
     promptDownload,
     introduce,
+    showAccount: account.showAccount,
     welcomeRepo: onboarding.welcomeRepo,
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,
@@ -1562,6 +1574,7 @@ export const createAppController = (
     openDownload,
     promptDownload,
     introduce,
+    showAccount: account.showAccount,
     welcomeRepo: onboarding.welcomeRepo,
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,

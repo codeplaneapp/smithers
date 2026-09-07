@@ -461,10 +461,11 @@
 	background: var(--hover);
 }
 
-/* The download, Secrets and Dispatcher buttons carry an icon; keep each on one line with its label. */
+/* The download, Secrets, Dispatcher and Account buttons carry an icon; keep each on one line with its label. */
 .chrome-action-download,
 .chrome-action-secrets,
-.chrome-action-dispatcher {
+.chrome-action-dispatcher,
+.chrome-action-account {
 	display: flex;
 	align-items: center;
 	gap: 6px;

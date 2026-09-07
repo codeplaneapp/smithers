@@ -1122,3 +1122,170 @@ describe("the chrome-actions footer's Dispatcher button", () => {
     expect(host.querySelector('[data-flow="triggers.list"]')).toBeNull()
   })
 })
+/*
+ * The Account button (factory mock 21, design session §6c): the button door of
+ * account.show, in the chrome that belongs to no session. Signed in, its click
+ * renders one read-only card of seam facts (login, allowlist answer, the
+ * identity worker's scopes, the boxes the workspaces seam listed) with the
+ * Sign out door and nothing else: no billing, usage or seat rows, because no
+ * seam holds them. Signed out, the same flow renders the sign-in step, never
+ * an empty account.
+ */
+describe("the chrome-actions footer's Account button", () => {
+  const accountHarness = async (): Promise<{ store: AppStore; controller: AppControllerType; scopesRead: () => number }> => {
+    let scopesRead = 0
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const path = new URL(url, "https://app.test").pathname
+        if (path === "/api/auth/scopes") {
+          scopesRead += 1
+          return new Response(
+            JSON.stringify({
+              provider: "github",
+              requestedScopes: ["read:user", "repo"],
+              scopes: [
+                { scope: "read:user", plain: "See your GitHub profile.", why: "Sign-in." },
+                { scope: "repo", plain: "Read access to your repositories.", why: "The connector." }
+              ]
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        }
+        return new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
+      }
+    })
+    return { store, controller, scopesRead: () => scopesRead }
+  }
+
+  const signedIn = async (store: AppStore): Promise<void> => {
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-in",
+      login: "will",
+      allowlisted: true,
+      admin: false,
+      scopesPlain: null
+    })
+  }
+
+  test("signed in, the click renders the seam-backed rows, the Sign out door, and nothing else", async () => {
+    const { store, controller, scopesRead } = await accountHarness()
+    await signedIn(store)
+    // The workspaces seam has listed boxes in two repositories: both are the person's.
+    await persisted(store, {
+      type: "workspaces.loaded",
+      actor: "system",
+      workspaces: [
+        { id: "ws-2", repoId: "will/flows", name: "epic-librarian", targetBookmark: null, status: "running", provisioningStage: null, suspendedAt: null, createdAt: null },
+        { id: "ws-1", repoId: "acme/viem", name: "main", targetBookmark: null, status: "suspended", provisioningStage: null, suspendedAt: null, createdAt: null }
+      ]
+    })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-account]")
+    expect(button).not.toBeNull()
+    expect(button?.dataset.flow).toBe("account.show")
+    expect(button?.textContent).toBe("Account")
+    expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    // Signed in, the chrome offers Account, not the sign-in line.
+    expect(host.querySelector("[data-testid=chrome-sign-in]")).toBeNull()
+    const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(order.indexOf("secrets.list")).toBeLessThan(order.indexOf("account.show"))
+    expect(order.indexOf("account.show")).toBeLessThan(order.indexOf("appearance.dark-mode"))
+    // The slash door offers the same registry entry the button is bound to.
+    const slashNames = controller.slashTree("account.show").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
+    expect(slashNames).toContain("account.show")
+
+    await act(() => button?.click())
+    await act(() => {})
+    expect(scopesRead()).toBe(1)
+    const card = host.querySelector<HTMLElement>('[data-kind="account"]')
+    expect(card).not.toBeNull()
+    expect(card?.getAttribute("aria-label")).toBe("Account · @will")
+    expect(card?.querySelector("[data-testid=account-login]")?.textContent).toBe("GitHubConnected as @will")
+    expect(card?.querySelector("[data-testid=account-access]")?.textContent).toBe("AccessAllowed")
+    expect(card?.querySelector('[data-testid="account-scope-read:user"]')?.textContent).toBe("read:userSee your GitHub profile.")
+    expect(card?.querySelector("[data-testid=account-scope-repo]")?.textContent).toBe("repoRead access to your repositories.")
+    // Boxes list across repositories, sorted by repository then name.
+    const boxes = [...(card?.querySelectorAll<HTMLElement>("[data-testid^=account-box-]") ?? [])].map((row) => row.textContent)
+    expect(boxes).toEqual(["acme/viemmainsuspended", "will/flowsepic-librarianrunning"])
+    // Exactly the seam-backed rows: two identity rows, two scopes, two boxes.
+    expect(card?.querySelectorAll("tbody tr")).toHaveLength(6)
+    const signOut = card?.querySelector<HTMLButtonElement>('[data-flow="auth.sign-out"]')
+    expect(signOut?.textContent).toBe("Sign out")
+    expect(card?.querySelectorAll(".world-card-list button")).toHaveLength(1)
+    // No billing, usage, seat or invented rows.
+    for (const banned of ["$", "Usage", "Seats", "Runs", "box-hours", "Notifications", "Remembered"]) {
+      expect(card?.textContent).not.toContain(banned)
+    }
+
+    // The agent door reads the same facts back, so the model never guesses who is signed in.
+    const outcome = await controller.commands.runForAgent("account.show")
+    expect(outcome.status).toBe("executed")
+    expect(outcome.status === "executed" ? outcome.value : "").toBe(
+      "account: @will; access allowed; 2 GitHub scope(s); 2 box(es) listed"
+    )
+    // The same card is re-surfaced, never a second one.
+    await act(() => {})
+    expect(host.querySelectorAll('[data-kind="account"]')).toHaveLength(1)
+  })
+
+  test("signed in with no scopes answer and no boxes listed, those sections are absent, not empty", async () => {
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async () => new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
+    })
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-in",
+      login: "will",
+      allowlisted: false,
+      admin: false,
+      scopesPlain: null
+    })
+    await persisted(store, { type: "identity.access.requested", actor: "user" })
+    const { host, act } = mount(controller)
+    await act(() => host.querySelector<HTMLButtonElement>("[data-testid=chrome-account]")?.click())
+    await act(() => {})
+    const card = host.querySelector<HTMLElement>('[data-kind="account"]')
+    expect(card?.querySelector("[data-testid=account-access]")?.textContent).toBe("AccessRequested, waiting on an answer")
+    expect(card?.querySelectorAll("tbody tr")).toHaveLength(2)
+    expect(card?.textContent).not.toContain("GitHub scopes")
+    expect(card?.textContent).not.toContain("Boxes")
+  })
+
+  test("signed out, the click renders the sign-in step, never an empty account", async () => {
+    const { store, controller } = await accountHarness()
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-out",
+      login: null,
+      allowlisted: false,
+      admin: false,
+      scopesPlain: null
+    })
+    const { host, act } = mount(controller)
+    // Signed out, both doors stand: the direct sign-in line and Account.
+    expect(host.querySelector("[data-testid=chrome-sign-in]")).not.toBeNull()
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-account]")
+    expect(button).not.toBeNull()
+    await act(() => button?.click())
+    await act(() => {})
+    expect(host.querySelector('[data-kind="account"]')).toBeNull()
+    const prompt = [...host.querySelectorAll<HTMLButtonElement>('.message-cta[data-flow="auth.sign-in"]')]
+    expect(prompt.length).toBeGreaterThan(0)
+    expect(prompt.at(-1)?.textContent).toBe("Sign in with GitHub")
+    const outcome = await controller.commands.runForAgent("account.show")
+    expect(outcome).toEqual({ status: "executed", value: "signed out: the sign-in step is in the chat" })
+  })
+
+  test("host local renders no Account button: account.show needs an identity seam", async () => {
+    const { controller } = await localHarness()
+    expect(controller.commands.find("account.show")).toBeUndefined()
+    const { host } = mount(controller)
+    expect(host.querySelector("[data-testid=chrome-account]")).toBeNull()
+    expect(host.querySelector('[data-flow="account.show"]')).toBeNull()
+  })
+})

@@ -559,6 +559,7 @@ describe("command registry bindings", () => {
       "auth.prompt",
       "auth.sign-out",
       "auth.request-access",
+      "account.show",
       "storage.recovery",
       "storage.recovery.export",
       "cloud.sign-in",

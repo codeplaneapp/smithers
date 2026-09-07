@@ -20,6 +20,7 @@
 import type * as FlowBinding from "@smthrs/harness/FlowBinding"
 import type { AppBootstrap, RuntimeCapability } from "@smthrs/rpc/AppBootstrap"
 import type { Schema } from "effect"
+import * as account from "./entries/account"
 import * as admin from "./entries/admin"
 import * as agent from "./entries/agent"
 import * as app from "./entries/app"
@@ -394,6 +395,7 @@ export const NAMESPACES: ReadonlyArray<Namespace> = [
   notifications.namespace,
   browser.namespace,
   auth.namespace,
+  account.namespace,
   cloud.namespace,
   billing.namespace,
   card.namespace,
