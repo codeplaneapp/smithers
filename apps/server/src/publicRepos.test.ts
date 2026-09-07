@@ -90,12 +90,14 @@ describe("the curated catalog", () => {
     }
   })
 
-  test("shows Smithers' direct dependencies and its VCS as coming soon, in the landing page's order", () => {
+  test("shows Smithers' direct and second-ring dependencies and its VCS as coming soon, in the landing page's order", () => {
     expect(COMING_SOON_REPOS.map((repo) => [repo.name, repo.title])).toEqual([
       ["Effect-TS/effect", "Effect"],
       ["wevm/incur", "incur"],
       ["bombshell-dev/clack", "clack"],
-      ["jj-vcs/jj", "jj"]
+      ["jj-vcs/jj", "jj"],
+      ["modelcontextprotocol/typescript-sdk", "MCP TypeScript SDK"],
+      ["GitoxideLabs/gitoxide", "gitoxide"]
     ])
   })
 
@@ -144,7 +146,9 @@ describe("public available repositories", () => {
     }
     expect(catalog).toEqual({ repos: expectedRepos(statsOf), comingSoon: expectedComingSoon(statsOf) })
     expect(catalog.repos[0]).toMatchObject({ name: "smithersai/smithers", stats: { stars: 407 } })
-    expect(catalog.comingSoon!.map((repo) => repo.name)).toEqual(["Effect-TS/effect", "wevm/incur", "bombshell-dev/clack", "jj-vcs/jj"])
+    expect(catalog.comingSoon!.map((repo) => repo.name)).toEqual([
+      "Effect-TS/effect", "wevm/incur", "bombshell-dev/clack", "jj-vcs/jj", "modelcontextprotocol/typescript-sdk", "GitoxideLabs/gitoxide"
+    ])
     expect(catalog.comingSoon![0]).toMatchObject({ name: "Effect-TS/effect", stats: { stars: 3407 } })
     expect(requests.map((req) => req.url)).toEqual(fetchedUrls())
     for (const req of requests) {
@@ -183,7 +187,8 @@ describe("public available repositories", () => {
     const catalog = await response.json() as PublicRepoCatalog
     expect(catalog.repos[0]!.stats?.stars).toBe(407)
     expect(catalog.comingSoon!.map((repo) => [repo.name, repo.stats === null])).toEqual([
-      ["Effect-TS/effect", false], ["wevm/incur", true], ["bombshell-dev/clack", false], ["jj-vcs/jj", false]
+      ["Effect-TS/effect", false], ["wevm/incur", true], ["bombshell-dev/clack", false], ["jj-vcs/jj", false],
+      ["modelcontextprotocol/typescript-sdk", false], ["GitoxideLabs/gitoxide", false]
     ])
   })
 

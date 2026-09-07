@@ -31,7 +31,10 @@ export const COMING_SOON_REPOS = [
   { name: "Effect-TS/effect", title: "Effect", url: "https://github.com/Effect-TS/effect" },
   { name: "wevm/incur", title: "incur", url: "https://github.com/wevm/incur" },
   { name: "bombshell-dev/clack", title: "clack", url: "https://github.com/bombshell-dev/clack" },
-  { name: "jj-vcs/jj", title: "jj", url: "https://github.com/jj-vcs/jj" }
+  { name: "jj-vcs/jj", title: "jj", url: "https://github.com/jj-vcs/jj" },
+  // Second-ring dependencies: incur depends on the MCP SDK; jj depends on gitoxide.
+  { name: "modelcontextprotocol/typescript-sdk", title: "MCP TypeScript SDK", url: "https://github.com/modelcontextprotocol/typescript-sdk" },
+  { name: "GitoxideLabs/gitoxide", title: "gitoxide", url: "https://github.com/GitoxideLabs/gitoxide" }
 ] as const
 
 /**
