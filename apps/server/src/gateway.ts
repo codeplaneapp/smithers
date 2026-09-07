@@ -241,6 +241,15 @@ const writeRecord = async (
   }
 }
 
+/**
+ * The gateway record a login already holds for a repository, or undefined
+ * when none is cached. A lookup and nothing more: it never provisions, so a
+ * read route can ask "is there a box to ask?" without spending the caller's
+ * Cloud resources on the question.
+ */
+export const peekGatewayRecord = (env: GatewayEnv, login: string, repo: string): Promise<GatewayRecord | undefined> =>
+  readRecord(env, login, repo)
+
 /** The unit-test hook: clears the in-isolate fallback between tests. */
 export const clearMemoryGatewayRecords = (): void => {
   memoryRecords.clear()

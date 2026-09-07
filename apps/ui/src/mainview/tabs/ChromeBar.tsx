@@ -725,7 +725,7 @@ export function ChromeBar() {
             </button>
           ) :
           null}
-        {/* The button door of triggers.list: the dispatcher card in the chat; signed out, the run path defers it behind sign-in. */}
+        {/* The button door of triggers.list: the dispatcher card in the chat; readable signed out from the declaration on the public mirror. */}
         {canDispatcher ?
           (
             <button

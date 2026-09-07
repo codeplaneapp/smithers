@@ -1,16 +1,19 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { WORKFLOW_TRIGGERS_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { clearMemoryGatewayRecords, seedMemoryGatewayRecord } from "./gateway"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
-import { TRIGGERS_UNAVAILABLE_REASON } from "./workflowTriggers"
+import { noLiveTriggers, workflowTriggersFromFrame } from "./workflowTriggers"
 import type { WorkflowTriggersBody } from "./workflowTriggers"
 
 /*
- * The dispatchers route: what the triggers.list card reads. The gateway
- * relays no trigger procedure yet, so the contract under test is the honest
- * one: a session-gated 200 carrying empty trigger AND webhook lists AND the
- * reason naming both gaps, with no call to Smithers Cloud at all, never a
- * fabricated row and never a 404.
+ * The live-dispatchers route: what the triggers.list card reads beside the
+ * declared rules it gets from the public mirror. The contract is two-valued
+ * and honest: `live: true` with the box's rows when a signed-in session's
+ * existing box answered `List { _tag: "triggers" }`; otherwise a 200 with
+ * `live: false` and empty lists, whether the caller is signed out, the
+ * deployment has no identity seam, the login holds no box, or the box refuses
+ * the listing. No reason is stated as a row, and a read never provisions.
  */
 
 const env: WorkerEnv = {
@@ -20,23 +23,28 @@ const env: WorkerEnv = {
   SMITHERS_CLOUD_API_BASE_URL: "https://cloud.test"
 }
 
+const REPO = "smithersai/smithers"
+const GATEWAY = "https://cloud.test/api/gateways/gw-0"
+
 const request = (query: string, init: RequestInit = {}): Request =>
   new Request(`https://mvp.test${WORKFLOW_TRIGGERS_PATH}${query}`, {
     ...init,
     headers: { cookie: "smithers_session=sealed", ...(init.headers ?? {}) }
   })
 
-/** Every outbound fetch the Worker makes, with the identity seam answering as configured. */
+/** Every outbound fetch the Worker makes: identity as configured, the gateway relay as configured, nothing else answers. */
 const withUpstreams = async (
   identity: () => Response,
-  run: (seen: ReadonlyArray<string>) => Promise<void>
+  run: (seen: ReadonlyArray<string>) => Promise<void>,
+  gateway: (request: Request) => Response | Promise<Response> = () => new Response("404 page not found\n", { status: 404 })
 ): Promise<void> => {
   const seen: Array<string> = []
   const original = globalThis.fetch
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
     seen.push(url)
     if (url.includes("/api/identity/validate")) return identity()
+    if (url.startsWith(GATEWAY)) return gateway(new Request(url, init))
     return new Response("404 page not found\n", { status: 404 })
   }) as unknown as typeof fetch
   try {
@@ -52,27 +60,122 @@ const validated = () =>
     headers: { "content-type": "application/json" }
   })
 
+const seedBox = (): void =>
+  seedMemoryGatewayRecord("will", REPO, {
+    gatewayId: "gw-0",
+    baseUrl: GATEWAY,
+    token: "gateway-token",
+    vmId: "msb_0",
+    expiresAt: Date.now() + 30 * 60 * 1000,
+    renewAfter: Date.now() + 20 * 60 * 1000,
+    provisionedAt: Date.now()
+  })
+
+const frame = (exit: unknown): Response =>
+  new Response(`${JSON.stringify({ _tag: "Exit", requestId: 1, exit })}\n`, {
+    status: 200,
+    headers: { "content-type": "application/json" }
+  })
+
+const TRIGGER_PAGE = {
+  _tag: "triggers",
+  items: [
+    {
+      triggerId: "nightly",
+      flowId: "review",
+      input: {},
+      cron: "0 9 * * 1-5",
+      timezone: "UTC",
+      overlap: "skip",
+      catchUp: "none",
+      enabled: true,
+      revision: 3,
+      lastFiredAtMs: 1_700_000_000_000,
+      activeRunId: "run-8f21",
+      nextOccurrencesMs: [1_700_086_400_000, 1_700_172_800_000]
+    },
+    { triggerId: "sweep", flowId: "issue", input: {}, cron: "*/15 * * * *", overlap: "skip", catchUp: "none", enabled: false, revision: 1, nextOccurrencesMs: [] },
+    { notATrigger: true }
+  ]
+}
+
+afterEach(() => clearMemoryGatewayRecords())
+
 describe("GET /api/workflow/triggers", () => {
-  test("a signed-in read answers empty trigger and webhook lists with their reason and never asks Smithers Cloud", async () => {
-    await withUpstreams(validated, async (seen) => {
-      const response = await worker.fetch(request("?repo=smithersai/smithers"), env)
+  test("an anonymous read answers live:false with empty lists as a 200, never a 401 and never a reason as a row", async () => {
+    await withUpstreams(() => new Response("{}", { status: 401 }), async (seen) => {
+      const response = await worker.fetch(request(`?repo=${REPO}`), env)
       expect(response.status).toBe(200)
       const body = (await response.json()) as WorkflowTriggersBody
-      expect(body).toEqual({
-        status: "ok",
-        repo: "smithersai/smithers",
-        triggers: [],
-        webhooks: [],
-        reason: TRIGGERS_UNAVAILABLE_REASON
-      })
-      /* The reason names the export each list is waiting on, so nobody reads the empty webhook list as "no webhooks". */
-      expect(body.reason).toContain("List { _tag: \"triggers\" }")
-      expect(body.reason).toContain("Channels.list")
+      expect(body).toEqual({ status: "ok", repo: REPO, live: false, triggers: [], webhooks: [] })
+      expect("reason" in body).toBe(false)
       expect(seen.every((url) => url.includes("identity.test"))).toBe(true)
     })
   })
 
-  test("the repository is required and must be owner/repo", async () => {
+  test("a signed-in login with no box answers live:false and provisions nothing", async () => {
+    await withUpstreams(validated, async (seen) => {
+      const response = await worker.fetch(request(`?repo=${REPO}`), env)
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual(noLiveTriggers(REPO))
+      /* Only the identity check left the Worker: no Cloud token mint, no gateway POST. */
+      expect(seen.every((url) => url.includes("identity.test"))).toBe(true)
+    })
+  })
+
+  test("a signed-in login whose box answers List { _tag: \"triggers\" } gets live:true and the box's rows", async () => {
+    seedBox()
+    const relayed: Array<string> = []
+    await withUpstreams(
+      validated,
+      async () => {
+        const response = await worker.fetch(request(`?repo=${REPO}`), env)
+        expect(response.status).toBe(200)
+        const body = (await response.json()) as WorkflowTriggersBody
+        expect(body.live).toBe(true)
+        expect(body.webhooks).toEqual([])
+        expect(body.triggers).toEqual([
+          {
+            id: "nightly",
+            flowId: "review",
+            cron: "0 9 * * 1-5",
+            timezone: "UTC",
+            enabled: true,
+            lastFiredAt: 1_700_000_000_000,
+            nextFireAt: 1_700_086_400_000,
+            activeRunId: "run-8f21"
+          },
+          { id: "sweep", flowId: "issue", cron: "*/15 * * * *", enabled: false }
+        ])
+        /* The relay carried exactly the List frame for the triggers page to the box's /rpc mount. */
+        expect(relayed).toHaveLength(1)
+        const sent = JSON.parse(relayed[0]!.trim()) as { tag: string; payload: unknown }
+        expect(sent.tag).toBe("List")
+        expect(sent.payload).toEqual({ _tag: "triggers" })
+      },
+      async (gatewayRequest) => {
+        expect(gatewayRequest.url).toBe(`${GATEWAY}/rpc`)
+        expect(gatewayRequest.headers.get("authorization")).toBe("Bearer gateway-token")
+        relayed.push(await gatewayRequest.text())
+        return frame({ _tag: "Success", value: TRIGGER_PAGE })
+      }
+    )
+  })
+
+  test("a box whose host serves no trigger store answers live:false, not an empty live list", async () => {
+    seedBox()
+    await withUpstreams(
+      validated,
+      async () => {
+        const response = await worker.fetch(request(`?repo=${REPO}`), env)
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(noLiveTriggers(REPO))
+      },
+      () => frame({ _tag: "Failure", cause: { _tag: "InvalidInput", message: "this host serves no trigger store" } })
+    )
+  })
+
+  test("the repository is required and must be owner/repo, for every caller", async () => {
     await withUpstreams(validated, async () => {
       for (const query of ["", "?repo=", "?repo=smithers", "?repo=../etc/passwd", "?repo=a/b/c"]) {
         const response = await worker.fetch(request(query), env)
@@ -83,23 +186,27 @@ describe("GET /api/workflow/triggers", () => {
     })
   })
 
-  test("an anonymous read is refused before anything is read", async () => {
-    await withUpstreams(() => new Response("{}", { status: 401 }), async () => {
-      const response = await worker.fetch(request("?repo=smithersai/smithers"), env)
-      expect(response.status).toBe(401)
-    })
-  })
-
   test("only GET is served", async () => {
     await withUpstreams(validated, async (seen) => {
-      const response = await worker.fetch(request("?repo=smithersai/smithers", { method: "POST" }), env)
+      const response = await worker.fetch(request(`?repo=${REPO}`, { method: "POST" }), env)
       expect(response.status).toBe(405)
       expect(seen).toHaveLength(0)
     })
   })
 
-  test("with no identity seam the route says so instead of inventing a list", async () => {
-    const response = await worker.fetch(request("?repo=smithersai/smithers"), { ASSETS: env.ASSETS })
-    expect(response.status).toBe(501)
+  test("with no identity seam there is no signed-in session, so the answer is live:false", async () => {
+    const response = await worker.fetch(request(`?repo=${REPO}`), { ASSETS: env.ASSETS })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(noLiveTriggers(REPO))
+  })
+})
+
+describe("the box's page as rows", () => {
+  test("a refusal, a page of another tag, or a shapeless answer is live:false; well-formed items become rows", () => {
+    expect(workflowTriggersFromFrame(REPO, { ok: false, error: { message: "this host serves no trigger store" } })).toEqual(noLiveTriggers(REPO))
+    expect(workflowTriggersFromFrame(REPO, { ok: true, payload: { _tag: "flows", items: [] } })).toEqual(noLiveTriggers(REPO))
+    expect(workflowTriggersFromFrame(REPO, { ok: true, payload: "nonsense" })).toEqual(noLiveTriggers(REPO))
+    const empty = workflowTriggersFromFrame(REPO, { ok: true, payload: { _tag: "triggers", items: [] } })
+    expect(empty).toEqual({ status: "ok", repo: REPO, live: true, triggers: [], webhooks: [] })
   })
 })

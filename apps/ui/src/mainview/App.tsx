@@ -884,7 +884,17 @@ function App() {
                       onRunWorkflow={(name) => controller.runCommandArgs("flow.run", name)}
                     />
                   )}
-                {triggersCard === undefined ? null : <TriggerListCardBody card={triggersCard} />}
+                {triggersCard === undefined ?
+                  null :
+                  (
+                    <TriggerListCardBody
+                      card={triggersCard}
+                      onRunCommand={(name, commandArgs) =>
+                        commandArgs === undefined
+                          ? controller.runCommand(name)
+                          : controller.runCommandArgs(name, commandArgs)}
+                    />
+                  )}
               </div>
             </section>
           ) :

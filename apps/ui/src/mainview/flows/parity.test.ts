@@ -298,6 +298,8 @@ describe("launch-law parity: every affordance is a command", () => {
       "../cards/TargetCards.tsx": 26,
       /* The factory card: one Open per present infra file, one shared handler through onRunCommand (files.read). */
       "../cards/FactoryCard.tsx": 1,
+      /* The dispatcher card's Register door, the button door of triggers.register (factory mock 2; sign-in is the door). */
+      "../cards/TriggersCard.tsx": 1,
       /*
        * The sidebar (docs/LOCAL-APP.md "Tabs"): the list's select and close
        * per tab, the Repos section's empty "Select a repo" row, each repo

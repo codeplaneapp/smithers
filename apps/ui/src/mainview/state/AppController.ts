@@ -70,6 +70,8 @@ import type { FactorySeam } from "./seams/FactorySeam"
 import { createSecretsSeam } from "./seams/SecretsSeam"
 import { createHistorySeam } from "./seams/HistorySeam"
 import type { HistorySeam } from "./seams/HistorySeam"
+import { createTriggersSeam } from "./seams/TriggersSeam"
+import type { TriggersSeam } from "./seams/TriggersSeam"
 import type { SecretsSeam } from "./seams/SecretsSeam"
 import { createOnboardingController } from "./controller/onboarding"
 import type { OnboardingController } from "./controller/onboarding"
@@ -156,8 +158,10 @@ export interface AppController {
     repo?: string
   ) => Promise<string | void | { readonly value: string }>
   readonly listWorkspaceWorkflows: (repo?: string) => Promise<string | void | { readonly value: string }>
-  /** The dispatchers waiting on the repository (triggers.list). */
-  readonly listTriggers: WorkflowController["listTriggers"]
+  /** The dispatchers waiting on the repository (triggers.list): declared rules for every visitor, live rows when a box answered. */
+  readonly listTriggers: TriggersSeam["listTriggers"]
+  /** The register door (triggers.register): signed-in by requirement. */
+  readonly registerTrigger: TriggersSeam["registerTrigger"]
   /** Ask 5: the Flows pane — the surface switch and the listing that fills it. */
   readonly showFlows: () => Promise<string | void | { readonly value: string }>
   readonly runWorkflow: (name: string, repo?: string) => Promise<string | void | { readonly value: string }>
@@ -641,6 +645,7 @@ export const createAppController = (
   const secretsSeam = actors.pair(seamCtx, (context) => createSecretsSeam(context))
   const historySeam = actors.pair(seamCtx, (context) => createHistorySeam(context))
   const factorySeam = actors.pair(seamCtx, (context) => createFactorySeam(context))
+  const triggersSeam = actors.pair(seamCtx, (context) => createTriggersSeam(context))
   const repoImportSeam = actors.pair(seamCtx, (context) => createRepoImportSeam(context))
   const bookmarksSeam = actors.pair(seamCtx, (context) => createBookmarksSeam(context))
   const filesSeam = actors.pair(seamCtx, (context) => createFilesSeam(context))
@@ -862,13 +867,13 @@ export const createAppController = (
   const {
     createWorkflow,
     listWorkspaceWorkflows,
-    listTriggers,
     showFlows,
     runWorkflow,
     chooseWorkflowRepo,
     forwardApprovalDecision,
     forwardInboxApprovalDecision
   } = workflowController
+  const { listTriggers, registerTrigger } = triggersSeam
   const runs = actors.pair(ctx, (context, select) => createRunsController(context, nextTranscriptOrdinal, select(workflowController)))
   const {
     subscribeToAgent,
@@ -1288,6 +1293,7 @@ export const createAppController = (
     showHistory: historySeam.showHistory,
     retellHistory: historySeam.retellHistory,
     showFactory: factorySeam.showFactory,
+    registerTrigger,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,
@@ -1621,6 +1627,7 @@ export const createAppController = (
     showHistory: historySeam.showHistory,
     retellHistory: historySeam.retellHistory,
     showFactory: factorySeam.showFactory,
+    registerTrigger,
     importRepository: repoImportSeam.importRepository,
     retryImport: repoImportSeam.retryImport,
     listBookmarks: bookmarksSeam.listBookmarks,

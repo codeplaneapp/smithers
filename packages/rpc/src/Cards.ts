@@ -5,6 +5,7 @@
  */
 import { z } from "zod"
 import { AgentRoleIdSchema, AgentRoleModelSchema } from "./AgentRoles.ts"
+import { FactoryRuleSchema } from "./FactoryProjection.ts"
 import {
   ChangeAnalyzerRunSchema,
   ChangeCheckSchema,
@@ -731,19 +732,24 @@ export const CardSchema = z.discriminatedUnion("kind", [
     })
   }),
   /*
-   * The dispatchers a repository's runs wait on (triggers.list): one row per
-   * durable trigger registration, carrying the raw schedule the card puts in
-   * words, the flow it launches, and its state; and one row per registered
-   * webhook, carrying the channel name and the flow it starts when the
-   * declaration fixes one. `reason` says why the lists are empty when the
-   * registries could not be read; rows are never invented.
+   * The dispatchers waiting on a repository (triggers.list). Two sources,
+   * never mixed: `declared` is the `on` table of `.smithers/factory.json`
+   * read from the public mirror, so every visitor gets it; `triggers` and
+   * `webhooks` are the box's own registrations (the trigger store behind
+   * List { _tag: "triggers" } and the Channels registry), present only when a
+   * signed-in session's box answered, which `live` states. Rows are never
+   * invented: no projection means no declared rows, no answering box means
+   * live is false and the live lists are empty.
    */
   z.object({
     ...cardBaseShape,
     kind: z.literal("trigger-list"),
     payload: z.object({
       repo: z.string(),
-      reason: z.string().optional(),
+      /** Optional for cards persisted before the declaration joined the listing. */
+      declared: z.array(FactoryRuleSchema).optional(),
+      /** True only when a box answered the live listing on this show. Optional for older cards. */
+      live: z.boolean().optional(),
       triggers: z.array(
         z.object({
           id: z.string(),
@@ -751,7 +757,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
           cron: z.string(),
           timezone: z.string().optional(),
           enabled: z.boolean(),
-          lastFiredAt: z.number().optional()
+          lastFiredAt: z.number().optional(),
+          nextFireAt: z.number().optional(),
+          activeRunId: z.string().optional()
         })
       ),
       /** Optional for cards persisted before webhooks joined the listing. */

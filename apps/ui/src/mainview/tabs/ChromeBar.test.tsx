@@ -1052,6 +1052,7 @@ describe("the chrome-actions footer's Dispatcher button", () => {
             JSON.stringify({
               status: "ok",
               repo: "will/flows",
+              live: true,
               triggers: [{ id: "nightly", flowId: "review", cron: "0 9 * * 1-5", timezone: "Europe/London", enabled: true }],
               webhooks: [{ name: "github", flowId: "implement" }]
             }),

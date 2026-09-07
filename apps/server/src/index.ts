@@ -41,6 +41,7 @@ import {
   fetchCloudToken,
   GatewaySessionRegistry,
   isRelayRepoName,
+  peekGatewayRecord,
   upstreamTimeoutMs
 } from "./gateway"
 import {
@@ -65,7 +66,7 @@ import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
 import { createPublicRepoActivityHandler, parsePublicRepoActivityPath } from "./publicRepoActivity"
 import { isPublicRepositoryRead, readPublicRepository } from "./publicRepositoryReads"
-import { workflowTriggers } from "./workflowTriggers"
+import { LIST_TRIGGERS_PAYLOAD, noLiveTriggers, workflowTriggersFromFrame } from "./workflowTriggers"
 
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
@@ -2076,18 +2077,33 @@ const handleWorkflowRpc = async (request: Request, env: WorkerEnv): Promise<Resp
 }
 
 /**
- * The dispatchers waiting on one repository. The same session gate as every
- * workflow route: the list is the caller's own workspace state. See
- * workflowTriggers.ts for why the answer is empty on this deployment.
+ * The live dispatchers of one repository (workflowTriggers.ts). The declared
+ * rules ride the public contents route, so this route is only the box's
+ * answer: a signed-in, allowlisted session that already holds a box gets that
+ * box's `List { _tag: "triggers" }` page; everyone and everything else gets
+ * `live: false` with empty lists, as a 200, and no box is provisioned to
+ * answer a read. The repository is validated before any session is checked,
+ * so a malformed name is a 400 for every caller.
  */
 const handleWorkflowTriggers = async (request: Request, env: WorkerEnv, url: URL): Promise<Response> => {
-  const session = await requireWorkflowSession(request, env)
-  if (session instanceof Response) return session
   const repo = parseWorkflowRepo(url.searchParams.get("repo") ?? undefined)
   if (repo === undefined) {
     return json(400, { status: "error", message: "Query must name the repository as ?repo=owner/repo." })
   }
-  return json(200, workflowTriggers(repo))
+  const session = await requireWorkflowSession(request, env)
+  if (session instanceof Response) return json(200, noLiveTriggers(repo))
+  const record = await peekGatewayRecord(env, session.login, repo)
+  if (record === undefined) return json(200, noLiveTriggers(repo))
+  const call = await callGateway(env, session.login, repo, GATEWAY_PROCEDURE_MOUNTS.List ?? "/rpc", {
+    method: "POST",
+    text: encodeGatewayRequest("List", LIST_TRIGGERS_PAYLOAD),
+    replayable: true
+  })
+  if (call.status !== "ok" || call.response.status !== 200) {
+    if (call.status === "ok") await call.response.body?.cancel()
+    return json(200, noLiveTriggers(repo))
+  }
+  return json(200, workflowTriggersFromFrame(repo, decodeGatewayResponse(await call.response.text())))
 }
 
 const isApiRoute = (pathname: string): boolean => pathname.startsWith("/api/") || isRetiredGatewayRoute(pathname)
