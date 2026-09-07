@@ -30,6 +30,8 @@ import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { appendClientError, ClientErrorLog, readClientErrors } from "./clientErrorLog"
 import type { ClientErrorNamespace } from "./clientErrorLog"
+import { handleCloudRoleTurn, isCloudRoleTurn, turnHints } from "./cloudRoleTurn"
+import type { CloudRoleEnv, TurnRequest } from "./cloudRoleTurn"
 import { handleRecommend, handleRecommendOutcome, readRecommendLog, RecommendLog } from "./recommend"
 import type { RecommendEnv } from "./recommend"
 import {
@@ -319,7 +321,7 @@ const turnCancelStub = (env: WorkerEnv, runId: string): TurnCancelStub | undefin
 const readStubJson = async <T>(response: Response): Promise<T | undefined> =>
   (response.json().catch(() => undefined)) as Promise<T | undefined>
 
-export interface WorkerEnv extends RecommendEnv {
+export interface WorkerEnv extends RecommendEnv, CloudRoleEnv {
   /** Trusted service implementing docs/browser-egress.md's pinned HTTPS transport. */
   readonly BROWSER_EGRESS?: { readonly fetch: (request: Request) => Promise<Response> }
   readonly ASSETS: { readonly fetch: (request: Request) => Promise<Response> }
@@ -721,7 +723,7 @@ const chatUpstreamHeaders = (
 }
 
 /** The turn request, or the refusal its body earns. Read once: the router reads it before the gate decides. */
-const readStartTurn = async (request: Request): Promise<StartAgentTurnRequest | Response> => {
+const readStartTurn = async (request: Request): Promise<TurnRequest | Response> => {
   let body: unknown
   try {
     body = await readTurnBody(request)
@@ -742,17 +744,28 @@ const readStartTurn = async (request: Request): Promise<StartAgentTurnRequest | 
       message: "Body must be { runId, messages, instructions } with optional tools and context."
     })
   }
-  return body
+  // The hints (tier, purpose, role) are read leniently: an unknown value is
+  // dropped here, never refused (cloudRoleTurn.ts turnHints).
+  return {
+    runId: body.runId,
+    messages: body.messages,
+    instructions: body.instructions,
+    ...(body.tools === undefined ? {} : { tools: body.tools }),
+    ...(body.context === undefined ? {} : { context: body.context }),
+    ...turnHints(body)
+  }
 }
 
 const handleTurn = async (
   request: Request,
   env: WorkerEnv,
   turnSession?: ValidatedIdentity,
-  parsed?: StartAgentTurnRequest
+  parsed?: TurnRequest
 ): Promise<Response> => {
   const body = parsed ?? await readStartTurn(request)
   if (body instanceof Response) return body
+  // A cloud role (librarian, flows) is answered here on Cerebras, never upstream.
+  if (isCloudRoleTurn(body)) return handleCloudRoleTurn(body, env, ISOLATION_HEADERS, request.signal)
   const registry = turnCancelStub(env, body.runId)
   if (registry !== undefined) {
     // The registry is the cross-isolate authority on duplicate turns; the
@@ -805,7 +818,12 @@ const handleTurn = async (
         // The tool-loop contract (Wave 3b): the one tool spec rides every
         // turn; the upstream emits tool_call frames the client answers
         // with function_call_output continuation items in `messages`.
-        ...(body.tools === undefined ? {} : { tools: body.tools })
+        ...(body.tools === undefined ? {} : { tools: body.tools }),
+        // The model hints ride the wire as the native CloudAgent sends them;
+        // the upstream maps them to a model or answers on its default.
+        ...(body.tier === undefined ? {} : { tier: body.tier }),
+        ...(body.purpose === undefined ? {} : { purpose: body.purpose }),
+        ...(body.role === undefined ? {} : { role: body.role })
       })
     })
   } catch (error) {
@@ -863,10 +881,13 @@ const handleTurn = async (
  * The browser runs the real @smthrs/model request/stream machinery against this
  * path and the relay forwards it, unchanged, to the SAME managed-inference
  * upstream `/api/agent/turn` uses (`chatUpstreamHeaders` above). That upstream
- * owns the Cerebras key, authorizes the balance BEFORE calling the provider,
- * and enqueues the turn's authoritative usage onto the durable metering queue —
- * so the relay inherits per-user metering rather than reproducing it, and no
- * provider credential exists on this Worker at all.
+ * owns the metered provider keys, authorizes the balance BEFORE calling the
+ * provider, and enqueues the turn's authoritative usage onto the durable
+ * metering queue, so the relay inherits per-user metering rather than
+ * reproducing it. The one provider credential this Worker does hold is the
+ * free Cerebras key (CEREBRAS_API_KEY), spent only by the command recommender
+ * (recommend.ts) and the cloud role turns (cloudRoleTurn.ts), never by this
+ * relay.
  *
  * The router gates the route before any of this runs: anonymous callers get
  * 401, non-allowlisted ones 403, and the per-login turn ceiling applies — all

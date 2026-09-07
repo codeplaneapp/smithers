@@ -424,14 +424,122 @@ export const filterAnswer = (
 /** The one shape of fetch the model call uses; tests pass a stub. */
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>
 
+/** One message of a Cerebras chat completion. */
+export interface CerebrasChatMessage {
+  readonly role: "system" | "user" | "assistant"
+  readonly content: string
+}
+
+/** One Cerebras chat completion: the model, the messages, and its bounds. */
+export interface CerebrasChatRequest {
+  readonly model: string
+  readonly messages: ReadonlyArray<CerebrasChatMessage>
+  readonly maxTokens: number
+  readonly temperature: number
+  /** The provider's `response_format` object, when the caller wants structured output. */
+  readonly responseFormat?: Record<string, unknown>
+  /** How long this one completion gets, in ms. */
+  readonly timeoutMs: number
+  /**
+   * An outer abort: the caller's request going away, or a deadline that
+   * spans more than one completion. Aborting it ends the call as `aborted`.
+   */
+  readonly signal?: AbortSignal
+}
+
+/**
+ * What one completion answered. `http` carries the provider's status so a
+ * caller can retry a 400 differently from a 429; `empty` is a 200 whose
+ * first choice carried no text; `timeout` is this call's own deadline;
+ * `aborted` is the caller's signal.
+ */
+export type CerebrasChatAnswer =
+  | { readonly ok: true; readonly content: string; readonly model: string }
+  | { readonly ok: false; readonly reason: "http"; readonly status: number }
+  | { readonly ok: false; readonly reason: "empty" }
+  | { readonly ok: false; readonly reason: "timeout" }
+  | { readonly ok: false; readonly reason: "aborted" }
+  | { readonly ok: false; readonly reason: "unreachable"; readonly message: string }
+
+/**
+ * One Cerebras chat completion, non-streaming, under a deadline. The one
+ * client every Cerebras-spending route on this Worker uses (the recommender
+ * below, the cloud role turns in cloudRoleTurn.ts), so there is one place
+ * that says what a Cerebras request looks like and how its failures read.
+ * A refused or failed response has its body cancelled here.
+ */
+export const cerebrasChat = async (
+  request: CerebrasChatRequest,
+  apiKey: string,
+  fetchImpl: FetchLike
+): Promise<CerebrasChatAnswer> => {
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, request.timeoutMs)
+  const outer = request.signal
+  const onOuterAbort = (): void => controller.abort()
+  if (outer !== undefined) {
+    if (outer.aborted) controller.abort()
+    else outer.addEventListener("abort", onOuterAbort)
+  }
+  try {
+    const response = await fetchImpl(CEREBRAS_CHAT_COMPLETIONS_URL, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: request.model,
+        temperature: request.temperature,
+        max_tokens: request.maxTokens,
+        messages: request.messages,
+        ...(request.responseFormat === undefined ? {} : { response_format: request.responseFormat })
+      }),
+      signal: controller.signal
+    })
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined)
+      return { ok: false, reason: "http", status: response.status }
+    }
+    const answer = (await response.json().catch(() => undefined)) as
+      | { readonly model?: unknown; readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: unknown } }> }
+      | undefined
+    const content = answer?.choices?.[0]?.message?.content
+    if (typeof content !== "string") return { ok: false, reason: "empty" }
+    return { ok: true, content, model: typeof answer?.model === "string" ? answer.model : request.model }
+  } catch (error) {
+    if (controller.signal.aborted) return { ok: false, reason: timedOut ? "timeout" : "aborted" }
+    return { ok: false, reason: "unreachable", message: error instanceof Error ? error.message : "unknown error" }
+  } finally {
+    clearTimeout(timer)
+    outer?.removeEventListener("abort", onOuterAbort)
+  }
+}
+
 type ModelAnswer =
   | { readonly ok: true; readonly commands: ReadonlyArray<string>; readonly model: string }
   | { readonly ok: false; readonly message: string }
 
+const recommendFailure = (answer: Exclude<CerebrasChatAnswer, { readonly ok: true }>): string => {
+  switch (answer.reason) {
+    case "http":
+      return `The recommender answered HTTP ${answer.status}.`
+    case "empty":
+      return "The recommender did not answer with a command list."
+    case "timeout":
+    case "aborted":
+      return `The recommender did not answer within ${Math.round(RECOMMEND_TIMEOUT_MS / 1000)}s.`
+    case "unreachable":
+      return "The recommender is unreachable."
+  }
+}
+
 /**
- * One Cerebras chat completion under the deadline. The strict JSON schema is
- * asked for first; a provider that refuses the format (HTTP 400) is asked
- * once more without it and its prose is parsed defensively.
+ * One recommendation under the deadline. The strict JSON schema is asked for
+ * first; a provider that refuses the format (HTTP 400) is asked once more
+ * without it and its prose is parsed defensively. One deadline spans both
+ * calls: pills that arrive after the user has moved on are noise.
  */
 const askModel = async (
   body: RecommendRequest,
@@ -441,45 +549,25 @@ const askModel = async (
 ): Promise<ModelAnswer> => {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), RECOMMEND_TIMEOUT_MS)
-  const call = (strict: boolean): Promise<Response> =>
-    fetchImpl(CEREBRAS_CHAT_COMPLETIONS_URL, {
-      method: "POST",
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model,
-        temperature: 0,
-        max_tokens: 256,
-        messages: recommendMessages(body),
-        ...(strict
-          ? { response_format: { type: "json_schema", json_schema: { name: "recommendation", strict: true, schema: ANSWER_SCHEMA } } }
-          : {})
-      }),
-      signal: controller.signal
-    })
+  const ask = (strict: boolean): Promise<CerebrasChatAnswer> =>
+    cerebrasChat({
+      model,
+      temperature: 0,
+      maxTokens: 256,
+      messages: recommendMessages(body),
+      timeoutMs: RECOMMEND_TIMEOUT_MS,
+      signal: controller.signal,
+      ...(strict
+        ? { responseFormat: { type: "json_schema", json_schema: { name: "recommendation", strict: true, schema: ANSWER_SCHEMA } } }
+        : {})
+    }, apiKey, fetchImpl)
   try {
-    let response = await call(true)
-    if (response.status === 400) {
-      await response.body?.cancel().catch(() => undefined)
-      response = await call(false)
-    }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined)
-      return { ok: false, message: `The recommender answered HTTP ${response.status}.` }
-    }
-    const answer = (await response.json().catch(() => undefined)) as
-      | { readonly model?: unknown; readonly choices?: ReadonlyArray<{ readonly message?: { readonly content?: unknown } }> }
-      | undefined
-    const content = answer?.choices?.[0]?.message?.content
-    const names = typeof content === "string" ? parseAnswer(content) : undefined
-    if (names === undefined) return { ok: false, message: "The recommender did not answer with a command list." }
-    return { ok: true, commands: filterAnswer(names, body.commands), model: typeof answer?.model === "string" ? answer.model : model }
-  } catch {
-    return {
-      ok: false,
-      message: controller.signal.aborted
-        ? `The recommender did not answer within ${Math.round(RECOMMEND_TIMEOUT_MS / 1000)}s.`
-        : "The recommender is unreachable."
-    }
+    let answer = await ask(true)
+    if (!answer.ok && answer.reason === "http" && answer.status === 400) answer = await ask(false)
+    if (!answer.ok) return { ok: false, message: recommendFailure(answer) }
+    const names = parseAnswer(answer.content)
+    if (names === undefined) return { ok: false, message: recommendFailure({ ok: false, reason: "empty" }) }
+    return { ok: true, commands: filterAnswer(names, body.commands), model: answer.model }
   } finally {
     clearTimeout(timer)
   }

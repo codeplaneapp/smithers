@@ -5,7 +5,7 @@
  */
 import { z } from "zod"
 import type { AgentRuntimeContext } from "./AgentContext.ts"
-import type { AgentRoleId } from "./AgentRoles.ts"
+import type { AgentRoleId, CloudRoleId } from "./AgentRoles.ts"
 import { CardPatchSchema, CardSchema } from "./Cards.ts"
 
 /**
@@ -84,16 +84,19 @@ export interface StartAgentTurnRequest {
   /**
    * What the turn is for. Unset (or "conversation") is the transcript's own
    * turn; "recommend" is the background next-step read, which a scripted or
-   * stub seam must not treat as the conversation's next leg.
+   * stub seam must not treat as the conversation's next leg; "explain",
+   * "librarian" and "flows" are the concierge's side turns.
    */
-  readonly purpose?: "conversation" | "recommend" | "explain"
+  readonly purpose?: "conversation" | "recommend" | "explain" | "librarian" | "flows"
   /**
    * The named role this turn asks to be answered by (AgentRoles.ts): the
    * conversation's own turns are the orchestrator's; `explain` asks for the
-   * explainer. A hint like `tier`: the serving side maps it to a model or
-   * ignores it, and the client never claims a model it was not told about.
+   * explainer. A cloud role (`librarian`, `flows`) is answered by the app
+   * Worker itself on Cerebras and admits no tools. Otherwise a hint like
+   * `tier`: the serving side maps it to a model or ignores it, and the
+   * client never claims a model it was not told about.
    */
-  readonly role?: AgentRoleId
+  readonly role?: AgentRoleId | CloudRoleId
 }
 
 /**

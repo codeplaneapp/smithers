@@ -7,9 +7,15 @@ import {
   agentRole,
   AgentRoleSchema,
   agentRoleTitle,
+  CLOUD_AGENT_ROLE_IDS,
+  CLOUD_AGENT_ROLES,
+  cloudRole,
+  cloudRoleModelId,
+  CloudRoleSchema,
   findAgentRole,
   isAgentRoleId,
   isBuiltinAgentRoleId,
+  isCloudRoleId,
   orderedAgentRoles,
   roleLaunchArgv
 } from "../src/AgentRoles.ts"
@@ -147,5 +153,38 @@ describe("the agent role registry", () => {
     expect(agentIdFromLabel("  Reviewer (mine) ")).toBe("reviewer-mine")
     expect(agentIdFromLabel("42")).toBeUndefined()
     expect(agentIdFromLabel("")).toBeUndefined()
+  })
+})
+
+describe("the cloud roles", () => {
+  test("librarian and flows are served on Cerebras, carry no harness, and never join the agents store's built-ins", () => {
+    expect(CLOUD_AGENT_ROLES.map((role) => role.id)).toEqual([...CLOUD_AGENT_ROLE_IDS])
+    for (const role of CLOUD_AGENT_ROLES) {
+      expect(CloudRoleSchema.safeParse(role).success).toBe(true)
+      expect(role.seat).toBe("cloud")
+      expect(role.model.provider).toBe("cerebras")
+      expect(role.purpose.length).toBeGreaterThan(10)
+      expect("harness" in role).toBe(false)
+      expect(isBuiltinAgentRoleId(role.id)).toBe(false)
+      expect(AgentRoleSchema.safeParse(role).success).toBe(false)
+    }
+    expect(cloudRole("librarian")).toMatchObject({
+      model: { id: "gpt-oss-120b" },
+      modelEnv: "CEREBRAS_MODEL_LIBRARIAN"
+    })
+    expect(cloudRole("flows")).toMatchObject({ model: { id: "qwen-3.8-27b" }, modelEnv: "CEREBRAS_MODEL_FLOWS" })
+    expect(isCloudRoleId("librarian")).toBe(true)
+    expect(isCloudRoleId("explainer")).toBe(false)
+    expect(isCloudRoleId("")).toBe(false)
+  })
+
+  test("the served model is the env override when it is a model id, else the table default", () => {
+    const librarian = cloudRole("librarian")
+    expect(cloudRoleModelId(librarian, {})).toBe("gpt-oss-120b")
+    expect(cloudRoleModelId(librarian, { CEREBRAS_MODEL_LIBRARIAN: " gemma-4-31b " })).toBe("gemma-4-31b")
+    expect(cloudRoleModelId(librarian, { CEREBRAS_MODEL_FLOWS: "gemma-4-31b" })).toBe("gpt-oss-120b")
+    expect(cloudRoleModelId(librarian, { CEREBRAS_MODEL_LIBRARIAN: "" })).toBe("gpt-oss-120b")
+    // A flag-shaped override is ignored, exactly as roleLaunchArgv refuses one.
+    expect(cloudRoleModelId(librarian, { CEREBRAS_MODEL_LIBRARIAN: "--model evil" })).toBe("gpt-oss-120b")
   })
 })

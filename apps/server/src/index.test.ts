@@ -5,6 +5,7 @@ import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import { LOCAL_SESSION_HEADER } from "@smthrs/rpc/LocalSession"
 import worker, { PLATFORM_PROXY_RULES, TurnCancelRegistry } from "./index"
 import type { TurnCancelNamespace, TurnCancelStorage, WorkerEnv } from "./index"
+import type { TurnLimitNamespace } from "./turnLimit"
 
 const assetsEnv = (html = "<html><body>smithers</body></html>"): WorkerEnv => ({
   ASSETS: { fetch: async () => new Response(html, { status: 200 }) }
@@ -2812,5 +2813,191 @@ describe("the /api/cloud bridge", () => {
         }
       }
     }
+  })
+})
+
+/*
+ * The cloud roles (src/cloudRoleTurn.ts): a turn whose `role` is `librarian`
+ * or `flows` is answered by this Worker on Cerebras and never reaches the
+ * chat upstream; every other role rides upstream as a hint. The ceilings a
+ * cloud role turn spends are the ones an upstream turn spends.
+ */
+describe("cloud roles on Cerebras", () => {
+  const CEREBRAS = "https://api.cerebras.ai/v1/chat/completions"
+  const completion = (content: string, model = "gpt-oss-120b"): Response =>
+    Response.json({ model, choices: [{ message: { content } }] })
+
+  const recordingLimits = (): TurnLimitNamespace & { readonly spends: () => ReadonlyArray<string> } => {
+    const spent: Array<string> = []
+    return {
+      spends: () => spent,
+      idFromName: (name) => name,
+      get: (id) => ({
+        fetch: async (request) => {
+          if (new URL(request.url).pathname === "/spend") spent.push(String(id))
+          return Response.json({ allowed: true, remaining: 1 })
+        }
+      })
+    }
+  }
+
+  const network = (
+    cerebras: (request: Request) => Response,
+    upstream: (request: Request) => Response = () => ndjsonUpstream([{ type: "done" }])
+  ) => {
+    const calls = { cerebras: [] as Array<Request>, upstream: [] as Array<Request>, identity: 0 }
+    const handler = (request: Request): Response | undefined => {
+      const host = new URL(request.url).hostname
+      if (request.url === CEREBRAS) {
+        calls.cerebras.push(request)
+        return cerebras(request)
+      }
+      if (host === "upstream.test") {
+        calls.upstream.push(request)
+        return upstream(request)
+      }
+      if (host === "identity.test") {
+        calls.identity += 1
+        return new Response("{}", { status: 401 })
+      }
+      return undefined
+    }
+    return { calls, handler }
+  }
+
+  const env: WorkerEnv = { ...assetsEnv(), SMITHERS_CHAT_URL: "https://upstream.test/chat", CEREBRAS_API_KEY: "csk-test" }
+  const librarian = { ...turnBody, runId: "run-librarian", role: "librarian", purpose: "librarian" }
+
+  test("a librarian turn reaches Cerebras on the librarian model and never the chat upstream", async () => {
+    const wire = network(() => completion("Triggers live in flows/triggers.ts."))
+    await withMockedFetch(wire.handler, async () => {
+      const response = await worker.fetch(post("/api/agent/turn", librarian), env)
+      expect(response.status).toBe(200)
+      expect(response.headers.get("content-type")).toBe("application/x-ndjson")
+      const frames = (await response.text()).trim().split("\n").map((line) => JSON.parse(line))
+      expect(frames).toEqual([
+        { runId: "run-librarian", type: "delta", kind: "text", text: "Triggers live in flows/triggers.ts." },
+        { runId: "run-librarian", type: "done", reason: "stop" }
+      ])
+    })
+    expect(wire.calls.upstream.length).toBe(0)
+    expect(wire.calls.cerebras.length).toBe(1)
+    expect(wire.calls.cerebras[0]!.headers.get("authorization")).toBe("Bearer csk-test")
+    const sent = (await wire.calls.cerebras[0]!.json()) as { model: string; messages: Array<{ role: string; content: string }> }
+    expect(sent.model).toBe("gpt-oss-120b")
+    expect(sent.messages).toEqual([
+      { role: "system", content: "Be brief." },
+      { role: "user", content: "Hello who are you" }
+    ])
+  })
+
+  test("the deployment's CEREBRAS_MODEL_LIBRARIAN and CEREBRAS_MODEL_FLOWS override the served models", async () => {
+    const wire = network(() => completion("ok"))
+    await withMockedFetch(wire.handler, async () => {
+      const models = { ...env, CEREBRAS_MODEL_LIBRARIAN: "gemma-4-31b", CEREBRAS_MODEL_FLOWS: "gpt-oss-120b" }
+      await (await worker.fetch(post("/api/agent/turn", librarian), models)).text()
+      await (await worker.fetch(post("/api/agent/turn", { ...librarian, runId: "run-flows", role: "flows", purpose: "flows" }), models)).text()
+    })
+    const sent = await Promise.all(wire.calls.cerebras.map(async (request) => ((await request.json()) as { model: string }).model))
+    expect(sent).toEqual(["gemma-4-31b", "gpt-oss-120b"])
+    expect(wire.calls.upstream.length).toBe(0)
+  })
+
+  test("a tool-bearing librarian body is refused with 400 and spends nothing anywhere", async () => {
+    const wire = network(() => completion("never"))
+    const tools = [{ type: "function", name: "commands", description: "the one tool", parameters: { type: "object", properties: {} } }]
+    await withMockedFetch(wire.handler, async () => {
+      const response = await worker.fetch(post("/api/agent/turn", { ...librarian, tools }), env)
+      expect(response.status).toBe(400)
+      expect(((await response.json()) as { message: string }).message).toContain("Librarian")
+    })
+    expect(wire.calls.cerebras.length).toBe(0)
+    expect(wire.calls.upstream.length).toBe(0)
+  })
+
+  test("an explainer turn rides upstream carrying tier, purpose and role; unknown hint values are dropped, never refused", async () => {
+    const wire = network(() => completion("never"), () => ndjsonUpstream([{ type: "delta", kind: "text", text: "Because." }, { type: "done" }]))
+    await withMockedFetch(wire.handler, async () => {
+      const explained = await worker.fetch(
+        post("/api/agent/turn", { ...turnBody, runId: "run-explain", tier: "cheap", purpose: "explain", role: "explainer" }),
+        env
+      )
+      expect(explained.status).toBe(200)
+      await explained.text()
+      const odd = await worker.fetch(
+        post("/api/agent/turn", { ...turnBody, runId: "run-odd", tier: "gold", purpose: "p".repeat(201), role: "Not A Role" }),
+        env
+      )
+      expect(odd.status).toBe(200)
+      await odd.text()
+    })
+    expect(wire.calls.cerebras.length).toBe(0)
+    expect(wire.calls.upstream.length).toBe(2)
+    expect(await wire.calls.upstream[0]!.json()).toEqual({
+      messages: turnBody.messages,
+      instructions: turnBody.instructions,
+      tier: "cheap",
+      purpose: "explain",
+      role: "explainer"
+    })
+    expect(await wire.calls.upstream[1]!.json()).toEqual({ messages: turnBody.messages, instructions: turnBody.instructions })
+  })
+
+  test("a signed-out catalog turn on the librarian spends the anonymous ceilings once and runs on Cerebras", async () => {
+    const limits = recordingLimits()
+    const gated: WorkerEnv = { ...env, IDENTITY_UPSTREAM_URL: "https://identity.test", TURN_LIMITS: limits }
+    const exploring = {
+      ...librarian,
+      runId: "run-anon-librarian",
+      context: {
+        version: 1,
+        product: "smithers",
+        capturedAt: 1786223000000,
+        revision: 3,
+        surface: "chat",
+        theme: "light",
+        selectedWorldDocument: null,
+        connectors: [],
+        activeRepository: "smithersai/smithers",
+        github: { connected: false, login: null, repositories: null },
+        worldState: { documentCount: 0, documents: [] },
+        capabilities: [],
+        limitations: []
+      }
+    }
+    const wire = network(() => completion("It is a monorepo."))
+    await withMockedFetch(wire.handler, async () => {
+      const response = await worker.fetch(post("/api/agent/turn", exploring), gated)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain("It is a monorepo.")
+      // The same body about a repository outside the catalog keeps the sign-in 401.
+      const refused = await worker.fetch(
+        post("/api/agent/turn", { ...exploring, runId: "run-anon-private", context: { ...exploring.context, activeRepository: "someone/private" } }),
+        gated
+      )
+      expect(refused.status).toBe(401)
+    })
+    expect(wire.calls.identity).toBe(2)
+    expect(wire.calls.cerebras.length).toBe(1)
+    expect(wire.calls.upstream.length).toBe(0)
+    const spends = limits.spends()
+    expect(spends.length).toBe(2)
+    expect(spends.filter((key) => key.startsWith("anonymous:") && key !== "anonymous:all").length).toBe(1)
+    expect(spends.filter((key) => key === "anonymous:all").length).toBe(1)
+    // The system message carries the runtime context the client derived, rendered server-side.
+    const sent = (await wire.calls.cerebras[0]!.json()) as { messages: Array<{ role: string; content: string }> }
+    expect(sent.messages[0]!.role).toBe("system")
+    expect(sent.messages[0]!.content).toContain("smithersai/smithers")
+  })
+
+  test("without a Cerebras key the librarian is an honest 503 and the chat upstream is never asked instead", async () => {
+    const wire = network(() => completion("never"))
+    await withMockedFetch(wire.handler, async () => {
+      const response = await worker.fetch(post("/api/agent/turn", librarian), { ...env, CEREBRAS_API_KEY: undefined })
+      expect(response.status).toBe(503)
+      expect(((await response.json()) as { message: string }).message).toContain("CEREBRAS_API_KEY is unset")
+    })
+    expect(wire.calls.cerebras.length).toBe(0)
+    expect(wire.calls.upstream.length).toBe(0)
   })
 })

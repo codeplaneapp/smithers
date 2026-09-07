@@ -248,6 +248,123 @@ export const orderedAgentRoles = (roles: ReadonlyArray<AgentRole>): ReadonlyArra
   )
 }
 
+/*
+ * Cloud roles (docs: the concierge's side turns). A cloud role is a
+ * sub-agent the app Worker answers ITSELF, on the deployment's own Cerebras
+ * key, instead of forwarding the turn to the chat upstream: the Librarian
+ * answers wiki and repository questions from the runtime context, the Flows
+ * agent picks which registered flows achieve a goal. Neither runs a local
+ * harness, so a cloud role is not an `AgentRole` (AgentRoleSchema requires a
+ * harness) and never appears in the agents store or the `+` menus: it is a
+ * separate compile-time table with a `seat: "cloud"` marker. A cloud role is
+ * tool-free by contract; the Worker refuses a tool-bearing body on it.
+ *
+ * The model row is the default; a deployment overrides it with the named
+ * environment variable, so the served model is always readable from the
+ * Worker's configuration and never claimed by the client.
+ */
+
+/** The cloud role ids: the sub-agents the Worker serves on Cerebras.
+ * @since 1.0.0
+ * @category constants
+ */
+export const CLOUD_AGENT_ROLE_IDS = ["librarian", "flows"] as const
+/**
+ * The cloud role id contract shared by the host and its clients.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type CloudRoleId = (typeof CLOUD_AGENT_ROLE_IDS)[number]
+/**
+ * Validates cloud role id values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const CloudRoleIdSchema = z.enum(CLOUD_AGENT_ROLE_IDS)
+
+/**
+ * Validates cloud role values at the RPC boundary.
+ *
+ * @since 1.0.0
+ * @category schemas
+ */
+export const CloudRoleSchema = z.object({
+  id: CloudRoleIdSchema,
+  label: z.string().min(1).max(60),
+  /** One sentence the model and the UI both read. */
+  purpose: z.string().max(400),
+  /** Served by the app Worker, never by a local harness. */
+  seat: z.literal("cloud"),
+  /** The default model; `provider` is always "cerebras". */
+  model: AgentRoleModelSchema,
+  /** The Worker environment variable whose value, when set, replaces `model.id`. */
+  modelEnv: z.string().regex(/^[A-Z][A-Z0-9_]*$/)
+})
+/**
+ * The decoded value accepted by {@link CloudRoleSchema}.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type CloudRole = z.infer<typeof CloudRoleSchema>
+
+/** The cloud roles, in the order the concierge names them.
+ * @since 1.0.0
+ * @category constants
+ */
+export const CLOUD_AGENT_ROLES: ReadonlyArray<CloudRole> = [
+  {
+    id: "librarian",
+    label: "Librarian",
+    purpose:
+      "Answers questions about the Wiki and the repository facts in the runtime context, citing paths and pages, never inventing one.",
+    seat: "cloud",
+    model: { provider: "cerebras", id: "gpt-oss-120b", label: "Cerebras gpt-oss-120b" },
+    modelEnv: "CEREBRAS_MODEL_LIBRARIAN"
+  },
+  {
+    id: "flows",
+    label: "Flows",
+    purpose:
+      "Picks which registered flows achieve a goal and says how to run them, using only flows the catalog offers.",
+    seat: "cloud",
+    model: { provider: "cerebras", id: "qwen-3.8-27b", label: "Cerebras Qwen 3.8 27B" },
+    modelEnv: "CEREBRAS_MODEL_FLOWS"
+  }
+]
+
+/** Whether an id names a cloud role.
+ * @since 1.0.0
+ * @category conversions
+ */
+export const isCloudRoleId = (value: string): value is CloudRoleId =>
+  (CLOUD_AGENT_ROLE_IDS as ReadonlyArray<string>).includes(value)
+
+/** A cloud role by id; throws for anything else (the table is compile-time).
+ * @since 1.0.0
+ * @category conversions
+ */
+export const cloudRole = (id: CloudRoleId): CloudRole => {
+  const role = CLOUD_AGENT_ROLES.find((candidate) => candidate.id === id)
+  if (role === undefined) throw new Error(`Unknown cloud role ${id}`)
+  return role
+}
+
+/**
+ * The model id a deployment serves a cloud role on: the role's `modelEnv`
+ * variable when it is set to a well-formed model id, else the table default.
+ * A malformed override is ignored, not launched: the id is re-checked here
+ * exactly as `roleLaunchArgv` re-checks a local role's.
+ * @since 1.0.0
+ * @category conversions
+ */
+export const cloudRoleModelId = (role: CloudRole, env: Readonly<Record<string, string | undefined>>): string => {
+  const override = env[role.modelEnv]?.trim()
+  return override !== undefined && override !== "" && MODEL_ID.test(override) ? override : role.model.id
+}
+
 /** "Explainer · Kimi K3": the menu label.
  * @since 1.0.0
  * @category conversions

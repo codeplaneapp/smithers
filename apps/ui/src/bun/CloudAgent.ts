@@ -95,6 +95,9 @@ const streamTurn = (
             ...(request.tier === undefined ? {} : { tier: request.tier }),
             // The purpose and the named role (AgentRoles.ts) ride the wire as
             // hints too; a server that ignores them answers on its default model.
+            // A cloud role (librarian, flows) is the exception: the app Worker
+            // answers it itself on Cerebras (apps/server/src/cloudRoleTurn.ts),
+            // and this native seam has no such key, so here it stays a hint.
             ...(request.purpose === undefined ? {} : { purpose: request.purpose }),
             ...(request.role === undefined ? {} : { role: request.role })
           })
