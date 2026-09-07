@@ -46,13 +46,19 @@
 			// The bounded client-error log, read back at GET /api/admin/errors.
 			// Without it a browser crash lives only in a wrangler tail nobody
 			// is watching (src/clientErrorLog.ts).
-			{ "name": "CLIENT_ERRORS", "class_name": "ClientErrorLog" }
+			{ "name": "CLIENT_ERRORS", "class_name": "ClientErrorLog" },
+			// The command recommender's log: one row per recommendation (tail
+			// digest, the ordered answer, the command the user ran next), a ring
+			// of the newest 5000, read back at GET /api/admin/recommend/log for
+			// scoring (src/recommend.ts). Needs the CEREBRAS_API_KEY secret below.
+			{ "name": "RECOMMEND_LOG", "class_name": "RecommendLog" }
 		]
 	},
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["TurnCancelRegistry"] },
 		{ "tag": "v2", "new_sqlite_classes": ["GatewaySessionRegistry"] },
-		{ "tag": "v3", "new_sqlite_classes": ["TurnRateLimiter", "ClientErrorLog"] }
+		{ "tag": "v3", "new_sqlite_classes": ["TurnRateLimiter", "ClientErrorLog"] },
+		{ "tag": "v4", "new_sqlite_classes": ["RecommendLog"] }
 	],
 	"vars": {
 		// Wave 7 canary upstreams. identity lives on workers.dev until will
@@ -97,6 +103,10 @@
 		//                              the validated login so the turn's comped charge lands on the user's OWN account
 		//   ANONYMOUS_TURN_SALT      (secret) salts the per-address buckets under the anonymous turn ceiling
 		//                              (PUBLIC-REPOSITORIES.md "Anonymous turns"); unset = unsalted hashes, still no raw address
+		//   CEREBRAS_API_KEY         (secret) the Cerebras key POST /api/recommend spends on command suggestions
+		//                              (src/recommend.ts); unset = the route answers an honest 503 and the client
+		//                              keeps its rule-based pills. CEREBRAS_MODEL (var, optional) overrides the
+		//                              default gpt-oss-120b.
 		// The identity and billing workers both gate on the browser Origin, so their
 		// ALLOWED_ORIGINS must list this Worker's own origin — it is what the proxy sends.
 		// The legacy GATEWAY_UPSTREAM_URL / GATEWAY_AUTH_TOKEN / GATEWAY_SESSION_USER_*

@@ -234,6 +234,35 @@ export const ADMIN_HEALTH_PATH = "/api/admin/health"
 export const ADMIN_ERRORS_PATH = "/api/admin/errors"
 
 /*
+ * The command recommender: the browser posts the tail of the current chat and
+ * every command the user can invoke, and the Worker answers an ordered list of
+ * up to five command names from a small model. The outcome route records the
+ * command the user ran next, keyed by the recommendation id, so the
+ * recommendations can be scored (apps/server/src/recommend.ts).
+ */
+/**
+ * The recommend route shared by server and client.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const RECOMMEND_PATH = "/api/recommend"
+/**
+ * The recommend outcome route shared by server and client.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const RECOMMEND_OUTCOME_PATH = "/api/recommend/outcome"
+/**
+ * The admin read of the recommendation log, newest first, for the scorer.
+ *
+ * @since 1.0.0
+ * @category constants
+ */
+export const ADMIN_RECOMMEND_LOG_PATH = "/api/admin/recommend/log"
+
+/*
  * The local app's own chat boundary (apps/ui/docs/LOCAL-APP.md): the Bun
  * main process serves these on http://127.0.0.1:<port> and the SPA streams
  * the same NDJSON AgentTurnFrames the native bridge used to carry.

@@ -3,6 +3,7 @@ import {
   ADMIN_ERRORS_PATH,
   ADMIN_GRANT_PATH,
   ADMIN_HEALTH_PATH,
+  ADMIN_RECOMMEND_LOG_PATH,
   ADMIN_REQUESTS_PATH,
   ADMIN_ROUTE_PREFIX,
   AUTH_CALLBACK_PATH,
@@ -13,6 +14,8 @@ import {
   CANCEL_PATH,
   IDENTITY_ROUTE_PREFIX,
   MODEL_STREAM_PATH,
+  RECOMMEND_OUTCOME_PATH,
+  RECOMMEND_PATH,
   TOOLS_BROWSER_FETCH_PATH,
   TURN_PATH,
   WORKFLOW_PROVISION_PATH,
@@ -27,6 +30,8 @@ import { CLOUD_ROUTE_PREFIX } from "@smthrs/rpc/LocalApp"
 import type { StartAgentTurnRequest } from "@smthrs/rpc/NativeAgent"
 import { appendClientError, ClientErrorLog, readClientErrors } from "./clientErrorLog"
 import type { ClientErrorNamespace } from "./clientErrorLog"
+import { handleRecommend, handleRecommendOutcome, readRecommendLog, RecommendLog } from "./recommend"
+import type { RecommendEnv } from "./recommend"
 import {
   callGateway,
   DEFAULT_CLOUD_API_BASE_URL,
@@ -61,7 +66,7 @@ import { workflowTriggers } from "./workflowTriggers"
 /* The per-user gateway session registry (Wave 11) — wrangler binds this DO. */
 export { GatewaySessionRegistry }
 /* The per-login turn ceiling and the client-error log — wrangler binds both. */
-export { ClientErrorLog, TurnRateLimiter }
+export { ClientErrorLog, RecommendLog, TurnRateLimiter }
 
 /*
  * The deployable Smithers MVP server: a Cloudflare Worker that serves the built
@@ -312,7 +317,7 @@ const turnCancelStub = (env: WorkerEnv, runId: string): TurnCancelStub | undefin
 const readStubJson = async <T>(response: Response): Promise<T | undefined> =>
   (response.json().catch(() => undefined)) as Promise<T | undefined>
 
-export interface WorkerEnv {
+export interface WorkerEnv extends RecommendEnv {
   /** Trusted service implementing docs/browser-egress.md's pinned HTTPS transport. */
   readonly BROWSER_EGRESS?: { readonly fetch: (request: Request) => Promise<Response> }
   readonly ASSETS: { readonly fetch: (request: Request) => Promise<Response> }
@@ -408,6 +413,12 @@ export interface WorkerEnv {
    * handler keeps its console.error and nothing is stored.
    */
   readonly CLIENT_ERRORS?: ClientErrorNamespace
+  /**
+   * The command recommender's log (one Durable Object for the deployment),
+   * read back through GET /api/admin/recommend/log. The Cerebras key and
+   * model it also reads are declared on RecommendEnv (src/recommend.ts).
+   */
+  readonly RECOMMEND_LOG?: RecommendEnv["RECOMMEND_LOG"]
 }
 
 const withIsolationHeaders = (response: Response): Response => {
@@ -1864,6 +1875,21 @@ const handleAdmin = async (request: Request, env: WorkerEnv, url: URL): Promise<
     })
   }
 
+  // The recommendation log, newest first: what the recommender said and what
+  // the user ran next. The scorer reads it; nothing here holds chat text.
+  if (url.pathname === ADMIN_RECOMMEND_LOG_PATH && request.method === "GET") {
+    const asked = Number(url.searchParams.get("limit") ?? "")
+    const limit = Number.isInteger(asked) && asked > 0 ? asked : undefined
+    const rows = await readRecommendLog(env.RECOMMEND_LOG, limit)
+    return json(200, {
+      status: "ok",
+      rows,
+      ...(env.RECOMMEND_LOG === undefined
+        ? { note: "No RECOMMEND_LOG binding on this deployment: nothing is stored, so this log is always empty." }
+        : {})
+    })
+  }
+
   // An admin-only path this Worker does not implement is still just not found.
   return notFound()
 }
@@ -2488,6 +2514,17 @@ export default {
         status: "error",
         message: "This API only answers requests from its own origin."
       })
+    }
+    // The command recommender (src/recommend.ts): open to a visitor as well
+    // as a login, under its own ceilings. A login is the bucket when the
+    // session validates; anything else, including identity being down, is
+    // the visitor's address bucket, because the pills must never wait on
+    // sign-in and never spend a real model turn.
+    if (url.pathname === RECOMMEND_PATH || url.pathname === RECOMMEND_OUTCOME_PATH) {
+      if (request.method !== "POST") return json(405, { status: "error", message: "Method not allowed." })
+      if (url.pathname === RECOMMEND_OUTCOME_PATH) return handleRecommendOutcome(request, env, ISOLATION_HEADERS)
+      const validation = request.headers.has("cookie") ? await validateSession(request, env) : undefined
+      return handleRecommend(request, env, validation?.status === "valid" ? validation.identity.login : undefined, ISOLATION_HEADERS)
     }
     if (url.pathname === APP_BOOTSTRAP_PATH) {
       if (request.method !== "GET") return json(405, { status: "error", message: "Method not allowed." })

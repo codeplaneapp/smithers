@@ -150,6 +150,24 @@ Deploying this Worker does not deploy them, and a broken sign-in is more
 often theirs than ours. `apps/UPSTREAMS.md` names each one, its source, its
 hostname, and how to deploy it with a receipt.
 
+### Command suggestions need a Cerebras key
+
+`POST /api/recommend` asks Cerebras (`gpt-oss-120b`, 6 s deadline) which of
+the user's commands to suggest next, and `POST /api/recommend/outcome` records
+what the user ran. Both are open to signed-out visitors under their own daily
+ceilings (300 per address or login, 5000 deployment-wide). The route needs:
+
+- `CEREBRAS_API_KEY` (secret, `wrangler secret put CEREBRAS_API_KEY`). Unset,
+  the route answers `503` and the app keeps its rule-based pills; nothing is
+  invented.
+- `RECOMMEND_LOG` (Durable Object binding, declared in `wrangler.jsonc`,
+  migration `v4`). One row per recommendation, a ring of the newest 5000,
+  holding a SHA-256 of the chat tail and never the text. Admins read it at
+  `GET /api/admin/recommend/log?limit=N`, newest first, to score hit rate and
+  top-1 rate.
+
+`CEREBRAS_MODEL` (var, optional) overrides the model id.
+
 ### The engine gateway relay needs an identity upstream
 
 When `GATEWAY_UPSTREAM_URL` is set, this Worker relays `/rpc`, `/projections`,

@@ -52,7 +52,13 @@ export const TURN_WINDOW_MS = 60 * 60 * 1000
  * deployment-wide bucket has done nothing at all.
  */
 export interface TurnCeiling {
-  readonly kind: "login" | "anonymous" | "anonymous-all"
+  /**
+   * `recommend` is the command recommender's ceiling (recommend.ts): the
+   * same counter, spent on a route that costs a small model call and that
+   * chat never depends on, so its refusal says suggestions paused and
+   * nothing else.
+   */
+  readonly kind: "login" | "anonymous" | "anonymous-all" | "recommend"
   readonly max: number
   readonly windowMs: number
 }
@@ -262,7 +268,11 @@ export const turnLimitResponse = (
     JSON.stringify({
       status: "error",
       code: "turn_rate_limited",
-      message: ceiling.kind === "anonymous"
+      message: ceiling.kind === "recommend"
+        ? `Command suggestions have reached their daily limit. Chat keeps working; suggestions come back in about ${
+          waitLabel(seconds)
+        }. Nothing was charged.`
+        : ceiling.kind === "anonymous"
         ? `That is ${ceiling.max} turns today without signing in, which is as far as exploring goes. Sign in with GitHub to keep going, or come back in about ${
           waitLabel(seconds)
         }. Nothing was charged.`
