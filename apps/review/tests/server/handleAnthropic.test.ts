@@ -122,6 +122,51 @@ describe("anthropic proxy", () => {
     void harness;
   });
 
+  test("refuses file, batch and non-POST endpoints without ever calling upstream", async () => {
+    // The forwarded request carries the service-wide key, and Anthropic's file
+    // and batch APIs are workspace-scoped: a repo-scoped caller reaching them
+    // would read, delete and asynchronously spend against every other tenant's
+    // objects in the shared account. Authenticate the caller first so the 404
+    // proves the endpoint allowlist, not a rejected credential.
+    const env = await buildTestEnv();
+    await registerRepo(env, REPO);
+    const token = await seedSession(env, REPO);
+    const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });
+    teardowns.push(() => fixture.stop());
+    const worker = createReviewWorker({
+      jwksUrl: "http://unused",
+      anthropicBaseUrl: fixture.baseUrl,
+      fetchUpstream: fetch,
+      now: () => Date.now(),
+      waitUntil: () => undefined,
+    });
+    const refused: [string, string][] = [
+      ["GET", "/v1/files"],
+      ["DELETE", "/v1/files/foreign-tenant-file"],
+      ["POST", "/v1/messages/batches"],
+      ["GET", "/v1/messages/batches/msgbatch_foreign"],
+      ["GET", "/v1/messages"],
+      ["POST", "/v1/messages/"],
+    ];
+    for (const [method, path] of refused) {
+      const res = await worker.fetch(
+        new Request(`https://review.test/anthropic${path}`, {
+          method,
+          headers: { "x-api-key": token, "content-type": "application/json" },
+          ...(method === "GET" || method === "HEAD" ? {} : { body: "{}" }),
+        }),
+        env,
+      );
+      expect([method, path, res.status]).toEqual([method, path, 404]);
+      await res.text();
+    }
+    // Nothing reached the fixture, so the real key was never attached to any
+    // of these requests.
+    expect(fixture.requests).toEqual([]);
+    const usage = await env.DB.prepare("SELECT COUNT(*) AS n FROM usage_events").first<{ n: number }>();
+    expect(usage?.n).toBe(0);
+  });
+
   test("401s unknown sessions", async () => {
     const env = await buildTestEnv();
     const fixture = serveFixtureAnthropic({ contentType: "application/json", body: "{}" });

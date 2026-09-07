@@ -3,6 +3,7 @@ import { jsonError } from "../jsonError.ts";
 import { repoMonthlyCapUsd } from "../repoMonthlyCapUsd.ts";
 import { repoMonthlySpendUsd } from "../repoMonthlySpendUsd.ts";
 import { lookupRepo } from "../sessions/lookupRepo.ts";
+import { anthropicEndpointAllowed } from "./anthropicEndpointAllowed.ts";
 import { authenticateProxyRequest } from "./authenticateProxyRequest.ts";
 import { parseUsageFromJson } from "./parseUsageFromJson.ts";
 import { parseUsageFromSse } from "./parseUsageFromSse.ts";
@@ -103,9 +104,11 @@ function teeForMetering(upstream: Response): { passthrough: ReadableStream; coll
 }
 
 /**
- * /anthropic/v1/* — auth, forward to api.anthropic.com with the real key,
- * stream the response back unmodified, then meter from a teed copy. Anything
- * outside /v1/ is rejected: the proxy is not a general egress.
+ * /anthropic/v1/messages — auth, forward to api.anthropic.com with the real
+ * key, stream the response back unmodified, then meter from a teed copy. Only
+ * the methods and paths in {@link anthropicEndpointAllowed} are forwarded: the
+ * proxy is not a general egress, and the shared key it injects reaches every
+ * object in the upstream workspace.
  */
 export async function handleAnthropic(
   request: Request,
@@ -114,8 +117,11 @@ export async function handleAnthropic(
   url: URL,
 ): Promise<Response> {
   const proxiedPath = url.pathname.slice("/anthropic".length);
-  if (!proxiedPath.startsWith("/v1/")) {
-    return jsonError(404, "only /v1/* paths are forwarded");
+  if (!anthropicEndpointAllowed(request.method, proxiedPath)) {
+    return jsonError(404, "endpoint not forwarded; the proxy serves POST /v1/messages only", {
+      method: request.method,
+      path: proxiedPath,
+    });
   }
   const now = deps.now();
   const auth = await authenticateProxyRequest(request, env, now);
