@@ -158,6 +158,22 @@ export const runsFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
     handler: ({ runId }) => actions.showRunSteps(runId)
   }),
   flow({
+    /*
+     * The run card's Trace tab (design session §6b): the run's journal as a
+     * call tree, a waterfall and a details pane. The card's own presentation
+     * act, so it stays hidden; the read is the gateway's run-events projection,
+     * so it needs the signed-in workspace.
+     */
+    name: "runs.trace",
+    summary: "Show a run's trace on its card: the call tree and waterfall",
+    runtime: ["cloud"],
+    hidden: true,
+    args: "<runId>",
+    requires: ["signed-in"],
+    input: Schema.Struct({ runId: Schema.String }),
+    handler: ({ runId }) => actions.showRunTrace(runId)
+  }),
+  flow({
     /* The raw journal is a debug surface; the controller gates it on verbose. */
     name: "runs.events",
     summary: "Show a run's raw events on its card (verbose)",

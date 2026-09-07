@@ -12,6 +12,8 @@ import type { Card } from "../state/AppState"
 import { timeLabel as clockLabel } from "../Timestamps"
 import type { CardFamily } from "./CardFamily"
 import { defaultPill, settledPill } from "./CardFamily"
+import { defaultRunFacet } from "./RunTrace"
+import { RunTraceBody } from "./RunTraceCard"
 
 /*
  * Wave 11 — the embedded run card: live status from the relay event stream,
@@ -46,9 +48,22 @@ export const WorkflowRunCardBody = ({
   readonly debugVerbose?: boolean
 }) => {
   const { phase, steps, result, error, runId } = card.payload
-  const facet = card.payload.facet ?? "steps"
+  /* §6b: a run of a traced kind (prototype, implement) opens on its trace; every other run on its steps. */
+  const facet = card.payload.facet ?? defaultRunFacet(card.payload.kind)
+  const traceFirst = defaultRunFacet(card.payload.kind) === "trace"
+  const traceTab = (
+    <Button
+      size="sm"
+      variant={facet === "trace" ? "default" : "outline"}
+      data-flow="runs.trace"
+      data-testid={`flow-run-facet-trace-${runId}`}
+      onClick={() => onRunCommand("runs.trace", runId)}
+    >
+      Trace
+    </Button>
+  )
   return (
-    <div className="flow-run-card">
+    <div className="flow-run-card" data-run-kind={card.payload.kind}>
       {result !== null ? <Markdown className="smithers-card-markdown" content={result} /> : null}
       <p className="smithers-card-note">{WORKFLOW_RUN_PHASE_WORDS[phase] ?? phase}</p>
       {/* Lane runs: why a live run is not moving, in the control plane's word. */}
@@ -70,6 +85,7 @@ export const WorkflowRunCardBody = ({
        * is on (runs.events). Each tab is a registered flow, never local state.
        */}
       <div className="flow-run-actions" role="tablist" aria-label="Run views">
+        {traceFirst ? traceTab : null}
         <Button
           size="sm"
           variant={facet === "steps" ? "default" : "outline"}
@@ -88,6 +104,7 @@ export const WorkflowRunCardBody = ({
         >
           Transcript
         </Button>
+        {traceFirst ? null : traceTab}
         {debugVerbose ?
           (
             <Button
@@ -102,6 +119,7 @@ export const WorkflowRunCardBody = ({
           ) :
           null}
       </div>
+      {facet === "trace" ? <RunTraceBody card={card} /> : null}
       {facet === "transcript" ?
         card.payload.transcriptRows === undefined || card.payload.transcriptRows.length === 0 ?
           <p className="smithers-card-note">The transcript is empty so far.</p> :

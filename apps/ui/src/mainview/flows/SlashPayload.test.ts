@@ -145,7 +145,7 @@ describe("the runs grammar", () => {
   })
 
   test("the id-scoped acts refuse a blank run id", () => {
-    for (const name of ["runs.resume", "runs.rerun", "runs.events", "runs.steps", "approvals.open"]) {
+    for (const name of ["runs.resume", "runs.rerun", "runs.events", "runs.trace", "runs.steps", "approvals.open"]) {
       expect(payloadFor(name, "")).toEqual({ error: `${name} needs a run id` })
     }
   })

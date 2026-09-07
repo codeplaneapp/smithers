@@ -528,6 +528,7 @@ describe("command registry bindings", () => {
       "runs.tools",
       "runs.logs",
       "runs.steps",
+      "runs.trace",
       "runs.events",
       "flow.run.stop-all",
       "approvals.list",

@@ -230,6 +230,21 @@ export const createWorkflowPumpController = (
         }
 
         /*
+         * The trace facet (design session §6b) tails the journal the same
+         * way: while the card shows the trace, each cycle re-reads the
+         * run-events projection so the call tree and waterfall follow the
+         * live run. A terminal run keeps its last journal standing.
+         */
+        let events: Extract<Card, { kind: "flow-run" }>["payload"]["events"]
+        if (card.payload.facet === "trace") {
+          const journal = await gateway.runEvents(repo, runId)
+          if (pump.stopped || ctx.runPumps.get(cardId) !== pump) return
+          if (journal.status === "ok") {
+            events = journal.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
+          }
+        }
+
+        /*
          * Why the run is not moving, in the control plane's word. `accepted`
          * reads "executor" — the CLI's own render-time convention for a run
          * nothing is driving yet — and a parked run names its wait. A moving
@@ -249,7 +264,7 @@ export const createWorkflowPumpController = (
             // The run summary's own verdict, which is what `whatHappened`
             // used to answer out of the engine database.
             const result = row.verdict
-            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }) }, "acted")
+            patchRunCard(cardId, { phase, steps, lastSeq: row.updatedAt, result, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }) }, "acted")
             store.dispatch({ type: "message.appended", actor: "system", text: result })
           } else {
             // Lead with the run's own diagnosis; the generic line is the
@@ -260,7 +275,7 @@ export const createWorkflowPumpController = (
               : "The run was cancelled."
             patchRunCard(
               cardId,
-              { phase, steps, lastSeq: row.updatedAt, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(detail === undefined ? {} : { error: detail }) },
+              { phase, steps, lastSeq: row.updatedAt, waiting: undefined, steeringPending, ...(transcriptRows === undefined ? {} : { transcriptRows }), ...(events === undefined ? {} : { events }), ...(detail === undefined ? {} : { error: detail }) },
               "error"
             )
             store.dispatch({ type: "message.appended", actor: "system", text: message })
@@ -289,7 +304,8 @@ export const createWorkflowPumpController = (
           lastSeq: row.updatedAt,
           waiting,
           steeringPending,
-          ...(transcriptRows === undefined ? {} : { transcriptRows })
+          ...(transcriptRows === undefined ? {} : { transcriptRows }),
+          ...(events === undefined ? {} : { events })
         })
         await pokeableWait(cardId, RUN_POLL_MS)
       }

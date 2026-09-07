@@ -39,6 +39,8 @@ export interface RunsController {
   readonly showRunLogs: (runId: string, follow?: boolean) => Promise<CommandResult>
   readonly showRunSteps: (runId: string) => CommandResult
   readonly showRunEvents: (runId: string) => Promise<CommandResult>
+  /** The trace facet (design session §6b): the run's journal as a call tree and waterfall, kept live by the pump. */
+  readonly showRunTrace: (runId: string) => Promise<CommandResult>
   readonly stopAllRuns: (repo?: string) => Promise<CommandResult>
   readonly listApprovals: (repo?: string) => Promise<CommandResult>
   readonly openApproval: (runId: string) => Promise<CommandResult>
@@ -352,6 +354,31 @@ export const createRunsController = (
     return { value: `events run=${runId}` }
   }
 
+  /**
+   * The trace facet: the same `run-events` projection the events tab reads,
+   * folded by the card into the call tree and waterfall (RunTrace.ts). A
+   * product surface, not a debug one, so it is not gated on verbose; the pump
+   * re-reads the journal each cycle while the facet is open, so a live run's
+   * trace tails itself.
+   */
+  const showRunTrace = async (runId: string): Promise<CommandResult> => {
+    const guard = workflows.workflowIdentityGuard()
+    if (guard !== undefined) return guard
+    const card = runCardFor(runId)
+    if (card === undefined) return `Open the run first (runs.open ${runId}): the trace lives on its card.`
+    const target = repoForRun(runId)
+    if ("error" in target) return target.error
+    const events = await gateway.runEvents(target.repo, runId)
+    if (events.status !== "ok") return events.message
+    patchRunCard(runId, {
+      facet: "trace",
+      follow: false,
+      events: events.value.map((event) => ({ ...(event as unknown as Record<string, unknown>) }))
+    })
+    pokeRun(runId)
+    return { value: `trace run=${runId} spans=${events.value.length}` }
+  }
+
   /** Stop every live run card's run — one workspace's, when named. Each cancel is durable; the cards settle from the pump. */
   /** The wire statuses the run inbox counts as live (mirrors RunsCards LIVE_STATUSES). */
   const RUN_LIST_LIVE_STATUSES: ReadonlySet<string> = new Set(["accepted", "running", "parked", "waiting-approval"])
@@ -503,6 +530,7 @@ export const createRunsController = (
     showRunLogs,
     showRunSteps,
     showRunEvents,
+    showRunTrace,
     stopAllRuns,
     listApprovals,
     openApproval

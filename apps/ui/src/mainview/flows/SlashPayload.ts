@@ -235,6 +235,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
     if (rest.length > 0) return no("runs.logs takes a run id and optionally --follow")
     return ok(follow ? { runId, follow } : { runId })
   },
+  "runs.trace": (args) => required("runId", args, "runs.trace needs a run id"),
   "runs.events": (args) => required("runId", args, "runs.events needs a run id"),
   "runs.steps": (args) => required("runId", args, "runs.steps needs a run id"),
   "approvals.list": (args) => repoOnly("approvals.list", args),

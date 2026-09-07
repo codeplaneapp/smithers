@@ -524,6 +524,57 @@ describe("the run card's facets — transcript, follow, and the verbose events t
   })
 })
 
+describe("the run card's trace facet: runs.trace and the pump's tail", () => {
+  test("runs.trace shows the journal as the trace and the pump keeps it current while the facet is open", async () => {
+    const store = await webStore()
+    const journal: Array<Record<string, unknown>> = [
+      { kind: "control.agent.turn-opened", payload: { seat: "openai:gpt-5.6-sol", at: 100 }, sequence: 1, occurredAt: 100 }
+    ]
+    const double = relay({
+      runs: [{ runId: "run-8", flowId: "deploy", status: "running" }],
+      events: journal
+    })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    await controller.commands.run("runs.open", "run-8")
+    let card = store.collections.cards.get("flow-run-run-8")
+    // A run of no traced kind opens on its steps; the trace is one tab away, not gated on verbose.
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
+    expect(card?.kind === "flow-run" && card.payload.kind).toBeUndefined()
+
+    const shown = await controller.commands.run("runs.trace", "run-8")
+    expect(said(shown)).toBe("trace run=run-8 spans=1")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("trace")
+    expect(card?.kind === "flow-run" && card.payload.events?.length).toBe(1)
+
+    // The workspace journals a call; the pump's next cycle carries it onto the card without another act.
+    journal.push({ kind: "control.agent.cell-call-started", payload: { flowName: "files.read", input: { path: "README.md" }, at: 250 }, sequence: 2, occurredAt: 250 })
+    await waitFor(() => {
+      const current = store.collections.cards.get("flow-run-run-8")
+      return current?.kind === "flow-run" && (current.payload.events?.length ?? 0) === 2
+    })
+    expect(double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length).toBeGreaterThanOrEqual(2)
+
+    // The Steps tab is the way back, and the pump stops re-reading the journal.
+    await controller.commands.run("runs.steps", "run-8")
+    card = store.collections.cards.get("flow-run-run-8")
+    expect(card?.kind === "flow-run" && card.payload.facet).toBe("steps")
+    const reads = double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length
+    await settle(20)
+    expect(double.calls.filter((call) => JSON.stringify(call.body).includes("\"run-events\"")).length).toBe(reads)
+  })
+
+  test("runs.trace needs the run's card first", async () => {
+    const store = await webStore()
+    const double = relay({ runs: [{ runId: "run-9", flowId: "deploy", status: "running" }] })
+    const controller = createAppController(store, unavailableRepositories, silentAgent(), double.services)
+    await signIn(store)
+    const refused = await controller.commands.run("runs.trace", "run-9")
+    expect(said(refused)).toContain("runs.open run-9")
+  })
+})
+
 describe("flow.run.stop-all — every live run, cancelled", () => {
   test("cancels each live run card's run and reports the count", async () => {
     const store = await webStore()

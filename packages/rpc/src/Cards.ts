@@ -699,8 +699,8 @@ export const CardSchema = z.discriminatedUnion("kind", [
       waiting: z.string().optional(),
       /** Whether an operator steer is queued for the run. */
       steeringPending: z.boolean().optional(),
-      /** Which body tab the card shows; the steps tail by default. */
-      facet: z.enum(["steps", "transcript", "events"]).optional(),
+      /** Which body tab the card shows; the steps tail by default, the trace for a run of a traced kind. */
+      facet: z.enum(["steps", "transcript", "events", "trace"]).optional(),
       /** Whether the transcript keeps following the live run. */
       follow: z.boolean().optional(),
       /** The transcript tab's rows, merged from the transcript projection while the card follows. */

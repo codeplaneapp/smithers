@@ -1,4 +1,5 @@
 import { WORKFLOW_PROVISION_PATH } from "@smthrs/rpc/AgentApiRoutes"
+import { defaultRunFacet } from "../../cards/RunTrace"
 import type { Card } from "../AppState"
 import type { ControllerContext } from "./context"
 import { resolveTargetRepo } from "../RepoContext"
@@ -227,7 +228,15 @@ export const createWorkflowController = (
         result: null,
         lastSeq: 0,
         ...(args.input === undefined ? {} : { input: args.input }),
-        ...(args.kind === undefined ? {} : { kind: args.kind })
+        ...(args.kind === undefined ? {} : { kind: args.kind }),
+        /*
+         * §6b: a run of a traced kind opens on its trace, and the pump tails
+         * the journal for it from the first cycle. A card already in hand
+         * keeps the facet the human chose.
+         */
+        facet: existing?.kind === "flow-run" && existing.payload.facet !== undefined
+          ? existing.payload.facet
+          : defaultRunFacet(args.kind)
       }
     }
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })

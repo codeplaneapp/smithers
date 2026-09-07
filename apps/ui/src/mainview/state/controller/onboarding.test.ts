@@ -496,7 +496,9 @@ describe("feature.prototype", () => {
       runId: "run-1",
       workflow: "prototype",
       kind: "prototype",
-      input: { goal: "a dark mode toggle" }
+      input: { goal: "a dark mode toggle" },
+      // §6b: a prototype run opens on its trace; the pump tails the journal from the first cycle.
+      facet: "trace"
     })
     expect(card?.title).toBe("prototype · a dark mode toggle")
     // No chat turn is spent on a sketch: the run is the answer.

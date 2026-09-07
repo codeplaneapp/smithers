@@ -52,6 +52,7 @@ const PRE_SPLIT_BASE: ReadonlyArray<string> = [
   "runs.tools",
   "runs.logs",
   "runs.steps",
+  "runs.trace",
   "runs.events",
   "flow.run.stop-all",
   "approvals.list",

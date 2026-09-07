@@ -1867,3 +1867,239 @@
 	font-weight: 600;
 	color: var(--muted-foreground, #6b6457);
 }
+
+
+/* The run trace (Factory design session 2026-09-07 §6b): call tree, waterfall, span pane. */
+.run-trace {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+	font-size: 0.75rem;
+}
+.run-trace-banner {
+	margin: 0;
+	padding: 0.375rem 0.5rem;
+	border: 1px solid var(--warning, #826601);
+	border-radius: 8px;
+	background: var(--warning-soft, color-mix(in srgb, var(--warning, #826601) 12%, transparent));
+	color: var(--text, inherit);
+}
+.run-trace-kind {
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-weight: 600;
+	margin-right: 0.375rem;
+}
+.run-trace-bar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+	padding: 0.25rem 0.375rem;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 8px;
+	background: var(--surface, #fff);
+}
+.run-trace-filter {
+	padding: 0.0625rem 0.5rem;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--muted-foreground, #6b6457);
+	font: inherit;
+	cursor: pointer;
+}
+.run-trace-filter[data-on="true"] {
+	border-color: var(--primary, #207770);
+	color: var(--primary, #207770);
+}
+.run-trace-clock {
+	margin-left: auto;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	color: var(--muted-foreground, #6b6457);
+}
+.run-trace-body {
+	display: grid;
+	grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+	gap: 0.5rem;
+	min-height: 16rem;
+}
+.run-trace-tree {
+	list-style: none;
+	margin: 0;
+	padding: 0.25rem 0;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 8px;
+	max-height: 28rem;
+	overflow: auto;
+	background: var(--surface, #fff);
+}
+.run-trace-node {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	width: 100%;
+	padding: 0.125rem 0.375rem;
+	border: 0;
+	background: transparent;
+	color: var(--text, inherit);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.run-trace-node[aria-selected="true"] {
+	background: var(--accent-soft, color-mix(in srgb, var(--accent, #b8a98a) 14%, transparent));
+}
+.run-trace-node[data-kind="run"] .run-trace-label,
+.run-trace-node[data-kind="frame"] .run-trace-label {
+	font-weight: 600;
+}
+.run-trace-dot {
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: 999px;
+	background: var(--success, #207770);
+}
+.run-trace-dot[data-status="running"],
+.run-trace-dot[data-status="launching"],
+.run-trace-dot[data-status="reconnecting"] {
+	background: var(--warning, #826601);
+}
+.run-trace-dot[data-status="waiting"],
+.run-trace-dot[data-status="waiting-approval"],
+.run-trace-dot[data-status="quiet"] {
+	background: var(--warning, #826601);
+	opacity: 0.6;
+}
+.run-trace-dot[data-status="failed"],
+.run-trace-dot[data-status="denied"],
+.run-trace-dot[data-status="no-capacity"] {
+	background: var(--danger, #ba3f3b);
+}
+.run-trace-dot[data-status="cancelled"],
+.run-trace-dot[data-status="stopped"] {
+	background: var(--muted-foreground, #6b6457);
+}
+.run-trace-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.run-trace-duration {
+	flex-shrink: 0;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	color: var(--muted-foreground, #6b6457);
+}
+.run-trace-detail {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	min-width: 0;
+}
+.run-trace-waterfall {
+	list-style: none;
+	margin: 0;
+	padding: 0.25rem 0.375rem;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 8px;
+	max-height: 12rem;
+	overflow: auto;
+	background: var(--surface, #fff);
+}
+.run-trace-water-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.0625rem 0;
+}
+.run-trace-water-label {
+	width: 9rem;
+	flex-shrink: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	color: var(--muted-foreground, #6b6457);
+}
+.run-trace-track {
+	position: relative;
+	flex: 1;
+	height: 0.5rem;
+	background: var(--accent-soft, color-mix(in srgb, var(--accent, #b8a98a) 14%, transparent));
+	border-radius: 4px;
+}
+.run-trace-water-bar {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	border-radius: 4px;
+	background: var(--success, #207770);
+}
+.run-trace-water-row[data-status="running"] .run-trace-water-bar,
+.run-trace-water-row[data-status="waiting"] .run-trace-water-bar {
+	background: var(--warning, #826601);
+}
+.run-trace-water-row[data-status="failed"] .run-trace-water-bar,
+.run-trace-water-row[data-status="denied"] .run-trace-water-bar {
+	background: var(--danger, #ba3f3b);
+}
+.run-trace-water-bar[data-instant="true"] {
+	width: 2px !important;
+	border-radius: 1px;
+}
+.run-trace-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+	padding: 0.5rem;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 8px;
+	background: var(--surface, #fff);
+}
+.run-trace-pane-title,
+.run-trace-block h5 {
+	margin: 0;
+	font-size: 0.75rem;
+	font-weight: 600;
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+}
+.run-trace-kv {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 0.125rem 0.75rem;
+	margin: 0;
+}
+.run-trace-kv dt {
+	color: var(--muted-foreground, #6b6457);
+}
+.run-trace-kv dd {
+	margin: 0;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.run-trace-block {
+	display: flex;
+	flex-direction: column;
+	gap: 0.125rem;
+}
+.run-trace-code {
+	margin: 0;
+	max-height: 10rem;
+	overflow: auto;
+	padding: 0.375rem 0.5rem;
+	border: 1px solid var(--border, #e4ddcf);
+	border-radius: 6px;
+	font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 0.6875rem;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.smithers-card[data-maximized="true"] .run-trace-tree,
+.smithers-card[data-maximized="true"] .run-trace-waterfall,
+.smithers-card[data-maximized="true"] .run-trace-code {
+	max-height: none;
+}

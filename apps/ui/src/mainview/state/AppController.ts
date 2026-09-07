@@ -181,6 +181,7 @@ export interface AppController {
   readonly showRunLogs: RunsController["showRunLogs"]
   readonly showRunSteps: RunsController["showRunSteps"]
   readonly showRunEvents: RunsController["showRunEvents"]
+  readonly showRunTrace: RunsController["showRunTrace"]
   readonly stopAllRuns: RunsController["stopAllRuns"]
   readonly listApprovals: RunsController["listApprovals"]
   readonly openApproval: RunsController["openApproval"]
@@ -1160,6 +1161,7 @@ export const createAppController = (
     showRunLogs: runs.showRunLogs,
     showRunSteps: runs.showRunSteps,
     showRunEvents: runs.showRunEvents,
+    showRunTrace: runs.showRunTrace,
     stopAllRuns: runs.stopAllRuns,
     listApprovals: runs.listApprovals,
     openApproval: runs.openApproval,
@@ -1492,6 +1494,7 @@ export const createAppController = (
     showRunLogs: runs.showRunLogs,
     showRunSteps: runs.showRunSteps,
     showRunEvents: runs.showRunEvents,
+    showRunTrace: runs.showRunTrace,
     stopAllRuns: runs.stopAllRuns,
     listApprovals: runs.listApprovals,
     openApproval: runs.openApproval,
