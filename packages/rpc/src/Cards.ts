@@ -1031,8 +1031,9 @@ export const CardSchema = z.discriminatedUnion("kind", [
    * The mythical history (Factory design session 2026-09-07 §3, mock 13): the
    * repository's second history read through the Smithers Cloud mirror. The
    * payload states what the mirror answered and nothing else: `mainCommits`
-   * is null when the change feed could not be walked to the default
-   * bookmark's root, `mythical` is absent until the bookmark exists,
+   * is null until a seam exposes the default bookmark's commit count (the
+   * mirror exposes none today, and a capped change-feed page is never counted
+   * as one), `mythical` is absent until the bookmark exists,
    * `treeEqual` is unsupported until the mirror serves git commits, and a
    * note is null when refs/notes/mythical holds none for that commit. `notes`
    * says how far the notes read went: "read" means the notes commit's tree was

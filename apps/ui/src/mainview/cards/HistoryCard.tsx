@@ -4,7 +4,8 @@
  * their atomic commits under them and each commit's note beside it; the badge
  * is the invariant tree(mythical) == tree(main), or the honest reason it
  * cannot be checked. Until the bookmark exists the card is one sentence and
- * one door (history.bootstrap). Every button is the button door of a
+ * one door (history.bootstrap); the sentence carries "main has N commits."
+ * only when a seam exposes the count. Every button is the button door of a
  * registered flow, dispatched through onRunCommand with its repo carried.
  */
 import type { HistoryNote } from "@smthrs/rpc/Cards"

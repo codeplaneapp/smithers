@@ -140,12 +140,13 @@ const MAIN_ONLY = [
 ]
 
 describe("history seam: the empty state", () => {
-  test("no mythical bookmark: the card states the default bookmark's commit count from the change feed, walked across pages, signed out", async () => {
+  test("no mythical bookmark: the card is the one sentence with no count, and the change feed is never read to estimate one", async () => {
     const seen: Array<string> = []
     const { store, controller } = await ready(
       backend({
         [REPO]: json(200, { full_name: "will/flows", default_bookmark: "main" }),
         [`${REPO}/git/refs`]: json(200, [ref("refs/heads/main", "aaa3000000000000000000000000000000000003"), ref("refs/heads/side", "ffffff00000000000000000000000000000000ff")]),
+        // The feed would answer a walkable 3-commit main line; the seam must not count it.
         [`${REPO}/changes`]: feed(MAIN_ONLY, 2)
       }, seen)
     )
@@ -154,38 +155,17 @@ describe("history seam: the empty state", () => {
     await settled()
     const card = historyCard(store)
     expect(card.title).toBe("Mythical history · will/flows")
-    expect(card.payload).toEqual({ repo: "will/flows", defaultBookmark: "main", mainCommits: 3, mythical: { state: "absent" } })
-    expect(emptyHistorySentence(card.payload.defaultBookmark, card.payload.mainCommits)).toBe("No mythical history yet. main has 3 commits.")
-    // Both feed pages were read: the root sits on the second one.
-    expect(seen.filter((path) => path.startsWith(`${REPO}/changes`))).toEqual([`${REPO}/changes?limit=100`, `${REPO}/changes?limit=100&cursor=2`])
+    expect(card.payload).toEqual({ repo: "will/flows", defaultBookmark: "main", mainCommits: null, mythical: { state: "absent" } })
+    expect(emptyHistorySentence(card.payload.defaultBookmark, card.payload.mainCommits)).toBe("No mythical history yet.")
+    expect(seen.filter((path) => path.startsWith(`${REPO}/changes`))).toEqual([])
   })
 
-  test("a feed the walk cannot finish within the page bound answers a null count, never a partial one", async () => {
-    const pages: Array<string> = []
-    const { store, controller } = await ready(
-      backend({
-        [REPO]: json(200, { default_bookmark: "main" }),
-        [`${REPO}/git/refs`]: json(200, [ref("refs/heads/main", "aaa3000000000000000000000000000000000003")]),
-        // Every page names a parent the next page never delivers.
-        [`${REPO}/changes`]: (request) => {
-          const cursor = new URL(request.url).searchParams.get("cursor") ?? ""
-          pages.push(cursor)
-          const n = pages.length
-          return json(200, {
-            items: [change(`c-${n}`, n === 1 ? "aaa3000000000000000000000000000000000003" : `sha-${n}`, `commit ${n}`, [`c-${n + 1}`])],
-            next_cursor: String(n * 100)
-          })
-        }
-      })
-    )
-    expect((await controller.commands.run("history.show")).status).toBe("executed")
-    await settled()
-    expect(pages.length).toBe(MAX_CHANGE_PAGES)
-    const card = historyCard(store)
-    expect(card.payload.mainCommits).toBeNull()
-    expect(emptyHistorySentence(card.payload.defaultBookmark, card.payload.mainCommits)).toBe(
-      "No mythical history yet. The commit count of main is not available."
-    )
+  test("the sentence carries the count clause only when a count is given", () => {
+    expect(emptyHistorySentence("main", null)).toBe("No mythical history yet.")
+    expect(emptyHistorySentence(null, null)).toBe("No mythical history yet.")
+    expect(emptyHistorySentence("main", 3)).toBe("No mythical history yet. main has 3 commits.")
+    expect(emptyHistorySentence("main", 1)).toBe("No mythical history yet. main has 1 commit.")
+    expect(emptyHistorySentence(null, 0)).toBe("No mythical history yet. the default bookmark has 0 commits.")
   })
 
   test("the write doors are registered and signed-in, and refuse with the empty state's own sentence", async () => {
@@ -200,7 +180,7 @@ describe("history seam: the empty state", () => {
     for (const door of ["history.bootstrap", "history.amend", "history.fold"]) {
       const outcome = await controller.commands.run(door)
       expect(outcome.status).toBe("failed")
-      if (outcome.status === "failed") expect(outcome.error).toBe("No mythical history yet. main has 3 commits.")
+      if (outcome.status === "failed") expect(outcome.error).toBe("No mythical history yet.")
     }
     // Signed out, the doors defer behind sign-in instead of running.
     const anonymous = await ready(backend({}))
@@ -282,7 +262,8 @@ describe("history seam: the mythical history", () => {
     expect((await controller.commands.run("history.show")).status).toBe("executed")
     await settled()
     const { payload } = historyCard(store)
-    expect(payload.mainCommits).toBe(2)
+    // The mirror exposes no commit count, so none is derived from the change feed even when the feed reached main's root.
+    expect(payload.mainCommits).toBeNull()
     if (payload.mythical.state !== "present") throw new Error("expected the mythical history")
     expect(payload.mythical.head).toBe(E2)
     expect(payload.mythical.mainHead).toBe(M)

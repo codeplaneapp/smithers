@@ -16,12 +16,14 @@
  * already does), notes come from /contents against the notes commit (a
  * directory path lists the tree, a file path carries the blob), and the
  * tree-equality badge is a typed "unsupported" until /git/commits answers.
- * Nothing here invents a row or presents a partial read as the whole: a count
- * the feed could not finish is null, a history whose chains the feed did not
- * reach is the typed unsupported state, notes are read for exactly the commits
- * the notes tree names (never a capped prefix), and a notes tree the mirror
- * would not list is `notes: "unread"` rather than forty nulls that look like
- * absence. The honest empty state is one sentence with one door.
+ * Nothing here invents a row or presents a partial read as the whole: a
+ * history whose chains the feed did not reach is the typed unsupported state,
+ * notes are read for exactly the commits the notes tree names (never a capped
+ * prefix), and a notes tree the mirror would not list is `notes: "unread"`
+ * rather than forty nulls that look like absence. The mirror exposes no commit
+ * count, so `mainCommits` is null and the empty state never estimates one from
+ * a capped change-feed page (design session ruling 2026-09-07, spec 03 §6):
+ * the honest empty state is one sentence with one door.
  */
 import type { HistoryEpic, HistoryNote } from "@smthrs/rpc/Cards"
 import type { Card } from "../AppState"
@@ -33,7 +35,7 @@ export const MYTHICAL_NOTES_REF = "refs/notes/mythical"
 
 /** The mirror's page ceiling for the change feed. */
 const PAGE_SIZE = 100
-/** Bounds the change-feed walk, the same bound the activity route uses; a walk that outruns it answers null, never a partial count. */
+/** Bounds the change-feed walk, the same bound the activity route uses; a walk that outruns it is the typed unsupported state, never a partial history. */
 export const MAX_CHANGE_PAGES = 20
 /** Bounds the notes tree listing: git fans notes out two hex characters per directory, so 40 hex is at most 20 levels. */
 const MAX_NOTES_TREE_DEPTH = 20
@@ -50,13 +52,13 @@ export interface HistorySeam {
 }
 
 /**
- * The empty state's one sentence. The count is the default bookmark's
- * commits from the change feed; when the feed could not be walked to the
- * root the sentence says so instead of guessing.
+ * The empty state's one sentence. The clause "main has N commits." renders
+ * only when a seam actually exposes a commit count; with none the sentence
+ * stops after the first clause and never estimates from a capped read.
  */
 export const emptyHistorySentence = (bookmark: string | null, mainCommits: number | null): string => {
+  if (mainCommits === null) return "No mythical history yet."
   const name = bookmark ?? "the default bookmark"
-  if (mainCommits === null) return `No mythical history yet. The commit count of ${name} is not available.`
   return `No mythical history yet. ${name} has ${mainCommits} commit${mainCommits === 1 ? "" : "s"}.`
 }
 
@@ -101,30 +103,6 @@ export class ChangeGraph {
   add(row: ChangeRow): void {
     this.byChange.set(row.changeId, row)
     this.byCommit.set(row.commitId, row)
-  }
-
-  /**
-   * Every ancestor of a commit, or null while one is still unresolved (its
-   * change id has not been read off the feed yet).
-   */
-  ancestors(commitId: string): ReadonlyArray<ChangeRow> | null {
-    const start = this.byCommit.get(commitId)
-    if (start === undefined) return null
-    const seen = new Set<string>()
-    const out: Array<ChangeRow> = []
-    const queue: Array<ChangeRow> = [start]
-    while (queue.length > 0) {
-      const row = queue.pop()!
-      if (seen.has(row.changeId)) continue
-      seen.add(row.changeId)
-      out.push(row)
-      for (const parent of row.parents) {
-        const next = this.byChange.get(parent)
-        if (next === undefined) return null
-        queue.push(next)
-      }
-    }
-    return out
   }
 
   /** The first-parent line from a commit to the root, or null while a link is unresolved. */
@@ -212,15 +190,16 @@ const readDefaultBookmark = async (ctx: SeamContext, base: string): Promise<stri
 /**
  * Reads change-feed pages, newest first, until `settled` is true, the feed
  * ends, or the page bound trips. The feed lists children before parents, so
- * every walk resolves a page at a time; `complete` is false only when the
- * bound (or a broken page) stopped the read before the walk settled.
+ * every walk resolves a page at a time; the caller re-asks the graph what it
+ * reached, so a walk the bound stopped shows as unresolved links, never as a
+ * partial answer.
  */
 export const loadChanges = async (
   ctx: SeamContext,
   base: string,
   settled: (graph: ChangeGraph) => boolean,
   maxPages: number = MAX_CHANGE_PAGES
-): Promise<{ readonly graph: ChangeGraph; readonly complete: boolean }> => {
+): Promise<ChangeGraph> => {
   const graph = new ChangeGraph()
   let cursor = ""
   for (let page = 0; page < maxPages; page += 1) {
@@ -228,20 +207,20 @@ export const loadChanges = async (
     if (cursor !== "") query.set("cursor", cursor)
     const answer = await readJson(ctx, `${base}/changes?${query.toString()}`)
     if (answer.status !== 200 || !isRecord(answer.body) || !Array.isArray(answer.body.items)) {
-      return { graph, complete: false }
+      return graph
     }
     for (const item of answer.body.items) {
       const row = parseChange(item)
       if (row !== null) graph.add(row)
     }
-    if (settled(graph)) return { graph, complete: true }
+    if (settled(graph)) return graph
     const next = answer.body.next_cursor
     if (typeof next !== "string" || next === "" || next === cursor || answer.body.items.length === 0) {
-      return { graph, complete: settled(graph) }
+      return graph
     }
     cursor = next
   }
-  return { graph, complete: settled(graph) }
+  return graph
 }
 
 /** The commit's tree sha off GET /git/commits/{sha}, or null when the mirror does not answer it (501 today). */
@@ -370,22 +349,16 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
   const mainHead = defaultBookmark === null ? null : refs.heads.get(defaultBookmark) ?? null
   const mythicalHead = refs.heads.get("mythical") ?? null
 
-  if (mythicalHead === null) {
-    const { graph, complete } = mainHead === null
-      ? { graph: new ChangeGraph(), complete: false }
-      : await loadChanges(ctx, base, (loaded) => loaded.ancestors(mainHead) !== null)
-    const mainCommits = complete && mainHead !== null ? graph.ancestors(mainHead)?.length ?? null : null
-    return { repo, defaultBookmark, mainCommits, mythical: { state: "absent" } }
-  }
+  /* No bookmark: one sentence and one door. The mirror exposes no commit count and the change feed is never read to estimate one. */
+  if (mythicalHead === null) return { repo, defaultBookmark, mainCommits: null, mythical: { state: "absent" } }
 
   const settled = (graph: ChangeGraph): boolean => {
     const line = graph.firstParentLine(mythicalHead)
     if (line === null) return false
     const lineIds = new Set(line.map((row) => row.changeId))
-    if (line.some((row) => row.parents.length > 1 && graph.secondParentChain(row, lineIds) === null)) return false
-    return mainHead === null || graph.ancestors(mainHead) !== null
+    return !line.some((row) => row.parents.length > 1 && graph.secondParentChain(row, lineIds) === null)
   }
-  const { graph, complete } = await loadChanges(ctx, base, settled)
+  const graph = await loadChanges(ctx, base, settled)
   const line = graph.firstParentLine(mythicalHead)
   if (line === null) {
     return {
@@ -412,7 +385,6 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
     }
     epicsRaw.push({ row, chain })
   }
-  const mainCommits = complete && mainHead !== null ? graph.ancestors(mainHead)?.length ?? null : null
   const shas = epicsRaw.flatMap(({ row, chain }) => [row.commitId, ...chain.map((commit) => commit.commitId)])
 
   const [mythicalTree, mainTree] = await Promise.all([
@@ -433,7 +405,7 @@ export const readHistory = async (ctx: SeamContext, repo: string): Promise<Histo
   return {
     repo,
     defaultBookmark,
-    mainCommits,
+    mainCommits: null,
     mythical: {
       state: "present",
       head: mythicalHead,

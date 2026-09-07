@@ -26,16 +26,20 @@ const render = (payload: HistoryCard["payload"], onRunCommand: (name: string, ar
   renderToStaticMarkup(<HistoryCardBody card={card(payload)} onRunCommand={onRunCommand} />)
 
 describe("HistoryCard", () => {
-  test("the empty state is the one sentence and the bootstrap door carrying the repository", () => {
-    const html = render({ repo: "will/flows", defaultBookmark: "main", mainCommits: 214, mythical: { state: "absent" } })
-    expect(html).toContain("No mythical history yet. main has 214 commits.")
+  test("the empty state without a count is the short sentence and the bootstrap door carrying the repository", () => {
+    const html = render({ repo: "will/flows", defaultBookmark: "main", mainCommits: null, mythical: { state: "absent" } })
+    expect(html).toContain('data-testid="history-empty">No mythical history yet.</p>')
+    expect(html).not.toContain("commit")
     expect(html).toContain('data-flow="history.bootstrap"')
     expect(html).not.toContain("history.fold")
-    // One commit reads singular; an unknown count says so instead of a number.
-    expect(render({ repo: "will/flows", defaultBookmark: "main", mainCommits: 1, mythical: { state: "absent" } })).toContain("main has 1 commit.")
-    expect(render({ repo: "will/flows", defaultBookmark: "main", mainCommits: null, mythical: { state: "absent" } })).toContain(
-      "No mythical history yet. The commit count of main is not available."
+  })
+
+  test("the empty state renders the count clause only when a seam exposed a count", () => {
+    expect(render({ repo: "will/flows", defaultBookmark: "main", mainCommits: 214, mythical: { state: "absent" } })).toContain(
+      "No mythical history yet. main has 214 commits."
     )
+    // One commit reads singular.
+    expect(render({ repo: "will/flows", defaultBookmark: "main", mainCommits: 1, mythical: { state: "absent" } })).toContain("main has 1 commit.")
   })
 
   test("the badge states tree equality against the default bookmark's head, or why it cannot be checked", () => {
