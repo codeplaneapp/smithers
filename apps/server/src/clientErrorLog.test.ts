@@ -101,6 +101,60 @@ describe("the client-error log (Durable Object state)", () => {
     expect((read.reports[0]?.report as { index: number }).index).toBe(CLIENT_ERROR_LOG_LIMIT + 24)
   })
 
+  test("a second append during a slow body does not overwrite the first", async () => {
+    // A Durable Object defers concurrent events only while a storage operation
+    // is pending, so awaiting the request body between the read and the write
+    // used to let two appends load the same snapshot and clobber each other.
+    // This schedule never overlaps two storage calls: the second append is
+    // dispatched after the first read completes and finishes before the first
+    // body is released.
+    const trace: Array<string> = []
+    const data = new Map<string, unknown>()
+    const log = new ClientErrorLog({
+      storage: {
+        get: async (key) => {
+          trace.push("get")
+          return structuredClone(data.get(key)) as never
+        },
+        put: async (key, value) => {
+          data.set(key, structuredClone(value))
+          trace.push("put")
+        }
+      }
+    })
+    let release = (): void => {}
+    const slowBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        release = () => {
+          controller.enqueue(
+            new TextEncoder().encode(JSON.stringify({ at: "2026-08-18T00:00:00.000Z", report: { message: "slow" } }))
+          )
+          controller.close()
+        }
+      }
+    })
+    const slow = log.fetch(new Request("https://client-errors.internal/append", { method: "POST", body: slowBody }))
+    // Let the slow append reach its body await before the second one starts.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const prompt = await log.fetch(
+      new Request("https://client-errors.internal/append", {
+        method: "POST",
+        body: JSON.stringify({ at: "2026-08-18T00:00:01.000Z", report: { message: "prompt" } })
+      })
+    )
+    expect(prompt.status).toBe(200)
+    release()
+    expect((await slow).status).toBe(200)
+    const read = (await (await log.fetch(new Request("https://client-errors.internal/read"))).json()) as {
+      total: number
+      reports: Array<{ report: { message: string } }>
+    }
+    expect(read.total).toBe(2)
+    expect(read.reports.map((row) => row.report.message).sort()).toEqual(["prompt", "slow"])
+    // Every read is followed by its own write: no snapshot is read twice.
+    expect(trace.slice(0, 4)).toEqual(["get", "put", "get", "put"])
+  })
+
   test("a limit trims the read and never exceeds what is kept", async () => {
     const logs = memoryLog()
     for (let index = 0; index < 10; index += 1) {

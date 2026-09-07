@@ -129,11 +129,18 @@ export class ClientErrorLog {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url)
-    const stored = (await this.ctx.storage.get<ReadonlyArray<ClientErrorRecord>>(LOG_KEY)) ?? []
     switch (url.pathname) {
       case "/append": {
+        // The body is read to completion BEFORE the log is, and nothing but
+        // storage is awaited between the read and the write. A Durable Object
+        // only defers concurrent events while a storage operation is pending,
+        // so an await on request I/O in the middle of a read-modify-write lets
+        // a second append load the same snapshot and overwrite the first one's
+        // put. During a storm, which is the only time this log is read, that
+        // silently drops reports.
         const record = (await request.json().catch(() => undefined)) as ClientErrorRecord | undefined
         if (record === undefined) return new Response("bad record", { status: 400 })
+        const stored = (await this.ctx.storage.get<ReadonlyArray<ClientErrorRecord>>(LOG_KEY)) ?? []
         // Newest first, oldest evicted: a storm never buries the report
         // that is being read right now.
         const next = bounded([capRecord(record), ...stored])
@@ -147,6 +154,7 @@ export class ClientErrorLog {
         const limit = Number.isInteger(asked) && asked > 0
           ? Math.min(asked, CLIENT_ERROR_LOG_LIMIT)
           : CLIENT_ERROR_LOG_LIMIT
+        const stored = (await this.ctx.storage.get<ReadonlyArray<ClientErrorRecord>>(LOG_KEY)) ?? []
         return new Response(
           JSON.stringify({ status: "ok", total: stored.length, reports: stored.slice(0, limit) }),
           { headers: { "content-type": "application/json" } }
