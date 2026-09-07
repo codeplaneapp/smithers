@@ -1718,7 +1718,11 @@ export const CardSchema = z.discriminatedUnion("kind", [
         activity: z.object({
           sentence: z.string(),
           /** A null count is one the mirror could not answer; the sentence names it. */
-          counts: z.object({ commits: z.number().int().nullable(), pullRequests: z.number().int().nullable(), issues: z.number().int().nullable() }),
+          counts: z.object({
+            commits: z.number().int().nullable(),
+            pullRequests: z.number().int().nullable(),
+            issues: z.number().int().nullable()
+          }),
           since: z.string()
         }).nullable(),
         /** Why `activity` is null: the route is not deployed yet, or its answer could not be read. */
