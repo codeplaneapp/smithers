@@ -371,7 +371,10 @@ the last `v*` tag to `HEAD`, grouped by conventional-commit type, labelled with
 each commit's scope, and linked to the commit. Commits of type `release` are
 skipped, so the release commit a cut writes does not make the section it just
 generated stale. Nothing outside the markers is rewritten, so regenerating can
-never eat the narrative.
+never eat the narrative. The release's own `v<version>` tag never starts the
+range: a tag pushed for a publish that did not complete sits on an ancestor of
+every later `main` commit, and the section for that version still spans from
+the previous release.
 
 Two targets cover it:
 

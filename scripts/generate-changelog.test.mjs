@@ -349,6 +349,24 @@ test("readCommits skips merges and previousTag skips a tag on the range end", ()
   })
 })
 
+test("previousTag skips the release's own tag on an ancestor, so a withdrawn tag cannot shrink the range", () => {
+  withFixture((root) => {
+    // A pushed v0.2.0 whose publish never completed: it sits two commits below
+    // HEAD, and a plain describe would stop there.
+    git(root, ["tag", "-a", "v0.2.0", "-m", "withdrawn", "HEAD~2"])
+    assert.equal(previousTag("HEAD", root), "v0.2.0")
+    assert.equal(previousTag("HEAD", root, "0.2.0"), "v0.1.0")
+    assert.equal(previousTag("v0.2.0", root, "0.2.0"), "v0.1.0")
+
+    main([], root)
+    const written = readFileSync(join(root, "CHANGELOG.md"), "utf8")
+    assert.match(written, /^3 commits since \[v0\.1\.0\]/m, "the section still spans from the previous release")
+    assert.doesNotMatch(written, /since \[v0\.2\.0\]/m)
+    main(["--check"], root)
+    assert.equal(process.exitCode, undefined)
+  })
+})
+
 test("a write followed by a check is green, and a second write changes nothing", () => {
   withFixture((root) => {
     const changelogPath = join(root, "CHANGELOG.md")

@@ -69,7 +69,7 @@
  *   node scripts/generate-changelog.mjs [options]
  *
  *   --version <v>  the release to render (default: packages/smithers version)
- *   --from <ref>   range start, exclusive (default: the nearest v* tag below --to)
+ *   --from <ref>   range start, exclusive (default: the nearest v* tag below --to, never v<version> itself)
  *   --to <ref>     range end, inclusive (default: HEAD)
  *   --check        report drift and exit 1 instead of writing
  */
@@ -321,10 +321,19 @@ export const hasRepository = (root = repoRoot) => {
  *
  * Tags that point at `to` itself are excluded: on a tag push HEAD is the tag,
  * and describing it would return an empty range.
+ *
+ * The release's own tag is excluded wherever it points. A pushed `v<version>`
+ * tag whose publish never completed sits on an ancestor of every later main
+ * commit, and describing past it would shrink the section for `version` to
+ * the handful of commits since the withdrawn tag. The 1.0.0-rc.0 rehearsal
+ * hit exactly that: the range collapsed from `v0.35.0..HEAD` (1547 commits)
+ * to `v1.0.0-rc.0..HEAD` (56), and the gate failed a changelog that was
+ * right. The section for a version always spans from the previous release.
  */
-export const previousTag = (to, root = repoRoot) => {
+export const previousTag = (to, root = repoRoot, version = undefined) => {
   const here = git(["tag", "--points-at", to], root).split("\n").filter((line) => line !== "")
-  const excludes = here.map((tag) => `--exclude=${tag}`)
+  const own = version === undefined ? [] : [`v${version}`]
+  const excludes = [...new Set([...here, ...own])].map((tag) => `--exclude=${tag}`)
   try {
     return git(["describe", "--tags", "--abbrev=0", "--match=v*", ...excludes, to], root)
   } catch {
@@ -385,7 +394,7 @@ export const applyBlock = (text, { version, date, block }) => {
 /** The changelog text this version and range should produce, read from git. */
 export const generate = ({ version, from, to = "HEAD", root = repoRoot, text }) => {
   const baseUrl = commitBaseUrl(root)
-  const start = from ?? previousTag(to, root)
+  const start = from ?? previousTag(to, root, version)
   const block = renderBlock({
     version,
     from: start,
