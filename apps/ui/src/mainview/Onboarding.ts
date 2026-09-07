@@ -117,6 +117,12 @@ export const SMITHERS_HELPERS: ReadonlyArray<{ readonly flow: string; readonly l
 ]
 
 export interface IdentityFacts extends Pick<InitFacts, "bootstrap" | "harnesses" | "connectors" | "repos"> {
+  /**
+   * The `owner/name` the selection names (RepoContext.ts activeRepositoryId),
+   * the same row the agent runtime context reads: a signed-out visitor at
+   * /owner/name has a repository selected before any checkout is open.
+   */
+  readonly activeRepository: string | null
   /** Whether a flow is registered on this host right now; unregistered helpers are never named. */
   readonly registered: (flow: string) => boolean
 }
@@ -130,10 +136,18 @@ const hostLabel = (bootstrap: AppBootstrap | undefined): string =>
  * no repository and no helper each read as such rather than as an invention.
  */
 export const identityMessage = (facts: IdentityFacts): string => {
-  const repositories = [
+  /*
+   * The selected repository leads: the visitor at /smithersai/smithers heard
+   * "no repository is open yet" while the composer already named that head.
+   * Open checkouts and connectors follow; a name appears once.
+   */
+  const inReach = [
     ...facts.repos.map((repo) => repo.name),
     ...facts.connectors.map((connector) => connector.name)
   ]
+  const repositories = facts.activeRepository === null
+    ? inReach
+    : [facts.activeRepository, ...inReach.filter((name) => name !== facts.activeRepository)]
   const where = repositories.length === 0
     ? `I am ${SMITHERS_NAME}, the concierge of ${hostLabel(facts.bootstrap)}; no repository is open yet.`
     : `I am ${SMITHERS_NAME}, the concierge for ${repositories.join(", ")} in ${hostLabel(facts.bootstrap)}.`

@@ -345,7 +345,14 @@ describe("onboarding — the pure rules", () => {
   })
 
   test("the identity line is a constant over live facts: honest about an empty host, names only registered helpers", () => {
-    const none = identityMessage({ bootstrap: undefined, harnesses: [], connectors: [], repos: [], registered: () => false })
+    const none = identityMessage({
+      bootstrap: undefined,
+      harnesses: [],
+      connectors: [],
+      repos: [],
+      activeRepository: null,
+      registered: () => false
+    })
     expect(none.startsWith("I am Smithers, the concierge of an unknown host; no repository is open yet.")).toBe(true)
     expect(none).toContain("No local harness is detected.")
     expect(none).not.toContain("Librarian")
@@ -366,9 +373,24 @@ describe("onboarding — the pure rules", () => {
       harnesses: [],
       connectors: [{ name: "flows", branch: "main" }],
       repos: [{ name: "smithers" }],
+      activeRepository: null,
       registered: (flow) => SMITHERS_HELPERS.some((helper) => helper.flow === flow)
     })
     expect(full).toContain("I am Smithers, the concierge for smithers, flows in the Smithers web app.")
     for (const helper of SMITHERS_HELPERS) expect(full).toContain(helper.line)
+  })
+
+  test("the identity line leads with the selected repository and names it once", () => {
+    const facts = {
+      bootstrap: undefined,
+      harnesses: [],
+      connectors: [],
+      registered: () => false
+    }
+    const selected = identityMessage({ ...facts, repos: [], activeRepository: "smithersai/smithers" })
+    expect(selected.startsWith("I am Smithers, the concierge for smithersai/smithers in an unknown host.")).toBe(true)
+    expect(selected).not.toContain("no repository is open yet")
+    const beside = identityMessage({ ...facts, repos: [{ name: "smithersai/smithers" }, { name: "flows" }], activeRepository: "smithersai/smithers" })
+    expect(beside).toContain("the concierge for smithersai/smithers, flows in an unknown host.")
   })
 })

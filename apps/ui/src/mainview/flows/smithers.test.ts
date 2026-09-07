@@ -92,7 +92,8 @@ describe("smithers.who", () => {
     const texts = smithersMessages(store)
     expect(texts).toHaveLength(before + 1)
     const line = texts[texts.length - 1] ?? ""
-    expect(line.startsWith("I am Smithers, the concierge of the Smithers web app")).toBe(true)
+    // Nothing is selected and nothing is open: the honest no-repository sentence.
+    expect(line.startsWith("I am Smithers, the concierge of the Smithers web app; no repository is open yet.")).toBe(true)
     expect(line).not.toContain("Smith Smithers")
     // No helper flow is registered yet, so none is named: an honest hand-off line instead.
     for (const helper of SMITHERS_HELPERS) {
@@ -100,6 +101,23 @@ describe("smithers.who", () => {
       expect(line).not.toContain(helper.line)
     }
     expect(line).toContain("I answer this chat myself")
+  })
+
+  test("a selected repository is the one Smithers is concierge for, before any checkout is open", async () => {
+    // The signed-out visitor at /smithersai/smithers: the catalog row is loaded and selected (RepoLink.ts).
+    const { store, controller } = await freshController(WEB)
+    store.dispatch({
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "smithersai/smithers", org: "smithersai", ownerKind: "org", name: "smithers", head: null, catalog: true }]
+    })
+    store.dispatch({ type: "repo.selected", actor: "user", id: "smithersai/smithers" })
+    expect(store.session().activeRepoKey).toBe("smithersai/smithers")
+    const outcome = await controller.commands.run("smithers.who")
+    expect(outcome.status).toBe("executed")
+    const line = smithersMessages(store).at(-1) ?? ""
+    expect(line.startsWith("I am Smithers, the concierge for smithersai/smithers in the Smithers web app.")).toBe(true)
+    expect(line).not.toContain("no repository is open yet")
   })
 
   test("the native host reads as the native app, with its harnesses from the same facts the opening message reads", async () => {

@@ -18,6 +18,7 @@ import { DOWNLOAD_URL } from "@smthrs/rpc/AppLinks"
 import { downloadAnswers } from "../../flows/Commands"
 import { identityMessage } from "../../Onboarding"
 import type { AppServices } from "../AppController"
+import { activeRepositoryId } from "../RepoContext"
 import type { ControllerContext } from "./context"
 
 export interface AppShellController {
@@ -97,6 +98,8 @@ export const createAppShellController = (ctx: ControllerContext): AppShellContro
       harnesses: [...collections.harnesses.values()],
       connectors: [...collections.connectors.values()],
       repos: [...collections.repos.values()],
+      // The same selection the agent runtime context reports (controller/turns.ts activeRepository).
+      activeRepository: activeRepositoryId(ctx.store),
       registered: (flow) => ctx.commands.find(flow) !== undefined
     })
     ctx.store.dispatch({ type: "message.appended", actor: "smithers", text: value })
