@@ -38,12 +38,14 @@ import { ControlExecutor } from "./ControlExecutor.ts"
 import { ControlRuntime } from "./ControlRuntime.ts"
 import type {
   ControlEvent,
+  FireSummary,
   IdempotencyKey,
   ListRequest,
   ListResponse,
   Receipt,
   RunId,
   RunSummary,
+  TriggerSummary,
   WatchFilter
 } from "./ControlSchema.ts"
 import {
@@ -57,6 +59,7 @@ import {
   SteerInputSchema,
   steerItem
 } from "./ControlSchema.ts"
+import * as DispatchReader from "./DispatchReader.ts"
 import { schemaIssuePath } from "./internal/issues.ts"
 import * as MutationBoundary from "./internal/MutationBoundary.ts"
 import { alreadyApplied, canonical } from "./internal/planning.ts"
@@ -288,6 +291,14 @@ export const layer: Layer.Layer<
     const notifications = yield* NotificationQueue.NotificationQueue
     const registry = yield* Registry.Registry
     const executor = yield* Effect.serviceOption(ControlExecutor)
+    // Optional like the executor: a composition without a trigger store still
+    // plans, runs, and lists flows and runs. Only the two trigger listings
+    // refuse, and they refuse with the same typed issue `layerNone` answers,
+    // so a caller cannot tell an omitted port from a declared empty one.
+    const dispatch = Option.getOrElse(
+      yield* Effect.serviceOption(DispatchReader.DispatchReader),
+      DispatchReader.makeNone
+    )
     const observe = (run: RunSummary): Effect.Effect<RunSummary, PersistenceError> =>
       Effect.gen(function*() {
         if (Option.isNone(executor) || executor.value.readExecution === undefined) return run
@@ -764,6 +775,40 @@ export const layer: Layer.Layer<
           return result.nextCursor === undefined
             ? { _tag: "flows", items: result.items, ...diagnostics }
             : { _tag: "flows", items: result.items, ...diagnostics, nextCursor: result.nextCursor }
+        }
+
+        if (request._tag === "triggers") {
+          let triggers: ReadonlyArray<TriggerSummary> = yield* dispatch.list(request)
+          if (request.filters?.triggerId !== undefined) {
+            triggers = triggers.filter((trigger) => trigger.triggerId === request.filters?.triggerId)
+          }
+          if (request.filters?.flowId !== undefined) {
+            triggers = triggers.filter((trigger) => trigger.flowId === request.filters?.flowId)
+          }
+          if (request.filters?.enabled !== undefined) {
+            triggers = triggers.filter((trigger) => trigger.enabled === request.filters?.enabled)
+          }
+          const result = page(triggers, bounds)
+          return result.nextCursor === undefined
+            ? { _tag: "triggers", items: result.items }
+            : { _tag: "triggers", items: result.items, nextCursor: result.nextCursor }
+        }
+
+        if (request._tag === "fires") {
+          let fires: ReadonlyArray<FireSummary> = yield* dispatch.fires(request)
+          if (request.filters?.triggerId !== undefined) {
+            fires = fires.filter((fire) => fire.triggerId === request.filters?.triggerId)
+          }
+          if (request.filters?.runId !== undefined) {
+            fires = fires.filter((fire) => fire.runId === request.filters?.runId)
+          }
+          if (request.filters?.outcome !== undefined) {
+            fires = fires.filter((fire) => fire.outcome === request.filters?.outcome)
+          }
+          const result = page(fires, bounds)
+          return result.nextCursor === undefined
+            ? { _tag: "fires", items: result.items }
+            : { _tag: "fires", items: result.items, nextCursor: result.nextCursor }
         }
 
         if (request.filters?.principalId !== undefined) {

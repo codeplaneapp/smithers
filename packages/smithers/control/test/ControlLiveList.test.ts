@@ -12,7 +12,8 @@ import { Control } from "../src/Control.ts"
 import { InvalidInput, LaunchFailed, PersistenceError, PlanDenied } from "../src/ControlError.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import { ControlRuntime, type MemoryFlow } from "../src/ControlRuntime.ts"
-import type { Envelope, ListResponse, Principal, Receipt } from "../src/ControlSchema.ts"
+import type { Envelope, FireSummary, ListResponse, Principal, Receipt, TriggerSummary } from "../src/ControlSchema.ts"
+import * as DispatchReader from "../src/DispatchReader.ts"
 import { park } from "./Park.ts"
 import { descriptor, live, memoryRuntime, type Stack } from "./TestStack.ts"
 
@@ -50,8 +51,18 @@ const start = (flowId: string, suffix: string) =>
     return { card, runId: receipt.runId }
   })
 
-const items = (listed: ListResponse): ReadonlyArray<string> =>
-  listed._tag === "flows" ? listed.items.map((item) => item.flowId) : listed.items.map((item) => item.runId)
+const items = (listed: ListResponse): ReadonlyArray<string> => {
+  switch (listed._tag) {
+    case "flows":
+      return listed.items.map((item) => item.flowId)
+    case "runs":
+      return listed.items.map((item) => item.runId)
+    case "triggers":
+      return listed.items.map((item) => item.triggerId)
+    case "fires":
+      return listed.items.map((item) => `${item.triggerId}@${item.occurrenceAtMs}`)
+  }
+}
 
 describe("ControlLive listings", () => {
   it("pages valid flow listings and refuses sizes or cursors that cannot make progress", async () => {
@@ -785,5 +796,232 @@ describe("ControlLive executor acceptance", () => {
       "control.run.accepted",
       "control.run.running"
     ])
+  })
+})
+
+/** Three registered triggers, so a page boundary and each filter can be named exactly. */
+const triggers: ReadonlyArray<TriggerSummary> = [
+  {
+    triggerId: "nightly-lint",
+    flowId: "lint",
+    input: { scope: "all" },
+    cron: "0 3 * * *",
+    timezone: "UTC",
+    overlap: "skip",
+    catchUp: "none",
+    enabled: true,
+    revision: 2,
+    lastFiredAtMs: 1_700_000_000_000,
+    nextOccurrencesMs: [1_700_086_400_000, 1_700_172_800_000],
+    schedulerLastTickMs: 1_700_000_060_000
+  },
+  {
+    triggerId: "hourly-triage",
+    flowId: "issue-triage",
+    input: null,
+    cron: "0 * * * *",
+    overlap: "buffer-one",
+    catchUp: "one",
+    maxCatchUp: 1,
+    enabled: true,
+    revision: 1,
+    pendingAtMs: 1_700_003_600_000,
+    activeRunId: "run-triage-7",
+    nextOccurrencesMs: [1_700_003_600_000]
+  },
+  {
+    triggerId: "weekly-release-notes",
+    flowId: "release-notes",
+    input: { channel: "#releases" },
+    cron: "0 9 * * 1",
+    overlap: "supersede",
+    catchUp: "all",
+    maxCatchUp: 4,
+    enabled: false,
+    revision: 5,
+    nextOccurrencesMs: []
+  }
+]
+
+/** Newest first, as a store's history would answer. */
+const fires: ReadonlyArray<FireSummary> = [
+  { triggerId: "hourly-triage", occurrenceAtMs: 1_700_003_600_000, outcome: null },
+  { triggerId: "nightly-lint", occurrenceAtMs: 1_700_000_000_000, outcome: "launched", runId: "run-lint-3" },
+  { triggerId: "nightly-lint", occurrenceAtMs: 1_699_913_600_000, outcome: "skipped" },
+  { triggerId: "hourly-triage", occurrenceAtMs: 1_699_999_200_000, outcome: "failed", error: "plan denied" },
+  {
+    triggerId: "nightly-lint",
+    occurrenceAtMs: 1_699_827_200_000,
+    outcome: "launched",
+    runId: "run-lint-2",
+    waiting: "approval"
+  }
+]
+
+/** A reader that answers the fixtures and records what it was asked. */
+const recordingReader = (): { readonly reader: DispatchReader.Service; readonly asked: Array<string> } => {
+  const asked: Array<string> = []
+  return {
+    asked,
+    reader: DispatchReader.make({
+      list: (request) =>
+        Effect.sync(() => {
+          asked.push(`list:${JSON.stringify(request.filters ?? {})}`)
+          return triggers
+        }),
+      fires: (request) =>
+        Effect.sync(() => {
+          asked.push(`fires:${JSON.stringify(request.filters ?? {})}`)
+          return fires
+        })
+    })
+  }
+}
+
+describe("ControlLive trigger listings", () => {
+  it("pages trigger rows from the reader and walks the cursor back to the rest", async () => {
+    const { asked, reader } = recordingReader()
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const first = yield* control.list({ _tag: "triggers", limit: 2 })
+        const rest = first.nextCursor === undefined
+          ? undefined
+          : yield* control.list({ _tag: "triggers", limit: 2, cursor: first.nextCursor })
+        return { first, rest, all: yield* control.list({ _tag: "triggers" }) }
+      }),
+      live({ runtime: memoryRuntime({ flows }), dispatch: reader })
+    )
+
+    expect(observed.first._tag).toBe("triggers")
+    expect(items(observed.first)).toEqual(["nightly-lint", "hourly-triage"])
+    expect(observed.first.nextCursor).toBe("2")
+    expect(observed.rest).toBeDefined()
+    expect(items(observed.rest as ListResponse)).toEqual(["weekly-release-notes"])
+    expect(observed.rest).not.toHaveProperty("nextCursor")
+    // Rows cross the plane unchanged: the optional fields a store reports stay
+    // where the store put them, and the ones it omitted stay absent.
+    expect(observed.all).toEqual({ _tag: "triggers", items: triggers })
+    expect(asked).toEqual(["list:{}", "list:{}", "list:{}"])
+  })
+
+  it("applies the trigger filters over what the reader answered and hands the reader the request", async () => {
+    const { asked, reader } = recordingReader()
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        return {
+          one: yield* control.list({ _tag: "triggers", filters: { triggerId: "hourly-triage" } }),
+          byFlow: yield* control.list({ _tag: "triggers", filters: { flowId: "release-notes" } }),
+          disabled: yield* control.list({ _tag: "triggers", filters: { enabled: false } }),
+          enabled: yield* control.list({ _tag: "triggers", filters: { enabled: true } }),
+          none: yield* control.list({ _tag: "triggers", filters: { flowId: "lint", enabled: false } })
+        }
+      }),
+      live({ runtime: memoryRuntime({ flows }), dispatch: reader })
+    )
+
+    expect(items(observed.one)).toEqual(["hourly-triage"])
+    expect(items(observed.byFlow)).toEqual(["weekly-release-notes"])
+    expect(items(observed.disabled)).toEqual(["weekly-release-notes"])
+    expect(items(observed.enabled)).toEqual(["nightly-lint", "hourly-triage"])
+    expect(observed.none).toEqual({ _tag: "triggers", items: [] })
+    expect(asked[0]).toBe("list:{\"triggerId\":\"hourly-triage\"}")
+  })
+
+  it("pages the fire ledger newest first and a runId filter returns the one fire naming that run", async () => {
+    const { reader } = recordingReader()
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        const first = yield* control.list({ _tag: "fires", limit: 3 })
+        const rest = first.nextCursor === undefined
+          ? undefined
+          : yield* control.list({ _tag: "fires", cursor: first.nextCursor })
+        return {
+          first,
+          rest,
+          byRun: yield* control.list({ _tag: "fires", filters: { runId: "run-lint-3" } }),
+          byTrigger: yield* control.list({ _tag: "fires", filters: { triggerId: "hourly-triage" } }),
+          launched: yield* control.list({ _tag: "fires", filters: { outcome: "launched" } }),
+          unknownRun: yield* control.list({ _tag: "fires", filters: { runId: "run-nobody" } })
+        }
+      }),
+      live({ runtime: memoryRuntime({ flows }), dispatch: reader })
+    )
+
+    expect(observed.first._tag).toBe("fires")
+    expect(items(observed.first)).toEqual([
+      "hourly-triage@1700003600000",
+      "nightly-lint@1700000000000",
+      "nightly-lint@1699913600000"
+    ])
+    expect(observed.first.nextCursor).toBe("3")
+    expect(items(observed.rest as ListResponse)).toEqual([
+      "hourly-triage@1699999200000",
+      "nightly-lint@1699827200000"
+    ])
+    expect(observed.byRun).toEqual({
+      _tag: "fires",
+      items: [{
+        triggerId: "nightly-lint",
+        occurrenceAtMs: 1_700_000_000_000,
+        outcome: "launched",
+        runId: "run-lint-3"
+      }]
+    })
+    expect(items(observed.byTrigger)).toEqual(["hourly-triage@1700003600000", "hourly-triage@1699999200000"])
+    expect(items(observed.launched)).toEqual(["nightly-lint@1700000000000", "nightly-lint@1699827200000"])
+    expect(observed.unknownRun).toEqual({ _tag: "fires", items: [] })
+  })
+
+  it("refuses sizes and cursors that cannot make progress before asking the reader", async () => {
+    const { asked, reader } = recordingReader()
+    const observed = await run(
+      Effect.gen(function*() {
+        const control = yield* Control
+        return {
+          limit: yield* control.list({ _tag: "triggers", limit: 0 }).pipe(Effect.flip),
+          cursor: yield* control.list({ _tag: "fires", cursor: "later" }).pipe(Effect.flip)
+        }
+      }),
+      live({ runtime: memoryRuntime({ flows }), dispatch: reader })
+    )
+
+    expect(observed.limit).toBeInstanceOf(InvalidInput)
+    expect((observed.limit as InvalidInput).issue).toContain("limit")
+    expect(observed.cursor).toBeInstanceOf(InvalidInput)
+    expect((observed.cursor as InvalidInput).issue).toContain("cursor")
+    expect(asked).toEqual([])
+  })
+
+  it("answers the typed refusal, not an empty page, when the host serves no trigger store", async () => {
+    const refusals = await Effect.runPromise(
+      Effect.forEach(
+        [live({ runtime: memoryRuntime({ flows }), dispatch: "none" }), live({ runtime: memoryRuntime({ flows }) })],
+        (stack) =>
+          Effect.gen(function*() {
+            const control = yield* Control
+            return {
+              triggers: yield* control.list({ _tag: "triggers" }).pipe(Effect.flip),
+              fires: yield* control.list({ _tag: "fires", filters: { runId: "run-lint-3" } }).pipe(Effect.flip),
+              // The two variants a store is not needed for keep answering.
+              flows: yield* control.list({ _tag: "flows", limit: 1 }),
+              runs: yield* control.list({ _tag: "runs" })
+            }
+          }).pipe(Effect.provide(stack), Effect.scoped, Effect.orDie)
+      )
+    )
+
+    for (const observed of refusals) {
+      for (const refusal of [observed.triggers, observed.fires]) {
+        expect(refusal).toBeInstanceOf(InvalidInput)
+        expect((refusal as InvalidInput).code).toBe("invalid_input")
+        expect((refusal as InvalidInput).issue).toBe(DispatchReader.noStoreIssue)
+        expect((refusal as InvalidInput).issue).toBe("this host serves no trigger store")
+      }
+      expect(items(observed.flows)).toEqual(["system/test"])
+      expect(observed.runs).toEqual({ _tag: "runs", items: [] })
+    }
   })
 })

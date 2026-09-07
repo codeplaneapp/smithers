@@ -53,6 +53,7 @@
     "./Credential": "./src/Credential.ts",
     "./CredentialCipher": "./src/CredentialCipher.ts",
     "./CredentialStore": "./src/CredentialStore.ts",
+    "./DispatchReader": "./src/DispatchReader.ts",
     "./Lineage": "./src/Lineage.ts",
     "./Migrations": "./src/Migrations.ts",
     "./Monitor": "./src/Monitor.ts",
@@ -164,6 +165,11 @@
         "types": "./dist/esm/CredentialStore.d.ts",
         "import": "./dist/esm/CredentialStore.js",
         "require": "./dist/cjs/CredentialStore.js"
+      },
+      "./DispatchReader": {
+        "types": "./dist/esm/DispatchReader.d.ts",
+        "import": "./dist/esm/DispatchReader.js",
+        "require": "./dist/cjs/DispatchReader.js"
       },
       "./Lineage": {
         "types": "./dist/esm/Lineage.d.ts",

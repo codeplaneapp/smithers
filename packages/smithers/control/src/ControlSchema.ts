@@ -789,7 +789,96 @@ export const PageLimit = Schema.Int.check(
 )
 
 /**
- * A typed listing request for discovered flows or durable runs.
+ * How a claimed trigger occurrence ended.
+ *
+ * The same six words `@smthrs/triggers` records in its fire ledger. They are
+ * declared here rather than imported because the triggers package depends on
+ * this one (its scheduler launches runs through `Control`), so the vocabulary
+ * has to live on the control side of that edge.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const FireOutcome = Schema.Literals(["launched", "completed", "skipped", "buffered", "superseded", "failed"])
+
+/**
+ * How a claimed trigger occurrence ended.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type FireOutcome = typeof FireOutcome.Type
+
+/**
+ * One registered trigger as a listing reports it.
+ *
+ * `nextOccurrencesMs` is the store clock's view of the next fires, computed at
+ * read time, so an operator sees when a schedule will next run without
+ * evaluating the cron expression client-side. `schedulerLastTickMs` is the
+ * last poll the scheduler recorded; absent means no scheduler has ticked on
+ * this host, so an enabled trigger is not going to fire. `activeRunId` names
+ * the run the trigger is currently holding, and is absent while the trigger
+ * holds a reservation rather than a launched run.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const TriggerSummary = Schema.Struct({
+  triggerId: Schema.String,
+  flowId: FlowId,
+  input: Schema.Json,
+  cron: Schema.String,
+  timezone: Schema.optional(Schema.String),
+  overlap: Schema.Literals(["skip", "buffer-one", "supersede"]),
+  catchUp: Schema.Literals(["none", "one", "all"]),
+  maxCatchUp: Schema.optional(Schema.Number),
+  enabled: Schema.Boolean,
+  revision: Schema.Number,
+  lastFiredAtMs: Schema.optional(Schema.Number),
+  pendingAtMs: Schema.optional(Schema.Number),
+  activeRunId: Schema.optional(RunId),
+  nextOccurrencesMs: Schema.Array(Schema.Number),
+  schedulerLastTickMs: Schema.optional(Schema.Number)
+})
+
+/**
+ * One registered trigger as a listing reports it.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type TriggerSummary = typeof TriggerSummary.Type
+
+/**
+ * One claimed trigger occurrence and what became of it.
+ *
+ * `outcome` is `null` while the occurrence is claimed and not yet reported,
+ * which is the window between a claim and its `recordResult`. `waiting` names
+ * what a launched run is parked on when the ledger can see it.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export const FireSummary = Schema.Struct({
+  triggerId: Schema.String,
+  occurrenceAtMs: Schema.Number,
+  outcome: Schema.NullOr(FireOutcome),
+  runId: Schema.optional(RunId),
+  error: Schema.optional(Schema.String),
+  waiting: Schema.optional(Schema.Literal("approval"))
+})
+
+/**
+ * One claimed trigger occurrence and what became of it.
+ *
+ * @since 1.0.0
+ * @category models
+ */
+export type FireSummary = typeof FireSummary.Type
+
+/**
+ * A typed listing request for discovered flows, durable runs, registered
+ * triggers, or the trigger fire ledger.
  *
  * `principalId` stays on the wire and is REFUSED by `Control.list` rather than
  * removed from it. rc.0 records no launch principal on a run summary, so there
@@ -821,11 +910,30 @@ export const ListRequest = Schema.Union([
     })),
     cursor: Schema.optional(Schema.String),
     limit: Schema.optional(PageLimit)
+  }),
+  Schema.TaggedStruct("triggers", {
+    filters: Schema.optional(Schema.Struct({
+      triggerId: Schema.optional(Schema.String),
+      flowId: Schema.optional(FlowId),
+      enabled: Schema.optional(Schema.Boolean)
+    })),
+    cursor: Schema.optional(Schema.String),
+    limit: Schema.optional(PageLimit)
+  }),
+  Schema.TaggedStruct("fires", {
+    filters: Schema.optional(Schema.Struct({
+      triggerId: Schema.optional(Schema.String),
+      runId: Schema.optional(RunId),
+      outcome: Schema.optional(FireOutcome)
+    })),
+    cursor: Schema.optional(Schema.String),
+    limit: Schema.optional(PageLimit)
   })
 ])
 
 /**
- * A typed listing request for discovered flows or durable runs.
+ * A typed listing request for discovered flows, durable runs, registered
+ * triggers, or the trigger fire ledger.
  *
  * @since 0.1.0
  * @category models
@@ -834,7 +942,7 @@ export const ListRequest = Schema.Union([
 export type ListRequest = typeof ListRequest.Type
 
 /**
- * A typed page returned for a flow or run listing.
+ * A typed page returned for a flow, run, trigger, or fire listing.
  *
  * @since 0.1.0
  * @category models
@@ -849,11 +957,19 @@ export const ListResponse = Schema.Union([
   Schema.TaggedStruct("runs", {
     items: Schema.Array(RunSummary),
     nextCursor: Schema.optional(Schema.String)
+  }),
+  Schema.TaggedStruct("triggers", {
+    items: Schema.Array(TriggerSummary),
+    nextCursor: Schema.optional(Schema.String)
+  }),
+  Schema.TaggedStruct("fires", {
+    items: Schema.Array(FireSummary),
+    nextCursor: Schema.optional(Schema.String)
   })
 ])
 
 /**
- * A typed page returned for a flow or run listing.
+ * A typed page returned for a flow, run, trigger, or fire listing.
  *
  * @since 0.1.0
  * @category models

@@ -79,6 +79,17 @@
       "reason": "Host-owned approval authority, distinct from authenticated principal attribution and workflow capability grants; enforced before mutation/replay and at decision commit."
     },
     {
+      "name": "@smthrs/control",
+      "subpath": "./DispatchReader",
+      "development": "./src/DispatchReader.ts",
+      "published": {
+        "types": "./dist/esm/DispatchReader.d.ts",
+        "import": "./dist/esm/DispatchReader.js",
+        "require": "./dist/cjs/DispatchReader.js"
+      },
+      "reason": "Read port from the control plane into a host's trigger store, so Control.list answers the triggers and fires variants; the port lives in control because @smthrs/triggers already depends on it, and layerNone is the typed refusal for a host without a store."
+    },
+    {
       "name": "@smthrs/engine-store",
       "subpath": "./PlanMergeStore",
       "development": "./src/PlanMergeStore.ts",

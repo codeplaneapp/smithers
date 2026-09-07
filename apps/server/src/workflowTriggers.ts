@@ -8,14 +8,15 @@
  * coordinator (`Webhook.make` registers a channel by name; its inbound map
  * names the flow each verified payload starts).
  *
- * The per-user gateway relays no procedure that reads either registry:
- * `Control.list` knows `flows` and `runs` only, no projection carries
- * trigger rows, and `Channels` exposes register, lookup, ingest, and project
- * with no list. Until a `List { _tag: "triggers" }` request (or a `triggers`
- * projection) ships for the store, and a `Channels.list` (or a
- * `List { _tag: "channels" }` request) ships for the registered webhooks,
- * this route answers the one honest thing it can: empty lists and the
- * reason they are empty. The client renders the reason; it never invents rows.
+ * `Control.list` defines `List { _tag: "triggers" }` and `List { _tag: "fires" }`
+ * (`@smthrs/control` DispatchReader), and the workflow RPC relay already
+ * carries `List` unchanged, but the workspace gateway answers those two
+ * variants only once its host composes a DispatchReader over the trigger
+ * store; until then the gateway refuses them with `this host serves no trigger
+ * store`. `Channels` exposes register, lookup, ingest, and project with no
+ * list, so registered webhooks have no read path at all yet. This route
+ * therefore answers the one honest thing it can: empty lists and the reason
+ * they are empty. The client renders the reason; it never invents rows.
  */
 
 /** One trigger row as the client renders it. */
@@ -49,7 +50,7 @@ export interface WorkflowTriggersBody {
 
 /** Why the lists are empty on this deployment: a statement about the gateway, not about the repository. */
 export const TRIGGERS_UNAVAILABLE_REASON =
-  "Your Smithers Cloud workspace does not serve its trigger store or its webhook registry yet, so there are no triggers or webhooks to list here. The gateway needs a List { _tag: \"triggers\" } request for scheduled triggers and a Channels.list export for registered webhooks. Triggers and webhooks registered with the smthrs CLI keep firing under smthrs serve; smthrs triggers list shows the triggers."
+  "Your Smithers Cloud workspace does not serve its trigger store or its webhook registry yet, so there are no triggers or webhooks to list here. The control plane defines List { _tag: \"triggers\" } and List { _tag: \"fires\" } for scheduled triggers and their fire ledger, but the workspace gateway answers them only once its host serves a trigger store, and registered webhooks still need a Channels.list export. Triggers and webhooks registered with the smthrs CLI keep firing under smthrs serve; smthrs triggers list shows the triggers."
 
 /** The trigger and webhook lists for one repository. */
 export const workflowTriggers = (repo: string): WorkflowTriggersBody => ({

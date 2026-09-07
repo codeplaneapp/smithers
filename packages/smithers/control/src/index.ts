@@ -80,6 +80,12 @@ export * as ControlRuntime from "./ControlRuntime.ts"
 export * as ControlExecutor from "./ControlExecutor.ts"
 
 /**
+ * @category services
+ * @since 1.0.0
+ */
+export * as DispatchReader from "./DispatchReader.ts"
+
+/**
  * @category layers
  * @since 0.1.0
  * @slop

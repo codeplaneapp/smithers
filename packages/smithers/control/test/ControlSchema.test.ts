@@ -275,8 +275,101 @@ describe("ControlSchema", () => {
       .toEqual({ kind: "Tools", toolNames: ["read", "write"] })
   })
 
+  it("round-trips a trigger listing request and its page", () => {
+    roundTrip(ControlSchema.ListRequest, {
+      _tag: "triggers",
+      filters: { triggerId: "nightly-lint", flowId: "lint", enabled: true },
+      cursor: "2",
+      limit: 25
+    })
+    roundTrip(ControlSchema.ListResponse, {
+      _tag: "triggers",
+      items: [
+        {
+          triggerId: "nightly-lint",
+          flowId: "lint",
+          input: { scope: "all", retries: 2, nested: [1, null, "x"] },
+          cron: "0 3 * * *",
+          timezone: "UTC",
+          overlap: "skip",
+          catchUp: "one",
+          maxCatchUp: 1,
+          enabled: true,
+          revision: 2,
+          lastFiredAtMs: 1_700_000_000_000,
+          pendingAtMs: 1_700_003_600_000,
+          activeRunId: "run-lint-3",
+          nextOccurrencesMs: [1_700_086_400_000, 1_700_172_800_000],
+          schedulerLastTickMs: 1_700_000_060_000
+        },
+        {
+          triggerId: "weekly",
+          flowId: "release-notes",
+          input: null,
+          cron: "0 9 * * 1",
+          overlap: "supersede",
+          catchUp: "none",
+          enabled: false,
+          revision: 1,
+          nextOccurrencesMs: []
+        }
+      ],
+      nextCursor: "2"
+    })
+    for (const overlap of ["always", "", 1]) {
+      expect(() =>
+        Schema.decodeUnknownSync(ControlSchema.TriggerSummary)({
+          triggerId: "t",
+          flowId: "f",
+          input: null,
+          cron: "* * * * *",
+          overlap,
+          catchUp: "none",
+          enabled: true,
+          revision: 1,
+          nextOccurrencesMs: []
+        })
+      ).toThrow()
+    }
+  })
+
+  it("round-trips a fire ledger request and its page, including an unreported outcome", () => {
+    roundTrip(ControlSchema.ListRequest, {
+      _tag: "fires",
+      filters: { triggerId: "nightly-lint", runId: "run-lint-3", outcome: "launched" },
+      limit: 1
+    })
+    roundTrip(ControlSchema.ListResponse, {
+      _tag: "fires",
+      items: [
+        { triggerId: "hourly-triage", occurrenceAtMs: 1_700_003_600_000, outcome: null },
+        {
+          triggerId: "nightly-lint",
+          occurrenceAtMs: 1_700_000_000_000,
+          outcome: "launched",
+          runId: "run-lint-3",
+          waiting: "approval"
+        },
+        { triggerId: "hourly-triage", occurrenceAtMs: 1_699_999_200_000, outcome: "failed", error: "plan denied" }
+      ]
+    })
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: "fires", filters: { outcome: "exploded" } })
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ControlSchema.FireSummary)({
+        triggerId: "t",
+        occurrenceAtMs: 1,
+        outcome: "launched",
+        waiting: "timer"
+      })
+    ).toThrow()
+    // `null` is the unreported window; an omitted outcome is a malformed row.
+    expect(() => Schema.decodeUnknownSync(ControlSchema.FireSummary)({ triggerId: "t", occurrenceAtMs: 1 })).toThrow()
+  })
+
   it("accepts only finite positive integer page sizes up to 500", () => {
-    for (const tag of ["flows", "runs"] as const) {
+    for (const tag of ["flows", "runs", "triggers", "fires"] as const) {
       for (const limit of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 501]) {
         expect(() => Schema.decodeUnknownSync(ControlSchema.ListRequest)({ _tag: tag, limit })).toThrow()
       }

@@ -16,6 +16,7 @@ import type { Control } from "../src/Control.ts"
 import * as ControlExecutor from "../src/ControlExecutor.ts"
 import * as ControlLive from "../src/ControlLive.ts"
 import * as ControlRuntime from "../src/ControlRuntime.ts"
+import * as DispatchReader from "../src/DispatchReader.ts"
 
 /** The same host-free crypto `TestControl` uses, without a Node import. */
 export const browserCrypto = Layer.succeed(
@@ -50,6 +51,12 @@ export interface StackOptions {
   readonly notifications?: Layer.Layer<NotificationQueue.NotificationQueue> | undefined
   readonly registry?: Layer.Layer<Registry.Registry> | undefined
   readonly executor?: ControlExecutor.Service | "absent" | undefined
+  /**
+   * The trigger read port. Omitted by default, the composition `TestControl`
+   * fixes; `"none"` provides `DispatchReader.layerNone` so a suite can tell a
+   * declared refusal from an absent port.
+   */
+  readonly dispatch?: DispatchReader.Service | "none" | undefined
 }
 
 /** Everything a control edge test may reach for. */
@@ -73,9 +80,15 @@ export const live = (options: StackOptions = {}): Layer.Layer<Stack> => {
     options.notifications ?? NotificationQueue.layer.pipe(Layer.provide(journal)),
     options.registry ?? Registry.layerNoop()
   )
-  const dependencies = options.executor === "absent"
+  const withExecutor = options.executor === "absent"
     ? collaborators
     : Layer.merge(collaborators, ControlExecutor.layer(options.executor ?? ControlExecutor.makeNoop()))
+  const dependencies = options.dispatch === undefined
+    ? withExecutor
+    : Layer.merge(
+      withExecutor,
+      options.dispatch === "none" ? DispatchReader.layerNone : DispatchReader.layer(options.dispatch)
+    )
   return Layer.provideMerge(ControlLive.layer, dependencies) as Layer.Layer<Stack>
 }
 
