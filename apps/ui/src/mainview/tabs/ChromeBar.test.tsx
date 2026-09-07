@@ -1511,10 +1511,11 @@ describe("the chrome-actions footer's History button", () => {
     await act(() => button?.click())
     for (let tick = 0; tick < 50 && !store.collections.cards.has("history-will/flows"); tick += 1) await act(() => {})
     await act(() => {})
-    expect(feedReads()).toBe(1)
+    // The mirror exposes no commit count (335fa4a763): the empty state never walks the change feed to estimate one.
+    expect(feedReads()).toBe(0)
     const card = host.querySelector<HTMLElement>('[data-kind="history"]')
     expect(card).not.toBeNull()
-    expect(card?.querySelector("[data-testid=history-empty]")?.textContent).toBe("No mythical history yet. main has 3 commits.")
+    expect(card?.querySelector("[data-testid=history-empty]")?.textContent).toBe("No mythical history yet.")
     const door = card?.querySelector<HTMLElement>("[data-testid=history-bootstrap]")
     expect(door?.dataset.flow).toBe("history.bootstrap")
     // The one door is the only button in the empty state; no fold or amend door is invented.
