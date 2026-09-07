@@ -23,11 +23,13 @@ import type { NonEmptyReadonlyArray } from "effect/Array"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 import type * as HttpApi from "effect/unstable/httpapi/HttpApi"
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder"
 import type * as HttpApiGroup from "effect/unstable/httpapi/HttpApiGroup"
 import type * as Rpc from "effect/unstable/rpc/Rpc"
 import * as FlowProxy from "./FlowProxy.ts"
+import { renderDiagnostic } from "./internal/Diagnostic.ts"
 
 /**
  * Rewrites the caller-supplied execution id before it reaches the engine, so
@@ -82,6 +84,57 @@ function scopeExecutionId(
 }
 
 /**
+ * The refusal a served flow dies with when its handler died of anything else.
+ *
+ * A defect is an implementation error, and an implementation error is the kind
+ * that carries the credential the call was made with: an HTTP client error
+ * holding the request headers, a provider SDK error holding the API key it was
+ * constructed with. Inside the process that value is the best diagnostic there
+ * is, so the engine keeps dying with it. Crossing this boundary it is a
+ * liability instead — the server log prints it with `Cause.pretty`, and
+ * `RpcServer` answers the caller that triggered the run with `Schema.Defect`
+ * of it, which encodes a plain object as full JSON. `diagnostic` is the same
+ * bounded, redacted rendering the engine writes to its own log line, so the
+ * operator still reads what failed and the caller still learns that it did.
+ *
+ * @category errors
+ * @since 1.0.0
+ */
+export class FlowHandlerDefect extends Schema.TaggedError<FlowHandlerDefect>()(
+  "@smthrs/engine/FlowHandlerDefect",
+  {
+    code: Schema.Literal("flow_handler_defect").pipe(
+      Schema.withConstructorDefault(Effect.succeed("flow_handler_defect"))
+    ),
+    flowName: Schema.String,
+    diagnostic: Schema.String,
+    message: Schema.String
+  }
+) {}
+
+/**
+ * Logs a handler defect as its redacted rendering and re-dies with a refusal
+ * carrying the same rendering, so neither the log nor the wire sees the raw
+ * value.
+ *
+ * @private
+ */
+const guardDefects = (flowName: string) => <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.catchDefect(effect, (defect) => {
+    const diagnostic = renderDiagnostic(defect)
+    return Effect.andThen(
+      Effect.logError("A flow proxy handler died", diagnostic),
+      Effect.die(
+        new FlowHandlerDefect({
+          flowName,
+          diagnostic,
+          message: `A ${flowName} proxy handler died: ${diagnostic}`
+        })
+      )
+    )
+  })
+
+/**
  * Creates handlers for a flow HTTP API group, wiring execute, discard, and
  * resume endpoints to the supplied flows.
  *
@@ -132,7 +185,7 @@ export const layerHttpApi = <
                   payload: request.payload
                 })
               }).pipe(
-                Effect.tapDefect(Effect.logError),
+                guardDefects(flow._tag),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
                   method: operation.execute
@@ -156,7 +209,7 @@ export const layerHttpApi = <
                   payload: request.payload
                 })
               }).pipe(
-                Effect.tapDefect(Effect.logError),
+                guardDefects(flow._tag),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
                   method: operation.discard
@@ -172,7 +225,7 @@ export const layerHttpApi = <
                 clientValue: payload.executionId,
                 payload: undefined
               })).pipe(
-                Effect.tapDefect(Effect.logError),
+                guardDefects(flow._tag),
                 Effect.annotateLogs({
                   module: "FlowProxyServer",
                   method: operation.resume
@@ -232,7 +285,7 @@ export const layerRpcHandlers = <
               payload: request.payload
             })
           }).pipe(
-            Effect.tapDefect(Effect.logError),
+            guardDefects(flow._tag),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tag })
           ) as any
       } as any)
@@ -249,7 +302,7 @@ export const layerRpcHandlers = <
               payload: request.payload
             })
           }).pipe(
-            Effect.tapDefect(Effect.logError),
+            guardDefects(flow._tag),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagDiscard })
           ) as any
       } as any)
@@ -263,7 +316,7 @@ export const layerRpcHandlers = <
             clientValue: payload.executionId,
             payload: undefined
           })).pipe(
-            Effect.tapDefect(Effect.logError),
+            guardDefects(flow._tag),
             Effect.annotateLogs({ module: "FlowProxyServer", method: tagResume })
           ) as any
       } as any)
