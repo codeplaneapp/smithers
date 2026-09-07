@@ -2472,6 +2472,8 @@ Use these guides when you know what you want to do. For a complete worked projec
 ## Operate persistent runs
 
 - [Run flows in CI](/docs/guides/ci/): choose an exit policy and retain useful failure evidence.
+- [Run CI on Smithers Cloud](/docs/guides/cloud-ci/): run an existing CI target when code changes and require its result before merging or landing.
+- [Define triggers](/docs/guides/triggers/): bind typed repository events, schedules, and manual input to targets and flows.
 - [Control plane](/docs/guides/control-plane/): host runs beyond a terminal session.
 - [Artifacts and cache](/docs/guides/artifacts-cache/): store output bytes and share sealed results.
 - [Retention](/docs/guides/retention/): back up state and remove data you no longer need.
@@ -4902,6 +4904,8 @@ Run a flow from CI with `smthrs flow start`. A local attached invocation stays w
 
 This guide covers durable flows. `smthrs ci <pattern>` runs build, test, lint, and docs targets from `PACKAGE.ts`; it does not launch every flow in the repository.
 
+To run repository checks automatically on Smithers Cloud, see [Run CI on Smithers Cloud](/docs/guides/cloud-ci/).
+
 ## Before you start
 
 Commit your flow sources under `flows/` and configure their model seats. The runner needs Node.js 22.19.0 or later and the Smithers CLI. Store provider credentials in your CI system's secret store and expose only the variables the chosen seat needs.
@@ -5283,6 +5287,268 @@ Comment `@smthrs review` on an open pull request. The action posts the narrative
 
 - [Run flows in CI](/docs/guides/ci/): the Smithers CLI's own CI contract, with exit codes and secrets.
 - [Model seats](/docs/guides/model-seats/): what a `provider:model` seat string declares.
+
+---
+
+# Run CI on Smithers Cloud
+https://smithers.sh/docs/guides/cloud-ci/
+
+Smithers Cloud runs your checks when their declared triggers match a repository event. Define the checks and triggers in `PACKAGE.ts`, enable CI for the repository, and push. Cloud prepares the workspace, executes the target graph, and attaches the result to the tested revision.
+
+Repositories can live in Plue or connect from GitHub. GitHub repositories send events directly through the Smithers GitHub App; no GitHub Actions workflow is required.
+
+## Before you start
+
+You need a Smithers workspace with exported targets, a Smithers Cloud account, and permission to manage the repository's CI. To create a workspace, follow [Run a target and hit the cache](/docs/tutorials/first-target/).
+
+The default Cloud API is `https://api.jjhub.tech`, the same service used by the Smithers app. Your Cloud connection supplies the endpoint; `PACKAGE.ts` contains the work to run.
+
+## Choose what runs and when
+
+Create a suite for the checks and an automation that binds it to repository events. This example runs on pushes to `main` and on reviews targeting `main`:
+
+```ts title="PACKAGE.ts"
+import { Smithers as S } from "@smthrs/targets"
+import { Trigger as T } from "@smthrs/triggers"
+import { Package as src } from "./src/PACKAGE.js"
+
+const checks = S.Suite({
+  tests: [src.lint, src.typeCheck, src.test],
+})
+
+const ci = S.Automation({
+  on: [
+    T.push({ branches: ["main"] }),
+    T.review({ base: ["main"] }),
+  ],
+  run: checks,
+})
+
+export const Package = S.Package({
+  targets: { checks },
+  automations: { ci },
+})
+```
+
+The example assumes `src/PACKAGE.ts` exports `lint`, `typeCheck`, and `test`. Replace those entries with your checks and `main` with the branch or bookmark you use. Preserve existing entries when adding to `Package`.
+
+To reuse a suite such as `prePush`, set the automation's `run` to that target:
+
+```ts
+run: prePush,
+```
+
+The `on` entries are alternatives: either event starts the automation. `T.review` covers GitHub pull requests and Plue landing requests. Its `base` filter selects the destination branch or bookmark.
+
+Naming an automation `ci` does not add implicit triggers. To add a schedule or manual launch, see [Define triggers](/docs/guides/triggers/).
+
+Run the target locally before enabling Cloud CI:
+
+```bash
+pnpm exec smthrs target '//:checks'
+```
+
+If you use `prePush`, run `//:prePush` instead. Local target execution runs the checks without subscribing to events. Cloud uses the same target graph: dependencies determine execution order, and independent checks can run concurrently. Tools and package installation come from `.smithers/WORKSPACE.ts` and the repository's lockfiles.
+
+Commit the target declaration to the repository's default branch or bookmark and push it.
+
+## Enable CI for the repository
+
+In Smithers, ask to enable CI for your repository. For example:
+
+> Enable CI for artsy/force.
+
+If the repository is not connected, complete the connection first. For GitHub, install the Smithers GitHub App with access to that repository.
+
+Smithers shows the repository, the `//:ci` automation, and its declared triggers. Confirm the setup. Cloud registers the declarations from the default branch or bookmark and listens for matching events.
+
+The example starts runs for:
+
+- Pushes to `main`.
+- Reviews targeting `main` that are opened, reopened, updated with new code, or marked ready for review.
+
+Draft reviews are excluded by default. Editing a title or description does not start another run. Enabling CI registers the triggers; the next matching event starts the first run.
+
+## Read the result
+
+Open the run from the repository's CI result. In the Smithers app, the run appears in the conversation with its revision, target results, and logs.
+
+The **Smithers CI** result stays pending while work is queued or running. It passes when all checks pass or reuse valid cached results. A failed check makes CI fail; open that check's logs to diagnose it.
+
+To verify the integration, push a change that fails one of your checks. Confirm that Cloud reports a failure for that revision, then fix the check and confirm that the next run passes.
+
+Review runs test the source revision shown on the run. A matching push after merging or landing tests the resulting branch or bookmark revision. For details, see [Revisions and delivery](/docs/reference/triggers/#revisions-and-delivery).
+
+## Require CI before merging or landing
+
+For a Plue repository, make **Smithers CI** a required check on the destination bookmark. For a GitHub repository, add **Smithers CI** to the destination branch's required status checks and select the Smithers GitHub App as its source.
+
+A result from an older revision does not satisfy the requirement for a newer one. A missing `//:ci` automation, an empty suite, or a configuration error fails CI. Keep a review trigger that covers the destination branch when CI is required there.
+
+If you are replacing GitHub Actions, verify a passing and failing Cloud run before changing the requirement. Then remove the replaced workflows. If `S.Github.CiGen` generates those files, remove the corresponding entries from its `workflows` list as well.
+
+## Rerun or cancel work
+
+Open a run in Smithers to rerun or cancel it. You can also ask Smithers to perform either action for a named repository and run.
+
+A rerun creates a new attempt at the same revision and can reuse valid cached target results. To test new code, push the new revision.
+
+When a review receives another source revision, Cloud cancels its earlier unfinished CI run. Runs for separate reviews remain independent. Closing the app does not cancel Cloud execution.
+
+## Change the checks
+
+Edit the `checks` suite and push the change. Cloud loads the checks from the revision being tested, so adding a check requires no separate CI configuration change.
+
+To change when CI runs, edit `on` and commit the change to the default branch or bookmark. Cloud updates the registered triggers after validating that revision. A review cannot remove its own required check by changing the trigger declaration.
+
+Keep inputs and outputs declared on each target so cache decisions reflect the work. For more information, see [How target caching works](/docs/concepts/target-caching/).
+
+---
+
+# Define triggers
+https://smithers.sh/docs/guides/triggers/
+
+A trigger selects an event. An automation connects that event to an existing target or flow. Declare both in `PACKAGE.ts` to keep the work and its starting conditions under version control.
+
+You need a connected Cloud repository and an existing target or flow. [Run CI on Smithers Cloud](/docs/guides/cloud-ci/) covers repository setup. The default Cloud API is `https://api.jjhub.tech`.
+
+## Run a target when code changes
+
+Import the trigger constructors and bind them to a target. This example assumes the root package already declares `prePush`:
+
+```ts title="PACKAGE.ts"
+import { Smithers as S } from "@smthrs/targets"
+import { Trigger as T } from "@smthrs/triggers"
+
+const ci = S.Automation({
+  on: [
+    T.push({ branches: ["main"] }),
+    T.review({ base: ["main"] }),
+  ],
+  run: prePush,
+})
+
+export const Package = S.Package({
+  targets: { prePush },
+  automations: { ci },
+})
+```
+
+Preserve the existing `prePush` declaration and other package entries. `on` is a non-empty list of alternatives. If more than one entry matches the same event, Cloud starts one run and records every matching entry.
+
+`T.review` handles GitHub pull requests and Plue landing requests. Use `base` for the destination and `head` for the source. By default, it selects non-draft reviews when opened, reopened, updated with new code, or marked ready.
+
+Run `pnpm exec smthrs target '//:prePush'` to execute the same work locally. Importing a package or running its target locally does not register subscriptions.
+
+## Filter events
+
+Filter fields combine with AND. Values within a list combine with OR. This trigger matches a push to `main` or `release/**` that changes an included path:
+
+```ts
+T.push({
+  branches: ["main", "release/**"],
+  paths: {
+    include: ["src/**", "package.json"],
+    exclude: ["src/**/*.md"],
+  },
+})
+```
+
+Exclusions take precedence regardless of list order. Use path filters for optional automation; required CI usually benefits from running its graph and reusing cached results. A filtered event is not evidence that checks passed.
+
+For a condition that needs event data, add a synchronous `when` predicate. This example selects a review that receives the `run-ci` label:
+
+```ts
+const labeled = S.Automation({
+  on: [T.review({ actions: ["labeled"] })],
+  when: event => event.label === "run-ci",
+  run: prePush,
+})
+```
+
+The selected event determines the type of `event`. A push event has no `label`; a labeled review event does. Add `labeled` to `Package.automations` to register it.
+
+## Add a schedule
+
+Add a schedule to the automation's `on` list:
+
+```ts
+T.schedule({
+  cron: "0 9 * * 1-5",
+  timezone: "America/New_York",
+  ref: "main",
+})
+```
+
+This schedule becomes due at 9 AM on weekdays in New York. Omit `timezone` for UTC and `ref` for the default branch or bookmark. Cloud validates the expression and timezone when registering the declaration. Actual start time also depends on worker availability.
+
+## Accept typed manual input
+
+Use a flow's payload schema as the manual input schema. This example assumes `Deploy` is an existing flow whose payload contains `environment: "staging" | "production"` and `version: string`:
+
+```ts
+const deploy = S.Automation({
+  on: [T.manual({ input: Deploy.payloadSchema })],
+  run: Deploy,
+  input: event => event.input,
+})
+```
+
+Import `Deploy` from its module and add `deploy` to `Package.automations`. Keep the flow's existing action implementations and runtime configuration. The app derives its input form from the schema. App, agent, CLI, and API launches all validate the same input before creating work.
+
+The mapper receives the inferred payload type. Returning an unsupported environment or omitting the required version is a TypeScript error. External requests with those values fail schema validation.
+
+Use `T.manual()` for a launch with no input. A manual trigger permits fresh launches; rerunning a recorded attempt uses that attempt's original event and input.
+
+## Accept an external event
+
+Give an external event a name and schema:
+
+```ts
+import * as Schema from "effect/Schema"
+
+const deployRequested = T.event({
+  name: "deploy.requested",
+  input: Schema.Struct({
+    environment: Schema.Literals(["staging", "production"]),
+    version: Schema.String,
+  }),
+})
+
+const deploy = S.Automation({
+  on: [deployRequested],
+  run: Deploy,
+  input: event => event.input,
+})
+```
+
+This is an alternative to the manual-only `deploy` declaration. You can also put both selectors in one `on` list when they supply the same payload.
+
+Register the event's publisher on the Cloud connection. Cloud authenticates the publisher before validating its payload. For an HTTP webhook, the registered source verifies the signature over the original request bytes. A matching event name and valid JSON do not grant permission to start work.
+
+## Continue after another automation succeeds
+
+Reference the automation directly to retain its result type. This example assumes `build` runs a flow that returns `{ artifact: string }` and `Publish` accepts that artifact:
+
+```ts
+const publish = S.Automation({
+  on: [T.succeeded(build)],
+  when: event =>
+    event.cause.type === "push" && event.cause.branch === "main",
+  run: Publish,
+  input: event => ({ artifact: event.output.artifact }),
+})
+```
+
+The condition admits successful builds caused by pushes to `main`. `event.output` is inferred from the upstream flow's success schema. The continuation uses the upstream commit and retains its trust restrictions.
+
+Use dependencies inside a target graph or flow for steps of the same run. Use a completion trigger when you need a separate run with its own result.
+
+## Activate and inspect triggers
+
+Commit the package to the default branch or bookmark, then enable its automations in Smithers. Cloud shows the declarations and their starting conditions before activation. Later changes on that branch update the registered subscriptions; an invalid declaration reports an error and leaves the last valid registration active.
+
+Each run records the event, matching selectors, declaration revision, and execution revision. Inspect those values when a run starts unexpectedly or a filter excludes work. For matching rules and event fields, see the [Trigger reference](/docs/reference/triggers/).
 
 ---
 
@@ -41014,6 +41280,87 @@ Every command that touches durable state resolves the same project root, in this
 
 ---
 
+# Smithers Cloud CI
+https://smithers.sh/docs/reference/cloud-ci/
+
+Smithers Cloud CI runs an automation's work when its declared triggers match. Plue owns event delivery, run records, worker allocation, and result reporting. For setup instructions, see [Run CI on Smithers Cloud](/docs/guides/cloud-ci/). For selector types and matching, see the [Trigger reference](/docs/reference/triggers/).
+
+## Defaults
+
+Cloud CI uses these defaults:
+
+| Setting | Value |
+| --- | --- |
+| API origin | `https://api.jjhub.tech` |
+| CI automation selected during setup | `//:ci` |
+| Declaration | An `S.Automation` exported through `Package.automations`. |
+| Automatic events | Those declared in `on`; no events are added by the name `ci`. |
+| Workspace | `.smithers/WORKSPACE.ts` and committed dependency lockfiles. |
+| Check name for the configured CI automation | **Smithers CI** |
+| Execution | Isolated Linux workers on Smithers Cloud's Plue infrastructure. |
+| Target selection | The complete dependency graph of the referenced target, with normal cache reuse. |
+| Review concurrency | A newer source revision cancels earlier unfinished CI for that review. |
+
+The default service shares the Plue API and Microsandbox infrastructure used by the Smithers app. For a separately operated installation, configure its HTTPS API origin on the Cloud connection. The repository's declarations remain the same.
+
+## Repository activation
+
+Enabling CI authorizes the repository's automation and registers its triggers from the default branch or bookmark. Activation does not itself emit a repository event. The next matching event starts work; declare `T.manual()` if you also want fresh manual launches.
+
+The default setup selects the root `//:ci` automation. Its `run` points to the existing work. A target named `ci` without an automation does not acquire triggers. The target's own label remains available to local commands.
+
+The selected CI automation must resolve to executable work. Missing references, empty suites, unsupported worker requirements, and invalid declarations fail CI. An enabled requirement remains in effect if a revision deletes the automation or changes its triggers to exclude the review.
+
+Cloud uses trusted registered selectors for routing and loads the work from the event's execution revision. The run records both revisions. A review can change its checks, but it cannot rewrite its own routing policy or grant itself additional credentials. For exact revision rules, see [Revisions and delivery](/docs/reference/triggers/#revisions-and-delivery).
+
+## Execution and caching
+
+Cloud prepares the workspace in an isolated worker, resolves its declared tools, installs dependencies from the lockfiles, and evaluates the work inside that worker. Target dependencies determine execution order; independent checks can execute concurrently within worker capacity.
+
+Target attempts plan the complete selected graph. Cached results are reused only when their declared inputs, execution environment, and cache policy permit reuse. Trigger path filters decide whether to start work; they do not replace target dependency tracking.
+
+Repository credentials come from the Cloud connection and target or flow declarations. A missing required credential fails the affected work. Repository code does not receive the Cloud service's infrastructure credentials. Fork execution requires an explicitly authorized isolated policy; otherwise the event is refused and cannot satisfy required CI.
+
+Run results, logs, and declared outputs remain associated with the recorded revision. Closing a client does not stop a run. If a worker is lost and the work cannot be recovered, the attempt fails. A rerun can reuse valid completed cache entries. The service's deadline bounds queue time, execution, and approval waits; the run shows the applied deadline.
+
+## Results and required checks
+
+Cloud publishes **Smithers CI** on the tested commit. Plue shows the result on the repository and landing request. For a connected GitHub repository, the Smithers GitHub App publishes the check with a link to the Cloud run.
+
+The result has these meanings:
+
+| Result | Meaning |
+| --- | --- |
+| Pending | Work is queued, executing, or waiting for an authorized approval. |
+| Passed | Required work completed successfully, including any valid cached target results. |
+| Failed | Configuration, workspace preparation, a check, or unrecoverable execution failed. |
+| Cancelled | A user cancelled the attempt or a newer review revision superseded it. |
+| Timed out | The run exceeded its deadline. |
+
+Only a passed result satisfies a required check. Admission, missing work, and an empty suite do not count as success. For a review revision where Cloud CI requires this automation, a selector or predicate that excludes it produces a failure explaining the unmatched requirement. This avoids leaving an unexplained pending check or claiming that unexecuted checks passed.
+
+Results remain bound to their attempt and commit. A late result from an earlier revision cannot replace the current revision's result. When CI is required on a Plue bookmark, a newer explicit rerun keeps that revision's requirement pending until it finishes. For GitHub, the configured branch rules evaluate the App's checks. Cloud retains the recorded outcome if reporting fails and retries delivery.
+
+Review runs test the source commit. A destination-only update does not test a new merge result. Require a separate merge-result check if your repository's policy needs validation of the combined tree before landing.
+
+## Troubleshooting
+
+Common problems have these causes and next steps:
+
+| Problem | Check |
+| --- | --- |
+| No run appears | Confirm CI is enabled, the connection has repository access, and a registered selector matches the event. |
+| A trigger change has no effect | Confirm the change is on the default branch or bookmark and registration succeeded. |
+| The run cannot find its work | Check `Package.automations`, the `run` reference, and target or flow exports at the recorded commit. |
+| A required review is filtered | Inspect `base`, `head`, activity, path, and `when` filters in the registered declaration. |
+| Workspace preparation fails | Check declared tools, committed lockfiles, and dependency access in the logs. |
+| Local checks pass but Cloud checks fail | Compare the tested commit, declared inputs, Linux support, and credentials. |
+| A check stays pending | Inspect the run for a worker queue, approval wait, or reporting failure and its applied deadline. |
+
+For the guide's target example, reproduce the same revision locally with `pnpm exec smthrs target '//:checks'` and inspect the failed target's logs.
+
+---
+
 # smthrs approve
 https://smithers.sh/docs/reference/cli/approve/
 
@@ -43939,6 +44286,118 @@ usage errors and explicit confirmation refusals use 2; flows awaiting
 approval use 3. Inconclusive evaluations exit 5. Interruption
 and termination use 130 and 143. See [environment variables](/docs/reference/environment-variables/)
 for the control-plane configuration.
+
+---
+
+# Triggers
+https://smithers.sh/docs/reference/triggers/
+
+Import event constructors with `import { Trigger as T } from "@smthrs/triggers"`. Bind them to work with `S.Automation` from `@smthrs/targets`, then export the binding through `Package.automations`. For examples, see [Define triggers](/docs/guides/triggers/).
+
+## Automation
+
+An automation binds one or more event selectors to one existing target or flow. Its package export supplies its identity: a root `automations: { ci }` entry has the label `//:ci`. Target and automation labels must be distinct within a package.
+
+The constructor accepts these fields:
+
+| Field | Requirement | Type and behavior |
+| --- | --- | --- |
+| `on` | Required | Non-empty array of typed selectors. Any matching selector admits the event. |
+| `run` | Required | One target or flow reference. Use a suite to group targets. |
+| `when` | Optional | Synchronous predicate over the event union inferred from `on`. Runs after selector matching; `false` records a filtered decision. |
+| `input` | Required for a flow with required payload fields | Synchronous mapper from the inferred event to the flow's accepted payload. Targets have no payload mapper. A flow accepting an empty payload can omit it. |
+
+The `run` reference fixes the destination payload type. A mapper cannot widen that type by returning an incompatible value. A flow's schema also validates the mapped value before execution.
+
+`when` and `input` are pure functions: they use their arguments and immutable constants. Cloud evaluates them from the registered declaration revision in a bounded sandbox without network access or credentials. Work with side effects belongs in the target or flow. A thrown predicate or mapper fails evaluation; it does not mean the event failed to match.
+
+Importing a declaration starts no work. The Cloud connection supplies the API origin, defaulting to `https://api.jjhub.tech`. Activation, permissions, concurrency, and retries remain separate from event selection.
+
+## Constructors
+
+Each constructor returns a `Selector<Event>` carrying its event type. `T.EventOf<typeof selector>` extracts that type. Filter options accept a non-empty list or an include/exclude object as described under [Matching](#matching).
+
+| Constructor | Options | Event fields in addition to the common fields |
+| --- | --- | --- |
+| `T.push(options?)` | `branches?`, `paths?` | `type: "push"`, `branch`, `commit`, `before: string \| null`. |
+| `T.review(options?)` | `actions?`, `base?`, `head?`, `paths?`, `drafts?` | `type: "review"`, `action`, `review`; labeled events also have `label`. |
+| `T.tag(options?)` | `names?` | `type: "tag"`, `name`, `commit`. |
+| `T.schedule(options)` | Required `cron`; optional `timezone`, `ref`. | `type: "schedule"`, `scheduledAt`, `timezone`. |
+| `T.manual(options?)` | `input?`: runtime schema. | `type: "manual"`, decoded `input`. |
+| `T.event(options)` | Required literal `name` and runtime `input` schema. | `type: "event"`, literal `name`, decoded `input`. |
+| `T.succeeded(automation)` | A direct automation reference. | `type: "succeeded"`, `runId`, `commit`, original `cause`, typed `output`. |
+
+Common fields are `id`, `repository: { id, host }`, and `receivedAt`. `host` is `"plue"` or `"github"`. Timestamps are ISO 8601 strings. The host is the repository connection; it does not imply that an external publisher has repository credentials.
+
+### Repository events
+
+`push` selects updates to branches or Plue bookmarks, including creation. It excludes deletion and tag events. Omitted `branches` matches all branches or bookmarks. `tag` selects tag creation and resolves annotated tags to their commit.
+
+`review` normalizes GitHub pull requests and Plue landing requests. Its `review` object contains `number`, `base`, `head`, `headCommit`, `baseCommit`, and `draft`. The base and head names mean destination and source respectively.
+
+The accepted actions are `"opened"`, `"reopened"`, `"updated"`, `"ready"`, `"labeled"`, `"closed"`, and `"merged"`. The default selects the first four. `updated` means the source commit changed. A destination edit, label change, or other metadata edit is not an `updated` event. `closed` means closed without merging or landing; `merged` covers a completed merge or landing. `drafts` defaults to `false`; `true` includes drafts as well as ready reviews.
+
+Action selection narrows the event type. `actions: ["labeled"]` makes `event.label` available. With both labeled and updated actions, narrow by `event.action` before reading the label. Unsupported actions and filters are TypeScript errors. Cloud rejects a selector the connected host cannot supply rather than silently ignoring it.
+
+### Schedules
+
+`cron` uses five fields, with minute precision. `timezone` defaults to `"UTC"` and accepts an IANA timezone; `ref` defaults to the repository's default branch or bookmark. Registration validates syntax, timezone, and whether the calendar can satisfy the expression. Strings remain subject to runtime validation even when TypeScript accepts them.
+
+`scheduledAt` identifies the due occurrence. It is independent of dispatch and worker start time. A timezone's skipped local times produce no occurrence; repeated local times produce one occurrence at the earlier instant. Missed occurrences during downtime are recorded and skipped by default, with no automatic backlog replay.
+
+### Manual and external input
+
+Input schemas must support decoding and encoding without external services and must encode to JSON. Cloud decodes external data before exposing it as `event.input`. A schema's TypeScript type describes the decoded value; its encoded representation is used for transport and persistence. Cloud schema-encodes a mapper's result before persisting it, preserving values such as decoded dates.
+
+`T.manual()` accepts an empty input object. With a schema, its required fields and literal choices also define the app's input form. A fresh manual launch requires a manual selector; a rerun reuses an existing attempt's event and mapped input.
+
+`T.event` requires a schema and an authenticated publisher registration. Different literal names preserve their payload types in a mixed `on` list. A schema validates data; it does not authenticate the sender. Signature verification operates on the original HTTP request before JSON decoding.
+
+### Successful completion
+
+`succeeded` matches successful runs of the referenced automation and preserves its output type. Flow bindings expose the decoded success schema; target bindings expose a result containing `targets`, with each successful target's `label` and `status` (`"ran"` or `"hit"`). A failure does not fabricate a success output.
+
+`cause` is the upstream run's typed triggering event. Use it to restrict a continuation to an intended branch or event. Completion subscriptions preserve the upstream revision and trust classification; success does not grant additional credentials. Registration rejects cycles between automation completion subscriptions.
+
+## Matching
+
+Matching follows these rules:
+
+1. Entries in `on` combine with OR. One event matching multiple entries starts one run per automation.
+2. Distinct fields within one selector combine with AND.
+3. Values within a filter list combine with OR.
+4. An exclusion wins over every inclusion, regardless of order.
+5. After a selector matches, `when` must return `true` if present.
+
+For an include/exclude object, at least one non-empty list is required. An omitted `include` admits all values before exclusions. Empty lists and objects are rejected. Patterns match the whole branch, tag, or repository-relative path. `*` matches within one path segment; `**` can cross segments. Leading `!` patterns are rejected; use `exclude`.
+
+For paths, at least one changed path must remain after filtering. Changed paths include additions, edits, deletions, and both sides of renames. Pushes compare the recorded before and after commits; reviews compare the recorded head with its merge base against the recorded base. An unavailable or incomplete comparison admits work conservatively and records the fallback.
+
+A filtered decision is distinct from a passed run. If Cloud CI requires the automation for a review revision, a nonmatch fails that requirement with its reason. Prefer target cache reuse to path or arbitrary predicate filters on required checks.
+
+## Revisions and delivery
+
+Cloud registers subscriptions from the trusted default branch or bookmark after repository authorization. Updates replace the registered set atomically; invalid declarations preserve the previous valid set and report a validation error.
+
+Each accepted event records the subscription revision separately from the execution revision:
+
+| Trigger | Execution revision |
+| --- | --- |
+| Push | Event's after commit. |
+| Review | Recorded source commit. |
+| Tag | Commit resolved from the created tag. |
+| Schedule | Configured ref resolved when the occurrence is admitted. |
+| Manual | Authorized ref selected at launch, or the default branch or bookmark. |
+| External event | Default branch or bookmark resolved at admission. Payload fields cannot silently select another checkout. |
+| Successful completion | Upstream run's execution commit. |
+
+Cloud pins that commit before queuing work. A moved branch cannot substitute a different checkout. Target or flow code comes from the execution revision; routing and payload-mapping functions come from the recorded subscription revision. Cloud validates the resolved destination's schema again before launching it.
+
+Event delivery can repeat. Cloud deduplicates using repository, source event identity, and automation identity; a schedule uses its registered identity and scheduled instant. Redelivery returns the first recorded receipt, including its subscription revision. A changed subscription does not turn an old delivery into new work.
+
+Separate events at the same commit can start separate runs. An explicit rerun creates a distinct attempt and retains the original event, revisions, and input. Idempotent admission does not guarantee that a target's external side effects execute only once.
+
+The existing [durable scheduler and channel reference](/docs/reference/api/triggers/) covers host services for persistence, occurrence claims, and authenticated delivery.
 
 ---
 

@@ -1,0 +1,112 @@
+---
+title: "Triggers"
+description: "Typed event selectors, automation bindings, matching rules, schemas, and revision behavior."
+editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/reference/triggers.mdx"
+---
+
+Import event constructors with `import { Trigger as T } from "@smthrs/triggers"`. Bind them to work with `S.Automation` from `@smthrs/targets`, then export the binding through `Package.automations`. For examples, see [Define triggers](/docs/guides/triggers/).
+
+## Automation
+
+An automation binds one or more event selectors to one existing target or flow. Its package export supplies its identity: a root `automations: { ci }` entry has the label `//:ci`. Target and automation labels must be distinct within a package.
+
+The constructor accepts these fields:
+
+| Field | Requirement | Type and behavior |
+| --- | --- | --- |
+| `on` | Required | Non-empty array of typed selectors. Any matching selector admits the event. |
+| `run` | Required | One target or flow reference. Use a suite to group targets. |
+| `when` | Optional | Synchronous predicate over the event union inferred from `on`. Runs after selector matching; `false` records a filtered decision. |
+| `input` | Required for a flow with required payload fields | Synchronous mapper from the inferred event to the flow's accepted payload. Targets have no payload mapper. A flow accepting an empty payload can omit it. |
+
+The `run` reference fixes the destination payload type. A mapper cannot widen that type by returning an incompatible value. A flow's schema also validates the mapped value before execution.
+
+`when` and `input` are pure functions: they use their arguments and immutable constants. Cloud evaluates them from the registered declaration revision in a bounded sandbox without network access or credentials. Work with side effects belongs in the target or flow. A thrown predicate or mapper fails evaluation; it does not mean the event failed to match.
+
+Importing a declaration starts no work. The Cloud connection supplies the API origin, defaulting to `https://api.jjhub.tech`. Activation, permissions, concurrency, and retries remain separate from event selection.
+
+## Constructors
+
+Each constructor returns a `Selector<Event>` carrying its event type. `T.EventOf<typeof selector>` extracts that type. Filter options accept a non-empty list or an include/exclude object as described under [Matching](#matching).
+
+| Constructor | Options | Event fields in addition to the common fields |
+| --- | --- | --- |
+| `T.push(options?)` | `branches?`, `paths?` | `type: "push"`, `branch`, `commit`, `before: string \| null`. |
+| `T.review(options?)` | `actions?`, `base?`, `head?`, `paths?`, `drafts?` | `type: "review"`, `action`, `review`; labeled events also have `label`. |
+| `T.tag(options?)` | `names?` | `type: "tag"`, `name`, `commit`. |
+| `T.schedule(options)` | Required `cron`; optional `timezone`, `ref`. | `type: "schedule"`, `scheduledAt`, `timezone`. |
+| `T.manual(options?)` | `input?`: runtime schema. | `type: "manual"`, decoded `input`. |
+| `T.event(options)` | Required literal `name` and runtime `input` schema. | `type: "event"`, literal `name`, decoded `input`. |
+| `T.succeeded(automation)` | A direct automation reference. | `type: "succeeded"`, `runId`, `commit`, original `cause`, typed `output`. |
+
+Common fields are `id`, `repository: { id, host }`, and `receivedAt`. `host` is `"plue"` or `"github"`. Timestamps are ISO 8601 strings. The host is the repository connection; it does not imply that an external publisher has repository credentials.
+
+### Repository events
+
+`push` selects updates to branches or Plue bookmarks, including creation. It excludes deletion and tag events. Omitted `branches` matches all branches or bookmarks. `tag` selects tag creation and resolves annotated tags to their commit.
+
+`review` normalizes GitHub pull requests and Plue landing requests. Its `review` object contains `number`, `base`, `head`, `headCommit`, `baseCommit`, and `draft`. The base and head names mean destination and source respectively.
+
+The accepted actions are `"opened"`, `"reopened"`, `"updated"`, `"ready"`, `"labeled"`, `"closed"`, and `"merged"`. The default selects the first four. `updated` means the source commit changed. A destination edit, label change, or other metadata edit is not an `updated` event. `closed` means closed without merging or landing; `merged` covers a completed merge or landing. `drafts` defaults to `false`; `true` includes drafts as well as ready reviews.
+
+Action selection narrows the event type. `actions: ["labeled"]` makes `event.label` available. With both labeled and updated actions, narrow by `event.action` before reading the label. Unsupported actions and filters are TypeScript errors. Cloud rejects a selector the connected host cannot supply rather than silently ignoring it.
+
+### Schedules
+
+`cron` uses five fields, with minute precision. `timezone` defaults to `"UTC"` and accepts an IANA timezone; `ref` defaults to the repository's default branch or bookmark. Registration validates syntax, timezone, and whether the calendar can satisfy the expression. Strings remain subject to runtime validation even when TypeScript accepts them.
+
+`scheduledAt` identifies the due occurrence. It is independent of dispatch and worker start time. A timezone's skipped local times produce no occurrence; repeated local times produce one occurrence at the earlier instant. Missed occurrences during downtime are recorded and skipped by default, with no automatic backlog replay.
+
+### Manual and external input
+
+Input schemas must support decoding and encoding without external services and must encode to JSON. Cloud decodes external data before exposing it as `event.input`. A schema's TypeScript type describes the decoded value; its encoded representation is used for transport and persistence. Cloud schema-encodes a mapper's result before persisting it, preserving values such as decoded dates.
+
+`T.manual()` accepts an empty input object. With a schema, its required fields and literal choices also define the app's input form. A fresh manual launch requires a manual selector; a rerun reuses an existing attempt's event and mapped input.
+
+`T.event` requires a schema and an authenticated publisher registration. Different literal names preserve their payload types in a mixed `on` list. A schema validates data; it does not authenticate the sender. Signature verification operates on the original HTTP request before JSON decoding.
+
+### Successful completion
+
+`succeeded` matches successful runs of the referenced automation and preserves its output type. Flow bindings expose the decoded success schema; target bindings expose a result containing `targets`, with each successful target's `label` and `status` (`"ran"` or `"hit"`). A failure does not fabricate a success output.
+
+`cause` is the upstream run's typed triggering event. Use it to restrict a continuation to an intended branch or event. Completion subscriptions preserve the upstream revision and trust classification; success does not grant additional credentials. Registration rejects cycles between automation completion subscriptions.
+
+## Matching
+
+Matching follows these rules:
+
+1. Entries in `on` combine with OR. One event matching multiple entries starts one run per automation.
+2. Distinct fields within one selector combine with AND.
+3. Values within a filter list combine with OR.
+4. An exclusion wins over every inclusion, regardless of order.
+5. After a selector matches, `when` must return `true` if present.
+
+For an include/exclude object, at least one non-empty list is required. An omitted `include` admits all values before exclusions. Empty lists and objects are rejected. Patterns match the whole branch, tag, or repository-relative path. `*` matches within one path segment; `**` can cross segments. Leading `!` patterns are rejected; use `exclude`.
+
+For paths, at least one changed path must remain after filtering. Changed paths include additions, edits, deletions, and both sides of renames. Pushes compare the recorded before and after commits; reviews compare the recorded head with its merge base against the recorded base. An unavailable or incomplete comparison admits work conservatively and records the fallback.
+
+A filtered decision is distinct from a passed run. If Cloud CI requires the automation for a review revision, a nonmatch fails that requirement with its reason. Prefer target cache reuse to path or arbitrary predicate filters on required checks.
+
+## Revisions and delivery
+
+Cloud registers subscriptions from the trusted default branch or bookmark after repository authorization. Updates replace the registered set atomically; invalid declarations preserve the previous valid set and report a validation error.
+
+Each accepted event records the subscription revision separately from the execution revision:
+
+| Trigger | Execution revision |
+| --- | --- |
+| Push | Event's after commit. |
+| Review | Recorded source commit. |
+| Tag | Commit resolved from the created tag. |
+| Schedule | Configured ref resolved when the occurrence is admitted. |
+| Manual | Authorized ref selected at launch, or the default branch or bookmark. |
+| External event | Default branch or bookmark resolved at admission. Payload fields cannot silently select another checkout. |
+| Successful completion | Upstream run's execution commit. |
+
+Cloud pins that commit before queuing work. A moved branch cannot substitute a different checkout. Target or flow code comes from the execution revision; routing and payload-mapping functions come from the recorded subscription revision. Cloud validates the resolved destination's schema again before launching it.
+
+Event delivery can repeat. Cloud deduplicates using repository, source event identity, and automation identity; a schedule uses its registered identity and scheduled instant. Redelivery returns the first recorded receipt, including its subscription revision. A changed subscription does not turn an old delivery into new work.
+
+Separate events at the same commit can start separate runs. An explicit rerun creates a distinct attempt and retains the original event, revisions, and input. Idempotent admission does not guarantee that a target's external side effects execute only once.
+
+The existing [durable scheduler and channel reference](/docs/reference/api/triggers/) covers host services for persistence, occurrence claims, and authenticated delivery.

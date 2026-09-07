@@ -1,0 +1,149 @@
+---
+title: "Define triggers"
+description: "Start existing targets and flows from repository events, schedules, manual input, and typed external events."
+editUrl: "https://github.com/smithersai/smithers/edit/main/apps/site/src/content/docs/docs/guides/triggers.mdx"
+sidebar:
+  order: 26
+---
+
+A trigger selects an event. An automation connects that event to an existing target or flow. Declare both in `PACKAGE.ts` to keep the work and its starting conditions under version control.
+
+You need a connected Cloud repository and an existing target or flow. [Run CI on Smithers Cloud](/docs/guides/cloud-ci/) covers repository setup. The default Cloud API is `https://api.jjhub.tech`.
+
+## Run a target when code changes
+
+Import the trigger constructors and bind them to a target. This example assumes the root package already declares `prePush`:
+
+```ts title="PACKAGE.ts"
+import { Smithers as S } from "@smthrs/targets"
+import { Trigger as T } from "@smthrs/triggers"
+
+const ci = S.Automation({
+  on: [
+    T.push({ branches: ["main"] }),
+    T.review({ base: ["main"] }),
+  ],
+  run: prePush,
+})
+
+export const Package = S.Package({
+  targets: { prePush },
+  automations: { ci },
+})
+```
+
+Preserve the existing `prePush` declaration and other package entries. `on` is a non-empty list of alternatives. If more than one entry matches the same event, Cloud starts one run and records every matching entry.
+
+`T.review` handles GitHub pull requests and Plue landing requests. Use `base` for the destination and `head` for the source. By default, it selects non-draft reviews when opened, reopened, updated with new code, or marked ready.
+
+Run `pnpm exec smthrs target '//:prePush'` to execute the same work locally. Importing a package or running its target locally does not register subscriptions.
+
+## Filter events
+
+Filter fields combine with AND. Values within a list combine with OR. This trigger matches a push to `main` or `release/**` that changes an included path:
+
+```ts
+T.push({
+  branches: ["main", "release/**"],
+  paths: {
+    include: ["src/**", "package.json"],
+    exclude: ["src/**/*.md"],
+  },
+})
+```
+
+Exclusions take precedence regardless of list order. Use path filters for optional automation; required CI usually benefits from running its graph and reusing cached results. A filtered event is not evidence that checks passed.
+
+For a condition that needs event data, add a synchronous `when` predicate. This example selects a review that receives the `run-ci` label:
+
+```ts
+const labeled = S.Automation({
+  on: [T.review({ actions: ["labeled"] })],
+  when: event => event.label === "run-ci",
+  run: prePush,
+})
+```
+
+The selected event determines the type of `event`. A push event has no `label`; a labeled review event does. Add `labeled` to `Package.automations` to register it.
+
+## Add a schedule
+
+Add a schedule to the automation's `on` list:
+
+```ts
+T.schedule({
+  cron: "0 9 * * 1-5",
+  timezone: "America/New_York",
+  ref: "main",
+})
+```
+
+This schedule becomes due at 9 AM on weekdays in New York. Omit `timezone` for UTC and `ref` for the default branch or bookmark. Cloud validates the expression and timezone when registering the declaration. Actual start time also depends on worker availability.
+
+## Accept typed manual input
+
+Use a flow's payload schema as the manual input schema. This example assumes `Deploy` is an existing flow whose payload contains `environment: "staging" | "production"` and `version: string`:
+
+```ts
+const deploy = S.Automation({
+  on: [T.manual({ input: Deploy.payloadSchema })],
+  run: Deploy,
+  input: event => event.input,
+})
+```
+
+Import `Deploy` from its module and add `deploy` to `Package.automations`. Keep the flow's existing action implementations and runtime configuration. The app derives its input form from the schema. App, agent, CLI, and API launches all validate the same input before creating work.
+
+The mapper receives the inferred payload type. Returning an unsupported environment or omitting the required version is a TypeScript error. External requests with those values fail schema validation.
+
+Use `T.manual()` for a launch with no input. A manual trigger permits fresh launches; rerunning a recorded attempt uses that attempt's original event and input.
+
+## Accept an external event
+
+Give an external event a name and schema:
+
+```ts
+import * as Schema from "effect/Schema"
+
+const deployRequested = T.event({
+  name: "deploy.requested",
+  input: Schema.Struct({
+    environment: Schema.Literals(["staging", "production"]),
+    version: Schema.String,
+  }),
+})
+
+const deploy = S.Automation({
+  on: [deployRequested],
+  run: Deploy,
+  input: event => event.input,
+})
+```
+
+This is an alternative to the manual-only `deploy` declaration. You can also put both selectors in one `on` list when they supply the same payload.
+
+Register the event's publisher on the Cloud connection. Cloud authenticates the publisher before validating its payload. For an HTTP webhook, the registered source verifies the signature over the original request bytes. A matching event name and valid JSON do not grant permission to start work.
+
+## Continue after another automation succeeds
+
+Reference the automation directly to retain its result type. This example assumes `build` runs a flow that returns `{ artifact: string }` and `Publish` accepts that artifact:
+
+```ts
+const publish = S.Automation({
+  on: [T.succeeded(build)],
+  when: event =>
+    event.cause.type === "push" && event.cause.branch === "main",
+  run: Publish,
+  input: event => ({ artifact: event.output.artifact }),
+})
+```
+
+The condition admits successful builds caused by pushes to `main`. `event.output` is inferred from the upstream flow's success schema. The continuation uses the upstream commit and retains its trust restrictions.
+
+Use dependencies inside a target graph or flow for steps of the same run. Use a completion trigger when you need a separate run with its own result.
+
+## Activate and inspect triggers
+
+Commit the package to the default branch or bookmark, then enable its automations in Smithers. Cloud shows the declarations and their starting conditions before activation. Later changes on that branch update the registered subscriptions; an invalid declaration reports an error and leaves the last valid registration active.
+
+Each run records the event, matching selectors, declaration revision, and execution revision. Inspect those values when a run starts unexpectedly or a filter excludes work. For matching rules and event fields, see the [Trigger reference](/docs/reference/triggers/).

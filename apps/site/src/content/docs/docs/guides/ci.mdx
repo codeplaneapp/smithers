@@ -9,6 +9,8 @@ Run a flow from CI with `smthrs flow start`. A local attached invocation stays w
 
 This guide covers durable flows. `smthrs ci <pattern>` runs build, test, lint, and docs targets from `PACKAGE.ts`; it does not launch every flow in the repository.
 
+To run repository checks automatically on Smithers Cloud, see [Run CI on Smithers Cloud](/docs/guides/cloud-ci/).
+
 ## Before you start
 
 Commit your flow sources under `flows/` and configure their model seats. The runner needs Node.js 22.19.0 or later and the Smithers CLI. Store provider credentials in your CI system's secret store and expose only the variables the chosen seat needs.

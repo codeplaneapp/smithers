@@ -80,6 +80,8 @@ export default defineConfig({
             { slug: "docs/reference/errors" },
             { slug: "docs/reference/mcp-tools" },
             { slug: "docs/reference/http-api" },
+            { slug: "docs/reference/cloud-ci" },
+            { slug: "docs/reference/triggers" },
             { label: "Packages", items: [{ autogenerate: { directory: "docs/reference/api" } }], collapsed: true },
             { label: "Build rules", items: [{ autogenerate: { directory: "docs/reference/targets" } }], collapsed: true },
             { slug: "docs/reference/glossary" },
