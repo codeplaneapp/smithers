@@ -1,7 +1,7 @@
 import { fileArgs } from "../flows/FileArgs"
 import { FileTree } from "@smthrs/ui"
 import { useLiveQuery } from "@tanstack/react-db"
-import { ChevronRight, Download, FolderGit2, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, X } from "lucide-react"
+import { ChevronRight, Download, FolderGit2, KeyRound, Moon, Pencil, Plus, RotateCcw, Sun, Timer, X } from "lucide-react"
 import { roleMenuEntries } from "../AgentRoleMenu"
 import { useController } from "../ControllerContext"
 import { DEFAULT_WORKSPACE_NAME, MAIN_TAB_ID, parseRepoSelection } from "../state/AppState"
@@ -96,6 +96,8 @@ export function ChromeBar() {
   const canDownload = controller.commands.find("app.download") !== undefined && controller.downloadUrl !== null
   // The Secrets door: the same registry entry the /secrets.list slash runs, so it renders only where the flow registers (the cloud host).
   const canSecrets = controller.commands.find("secrets.list") !== undefined
+  // The Dispatcher door: the registry entry the /triggers.list slash runs; the Flows pane keeps its own door to the same flow.
+  const canDispatcher = controller.commands.find("triggers.list") !== undefined
   const canOpenRepo = controller.commands.find("repo.open") !== undefined
   const canSelectRepo = controller.commands.find("repo.select") !== undefined
   const canTree = controller.commands.find("repo.tree") !== undefined
@@ -716,6 +718,21 @@ export function ChromeBar() {
             >
               <KeyRound size={14} aria-hidden="true" />
               Secrets
+            </button>
+          ) :
+          null}
+        {/* The button door of triggers.list: the dispatcher card in the chat; signed out, the run path defers it behind sign-in. */}
+        {canDispatcher ?
+          (
+            <button
+              type="button"
+              className="chrome-action chrome-action-dispatcher"
+              data-flow="triggers.list"
+              data-testid="chrome-dispatcher"
+              onClick={() => controller.runCommand("triggers.list")}
+            >
+              <Timer size={14} aria-hidden="true" />
+              Dispatcher
             </button>
           ) :
           null}

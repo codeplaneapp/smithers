@@ -11,9 +11,9 @@ import type { FlowEntry, Namespace } from "../registry"
 import type { CommandActions } from "./Declare"
 
 /** The `workspace` namespace row: the slash tree lists it in registry.ts NAMESPACES order. */
-export const namespace: Namespace = { id: "workspace", label: "Computers", summary: "Cloud computers: open, stream, snapshot, and inspect (ADR 0002)" }
+export const namespace: Namespace = { id: "workspace", label: "Boxes", summary: "Open and drive the box for a branch: stream, snapshot, and inspect it (ADR 0002)" }
 
-/** The `workspace.*` flows: cloud computers. */
+/** The `workspace.*` flows: the boxes (the design session says box, never computer). */
 export const workspaceFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => [
   /*
    * Lane citc (ADR 0002): the persistent cloud computers. `workspace.open`

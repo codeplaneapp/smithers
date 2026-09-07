@@ -1029,3 +1029,96 @@ describe("the chrome-actions footer's Secrets button", () => {
     expect(host.querySelector('[data-flow="secrets.list"]')).toBeNull()
   })
 })
+
+/*
+ * The Dispatcher button (design session 2026-09-07: the chrome is Wiki,
+ * Dispatcher, Flows, Secrets, History, Account). It is the button door of
+ * triggers.list, in the chrome that belongs to no session, beside Secrets.
+ * It renders exactly where the registry holds triggers.list (the cloud host)
+ * and its click runs the same registry entry the /triggers.list slash and the
+ * Flows pane's Triggers button run, so the dispatcher card appears in the
+ * chat with the repository's real rows and never an invented one.
+ */
+describe("the chrome-actions footer's Dispatcher button", () => {
+  const dispatcherHarness = async (): Promise<{ store: AppStore; controller: AppControllerType; listed: () => number }> => {
+    let listed = 0
+    const { store, controller } = await cloudHarness({
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const parsed = new URL(url, "https://app.test")
+        if (parsed.pathname === "/api/workflow/triggers" && parsed.searchParams.get("repo") === "will/flows") {
+          listed += 1
+          return new Response(
+            JSON.stringify({
+              status: "ok",
+              repo: "will/flows",
+              triggers: [{ id: "nightly", flowId: "review", cron: "0 9 * * 1-5", timezone: "Europe/London", enabled: true }],
+              webhooks: [{ name: "github", flowId: "implement" }]
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        }
+        return new Response(JSON.stringify({ status: "error" }), { status: 404, headers: { "content-type": "application/json" } })
+      }
+    })
+    return { store, controller, listed: () => listed }
+  }
+
+  test("host cloud renders it beside Secrets bound to triggers.list, and a signed-in click surfaces the dispatcher card", async () => {
+    const { store, controller, listed } = await dispatcherHarness()
+    await persisted(store, {
+      type: "identity.session.loaded",
+      actor: "system",
+      state: "signed-in",
+      login: "will",
+      allowlisted: true,
+      admin: false,
+      scopesPlain: null
+    })
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: null }]
+    })
+    const { host, act } = mount(controller)
+    const button = host.querySelector<HTMLButtonElement>("[data-testid=chrome-dispatcher]")
+    expect(button).not.toBeNull()
+    expect(button?.dataset.flow).toBe("triggers.list")
+    expect(button?.textContent).toBe("Dispatcher")
+    expect(button?.querySelector("svg")).not.toBeNull()
+    expect(button?.closest("[data-testid=chrome-actions]")).not.toBeNull()
+    // Right after Secrets and above the theme corner, like the other footer doors.
+    const order = [...host.querySelectorAll<HTMLElement>("[data-testid=chrome-actions] [data-flow]")].map((el) => el.dataset.flow)
+    expect(order.indexOf("triggers.list")).toBe(order.indexOf("secrets.list") + 1)
+    expect(order.indexOf("triggers.list")).toBeLessThan(order.indexOf("appearance.dark-mode"))
+    // The slash door offers the same registry entry the button is bound to.
+    const slashNames = controller.slashTree("triggers.list").flatMap((row) => (row.kind === "flow" ? [row.flow.name] : []))
+    expect(slashNames).toContain("triggers.list")
+
+    await act(() => button?.click())
+    await act(() => {})
+    expect(listed()).toBe(1)
+    const list = host.querySelector<HTMLElement>("[data-testid=trigger-list]")
+    expect(list).not.toBeNull()
+    const row = list?.querySelector("[data-trigger=nightly]")
+    expect(row?.textContent).toContain("runs review")
+    expect(row?.querySelector("[data-testid=trigger-state-nightly]")?.textContent).toBe("enabled · never fired")
+    expect(list?.querySelector("[data-webhook=github]")?.textContent).toContain("runs implement")
+
+    // The slash door runs the identical flow: the same card is re-surfaced, never a second one.
+    await act(() => {
+      expect(controller.runCommand("triggers.list")).toBe(true)
+    })
+    await act(() => {})
+    expect(listed()).toBe(2)
+    expect(host.querySelectorAll("[data-testid=trigger-list]")).toHaveLength(1)
+  })
+
+  test("host local renders no Dispatcher button: triggers.list is not registered there", async () => {
+    const { controller } = await localHarness()
+    expect(controller.commands.find("triggers.list")).toBeUndefined()
+    const { host } = mount(controller)
+    expect(host.querySelector("[data-testid=chrome-dispatcher]")).toBeNull()
+    expect(host.querySelector('[data-flow="triggers.list"]')).toBeNull()
+  })
+})

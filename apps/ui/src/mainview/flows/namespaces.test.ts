@@ -43,6 +43,13 @@ describe("registry data tables read the namespace modules", () => {
     expect(new Set(NAMESPACES.map((row) => row.id)).size).toBe(NAMESPACES.length)
   })
 
+  test("the workspace namespace is labeled Boxes: the product says box, never computer (design session 2026-09-07)", () => {
+    const row = NAMESPACES.find((candidate) => candidate.id === "workspace")
+    expect(row?.label).toBe("Boxes")
+    expect(row?.summary).toContain("box")
+    expect(row?.summary.toLowerCase()).not.toContain("computer")
+  })
+
   test("every requirement row comes from a module whose flow fulfills it", async () => {
     const found = await modules()
     const exported = [...found].flatMap(([id, module]) => (module.requirements ?? []).map((row) => ({ id, row })))
