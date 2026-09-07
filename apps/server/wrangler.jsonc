@@ -7,15 +7,18 @@
 	// the POC worker `smithers-ui-canary` (rollback: redeploy that worker from a
 	// `smithersai/ui` checkout — `bun x wrangler deploy` — and the domain
 	// re-attaches; its last POC version was bd819f28-8c25-4443-b3b2-13d1e18cd09d).
-	// The app under the apex (wave "smithers.sh is the product"): smithers.sh
-	// itself is the marketing site, a separate assets-only Worker, so this Worker
-	// claims only the three prefixes it owns there. Rollback: delete the three
-	// zone routes; the canary custom domain is untouched either way.
+	// The app under the apex (wave "smithers.sh is the product"): this Worker
+	// serves the whole smithers.sh Astro build (landing, docs, the prerendered
+	// app page, /_astro chunks), so one zone route claims every apex path. A
+	// zone route wins over a custom domain on the same hostname, so the old
+	// assets-only Worker smithers-site-v1 keeps the apex custom domain as the
+	// fallback until it is retired (DEPLOY.md "Cutover log"). Splitting the apex
+	// by prefix served page HTML from one build and its /_astro chunks from the
+	// other (404). Rollback: restore the three narrow routes (smithers.sh/smithersai/*,
+	// /api/*, /assets/*) and deploy; the canary custom domain is untouched either way.
 	"routes": [
 		{ "pattern": "canary.smithers.sh", "custom_domain": true },
-		{ "pattern": "smithers.sh/smithersai/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" },
-		{ "pattern": "smithers.sh/api/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" },
-		{ "pattern": "smithers.sh/assets/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" }
+		{ "pattern": "smithers.sh/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" }
 	],
 	// The assets are the smithers.sh Astro build in the sibling `apps/site`
 	// package: the landing page, the docs, and the product app prerendered at

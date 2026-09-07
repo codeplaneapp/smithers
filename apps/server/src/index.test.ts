@@ -138,7 +138,7 @@ describe("routed repository pages", () => {
     expect(apex.headers.get("X-Robots-Tag")).toBeNull()
   })
 
-  test("wrangler runs the Worker first for every routed owner and the frame prefix, and routes the apex prefixes beside the canary", async () => {
+  test("wrangler runs the Worker first for every routed owner and the frame prefix, and routes the whole apex beside the canary", async () => {
     // Without the run_worker_first entries the assets layer answers /smithersai/*
     // and /w/* before this Worker sees them, and the handlers above are dead on
     // Cloudflare.
@@ -149,14 +149,13 @@ describe("routed repository pages", () => {
     }
     expect(config.assets.run_worker_first).toContain("/smithersai/*")
     expect(config.assets.run_worker_first).toContain("/w/*")
-    expect(config.routes.map((route) => route.pattern)).toEqual([
-      "canary.smithers.sh",
-      "smithers.sh/smithersai/*",
-      "smithers.sh/api/*",
-      "smithers.sh/assets/*"
+    // One apex route: the page HTML and its /_astro chunks come from the same
+    // build. Splitting the apex by prefix once served the chunks from the old
+    // assets-only Worker (404), see DEPLOY.md "Cutover log".
+    expect(config.routes).toEqual([
+      { pattern: "canary.smithers.sh", custom_domain: true },
+      { pattern: "smithers.sh/*", zone_id: "8ebd98d2f0dc7d8db2e61f31ebc19c14" }
     ])
-    expect(config.routes[0]).toEqual({ pattern: "canary.smithers.sh", custom_domain: true })
-    for (const route of config.routes.slice(1)) expect(route.zone_id).toBe("8ebd98d2f0dc7d8db2e61f31ebc19c14")
   })
 })
 

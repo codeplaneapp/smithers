@@ -23,6 +23,10 @@ describe("the Worker identity stays frozen", () => {
     expect(config.routes[0]).toEqual({ pattern: "canary.smithers.sh", custom_domain: true })
   })
 
+  test("one zone route claims every apex path, so the app page and its /_astro chunks come from one build", () => {
+    expect(config.routes.slice(1)).toEqual([{ pattern: "smithers.sh/*", zone_id: "8ebd98d2f0dc7d8db2e61f31ebc19c14" }])
+  })
+
   test("the five Durable Object bindings and their classes", () => {
     expect(config.durable_objects.bindings).toEqual([
       { name: "TURN_CANCELS", class_name: "TurnCancelRegistry" },

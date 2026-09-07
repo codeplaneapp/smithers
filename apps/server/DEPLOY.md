@@ -24,17 +24,18 @@ If the identity or domain genuinely needs to change, that is a separate,
 deliberate decision — not a side effect of a deploy.
 
 One such deliberate change is on record. The product for a repository lives at
-`https://smithers.sh/<owner>/<name>`, and `smithers.sh` itself is the marketing
-site, a separate assets-only Worker (`apps/site`), so `routes` also carries
-three zone routes beside the canary custom domain: `smithers.sh/smithersai/*`,
-`smithers.sh/api/*`, and `smithers.sh/assets/*` (zone
-`8ebd98d2f0dc7d8db2e61f31ebc19c14`). `run_worker_first` lists `/smithersai/*`
-so the Worker, not the assets layer's SPA fallback, answers a repository path:
-a catalog repository serves the SPA document and any other path under that
-owner redirects to `https://smithers.sh/`. The Worker name and the canary
-domain are unchanged, so Durable Object state is unaffected. Rollback is to
-delete the three zone routes and deploy; `canary.smithers.sh` keeps serving
-throughout.
+`https://smithers.sh/<owner>/<name>`, so `routes` also carries a zone route
+beside the canary custom domain. It began as three narrow routes
+(`smithers.sh/smithersai/*`, `smithers.sh/api/*`, `smithers.sh/assets/*`, zone
+`8ebd98d2f0dc7d8db2e61f31ebc19c14`) while `smithers.sh` itself was a separate
+assets-only Worker; since this Worker serves the whole site build, one route,
+`smithers.sh/*`, claims every apex path (see the cutover log below).
+`run_worker_first` lists `/smithersai/*` so the Worker, not the assets layer,
+answers a repository path: a catalog repository serves the app document and
+any other path under that owner redirects to `https://smithers.sh/`. The
+Worker name and the canary domain are unchanged, so Durable Object state is
+unaffected. Rollback is to delete the zone route and deploy;
+`canary.smithers.sh` keeps serving throughout.
 
 The second deliberate change is the assets directory. `assets.directory` is
 `../site/dist`, the smithers.sh Astro build, instead of `../ui/dist`, the
@@ -53,6 +54,28 @@ build:web`) and deploy, or roll the Worker back to the prior version id from
 the last receipt (`bun x wrangler rollback <version-id>`, see "Rollback"
 below); the assets travel with the version, so the rollback restores the
 previous build without a rebuild.
+
+### Cutover log
+
+Every deliberate change to the frozen identity, newest last, with its
+rollback. `src/workerIdentity.test.ts` and `src/index.test.ts` pin the current
+state, so a new entry here lands in the same commit as the test change.
+
+- Three apex zone routes (`smithers.sh/smithersai/*`, `/api/*`, `/assets/*`)
+  added beside the canary custom domain so the product lives at
+  `smithers.sh/<owner>/<name>`; rollback = delete the routes and deploy.
+- Assets directory moved from `../ui/dist` (SPA) to `../site/dist` (the
+  smithers.sh Astro build, `404-page`); rollback = restore both fields, build
+  `apps/ui`, deploy, or `wrangler rollback` to the prior version id.
+- Apex route `smithers.sh/*` added on 2026-09-07 so one Worker serves every
+  apex path. The three narrow routes left every other apex path, `/_astro/*`
+  included, to the old assets-only Worker `smithers-site-v1` through its
+  custom domain, so the app page HTML came from the new build and its
+  `/_astro` chunks from the old one (404). A zone route takes precedence over
+  a custom domain on the same hostname (the live `/api/*` route proved it).
+  Rollback = restore the three narrow routes and deploy (seconds).
+  `smithers-site-v1` still holds the apex custom domain as the fallback until
+  it is retired.
 
 ## Scripted deploy (this repo's one repeatable path)
 
