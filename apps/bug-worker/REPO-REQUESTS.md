@@ -11,11 +11,31 @@ It checks GitHub for a public, enabled repository with a recognized license,
 then stores it as `smithering`. GitHub URLs and `.git` suffixes normalize to
 one case-insensitive repository identity. This records a request for the team
 to support the repository; it does not launch an agent or provision the app.
+Every accepted request is one nomination. The response is
+`{ repo, subscribed }`, and `repo.nominations` is the repository's current
+nomination count, including this one.
 
-`GET /api/repo-requests` returns `{ repos, cursor }`. Each public record has
-`name`, `url`, `status` (`smithering` or `ready`), and `appUrl` (null until ready).
-Pass `?cursor=...` to get another page. The upcoming app can consume this same
-public catalog and use ready entries as its supported repositories.
+Each public record has `name`, `url`, `status` (`smithering` or `ready`),
+`appUrl` (null until ready), and `nominations`.
+
+`GET /api/repo-requests` returns `{ repos }`: the 20 most nominated
+repositories, most nominated first, ties by name. The Worker ranks the first
+200 recorded repositories, so a repository beyond that scan is not listed.
+`GET /api/repo-requests?repo=owner/repo` returns `{ repo }` for one
+repository, 404 when nobody has requested it, and 400 for an invalid name.
+The upcoming app can consume this same public catalog and use ready entries
+as its supported repositories.
+
+## Nomination counts
+
+Each repository has one counter key, `repo-nominations:<owner/repo>`, holding
+the count as a decimal string. An accepted `POST` reads it, adds one, and
+writes it back; rejected requests (invalid input, private or unlicensed
+repository, rate limit) never touch it. KV has no atomic increment, so two
+nominations that arrive at the same moment can record as one. The tally is
+public and informational, so that undercount is accepted rather than adding a
+Durable Object. The list endpoint reads one counter per recorded repository,
+then the record and readiness of the top 20 only.
 
 Once the app supports a repository **and its repository view works for an
 anonymous visitor**, call `POST /api/repo-requests/complete` with the existing
@@ -87,8 +107,9 @@ the next call; retry the same page on failures. Completion remains visible
 if sending fails. The cron keeps separate sweep and subscriber cursors and handles at most two
 repositories per invocation to stay within Worker subrequest limits.
 
-KV is eventually consistent. New requests and readiness may take up to a
-minute to reach other locations; the page refreshes every 30 seconds. Records
+KV is eventually consistent. New requests, readiness, and counts may take up
+to a minute to reach other locations; the page loads the most nominated list
+once per visit and again after each submission. Records
 and per-email subscriptions use separate keys so concurrent submissions
 cannot overwrite a subscriber list or reset completed work. Provider keys
 protect concurrent delivery retries for 24 hours; if a send succeeds but its
@@ -97,15 +118,18 @@ The existing KV per-IP throttle is advisory, not an atomic rate limiter.
 
 Email addresses never appear in public responses. They live under
 `repo-subscriber:<owner/repo>:<sha256(email)>`, separate from public metadata
-under `repo-request:` and completion under `repo-ready:`. Notification receipts
-use `repo-notified:`, forks use `repo-fork:`, and claims use `repo-claim:`. There are no additional database bindings or migrations.
+under `repo-request:`, counts under `repo-nominations:`, and completion under
+`repo-ready:`. Notification receipts use `repo-notified:`, forks use
+`repo-fork:`, and claims use `repo-claim:`. There are no additional database
+bindings or migrations.
 
 ## Validation and deployment
 
 Run `pnpm -C apps/bug-worker test` and `pnpm -C apps/site build`. Deploy the
-Worker before the site; otherwise the new form gets a visible API error.
-Use the package's existing deployment command after resolving the repository's
-Alchemy version mismatch: the checked-in deployment scripts use Alchemy 1.x
-imports while the workspace currently installs 2.x. Deployment needs that
-existing migration, the email bindings above, `GITHUB_FORK_TOKEN` for community
-forks, and the ten-minute cron.
+Worker before the site; otherwise the new form gets a visible API error and
+the most nominated list stays hidden. `alchemy.run.ts` is an Alchemy 2 stack
+(`import * as Alchemy from "alchemy"` and `alchemy/Cloudflare`), matching the
+`alchemy` version the workspace installs; deploy with
+`BUG_ADMIN_TOKEN=... pnpm -C apps/bug-worker deploy`. Deployment needs the
+email bindings above, `GITHUB_FORK_TOKEN` for community forks, and the
+ten-minute cron.

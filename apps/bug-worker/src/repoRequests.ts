@@ -11,6 +11,9 @@ const cors = {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: cors });
 type Repo = { name: string; url: string };
 type Ready = { appUrl: string; completedAt: string };
+/** Most repositories the public list scans before ranking; bounds KV reads per request. */
+const listScan = 200;
+const listTop = 20;
 
 /** Accept repository roots only; never fetch a user-supplied host. */
 export function repoName(value: unknown): string | null {
@@ -28,9 +31,32 @@ async function read<T>(env: BugWorkerEnv, key: string): Promise<T | null> {
   const value = await env.BUGS.get(key);
   return value === null ? null : JSON.parse(value) as T;
 }
-async function publicRepo(env: BugWorkerEnv, repo: Repo) {
+/** Distinct nominations recorded for a repository; one accepted POST is one nomination. */
+async function nominations(env: BugWorkerEnv, name: string) {
+  return Number(await env.BUGS.get(`repo-nominations:${name}`)) || 0;
+}
+async function publicRepo(env: BugWorkerEnv, repo: Repo, count?: number) {
   const ready = await read<Ready>(env, `repo-ready:${repo.name}`);
-  return { ...repo, status: ready ? "ready" : "smithering", appUrl: ready?.appUrl ?? null };
+  return {
+    ...repo,
+    status: ready ? "ready" : "smithering",
+    appUrl: ready?.appUrl ?? null,
+    nominations: count ?? await nominations(env, repo.name),
+  };
+}
+/** Repositories ranked by nominations, most nominated first; ties break on name. */
+async function mostNominated(env: BugWorkerEnv) {
+  const page = await list(env, prefix, undefined, listScan);
+  const ranked = await Promise.all(page.keys.map(async (key) => {
+    const name = key.name.slice(prefix.length);
+    return { name, count: await nominations(env, name) };
+  }));
+  ranked.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const records = await Promise.all(ranked.slice(0, listTop).map(async (entry) => {
+    const repo = await read<Repo>(env, `${prefix}${entry.name}`);
+    return repo ? publicRepo(env, repo, entry.count) : null;
+  }));
+  return records.filter((repo) => repo !== null);
 }
 async function list(env: BugWorkerEnv, keyPrefix: string, cursor?: string, limit = 50) {
   if (!env.BUGS.list) throw new Error("KV listing unavailable");
@@ -73,10 +99,13 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
     const url = new URL(request.url);
     const route = url.pathname.slice("/api/repo-requests".length);
     if (request.method === "GET" && route === "") {
-      const page = await list(env, prefix, url.searchParams.get("cursor") || undefined);
-      const records = await Promise.all(page.keys.map((key) => read<Repo>(env, key.name)));
-      const repos = await Promise.all(records.filter((r): r is Repo => r !== null).map((repo) => publicRepo(env, repo)));
-      return json(200, { repos, cursor: page.list_complete ? null : page.cursor });
+      const query = url.searchParams.get("repo");
+      if (query === null) return json(200, { repos: await mostNominated(env) });
+      const name = repoName(query);
+      if (!name) return json(400, { error: "Enter a GitHub repository URL or owner/repo." });
+      const repo = await read<Repo>(env, `${prefix}${name}`);
+      if (!repo) return json(404, { error: "Repository has not been requested." });
+      return json(200, { repo: await publicRepo(env, repo) });
     }
     const admin = route === "/complete" || route === "/notify";
     if (request.method !== "POST" || (route !== "" && !admin)) return json(404, { error: "Not found." });
@@ -139,7 +168,11 @@ export async function handleRepoRequests(request: Request, env: BugWorkerEnv, de
       await env.BUGS.put(`${prefix}${name}`, JSON.stringify(repo));
       await forkRepo(env, deps, name);
     }
-    const result = await publicRepo(env, repo);
+    // A plain counter per repository: KV has no atomic increment, so two simultaneous
+    // nominations can record one. That undercount is acceptable for a public tally.
+    const count = await nominations(env, name) + 1;
+    await env.BUGS.put(`repo-nominations:${name}`, String(count));
+    const result = await publicRepo(env, repo, count);
     if (email && result.status !== "ready") await env.BUGS.put(`repo-subscriber:${name}:${await hash(email)}`, email);
     return json(200, { repo: result, subscribed: Boolean(email) && result.status !== "ready" });
   } catch {

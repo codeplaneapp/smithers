@@ -18,6 +18,10 @@ const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithe
       <button class="btn primary" type="submit">Smither this repo <span aria-hidden="true">↗</span></button>
       <p class="feedback" data-feedback role="status" aria-live="polite"></p>
     </form>
+    <aside class="most-nominated" data-most-nominated hidden aria-labelledby="most-nominated-title">
+      <h3 id="most-nominated-title">Most nominated</h3>
+      <ol data-most-nominated-list></ol>
+    </aside>
   </div>
   <noscript>Enable JavaScript to submit a repo.</noscript>
 </section>
@@ -38,7 +42,14 @@ const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithe
   button:disabled { opacity: .6; cursor: wait; }
   .feedback { font-size: .85rem; line-height: 1.5; margin: .8rem 0 0; }
   .feedback[data-error="true"] { color: var(--warning); }
-  @media (max-width: 720px) { .request-card { grid-template-columns: 1fr; gap: 2rem; } }
+  .most-nominated { grid-column: 2; padding-top: 1.25rem; border-top: 1px solid var(--border-strong); }
+  .most-nominated h3 { margin: 0 0 .6rem; font-size: .86rem; font-weight: 600; }
+  .most-nominated ol { display: flex; flex-direction: column; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+  .most-nominated li { display: flex; justify-content: space-between; gap: 1rem; font-size: .85rem; line-height: 1.5; }
+  .most-nominated a { color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
+  .most-nominated a:hover { text-decoration: underline; }
+  .most-nominated .tally { color: var(--text-muted); font: .78rem var(--font-mono); white-space: nowrap; }
+  @media (max-width: 720px) { .request-card { grid-template-columns: 1fr; gap: 2rem; } .most-nominated { grid-column: auto; } }
 </style>
 
 <script>
@@ -49,6 +60,38 @@ const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithe
   const emailInput = form.elements.namedItem("email") as HTMLInputElement
   const submit = form.querySelector<HTMLButtonElement>("button")!
   const feedback = root.querySelector<HTMLElement>("[data-feedback]")!
+  const mostNominated = root.querySelector<HTMLElement>("[data-most-nominated]")!
+  const mostNominatedList = root.querySelector<HTMLElement>("[data-most-nominated-list]")!
+  type PublicRepo = { name: string; url: string; status: string; nominations: number }
+  const validCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+  const label = (count: number) => `${count} ${count === 1 ? "nomination" : "nominations"}`
+  // The list is decoration: any failure leaves it hidden and the form untouched.
+  const loadMostNominated = async () => {
+    try {
+      const response = await fetch(endpoint, { credentials: "omit", signal: AbortSignal.timeout(15_000) })
+      if (!response.ok) throw new Error()
+      const data = await response.json() as { repos?: unknown }
+      const repos = (Array.isArray(data.repos) ? data.repos : [])
+        .filter((repo): repo is PublicRepo => typeof repo?.name === "string" && typeof repo?.url === "string" && validCount(repo?.nominations))
+        .filter((repo) => repo.nominations > 0)
+        .slice(0, 5)
+      mostNominatedList.replaceChildren(...repos.map((repo) => {
+        const item = document.createElement("li")
+        const link = document.createElement("a")
+        link.href = repo.url
+        link.textContent = repo.name
+        const count = document.createElement("span")
+        count.className = "tally"
+        count.textContent = label(repo.nominations)
+        item.append(link, count)
+        return item
+      }))
+      mostNominated.hidden = repos.length === 0
+    } catch {
+      mostNominated.hidden = true
+    }
+  }
+  void loadMostNominated()
   form.addEventListener("submit", async (event) => {
     event.preventDefault()
     if (!form.reportValidity()) return
@@ -64,10 +107,12 @@ const endpoint = import.meta.env.PUBLIC_REPO_REQUESTS_URL || "https://bug.smithe
       })
       const data = await response.json()
       if (!response.ok) throw new Error(data.error || "We couldn’t submit that repo. Please try again.")
-      feedback.textContent = data.repo.status === "ready"
+      const status = data.repo.status === "ready"
         ? `${data.repo.name} is already supported.`
         : `${data.repo.name} is now being smithered.${data.subscribed ? " We’ll email you when it’s ready." : ""}`
+      feedback.textContent = validCount(data.repo.nominations) ? `${label(data.repo.nominations)} for ${data.repo.name}. ${status}` : status
       emailInput.value = ""
+      void loadMostNominated()
     } catch (error) {
       feedback.dataset.error = "true"
       feedback.textContent = error instanceof Error && error.name === "Error" ? error.message : "We couldn’t submit that repo. Please try again."

@@ -92,12 +92,34 @@ describe("public repository requests", () => {
     await f.worker.scheduled({}, f.env);
     expect(f.calls.filter((call) => call.url.includes("resend"))).toHaveLength(1);
   });
-  test("public listing paginates without exposing subscribers", async () => {
+  test("a repeated nomination of the same repo increments its count", async () => {
     const f = fixture();
-    for (let i = 0; i < 51; i++) await f.env.BUGS.put(`repo-request:owner/r${i}`, JSON.stringify({ name: `owner/r${i}`, url: `https://github.com/owner/r${i}` }));
-    const page = await (await f.call()).json();
-    expect(page.repos).toHaveLength(50);
-    expect((await (await f.call(undefined, `?cursor=${page.cursor}`)).json()).repos).toHaveLength(1);
+    expect(await (await f.call({ repo: "owner/repo" })).json()).toMatchObject({ repo: { name: "owner/repo", nominations: 1 } });
+    expect(await (await f.call({ repo: "https://github.com/Owner/Repo.git", email: "me@example.com" })).json()).toMatchObject({ repo: { nominations: 2 } });
+    expect(await (await f.call(undefined, "?repo=OWNER/repo")).json()).toMatchObject({ repo: { name: "owner/repo", status: "smithering", nominations: 2 } });
+    expect((await f.call(undefined, "?repo=owner/never")).status).toBe(404);
+    expect((await f.call(undefined, "?repo=https://evil.com/owner/repo")).status).toBe(400);
+  });
+  test("rejected nominations do not count", async () => {
+    const f = fixture();
+    expect((await f.call({ repo: "owner/repo", email: "oops" })).status).toBe(400);
+    f.github({ private: true, license: { spdx_id: "MIT" } });
+    expect((await f.call({ repo: "owner/private" })).status).toBe(400);
+    expect((await f.env.BUGS.list!({ prefix: "repo-nominations:" })).keys).toHaveLength(0);
+  });
+  test("counts are independent per repo and the public list ranks by count, capped at 20", async () => {
+    const f = fixture();
+    for (let i = 0; i < 25; i++) await f.env.BUGS.put(`repo-request:owner/r${String(i).padStart(2, "0")}`, JSON.stringify({ name: `owner/r${i}`, url: `https://github.com/owner/r${i}` }));
+    await f.call({ repo: "owner/second" });
+    await f.call({ repo: "owner/first" });
+    await f.call({ repo: "owner/first" });
+    await f.call({ repo: "owner/second" });
+    await f.call({ repo: "owner/first" });
+    const { repos } = await (await f.call()).json();
+    expect(repos).toHaveLength(20);
+    expect(repos.slice(0, 2)).toMatchObject([{ name: "owner/first", nominations: 3 }, { name: "owner/second", nominations: 2 }]);
+    expect(repos.slice(2).every((repo: { nominations: number }) => repo.nominations === 0)).toBe(true);
+    expect(JSON.stringify(repos)).not.toContain("example.com");
   });
   test("limits payloads, throttles submissions, and reports storage failures", async () => {
     const f = fixture();
