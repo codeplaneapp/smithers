@@ -174,14 +174,18 @@ building the variant from a `.wasm` module import.
 **What happened.** A detached child operation failed catchably:
 `unsupported` (this host runs no detached children, or there is no running flow
 to attach one to), `not_found` (the flow is not in the `EngineChildren` list,
-or no such child run exists), or `failed` (the child never started, was
-cancelled, failed, or handed its lineage to a new execution id).
+no such child run exists, or the id names a run outside the calling run's own
+children), or `failed` (the child never started, was cancelled, failed, or
+handed its lineage to a new execution id).
 
 **What to change.** For `not_found` on spawn, add the flow to
 `EngineChildren.layer({ flows })` and register it with the runtime. For
 `failed`, the message carries the child's rendered cause, bounded to 2,048
 characters. Two concurrent children of one flow need two labels: the label is
-the child's identity within the parent.
+the child's identity within the parent. For `not_found` on `await` or `send`,
+check the id: a run reaches only ids under its own `${executionId}/child/`
+prefix, which is what the refusal message names, so an id copied from another
+run is refused whether or not that run exists.
 
 ## checkpoint_unsupported and checkpoint_unavailable
 

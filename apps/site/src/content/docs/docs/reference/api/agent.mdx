@@ -1288,6 +1288,14 @@ Builds or provides the durable child port:
   the same bytes. `Accepted` and `AlreadyApplied` receipts answer
   `delivered: true`; every other receipt fails the call.
 
+`await` and `send` are bound as tools whose `child` is a string the cell
+writes, so both are restricted to the calling run's own children. A call made
+inside a run may name only ids in that run's child namespace, `childExecutionId`
+of its own execution id; anything else is `ChildError { code: "not_found" }`,
+whether or not such a run exists. A call made outside any run is the host
+collecting a child of its own over the run store and control plane it already
+holds, and is not restricted.
+
 ### EngineChildren.Options
 
 | Field          | Type                      | What it decides                                                                                                                                                  |
@@ -1481,7 +1489,10 @@ const layerFileSystem: (root: string) => Layer.Layer<FlowStore, never, FileSyste
 
 A store over a directory on the host filesystem. Every path is checked before
 the first byte is written, so a rejected file cannot leave a half-saved flow on
-disk. `PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
+disk. A path that reaches its file through a symbolic link is refused with
+`FlowStoreError { code: "invalid_path" }` rather than followed, so a link
+already in the checkout cannot redirect a save outside the root.
+`PromoteFlows` writes `<root>/flows/<id>/{flow.ts,flow.e2e.ts,fixtures/<id>.json}`.
 
 ### FlowStore.makeMemory, FlowStore.layerMemory
 

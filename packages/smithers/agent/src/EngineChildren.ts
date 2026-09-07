@@ -27,6 +27,16 @@
  * runtime that satisfies those three contracts rather than over one engine
  * implementation.
  *
+ * **Whose children it reaches.** `await` and `send` take the child id as a
+ * plain string a cell writes, so a call made inside a run is restricted to
+ * that run's own child namespace — the ids `childExecutionId` derives from its
+ * execution id. Without that, the string was a selector over every run the host
+ * could see, and a cell that learned another run's id read its result and
+ * steered it. A call made from OUTSIDE any run is the host collecting a child
+ * of its own, which is the cross-process path below and is not model-reachable:
+ * such a caller composed this port and already holds the run store and the
+ * control plane it reads and steers through.
+ *
  * The one thing it does not do is park the caller. `await` waits by re-reading
  * the child's run row on an interval rather than suspending the run, so a cell
  * that awaits a long child holds its round open. That is a bounded, honest cost of
@@ -105,9 +115,44 @@ export const childExecutionId = (
   label: string
 ): string => `${parentExecutionId}/child/${label}`
 
+/**
+ * Whether `child` names a run inside `parentExecutionId`'s own child namespace.
+ *
+ * The derived id IS the parent/child edge, and it is the durable one: a child's
+ * execution id is the primary key of its run row, minted by
+ * {@link childExecutionId} out of the id of the run that spawned it, so a run
+ * can only name a child of its own by naming its own execution id. Nothing a
+ * cell writes reaches outside that namespace, which is what makes an id a
+ * capability rather than a selector — `await` and `send` take a caller-supplied
+ * string, and without this the string chose any run on the host.
+ *
+ * A descendant passes too: a grandchild is `parent/child/a/child/b`, still
+ * inside `parent`'s namespace. Ancestry is the relation being checked, and an
+ * ancestor reaching a run started underneath it reaches nothing it did not
+ * cause. A run that is NOT an ancestor cannot match, because matching requires
+ * the target id to begin with the caller's own id.
+ */
+const ownsChild = (parentExecutionId: string, child: string): boolean =>
+  child.startsWith(childExecutionId(parentExecutionId, ""))
+
 const notFound = (message: string): ChildError => new ChildError({ code: "not_found", message })
 
 const failed = (message: string): ChildError => new ChildError({ code: "failed", message })
+
+/**
+ * The refusal a lifecycle call gets when it names a run outside its children.
+ *
+ * `not_found`, deliberately: a cell that asked for a run it does not own has no
+ * business learning whether that run exists, and `not_found` is the code that
+ * tells a cell to stop asking rather than to retry. The message names the shape
+ * of an id this run CAN use, which is what a cell that mistyped a label needs,
+ * and says nothing about the run it asked for.
+ */
+const unowned = (operation: string, parentExecutionId: string, child: string): ChildError =>
+  notFound(
+    `${operation} knows no child run ${child}. A child of this run is named ` +
+      `${childExecutionId(parentExecutionId, "<label>")}, so that id belongs to another run.`
+  )
 
 /**
  * The largest rendered child cause returned to a cell.
@@ -221,6 +266,34 @@ export const make = (
               })
             ),
           onSome: Effect.succeed
+        }))
+      )
+
+    /**
+     * Refuses a lifecycle call that names a run the caller did not start.
+     *
+     * `await` and `send` are reachable by a model: `ChildFlows.source` binds
+     * them as tools whose `child` is a plain string the cell writes. Checking
+     * only that the id names an existing row made that string a selector over
+     * every run on the host, so a cell that learned another run's id read its
+     * result and steered it. The ambient instance is the run this call is
+     * executing inside — the same identity `spawn` derived the child's id from
+     * — so comparing the two is the whole ownership question.
+     *
+     * A call from OUTSIDE any run is the host collecting a child of its own,
+     * which is the documented cross-process path and is not model-reachable:
+     * such a caller composed this port and already holds the run store and the
+     * control plane the operations read and steer through, so refusing it
+     * would take nothing away from anyone.
+     */
+    const ownedByCaller = (operation: string, child: string): Effect.Effect<void, ChildError> =>
+      Effect.serviceOption(FlowRuntime.FlowInstance).pipe(
+        Effect.flatMap(Option.match({
+          onNone: () => Effect.void,
+          onSome: (parent: FlowRuntime.FlowInstance["Service"]) =>
+            ownsChild(parent.executionId, child)
+              ? Effect.void
+              : Effect.fail(unowned(operation, parent.executionId, child))
         }))
       )
 
@@ -365,12 +438,15 @@ export const make = (
           onSome: Effect.succeed
         })
       )
-      return attempt
+      return Effect.andThen(ownedByCaller("agent/await", input.child), attempt)
     }
 
     const send: ChildFlows.Children["send"] = (input) =>
       Effect.gen(function*() {
         const parent = yield* parentInstance("agent/send")
+        if (!ownsChild(parent.executionId, input.child)) {
+          return yield* Effect.fail(unowned("agent/send", parent.executionId, input.child))
+        }
         const row = yield* rowOf(input.child)
         if (Option.isNone(row)) {
           return yield* Effect.fail(notFound(`agent/send knows no child run ${input.child}.`))

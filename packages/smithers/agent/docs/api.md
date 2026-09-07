@@ -1281,6 +1281,14 @@ Builds or provides the durable child port:
   the same bytes. `Accepted` and `AlreadyApplied` receipts answer
   `delivered: true`; every other receipt fails the call.
 
+`await` and `send` are bound as tools whose `child` is a string the cell
+writes, so both are restricted to the calling run's own children. A call made
+inside a run may name only ids in that run's child namespace, `childExecutionId`
+of its own execution id; anything else is `ChildError { code: "not_found" }`,
+whether or not such a run exists. A call made outside any run is the host
+collecting a child of its own over the run store and control plane it already
+holds, and is not restricted.
+
 ### EngineChildren.Options
 
 | Field          | Type                      | What it decides                                                                                                                                                  |

@@ -149,7 +149,11 @@ implementation.
   was admitted. It reaches no engine internals: `FlowRuntime`, `RunStore`, and
   `Control` are the whole dependency set.
   `EngineChildren.layer({ flows })` names the flows a child may run; anything
-  else is `ChildError { code: "not_found" }`.
+  else is `ChildError { code: "not_found" }`. `await` and `send` reach the
+  calling run's own children and no others: the child id is derived from the
+  parent's execution id, so a call from inside a run that names an id outside
+  that namespace is `not_found`. A call from outside any run is the host
+  collecting its own child and is not restricted.
 - `CellPlugin.fromBindings` — the one-liner for authoring a harness plugin that
   contributes capabilities.
 
