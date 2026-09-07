@@ -2,8 +2,12 @@ import { describe, expect, test } from "bun:test"
 import worker from "./index"
 import type { WorkerEnv } from "./index"
 import {
+  ANONYMOUS_ALL_CEILING,
+  ANONYMOUS_ALL_KEY,
+  ANONYMOUS_ALL_TURN_MAX,
   ANONYMOUS_CEILING,
   ANONYMOUS_TURN_MAX,
+  anonymousBucketAddress,
   anonymousTurnKey,
   spendTurn,
   TURN_WINDOW_MAX,
@@ -353,11 +357,74 @@ describe("the anonymous ceiling", () => {
       await other.text()
     })
     // The buckets are hashes under the anonymous prefix: no address, no login.
-    expect(limits.logins()).toHaveLength(2)
-    for (const key of limits.logins()) {
+    // The third bucket is the deployment-wide one, charged for every turn.
+    expect(limits.logins()).toContain(ANONYMOUS_ALL_KEY)
+    const addressed = limits.logins().filter((key) => key !== ANONYMOUS_ALL_KEY)
+    expect(addressed).toHaveLength(2)
+    for (const key of addressed) {
       expect(key).toMatch(/^anonymous:[0-9a-f]{64}$/)
       expect(key).not.toContain("203.0.113.7")
     }
+  })
+
+  test("an IPv6 visitor's whole /64 is one bucket", () => {
+    expect(anonymousBucketAddress("2001:db8:1:2::1")).toBe("2001:db8:1:2::/64")
+    expect(anonymousBucketAddress("2001:0DB8:0001:0002:ffff:ffff:ffff:ffff")).toBe("2001:db8:1:2::/64")
+    expect(anonymousBucketAddress("2001:db8::1")).toBe("2001:db8:0:0::/64")
+    expect(anonymousBucketAddress("::1")).toBe("0:0:0:0::/64")
+    expect(anonymousBucketAddress("2001:db8:1:3::1")).not.toBe(anonymousBucketAddress("2001:db8:1:2::1"))
+    expect(anonymousBucketAddress("203.0.113.7")).toBe("203.0.113.7")
+    expect(anonymousBucketAddress("::ffff:203.0.113.7")).toBe("203.0.113.7")
+  })
+
+  test("two addresses in one /64 spend the same day of questions", async () => {
+    const limits = memoryLimits()
+    const env = identityEnv(limits)
+    await withSignedOutSeams(async (upstreamCalls) => {
+      for (let turn = 0; turn < ANONYMOUS_TURN_MAX; turn += 1) {
+        const response = await worker.fetch(exploring("2001:db8:1:2::1", `anon-v6-${turn}`), env)
+        expect(response.status).toBe(200)
+        await response.text()
+      }
+      // A sibling address in the same /64 finds the bucket already spent.
+      const sibling = await worker.fetch(exploring("2001:db8:1:2:aaaa:bbbb:cccc:dddd", "anon-v6-sibling"), env)
+      expect(sibling.status).toBe(429)
+      expect(((await sibling.json()) as { message: string }).message).toContain(`${ANONYMOUS_TURN_MAX} turns today`)
+      expect(upstreamCalls()).toBe(ANONYMOUS_TURN_MAX)
+      // The next /64 over is another visitor.
+      const neighbour = await worker.fetch(exploring("2001:db8:1:3::1", "anon-v6-neighbour"), env)
+      expect(neighbour.status).toBe(200)
+      await neighbour.text()
+    })
+    expect(limits.logins().filter((key) => key !== ANONYMOUS_ALL_KEY)).toHaveLength(2)
+  })
+
+  test("the deployment-wide bucket refuses a fresh address once everyone's day is spent", async () => {
+    const limits = memoryLimits([ANONYMOUS_ALL_KEY])
+    const env = identityEnv(limits)
+    await withSignedOutSeams(async (upstreamCalls) => {
+      const refused = await worker.fetch(exploring("198.51.100.9", "anon-all-over"), env)
+      expect(refused.status).toBe(429)
+      expect(refused.headers.get("retry-after")).not.toBeNull()
+      const body = (await refused.json()) as { code: string; message: string }
+      expect(body.code).toBe("turn_rate_limited")
+      expect(body.message).toContain("everyone")
+      expect(body.message).toContain("Sign in with GitHub")
+      expect(body.message).not.toContain(`${ANONYMOUS_TURN_MAX} turns today`)
+      expect(upstreamCalls()).toBe(0)
+    })
+    // A login is not a visitor: its own bucket is untouched by the shared one.
+    expect((await spendTurn(limits, "will")).allowed).toBe(true)
+  })
+
+  test("the deployment-wide ceiling counts every visitor together", async () => {
+    const limits = memoryLimits()
+    for (let turn = 0; turn < ANONYMOUS_ALL_TURN_MAX; turn += 1) {
+      expect((await spendTurn(limits, ANONYMOUS_ALL_KEY, ANONYMOUS_ALL_CEILING)).allowed).toBe(true)
+    }
+    expect((await spendTurn(limits, ANONYMOUS_ALL_KEY, ANONYMOUS_ALL_CEILING)).allowed).toBe(false)
+    // The per-address bucket is untouched: the refusal above is independent of it.
+    expect((await spendTurn(limits, "anonymous:abc", ANONYMOUS_CEILING)).remaining).toBe(ANONYMOUS_TURN_MAX - 1)
   })
 
   test("the bucket key is salted and never a user's login", async () => {

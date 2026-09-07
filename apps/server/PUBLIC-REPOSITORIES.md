@@ -80,12 +80,16 @@ names a catalog repository (`context.activeRepository`, the selection the
 refusal. The turn carries no login, so the chat upstream meters it to the
 deployment and it never reaches a user's billing account.
 
-Anonymous turns spend from a bucket keyed by a salted SHA-256 of the client
-address (`cf-connecting-ip`, salted with the `ANONYMOUS_TURN_SALT` secret),
-in the same `TURN_LIMITS` Durable Object as the per-login ceiling. The
-ceiling is `ANONYMOUS_TURN_MAX` turns per day (`turnLimit.ts`); the refusal
-is the existing `429 turn_rate_limited` response, worded to name sign-in as
-the way to keep going. `POST /api/agent/turn/cancel` answers a signed-out
+Anonymous turns spend from two buckets in the same `TURN_LIMITS` Durable
+Object as the per-login ceiling, and either refuses. One is keyed by a
+salted SHA-256 of the client address (`cf-connecting-ip`, salted with the
+`ANONYMOUS_TURN_SALT` secret; an IPv6 address is masked to its /64 first, so
+one visitor's allocation is one bucket) with a ceiling of
+`ANONYMOUS_TURN_MAX` turns per day. The other is the deployment-wide
+`anonymous:all` bucket with a ceiling of `ANONYMOUS_ALL_TURN_MAX` turns per
+day (`turnLimit.ts`), which caps what exploring can cost when a caller
+rotates addresses. The refusal is the existing `429 turn_rate_limited`
+response, worded to name sign-in as the way to keep going. `POST /api/agent/turn/cancel` answers a signed-out
 caller too, because cancelling spends nothing and an owned turn refuses
 anyone but its owner.
 

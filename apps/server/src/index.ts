@@ -43,7 +43,15 @@ import {
   NON_REPLAYABLE_GATEWAY_PROCEDURES
 } from "./gatewayRpc"
 import type { GatewaySessionNamespace } from "./gateway"
-import { ANONYMOUS_CEILING, anonymousTurnKey, spendTurn, turnLimitResponse, TurnRateLimiter } from "./turnLimit"
+import {
+  ANONYMOUS_ALL_CEILING,
+  ANONYMOUS_ALL_KEY,
+  ANONYMOUS_CEILING,
+  anonymousTurnKey,
+  spendTurn,
+  turnLimitResponse,
+  TurnRateLimiter
+} from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
@@ -2421,9 +2429,12 @@ const isCatalogRepository = (name: unknown): boolean =>
  * smithers.sh/smithersai/smithers talks to Smithers about that repository
  * without an account. The turn names its repository in the runtime context
  * the client derives each turn (`context.activeRepository`); only a catalog
- * repository opens the door, and it opens onto the anonymous ceiling keyed by
- * the caller's address, never onto a user's budget or billing account: the
- * turn carries no login, so the chat upstream meters it to the deployment.
+ * repository opens the door, and it opens onto the anonymous ceilings, never
+ * onto a user's budget or billing account: the turn carries no login, so the
+ * chat upstream meters it to the deployment. Two buckets are spent, and
+ * either refuses: the caller's address (one IPv6 /64 is one address) and the
+ * deployment-wide `anonymous:all`, which is what caps the day's cost when a
+ * caller rotates addresses.
  *
  * What the turn can reach is what the client can reach signed out: the
  * model's tool calls run in the browser, against this Worker, where every
@@ -2442,6 +2453,10 @@ const anonymousCatalogTurn = async (request: Request, env: WorkerEnv, refusal: R
     ANONYMOUS_CEILING
   )
   if (!budget.allowed) return turnLimitResponse(budget, ISOLATION_HEADERS, ANONYMOUS_CEILING)
+  // Spent after the address bucket admits, so a visitor who is already at
+  // their own ceiling never draws down everyone's.
+  const shared = await spendTurn(env.TURN_LIMITS, ANONYMOUS_ALL_KEY, ANONYMOUS_ALL_CEILING)
+  if (!shared.allowed) return turnLimitResponse(shared, ISOLATION_HEADERS, ANONYMOUS_ALL_CEILING)
   return handleTurn(request, env, undefined, body)
 }
 

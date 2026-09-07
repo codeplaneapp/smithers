@@ -47,11 +47,12 @@ export const TURN_WINDOW_MS = 60 * 60 * 1000
 /**
  * A ceiling: how many model calls one bucket may start per window, and whose
  * bucket it is. The kind picks the refusal's wording, because a login that
- * trips its ceiling has hit a bug and a visitor who trips theirs has reached
- * the end of what exploring offers.
+ * trips its ceiling has hit a bug, a visitor who trips theirs has reached
+ * the end of what exploring offers, and a visitor refused by the
+ * deployment-wide bucket has done nothing at all.
  */
 export interface TurnCeiling {
-  readonly kind: "login" | "anonymous"
+  readonly kind: "login" | "anonymous" | "anonymous-all"
   readonly max: number
   readonly windowMs: number
 }
@@ -78,6 +79,31 @@ export const ANONYMOUS_TURN_WINDOW_MS = 24 * 60 * 60 * 1000
 export const ANONYMOUS_CEILING: TurnCeiling = {
   kind: "anonymous",
   max: ANONYMOUS_TURN_MAX,
+  windowMs: ANONYMOUS_TURN_WINDOW_MS
+}
+
+/**
+ * Turns ALL signed-out visitors together may start per day.
+ *
+ * The per-address bucket alone is not a cost cap: an IPv6 visitor holds a
+ * whole /64 and a pool of IPv4 proxies is cheap, so a caller who rotates
+ * addresses gets a fresh twenty each time. This second bucket
+ * (`ANONYMOUS_ALL_KEY`) is spent beside the per-address one on every
+ * anonymous turn and bounds what exploring can cost the deployment in a day
+ * no matter how many addresses ask. Three hundred is fifteen full visitors'
+ * worth, or about a dollar at the alpha's rate card.
+ */
+export const ANONYMOUS_ALL_TURN_MAX = 300
+
+/**
+ * The deployment-wide anonymous bucket. `all` is never a hex digest, so it
+ * cannot collide with a per-address key.
+ */
+export const ANONYMOUS_ALL_KEY = "anonymous:all"
+
+export const ANONYMOUS_ALL_CEILING: TurnCeiling = {
+  kind: "anonymous-all",
+  max: ANONYMOUS_ALL_TURN_MAX,
   windowMs: ANONYMOUS_TURN_WINDOW_MS
 }
 
@@ -183,14 +209,35 @@ export const spendTurn = async (
 }
 
 /**
+ * The part of a client address that names its bucket. An IPv4 address is
+ * its own bucket. An IPv6 visitor normally holds a whole /64, so the bucket
+ * is the /64 prefix: the first four hextets, expanded so `2001:db8::1` and
+ * `2001:0db8:0:0::2` land in the same bucket. Anything unparseable is
+ * bucketed as written rather than refused.
+ */
+export const anonymousBucketAddress = (ip: string): string => {
+  const address = ip.trim().toLowerCase()
+  if (!address.includes(":")) return address
+  // An IPv4-mapped address (`::ffff:198.51.100.9`) is an IPv4 visitor.
+  const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
+  if (mapped !== null) return mapped[1]!
+  const [head = "", tail = ""] = address.split("::", 2)
+  const heads = head === "" ? [] : head.split(":")
+  const tails = tail === "" ? [] : tail.split(":")
+  const hextets = [...heads, ...Array(Math.max(0, 8 - heads.length - tails.length)).fill("0"), ...tails]
+  return `${hextets.slice(0, 4).map((hextet) => hextet.replace(/^0+(?=.)/, "")).join(":")}::/64`
+}
+
+/**
  * The bucket an anonymous turn spends from: a salted SHA-256 of the client
- * IP Cloudflare reports. The `anonymous:` prefix can never collide with a
- * GitHub login, so a visitor's bucket is never a user's. `salt` is the
+ * address Cloudflare reports (`anonymousBucketAddress`, so one IPv6 /64 is
+ * one bucket). The `anonymous:` prefix can never collide with a GitHub
+ * login, so a visitor's bucket is never a user's. `salt` is the
  * deployment's ANONYMOUS_TURN_SALT secret; without one the hash is still
  * not an address, only linkable across deployments that also have none.
  */
 export const anonymousTurnKey = async (request: Request, salt: string | undefined): Promise<string> => {
-  const ip = request.headers.get("cf-connecting-ip") ?? ""
+  const ip = anonymousBucketAddress(request.headers.get("cf-connecting-ip") ?? "")
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt ?? ""}\n${ip}`))
   return `anonymous:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`
 }
@@ -200,7 +247,9 @@ const waitLabel = (seconds: number): string =>
 
 /**
  * The refusal a spent budget answers with. For a login: a bug report, never a
- * sales pitch. For a visitor: the end of exploring, and the one way on.
+ * sales pitch. For a visitor: the end of exploring, and the one way on. For
+ * a visitor refused by the deployment-wide bucket: the same way on, and that
+ * they did nothing wrong.
  */
 export const turnLimitResponse = (
   budget: TurnBudget,
@@ -215,6 +264,10 @@ export const turnLimitResponse = (
       code: "turn_rate_limited",
       message: ceiling.kind === "anonymous"
         ? `That is ${ceiling.max} turns today without signing in, which is as far as exploring goes. Sign in with GitHub to keep going, or come back in about ${
+          waitLabel(seconds)
+        }. Nothing was charged.`
+        : ceiling.kind === "anonymous-all"
+        ? `Exploring without signing in has reached its daily limit for everyone, not just you. Sign in with GitHub to keep going, or come back in about ${
           waitLabel(seconds)
         }. Nothing was charged.`
         : `That is more than ${ceiling.max} model calls in an hour, which no conversation reaches by hand — something is looping. Chat resumes on its own in about ${
