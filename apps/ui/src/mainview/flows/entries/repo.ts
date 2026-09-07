@@ -94,8 +94,9 @@ export const repoFlows = (actions: CommandActions): ReadonlyArray<FlowEntry> => 
   flow({
     name: "repo.tree",
     form: { args: (payload) => text(payload, "path") === undefined ? text(payload, "copy") ?? "" : `${text(payload, "copy")}#${text(payload, "path")}` },
-    summary: "Expand or collapse a directory of a working copy in the sidebar",
-    runtime: ["local.repositories"],
+    summary: "Expand or collapse a directory of a working copy (a local checkout or a cloud workspace) in the sidebar",
+    /* A local checkout lists through the local app; a cloud workspace copy lists through Smithers Cloud (RepoTreeSeam). */
+    runtimeAny: ["local.repositories", "cloud"],
     args: "<copyId>[#path]",
     input: Schema.Struct({ copy: Schema.String, path: Schema.optional(Schema.String) }),
     handler: ({ copy, path }) => actions.toggleRepoTree(copy, path)

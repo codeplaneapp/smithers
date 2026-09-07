@@ -629,6 +629,102 @@ describe("the sidebar's file tree", () => {
     expect(names(host.querySelector(`[data-testid="repo-tree-${COPY}"]`), ".sui-file-tree-dir-name")).toEqual([".git", "boom", "packages", "ui"])
   })
 
+  /*
+   * A cloud workspace copy (a box) on the web host: its caret is the same
+   * repo.tree flow, the listing comes through the Worker's forward of the
+   * box's files route, and a file click is workspace.file (the existing
+   * workspace file card, titled with the box). A box that is not running says
+   * its state at the root and asks the route nothing.
+   */
+  const BOX_ROW = {
+    id: "ws-1",
+    repoId: "will/flows",
+    name: "fix-landings",
+    targetBookmark: "main",
+    status: "running" as const,
+    provisioningStage: null,
+    suspendedAt: null,
+    createdAt: "2026-09-07T00:00:00Z"
+  }
+  const boxHarness = async (status: "running" | "starting") => {
+    const requests: Array<string> = []
+    const services: AppServices = {
+      fetchImpl: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+        const parsed = new URL(url, "http://cloud.test")
+        const path = parsed.pathname
+        requests.push(`${path}${parsed.search}`)
+        const at = parsed.searchParams.get("path") ?? ""
+        if (path === "/api/cloud/api/repos/will/flows/workspaces/ws-1/files") {
+          if (at === "") return json(200, { path: "", entries: [{ name: "apps", path: "apps", type: "dir", size: 0 }, { name: "README.md", path: "README.md", type: "file", size: 6 }] })
+          if (at === "apps") return json(200, { path: "apps", entries: [{ name: "ui", path: "apps/ui", type: "dir", size: 0 }] })
+          return json(404, { status: "error", message: `no such path in ws-1: ${at}` })
+        }
+        if (path === "/api/cloud/api/repos/will/flows/workspaces/ws-1/files/content" && at === "README.md") {
+          return json(200, { path: "README.md", content: "# Box\n", encoding: "utf-8", size: 6, truncated: false })
+        }
+        return json(404, { status: "error", message: `no stub for ${url}` })
+      }
+    }
+    const { store, controller } = await cloudHarness(services)
+    await persisted(store, { type: "cloud.session.loaded", actor: "system", state: "signed-in", username: "will", expiresAt: null, scopes: null })
+    await persisted(store, {
+      type: "repositories.loaded",
+      actor: "system",
+      repositories: [{ id: "will/flows", org: "will", ownerKind: "user", name: "flows", head: { bookmark: "main", changeId: "qupxosqw", commitId: "abc123" } }]
+    })
+    await persisted(store, { type: "workspaces.loaded", actor: "system", workspaces: [{ ...BOX_ROW, status }] })
+    return { store, controller, requests }
+  }
+
+  test("a running box's caret expands the box's tree through its files route; a file click renders the workspace file card", async () => {
+    const { store, controller, requests } = await boxHarness("running")
+    expect(controller.commands.find("repo.tree")).toBeDefined()
+    const { host, act } = mount(controller)
+    const copyId = "workspace:ws-1"
+    const toggle = host.querySelector<HTMLButtonElement>(`[data-testid="repo-tree-toggle-${copyId}"]`)
+    expect(toggle).not.toBeNull()
+    expect(toggle?.getAttribute("data-flow")).toBe("repo.tree")
+    expect(toggle?.getAttribute("aria-label")).toBe("Expand fix-landings")
+    expect(host.querySelector(`[data-testid="repo-tree-${copyId}"]`)).toBeNull()
+
+    await settle(act, () => toggle?.click())
+    expect(requests).toEqual(["/api/cloud/api/repos/will/flows/workspaces/ws-1/files?path="])
+    expect(toggle?.getAttribute("aria-expanded")).toBe("true")
+    const tree = host.querySelector<HTMLElement>(`[data-testid="repo-tree-${copyId}"]`)
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual(["apps"])
+    expect(names(tree, "[data-slot=file-tree-file]")).toEqual(["README.md"])
+    // Directories are repo.tree; files on a box are workspace.file, never the repository read.
+    for (const dir of tree?.querySelectorAll("[data-slot=file-tree-dir-toggle]") ?? []) expect(dir.getAttribute("data-flow")).toBe("repo.tree")
+    for (const file of tree?.querySelectorAll("[data-slot=file-tree-file]") ?? []) expect(file.getAttribute("data-flow")).toBe("workspace.file")
+    expect([...host.querySelectorAll(".chrome-bar button")].every((button) => button.getAttribute("data-flow") !== null)).toBe(true)
+
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-dir-${copyId}#apps"]`)?.click())
+    expect(requests[1]).toBe("/api/cloud/api/repos/will/flows/workspaces/ws-1/files?path=apps")
+    expect(names(tree, ".sui-file-tree-dir-name")).toEqual(["apps", "ui"])
+
+    // The file click is workspace.file README.md ws-1: the workspace file card lands in the chat, titled with the box.
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-file-${copyId}#README.md"]`)?.click())
+    expect(requests.at(-1)).toBe("/api/cloud/api/repos/will/flows/workspaces/ws-1/files/content?path=README.md")
+    const card = store.collections.cards.get("workspace-file-ws-1-README.md")
+    expect(card?.kind).toBe("file")
+    expect(card?.title).toBe("README.md · fix-landings")
+    expect(host.querySelector("[data-testid=transcript] .smithers-card[data-kind=file]")).not.toBeNull()
+    expect(requests.some((request) => request.startsWith("/api/cloud/api/repos/will/flows/contents"))).toBe(false)
+  })
+
+  test("a starting box's caret says its state at the root, verbatim and in place, and asks the route nothing", async () => {
+    const { controller, requests } = await boxHarness("starting")
+    const { host, act } = mount(controller)
+    const copyId = "workspace:ws-1"
+    expect(host.querySelector(`[data-testid="copy-${copyId}"]`)?.textContent).toContain("fix-landings · starting")
+    await settle(act, () => host.querySelector<HTMLButtonElement>(`[data-testid="repo-tree-toggle-${copyId}"]`)?.click())
+    const state = host.querySelector<HTMLElement>(`[data-testid="repo-tree-state-${copyId}#"]`)
+    expect(state?.textContent).toBe("fix-landings (ws-1) is starting, not running; wait for it to settle (the workspace card tracks it).")
+    expect(state?.dataset.state).toBe("failed")
+    expect(requests).toEqual([])
+  })
+
   test("sessions nest under the copy after its files, labelled apart once the tree is open", async () => {
     const { store, controller } = await treeHarness()
     await persisted(store, {

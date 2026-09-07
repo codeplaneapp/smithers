@@ -75,6 +75,15 @@ launch, relaunch, or quit the app: the orchestrator owns the running app.
   not fork it) and writes the row. Failures write `state: "failed"` with the
   server's error text verbatim; the tree shows it in place. Seam test with
   the real route contract like `FilesSeam.test.ts`.
+- Box lane L1 (box-tab-tree): a cloud workspace copy (a box) carries the same
+  caret. `loadDirectory` branches on `copy.kind === "workspace"` and reads
+  `GET /api/repos/{o}/{r}/workspaces/{id}/files?path=` (the route the Files
+  facet uses), mapping plue's `type: "dir" | "file"` rows to the tree's
+  `{ name, kind }`. A box the inventory shows as pending, starting, suspended,
+  stopped or failed fails the row with its state sentence and sends no
+  request. File rows on a box bind `workspace.file <path> <workspaceId>`;
+  local rows keep `files.read`. `repo.tree` registers with
+  `runtimeAny: ["local.repositories", "cloud"]` so the web host has it.
 - Flows: `repo.tree <copyId> [path]` — user and button only (the agent has
   `files.list`); toggles expansion and loads the directory on first expand
   (or when the row is `failed`, retry). `files.read <path> <repo>` is the

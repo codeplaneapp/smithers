@@ -12,9 +12,11 @@ import { SELECT_REPO_LABEL } from "../Onboarding"
  * The sidebar (docs/workbench-lanes/sidebar-tree.md): the workspace heading
  * first — its name, the way back to the chat, and the pencil that renames it
  * — then one row per repository, grouped `org/ → repo → working copies`. A
- * local working copy's row is a file tree: its caret expands the checkout's
- * ROOT, one directory per fetch, and a file click renders the existing file
- * card in the chat (files.read). The SESSIONS a copy holds — terminals,
+ * working copy's row is a file tree: its caret expands the copy's ROOT, one
+ * directory per fetch (a local checkout through the local app, a cloud
+ * workspace copy through its box's files route), and a file click renders the
+ * existing file card in the chat (files.read, or workspace.file for a
+ * workspace copy). The SESSIONS a copy holds: terminals,
  * agents, pinned cards — nest under it after its files. Then `+`, and at the
  * bottom the chrome that must stay visible everywhere: the theme toggle, the
  * admin reset, and "Sign in". Every affordance dispatches a registered flow;
@@ -186,12 +188,12 @@ export function ChromeBar() {
   )
 
   /*
-   * The caret on a local copy's row: `repo.tree <copyId>` expands the
-   * checkout's root. It renders only where the route can answer (a local
-   * checkout); a cloud workspace row has no caret rather than a dead one.
+   * The caret on a copy's row: `repo.tree <copyId>` expands the copy's root.
+   * A local checkout lists through the local app; a cloud workspace copy (a
+   * box) lists through its own files route, so both rows carry the caret.
    */
   const treeToggle = (copy: WorkingCopy, root: RepoTreeRow | undefined) =>
-    copy.kind === "local" && canTree ?
+    canTree ?
       (
         <button
           type="button"
@@ -210,18 +212,32 @@ export function ChromeBar() {
   /*
    * The expanded tree under a copy's row: what the route returned, nothing
    * else. Every directory row is `repo.tree <copyId>#<path>`; every file row
-   * is `files.read <path> <repo>` — the existing file card in the chat (THE
-   * EMBED LAW). A directory with nothing loaded shows its row's own state:
-   * `loading…`, `empty`, or the route's error text verbatim.
+   * is the existing file card in the chat (THE EMBED LAW): `files.read <path>
+   * <repo>` on a local checkout, `workspace.file <path> <workspaceId>` on a
+   * cloud workspace copy. A directory with nothing loaded shows its row's own
+   * state: `loading…`, `empty`, or the route's error text verbatim.
    */
   const copyTree = (copy: WorkingCopy, view: CopyTree) => {
     if (view.root?.expanded !== true) return null
     const repo = copy.path === undefined ? undefined : openByPath.get(copy.path)
+    const fileFlow = copy.kind === "workspace" ? "workspace.file" : "files.read"
+    const fileFlowArgs = (path: string): string =>
+      copy.kind === "workspace" ? fileArgs(path, copy.workspaceId ?? copy.id) : fileArgs(path, repo?.id)
     const stateOf = (path: string): string => {
       const row = view.rows.get(path)
       if (row === undefined || row.state === "loading") return "loading…"
       if (row.state === "failed") return row.error ?? "failed"
       return "empty"
+    }
+    // The root with nothing under it says its own state in place: `loading…`, `empty`, or the refusal verbatim (a box that is not running names its state).
+    if (view.nodes.length === 0 && view.directories.length === 0) {
+      return (
+        <div className="repo-tree" role="presentation" data-testid={`repo-tree-${copy.id}`}>
+          <span className="repo-tree-state" data-state={view.root.state} data-testid={`repo-tree-state-${copy.id}#`}>
+            {stateOf("")}
+          </span>
+        </div>
+      )
     }
     return (
       <div className="repo-tree" role="presentation" data-testid={`repo-tree-${copy.id}`}>
@@ -230,7 +246,7 @@ export function ChromeBar() {
           directories={view.directories}
           collapsed={view.collapsed}
           onToggle={(path) => controller.runCommandArgs("repo.tree", `${copy.id}#${path}`)}
-          onSelect={(path) => controller.runCommandArgs("files.read", fileArgs(path, repo?.id))}
+          onSelect={(path) => controller.runCommandArgs(fileFlow, fileFlowArgs(path))}
           renderDirectoryEmpty={(path) => (
             <span className="repo-tree-state" data-state={view.rows.get(path)?.state ?? "loading"} data-testid={`repo-tree-state-${copy.id}#${path}`}>
               {stateOf(path)}
@@ -238,7 +254,7 @@ export function ChromeBar() {
           )}
           renderDirectoryFooter={(path) => view.rows.get(path)?.truncated === true ? <span className="repo-tree-state">{TRUNCATED_LINE}</span> : null}
           directoryProps={(path) => ({ "data-flow": "repo.tree", "data-testid": `repo-dir-${copy.id}#${path}` })}
-          nodeProps={(node) => ({ "data-flow": "files.read", "data-testid": `repo-file-${copy.id}#${node.path}` })}
+          nodeProps={(node) => ({ "data-flow": fileFlow, "data-testid": `repo-file-${copy.id}#${node.path}` })}
         />
       </div>
     )

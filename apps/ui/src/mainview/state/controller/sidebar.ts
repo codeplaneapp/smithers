@@ -5,9 +5,10 @@ import type { ControllerContext } from "./context"
 
 /*
  * The sidebar's own acts (docs/workbench-lanes/sidebar-tree.md): the file
- * tree's carets and the workspace heading's name. Every state change goes
- * through the store's dispatcher with the actor recorded; the server is
- * reached only for a directory listing, through the tree seam.
+ * tree's carets (a local checkout or a cloud workspace copy alike) and the
+ * workspace heading's name. Every state change goes through the store's
+ * dispatcher with the actor recorded; the server is reached only for a
+ * directory listing, through the tree seam.
  */
 export interface SidebarController {
   /**
@@ -30,7 +31,6 @@ export const createSidebarController = (ctx: ControllerContext, seam: RepoTreeSe
     const path = normalizeTreePath(pathArg ?? "")
     const copy = collections.workingCopies.get(copyId)
     if (copy === undefined) return `There is no working copy with id ${copyId}.`
-    if (copy.kind !== "local") return `${copy.label} is a cloud workspace; only a checkout on this machine lists its files here.`
     const row = collections.repoTree.get(repoTreeRowId(copyId, path))
     if (row !== undefined && row.expanded) {
       store.dispatch({ type: "repo-tree.toggled", actor: "user", copyId, path, expanded: false })

@@ -64,8 +64,35 @@ const COPY = repoKeyOf(SMITHERS.path)
  * first, a `.git` entry like any other), an empty directory, a truncated one,
  * a file, and two refusals in the route's error envelope.
  */
+/*
+ * The Worker's forward of a box's files route
+ * (`GET /api/repos/{o}/{r}/workspaces/{id}/files?path=`, the same route the
+ * Files facet reads), keyed by the path plue is asked for. Entries are plue's
+ * WorkspaceFileEntry rows (`type` is `dir` or `file`); `ws-refused` is the
+ * Worker's own 401 body, `ws-broken` plue's 409 for a box that stopped
+ * between the inventory read and the click.
+ */
+const BOX_FILES = "/api/cloud/api/repos/will/flows/workspaces/ws-1/files"
+const boxAnswers: Record<string, () => Response> = {
+  "": () =>
+    json(200, {
+      path: "",
+      entries: [
+        { name: "apps", path: "apps", type: "dir", size: 0 },
+        { name: "README.md", path: "README.md", type: "file", size: 12 },
+        { name: "", path: "", type: "file", size: 0 },
+        { name: "link", path: "link", type: "symlink", size: 0 }
+      ]
+    }),
+  "apps": () => json(200, { path: "apps", entries: [{ name: "ui", path: "apps/ui", type: "dir", size: 0 }] }),
+  "apps/ui": () => json(200, { path: "apps/ui", entries: [] }),
+  "locked": () => json(409, { status: "error", message: "workspace ws-1 is not running" })
+}
+
 const treeBackend = () => {
   const requests: Array<{ readonly repoId?: string; readonly path?: string }> = []
+  /** Every box listing asked for, as `<workspaces path>?<query>`. */
+  const boxRequests: Array<string> = []
   const answers: Record<string, () => Response> = {
     "": () =>
       json(200, {
@@ -83,7 +110,14 @@ const treeBackend = () => {
   const services: AppServices = {
     fetchImpl: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-      const path = new URL(url, "http://local.test").pathname
+      const parsed = new URL(url, "http://local.test")
+      const path = parsed.pathname
+      if (path.startsWith("/api/cloud/api/repos/")) {
+        boxRequests.push(`${path.slice("/api/cloud/api".length)}${parsed.search}`)
+        if (path !== BOX_FILES) return json(401, { status: "error", message: "Sign in to run a Smithers turn." })
+        const answer = boxAnswers[parsed.searchParams.get("path") ?? ""]
+        return answer === undefined ? json(404, { status: "error", message: `no such path in ws-1: ${parsed.searchParams.get("path")}` }) : answer()
+      }
       if (path !== "/api/repo/files") return json(404, { status: "error", message: `no stub for ${url}` })
       const body = JSON.parse(String(init?.body ?? "{}")) as { repoId?: string; path?: string }
       requests.push(body)
@@ -93,7 +127,7 @@ const treeBackend = () => {
         : answer()
     }
   }
-  return { services, requests }
+  return { services, requests, boxRequests }
 }
 
 const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
@@ -113,8 +147,18 @@ const treeController = async (repos: ReadonlyArray<Repo> = [SMITHERS]) => {
     }
   })
   await store.dispatch({ type: "repos.loaded", actor: "system", repos: [...repos] }).isPersisted.promise
-  return { store, controller, storage, requests: backend.requests, settle }
+  return { store, controller, storage, requests: backend.requests, boxRequests: backend.boxRequests, settle }
 }
+
+/** A cloud workspace copy (a box) as the inventory view writes it; `state` is plue's status verbatim. */
+const boxCopy = (id: string, state: string, repoId = "will/flows") => ({
+  id,
+  repoId,
+  kind: "workspace" as const,
+  label: "fix-landings",
+  workspaceId: id,
+  state
+})
 
 describe("repo tree seam — one directory per request, the route's answer verbatim", () => {
   test("/repo.tree <copyId> lists the root through POST /api/repo/files and writes the loaded row, nothing filtered", async () => {
@@ -196,14 +240,6 @@ describe("repo tree seam — one directory per request, the route's answer verba
       error: "plue is pinned but not open on this machine — open it with /repo.open, then retry."
     })
     expect(requests).toHaveLength(0)
-    await store.dispatch({
-      type: "workingcopies.workspaces.loaded",
-      actor: "system",
-      copies: [{ id: "ws-1", repoId: "will/flows", kind: "workspace", label: "fix-landings", workspaceId: "ws-1", state: "running" }]
-    }).isPersisted.promise
-    const cloud = await controller.commands.run("repo.tree", "ws-1")
-    expect(cloud.status).toBe("failed")
-    expect(JSON.stringify(cloud)).toContain("fix-landings is a cloud workspace")
     const unknown = await controller.commands.run("repo.tree", "local:/nowhere")
     expect(unknown.status).toBe("failed")
     expect(JSON.stringify(unknown)).toContain("There is no working copy with id local:/nowhere.")
@@ -240,6 +276,85 @@ describe("repo tree seam — one directory per request, the route's answer verba
     expect(catalog?.hidden).toBeUndefined()
     expect(catalog?.confirm).toBeUndefined()
     expect(controller.commands.find("repo.tree")?.binding.descriptor.modelInvocable).toBe(true)
+  })
+})
+
+/*
+ * A cloud workspace copy (a box, docs/workbench-lanes/sidebar-tree.md) lists
+ * through the route its Files facet reads, forwarded by the Worker with the
+ * visitor's own session: `GET /api/repos/{o}/{r}/workspaces/{id}/files?path=`.
+ * The row holds plue's entries mapped to the tree's `{ name, kind }`, or the
+ * refusal verbatim. A box the inventory shows as anything but running is
+ * refused in place with its state sentence and no request: nothing invented.
+ */
+describe("repo tree seam: a cloud workspace copy reads the box's files route", () => {
+  const loadBox = async (copies: ReadonlyArray<ReturnType<typeof boxCopy>>) => {
+    const scope = await treeController([])
+    await scope.store.dispatch({ type: "workingcopies.workspaces.loaded", actor: "system", copies: [...copies] }).isPersisted.promise
+    return scope
+  }
+
+  test("/repo.tree <boxCopy> lists the box's root through GET .../workspaces/{id}/files?path= and maps plue's entries to the tree's rows", async () => {
+    const { store, controller, requests, boxRequests } = await loadBox([boxCopy("ws-1", "running")])
+    expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
+    expect(boxRequests).toEqual(["/repos/will/flows/workspaces/ws-1/files?path="])
+    // The local route is never asked for a box.
+    expect(requests).toEqual([])
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({
+      copyId: "ws-1",
+      path: "",
+      expanded: true,
+      state: "loaded",
+      // `dir` is a directory, anything else plue names is a file; a row without a name drops.
+      entries: [{ name: "apps", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "link", kind: "file" }]
+    })
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))?.error).toBeUndefined()
+    // A nested directory is one more request with its path; an empty one is a loaded row with no entries.
+    expect((await controller.commands.run("repo.tree", "ws-1#apps")).status).toBe("executed")
+    expect(boxRequests[1]).toBe("/repos/will/flows/workspaces/ws-1/files?path=apps")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", "apps"))?.entries).toEqual([{ name: "ui", kind: "dir" }])
+    expect((await controller.commands.run("repo.tree", "ws-1#apps/ui/")).status).toBe("executed")
+    expect(boxRequests[2]).toBe("/repos/will/flows/workspaces/ws-1/files?path=apps%2Fui")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", "apps/ui"))).toMatchObject({ state: "loaded", entries: [] })
+    // Collapsing is collection state: no request.
+    expect((await controller.commands.run("repo.tree", "ws-1#apps")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", "apps"))?.expanded).toBe(false)
+    expect(boxRequests).toHaveLength(3)
+  })
+
+  test("a box that is not running fails the row with its state sentence and asks the route nothing", async () => {
+    const { store, controller, boxRequests } = await loadBox([boxCopy("ws-1", "starting"), boxCopy("ws-2", "suspended"), boxCopy("ws-3", "pending")])
+    expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({
+      state: "failed",
+      expanded: true,
+      entries: [],
+      error: "fix-landings (ws-1) is starting, not running; wait for it to settle (the workspace card tracks it)."
+    })
+    expect((await controller.commands.run("repo.tree", "ws-2#apps")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-2", "apps"))?.error).toBe("fix-landings (ws-2) is suspended, not running; /workspace.resume it first.")
+    expect((await controller.commands.run("repo.tree", "ws-3")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-3", ""))?.error).toBe("fix-landings (ws-3) is pending, not running; wait for it to settle (the workspace card tracks it).")
+    expect(boxRequests).toEqual([])
+    // The box settles: the inventory refresh rewrites the copy, and the next toggle is the retry that lists it.
+    await store.dispatch({ type: "workingcopies.workspaces.loaded", actor: "system", copies: [boxCopy("ws-1", "running")] }).isPersisted.promise
+    expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))?.expanded).toBe(false)
+    expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
+    expect(boxRequests).toEqual(["/repos/will/flows/workspaces/ws-1/files?path="])
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({ state: "loaded", entries: [{ name: "apps", kind: "dir" }, { name: "README.md", kind: "file" }, { name: "link", kind: "file" }] })
+  })
+
+  test("a refusal from the Worker or plue writes the failed row with the message verbatim", async () => {
+    const { store, controller } = await loadBox([boxCopy("ws-1", "running"), boxCopy("ws-9", "running")])
+    // plue's 409 for a box that stopped between the inventory read and the click.
+    expect((await controller.commands.run("repo.tree", "ws-1#locked")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", "locked"))).toMatchObject({ state: "failed", error: "workspace ws-1 is not running" })
+    expect((await controller.commands.run("repo.tree", "ws-1#missing")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-1", "missing"))?.error).toBe("no such path in ws-1: missing")
+    // The Worker's own refusal (a signed-out page) reaches the row in the Worker's words.
+    expect((await controller.commands.run("repo.tree", "ws-9")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-9", ""))).toMatchObject({ state: "failed", error: "Sign in to run a Smithers turn." })
   })
 })
 

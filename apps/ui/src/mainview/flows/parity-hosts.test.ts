@@ -323,7 +323,15 @@ describe("host parity — the web and native catalogs against the servers' own c
      * that seam is checked as if a flow reached it.
      */
     const SIGN_IN_LOADS: ReadonlyArray<readonly [string, ReadonlySet<string>]> = [
-      ["(sign-in load: loadRepositories)", new Set(["RepositoriesSeam"])]
+      ["(sign-in load: loadRepositories)", new Set(["RepositoriesSeam"])],
+      /*
+       * The sidebar caret: repo.tree binds actions.toggleRepoTree, a
+       * controller pair over RepoTreeSeam (AppController.ts
+       * createSidebarController(context, select(repoTreeSeam))), which the
+       * `<action>: <seam>.<fn>` binding scan above does not see. A cloud
+       * workspace copy's caret reads GET /api/repos/{o}/{r}/workspaces/{id}/files.
+       */
+      ["repo.tree (sidebar caret: toggleRepoTree -> RepoTreeSeam)", new Set(["RepoTreeSeam"])]
     ]
     const pathCache = new Map<string, ReadonlySet<string>>()
     const writeCache = new Map<string, ReadonlySet<string>>()
@@ -365,6 +373,7 @@ describe("host parity — the web and native catalogs against the servers' own c
     expect(checked).toBeGreaterThan(50)
     expect([...(pathCache.get("RepositoriesSeam") ?? [])]).toContain("/api/user/repos")
     expect([...(pathCache.get("FilesSeam") ?? [])]).toContain("/api/repos/")
+    expect([...(pathCache.get("RepoTreeSeam") ?? [])]).toContain("/api/repos/")
     expect([...(writeCache.get("LinearSeam") ?? [])]).toContain("DELETE /api/integrations/linear/")
     expect([...(writeCache.get("ChangeSeam") ?? [])]).toContain("POST /api/orgs/")
     const found = [...gaps.entries()]
