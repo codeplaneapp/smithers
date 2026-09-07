@@ -260,7 +260,8 @@ describe("launch-law parity: every affordance is a command", () => {
        * every tab).
        */
       /* 23 = 22 + the chrome-actions footer's Download the app (docs/web-mode/PLAN.md §3; renders only where app.download is registered, the cloud host). */
-      "../tabs/ChromeBar.tsx": 24,
+      /* 25 = 24 + the footer's Secrets button, the button door of keys.list (renders only where keys.byok is emitted). */
+      "../tabs/ChromeBar.tsx": 25,
       /* The live-process close question: confirm through tab.close.confirm. */
       "../tabs/TabBodies.tsx": 1
     })
