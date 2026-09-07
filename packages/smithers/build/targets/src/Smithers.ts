@@ -22,6 +22,7 @@ import * as ChangesetsTargetModule from "./ChangesetsTarget.ts"
 import * as CiToolchainModule from "./CiToolchain.ts"
 import * as DocsCheckModule from "./DocsCheck.ts"
 import * as DocsPageModule from "./DocsPage.ts"
+import * as HomeModule from "./Home.ts"
 import * as InputModule from "./Input.ts"
 import { Mise as MiseSurface } from "./Mise.ts"
 import * as NodeArtifactModule from "./NodeArtifact.ts"
@@ -203,6 +204,7 @@ export { isFlowDeclaration } from "./Flow.ts"
 export { FlowCatalog } from "./FlowCatalog.ts"
 /** @category actions @since 1.0.0 */
 export { FlowCatalogAction, FlowCatalogError } from "./FlowCatalog.ts"
+export { HomePane, isHomeDeclaration } from "./Home.ts"
 /** @category actions @since 0.1.0 */
 /** @category parsing @since 0.1.0 */
 export * as GithubWorkflow from "./GithubWorkflow.ts"
@@ -536,3 +538,28 @@ export const Size = Object.freeze({ Budgets: NodeArtifactModule.Budgets })
  * @since 0.1.0
  */
 export const Docs = Object.freeze({ Page: DocsPageModule.Page, Check: DocsCheckModule.Check })
+
+/**
+ * The declared home-pane blocks: `Smithers.Home.Text`, `Links`, `Flows`, and
+ * `CiBenchmark`, the values `Smithers.Factory.Home` takes.
+ *
+ * @category namespace exports
+ * @since 1.0.0
+ */
+export const Home = Object.freeze({
+  Text: HomeModule.Text,
+  Links: HomeModule.Links,
+  Flows: HomeModule.Flows,
+  CiBenchmark: HomeModule.CiBenchmark
+})
+
+/**
+ * The factory declarations a root `PACKAGE.ts` exports. `Factory.Home` is the
+ * repository's home pane, projected to `flows/home.json` by `HomePane`.
+ *
+ * @category namespace exports
+ * @since 1.0.0
+ */
+export const Factory = Object.freeze({
+  Home: HomeModule.Home
+})

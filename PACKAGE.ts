@@ -163,6 +163,40 @@ const flowCatalog = Smithers.FlowCatalog({
 })
 // --- end featured flows ----------------------------------------------------
 
+// --- home pane -------------------------------------------------------------
+// The first card a visitor sees on smithers.sh/smithersai/smithers, above the
+// welcome: what this repository is, the flows to try first, and the CI
+// benchmark. Blocks are declared values, never raw HTML; the app renders each
+// from data. `homePane` projects the declaration into flows/home.json, the
+// file the app reads from the public mirror, so a visitor signed out sees it
+// and a workspace without node_modules never evaluates this file for it. The
+// benchmark numbers are not measured yet; the block names the measures and
+// the app says so until a measurement exists.
+export const home = Smithers.Factory.Home({
+  blocks: [
+    Smithers.Home.Text({
+      text:
+        "Smithers builds itself with Smithers. Every change here is landed by the flows below, and the build, the tests, and the generated files are declared in this repository's PACKAGE.ts files."
+    }),
+    Smithers.Home.Flows({ title: "Try first" }),
+    Smithers.Home.CiBenchmark({ title: "CI on Smithers" }),
+    Smithers.Home.Links({
+      title: "Read more",
+      links: [
+        { label: "Source on GitHub", url: "https://github.com/smithersai/smithers" },
+        { label: "smithers.sh", url: "https://smithers.sh" }
+      ]
+    })
+  ]
+})
+
+const homePane = Smithers.HomePane({
+  summary: "Regenerate and drift-check flows/home.json from the Smithers.Factory.Home declaration.",
+  featured: true,
+  home
+})
+// --- end home pane ---------------------------------------------------------
+
 const ubuntu = "ubuntu-latest"
 
 const node = Smithers.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
@@ -330,7 +364,10 @@ const ci = Smithers.GithubCiGen({
         { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" },
         // The featured-flow catalog smithers.sh serves from the public mirror.
         // Declared in this file, rendered over the flows/ tree, checked in.
-        { name: "Flow catalog drift", verb: Smithers.Verb.Lint, pattern: "//:flowCatalog" }
+        { name: "Flow catalog drift", verb: Smithers.Verb.Lint, pattern: "//:flowCatalog" },
+        // The home pane the app renders from the public mirror. Declared in
+        // this file, projected to flows/home.json, checked in.
+        { name: "Home pane drift", verb: Smithers.Verb.Lint, pattern: "//:homePane" }
       ]
     },
     {
@@ -647,6 +684,7 @@ export const Package = Smithers.Package({
     changelog,
     ci,
     flowCatalog,
+    homePane,
     reviewDocsAgainstCode,
     jsdocRules,
     jsdocTree,

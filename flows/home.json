@@ -1,0 +1,35 @@
+{
+  "blocks": [
+    {
+      "type": "text",
+      "text": "Smithers builds itself with Smithers. Every change here is landed by the flows below, and the build, the tests, and the generated files are declared in this repository's PACKAGE.ts files."
+    },
+    {
+      "type": "flows",
+      "title": "Try first"
+    },
+    {
+      "type": "ci-benchmark",
+      "title": "CI on Smithers",
+      "measures": [
+        "cold",
+        "incremental",
+        "cache-hit-rate"
+      ]
+    },
+    {
+      "type": "links",
+      "title": "Read more",
+      "links": [
+        {
+          "label": "Source on GitHub",
+          "url": "https://github.com/smithersai/smithers"
+        },
+        {
+          "label": "smithers.sh",
+          "url": "https://smithers.sh"
+        }
+      ]
+    }
+  ]
+}

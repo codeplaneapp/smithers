@@ -64,6 +64,7 @@ const policies: Readonly<Record<string, Policy>> = {
   "Go.Lint": { check: true, cache: "check" },
   "Go.ModDownload": { cache: "always" },
   "Go.Test": { cache: "always" },
+  "HomePane": { check: true },
   "Literal": { writes: true, cache: "always" },
   "Markdown.CodeBlocks": { cache: "always" },
   "Materialize": { writes: true },

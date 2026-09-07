@@ -1,6 +1,7 @@
 import type { StorageApi } from "@tanstack/db"
 import { describe, expect, test } from "bun:test"
 import type { AppBootstrap } from "@smthrs/rpc/AppBootstrap"
+import type { HomeDocument } from "@smthrs/rpc/HomePane"
 import { cloudCapabilities } from "@smthrs/rpc/HostCapabilities"
 import type { NativeAgent, NativeRepositories } from "../../native/NativeBridge"
 import type { AppServices } from "../AppController"
@@ -297,6 +298,105 @@ describe("repo.explore", () => {
     await controller.commands.run("repo.explore")
     const [card] = onboardingCards(store)
     expect(card?.payload).toEqual({ stage: "explore", repo: REPO, guides: [], reason: "Repository data is temporarily unavailable." })
+  })
+})
+
+const HOME: HomeDocument = {
+  blocks: [
+    { type: "text", text: "Smithers builds itself with Smithers." },
+    { type: "flows", title: "Try first" },
+    { type: "ci-benchmark", title: "CI on Smithers", measures: ["cold", "incremental", "cache-hit-rate"] }
+  ]
+}
+const CATALOG = {
+  flows: [
+    { id: "review", summary: "Review the change.", featured: true },
+    { id: "lint", summary: "Lint the named files.", featured: true },
+    { id: "create-flow/scaffold", summary: null, featured: false }
+  ]
+}
+/** The contents route's file record, base64 as the mirror answers it. */
+const file = (value: unknown): Response =>
+  json(200, { path: "flows/home.json", encoding: "base64", content: btoa(JSON.stringify(value)) })
+
+const homeCards = (store: AppStore): Array<Extract<Card, { kind: "repo-home" }>> =>
+  [...store.collections.cards.values()].flatMap((card) => (card.kind === "repo-home" ? [card] : []))
+
+describe("repo.home", () => {
+  test("reads flows/home.json through the public contents route and carries the blocks with the catalog's featured rows", async () => {
+    const { store, controller, requests } = await fixture({
+      "/api/repos/smithersai/smithers/contents/flows/home.json": () => file(HOME),
+      "/api/repos/smithersai/smithers/contents/flows/catalog.json": () =>
+        json(200, { path: "flows/catalog.json", encoding: "utf-8", content: JSON.stringify(CATALOG) })
+    })
+    const outcome = await controller.commands.runForAgent("repo.home")
+    expect(outcome.status).toBe("executed")
+    expect(requests).toEqual([
+      "/api/repos/smithersai/smithers/contents/flows/home.json",
+      "/api/repos/smithersai/smithers/contents/flows/catalog.json"
+    ])
+    const [card] = homeCards(store)
+    expect(card?.id).toBe(`repo-home-${REPO}`)
+    expect(card?.payload).toEqual({
+      repo: REPO,
+      path: "flows/home.json",
+      blocks: HOME.blocks,
+      featuredFlows: [{ id: "review", summary: "Review the change." }, { id: "lint", summary: "Lint the named files." }]
+    })
+    if (outcome.status === "executed") {
+      expect(outcome.value).toContain("Smithers builds itself with Smithers.")
+      expect(outcome.value).toContain("review (Review the change.)")
+      expect(outcome.value).toContain("not measured yet")
+    }
+  })
+
+  test("without flows/home.json it refuses honestly and renders nothing", async () => {
+    const { store, controller } = await fixture({})
+    const outcome = await controller.commands.run("repo.home")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe(`${REPO} declares no home pane: it has no flows/home.json.`)
+    expect(homeCards(store)).toEqual([])
+  })
+
+  test("a file that carries raw HTML is not a home pane: nothing renders and the flow says why", async () => {
+    const { store, controller } = await fixture({
+      "/api/repos/smithersai/smithers/contents/flows/home.json": () => file({ blocks: [{ type: "text", text: "<h1>Hi</h1>" }] })
+    })
+    const outcome = await controller.commands.run("repo.home")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toContain("must not contain HTML")
+    expect(homeCards(store)).toEqual([])
+  })
+
+  test("a flows block without a catalog leaves the featured rows null with the reason", async () => {
+    const { store, controller } = await fixture({
+      "/api/repos/smithersai/smithers/contents/flows/home.json": () => file(HOME)
+    })
+    expect((await controller.commands.run("repo.home")).status).toBe("executed")
+    const [card] = homeCards(store)
+    expect(card?.payload.featuredFlows).toBeNull()
+    expect(card?.payload.featuredReason).toBe(`${REPO} has no flows/catalog.json, so its featured flows are not published yet.`)
+  })
+
+  test("repo.welcome renders the home pane above the welcome when the repository declares one, and stands alone when it does not", async () => {
+    const declared = await fixture({
+      "/api/repos/smithersai/smithers/contents/flows/home.json": () => file(HOME),
+      "/api/repos/smithersai/smithers/contents/flows/catalog.json": () =>
+        json(200, { path: "flows/catalog.json", encoding: "utf-8", content: JSON.stringify(CATALOG) })
+    })
+    const outcome = await declared.controller.commands.runForAgent("repo.welcome")
+    expect(outcome.status).toBe("executed")
+    if (outcome.status === "executed") expect(outcome.value).toContain("repo.home")
+    const [home] = homeCards(declared.store)
+    const [welcome] = onboardingCards(declared.store)
+    expect(home?.payload.blocks).toEqual(HOME.blocks)
+    expect(welcome?.payload.stage).toBe("welcome")
+    expect(home!.ordinal).toBeLessThan(welcome!.ordinal)
+
+    const undeclared = await fixture({})
+    expect((await undeclared.controller.commands.run("repo.welcome")).status).toBe("executed")
+    expect(homeCards(undeclared.store)).toEqual([])
+    expect(onboardingCards(undeclared.store).map((card) => card.payload.stage)).toEqual(["welcome"])
   })
 })
 

@@ -16,6 +16,7 @@ A Smithers workspace holds target declarations and flow sources. Runtime state l
 - PACKAGE.ts
 - flows/
   - catalog.json
+  - home.json
   - review/
     - flow.mdx
   - deploy/
@@ -48,6 +49,7 @@ One directory per flow; discovery reads these rules.
 - `smthrs init <name>` scaffolds `flows/<name>/flow.mdx`; the name is one path segment of letters, digits, `-`, and `_`.
 - Ids that start with `system/` are reserved for the control plane: `smthrs flow plan` and `smthrs flow start` refuse them, and `smthrs flow list` does not list them.
 - `flows/catalog.json` is generated, not authored. A root `PACKAGE.ts` that declares `Smithers.FlowCatalog` renders it from the discovered flows and the `Smithers.Flow` declarations beside it: every flow's id, description, path, kind, capabilities, and model, plus the `summary` and `featured` flag the repository declares. `smithers-build target //:flowCatalog --write` regenerates it and `ci` fails on drift. See [Featured flows](/docs/reference/flow-mdx/#featured-flows).
+- `flows/home.json` is generated the same way. It is the repository's home pane, the first card smithers.sh shows for the repository, declared in the root `PACKAGE.ts` as `export const home = Smithers.Factory.Home({ blocks })` and projected by a `Smithers.HomePane({ home })` target. Blocks are declared values, never raw HTML: `Smithers.Home.Text({ text })`, `Smithers.Home.Links({ links })`, `Smithers.Home.Flows()` (the featured flows, read from `catalog.json`), and `Smithers.Home.CiBenchmark()` (the cold CI time, the one-file-change time, and the cache hit rate, each shown as not measured yet until a measurement exists). A string carrying an HTML tag fails the declaration. `smithers-build target //:homePane --write` regenerates the file and `ci` fails on drift. A repository without the file has no home pane.
 
 ## .flows/
 

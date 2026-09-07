@@ -25,6 +25,7 @@ import { fileCardFamily } from "./FileCards"
 import { flowFormCardFamily } from "./FlowFormCards"
 import { graphCardFamily } from "./GraphCardLazy"
 import { historyCardFamily } from "./HistoryCard"
+import { homeCardFamily } from "./HomeCards"
 import { issueCardFamily } from "./IssueCards"
 import { landingCardFamily } from "./LandingCards"
 import { notificationsCardFamily } from "./NotificationsCard"
@@ -54,6 +55,7 @@ export const CARD_FAMILIES: ReadonlyArray<CardFamily<never>> = [
   triggersCardFamily,
   runsCardFamily,
   onboardingCardFamily,
+  homeCardFamily,
   issueCardFamily,
   landingCardFamily,
   changeCardFamily,
@@ -91,6 +93,7 @@ export const CARD_RENDERERS: CardFamily<Card["kind"]> = {
   ...triggersCardFamily,
   ...runsCardFamily,
   ...onboardingCardFamily,
+  ...homeCardFamily,
   ...issueCardFamily,
   ...landingCardFamily,
   ...changeCardFamily,

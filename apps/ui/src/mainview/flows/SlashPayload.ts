@@ -300,6 +300,7 @@ const GRAMMAR: Readonly<Record<string, (args: string | undefined) => Parsed>> = 
   "repo.maintain": (args) => repoOnly("repo.maintain", args),
   "repo.contribute": (args) => repoOnly("repo.contribute", args),
   "repo.explore": (args) => repoOnly("repo.explore", args),
+  "repo.home": (args) => repoOnly("repo.home", args),
   "feature.prototype": (args) => {
     const { rest, repo } = splitTrailingRepo(args)
     if (rest === "") return no("feature.prototype needs what the feature should do")

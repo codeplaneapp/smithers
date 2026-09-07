@@ -107,7 +107,7 @@ switching either is one edit to `WORKSPACE.ts`.
 
 ## What the catalog covers
 
-The catalog holds 104 rules. They group roughly like this:
+The catalog holds 105 rules. They group roughly like this:
 
 | Family                  | Rules                                                              |
 | ----------------------- | ------------------------------------------------------------------ |
@@ -115,11 +115,11 @@ The catalog holds 104 rules. They group roughly like this:
 | Rust and Go             | the `Cargo` and `Go` families, plus their toolchain declarations   |
 | Containers and services | `Docker.Build`, `Docker.Bake`, `Docker.Serve`, `Shell.Serve`       |
 | Publishing              | `Npm.Pack`, `Npm.Publish`, `JsrPublish`, `Changesets.Version`      |
-| Generated files         | `Generate`, `Tsconfig`, `FlowCatalog`, `PackageJsonWrite`          |
+| Generated files         | `Generate`, `Tsconfig`, `FlowCatalog`, `HomePane`, `PackageJsonWrite` |
 | Agents and model review | `Agent.Lint`, `Agent.Diff`, `Agent.Pr`, `LlmLint`                  |
 | Composition             | `Filegroup`, `Suite`, `Alias`, `Test`, `Materialize`               |
 
-[Catalog rules](./rules.md) lists all 104 with the verbs each one joins,
+[Catalog rules](./rules.md) lists all 105 with the verbs each one joins,
 whether its result may be replayed from the cache, and whether it declares an
 output tree.
 

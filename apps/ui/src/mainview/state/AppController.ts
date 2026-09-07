@@ -346,6 +346,7 @@ export interface AppController {
   readonly maintainRepo: OnboardingController["maintainRepo"]
   readonly contributeRepo: OnboardingController["contributeRepo"]
   readonly exploreRepo: OnboardingController["exploreRepo"]
+  readonly homeRepo: OnboardingController["homeRepo"]
   readonly prototypeFeature: OnboardingController["prototypeFeature"]
   /*
    * The multi-parity domain seams (MULTI-ACTIONS-GAP.md Tier 1/2): issues,
@@ -1256,6 +1257,7 @@ export const createAppController = (
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,
     exploreRepo: onboarding.exploreRepo,
+    homeRepo: onboarding.homeRepo,
     prototypeFeature: onboarding.prototypeFeature,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,
@@ -1586,6 +1588,7 @@ export const createAppController = (
     maintainRepo: onboarding.maintainRepo,
     contributeRepo: onboarding.contributeRepo,
     exploreRepo: onboarding.exploreRepo,
+    homeRepo: onboarding.homeRepo,
     prototypeFeature: onboarding.prototypeFeature,
     listIssues: issuesSeam.listIssues,
     viewIssue: issuesSeam.viewIssue,

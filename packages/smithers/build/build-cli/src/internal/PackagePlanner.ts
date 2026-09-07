@@ -2903,7 +2903,7 @@ const dataLabelsOf = (
  * because their `build` verb writes whatever the declaration says today, and
  * the executor suite pins that.
  */
-const plannedModeRules: ReadonlySet<string> = new Set(["FlowCatalog"])
+const plannedModeRules: ReadonlySet<string> = new Set(["FlowCatalog", "HomePane"])
 
 const withPlannedMode = (rule: string, attrs: unknown, mode: Mode): unknown =>
   plannedModeRules.has(rule) && mode !== "execute" && typeof attrs === "object" && attrs !== null

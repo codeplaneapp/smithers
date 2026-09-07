@@ -70,6 +70,7 @@
     "./FlowCatalog": "./src/FlowCatalog.ts",
     "./Foundry": "./src/Foundry.ts",
     "./GeneratedFile": "./src/GeneratedFile.ts",
+    "./Home": "./src/Home.ts",
     "./GitTarget": "./src/GitTarget.ts",
     "./GithubCiGen": "./src/GithubCiGen.ts",
     "./GithubTarget": "./src/GithubTarget.ts",
@@ -307,6 +308,11 @@
         "types": "./dist/esm/GeneratedFile.d.ts",
         "import": "./dist/esm/GeneratedFile.js",
         "require": "./dist/cjs/GeneratedFile.js"
+      },
+      "./Home": {
+        "types": "./dist/esm/Home.d.ts",
+        "import": "./dist/esm/Home.js",
+        "require": "./dist/cjs/Home.js"
       },
       "./GitTarget": {
         "types": "./dist/esm/GitTarget.d.ts",

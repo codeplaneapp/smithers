@@ -19,8 +19,18 @@
  * activity route or the card says it is not available yet; the guide
  * documents are the ones the repository holds, read through the same public
  * contents route files.read uses.
+ *
+ * The home pane (repo.home) is the repository's own first card, above the
+ * welcome: the blocks its root PACKAGE.ts declares with
+ * `Smithers.Factory.Home`, projected to flows/home.json and read through the
+ * same public contents route. A repository without the file has no home
+ * card; a file that is not a home pane (raw HTML included) renders nothing
+ * and the flow says why. The featured flows a flows block shows come from
+ * flows/catalog.json, never from the block.
  */
 import { publicRepoActivityPath } from "@smthrs/rpc/AgentApiRoutes"
+import { HOME_PANE_PATH, parseHomeDocument } from "@smthrs/rpc/HomePane"
+import type { HomeBlock } from "@smthrs/rpc/HomePane"
 import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "../seams/SeamContext"
@@ -28,6 +38,8 @@ import type { ControllerContext } from "./context"
 
 type OnboardingCard = Extract<Card, { kind: "repo-onboarding" }>
 type OnboardingPayload = OnboardingCard["payload"]
+type HomeCard = Extract<Card, { kind: "repo-home" }>
+type HomePayload = HomeCard["payload"]
 type Activity = NonNullable<Extract<OnboardingPayload, { stage: "maintain" }>["activity"]>
 
 export type Answer = Promise<string | void | { readonly value: string }>
@@ -41,6 +53,8 @@ export interface OnboardingController {
   readonly contributeRepo: (repo?: string) => Answer
   /** `repo.explore [owner/repo]`: what the wiki is, the repository's guide documents, and the invitation to ask. */
   readonly exploreRepo: (repo?: string) => Answer
+  /** `repo.home [owner/repo]`: the repository's home pane, the blocks its PACKAGE.ts declares, read from flows/home.json. */
+  readonly homeRepo: (repo?: string) => Answer
   /** `feature.prototype <request> [owner/repo]`: one read-only chat turn that sketches the feature. */
   readonly prototypeFeature: (request: string, repo?: string) => Answer
 }
@@ -64,6 +78,10 @@ const ROOT_GUIDES: ReadonlyArray<string> = ["README.md", "CONTRIBUTING.md", "llm
 const DOCS_INDEXES: ReadonlyArray<string> = ["README.md", "index.md"]
 
 export const ACTIVITY_UNAVAILABLE = "Recent activity is not available yet."
+/** The repository-relative catalog a flows block reads its featured rows from. */
+export const FLOW_CATALOG_PATH = "flows/catalog.json"
+export const noHomePane = (repo: string): string => `${repo} declares no home pane: it has no ${HOME_PANE_PATH}.`
+export const noFlowCatalog = (repo: string): string => `${repo} has no ${FLOW_CATALOG_PATH}, so its featured flows are not published yet.`
 export const NO_CONTRIBUTING_GUIDE = "This repository has no CONTRIBUTING.md."
 
 /** The sentence the welcome speaks: the catalog's summary as a predicate of the repository name. */
@@ -88,6 +106,36 @@ export const summaryPredicate = (repo: string, summary: string | undefined): str
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
+/** The text of one contents-route file record, decoding base64 when the route says so; null for a directory or an unreadable body. */
+export const fileText = (body: unknown): string | null => {
+  if (!isRecord(body) || typeof body.content !== "string") return null
+  if (body.encoding !== "base64") return body.content
+  try {
+    const bytes = Uint8Array.from(atob(body.content.replace(/\s+/g, "")), (char) => char.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return null
+  }
+}
+
+/** The featured rows of a flows/catalog.json text, in catalog order, or null when the text is not a catalog. */
+export const featuredRows = (text: string): Array<{ id: string; summary: string | null }> | null => {
+  let value: unknown
+  try {
+    value = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (!isRecord(value) || !Array.isArray(value.flows)) return null
+  const rows: Array<{ id: string; summary: string | null }> = []
+  for (const row of value.flows) {
+    if (!isRecord(row) || typeof row.id !== "string") return null
+    if (row.featured !== true) continue
+    rows.push({ id: row.id, summary: typeof row.summary === "string" ? row.summary : null })
+  }
+  return rows
+}
+
 /** A count as the route states it: a non-negative integer, or null when the mirror could not answer. */
 const asCount = (value: unknown): number | null | undefined =>
   value === null ? null : typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined
@@ -110,7 +158,7 @@ export const parseActivity = (body: unknown): Activity | null => {
 export const createOnboardingController = (ctx: ControllerContext, deps: OnboardingDependencies): OnboardingController => {
   const { store } = ctx
 
-  const upsert = (id: string, title: string, payload: OnboardingPayload): void => {
+  const upsert = (id: string, title: string, payload: OnboardingPayload, ordinal = deps.nextOrdinal()): void => {
     store.dispatch({
       type: "card.upsert",
       actor: ctx.commandActor,
@@ -120,7 +168,23 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
         title,
         status: "active",
         createdAt: Date.now(),
-        ordinal: deps.nextOrdinal(),
+        ordinal,
+        payload
+      }
+    })
+  }
+
+  const upsertHome = (repo: string, payload: HomePayload, ordinal: number): void => {
+    store.dispatch({
+      type: "card.upsert",
+      actor: ctx.commandActor,
+      card: {
+        id: `repo-home-${repo}`,
+        kind: "repo-home",
+        title: `Home · ${repo}`,
+        status: "active",
+        createdAt: Date.now(),
+        ordinal,
         payload
       }
     })
@@ -162,15 +226,95 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
     )
   }
 
+  /** One file's text through the public contents route: null when the path is absent, the refusal when it could not be read. */
+  const readText = async (repo: string, path: string): Promise<string | null | { readonly refusal: string }> => {
+    let response: Response
+    try {
+      response = await ctx.boundedFetch(contentsUrl(repo, path))
+    } catch (error) {
+      return { refusal: `${path} in ${repo} could not be read: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    if (response.status === 404) return null
+    if (!response.ok) return { refusal: await readErrorMessage(response, `${path} in ${repo} could not be read (HTTP ${response.status}).`) }
+    const text = fileText(await response.json().catch(() => null))
+    return text === null ? { refusal: `${path} in ${repo} was unreadable.` } : text
+  }
+
+  /**
+   * The home pane as the card carries it: null when the repository declares
+   * none, the refusal when the file is not a home pane or could not be read.
+   * A flows block asks the catalog for the featured rows; an absent or
+   * unreadable catalog leaves them null with the reason on the payload.
+   */
+  const readHome = async (repo: string): Promise<HomePayload | null | { readonly refusal: string }> => {
+    const text = await readText(repo, HOME_PANE_PATH)
+    if (text === null || typeof text !== "string") return text
+    const parsed = parseHomeDocument(text)
+    if (!parsed.ok) return { refusal: `${repo}: ${parsed.reason}` }
+    const blocks: Array<HomeBlock> = parsed.document.blocks
+    let featuredFlows: HomePayload["featuredFlows"] = null
+    let featuredReason: string | undefined
+    if (blocks.some((block) => block.type === "flows")) {
+      const catalog = await readText(repo, FLOW_CATALOG_PATH)
+      if (catalog === null) featuredReason = noFlowCatalog(repo)
+      else if (typeof catalog !== "string") featuredReason = catalog.refusal
+      else {
+        featuredFlows = featuredRows(catalog)
+        if (featuredFlows === null) featuredReason = `${FLOW_CATALOG_PATH} in ${repo} is not a flow catalog.`
+      }
+    }
+    return { repo, path: HOME_PANE_PATH, blocks, featuredFlows, ...(featuredReason === undefined ? {} : { featuredReason }) }
+  }
+
+  /** What the model is told the pane shows: every block, in order, by what it says. */
+  const homeValue = (payload: HomePayload): string => {
+    const parts = payload.blocks.map((block) => {
+      switch (block.type) {
+        case "text":
+          return block.text
+        case "links":
+          return `${block.title ?? "Links"}: ${block.links.map((link) => `${link.label} (${link.url})`).join(", ")}`
+        case "flows":
+          return payload.featuredFlows === null
+            ? payload.featuredReason ?? noFlowCatalog(payload.repo)
+            : `${block.title ?? "Featured flows"}: ${
+              payload.featuredFlows.map((flow) => (flow.summary === null ? flow.id : `${flow.id} (${flow.summary})`)).join("; ")
+            }`
+        case "ci-benchmark":
+          return `${block.title ?? "CI benchmark"}: ${block.measures.join(", ")} are not measured yet.`
+      }
+    })
+    return `The home pane of ${payload.repo}, declared in its PACKAGE.ts: ${parts.join(" ")}`
+  }
+
   const welcomeRepo: OnboardingController["welcomeRepo"] = async (explicit) => {
     const target = resolveTargetRepo(store, explicit)
     if ("error" in target) return target.error
     const { repo } = target
     const summary = summaryPredicate(repo, store.collections.repositories.get(repo)?.summary)
-    upsert(`repo-welcome-${repo}`, `Welcome · ${repo}`, { stage: "welcome", repo, summary })
+    // The home pane sits above the welcome. Ordinals are read off the transcript
+    // (highest + 1), so the welcome takes the slot after the pane's and the
+    // pane, read after the welcome renders, fills the one below it.
+    const homeOrdinal = deps.nextOrdinal()
+    upsert(`repo-welcome-${repo}`, `Welcome · ${repo}`, { stage: "welcome", repo, summary }, homeOrdinal + 1)
+    const home = await readHome(repo)
+    if (home !== null && !("refusal" in home)) upsertHome(repo, home, homeOrdinal)
     return {
-      value: `${welcomeSentence(repo, summary)} The card asks whether they are maintaining this repo (repo.maintain), contributing to it (repo.contribute), or just exploring (repo.explore).`
+      value: `${welcomeSentence(repo, summary)} The card asks whether they are maintaining this repo (repo.maintain), contributing to it (repo.contribute), or just exploring (repo.explore).${
+        home !== null && !("refusal" in home) ? ` Above it, the repository's home pane (repo.home) shows what it declares.` : ""
+      }`
     }
+  }
+
+  const homeRepo: OnboardingController["homeRepo"] = async (explicit) => {
+    const target = resolveTargetRepo(store, explicit)
+    if ("error" in target) return target.error
+    const { repo } = target
+    const home = await readHome(repo)
+    if (home === null) return noHomePane(repo)
+    if ("refusal" in home) return home.refusal
+    upsertHome(repo, home, deps.nextOrdinal())
+    return { value: homeValue(home) }
   }
 
   const maintainRepo: OnboardingController["maintainRepo"] = async (explicit) => {
@@ -287,5 +431,5 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
     deps.send(brief)
   }
 
-  return { welcomeRepo, maintainRepo, contributeRepo, exploreRepo, prototypeFeature }
+  return { welcomeRepo, maintainRepo, contributeRepo, exploreRepo, homeRepo, prototypeFeature }
 }

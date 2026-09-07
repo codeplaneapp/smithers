@@ -265,6 +265,13 @@ describe("launch-law parity: every affordance is a command", () => {
        */
       "../cards/OnboardingCards.tsx": 1,
       /*
+       * The repository's home pane (controller/onboarding.ts): the featured
+       * flows' doors (flow.run) and Open PACKAGE.ts (files.read) are one
+       * shared handler through onRunCommand with data-flow set; links are
+       * anchors, not buttons.
+       */
+      "../cards/HomeCards.tsx": 1,
+      /*
        * Lane change (ADR 0003) + lane L1 (ADR 0004, the live plue routes):
        * the change card's facet tabs, Land / Split ready / Revert / Full
        * diff, the conflict rows' Resolve, the Diff facet's two pickers, its

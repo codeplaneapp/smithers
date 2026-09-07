@@ -584,6 +584,7 @@ describe("command registry bindings", () => {
       "repo.maintain",
       "repo.contribute",
       "repo.explore",
+      "repo.home",
       "feature.prototype",
       // §17.4: billing.upgrade / billing.portal register in the ADMIN plugin
       // only — no checkout is exposed to an MVP account.

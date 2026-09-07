@@ -23,6 +23,7 @@ import {
   LandingBlockSchema,
   RevisionPinSchema
 } from "./Changes.ts"
+import { HomeBlockSchema } from "./HomePane.ts"
 import {
   HARNESS_IDS,
   LSP_DIAGNOSTICS_CAP,
@@ -1879,6 +1880,27 @@ export const CardSchema = z.discriminatedUnion("kind", [
         reason: z.string().optional()
       })
     ])
+  }),
+  /*
+   * The repository's home pane (apps/ui controller/onboarding.ts): the first
+   * card a repository shows, declared in its root PACKAGE.ts as
+   * `Smithers.Factory.Home` and read as `flows/home.json` from the public
+   * mirror. `blocks` are the declared blocks verbatim (HomePane.ts refuses
+   * raw HTML); `featuredFlows` is the catalog's featured set when a flows
+   * block asked for it and the catalog answered, null when it did not, with
+   * `featuredReason` saying why.
+   */
+  z.object({
+    ...cardBaseShape,
+    kind: z.literal("repo-home"),
+    payload: z.object({
+      repo: z.string(),
+      /** The repository-relative file the pane was read from. */
+      path: z.string(),
+      blocks: z.array(HomeBlockSchema),
+      featuredFlows: z.array(z.object({ id: z.string(), summary: z.string().nullable() })).nullable(),
+      featuredReason: z.string().optional()
+    })
   }),
   z.object({
     ...cardBaseShape,
