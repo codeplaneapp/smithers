@@ -267,7 +267,10 @@ describe("Agent.Diff dispatch", () => {
   const diffPackage = (port: number): string =>
     `import { Smithers as S } from "@smthrs/targets"
 const srcs = S.Filegroup({ srcs: S.glob(["src/**"]) })
-const gate = S.Shell.Test({ shell: "test -f out/generated.txt" })
+// The gate reads the candidate file's bytes, not just its metadata: seatbelt
+// allows file-read-metadata under the whole workspace, so a bare \`test -f\`
+// would go green on macOS even when the candidate is hidden from the gate.
+const gate = S.Shell.Test({ shell: "grep -q generated out/generated.txt" })
 const fix = S.Agent.Diff({
   prompt: S.file("//prompt.md"),
   payload: { issue: S.Input.String("issue id") },

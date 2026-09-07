@@ -129,10 +129,18 @@ export const sandboxRequest = (
   node: PackageNode,
   nodes: ReadonlyMap<string, PackageNode>,
   workspace: WorkspaceDeclaration.WorkspaceDeclaration,
-  cacheDirectory: string
+  cacheDirectory: string,
+  candidateReads: ReadonlyArray<string> = []
 ): ExecSandbox.Request => {
   const reads = new Set<string>()
   for (const path of managerFilesOf(workspace)) reads.add(path)
+  // A gate judging an agent candidate reads what the candidate may have
+  // changed: the consumer's write-set and the overlay's own paths. Those files
+  // are the gate's subject, not its declared inputs, and the confinement binds
+  // only declared reads into the scratch tree (bubblewrap covers the workspace
+  // with a tmpfs; seatbelt denies undeclared data reads), so without this the
+  // gate judges a tree the candidate is missing from and stays red forever.
+  for (const path of candidateReads) reads.add(path)
   // Tools run from their declaring package and may inspect the directory
   // itself while opening explicitly declared children (Corepack and rm do).
   if (node.packagePath !== "") reads.add(node.packagePath)
@@ -397,7 +405,8 @@ export const execute = async (
     node: PackageNode,
     workspaceRoot: string,
     signal: AbortSignal | undefined = options.signal,
-    override?: ReadonlyArray<string>
+    override?: ReadonlyArray<string>,
+    candidateReads: ReadonlyArray<string> = []
   ): Promise<ExecOutcome> => {
     const resolved = await resolveSpawn(node, override)
     if ("error" in resolved) return { ok: false, error: resolved.error }
@@ -429,7 +438,7 @@ export const execute = async (
         sensitiveEnv: credentialNames,
         // The exec boundary enforces the confinement or fails the run closed;
         // nothing here can weaken it into a warning.
-        sandbox: sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory),
+        sandbox: sandboxRequest(node, planned.nodes, index.workspace, cacheDirectory, candidateReads),
         ...(node.nixEnvironment === undefined ? {} : {
           environment: {
             path: node.nixEnvironment.path.join(NodePath.delimiter),
@@ -1301,7 +1310,8 @@ export const execute = async (
   const gateAgainstTree = async (
     label: string,
     treeRoot: string,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    candidateReads: ReadonlyArray<string>
   ): Promise<AgentTarget.GateReportEntry> => {
     const red = (detail: string): AgentTarget.GateReportEntry => ({
       gate: label,
@@ -1321,11 +1331,11 @@ export const execute = async (
         label,
         gateNode.serviceDeps,
         treeRoot,
-        (inner) => judgeAgainstTree(gateNode, label, treeRoot, inner)
+        (inner) => judgeAgainstTree(gateNode, label, treeRoot, inner, candidateReads)
       )
       return judged.ok ? judged.value : red(judged.error)
     }
-    return judgeAgainstTree(gateNode, label, treeRoot, signal)
+    return judgeAgainstTree(gateNode, label, treeRoot, signal, candidateReads)
   }
 
   /** Judges one planned gate against a tree; services, if any, are already up. */
@@ -1333,7 +1343,8 @@ export const execute = async (
     gateNode: PackageNode,
     label: string,
     treeRoot: string,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    candidateReads: ReadonlyArray<string>
   ): Promise<AgentTarget.GateReportEntry> => {
     const red = (detail: string): AgentTarget.GateReportEntry => ({
       gate: label,
@@ -1346,10 +1357,12 @@ export const execute = async (
         return { gate: label, status: "green" }
       case "Alias":
         if (gateNode.aliasOf === undefined) return red("alias names no target")
-        return { ...(await gateAgainstTree(gateNode.aliasOf, treeRoot, signal)), gate: label }
+        return { ...(await gateAgainstTree(gateNode.aliasOf, treeRoot, signal, candidateReads)), gate: label }
       case "Suite": {
         const members: Array<AgentTarget.GateReportEntry> = []
-        for (const member of gateNode.members) members.push(await gateAgainstTree(member, treeRoot, signal))
+        for (const member of gateNode.members) {
+          members.push(await gateAgainstTree(member, treeRoot, signal, candidateReads))
+        }
         const failed = members.filter((entry) => entry.status === "red")
         if (failed.length === 0) return { gate: label, status: "green" }
         return red(
@@ -1358,7 +1371,7 @@ export const execute = async (
       }
       case "Shell.Test":
       case "Shell.Build": {
-        const spawned = await spawnNode(gateNode, treeRoot, signal)
+        const spawned = await spawnNode(gateNode, treeRoot, signal, undefined, candidateReads)
         return spawned.ok ? { gate: label, status: "green" } : red(spawned.error ?? "tool run failed")
       }
       case "Cargo.Test":
@@ -1368,7 +1381,7 @@ export const execute = async (
       case "Cargo.Fmt": {
         if (gateNode.lane?.kind !== "cargo") return red("cargo gate planned no commands")
         for (const command of gateNode.lane.commands) {
-          const spawned = await spawnNode(gateNode, treeRoot, signal, command)
+          const spawned = await spawnNode(gateNode, treeRoot, signal, command, candidateReads)
           if (!spawned.ok) return red(spawned.error ?? "cargo run failed")
         }
         return { gate: label, status: "green" }
@@ -1397,6 +1410,12 @@ export const execute = async (
           if (gateIdentities.length === 0) return []
           const scratch = await PackageTree.scratchCopy(root, cacheDirectory)
           try {
+            // What the gate may read of the candidate: the consumer's write-set
+            // (its static prefixes, the directories the agent fills) and every
+            // path this overlay wrote. The plan drops a read that does not
+            // exist, so a prefix the candidate never created costs nothing.
+            const candidateReads = new Set<string>()
+            for (const pattern of node.writeSet) candidateReads.add(staticPrefixOf(pattern) || ".")
             for (const [path, contents] of overlay.files) {
               const absolute = NodePath.join(scratch, ...path.split("/"))
               if (contents === null) {
@@ -1404,6 +1423,7 @@ export const execute = async (
               } else {
                 await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
                 await Fs.writeFile(absolute, contents, "utf8")
+                candidateReads.add(path)
               }
             }
             const entries: Array<AgentTarget.GateReportEntry> = []
@@ -1413,7 +1433,7 @@ export const execute = async (
                 entries.push({ gate: identity, status: "red", detail: "gate identity was not planned" })
                 continue
               }
-              const entry = await gateAgainstTree(label, scratch, signal)
+              const entry = await gateAgainstTree(label, scratch, signal, [...candidateReads])
               log(`${node.label}  round ${round}: gate ${label} ${entry.status}`)
               entries.push(entry)
             }
