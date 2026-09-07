@@ -1027,14 +1027,14 @@ export const createAppController = (
   /*
    * The repository welcome and its three answers: the sign-in gate rides the
    * requirement axis' park (deferCommand) and the auth.prompt step; the
-   * feature sketch rides the composer's own submit as the human's turn.
+   * feature prototype rides flow.run's launch path as a run of kind prototype.
    */
   const onboarding = actors.pair(ctx, (context, select) =>
     createOnboardingController(context, {
       nextOrdinal: nextTranscriptOrdinal,
       deferCommand,
       promptSignIn,
-      send: select(send)
+      workflows: select(workflowController)
     }))
 
   /*

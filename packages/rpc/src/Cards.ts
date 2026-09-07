@@ -687,6 +687,14 @@ export const CardSchema = z.discriminatedUnion("kind", [
        */
       /** The launch input, so `runs.rerun` relaunches the same flow with the same arguments. */
       input: z.record(z.string(), z.unknown()).optional(),
+      /**
+       * The run's kind (Factory design session 2026-09-07 §6b): "prototype"
+       * for a run `feature.prototype` started, "implement" for an Implement
+       * run. Prototype is a run kind, not its own UI: the kind selects the
+       * trace as the card's default facet and the never-promoted banner.
+       * Absent for every other run.
+       */
+      kind: z.string().optional(),
       /** Why a live run is not moving, in the control plane's word ("approval", "timer", "executor" when accepted). */
       waiting: z.string().optional(),
       /** Whether an operator steer is queued for the run. */

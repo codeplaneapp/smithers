@@ -25,6 +25,8 @@ export interface WorkflowController {
    * second launch that could drift from the one `flow.run` proves.
    */
   readonly workflowIdentityGuard: () => string | undefined
+  /** The refusal a $0 balance answers a launch with, already in the transcript; undefined when work may start. */
+  readonly workflowBalanceGuard: () => string | undefined
   readonly workflowTargetRepo: (preferred?: string) => { readonly repo: string } | { readonly error: string }
   readonly provisionWorkspace: (repo: string) => Promise<true | string>
   readonly upsertRunCard: (args: {
@@ -34,12 +36,15 @@ export interface WorkflowController {
     readonly title: string
     readonly firstStep: string
     readonly input?: Record<string, unknown>
+    /** The run's kind (prototype, implement); absent for every other run. */
+    readonly kind?: string
   }) => string
   readonly launchWorkflow: (args: {
     readonly repo: string
     readonly workflow: string
     readonly input: Record<string, unknown>
     readonly title: string
+    readonly kind?: string
   }) => Promise<{ readonly runId: string } | string>
   /** A decision made on the workspace approvals inbox, for a gate whose own card never landed. */
   readonly forwardInboxApprovalDecision: (
@@ -202,6 +207,7 @@ export const createWorkflowController = (
     readonly title: string
     readonly firstStep: string
     readonly input?: Record<string, unknown>
+    readonly kind?: string
   }): string => {
     const cardId = `flow-run-${args.runId}`
     const existing = store.collections.cards.get(cardId)
@@ -220,7 +226,8 @@ export const createWorkflowController = (
         steps: [args.firstStep],
         result: null,
         lastSeq: 0,
-        ...(args.input === undefined ? {} : { input: args.input })
+        ...(args.input === undefined ? {} : { input: args.input }),
+        ...(args.kind === undefined ? {} : { kind: args.kind })
       }
     }
     store.dispatch({ type: "card.upsert", actor: ctx.commandActor, card })
@@ -233,6 +240,7 @@ export const createWorkflowController = (
     readonly workflow: string
     readonly input: Record<string, unknown>
     readonly title: string
+    readonly kind?: string
   }): Promise<{ readonly runId: string } | string> => {
     const launch = await gateway.launch(args.repo, args.workflow, args.input)
     if (launch.status !== "ok") return launch.message
@@ -243,7 +251,8 @@ export const createWorkflowController = (
       workflow: args.workflow,
       title: args.title,
       firstStep: `Started ${args.workflow} on ${args.repo} (run ${runId}).`,
-      input: args.input
+      input: args.input,
+      ...(args.kind === undefined ? {} : { kind: args.kind })
     })
     return { runId }
   }
@@ -588,6 +597,7 @@ export const createWorkflowController = (
     chooseWorkflowRepo,
     forwardApprovalDecision,
     workflowIdentityGuard,
+    workflowBalanceGuard: zeroBalanceGuard,
     workflowTargetRepo,
     provisionWorkspace,
     upsertRunCard,

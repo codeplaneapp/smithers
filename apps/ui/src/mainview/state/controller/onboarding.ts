@@ -27,6 +27,12 @@
  * card; a file that is not a home pane (raw HTML included) renders nothing
  * and the flow says why. The featured flows a flows block shows come from
  * flows/catalog.json, never from the block.
+ *
+ * The feature sketch (feature.prototype) is a run of kind prototype (Factory
+ * design session 2026-09-07 §6b): the same launch path flow.run proves, on
+ * the workspace's `prototype` flow, tracked by the same run card. The same
+ * sign-in gate as contributing parks a signed-out visitor on the auth.prompt
+ * step before anything is provisioned.
  */
 import { publicRepoActivityPath } from "@smthrs/rpc/AgentApiRoutes"
 import { HOME_PANE_PATH, parseHomeDocument } from "@smthrs/rpc/HomePane"
@@ -35,6 +41,7 @@ import type { Card } from "../AppState"
 import { resolveTargetRepo } from "../RepoContext"
 import { readErrorMessage } from "../seams/SeamContext"
 import type { ControllerContext } from "./context"
+import type { WorkflowController } from "./workflows"
 
 type OnboardingCard = Extract<Card, { kind: "repo-onboarding" }>
 type OnboardingPayload = OnboardingCard["payload"]
@@ -55,9 +62,14 @@ export interface OnboardingController {
   readonly exploreRepo: (repo?: string) => Answer
   /** `repo.home [owner/repo]`: the repository's home pane, the blocks its PACKAGE.ts declares, read from flows/home.json. */
   readonly homeRepo: (repo?: string) => Answer
-  /** `feature.prototype <request> [owner/repo]`: one read-only chat turn that sketches the feature. */
+  /** `feature.prototype <request> [owner/repo]`: start a run of kind prototype on the request. */
   readonly prototypeFeature: (request: string, repo?: string) => Answer
 }
+
+/** The flow a prototype run launches on the workspace (design session §6: `/prototype <goal>`). */
+export const PROTOTYPE_FLOW_ID = "prototype"
+/** The run kind the prototype's card carries. */
+export const PROTOTYPE_RUN_KIND = "prototype"
 
 export interface OnboardingDependencies {
   readonly nextOrdinal: () => number
@@ -65,8 +77,11 @@ export interface OnboardingDependencies {
   readonly deferCommand: (name: string, args: string | null, requirement: string) => void
   /** The sign-in step, rendered into the chat (auth.prompt). */
   readonly promptSignIn: () => void
-  /** The composer's submit: the human's turn on the sketch prompt. */
-  readonly send: (text: string) => void
+  /** The one launch path (flow.run's): guards, the workspace, the launch, the run card. */
+  readonly workflows: Pick<
+    WorkflowController,
+    "workflowIdentityGuard" | "workflowBalanceGuard" | "provisionWorkspace" | "launchWorkflow"
+  >
 }
 
 /** The maintainer's reads, in button order; only the ones this host registers reach the card. */
@@ -418,17 +433,44 @@ export const createOnboardingController = (ctx: ControllerContext, deps: Onboard
     }
   }
 
+  /*
+   * A run of kind prototype on the request. The sign-in gate parks a
+   * signed-out human on the auth.prompt step (resumed after the redirect) and
+   * refuses the model; after it, the guards are the ones flow.run applies:
+   * the allowlist and the balance. The launch is flow.run's own (provision,
+   * then Plan, approve, Run through the gateway seam), and the card it
+   * upserts carries the kind, so the run renders as a trace with the
+   * never-promoted banner rather than as a second surface.
+   */
   const prototypeFeature: OnboardingController["prototypeFeature"] = async (request, explicit) => {
     const what = request.trim()
     if (what === "") return "feature.prototype needs what the feature should do"
+    const gated = gate("feature.prototype", explicit === undefined ? what : `${what} ${explicit}`)
+    if (gated !== undefined || ctx.commands.state().signedOut) return gated
+    const guard = deps.workflows.workflowIdentityGuard()
+    if (guard !== undefined) return guard
+    const balance = deps.workflows.workflowBalanceGuard()
+    if (balance !== undefined) return balance
     const target = resolveTargetRepo(store, explicit)
     if ("error" in target) return target.error
     const { repo } = target
-    const brief =
-      `Sketch a feature for ${repo}, read-only: ${what}. Describe what it should do, where in the repository it would live, and the smallest first step. Do not create a workspace, a branch, or a pull request.`
-    // The model is already the turn: the sketch is its own next answer, never a nested turn.
-    if (ctx.commandActor === "smithers") return { value: brief }
-    deps.send(brief)
+    const provisioned = await deps.workflows.provisionWorkspace(repo)
+    if (provisioned !== true) return provisioned
+    const launched = await deps.workflows.launchWorkflow({
+      repo,
+      workflow: PROTOTYPE_FLOW_ID,
+      input: { goal: what },
+      title: `${PROTOTYPE_RUN_KIND} · ${what.length > 80 ? `${what.slice(0, 79)}…` : what}`,
+      kind: PROTOTYPE_RUN_KIND
+    })
+    if (typeof launched === "string") {
+      // A workspace without the prototype flow says so; the refusal names the flow, never a guess at another.
+      return /unknown|not found/i.test(launched)
+        ? `${repo} has no ${PROTOTYPE_FLOW_ID} flow on its workspace yet, so there is nothing to run the prototype with.`
+        : launched
+    }
+    // The same minimal acknowledgment flow.run answers: the card is the claim surface.
+    return { value: `run-started workflow=${PROTOTYPE_FLOW_ID} run=${launched.runId} repo=${repo} kind=${PROTOTYPE_RUN_KIND}` }
   }
 
   return { welcomeRepo, maintainRepo, contributeRepo, exploreRepo, homeRepo, prototypeFeature }

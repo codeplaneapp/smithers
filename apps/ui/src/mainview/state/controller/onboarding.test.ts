@@ -18,7 +18,8 @@ import { parseActivity, summaryPredicate, welcomeSentence } from "./onboarding"
  * renders the step and fails honestly), the explore branch (the guide
  * documents the repository actually holds, read through the public contents
  * route), the maintain card's honest line while the activity route 404s, and
- * the feature sketch as the human's own turn.
+ * the feature prototype as a run of kind prototype through flow.run's launch
+ * path.
  */
 
 const createAppController = scopedControllers()
@@ -57,7 +58,10 @@ const settled = async (ticks = 4): Promise<void> => {
   for (let tick = 0; tick < ticks; tick += 1) await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
-const fixture = async (routes: Record<string, () => Response>) => {
+/** A route stub: the response for one path, given the request's init (the relay stubs read the body). */
+type Route = (init?: RequestInit) => Response
+
+const fixture = async (routes: Record<string, Route>) => {
   const store = await createAppStore({ kind: "localStorage", storage: memoryStorage() })
   const requests: Array<string> = []
   const turns: Array<string> = []
@@ -73,11 +77,12 @@ const fixture = async (routes: Record<string, () => Response>) => {
   }
   const services: AppServices = {
     bootstrap: WEB,
-    fetchImpl: async (input) => {
+    workflowPollMs: 5,
+    fetchImpl: async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
       const path = new URL(url, "https://app.test").pathname
       requests.push(path)
-      return (routes[path] ?? (() => json(404, { status: "error", message: `no stub for ${path}` })))()
+      return (routes[path] ?? (() => json(404, { status: "error", message: `no stub for ${path}` })))(init)
     }
   }
   const controller = createAppController(store, unavailableRepositories, agent, services)
@@ -400,9 +405,74 @@ describe("repo.home", () => {
   })
 })
 
+/*
+ * The relay, as the prototype launch rides it: provision answers ready, and
+ * the gateway procedures answer in the wire's shapes. Every procedure the
+ * launch called is recorded so the test reads the launch off the wire, not
+ * off the card alone.
+ */
+const relayStubs = (options: { readonly refuseRun?: string } = {}) => {
+  const procedures: Array<{ readonly procedure: string; readonly payload: Record<string, unknown> }> = []
+  const rpc: Route = (init) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as { procedure?: string; payload?: Record<string, unknown> }
+    const procedure = body.procedure ?? ""
+    const payload = body.payload ?? {}
+    procedures.push({ procedure, payload })
+    switch (procedure) {
+      case "Plan":
+        return json(200, {
+          ok: true,
+          payload: { planId: "plan-1", flowId: payload.flowId, digest: "digest-1", envelope: { capabilities: [], flows: [], budget: {} }, nodes: [] }
+        })
+      case "Approval.Submit":
+        return json(200, { ok: true, payload: { decision: { _tag: "Accepted", receiptId: "a" } } })
+      case "Run":
+        return options.refuseRun === undefined
+          ? json(200, { ok: true, payload: { _tag: "Accepted", receiptId: "r", runId: "run-1" } })
+          : json(200, { ok: false, error: { message: options.refuseRun } })
+      case "Projection.Snapshot":
+        return json(200, {
+          ok: true,
+          payload: {
+            cursor: { projection: "run-summary", runId: "run-1", value: 0 },
+            rows: [{
+              runId: "run-1",
+              flowId: "prototype",
+              status: "running",
+              createdAt: 1,
+              updatedAt: 2,
+              turns: 0,
+              calls: 0,
+              callsFailed: 0,
+              editsAttempted: 0,
+              editsSucceeded: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              verdict: "running",
+              diagnosis: ""
+            }]
+          }
+        })
+      default:
+        return json(200, { ok: false, error: { message: `no ${procedure}` } })
+    }
+  }
+  return {
+    procedures,
+    routes: {
+      "/api/workflow/provision": () => json(200, { status: "ready", repo: REPO, gatewayId: "gw-1" }),
+      "/api/workflow/rpc": rpc
+    }
+  }
+}
+
+const runCards = (store: AppStore): Array<Extract<Card, { kind: "flow-run" }>> =>
+  [...store.collections.cards.values()].flatMap((card) => (card.kind === "flow-run" ? [card] : []))
+
 describe("feature.prototype", () => {
-  test("the human's invocation starts one read-only chat turn on the request; the model's answers the brief to sketch in its own turn", async () => {
-    const { store, controller, turns } = await fixture({})
+  test("signed in, the human's request starts a run of kind prototype on the workspace's prototype flow, tracked by the run card", async () => {
+    const relay = relayStubs()
+    const { store, controller, turns } = await fixture(relay.routes)
     identity(store, "signed-in")
     await settled()
     // Missing input renders the form, never a usage sentence (THE FORM LAW).
@@ -412,15 +482,70 @@ describe("feature.prototype", () => {
 
     const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
     expect(outcome.status).toBe("executed")
-    await settled(8)
-    const user = [...store.collections.messages.values()].find((message) => message.role === "user")
-    expect(user?.text).toContain(`Sketch a feature for ${REPO}, read-only: a dark mode toggle.`)
-    expect(user?.text).toContain("Do not create a workspace, a branch, or a pull request.")
-    expect(turns).toHaveLength(1)
+    if (outcome.status === "executed") {
+      expect(outcome.value).toContain("run-started workflow=prototype run=run-1")
+      expect(outcome.value).toContain("kind=prototype")
+    }
+    // The launch is flow.run's own: Plan, approve the plan, Run, on the prototype flow with the request as its goal.
+    expect(relay.procedures.map((call) => call.procedure).slice(0, 3)).toEqual(["Plan", "Approval.Submit", "Run"])
+    expect(relay.procedures[0]?.payload).toMatchObject({ flowId: "prototype", input: { goal: "a dark mode toggle" } })
+    const [card] = runCards(store)
+    expect(card?.id).toBe("flow-run-run-1")
+    expect(card?.payload).toMatchObject({
+      repo: REPO,
+      runId: "run-1",
+      workflow: "prototype",
+      kind: "prototype",
+      input: { goal: "a dark mode toggle" }
+    })
+    expect(card?.title).toBe("prototype · a dark mode toggle")
+    // No chat turn is spent on a sketch: the run is the answer.
+    expect(turns).toHaveLength(0)
+    expect([...store.collections.messages.values()].filter((message) => message.role === "user")).toHaveLength(0)
+  })
 
-    const viaAgent = await controller.commands.runForAgent("feature.prototype", "a dark mode toggle")
-    expect(viaAgent.status).toBe("executed")
-    if (viaAgent.status === "executed") expect(viaAgent.value).toContain("Sketch a feature for")
-    expect(turns).toHaveLength(1)
+  test("signed out, the human's request parks on the sign-in step and resumes as a launch once signed in", async () => {
+    const relay = relayStubs()
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-out")
+    await settled()
+    const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
+    expect(outcome.status).toBe("executed")
+    await settled()
+    expect(lastMessage(store)?.action).toEqual({ flow: "auth.sign-in", label: "Sign in with GitHub" })
+    expect(store.session().pendingCommand).toMatchObject({ name: "feature.prototype", args: "a dark mode toggle", requirement: "signed-in" })
+    // Nothing was provisioned or launched for a signed-out visitor.
+    expect(relay.procedures).toEqual([])
+    expect(runCards(store)).toEqual([])
+
+    identity(store, "signed-in")
+    controller.resumeDeferredCommand()
+    await settled(8)
+    expect(store.session().pendingCommand ?? null).toBeNull()
+    expect(relay.procedures.map((call) => call.procedure)).toContain("Run")
+    expect(runCards(store)[0]?.payload).toMatchObject({ kind: "prototype", workflow: "prototype" })
+  })
+
+  test("the model's signed-out invocation renders the sign-in step and fails honestly without launching", async () => {
+    const relay = relayStubs()
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-out")
+    await settled()
+    const outcome = await controller.commands.runForAgent("feature.prototype", "a dark mode toggle")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toContain("Sign in with GitHub first")
+    expect(lastMessage(store)?.action?.flow).toBe("auth.sign-in")
+    expect(relay.procedures).toEqual([])
+  })
+
+  test("a workspace without the prototype flow is named, not guessed around", async () => {
+    const relay = relayStubs({ refuseRun: "Unknown flow: prototype" })
+    const { store, controller } = await fixture(relay.routes)
+    identity(store, "signed-in")
+    await settled()
+    const outcome = await controller.commands.run("feature.prototype", "a dark mode toggle")
+    expect(outcome.status).toBe("failed")
+    if (outcome.status === "failed") expect(outcome.error).toBe(`${REPO} has no prototype flow on its workspace yet, so there is nothing to run the prototype with.`)
+    expect(runCards(store)).toEqual([])
   })
 })
