@@ -577,6 +577,15 @@ describe("vitest coverage isolation conformance", () => {
     // than widened to `packages/*/*`: that glob names directories that are not
     // packages, and the gates that read this list one directory deep would stop
     // covering nested members without failing.
+    //
+    // Widened a seventh time (2026-09-06, release workflows restored): `flows`
+    // is `@smithers/release-workflows`, the private, unpublished workspace of
+    // the repository's own Smithers programs (release, review, triage, the
+    // release-support CLI the root `release:*` scripts call). It ships no
+    // `src` tree, is never published, and sits outside the `packages/`
+    // universe derivation above, so it adds no ungated publishable surface. It
+    // is a member so its `check` and `test` run under the root fan-out and so
+    // it resolves the real `@smthrs/*` packages through workspace links.
     const workspace = readFileSync(join(packagesDir, "..", "pnpm-workspace.yaml"), "utf8")
     const packagesBlock = workspace.match(/^packages:\n(?:  - .+\n)+/m)?.[0]
     expect(packagesBlock).toBe(
@@ -589,6 +598,7 @@ describe("vitest coverage isolation conformance", () => {
         "  - \"packages/smithers/flows/*\"",
         "  - \"packages/smithers/ui/*\"",
         "  - \"examples\"",
+        "  - \"flows\"",
         "  - \"apps/*\"",
         "  - \"apps/docs/*\"",
         "  - \"evals/*\"",
@@ -669,6 +679,12 @@ describe("vitest coverage isolation conformance", () => {
     // registry metadata, so the target is uncacheable and re-runs regardless,
     // which is the only concession the network costs. The alias is pinned so
     // the roster stays exact, not because it is a second enforcement path.
+    //
+    // `release:*` are operator entry points into the `flows` workspace's
+    // release-support program (release.yml and release-auth.yml call the same
+    // module). They run nothing in CI's package-graph gates and fan nothing
+    // out, so they neither add nor remove enforcement; they are pinned so the
+    // roster stays exact.
     const root = JSON.parse(readFileSync(join(packagesDir, "..", "package.json"), "utf8")) as {
       readonly scripts?: Record<string, string>
     }
@@ -687,6 +703,10 @@ describe("vitest coverage isolation conformance", () => {
       lint: "pnpm --recursive --if-present run lint",
       "lint:jsdoc":
         "eslint --config eslint.config.js \"packages/*/src/**/*.ts\" \"packages/*/*/src/**/*.ts\" \"packages/*/*/*/src/**/*.ts\" --max-warnings=0",
+      "release:answer": "node --experimental-strip-types flows/release-support/main.ts answer",
+      "release:content": "node --experimental-strip-types flows/release-support/main.ts release-content",
+      "release:status": "node --experimental-strip-types flows/release-support/main.ts status",
+      "release:workflow": "node --experimental-strip-types flows/release-support/main.ts release",
       test: "pnpm --recursive --if-present run test",
       "test:e2e": "bun apps/ui/e2e/packaged/run.ts",
       "test:examples": "pnpm --filter @smthrs/examples run test",
