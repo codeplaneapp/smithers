@@ -196,6 +196,7 @@ const ci = Smithers.GithubCiGen({
           workflows: [
             ".github/workflows/ci.yml",
             ".github/workflows/release.yml",
+            ".github/workflows/release-auth.yml",
             ".github/workflows/apps-deploy.yml",
             ".github/workflows/canary.yml",
             ".github/workflows/pr-review.yml",
