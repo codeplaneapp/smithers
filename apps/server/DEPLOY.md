@@ -168,6 +168,26 @@ ceilings (300 per address or login, 5000 deployment-wide). The route needs:
 
 `CEREBRAS_MODEL` (var, optional) overrides the model id.
 
+### The public catalog's GitHub stats can use a token
+
+`GET /api/public/repos` reads each catalog repository's stars, forks, and open
+issue count from `api.github.com`, one request per repository per cache
+refresh, and caches the catalog for five minutes. GitHub allows an
+unauthenticated address 60 requests an hour, so a busy hour or a shared egress
+address can trip the limit and every landing-page card then shows "Stats
+unavailable" until the limit resets.
+
+- `GITHUB_TOKEN` (secret, optional, `wrangler secret put GITHUB_TOKEN`). A
+  fine-grained or classic token with no scopes; every catalog repository is
+  public. Set, the stats reads carry `authorization: Bearer` and
+  `x-github-api-version: 2022-11-28`, and GitHub meters them at 5000 requests
+  an hour. The token is sent to GitHub only; it never enters the response, the
+  edge cache, or a log line. Unset, the reads go unauthenticated.
+
+A 403 or 429 from GitHub nulls that repository's stats and keeps the normal
+five-minute cache, so the Worker never retries into a tripped limit. Only a
+network error or a 5xx shortens the cache to 30 s.
+
 ### The engine gateway relay needs an identity upstream
 
 When `GATEWAY_UPSTREAM_URL` is set, this Worker relays `/rpc`, `/projections`,

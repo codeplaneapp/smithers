@@ -64,6 +64,8 @@ const harness = (
   return { handler, requests, advance: (ms: number) => { now += ms } }
 }
 
+const TOKEN = "ghp_test_token_never_served"
+
 describe("the curated catalog", () => {
   test("lists only Smithers at launch", () => {
     expect(AVAILABLE_REPOS.map((repo) => repo.name)).toEqual(["smithersai/smithers"])
@@ -175,7 +177,7 @@ describe("public available repositories", () => {
     for (const repo of COMING_SOON_REPOS) pending.get(repo.name)!(answerEach(requests[EVERY_NAME.indexOf(repo.name)]!))
     pending.get("smithersai/smithers")!(answerEach(requests[0]!))
     const response = await served
-    expect(response.headers.get("cache-control")).toBe("public, max-age=30")
+    expect(response.headers.get("cache-control")).toBe("public, max-age=300")
     const catalog = await response.json() as PublicRepoCatalog
     expect(catalog.repos.map((repo) => repo.name)).toEqual(CLAIMED_ROSTER.map((repo) => repo.name))
     expect(catalog.repos[0]!.stats?.stars).toBe(407)
@@ -186,7 +188,7 @@ describe("public available repositories", () => {
 
   test("a coming-soon repo's metadata outage nulls only its stats and shortens the cache like an available one's", async () => {
     const { handler } = harness((req) =>
-      repoName(req) === "wevm/incur" ? Response.json({ message: "rate limited" }, { status: 403 }) : answerEach(req))
+      repoName(req) === "wevm/incur" ? Response.json({ message: "bad gateway" }, { status: 502 }) : answerEach(req))
     const response = await handler(request())
     expect(response.headers.get("cache-control")).toBe("public, max-age=30")
     const catalog = await response.json() as PublicRepoCatalog
@@ -228,13 +230,10 @@ describe("public available repositories", () => {
     expect(calls).toBe(FETCH_COUNT * 2)
   })
 
-  test("outages and invalid or private metadata never invent counts or remove availability", async () => {
+  test("a transient outage never invents counts or removes availability, and retries after 30 s", async () => {
     for (const answer of [
-      () => Response.json({ message: "rate limited" }, { status: 403 }),
-      () => Response.json({ ...metadata, private: true }),
-      () => Response.json({ ...metadata, full_name: "another/repo" }),
-      () => Response.json({ ...metadata, stargazers_count: -1 }),
-      () => new Response("not json"),
+      () => Response.json({ message: "bad gateway" }, { status: 502 }),
+      () => new Response(null, { status: 503 }),
       () => { throw new Error("offline") }
     ]) {
       const { handler, requests, advance } = harness(answer)
@@ -247,6 +246,84 @@ describe("public available repositories", () => {
       advance(30_001)
       await handler(request())
       expect(requests).toHaveLength(FETCH_COUNT * 2)
+    }
+  })
+
+  test("a GitHub rate limit nulls the stats but keeps the full cache window, so the limit is not fed", async () => {
+    // Retrying a 403 or 429 every 30 s would send 600 calls an hour from one
+    // instance and keep the 60-an-hour anonymous ceiling tripped forever.
+    for (const status of [403, 429]) {
+      const { handler, requests, advance } = harness(() =>
+        Response.json({ message: "API rate limit exceeded" }, { status, headers: { "x-ratelimit-remaining": "0" } }))
+      const response = await handler(request())
+      expect(response.status).toBe(200)
+      expect(response.headers.get("cache-control")).toBe("public, max-age=300")
+      expect(await response.json()).toEqual({ repos: expectedRepos(() => null), comingSoon: expectedComingSoon(() => null) })
+      advance(299_000)
+      await handler(request())
+      expect(requests).toHaveLength(FETCH_COUNT)
+      advance(1_001)
+      await handler(request())
+      expect(requests).toHaveLength(FETCH_COUNT * 2)
+    }
+  })
+
+  test("settled non-metadata answers (404, private, invalid) null the stats and cache for the full window", async () => {
+    for (const answer of [
+      () => Response.json({ message: "Not Found" }, { status: 404 }),
+      () => Response.json({ ...metadata, private: true }),
+      () => Response.json({ ...metadata, full_name: "another/repo" }),
+      () => Response.json({ ...metadata, stargazers_count: -1 }),
+      () => new Response("not json")
+    ]) {
+      const { handler, requests, advance } = harness(answer)
+      const response = await handler(request())
+      expect(response.headers.get("cache-control")).toBe("public, max-age=300")
+      expect(await response.json()).toEqual({ repos: expectedRepos(() => null), comingSoon: expectedComingSoon(() => null) })
+      advance(30_001)
+      await handler(request())
+      expect(requests).toHaveLength(FETCH_COUNT)
+    }
+  })
+
+  test("sends the GITHUB_TOKEN secret as a bearer on the stats reads when set, and nothing when unset", async () => {
+    const { handler, requests } = harness()
+    const response = await handler(request(), { GITHUB_TOKEN: ` ${TOKEN} ` })
+    expect(requests).toHaveLength(FETCH_COUNT)
+    for (const req of requests) {
+      expect(req.headers.get("authorization")).toBe(`Bearer ${TOKEN}`)
+      expect(req.headers.get("x-github-api-version")).toBe("2022-11-28")
+    }
+    // The token authenticates the GitHub read only; the public response never carries it.
+    expect([...response.headers.entries()].join("\n")).not.toContain(TOKEN)
+    expect(await response.text()).not.toContain(TOKEN)
+
+    const unset = harness()
+    await unset.handler(request(), { GITHUB_TOKEN: "" })
+    await unset.handler(request())
+    expect(unset.requests).toHaveLength(FETCH_COUNT)
+    for (const req of unset.requests) {
+      expect(req.headers.has("authorization")).toBe(false)
+      expect(req.headers.has("x-github-api-version")).toBe(false)
+    }
+  })
+
+  test("the Worker hands its env to the catalog route, so a deployed secret reaches GitHub", async () => {
+    const original = globalThis.fetch
+    const seen: Array<Request> = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = new Request(input, init)
+      seen.push(req)
+      return answerEach(req)
+    }) as typeof fetch
+    try {
+      const env = { ASSETS: { fetch: async () => new Response("app") }, IDENTITY_UPSTREAM_URL: "https://identity.test", GITHUB_TOKEN: TOKEN }
+      const response = await worker.fetch(new Request(`https://app.test/api/public/repos?worker=${Date.now()}`), env)
+      expect(response.status).toBe(200)
+      expect(seen.length).toBeGreaterThan(0)
+      for (const req of seen) expect(req.headers.get("authorization")).toBe(`Bearer ${TOKEN}`)
+    } finally {
+      globalThis.fetch = original
     }
   })
 

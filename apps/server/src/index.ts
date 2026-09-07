@@ -347,6 +347,13 @@ export interface WorkerEnv extends RecommendEnv {
   readonly UPSTREAM_TIMEOUT_MS?: string
   /** Identity worker (GitHub OAuth + allowlist) upstream. Unset = 501. */
   readonly IDENTITY_UPSTREAM_URL?: string
+  /**
+   * Optional GitHub token for the public catalog's stats reads
+   * (src/publicRepos.ts). Raises GitHub's ceiling from 60 to 5000 requests an
+   * hour; unset, the reads go unauthenticated and a rate limit shows as
+   * "Stats unavailable" on the landing page.
+   */
+  readonly GITHUB_TOKEN?: string
   /** Service token for the product-Worker → identity /api/identity/validate call. */
   readonly IDENTITY_SERVICE_TOKEN?: string
   /**
@@ -2512,7 +2519,7 @@ export default {
     const url = new URL(request.url)
     // This one curated, read-only catalog is public to the marketing site.
     // Every authenticated API continues through the same-origin guard below.
-    if (url.pathname === PUBLIC_REPOS_PATH) return handlePublicRepos(request)
+    if (url.pathname === PUBLIC_REPOS_PATH) return handlePublicRepos(request, env)
     // The catalog's recent-activity sentence (src/publicRepoActivity.ts): a
     // public read computed from the Cloud mirror, never from GitHub.
     if (parsePublicRepoActivityPath(url.pathname) !== undefined) {

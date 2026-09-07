@@ -5,7 +5,8 @@ import { AVAILABLE_REPOS, COMING_SOON_REPOS, PUBLIC_REPOS_PATH } from "../../../
 const endpoint = import.meta.env.PUBLIC_AVAILABLE_REPOS_URL || `https://smithers.sh${PUBLIC_REPOS_PATH}`
 /* A repository's app lives at <app origin>/<owner>/<name>. */
 const appOrigin = (import.meta.env.PUBLIC_APP_ORIGIN || "https://smithers.sh").replace(/\/+$/, "")
-/* Smithers first, then its coming-soon dependencies; the catalog response follows the same order. */
+/* Smithers first, then its coming-soon dependencies; the catalog response follows the same order.
+   The heading counts every card, available and coming soon, because every card is rendered. */
 const cards = [
   ...AVAILABLE_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: true })),
   ...COMING_SOON_REPOS.map((repo) => ({ name: repo.name, title: repo.title, url: repo.url, available: false }))
@@ -13,10 +14,10 @@ const cards = [
 ---
 
 <section class="available wrap" aria-labelledby="available-title" data-available-repos data-endpoint={endpoint}>
-  <h2 id="available-title">Available repos <span class="count">{AVAILABLE_REPOS.length}</span></h2>
+  <h2 id="available-title">Available repos <span class="count">{cards.length}</span></h2>
   <div class="repo-grid">
     {cards.map((repo, index) => (
-      <article class="repo-card" data-repo={repo.name} data-availability={repo.available ? "available" : "coming-soon"} aria-labelledby={`repo-title-${index}`}>
+      <article class="repo-card" data-repo={repo.name} data-availability={repo.available ? "available" : "coming-soon"} aria-labelledby={`repo-title-${index} repo-badge-${index}`}>
         <div class="card-art" aria-hidden="true">
           <span class="card-number">{String(index + 1).padStart(2, "0")}</span>
           <div class="grid-floor"></div>
@@ -29,8 +30,8 @@ const cards = [
           <div class="title-row">
             <h3 id={`repo-title-${index}`}>{repo.title}</h3>
             {repo.available
-              ? <span class="badge badge-available">Available</span>
-              : <span class="badge badge-soon">Coming soon</span>}
+              ? <span id={`repo-badge-${index}`} class="badge badge-available">Available</span>
+              : <span id={`repo-badge-${index}`} class="badge badge-soon">Coming soon</span>}
           </div>
           <a class="repo-name" href={repo.url}>{repo.name} <span aria-hidden="true">↗</span></a>
           {repo.available && <a class="open-link" href={`${appOrigin}/${repo.name}`}>Open Smithers <span aria-hidden="true">→</span></a>}

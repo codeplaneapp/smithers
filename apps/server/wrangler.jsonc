@@ -107,6 +107,10 @@
 		//                              (src/recommend.ts); unset = the route answers an honest 503 and the client
 		//                              keeps its rule-based pills. CEREBRAS_MODEL (var, optional) overrides the
 		//                              default gpt-oss-120b.
+		//   GITHUB_TOKEN             (secret, optional) a GitHub token GET /api/public/repos sends as a bearer on
+		//                              its api.github.com stats reads (src/publicRepos.ts), raising GitHub's
+		//                              ceiling from 60 to 5000 requests an hour; needs no scopes, since every
+		//                              catalog repository is public. Unset = unauthenticated reads.
 		// The identity and billing workers both gate on the browser Origin, so their
 		// ALLOWED_ORIGINS must list this Worker's own origin — it is what the proxy sends.
 		// The legacy GATEWAY_UPSTREAM_URL / GATEWAY_AUTH_TOKEN / GATEWAY_SESSION_USER_*
