@@ -1,0 +1,159 @@
+/*
+ * The pure half of the site probe: what one deployment of `smithers-mvp-web`
+ * must answer now that its assets are the smithers.sh Astro build, graded from
+ * recorded observations. site-probe.ts supplies the real fetch and prints; the
+ * tests beside this file supply a fake. The split is the one every probe in
+ * this directory uses, so the verdicts are demonstrated without a deployment.
+ *
+ * Three families, each a claim about a different layer:
+ *
+ *   the site      / and /docs/ answer 200, /nope answers 404 (the build's 404
+ *                 page, not a SPA shell), /llms.txt and /sitemap-index.xml exist
+ *   the app       the catalog repository page answers 200 with the isolation
+ *                 headers OPFS needs, a frame path answers 200 (a reload inside
+ *                 the app), and the Worker, not the assets layer, answers /api/*
+ *   the aliases   every path the former Mintlify site indexed answers 200, or
+ *                 redirects to a path that answers 200 within a few hops
+ */
+import { DEFAULT_APP_DOCUMENT_PATH } from "../../src/appDocument.ts"
+import { PUBLIC_REPOS_PATH } from "../../src/publicRepoCatalog.ts"
+import { BUILD_STAMP_PATH } from "./BuildStamp.ts"
+
+export interface Observed {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+}
+
+/** One fetch, redirects NOT followed: a redirect is a verdict of its own. */
+export type Fetcher = (url: string) => Promise<Observed>
+
+export interface SiteCheck {
+  readonly path: string
+  readonly expected: string
+  readonly got: string
+  readonly status: "pass" | "fail"
+}
+
+export const APP_DOCUMENT_CHECK_PATH = DEFAULT_APP_DOCUMENT_PATH.replace(/\/$/, "")
+export const FRAME_PATH_SAMPLE = "/w/a/b/b/f/c"
+export const REDIRECT_HOP_LIMIT = 4
+
+const header = (observed: Observed, name: string): string | undefined => {
+  const lower = name.toLowerCase()
+  for (const [key, value] of Object.entries(observed.headers)) if (key.toLowerCase() === lower) return value
+  return undefined
+}
+
+const describeStatus = (observed: Observed): string => {
+  const location = header(observed, "location")
+  return location === undefined ? `${observed.status}` : `${observed.status} -> ${location}`
+}
+
+const check = (path: string, expected: string, ok: boolean, got: string): SiteCheck => ({
+  path,
+  expected,
+  got,
+  status: ok ? "pass" : "fail"
+})
+
+const expectStatus = async (fetch: Fetcher, origin: string, path: string, status: number): Promise<SiteCheck> => {
+  const observed = await fetch(`${origin}${path}`)
+  return check(path, `${status}`, observed.status === status, describeStatus(observed))
+}
+
+const expectAppDocument = async (fetch: Fetcher, origin: string, path: string): Promise<SiteCheck> => {
+  const observed = await fetch(`${origin}${path}`)
+  const coop = header(observed, "cross-origin-opener-policy")
+  const coep = header(observed, "cross-origin-embedder-policy")
+  const ok = observed.status === 200 && coop === "same-origin" && coep === "require-corp"
+  return check(
+    path,
+    "200 + COOP same-origin + COEP require-corp",
+    ok,
+    `${describeStatus(observed)} + COOP ${coop ?? "absent"} + COEP ${coep ?? "absent"}`
+  )
+}
+
+const expectWorkerJson = async (fetch: Fetcher, origin: string, path: string): Promise<SiteCheck> => {
+  // The assets layer never answers JSON for these paths; a 200 with a JSON
+  // content type is the Worker's, and proves run_worker_first covers /api/.
+  const observed = await fetch(`${origin}${path}`)
+  const type = header(observed, "content-type") ?? "absent"
+  const ok = observed.status === 200 && type.includes("application/json")
+  return check(path, "200 application/json (the Worker, not the assets layer)", ok, `${describeStatus(observed)} ${type}`)
+}
+
+/**
+ * A legacy alias answers 200 itself, or redirects (301/308) into a path that
+ * answers 200 within REDIRECT_HOP_LIMIT hops. The assets layer adds a
+ * trailing-slash hop of its own (308) after a _redirects 301, so one hop is
+ * not enough and an unbounded chain is a cycle.
+ */
+const expectAlias = async (fetch: Fetcher, origin: string, path: string): Promise<SiteCheck> => {
+  const hops: Array<string> = []
+  let current = path
+  for (let hop = 0; hop <= REDIRECT_HOP_LIMIT; hop += 1) {
+    const observed = await fetch(`${origin}${current}`)
+    hops.push(describeStatus(observed))
+    if (observed.status === 200) return check(path, "200, or a redirect chain ending in 200", true, hops.join(", "))
+    const location = header(observed, "location")
+    if (![301, 302, 307, 308].includes(observed.status) || location === undefined) {
+      return check(path, "200, or a redirect chain ending in 200", false, hops.join(", "))
+    }
+    const next = new URL(location, origin)
+    if (next.origin !== new URL(origin).origin) {
+      return check(path, "200, or a redirect chain ending in 200", false, `${hops.join(", ")} (leaves the site)`)
+    }
+    current = `${next.pathname}${next.search}`
+  }
+  return check(path, "200, or a redirect chain ending in 200", false, `${hops.join(", ")} (more than ${REDIRECT_HOP_LIMIT} hops)`)
+}
+
+export interface SiteProbeInput {
+  readonly origin: string
+  readonly legacyPaths: ReadonlyArray<string>
+}
+
+export const runSiteChecks = async (fetch: Fetcher, input: SiteProbeInput): Promise<ReadonlyArray<SiteCheck>> => {
+  const { origin } = input
+  const fixed = await Promise.all([
+    expectStatus(fetch, origin, "/", 200),
+    expectStatus(fetch, origin, "/docs/", 200),
+    expectStatus(fetch, origin, "/nope", 404),
+    expectAppDocument(fetch, origin, APP_DOCUMENT_CHECK_PATH),
+    expectStatus(fetch, origin, FRAME_PATH_SAMPLE, 200),
+    expectWorkerJson(fetch, origin, "/api/bootstrap"),
+    expectWorkerJson(fetch, origin, PUBLIC_REPOS_PATH),
+    expectStatus(fetch, origin, BUILD_STAMP_PATH, 200),
+    expectStatus(fetch, origin, "/llms.txt", 200),
+    expectStatus(fetch, origin, "/sitemap-index.xml", 200)
+  ])
+  const aliases: Array<SiteCheck> = []
+  // Sequential on purpose: a few hundred paths in one burst is a load test of
+  // the deployment, and this probe grades routing, not capacity.
+  for (const path of input.legacyPaths) aliases.push(await expectAlias(fetch, origin, path))
+  return [...fixed, ...aliases]
+}
+
+/** `canary.smithers.sh`, `https://canary.smithers.sh/`, or `http://localhost:8787` all name one origin. */
+export const originFromHostname = (value: string): string => {
+  const withScheme = /^[a-z]+:\/\//i.test(value) ? value : `https://${value}`
+  return new URL(withScheme).origin
+}
+
+/** The table the probe prints: one row per check, columns padded to the widest value. */
+export const renderTable = (checks: ReadonlyArray<SiteCheck>): string => {
+  const rows = [["verdict", "path", "expected", "got"], ...checks.map((entry) => [
+    entry.status === "pass" ? "ok" : "FAIL",
+    entry.path,
+    entry.expected,
+    entry.got
+  ])]
+  const widths = rows[0]!.map((_, column) => Math.max(...rows.map((row) => row[column]!.length)))
+  return rows.map((row) => row.map((cell, column) => cell.padEnd(widths[column]!)).join("  ").trimEnd()).join("\n")
+}
+
+export const tally = (checks: ReadonlyArray<SiteCheck>): { readonly passed: number; readonly failed: number } => ({
+  passed: checks.filter((entry) => entry.status === "pass").length,
+  failed: checks.filter((entry) => entry.status === "fail").length
+})

@@ -1,9 +1,10 @@
 # Deploying `smithers-mvp-web`
 
 The deployable is one Cloudflare Worker, `smithers-mvp-web`, serving the
-`smithers-ui` Vite build as static assets and the `/api` seams. The legacy raw
-gateway proxy is removed (see the 1.0 migration below). The canary Worker uses
-`canary.smithers.sh`.
+smithers.sh Astro build (`apps/site`, which prerenders the product app at
+`/<owner>/<name>` as a React island) as static assets and the `/api` seams. The
+legacy raw gateway proxy is removed (see the 1.0 migration below). The canary
+Worker uses `canary.smithers.sh`.
 
 ## Frozen identity — read this before touching `wrangler.jsonc`
 
@@ -35,14 +36,34 @@ domain are unchanged, so Durable Object state is unaffected. Rollback is to
 delete the three zone routes and deploy; `canary.smithers.sh` keeps serving
 throughout.
 
+The second deliberate change is the assets directory. `assets.directory` is
+`../site/dist`, the smithers.sh Astro build, instead of `../ui/dist`, the
+app's own Vite build, and `not_found_handling` is `404-page` instead of
+`single-page-application`: the app is a prerendered page of that build at
+`/<owner>/<name>/index.html`, so one build is deployed instead of two. The
+Worker fetches that page from the assets layer for a catalog repository path
+and for a frame path (`/w/<workspace>/b/<branch>/f/<frame>`, listed in
+`run_worker_first` as `/w/*`) and adds the isolation headers; every other path
+passes through as the site serves it, and the canary hostname marks HTML
+`noindex`. The name, routes, Durable Objects and migrations are untouched
+(`src/workerIdentity.test.ts` pins them), so state is unaffected. Rollback:
+restore `"directory": "../ui/dist"` and
+`"not_found_handling": "single-page-application"`, build `apps/ui` (`bun run
+build:web`) and deploy, or roll the Worker back to the prior version id from
+the last receipt (`bun x wrangler rollback <version-id>`, see "Rollback"
+below); the assets travel with the version, so the rollback restores the
+previous build without a rebuild.
+
 ## Scripted deploy (this repo's one repeatable path)
 
-`scripts/deploy.ts` builds the SPA (`vite build` in `apps/ui`), then runs
-`wrangler deploy` for this Worker, and writes a receipt (git sha + UTC
-timestamp + wrangler version id) to `deploy-receipts/`.
+`scripts/deploy.ts` prepares the Electrobun devkit projection the island's
+sources are typed against (`node scripts/ensure-devkit.mjs` in `apps/ui`),
+builds the site (`pnpm run build` in `apps/site`, stamped with the sha it
+records), then runs `wrangler deploy` for this Worker, and writes a receipt
+(git sha + UTC timestamp + wrangler version id) to `deploy-receipts/`.
 
 ```sh
-# Dry run — real vite build, `wrangler deploy --dry-run`, no credentials
+# Dry run: real site build, `wrangler deploy --dry-run`, no credentials
 # needed, nothing published. Receipt lands in deploy-receipts/dry-run/.
 pnpm run deploy:dry            # from the repo root
 # or, equivalently:

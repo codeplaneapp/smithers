@@ -5,19 +5,21 @@
  *                                     [--max-drift <n>] [--json <path>]
  *                                     [--allow-unstamped-html]
  *
- * Reads the build stamp the SPA carries (apps/ui/vite.config.ts writes it) and
- * compares it with the sha the caller expects. No credential is needed: the
- * stamp is a static asset on a public deployment.
+ * Reads the build stamp the deployment carries (the site build writes it,
+ * apps/site/scripts/build-stamp-integration.ts over apps/ui/scripts/build-stamp.ts)
+ * and compares it with the sha the caller expects. No credential is needed:
+ * the stamp is a static asset on a public deployment.
  *
  * Expected sha resolution, first hit wins: --sha, $CANARY_EXPECTED_SHA,
  * --receipt <path>, then ../../deploy-receipts/latest.json when it exists.
  * Receipts are gitignored, so a scheduled run usually resolves none; that
  * check then prints as skipped, never as a pass.
  *
- * The HTML-vs-asset row compares the served index.html with the served
- * /__build.json and fails either direction of disagreement, including HTML
- * that carries no stamp at all. It does not fetch the hashed chunks index.html
- * names. Pass --allow-unstamped-html only while the deploy that introduces the
+ * The HTML-vs-asset row compares the served app document (the prerendered
+ * /<owner>/<name>/ page, the one HTML in the build that carries the stamp) with
+ * the served /__build.json and fails either direction of disagreement,
+ * including HTML that carries no stamp at all. It does not fetch the hashed
+ * chunks the document names. Pass --allow-unstamped-html only while the deploy that introduces the
  * stamp is landing; it downgrades that row to a skip and never to a pass.
  *
  * This file is the process shell only. Every verdict lives in BuildStamp.ts,
@@ -38,6 +40,7 @@ import {
   resolveOrigin
 } from "./BuildStamp.ts"
 import type { BuildStamp } from "./BuildStamp.ts"
+import { DEFAULT_APP_DOCUMENT_PATH } from "../../src/appDocument.ts"
 
 const argv = process.argv.slice(2)
 const flag = (name: string): string | undefined => flagValue(argv, name)
@@ -93,8 +96,9 @@ if (typeof parsed === "string") {
 }
 const stamp: BuildStamp = parsed
 
-// 2. The HTML and the assets are the same build.
-const htmlResponse = await fetch(`${origin}/${bust}`, noCache)
+// 2. The HTML and the assets are the same build. The app document is the
+// HTML that carries the stamp; the site's landing page at / does not.
+const htmlResponse = await fetch(`${origin}${DEFAULT_APP_DOCUMENT_PATH}${bust}`, noCache)
 const metaSha = htmlResponse.ok ? buildShaFromHtml(await htmlResponse.text()) : null
 if (!htmlResponse.ok) {
   await htmlResponse.body?.cancel()
@@ -143,8 +147,8 @@ if (maxDrift !== undefined) {
 }
 
 /*
- * The stamp parsed, so the build that emitted it also stamped its own
- * index.html. Unstamped HTML from here on is evidence of a half-published
+ * The stamp parsed, so the build that emitted it also stamped its own app
+ * document. Unstamped HTML from here on is evidence of a half-published
  * deploy, not of an unverifiable input, and it is graded as one.
  */
 const agreement = htmlAgreementVerdict(stamp, { status: htmlResponse.status, metaSha }, allowUnstampedHtml)

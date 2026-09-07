@@ -1,10 +1,11 @@
 /**
- * Scripted deploy: build the shared Vite SPA, then deploy this package's
+ * Scripted deploy: build the smithers.sh Astro site (apps/site), which carries
+ * the product app as a prerendered React island, then deploy this package's
  * Worker with its checked-in Wrangler config, recording a receipt (git sha +
  * timestamp + wrangler version id) either way.
  *
  *   bun scripts/deploy.ts --dry-run
- *     Runs the real vite build, then `wrangler deploy --dry-run` — no
+ *     Runs the real site build, then `wrangler deploy --dry-run`: no
  *     Cloudflare credentials needed, nothing published. Receipt lands in
  *     deploy-receipts/dry-run/.
  *
@@ -16,7 +17,7 @@
  * is frozen — see apps/server/DEPLOY.md and wrangler.jsonc:1-9. This script
  * never changes wrangler.jsonc; it only builds and deploys what's there.
  *
- * CN-1: the receipt records the sha the SPA bundle was stamped with, not a sha
+ * CN-1: the receipt records the sha the site build was stamped with, not a sha
  * read afterwards, so `scripts/canary/build-probe.ts` can hold the deployment
  * to the claim.
  */
@@ -27,6 +28,7 @@ const dryRun = process.argv.includes("--dry-run")
 
 const serverDir = fileURLToPath(new URL("..", import.meta.url))
 const uiDir = fileURLToPath(new URL("../../ui", import.meta.url))
+const siteDir = fileURLToPath(new URL("../../site", import.meta.url))
 
 const run = async (
   cmd: ReadonlyArray<string>,
@@ -46,10 +48,11 @@ const run = async (
 
 /*
  * The sha is read BEFORE the build, not after, because the build consumes it:
- * apps/ui/vite.config.ts's buildStamp plugin writes SMITHERS_BUILD_SHA into
- * the bundle as /__build.json and as a meta tag on the HTML. The receipt below
- * records the same value, so the deployment and the receipt can be compared
- * byte for byte — that comparison is CN-1, and
+ * the site's build-stamp integration (apps/site/scripts/build-stamp-integration.ts,
+ * over apps/ui/scripts/build-stamp.ts) writes SMITHERS_BUILD_SHA into the
+ * build as /__build.json and as a meta tag on the app document. The receipt
+ * below records the same value, so the deployment and the receipt can be
+ * compared byte for byte; that comparison is CN-1, and
  * scripts/canary/build-probe.ts runs it.
  *
  * A dirty tree is recorded rather than hidden. The sha alone would claim the
@@ -59,14 +62,27 @@ const run = async (
 const gitSha = (await run(["git", "rev-parse", "HEAD"], { cwd: serverDir, capture: true })).output.trim()
 const gitDirty = (await run(["git", "status", "--porcelain"], { cwd: serverDir, capture: true })).output.trim() !== ""
 
-console.log(`[deploy] building the web SPA in ${uiDir}, stamped ${gitSha}${gitDirty ? " (dirty tree)" : ""}...`)
-const build = await run(["bun", "run", "build:web"], { cwd: uiDir, env: { SMITHERS_BUILD_SHA: gitSha } })
+/*
+ * The island's sources are transformed under apps/ui/tsconfig.json, which
+ * extends the projected Electrobun devkit (gitignored), so a fresh checkout
+ * cannot build the site until that projection exists. apps/ui's own build ran
+ * this step first; the site build does not, so it runs here.
+ */
+console.log(`[deploy] ensuring the Electrobun devkit projection in ${uiDir}...`)
+const devkit = await run(["node", "scripts/ensure-devkit.mjs"], { cwd: uiDir })
+if (devkit.exitCode !== 0) {
+  console.error("[deploy] the devkit projection could not be prepared.")
+  process.exit(devkit.exitCode)
+}
+
+console.log(`[deploy] building the smithers.sh site in ${siteDir}, stamped ${gitSha}${gitDirty ? " (dirty tree)" : ""}...`)
+const build = await run(["pnpm", "run", "build"], { cwd: siteDir, env: { SMITHERS_BUILD_SHA: gitSha } })
 if (build.exitCode !== 0) {
-  console.error("[deploy] vite build failed.")
+  console.error("[deploy] site build failed.")
   process.exit(build.exitCode)
 }
 
-console.log(`[deploy] ${dryRun ? "dry-run " : ""}wrangler deploy of the Worker and SPA assets...`)
+console.log(`[deploy] ${dryRun ? "dry-run " : ""}wrangler deploy of the Worker and site assets...`)
 const workerConfig = `${serverDir}/wrangler.jsonc`
 const deployArgs = [
   "bun",

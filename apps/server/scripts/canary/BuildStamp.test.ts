@@ -15,6 +15,7 @@ import {
   resolveOrigin
 } from "./BuildStamp.ts"
 import type { BuildStamp } from "./BuildStamp.ts"
+import { DEFAULT_APP_DOCUMENT_PATH } from "../../src/appDocument.ts"
 
 /*
  * CN-1's whole value is that it fails when the deployment is stale, so these
@@ -349,7 +350,7 @@ describe("the probe's exit code moves with the deployment", () => {
   }\n`
   const probePath = fileURLToPath(new URL("./build-probe.ts", import.meta.url))
 
-  /** Serves one index.html and one /__build.json on an ephemeral port. */
+  /** Serves one app document and one /__build.json on an ephemeral port; the root is the site's unstamped landing page. */
   const serve = (html: string) =>
     Bun.serve({
       port: 0,
@@ -358,7 +359,8 @@ describe("the probe's exit code moves with the deployment", () => {
         if (path === BUILD_STAMP_PATH) {
           return new Response(stampBody, { headers: { "content-type": "application/json" } })
         }
-        if (path === "/") return new Response(html, { headers: { "content-type": "text/html" } })
+        if (path === DEFAULT_APP_DOCUMENT_PATH) return new Response(html, { headers: { "content-type": "text/html" } })
+        if (path === "/") return new Response("<html><body>landing</body></html>", { headers: { "content-type": "text/html" } })
         return new Response("Not found", { status: 404 })
       }
     })

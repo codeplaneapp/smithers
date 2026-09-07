@@ -103,15 +103,15 @@ export interface Verdict {
  * printed by the probe so a green line cannot be read as a broader claim than
  * it is.
  *
- * It compares two artifacts of one build: the served `index.html` and the
- * served `/__build.json`. It fails in both directions of disagreement: HTML
+ * It compares two artifacts of one build: the served app document (the
+ * prerendered `/<owner>/<name>/` page) and the served `/__build.json`. It fails in both directions of disagreement: HTML
  * newer than the assets, and assets newer than the HTML, including the case
  * where the HTML carries no stamp at all. It does not fetch the hashed
  * chunks `index.html` names, so a deploy that published `index.html` and
  * `/__build.json` but not the chunks they reference is out of scope.
  */
 export const HTML_AGREEMENT_COVERAGE =
-  `compares the served index.html with the served ${BUILD_STAMP_PATH} and fails either direction of disagreement, including HTML that carries no stamp at all; it does not fetch the hashed chunks index.html names, so a deploy that published index.html and ${BUILD_STAMP_PATH} but not the chunks they reference is out of scope`
+  `compares the served app document with the served ${BUILD_STAMP_PATH} and fails either direction of disagreement, including HTML that carries no stamp at all; it does not fetch the hashed chunks the document names, so a deploy that published the document and ${BUILD_STAMP_PATH} but not the chunks they reference is out of scope`
 
 /** A check that can also decline to grade, because its input was unreadable. */
 export interface Graded {
@@ -158,7 +158,7 @@ export const htmlAgreementVerdict = (
     return {
       status: "skip",
       detail:
-        `GET / answered HTTP ${html.status}, so the served HTML could not be compared with ${BUILD_STAMP_PATH} (the uptime probe grades root availability)`
+        `GET of the app document answered HTTP ${html.status}, so the served HTML could not be compared with ${BUILD_STAMP_PATH} (the uptime probe grades availability)`
     }
   }
   if (html.metaSha === null) {

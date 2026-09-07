@@ -17,18 +17,26 @@
 		{ "pattern": "smithers.sh/api/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" },
 		{ "pattern": "smithers.sh/assets/*", "zone_id": "8ebd98d2f0dc7d8db2e61f31ebc19c14" }
 	],
-	// The SPA lives in the sibling `smithers-ui` package: this directory is its
-	// Vite build output, so `bun run build` there must run before `wrangler dev`
-	// or `wrangler deploy` here — an unbuilt `../ui/dist` is an empty site.
+	// The assets are the smithers.sh Astro build in the sibling `apps/site`
+	// package: the landing page, the docs, and the product app prerendered at
+	// /<owner>/<name>/index.html as a React island. `pnpm run build` there must
+	// run before `wrangler dev` or `wrangler deploy` here (scripts/deploy.ts
+	// does), because an unbuilt `../site/dist` is an empty site. This directory
+	// is the second deliberate identity change on record (DEPLOY.md); the
+	// previous value was `../ui/dist` with `single-page-application` handling.
 	"assets": {
-		"directory": "../ui/dist",
+		"directory": "../site/dist",
 		"binding": "ASSETS",
-		"not_found_handling": "single-page-application",
+		// The build carries a 404 page, and the app document is the Worker's to
+		// serve (src/index.ts), so no path falls back to a SPA shell.
+		"not_found_handling": "404-page",
 		// `/smithersai/*` runs the Worker first so a catalog repository page serves
-		// the SPA document and any other path under that owner redirects to the
-		// site, instead of the assets layer's SPA fallback answering both
-		// (src/index.ts, routedRepoPage).
-		"run_worker_first": ["/api/*", "/v1/*", "/workflows/*", "/smithersai/*"]
+		// the app document with its isolation headers and any other path under
+		// that owner redirects to the site; `/w/*` so a reload inside the app
+		// (/w/<workspace>/b/<branch>/f/<frame>) serves the app document instead of
+		// the 404 page (src/index.ts, routedRepoPage and isFramePath).
+		// src/workerIdentity.test.ts holds this list to the prefixes the code routes.
+		"run_worker_first": ["/api/*", "/v1/*", "/workflows/*", "/smithersai/*", "/w/*"]
 	},
 	// Server-side turn kill (B-3): cancellation state per runId lives in this
 	// Durable Object; the cancel route flips it and the streaming turn handler

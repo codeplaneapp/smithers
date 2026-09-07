@@ -37,39 +37,69 @@ const post = (path: string, body: unknown): Request =>
 
 /*
  * The app under the apex: smithers.sh/<owner>/<name>. wrangler.jsonc routes
- * `smithers.sh/smithersai/*` here and runs the Worker first for it, so this
- * handler, not the assets layer's SPA fallback, decides what a repository
- * path answers.
+ * `smithers.sh/smithersai/*` and `/w/*` here and runs the Worker first for
+ * them, so this handler, not the assets layer, decides what a repository path
+ * or a frame path answers. The assets are the smithers.sh Astro build: the
+ * app document is prerendered at /<owner>/<name>/index.html beside the landing
+ * page, the docs, and a 404 page.
  */
 describe("routed repository pages", () => {
-  const spaEnv = () => {
+  const APP_DOCUMENT = "<html><head><meta name=\"smithers-build-sha\" content=\"abc\"></head><body>smithers app</body></html>"
+  const siteEnv = () => {
     const served: Array<string> = []
     const env: WorkerEnv = {
       ASSETS: {
         fetch: async (request) => {
-          served.push(new URL(request.url).pathname)
-          return new URL(request.url).pathname === "/"
-            ? new Response("<html><body>smithers</body></html>", { status: 200 })
-            : new Response("not found", { status: 404 })
+          const path = new URL(request.url).pathname
+          served.push(path)
+          const html = { "content-type": "text/html; charset=utf-8" }
+          if (path === "/smithersai/smithers/") return new Response(APP_DOCUMENT, { status: 200, headers: html })
+          if (path === "/" || path === "/docs/") return new Response("<html><body>site</body></html>", { status: 200, headers: html })
+          if (path === "/_astro/a.js") {
+            return new Response("export {}", { status: 200, headers: { "content-type": "text/javascript" } })
+          }
+          return new Response("<html><body>404 page</body></html>", { status: 404, headers: html })
         }
       }
     }
     return { env, served }
   }
+  const isolation = (response: Response) => ({
+    coop: response.headers.get("Cross-Origin-Opener-Policy"),
+    coep: response.headers.get("Cross-Origin-Embedder-Policy")
+  })
 
-  test("a catalog repository serves the SPA document, whatever the case or trailing slash", async () => {
+  test("a catalog repository serves the prerendered app document by its canonical path, whatever the case or trailing slash", async () => {
     for (const path of ["/smithersai/smithers", "/SmithersAI/Smithers", "/smithersai/smithers/"]) {
-      const { env, served } = spaEnv()
+      const { env, served } = siteEnv()
       const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
-      expect({ path, status: response.status, served }).toEqual({ path, status: 200, served: ["/"] })
-      expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin")
-      expect(await response.text()).toContain("smithers")
+      expect({ path, status: response.status, served }).toEqual({ path, status: 200, served: ["/smithersai/smithers/"] })
+      expect(isolation(response)).toEqual({ coop: "same-origin", coep: "require-corp" })
+      expect(await response.text()).toBe(APP_DOCUMENT)
+    }
+  })
+
+  test("a frame path inside the app serves the app document with the isolation headers", async () => {
+    for (const path of ["/w/ws-1/b/main/f/frame-1", "/w/ws-1/b/main/f/frame-1/", "/w/a%20b/b/c/f/d"]) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status: 200, served: ["/smithersai/smithers/"] })
+      expect(isolation(response)).toEqual({ coop: "same-origin", coep: "require-corp" })
+    }
+  })
+
+  test("a path under /w/ that is not a frame path stays with the assets layer", async () => {
+    for (const path of ["/w/ws-1", "/w/ws-1/b/main", "/w/ws-1/b/main/f/frame-1/extra", "/w/"]) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status: 404, served: [path] })
+      expect(isolation(response)).toEqual({ coop: null, coep: null })
     }
   })
 
   test("any other path under the routed owner redirects to the site without touching the assets", async () => {
     for (const path of ["/smithersai/unknown", "/smithersai/smithers/issues/3", "/smithersai/"]) {
-      const { env, served } = spaEnv()
+      const { env, served } = siteEnv()
       const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
       expect({ path, status: response.status, location: response.headers.get("location"), served }).toEqual({
         path, status: 302, location: "https://smithers.sh/", served: []
@@ -78,20 +108,46 @@ describe("routed repository pages", () => {
   })
 
   test("a catalog repository under an owner wrangler does not route stays with the assets layer", async () => {
-    const { env, served } = spaEnv()
+    const { env, served } = siteEnv()
     const response = await worker.fetch(new Request("https://smithers.sh/wevm/incur"), env)
     expect({ status: response.status, served }).toEqual({ status: 404, served: ["/wevm/incur"] })
   })
 
-  test("wrangler runs the Worker first for every routed owner, and routes the apex prefixes beside the canary", async () => {
-    // Without the run_worker_first entry the assets layer answers /smithersai/*
-    // before this Worker sees it, and the handler above is dead on Cloudflare.
+  test("the site's pages and chunks pass through as the assets layer serves them, without isolation headers", async () => {
+    // The docs load Google Fonts and Pagefind, which COEP require-corp would block.
+    for (const [path, status] of [["/", 200], ["/docs/", 200], ["/_astro/a.js", 200], ["/nope", 404]] as const) {
+      const { env, served } = siteEnv()
+      const response = await worker.fetch(new Request(`https://smithers.sh${path}`), env)
+      expect({ path, status: response.status, served }).toEqual({ path, status, served: [path] })
+      expect(isolation(response)).toEqual({ coop: null, coep: null })
+      expect(response.headers.get("X-Robots-Tag")).toBeNull()
+    }
+  })
+
+  test("the canary hostname marks every HTML response noindex and leaves other assets alone", async () => {
+    for (const path of ["/smithersai/smithers", "/w/ws-1/b/main/f/frame-1", "/", "/docs/", "/nope"]) {
+      const { env } = siteEnv()
+      const response = await worker.fetch(new Request(`https://canary.smithers.sh${path}`), env)
+      expect({ path, robots: response.headers.get("X-Robots-Tag") }).toEqual({ path, robots: "noindex" })
+    }
+    const { env } = siteEnv()
+    const chunk = await worker.fetch(new Request("https://canary.smithers.sh/_astro/a.js"), env)
+    expect(chunk.headers.get("X-Robots-Tag")).toBeNull()
+    const apex = await worker.fetch(new Request("https://smithers.sh/smithersai/smithers"), env)
+    expect(apex.headers.get("X-Robots-Tag")).toBeNull()
+  })
+
+  test("wrangler runs the Worker first for every routed owner and the frame prefix, and routes the apex prefixes beside the canary", async () => {
+    // Without the run_worker_first entries the assets layer answers /smithersai/*
+    // and /w/* before this Worker sees them, and the handlers above are dead on
+    // Cloudflare.
     const wrangler = await Bun.file(new URL("../wrangler.jsonc", import.meta.url)).text()
     const config = JSON.parse(wrangler.replace(/^\s*\/\/.*$/gm, "")) as {
       routes: Array<{ pattern: string; custom_domain?: boolean; zone_id?: string }>
       assets: { run_worker_first: Array<string> }
     }
     expect(config.assets.run_worker_first).toContain("/smithersai/*")
+    expect(config.assets.run_worker_first).toContain("/w/*")
     expect(config.routes.map((route) => route.pattern)).toEqual([
       "canary.smithers.sh",
       "smithers.sh/smithersai/*",
@@ -104,11 +160,11 @@ describe("routed repository pages", () => {
 })
 
 describe("smithers mvp worker", () => {
-  test("serves the SPA with the cross-origin isolation headers OPFS needs", async () => {
+  test("serves the site's root as the assets layer answers it, without the app's isolation headers", async () => {
     const response = await worker.fetch(new Request("https://mvp.test/"), assetsEnv())
     expect(response.status).toBe(200)
-    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin")
-    expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBe("require-corp")
+    expect(response.headers.get("Cross-Origin-Opener-Policy")).toBeNull()
+    expect(response.headers.get("Cross-Origin-Embedder-Policy")).toBeNull()
     expect(await response.text()).toContain("smithers")
   })
 

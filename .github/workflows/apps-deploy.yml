@@ -186,6 +186,20 @@ jobs:
           set -euo pipefail
           echo "::warning title=CN-1 not run::This job deployed nothing, so canary.smithers.sh still serves an earlier commit and its sha is not this run's to assert."
           echo "- CN-1 build-stamp probe: NOT RUN — dry-run deploy (not a tag push, or CLOUDFLARE_API_TOKEN is unset)." >> "$GITHUB_STEP_SUMMARY"
+      # The Worker serves the smithers.sh Astro build as its assets and the
+      # product app inside it (apps/server/DEPLOY.md, the second deliberate
+      # identity change). This grades the routing that change depends on: the
+      # site's pages and its 404 page, the app document with its isolation
+      # headers, a frame path reload, the Worker answering /api/* before the
+      # assets layer, and every path the former Mintlify site indexed. Anonymous
+      # GETs only; nothing is spent. It reads the deployment this job published,
+      # so it runs on the real-deploy path only.
+      - name: Site probe (the deployment serves the site, the app document, and the legacy aliases)
+        if: ${{ !cancelled() && steps.deploy_real.outcome == 'success' }}
+        working-directory: apps/server
+        env:
+          REPORT: ${{ runner.temp }}/canary-site.json
+        run: bun scripts/canary/site-probe.ts canary.smithers.sh --json "$REPORT"
       # No credential. The nine origins are committed in workers-manifest.ts on
       # purpose: an origin hidden in a secret cannot be diffed, so a wrong one
       # would probe nothing and report PASS. The probe exits 1 when a Worker is
@@ -246,6 +260,7 @@ jobs:
           name: canary-probe-reports
           path: |
             ${{ runner.temp }}/canary-build.json
+            ${{ runner.temp }}/canary-site.json
             ${{ runner.temp }}/canary-rollback.log
           if-no-files-found: ignore
       - name: Upload deploy receipt

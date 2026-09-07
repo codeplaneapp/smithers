@@ -58,6 +58,7 @@ import {
   TurnRateLimiter
 } from "./turnLimit"
 import type { TurnLimitNamespace } from "./turnLimit"
+import { catalogDocumentPath, DEFAULT_APP_DOCUMENT_PATH, isFramePath } from "./appDocument"
 import { AVAILABLE_REPOS, PUBLIC_REPOS_PATH } from "./publicRepoCatalog"
 import { handlePublicRepos } from "./publicRepos"
 import { createPublicRepoActivityHandler, parsePublicRepoActivityPath } from "./publicRepoActivity"
@@ -2421,16 +2422,19 @@ const handleCloudProxy = async (request: Request, env: WorkerEnv, url: URL): Pro
 
 /*
  * The app under the apex. The product for a repository lives at
- * https://smithers.sh/<owner>/<name>, and smithers.sh itself is the marketing
- * site (a separate assets-only Worker), so wrangler.jsonc routes only the
- * owner prefixes below to this Worker and runs it first for them. A catalog
- * repository's page serves the SPA document; every other path under a routed
- * owner is nobody's page, so it leaves for the site instead of booting an
- * empty SPA shell. The owner list mirrors the `smithers.sh/<owner>/*` routes
- * and the `run_worker_first` entry in wrangler.jsonc: a new owner needs all
- * three in one commit.
+ * https://smithers.sh/<owner>/<name>, a page the smithers.sh Astro build
+ * (apps/site) prerenders per catalog repository and this Worker serves from
+ * that build's dist. wrangler.jsonc routes only the owner prefixes below to
+ * this Worker on the apex and runs it first for them, so this handler, not the
+ * assets layer, decides what a repository path answers: a catalog repository's
+ * page is the app document with the isolation headers OPFS needs, and every
+ * other path under a routed owner is nobody's page, so it leaves for the site
+ * instead of a 404 page. The owner list mirrors the `smithers.sh/<owner>/*`
+ * routes and the `run_worker_first` entries in wrangler.jsonc: a new owner
+ * needs all three in one commit (src/workerIdentity.test.ts holds the last two
+ * to this list).
  */
-const ROUTED_OWNER_PREFIXES: ReadonlyArray<string> = ["/smithersai/"]
+export const ROUTED_OWNER_PREFIXES: ReadonlyArray<string> = ["/smithersai/"]
 
 /** Whether `owner/name` is in the public catalog; GitHub names are case-insensitive. */
 const isCatalogRepository = (name: unknown): boolean =>
@@ -2478,12 +2482,35 @@ const handlePublicRepoActivity = createPublicRepoActivityHandler({
   cache: () => (globalThis as typeof globalThis & { caches?: CacheStorage & { default?: Cache } }).caches?.default
 })
 
-const routedRepoPage = (pathname: string): "catalog" | "unknown" | undefined => {
-  // GitHub names are case-insensitive, and `/owner/name/` is the same page.
+const routedRepoPage = (pathname: string): { readonly document: string } | "unknown" | undefined => {
   const lower = pathname.toLowerCase()
   if (!ROUTED_OWNER_PREFIXES.some((prefix) => lower.startsWith(prefix))) return undefined
-  const name = lower.replace(/\/$/, "")
-  return AVAILABLE_REPOS.some((repo) => `/${repo.name.toLowerCase()}` === name) ? "catalog" : "unknown"
+  const document = catalogDocumentPath(pathname)
+  return document === undefined ? "unknown" : { document }
+}
+
+/*
+ * The app document, fetched from the site build by its canonical path
+ * (src/appDocument.ts) and served with the isolation headers the app's OPFS
+ * persistence needs. Only the app document carries them: the docs pages in
+ * the same build load Google Fonts and Pagefind, which COEP require-corp
+ * would block.
+ */
+const serveAppDocument = async (request: Request, env: WorkerEnv, url: URL, document: string): Promise<Response> =>
+  withIsolationHeaders(await env.ASSETS.fetch(new Request(new URL(document, url).toString(), request)))
+
+/**
+ * The canary is a copy of the product, not a second product: an HTML page it
+ * serves must never outrank the apex in a search index.
+ */
+const CANARY_HOSTNAME = "canary.smithers.sh"
+
+const withCanaryRobots = (url: URL, response: Response): Response => {
+  if (url.hostname !== CANARY_HOSTNAME) return response
+  if (!(response.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) return response
+  const headers = new Headers(response.headers)
+  headers.set("X-Robots-Tag", "noindex")
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
 }
 
 export default {
@@ -2635,13 +2662,19 @@ export default {
     // admin surface answers non-admins with, so nothing is enumerable.
     if (url.pathname.startsWith("/api/")) return notFound()
     const repoPage = routedRepoPage(url.pathname)
-    if (repoPage === "catalog") {
-      // The same document the assets layer's SPA fallback serves for `/`.
-      return withIsolationHeaders(await env.ASSETS.fetch(new Request(new URL("/", url).toString(), request)))
-    }
     if (repoPage === "unknown") {
       return new Response(null, { status: 302, headers: { location: `${DEFAULT_APP_ORIGIN}/` } })
     }
-    return withIsolationHeaders(await env.ASSETS.fetch(request))
+    if (repoPage !== undefined) {
+      return withCanaryRobots(url, await serveAppDocument(request, env, url, repoPage.document))
+    }
+    // A reload or a deep link inside the app: the frame path names no file in
+    // the build, so the Worker serves the app document for it.
+    if (isFramePath(url.pathname)) {
+      return withCanaryRobots(url, await serveAppDocument(request, env, url, DEFAULT_APP_DOCUMENT_PATH))
+    }
+    // Everything else is the site build as the assets layer serves it: the
+    // landing page, the docs, the hashed chunks, and its 404 page.
+    return withCanaryRobots(url, await env.ASSETS.fetch(request))
   }
 }
