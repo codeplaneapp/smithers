@@ -323,7 +323,12 @@ describe("repo tree seam: a cloud workspace copy reads the box's files route", (
   })
 
   test("a box that is not running fails the row with its state sentence and asks the route nothing", async () => {
-    const { store, controller, boxRequests } = await loadBox([boxCopy("ws-1", "starting"), boxCopy("ws-2", "suspended"), boxCopy("ws-3", "pending")])
+    const { store, controller, boxRequests } = await loadBox([
+      boxCopy("ws-1", "starting"),
+      boxCopy("ws-2", "suspended"),
+      boxCopy("ws-3", "pending"),
+      boxCopy("ws-4", "failed")
+    ])
     expect((await controller.commands.run("repo.tree", "ws-1")).status).toBe("executed")
     expect(store.collections.repoTree.get(repoTreeRowId("ws-1", ""))).toMatchObject({
       state: "failed",
@@ -335,6 +340,14 @@ describe("repo tree seam: a cloud workspace copy reads the box's files route", (
     expect(store.collections.repoTree.get(repoTreeRowId("ws-2", "apps"))?.error).toBe("fix-landings (ws-2) is suspended, not running; /workspace.resume it first.")
     expect((await controller.commands.run("repo.tree", "ws-3")).status).toBe("executed")
     expect(store.collections.repoTree.get(repoTreeRowId("ws-3", ""))?.error).toBe("fix-landings (ws-3) is pending, not running; wait for it to settle (the workspace card tracks it).")
+    // A failed box never settles and cannot be resumed: no invented remedy, the card carries plue's failure_message.
+    expect((await controller.commands.run("repo.tree", "ws-4")).status).toBe("executed")
+    expect(store.collections.repoTree.get(repoTreeRowId("ws-4", ""))).toMatchObject({
+      state: "failed",
+      expanded: true,
+      entries: [],
+      error: "fix-landings (ws-4) is failed; the workspace card names why."
+    })
     expect(boxRequests).toEqual([])
     // The box settles: the inventory refresh rewrites the copy, and the next toggle is the retry that lists it.
     await store.dispatch({ type: "workingcopies.workspaces.loaded", actor: "system", copies: [boxCopy("ws-1", "running")] }).isPersisted.promise

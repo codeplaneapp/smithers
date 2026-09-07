@@ -48,14 +48,18 @@ export const openRepoOfCopy = (
 /**
  * Why a box cannot list files right now, in the state the inventory holds
  * for it. `undefined` for a running box: the route is asked, and its own
- * answer stands.
+ * answer stands. A `failed` box never settles (the settle watch polls only
+ * pending/starting) and cannot be resumed; plue's failure_message rides on
+ * the workspace row, so the card is where the reason shows.
  */
 export const workspaceTreeRefusal = (copy: WorkingCopy): string | undefined => {
   if (copy.state === undefined || copy.state === "running") return undefined
+  const name = `${copy.label} (${copy.workspaceId ?? copy.id})`
+  if (copy.state === "failed") return `${name} is failed; the workspace card names why.`
   const remedy = copy.state === "suspended" || copy.state === "stopped"
     ? "/workspace.resume it first"
     : "wait for it to settle (the workspace card tracks it)"
-  return `${copy.label} (${copy.workspaceId ?? copy.id}) is ${copy.state}, not running; ${remedy}.`
+  return `${name} is ${copy.state}, not running; ${remedy}.`
 }
 
 /**
