@@ -828,8 +828,11 @@ current occurrence.
 The signature verifier looks up `SignatureConfig.header` in `RawInbound.headers`
 first as lowercase and then exactly as written. It encodes the supplied header
 value as UTF-8 with `TextEncoder` and compares those bytes with the bytes
-returned by `SignatureConfig.expected`. An absent header becomes a zero-length
-byte string and fails against the expected signature.
+returned by `SignatureConfig.expected`. An absent or empty header is refused
+before `expected` runs, and an `expected` that answers with zero bytes is
+refused after it. Constant-time equality agrees on two empty byte strings, so
+without those guards a request carrying no signature at all would authenticate
+against a credential that resolved to the empty string.
 
 `Webhook.constantTimeEqual` iterates exactly `expected.length` times. It folds
 the length difference into the accumulated result, so unequal lengths fail

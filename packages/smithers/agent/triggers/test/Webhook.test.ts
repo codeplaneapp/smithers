@@ -245,6 +245,72 @@ describe("Webhook", () => {
     }
   })
 
+  it("refuses an absent or empty header before the secret is resolved", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: Webhook.makeSignatureVerifier({
+        header: "x-signature",
+        expected: () => {
+          calls.push("expected")
+          return Effect.succeed(new TextEncoder().encode("valid"))
+        }
+      })
+    })
+    for (const headers of [{}, { "x-signature": "" }]) {
+      const exit = await run(
+        Effect.exit(
+          webhook.register.pipe(Effect.andThen(webhook.ingest({
+            body: new TextEncoder().encode(JSON.stringify({ _tag: "start", flowId: "review", input: {} })),
+            headers,
+            idempotencyKey: `unsigned-${JSON.stringify(headers)}`
+          })))
+        ),
+        calls
+      )
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        expect(Cause.squash(exit.cause)).toMatchObject({ code: "verification_failed" })
+      }
+    }
+    expect(calls).not.toContain("expected")
+  })
+
+  it("refuses every request when the expected signature is empty", async () => {
+    const calls: Array<string> = []
+    const webhook = Webhook.make({
+      ...declaration(calls),
+      verify: Webhook.makeSignatureVerifier({
+        header: "x-signature",
+        expected: () => Effect.succeed(new Uint8Array())
+      })
+    })
+    for (
+      const headers of [
+        {},
+        { "x-signature": "" },
+        { "x-signature": "valid" }
+      ]
+    ) {
+      const exit = await run(
+        Effect.exit(
+          webhook.register.pipe(Effect.andThen(webhook.ingest({
+            body: new TextEncoder().encode(JSON.stringify({ _tag: "start", flowId: "review", input: {} })),
+            headers,
+            idempotencyKey: `empty-expected-${JSON.stringify(headers)}`
+          })))
+        ),
+        calls
+      )
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        expect(Cause.squash(exit.cause)).toMatchObject({ code: "verification_failed" })
+      }
+    }
+    expect(calls).not.toContain("plan:review")
+    expect(calls).not.toContain("run")
+  })
+
   it("accepts the signature header under its declared casing", async () => {
     const calls: Array<string> = []
     const webhook = Webhook.make({

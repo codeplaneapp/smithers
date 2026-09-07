@@ -116,8 +116,9 @@ tick reads again anyway.
 ## verification_failed
 
 **What happened.** A webhook request did not authenticate. Either the signature
-did not match, the header was absent, or the credential could not be resolved.
-Nothing was decoded and no Control operation ran.
+did not match, the header was absent or empty, `SignatureConfig.expected`
+returned zero bytes, or the credential could not be resolved. Nothing was
+decoded and no Control operation ran.
 
 **What to change.** Check three things in order.
 
@@ -127,7 +128,9 @@ Nothing was decoded and no Control operation ran.
 2. The bytes `SignatureConfig.expected` returns. They are compared against the
    UTF-8 encoding of the header value, so an implementation that returns raw
    HMAC bytes where the provider sends hex will never match. Return the encoded
-   form the provider actually sends.
+   form the provider actually sends. A zero-length result is refused outright,
+   because it means the secret resolved to the empty string rather than that
+   every request is valid.
 3. The credential. `Webhook.Config.credential` is required, and a failure inside
    `expected` while resolving it surfaces here as a typed failure rather than as
    a defect.

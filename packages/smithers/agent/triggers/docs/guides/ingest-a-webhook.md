@@ -79,8 +79,10 @@ Three properties of that signature are the point of it.
   stops growing and learn the expected signature's length.
 
 The verifier looks the header up first in lowercase and then exactly as written,
-so `x-hub-signature-256` and `X-Hub-Signature-256` both resolve. An absent header
-becomes a zero-length byte string and fails.
+so `x-hub-signature-256` and `X-Hub-Signature-256` both resolve. An absent or
+empty header is refused before `expected` runs, and an `expected` that answers
+with zero bytes is refused after it, so a secret that resolves to the empty
+string closes the door instead of opening it for everyone.
 
 ## Register once, then accept traffic
 

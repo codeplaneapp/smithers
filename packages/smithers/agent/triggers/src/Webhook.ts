@@ -61,28 +61,42 @@ export interface SignatureConfig {
 /**
  * Builds a verifier that compares a signature header in constant time.
  *
+ * An absent or empty header is refused before `expected` runs, and an
+ * `expected` that answers with zero bytes is refused after it. Neither is a
+ * comparison the constant-time equality can decide: it agrees on two empty
+ * byte strings, so a request carrying no signature at all would have
+ * authenticated against a secret that resolved to the empty string. A
+ * zero-length expected signature is a misconfigured credential, never a valid
+ * one, so the door stays closed instead of opening for everyone.
+ *
  * @category constructors
  * @since 0.1.0
  */
-export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify => (raw, credential) =>
-  Effect.suspend(() => {
+export const makeSignatureVerifier = (config: SignatureConfig): Channel.Verify => (raw, credential) => {
+  const refuse = () =>
+    Effect.fail(
+      new TriggerError({
+        code: "verification_failed",
+        message: `webhook signature in ${config.header} did not verify`
+      })
+    )
+  return Effect.suspend(() => {
     const supplied = raw.headers[config.header.toLowerCase()] ?? raw.headers[config.header]
-    const actual = supplied === undefined ? new Uint8Array() : new TextEncoder().encode(supplied)
+    if (supplied === undefined || supplied.length === 0) {
+      return refuse()
+    }
+    const actual = new TextEncoder().encode(supplied)
     // The verifier gets its own copy: nothing it does to these bytes can reach
     // the buffer that is about to be fingerprinted and decoded.
     return config.expected(raw.body.slice(), credential).pipe(
       Effect.flatMap((expected) =>
-        constantTimeEqual(expected, actual)
+        expected.length > 0 && constantTimeEqual(expected, actual)
           ? Effect.void
-          : Effect.fail(
-            new TriggerError({
-              code: "verification_failed",
-              message: `webhook signature in ${config.header} did not verify`
-            })
-          )
+          : refuse()
       )
     )
   })
+}
 
 /**
  * Webhook declaration configuration.
