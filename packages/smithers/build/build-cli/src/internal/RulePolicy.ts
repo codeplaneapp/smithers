@@ -43,6 +43,7 @@ const policies: Readonly<Record<string, Policy>> = {
   "Docs.Check": { check: true },
   "Docs.Page": { outward: true, attended: true, exclusive: true, writes: true },
   "Fetch": { writes: true, cache: "always" },
+  "FlowCatalog": { check: true },
   "Foundry.Build": { overlay: true, writes: true, cache: "always" },
   "Foundry.Fmt": { check: true, cache: "check" },
   "Foundry.Test": { overlay: true, cache: "execute" },

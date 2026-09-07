@@ -51,6 +51,31 @@ budget:
 
 The markdown below the closing `---` fence is the prompt the agent is handed, and every line of it is an instruction. Headings organize that prompt; they do not create separate durable steps or enforce execution order. Arguments passed at launch are appended after the body.
 
+## Featured flows
+
+Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in the root `PACKAGE.ts`, with `Smithers.Flow`:
+
+```ts
+import { Smithers } from "@smthrs/targets"
+
+export const review = Smithers.Flow({
+  flow: "review",
+  summary: "Review the working-copy change and return a verdict with the reasons behind it.",
+  featured: true
+})
+
+const flowCatalog = Smithers.FlowCatalog({ flows: [review] })
+```
+
+`flow` is the flow id, the directory path below `flows/`. `summary` is one non-empty line. `featured` defaults to `false`.
+
+`Smithers.FlowCatalog` is the target that joins these declarations with discovery and writes `flows/catalog.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery.
+
+- `smithers-build target //:flowCatalog --write` regenerates the file.
+- `smithers-build ci //:flowCatalog` fails on drift, the same way the generated `ci.yml` does.
+- A declaration whose `flow` names no discovered flow fails the write with the id in the message. A recommendation for a flow that does not exist is never written.
+- `smthrs ls` reads the catalog when it is present and marks featured flows with a leading `*` in its human output.
+
 ## See also
 
 - [Markdown flows](/docs/guides/markdown-flows/) walks through authoring one.

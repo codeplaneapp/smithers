@@ -3,7 +3,11 @@ import { Smithers } from "@smthrs/targets"
 
 const pack = Smithers.NodeTest({
   runner: Smithers.testRunner([Smithers.file("//flows/pack.test.mjs")]),
-  srcs: [Smithers.glob("//flows/**/flow.mdx"), Smithers.glob("//flows/**/flow.ts")],
+  srcs: [
+    Smithers.glob("//flows/**/flow.mdx"),
+    Smithers.glob("//flows/**/flow.ts"),
+    Smithers.file("//flows/catalog.json")
+  ],
   deps: []
 })
 

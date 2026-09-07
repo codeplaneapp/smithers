@@ -3208,6 +3208,9 @@ importers:
       '@smthrs/platform-node':
         specifier: 1.0.0-rc.0
         version: link:../../flows/platform-node
+      '@smthrs/registry':
+        specifier: 1.0.0-rc.0
+        version: link:../../agent/registry
       '@smthrs/targets':
         specifier: 1.0.0-rc.0
         version: link:../targets

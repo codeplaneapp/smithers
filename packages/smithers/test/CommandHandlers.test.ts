@@ -94,6 +94,22 @@ const launch = Effect.fnUntraced(function*() {
   return { runId: receipt.runId, approval }
 })
 
+describe("ls for a person", () => {
+  it("prints one line per flow, unstarred without a catalog, and keeps the document under --json", async () => {
+    const result = await run(
+      Effect.gen(function*() {
+        return { human: yield* text(["ls"]), json: yield* text(["--json", "ls"]) }
+      }),
+      testControl
+    )
+    expect(result.human).toBe(`  ${demoFlow.flowId}  ${demoFlow.description}`)
+    expect(JSON.parse(result.json)).toEqual({
+      _tag: "flows",
+      items: [{ flowId: demoFlow.flowId, description: demoFlow.description }]
+    })
+  })
+})
+
 describe("credential flag warning", () => {
   it.each([false, true])("warns on stderr without echoing the token (quiet: %s)", async (quiet) => {
     const result = await run(

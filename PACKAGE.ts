@@ -122,6 +122,47 @@ const repoAbout = Smithers.ToolRun({
   cwd: "."
 })
 
+// --- featured flows --------------------------------------------------------
+// The flows this repository recommends first, and the one line each shows
+// under its id. A flow describes itself in flows/<id>/flow.mdx; how the
+// repository presents it is declared here and nowhere else, riding the same
+// summary and featured pair every target carries. `flowCatalog` projects
+// these declarations over the discovered flows into flows/catalog.json, the
+// file smithers.sh reads from the public mirror; a declaration naming no
+// discovered flow fails that projection by id.
+export const review = Smithers.Flow({
+  flow: "review",
+  summary: "Review the working-copy change and return a verdict with the reasons behind it.",
+  featured: true
+})
+export const lint = Smithers.Flow({
+  flow: "lint",
+  summary: "Lint the files you name against this repository's conventions and fix what it finds.",
+  featured: true
+})
+export const prTriage = Smithers.Flow({
+  flow: "pr-triage",
+  summary: "Triage one pull request for scope, tests, docs, and review readiness from its diff alone.",
+  featured: true
+})
+export const issueTriage = Smithers.Flow({
+  flow: "issue-triage",
+  summary: "Reproduce and triage one GitHub issue into a structured maintainer response.",
+  featured: true
+})
+export const releaseNotes = Smithers.Flow({
+  flow: "release-notes",
+  summary: "Draft release notes from the commits since the last tag, grouped by package.",
+  featured: true
+})
+
+const flowCatalog = Smithers.FlowCatalog({
+  summary: "Regenerate and drift-check flows/catalog.json from the flows/ tree and the Smithers.Flow declarations.",
+  featured: true,
+  flows: [review, lint, prTriage, issueTriage, releaseNotes]
+})
+// --- end featured flows ----------------------------------------------------
+
 const ubuntu = "ubuntu-latest"
 
 const node = Smithers.CiToolchain.Node({ release: "22.19.0", npmRelease: "11.16.0" })
@@ -286,7 +327,10 @@ const ci = Smithers.GithubCiGen({
         // a stale fixture is deterministic and cheap to catch, and
         // `fixtures/claimChild.ts` once called the removed `Control.pause` and
         // died at runtime in every case that spawned it.
-        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" }
+        { name: "Generated workflow drift", verb: Smithers.Verb.Lint, pattern: "//:ci" },
+        // The featured-flow catalog smithers.sh serves from the public mirror.
+        // Declared in this file, rendered over the flows/ tree, checked in.
+        { name: "Flow catalog drift", verb: Smithers.Verb.Lint, pattern: "//:flowCatalog" }
       ]
     },
     {
@@ -602,6 +646,7 @@ export const Package = Smithers.Package({
   targets: {
     changelog,
     ci,
+    flowCatalog,
     reviewDocsAgainstCode,
     jsdocRules,
     jsdocTree,

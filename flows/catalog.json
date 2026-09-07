@@ -1,0 +1,234 @@
+{
+  "flows": [
+    {
+      "id": "review",
+      "description": "Reviews the uncommitted change in this repository and returns a verdict with the reasons behind it.",
+      "summary": "Review the working-copy change and return a verdict with the reasons behind it.",
+      "featured": true,
+      "kind": "mdx",
+      "path": "flows/review/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:*"
+      ],
+      "model": "openai:gpt-5.6-sol",
+      "modelInvocable": true
+    },
+    {
+      "id": "lint",
+      "description": "Lints the files you name against this repository's own conventions and fixes what it finds.",
+      "summary": "Lint the files you name against this repository's conventions and fix what it finds.",
+      "featured": true,
+      "kind": "mdx",
+      "path": "flows/lint/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**",
+        "proc:spawn:*"
+      ],
+      "model": "openai:gpt-5.6-sol",
+      "modelInvocable": true
+    },
+    {
+      "id": "pr-triage",
+      "description": "Triages one pull request for scope, tests, documentation, and review readiness from an untrusted diff without checking out its code.",
+      "summary": "Triage one pull request for scope, tests, docs, and review readiness from its diff alone.",
+      "featured": true,
+      "kind": "mdx",
+      "path": "flows/pr-triage/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:.triage/report.json",
+        "proc:spawn:rg *"
+      ],
+      "model": "openai:gpt-5.6-sol",
+      "modelInvocable": true
+    },
+    {
+      "id": "issue-triage",
+      "description": "Reproduces and triages one GitHub issue, producing a structured maintainer response without holding a GitHub write token.",
+      "summary": "Reproduce and triage one GitHub issue into a structured maintainer response.",
+      "featured": true,
+      "kind": "mdx",
+      "path": "flows/issue-triage/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:.triage/report.json",
+        "proc:spawn:rg *",
+        "proc:spawn:git status *",
+        "proc:spawn:git diff *",
+        "proc:spawn:pnpm test *",
+        "proc:spawn:pnpm exec vitest *"
+      ],
+      "model": "openai:gpt-5.6-sol",
+      "modelInvocable": true
+    },
+    {
+      "id": "release-notes",
+      "description": "Drafts release notes from the commits since the last tag, grouped by the package each one touched.",
+      "summary": "Draft release notes from the commits since the last tag, grouped by package.",
+      "featured": true,
+      "kind": "mdx",
+      "path": "flows/release-notes/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:*"
+      ],
+      "model": "openai:gpt-5.6-sol",
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/clarify",
+      "description": "Turns a plain-English request for a Smithers flow into a precise, buildable specification, without writing any files.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/clarify/flow.mdx",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/design",
+      "description": "Turns a clarified flow specification and its provisioning notes into a concrete node graph a scaffolder can implement.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/design/flow.mdx",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/document",
+      "description": "Writes the agent-facing skill file for a newly verified Smithers flow so future agents know it exists and how to run it.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/document/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/fix",
+      "description": "Repairs a newly scaffolded Smithers flow until its typecheck, discovery, and test all pass.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/fix/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**",
+        "proc:spawn:*"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/provision",
+      "description": "Pulls the documentation, examples, patterns, and seats a new Smithers flow needs into context before anyone designs it.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/provision/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "proc:spawn:*"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-flow/scaffold",
+      "description": "Writes the flow file, its actions, and its test from an approved design, then reports exactly what it wrote.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-flow/scaffold/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**",
+        "proc:spawn:*"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-skill/clarify",
+      "description": "Turns a plain-English request for an agent skill into a precise, buildable skill specification, without writing any files.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-skill/clarify/flow.mdx",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-skill/design",
+      "description": "Turns a clarified skill specification into a concrete SKILL.md blueprint a scaffolder can write without guessing.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-skill/design/flow.mdx",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-skill/document",
+      "description": "Summarizes a newly written agent skill for the operator, naming its path and when an agent should reach for it.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-skill/document/flow.mdx",
+      "capabilities": [],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "create-skill/scaffold",
+      "description": "Writes a real agent-facing SKILL.md and its supporting files from an approved skill design, then reports what it wrote.",
+      "summary": null,
+      "featured": false,
+      "kind": "mdx",
+      "path": "flows/create-skill/scaffold/flow.mdx",
+      "capabilities": [
+        "fs:read:**",
+        "fs:write:**"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "release",
+      "description": "Prepare a Smithers release or validate, build, smoke-test and publish its exact npm tarballs with durable human approval.",
+      "summary": null,
+      "featured": false,
+      "kind": "ts",
+      "path": "flows/release/flow.ts",
+      "capabilities": [
+        "*"
+      ],
+      "model": null,
+      "modelInvocable": true
+    },
+    {
+      "id": "release-content",
+      "description": "Analyze a release, draft changelog/blog/thread content, revise against quality gates, render previews and wait for approval before publication.",
+      "summary": null,
+      "featured": false,
+      "kind": "ts",
+      "path": "flows/release-content/flow.ts",
+      "capabilities": [
+        "*"
+      ],
+      "model": null,
+      "modelInvocable": true
+    }
+  ]
+}

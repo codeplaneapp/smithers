@@ -43,6 +43,7 @@ import * as Gc from "./Gc.ts"
 import * as Init from "./Init.ts"
 import * as CommandStatus from "./internal/CommandStatus.ts"
 import { causeLine } from "./internal/Failure.ts"
+import * as FeaturedFlows from "./internal/FeaturedFlows.ts"
 import * as History from "./internal/History.ts"
 import * as Legacy from "./Legacy.ts"
 import * as NodeOutput from "./NodeOutput.ts"
@@ -931,10 +932,17 @@ const listFlows = Effect.gen(function*() {
   // launched, and then sat at `accepted` with nothing to run. Discovery
   // warnings belong to `doctor`, so the stable `ls` document remains a plain
   // flow page even though both commands read the same paged catalog.
-  yield* render({
-    _tag: "flows",
-    items: catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId))
-  })
+  // The featured set and the one-line summaries come from the project's
+  // generated flows/catalog.json when it is checked in; a project without one
+  // lists exactly the discovered page. A person at a terminal reads one line
+  // per flow with the featured rows starred; `--json` keeps the document.
+  const projectRoot = yield* Project.ProjectRoot
+  const items = FeaturedFlows.present(
+    catalog.items.filter((item) => !Unsupported.isReservedFlow(item.flowId)),
+    FeaturedFlows.read(projectRoot)
+  )
+  const root = yield* rootCommand
+  yield* render(root.json ? { _tag: "flows", items } : FeaturedFlows.human(items).replace(/\n$/, ""))
 })
 
 const ls = Command.make("ls", {}, () => listFlows).pipe(Command.withDescription(Verb.find("ls")!.help))

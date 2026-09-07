@@ -411,6 +411,7 @@
     "@smthrs/keys": "1.0.0-rc.0",
     "@smthrs/plan": "1.0.0-rc.0",
     "@smthrs/platform-node": "1.0.0-rc.0",
+    "@smthrs/registry": "1.0.0-rc.0",
     "@smthrs/targets": "1.0.0-rc.0",
     "effect": "4.0.0-rc.112",
     "ignore": "7.0.8",

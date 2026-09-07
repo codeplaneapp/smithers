@@ -53,6 +53,7 @@ under a bare Flow runtime fails loudly instead of doing nothing.
 | `EsLint`                 | EsLint            | lint               | no        | no               | flow body        |
 | `Fetch`                  | Fetch             | build              | no        | yes              | package executor |
 | `Filegroup`              | Filegroup         | none               | yes       | no               | flow body        |
+| `FlowCatalog`            | FlowCatalog       | build, lint        | by attrs  | by attrs         | flow body        |
 | `Foundry.Build`          | Foundry           | build              | yes       | yes              | flow body        |
 | `Foundry.Fmt`            | Foundry           | lint, run          | by attrs  | no               | flow body        |
 | `Foundry.Test`           | Foundry           | test               | yes       | no               | flow body        |
@@ -119,4 +120,4 @@ under a bare Flow runtime fails loudly instead of doing nothing.
 | `VitestCoverage`         | VitestCoverage    | test               | no        | yes              | flow body        |
 | `VitestWatch`            | VitestWatch       | run                | no        | no               | flow body        |
 
-103 rules.
+104 rules.

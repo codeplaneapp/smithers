@@ -10,6 +10,7 @@ import { Cli, z } from "incur"
 import { readFile } from "node:fs/promises"
 import * as Forensics from "../Forensics.ts"
 import * as Failure from "../internal/Failure.ts"
+import * as FeaturedFlows from "../internal/FeaturedFlows.ts"
 import * as History from "../internal/History.ts"
 import * as Bridge from "./ControlBridge.ts"
 import { prepareHistoryRun, reconcileHistory } from "./HistoryCommands.ts"
@@ -59,7 +60,17 @@ export const createFlowCli = (runtime: Bridge.Runtime = {}) =>
     .command("list", {
       description: "List project flows",
       options,
-      run: (c) => safe(c, () => Bridge.invoke(["ls"], c.options, runtime))
+      run: (c) =>
+        safe(c, async () => {
+          const page = await Bridge.invoke(["ls"], c.options, runtime)
+          // A person reads one line per flow, featured rows starred, so the
+          // recommended set is visible without a table. Agents and `--json`
+          // keep the flow page document unchanged.
+          const session = Presentation.current()
+          if (session === undefined || session.policy.structured || !FeaturedFlows.isFlowPage(page)) return page
+          session.stdout.write(FeaturedFlows.human(page.items))
+          return undefined
+        })
     })
     .command("show", {
       description: "Show a discovered flow's identity and description",

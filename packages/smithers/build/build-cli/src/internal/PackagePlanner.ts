@@ -1267,8 +1267,12 @@ const visit = async (
   // PACKAGE.ts restating them. Filled before the key material is built, so the
   // tool identity is still keyed, and before the body runs, so the rule's own
   // argv builder is unchanged.
-  const attrs = WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain)
   const plannedMode = context.rootModes.get(label) ?? options.mode
+  const attrs = withPlannedMode(
+    rule,
+    WorkspaceToolchain.fill(metadata.workspaceAttrs, view.attrs, context.workspaceToolchain),
+    plannedMode
+  )
 
   // Dependencies: always visited for key material; the execution edges are a
   // per-rule subset decided below.
@@ -2889,6 +2893,22 @@ const dataLabelsOf = (
   }
   return labels
 }
+
+/**
+ * The flow-body generators whose output handling is a `mode` attr the
+ * invocation may override: `--write` flips the declared `check` to `write`,
+ * and a `check` invocation forces `check` on a declaration that asked to
+ * write, so `ci` never mutates the file. Every other rule keeps the attrs its
+ * declaration and verb view produced; `GithubCiGen` and `Tsconfig` stay out
+ * because their `build` verb writes whatever the declaration says today, and
+ * the executor suite pins that.
+ */
+const plannedModeRules: ReadonlySet<string> = new Set(["FlowCatalog"])
+
+const withPlannedMode = (rule: string, attrs: unknown, mode: Mode): unknown =>
+  plannedModeRules.has(rule) && mode !== "execute" && typeof attrs === "object" && attrs !== null
+    ? { ...attrs, mode }
+    : attrs
 
 /** The mode one root executes under, given the invocation. */
 const rootMode = (rule: string, options: RunOptions): Mode => {

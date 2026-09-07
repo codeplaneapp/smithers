@@ -241,8 +241,14 @@ export interface Presentation {
   readonly featured?: boolean | undefined
 }
 
-/** A declaration's presentation with the defaults applied. */
-interface Declared {
+/**
+ * A declaration's presentation with the defaults applied: the trimmed
+ * one-line summary, or undefined, and whether the declaration is featured.
+ *
+ * @category models
+ * @since 1.0.0
+ */
+export interface DeclaredPresentation {
   readonly summary: string | undefined
   readonly featured: boolean
 }
@@ -253,10 +259,16 @@ const presentationKeys: ReadonlySet<string> = new Set(["summary", "featured"])
 /**
  * Separates the presentation from the attrs of one snapshotted declaration,
  * or names the reason the presentation is unusable.
+ *
+ * Exported so every declaration that carries a `summary` and `featured`
+ * pair, a target or a `Smithers.Flow`, validates the pair through one rule.
+ *
+ * @category validation
+ * @since 1.0.0
  */
-const splitPresentation = (
+export const splitPresentation = (
   snapshot: unknown
-): { readonly attrs: unknown; readonly presentation: Declared } | string => {
+): { readonly attrs: unknown; readonly presentation: DeclaredPresentation } | string => {
   const none = { summary: undefined, featured: false }
   if (typeof snapshot !== "object" || snapshot === null || Array.isArray(snapshot)) {
     return { attrs: snapshot, presentation: none }
@@ -1371,7 +1383,7 @@ export const make = <
     // legacy declaration line the author has to edit.
     const site = sourceSite()
     let attrs: Attrs["Type"]
-    let presentation: Declared
+    let presentation: DeclaredPresentation
     try {
       const split = splitPresentation(snapshotAttrs(attrsInput, 0, { count: 0 }, new Map()))
       if (typeof split === "string") throw new TypeError(split)

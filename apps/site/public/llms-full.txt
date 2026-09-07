@@ -13084,7 +13084,7 @@ https://smithers.sh/docs/reference/api/build-cli/
 
 > **Source:** [implementation](https://github.com/smithersai/smithers/tree/main/packages/smithers/build/build-cli/src) · [reference source](https://github.com/smithersai/smithers/blob/main/packages/smithers/build/build-cli/docs/api.md)
 
-> **Related APIs:** [`@smthrs/build`](/docs/reference/api/build/) · [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/create-app`](/docs/reference/api/create-app/) · [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/keys`](/docs/reference/api/keys/) · [`@smthrs/plan`](/docs/reference/api/plan/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/targets`](/docs/reference/api/targets/)
+> **Related APIs:** [`@smthrs/build`](/docs/reference/api/build/) · [`@smthrs/canonical`](/docs/reference/api/canonical/) · [`@smthrs/core`](/docs/reference/api/core/) · [`@smthrs/create-app`](/docs/reference/api/create-app/) · [`@smthrs/crypto`](/docs/reference/api/crypto/) · [`@smthrs/engine`](/docs/reference/api/engine/) · [`@smthrs/flow`](/docs/reference/api/flow/) · [`@smthrs/journal`](/docs/reference/api/journal/) · [`@smthrs/keys`](/docs/reference/api/keys/) · [`@smthrs/plan`](/docs/reference/api/plan/) · [`@smthrs/platform-node`](/docs/reference/api/platform-node/) · [`@smthrs/registry`](/docs/reference/api/registry/) · [`@smthrs/targets`](/docs/reference/api/targets/)
 
 ```ts
 import { cli, makeCli, Planner, Workspace } from "@smthrs/build-cli"
@@ -40916,6 +40916,31 @@ budget:
 
 The markdown below the closing `---` fence is the prompt the agent is handed, and every line of it is an instruction. Headings organize that prompt; they do not create separate durable steps or enforce execution order. Arguments passed at launch are appended after the body.
 
+## Featured flows
+
+Frontmatter describes the flow. It never says how the repository presents it: the one-line `summary` a listing shows under the id, and whether the flow is `featured`, one of the handful the repository recommends first. Those two keys are not frontmatter keys; a `summary` or `featured` key in `flow.mdx` earns an `unknown_frontmatter_key` warning like any other. They are declared once, in the root `PACKAGE.ts`, with `Smithers.Flow`:
+
+```ts
+import { Smithers } from "@smthrs/targets"
+
+export const review = Smithers.Flow({
+  flow: "review",
+  summary: "Review the working-copy change and return a verdict with the reasons behind it.",
+  featured: true
+})
+
+const flowCatalog = Smithers.FlowCatalog({ flows: [review] })
+```
+
+`flow` is the flow id, the directory path below `flows/`. `summary` is one non-empty line. `featured` defaults to `false`.
+
+`Smithers.FlowCatalog` is the target that joins these declarations with discovery and writes `flows/catalog.json`: one row per discovered flow with `id`, `description`, `summary`, `featured`, `kind` (`ts`, `mdx`, or `skill`), `path`, `capabilities`, `model`, and `modelInvocable`, featured rows first in declaration order. The file is checked in, so smithers.sh and a workspace without `node_modules` read the featured set without running discovery.
+
+- `smithers-build target //:flowCatalog --write` regenerates the file.
+- `smithers-build ci //:flowCatalog` fails on drift, the same way the generated `ci.yml` does.
+- A declaration whose `flow` names no discovered flow fails the write with the id in the message. A recommendation for a flow that does not exist is never written.
+- `smthrs ls` reads the catalog when it is present and marks featured flows with a leading `*` in its human output.
+
 ## See also
 
 - [Markdown flows](/docs/guides/markdown-flows/) walks through authoring one.
@@ -41191,6 +41216,7 @@ A Smithers workspace holds target declarations and flow sources. Runtime state l
   - WORKSPACE.ts
 - PACKAGE.ts
 - flows/
+  - catalog.json
   - review/
     - flow.mdx
   - deploy/
@@ -41220,6 +41246,7 @@ One directory per flow; discovery reads these rules.
 - An entry file directly under `flows/` is refused: path-named sources cannot contain a root-level entry.
 - `smthrs init <name>` scaffolds `flows/<name>/flow.mdx`; the name is one path segment of letters, digits, `-`, and `_`.
 - Ids that start with `system/` are reserved for the control plane: `smthrs flow plan` and `smthrs flow start` refuse them, and `smthrs flow list` does not list them.
+- `flows/catalog.json` is generated, not authored. A root `PACKAGE.ts` that declares `Smithers.FlowCatalog` renders it from the discovered flows and the `Smithers.Flow` declarations beside it: every flow's id, description, path, kind, capabilities, and model, plus the `summary` and `featured` flag the repository declares. `smithers-build target //:flowCatalog --write` regenerates it and `ci` fails on drift. See [Featured flows](/docs/reference/flow-mdx/#featured-flows).
 
 ## .flows/
 

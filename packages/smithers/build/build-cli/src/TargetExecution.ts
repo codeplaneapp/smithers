@@ -34,6 +34,7 @@ import {
   targetToolchain,
   verifyTargetToolchain
 } from "./engine.ts"
+import { FlowCatalogLive } from "./FlowCatalogExec.ts"
 import type * as OutputStream from "./OutputStream.ts"
 import type * as Planner from "./Planner.ts"
 
@@ -95,6 +96,7 @@ export const runTarget = (
         WriteFileLive({ workspaceRoot }),
         CheckFileLive({ workspaceRoot }),
         CheckDocsLive({ workspaceRoot }),
+        FlowCatalogLive({ workspaceRoot }),
         LlmReviewLive({ workspaceRoot, sensitiveEnv }),
         SyncPackageJsonLive({ workspaceRoot, cacheDirectory }),
         ScaffoldPackageLive({ workspaceRoot, packageName }),

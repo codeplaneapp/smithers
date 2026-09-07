@@ -66,6 +66,8 @@
     "./FaultSuite": "./src/FaultSuite.ts",
     "./Fetch": "./src/Fetch.ts",
     "./Filegroup": "./src/Filegroup.ts",
+    "./Flow": "./src/Flow.ts",
+    "./FlowCatalog": "./src/FlowCatalog.ts",
     "./Foundry": "./src/Foundry.ts",
     "./GeneratedFile": "./src/GeneratedFile.ts",
     "./GitTarget": "./src/GitTarget.ts",
@@ -285,6 +287,16 @@
         "types": "./dist/esm/Filegroup.d.ts",
         "import": "./dist/esm/Filegroup.js",
         "require": "./dist/cjs/Filegroup.js"
+      },
+      "./Flow": {
+        "types": "./dist/esm/Flow.d.ts",
+        "import": "./dist/esm/Flow.js",
+        "require": "./dist/cjs/Flow.js"
+      },
+      "./FlowCatalog": {
+        "types": "./dist/esm/FlowCatalog.d.ts",
+        "import": "./dist/esm/FlowCatalog.js",
+        "require": "./dist/cjs/FlowCatalog.js"
       },
       "./Foundry": {
         "types": "./dist/esm/Foundry.d.ts",

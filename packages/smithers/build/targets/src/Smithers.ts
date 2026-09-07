@@ -195,6 +195,14 @@ export {
 } from "./GeneratedFile.ts"
 /** @category targets @since 0.1.0 */
 export { GithubCiGen } from "./GithubCiGen.ts"
+/** @category constructors @since 1.0.0 */
+export { Flow } from "./Flow.ts"
+/** @category guards @since 1.0.0 */
+export { isFlowDeclaration } from "./Flow.ts"
+/** @category targets @since 1.0.0 */
+export { FlowCatalog } from "./FlowCatalog.ts"
+/** @category actions @since 1.0.0 */
+export { FlowCatalogAction, FlowCatalogError } from "./FlowCatalog.ts"
 /** @category actions @since 0.1.0 */
 /** @category parsing @since 0.1.0 */
 export * as GithubWorkflow from "./GithubWorkflow.ts"

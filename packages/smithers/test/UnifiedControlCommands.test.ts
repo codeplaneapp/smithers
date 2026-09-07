@@ -446,6 +446,40 @@ describe("unified control dispatch", () => {
     expect(result.stdout).not.toContain("private-fixture")
   })
 
+  it("lists flows one per line for a person, starring the featured rows", async () => {
+    ports.invoke.mockResolvedValue({
+      _tag: "flows",
+      items: [
+        { flowId: "review", description: "Reviews the change.", featured: true, summary: "Review the change." },
+        { flowId: "create-flow/scaffold", description: "Writes the flow file." }
+      ]
+    })
+    let terminal = ""
+    const result = await invoke(["flow", "list", "--audience", "human", "--silent"], {
+      stdout: {
+        isTTY: true,
+        columns: 80,
+        write: (text) => {
+          terminal += text
+        }
+      }
+    })
+    expect(result.codes).toEqual([])
+    expect(result.stdout).toBe("")
+    expect(terminal).toBe(
+      `* ${"review".padEnd("create-flow/scaffold".length)}  Review the change.\n` +
+        "  create-flow/scaffold  Writes the flow file.\n"
+    )
+  })
+
+  it("keeps the flow page document for agents and --json", async () => {
+    const page = { _tag: "flows", items: [{ flowId: "review", description: "Reviews the change.", featured: true }] }
+    ports.invoke.mockResolvedValue(page)
+    const result = await invoke(["flow", "list", "--json"])
+    expect(result.codes).toEqual([])
+    expect(JSON.parse(result.stdout)).toMatchObject(page)
+  })
+
   it("keeps safe usable directly without a presentation session", async () => {
     const error = vi.fn<(cause: { code: string; message: string; exitCode?: number }) => never>()
     expect(await safe({ error }, async () => ({ answer: 42 }))).toEqual({ answer: 42 })
