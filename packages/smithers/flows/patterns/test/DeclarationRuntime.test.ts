@@ -66,6 +66,7 @@ describe("pattern declaration execution", () => {
     )).toEqual({
       passed: ["lint", "test"],
       failed: ["typecheck"],
+      errors: {},
       strategy: "all-pass",
       verdict: false
     })

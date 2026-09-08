@@ -44,7 +44,7 @@ export interface MakeOptions {
 }
 
 /**
- * One check's classified outcome.
+ * One check's classified outcome, with its original error when available.
  *
  * @category models
  * @since 0.1.0
@@ -52,10 +52,13 @@ export interface MakeOptions {
 export interface CheckResult {
   readonly id: string
   readonly passed: boolean
+  readonly error?: unknown
 }
 
 /**
- * The reduced suite outcome.
+ * The reduced suite outcome. `errors` retains errors by check id, including
+ * falsy tolerated errors; checks without an error have no entry. Diagnostics
+ * do not affect the verdict decision.
  *
  * @category models
  * @since 0.1.0
@@ -63,6 +66,7 @@ export interface CheckResult {
 export interface Verdict {
   readonly passed: ReadonlyArray<string>
   readonly failed: ReadonlyArray<string>
+  readonly errors: Readonly<Record<string, unknown>>
   readonly strategy: Strategy
   readonly verdict: boolean
 }
@@ -111,11 +115,23 @@ export const passed = (row: unknown): boolean => {
   return record.error === undefined || record.error === null || record.error === false
 }
 
+const classify = (id: string, row: unknown): CheckResult => {
+  const result = { id, passed: passed(row) }
+  const error = typeof row === "object" && row !== null ? (row as Record<string, unknown>).error : undefined
+  return error === undefined || error === null || error === false ? result : { ...result, error }
+}
+
 /**
  * Classifies the record a batch of check calls produces.
  *
  * Results follow declaration order, not completion order, so the verdict does
  * not depend on which check finished first.
+ *
+ * `quarantineOutcomes` defaults to `false`, treating values as plain check
+ * rows. Use `rows(values, ids, true)` for {@link Quarantine.all} output under
+ * the `quarantine` policy: successful envelopes are unwrapped and quarantined
+ * failures retain their original error, including falsy errors. Plain rows
+ * retain an `error` other than `undefined`, `null`, or `false`.
  *
  * @category introspection
  * @since 0.1.0
@@ -129,11 +145,10 @@ export const rows = (
   return ids.map((id) => {
     if (!Object.hasOwn(record, id)) return { id, passed: false }
     const row = record[id]
-    if (!quarantineOutcomes) return { id, passed: passed(row) }
-    return {
-      id,
-      passed: Quarantine.isSucceeded(row) ? passed(row.value) : false
-    }
+    if (!quarantineOutcomes) return classify(id, row)
+    if (Quarantine.isSucceeded(row)) return classify(id, row.value)
+    if (Quarantine.isQuarantined(row)) return { id, passed: false, error: row.error }
+    return { id, passed: false }
   })
 }
 
@@ -155,7 +170,10 @@ export const verdict = (results: ReadonlyArray<CheckResult>, strategy: Strategy)
     : strategy === "majority"
     ? passing.length * 2 > total && total > 0
     : total > 0 && passing.length === total
-  return { passed: passing, failed: failing, strategy, verdict: decided }
+  const errors = Object.fromEntries(
+    results.filter((result) => Object.hasOwn(result, "error")).map((result) => [result.id, result.error])
+  )
+  return { passed: passing, failed: failing, errors, strategy, verdict: decided }
 }
 
 const bound = (value: number): boolean => Number.isSafeInteger(value) && value >= 1
@@ -247,7 +265,8 @@ export const make = (options: MakeOptions): Flow.Flow<typeof Schema.Unknown, typ
  *
  * With `continueOnFail: false` the first failing check fails the suite and the
  * remaining checks do not run. With `continueOnFail: true` every check runs and
- * a failed one is listed in the verdict's `failed`. A check that succeeds but
+ * a failed one is listed in the verdict's `failed`, with its original error
+ * retained in `errors` under its id. A check that succeeds but
  * returns a failure row is always listed in `failed`; it does not fail the
  * suite, because the row is the check's answer, not an error.
  *
@@ -293,9 +312,9 @@ export const run = <I, Out, E, R>(
     Effect.forEach(
       declared,
       ([id, check]): Effect.Effect<CheckResult, E, R> => {
-        const attempt = Effect.map(check(input), (row) => ({ id, passed: passed(row) }))
+        const attempt = Effect.map(check(input), (row) => classify(id, row))
         return continueOnFail
-          ? Effect.catch(attempt, () => Effect.succeed({ id, passed: false }))
+          ? Effect.catch(attempt, (error) => Effect.succeed({ id, passed: false, error }))
           : attempt
       },
       { concurrency }

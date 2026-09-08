@@ -798,7 +798,7 @@ describe("options are snapshotted at the call", () => {
       options.concurrency = 0
       options.continueOnFail = true
 
-      expect(yield* running).toEqual({ passed: ["lint"], failed: [], strategy: "all-pass", verdict: true })
+      expect(yield* running).toEqual({ passed: ["lint"], failed: [], errors: {}, strategy: "all-pass", verdict: true })
       expect(trace).toEqual(["lint"])
     }))
 

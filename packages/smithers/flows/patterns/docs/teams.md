@@ -129,21 +129,30 @@ const suite = CheckSuite.make({
 
 An empty suite never passes under any strategy.
 
-`CheckSuite.passed(row)` classifies one check's row: a missing row fails, an object row fails on `passed: false`, `ok: false`, `failed: true`, or an `error` other than `undefined`, `null`, or `false`, and anything else passes. An empty string in `error` is a failure. `CheckSuite.rows(values, ids)` classifies the record a batch of calls produces, in declaration order. `CheckSuite.verdict(results, strategy)` reduces classified results and is exported so a caller can re-decide a recorded suite under a different strategy.
+`CheckSuite.passed(row)` classifies one check's row: a missing row fails, an object row fails on `passed: false`, `ok: false`, `failed: true`, or an `error` other than `undefined`, `null`, or `false`, and anything else passes. An empty string in `error` is a failure. `CheckSuite.rows(values, ids, quarantineOutcomes)` classifies the record a batch of calls produces, in declaration order. `quarantineOutcomes` defaults to `false`: rows are treated as check output, without decoding quarantine envelopes. Pass `true` for a tolerant join:
+
+```ts
+const results = CheckSuite.rows(values, ids, true)
+const verdict = CheckSuite.verdict(results, "all-pass")
+```
+
+`CheckSuite.verdict(results, strategy)` reduces classified results and is exported so a caller can re-decide a recorded suite under a different strategy.
 
 ### Declaration
 
 `make` declares one call per check, batched into `Node.all` groups of `concurrency` members, then one pure verdict map. Each call is a `Node.all` member named by its check id. `continueOnFail` changes the topology and is captured as well, so a tolerant suite and a fail-fast suite have different step identity.
 
-`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check settles as an explicit `Succeeded` or `Quarantined` envelope. `rows` unwraps successful rows and classifies quarantined failures. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
+`continueOnFail` picks the join. A tolerant suite joins each batch with `Quarantine.all` under the `quarantine` policy, so every check settles as an explicit `Succeeded` or `Quarantined` envelope. `rows(values, ids, true)` unwraps successful rows and classifies quarantined failures, retaining their errors. `make` supplies this flag from `continueOnFail`. A fail-fast suite joins under `halt`, the plain `Node.all` that fails on the first failing member and interrupts the rest.
 
 `make` throws a `PatternError` when the record is empty, when an id is the empty string, or when `concurrency` is not a positive safe integer.
 
 ### Execution
 
-With `continueOnFail: false` the first failing check fails the suite and the remaining checks do not run. With `continueOnFail: true` every check runs and a failed one is listed in the verdict's `failed`.
+With `continueOnFail: false` the first failing check fails the suite and the remaining checks do not run. With `continueOnFail: true` every check runs and a failed one is listed in the verdict's `failed`. Its original error is retained in `errors[checkId]`, including falsy error values.
 
-A check that succeeds but returns a failure row is always listed in `failed`. It does not fail the suite, because the row is the check's answer, not an error.
+A check that succeeds but returns a failure row is always listed in `failed`. It does not fail the suite, because the row is the check's answer, not an error. A row's `error` is retained when it is other than `undefined`, `null`, or `false`.
+
+`CheckResult.error` is optional. `Verdict.errors` is a record keyed by check id, empty when no errors were retained. A failed check without an error has no entry. Errors do not change the verdict decision; a majority or any-pass verdict can pass while retaining failed checks' errors.
 
 `run` takes the same record, with each value an `(input) => Effect` instead of a flow. It rejects the same suites `make` rejects, and it rejects them before any check runs: an empty record, an empty check id, and a `concurrency` that is not a positive safe integer each fail with a `PatternError`. An empty record fails rather than returning a false verdict, which would read like a failing suite rather than like a misconfigured one.
 

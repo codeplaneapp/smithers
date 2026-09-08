@@ -1,8 +1,10 @@
 import { describe, it } from "@effect/vitest"
 import { Flow, Graph, Node } from "@smthrs/core"
+import * as TestRuntime from "@smthrs/core/TestRuntime"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Latch from "effect/Latch"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { expect } from "vitest"
 import * as CheckSuite from "../src/CheckSuite.ts"
@@ -23,10 +25,157 @@ const results = [
 ]
 
 describe("CheckSuite", () => {
+  for (
+    const [passing, total, decided] of [
+      [0, 1, false],
+      [1, 2, false],
+      [2, 4, false],
+      [1, 3, false],
+      [2, 3, true],
+      [1, 1, true]
+    ] as const
+  ) {
+    for (const continueOnFail of [false, true]) {
+      it.effect(`requires a strict majority for ${passing}/${total} passes (tolerant: ${continueOnFail})`, () =>
+        Effect.gen(function*() {
+          const classified = Array.from({ length: total }, (_, index) => ({
+            id: `check-${index}`,
+            passed: index < passing
+          }))
+          const expected = {
+            passed: classified.slice(0, passing).map(({ id }) => id),
+            failed: classified.slice(passing).map(({ id }) => id),
+            errors: {},
+            strategy: "majority",
+            verdict: decided
+          }
+          const options = { strategy: "majority" as const, concurrency: 2, continueOnFail }
+          const suite = CheckSuite.make({
+            ...options,
+            checks: Object.fromEntries(classified.map(({ id, passed }) => [
+              id,
+              Flow.make({
+                input: Schema.Unknown,
+                output: Schema.Unknown,
+                body: () => Node.succeed({ passed })
+              })
+            ]))
+          })
+          if (suite.body === undefined) throw new Error("suite has no body")
+          const declared = TestRuntime.evaluateInline(suite.body("head"))
+          if (Result.isFailure(declared)) throw declared.failure
+
+          // Compare complete outcomes for the reducer and both execution paths.
+          expect(CheckSuite.verdict(classified, "majority")).toEqual(expected)
+          expect(declared.success).toEqual(expected)
+          expect(
+            yield* CheckSuite.run("head", {
+              ...options,
+              checks: Object.fromEntries(classified.map(({ id, passed }) => [id, () => Effect.succeed({ passed })]))
+            })
+          ).toEqual(expected)
+        }))
+    }
+  }
+
+  it("decodes quarantine envelopes only with the documented third argument", () => {
+    const values = { test: { _tag: "Succeeded", member: "test", value: { passed: false } } }
+    const ids = ["test"]
+
+    expect(CheckSuite.rows(values, ids)).toEqual([{ id: "test", passed: true }])
+    expect(CheckSuite.rows(values, ids, false)).toEqual(CheckSuite.rows(values, ids))
+    expect(CheckSuite.rows(values, ids, true)).toEqual([{ id: "test", passed: false }])
+    expect(CheckSuite.verdict(CheckSuite.rows(values, ids), "all-pass").verdict).toBe(true)
+    expect(CheckSuite.verdict(CheckSuite.rows(values, ids, true), "all-pass").verdict).toBe(false)
+  })
+
+  for (const error of [new Error("tsc: 14 errors in src/Foo.ts"), "tsc exited 2", undefined, null, false, 0, ""]) {
+    it.effect(`retains tolerated errors through rows, make, and run: ${String(error)}`, () =>
+      Effect.gen(function*() {
+        // A prototype-shaped id must remain an own key in the diagnostics record.
+        const id = "__proto__"
+        const expected = {
+          passed: ["lint"],
+          failed: [id],
+          errors: { [id]: error },
+          strategy: "any-pass",
+          verdict: true
+        }
+        const classified = CheckSuite.rows(
+          {
+            lint: { _tag: "Succeeded", member: "lint", value: { ok: true } },
+            [id]: { _tag: "Quarantined", member: id, error }
+          },
+          ["lint", id],
+          true
+        )
+        expect(classified).toStrictEqual([{ id: "lint", passed: true }, { id, passed: false, error }])
+        const reduced = CheckSuite.verdict(classified, "any-pass")
+        expect(reduced).toStrictEqual(expected)
+        expect(Object.hasOwn(reduced.errors, id)).toBe(true)
+        expect(reduced.errors[id]).toBe(error)
+
+        const options = { strategy: "any-pass" as const, concurrency: 1, continueOnFail: true }
+        const suite = CheckSuite.make({
+          ...options,
+          checks: {
+            lint: step,
+            [id]: Flow.make({ input: Schema.Unknown, output: Schema.Unknown, body: () => Node.fail(error) })
+          }
+        })
+        if (suite.body === undefined) throw new Error("suite has no body")
+        const declared = TestRuntime.evaluateInline(suite.body("head"))
+        if (Result.isFailure(declared)) throw declared.failure
+        expect(declared.success).toStrictEqual(expected)
+        expect((declared.success as CheckSuite.Verdict).errors[id]).toBe(error)
+
+        const executed = yield* CheckSuite.run("head", {
+          ...options,
+          checks: { lint: () => Effect.succeed({ ok: true }), [id]: () => Effect.fail(error) }
+        })
+        expect(executed).toStrictEqual(expected)
+        expect(Object.hasOwn(executed.errors, id)).toBe(true)
+        expect(executed.errors[id]).toBe(error)
+      }))
+  }
+
+  it("retains failure-row diagnostics without interpreting arbitrary rows as envelopes", () => {
+    const values = {
+      failure: { error: "3 failing" },
+      empty: { error: "" },
+      nil: { error: null },
+      absent: { error: undefined },
+      clear: { error: false }
+    }
+    const ids = Object.keys(values)
+    const expected = [
+      { id: "failure", passed: false, error: "3 failing" },
+      { id: "empty", passed: false, error: "" },
+      { id: "nil", passed: true },
+      { id: "absent", passed: true },
+      { id: "clear", passed: true }
+    ]
+    expect(CheckSuite.rows(values, ids)).toStrictEqual(expected)
+    expect(CheckSuite.rows(
+      Object.fromEntries(
+        Object.entries(values).map(([member, value]) => [
+          member,
+          { _tag: "Succeeded", member, value }
+        ])
+      ),
+      ids,
+      true
+    )).toStrictEqual(expected)
+    expect(CheckSuite.rows({ invalid: { ok: true } }, ["invalid"], true)).toEqual([
+      { id: "invalid", passed: false }
+    ])
+  })
+
   it("resolves each verdict strategy from the same results", () => {
     expect(CheckSuite.verdict(results, "all-pass")).toEqual({
       passed: ["lint", "typecheck"],
       failed: ["test"],
+      errors: {},
       strategy: "all-pass",
       verdict: false
     })
@@ -58,6 +207,8 @@ describe("CheckSuite", () => {
       { id: "test", passed: false }
     ])
     expect(CheckSuite.rows("not a record", ["lint"])).toEqual([{ id: "lint", passed: false }])
+    expect(CheckSuite.rows({ nil: null, absent: undefined, text: "done" }, ["nil", "absent", "text"]))
+      .toEqual([{ id: "nil", passed: false }, { id: "absent", passed: false }, { id: "text", passed: true }])
   })
 
   it("treats inherited prototype-shaped rows as missing", () => {
@@ -105,7 +256,7 @@ describe("CheckSuite", () => {
     expect(CheckSuite.passed(falsy)).toBe(true)
     expect(CheckSuite.rows({ lint, test: falsy }, ["lint", "test"], true)).toEqual([
       { id: "lint", passed: true },
-      { id: "test", passed: false }
+      { id: "test", passed: false, error: null }
     ])
   })
 
@@ -198,10 +349,12 @@ describe("CheckSuite", () => {
         }
       })
 
+      expect(verdict.errors).toEqual({ typecheck: "tsc exited 2" })
       expect(ran.sort()).toEqual(["lint", "test", "typecheck"])
       expect(verdict).toEqual({
         passed: ["lint", "test"],
         failed: ["typecheck"],
+        errors: { typecheck: "tsc exited 2" },
         strategy: "majority",
         verdict: true
       })
@@ -219,6 +372,7 @@ describe("CheckSuite", () => {
         }
       })
 
+      expect(verdict.errors).toEqual({ test: "3 failing" })
       expect(verdict.failed).toEqual(["test"])
       expect(verdict.verdict).toBe(false)
     }))
