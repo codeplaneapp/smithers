@@ -20,6 +20,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return {
     ...original,
     default: original,
+    copyFile: vi.fn(original.copyFile),
     lstat: async (path: NodeFs.PathLike): Promise<NodeFs.Stats> => {
       const stats = await original.lstat(path)
       if (lstatSizeOverride.path === String(path)) {
@@ -310,6 +311,100 @@ describe("the write-set guard reads git honestly", () => {
     await Fs.rm(NodePath.join(root, ".git"), { recursive: true, force: true })
     await expect(PackageTree.snapshotPortals(root, ".flows")).rejects.toThrow(/git (ls-files|status) failed/)
   })
+})
+
+describe("snapshot rollback preserves file permissions", () => {
+  beforeEach(() => {
+    ChildProcess.execFileSync("git", ["init", "--quiet", "."], { cwd: root, stdio: "ignore" })
+  })
+
+  const permissions = async (path: string): Promise<number> => (await Fs.lstat(path)).mode & 0o7777
+
+  for (const mode of [0o600, 0o640, 0o750]) {
+    for (const contentChanges of [true, false]) {
+      const change = contentChanges ? "content and permissions" : "permissions alone"
+      it.skipIf(process.platform === "win32")(
+        `restores an ordinary file at ${mode.toString(8)} after changing ${change}`,
+        async () => {
+          const secret = NodePath.join(root, "credentials.txt")
+          await Fs.writeFile(secret, "secret")
+          await Fs.chmod(secret, mode)
+          const snapshot = await PackageTree.snapshotTree(root, ".flows")
+          try {
+            if (contentChanges) await Fs.writeFile(secret, "overwritten")
+            await Fs.chmod(secret, 0o644)
+            expect(await PackageTree.changedSinceSnapshot(snapshot, ".flows")).toEqual(["credentials.txt"])
+            await PackageTree.revertPath(snapshot, "credentials.txt")
+            expect(await Fs.readFile(secret, "utf8")).toBe("secret")
+            expect(await permissions(secret)).toBe(mode)
+            expect(await PackageTree.changedSinceSnapshot(snapshot, ".flows")).toEqual([])
+          } finally {
+            await PackageTree.releaseSnapshot(snapshot)
+          }
+        }
+      )
+
+      for (const directoryPortal of [true, false]) {
+        it.skipIf(process.platform === "win32")(
+          `restores a ${directoryPortal ? "directory" : "file"} portal at ${mode.toString(8)} after changing ${change}`,
+          async () => {
+            const secret = NodePath.join(outside, "credentials.txt")
+            await Fs.writeFile(secret, "secret")
+            await Fs.chmod(secret, mode)
+            await Fs.symlink(directoryPortal ? outside : secret, NodePath.join(root, "portal"))
+            const snapshot = await PackageTree.snapshotPortals(root, ".flows")
+            try {
+              if (contentChanges) await Fs.writeFile(secret, "overwritten")
+              await Fs.chmod(secret, 0o644)
+              expect(await PackageTree.revertChangedPortals(snapshot)).toEqual([
+                directoryPortal ? "portal/credentials.txt" : "portal"
+              ])
+              expect(await Fs.readFile(secret, "utf8")).toBe("secret")
+              expect(await permissions(secret)).toBe(mode)
+              expect(await PackageTree.revertChangedPortals(snapshot)).toEqual([])
+            } finally {
+              await PackageTree.releasePortals(snapshot)
+            }
+          }
+        )
+      }
+    }
+  }
+})
+
+describe("failed snapshot acquisition removes its partial stash", () => {
+  for (const kind of ["tree", "portals"] as const) {
+    it(`removes the ${kind} stash when the second copy fails`, async () => {
+      ChildProcess.execFileSync("git", ["init", "--quiet", "."], { cwd: root, stdio: "ignore" })
+      const directory = kind === "tree" ? root : outside
+      await Fs.writeFile(NodePath.join(directory, "a.txt"), "first")
+      await Fs.writeFile(NodePath.join(directory, "b.txt"), "second")
+      if (kind === "portals") {
+        await Fs.symlink(NodePath.join(outside, "a.txt"), NodePath.join(root, "a-portal"))
+        await Fs.symlink(NodePath.join(outside, "b.txt"), NodePath.join(root, "b-portal"))
+      }
+      const original = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")
+      const failure = new Error("second snapshot copy failed")
+      let stashDirectory: string | undefined
+      let copiedFiles: Array<string> = []
+      const copy = vi.mocked(Fs.copyFile)
+      copy.mockImplementationOnce(original.copyFile).mockImplementationOnce(async (_source, destination) => {
+        stashDirectory = NodePath.dirname(String(destination))
+        copiedFiles = await original.readdir(stashDirectory)
+        throw failure
+      })
+      try {
+        const acquire = kind === "tree" ? PackageTree.snapshotTree : PackageTree.snapshotPortals
+        await expect(acquire(root, ".flows")).rejects.toBe(failure)
+        expect(copiedFiles).toHaveLength(1)
+        expect(stashDirectory).toBeDefined()
+        await expect(Fs.lstat(stashDirectory!)).rejects.toMatchObject({ code: "ENOENT" })
+      } finally {
+        copy.mockReset().mockImplementation(original.copyFile)
+        if (stashDirectory !== undefined) await Fs.rm(stashDirectory, { recursive: true, force: true })
+      }
+    })
+  }
 })
 
 describe("treeMatchesManifest compares the tree, not just the manifest", () => {

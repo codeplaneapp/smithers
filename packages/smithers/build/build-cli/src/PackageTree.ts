@@ -294,11 +294,11 @@ const parseStatusZ = (raw: string): Array<StatusEntry> => {
 export type PathState =
   | { readonly kind: "missing" }
   | { readonly kind: "link"; readonly target: string }
-  | { readonly kind: "file"; readonly digest: string; readonly executable: boolean }
+  | { readonly kind: "file"; readonly digest: string; readonly mode: number }
 
 /**
  * Measures the state of one absolute path: missing, a symlink with its
- * target, or a file with its content digest and executable bit.
+ * target, or a file with its content digest and full permission bits.
  *
  * @category write sets
  * @since 0.1.0
@@ -317,7 +317,7 @@ const statePath = async (absolute: string): Promise<PathState> => {
     return {
       kind: "file",
       digest: await digestFileBytes(absolute),
-      executable: (stats.mode & 0o111) !== 0
+      mode: stats.mode & 0o7777
     }
   }
   return { kind: "missing" }
@@ -327,7 +327,7 @@ const sameState = (left: PathState, right: PathState): boolean => {
   if (left.kind !== right.kind) return false
   if (left.kind === "link" && right.kind === "link") return left.target === right.target
   if (left.kind === "file" && right.kind === "file") {
-    return left.digest === right.digest && left.executable === right.executable
+    return left.digest === right.digest && left.mode === right.mode
   }
   return true
 }
@@ -392,19 +392,25 @@ export const snapshotTree = async (root: string, cacheDirectory: string): Promis
   const raw = await runGit(root, ["status", "--porcelain", "-z", "--untracked-files=all"])
   const states = new Map<string, PathState>()
   const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-writeset-"))
-  for (const entry of parseStatusZ(raw)) {
-    if (skipStatusPath(cacheDirectory, entry.path)) continue
-    const absolute = NodePath.join(root, entry.path)
-    const state = await statePath(absolute)
-    states.set(entry.path, state)
-    if (state.kind === "file") {
-      const stashFile = NodePath.join(stashDirectory, digestBytes(Buffer.from(entry.path, "utf8")))
-      await Fs.copyFile(absolute, stashFile)
-    } else if (state.kind === "link") {
-      // Link state is fully described by its target text; nothing to stash.
+  try {
+    for (const entry of parseStatusZ(raw)) {
+      if (skipStatusPath(cacheDirectory, entry.path)) continue
+      const absolute = NodePath.join(root, entry.path)
+      const state = await statePath(absolute)
+      states.set(entry.path, state)
+      if (state.kind === "file") {
+        const stashFile = NodePath.join(stashDirectory, digestBytes(Buffer.from(entry.path, "utf8")))
+        await Fs.copyFile(absolute, stashFile)
+      } else if (state.kind === "link") {
+        // Link state is fully described by its target text; nothing to stash.
+      }
     }
+    return { root, states, stashDirectory }
+  } catch (cause) {
+    // The caller never received a snapshot to release; retain the acquisition error.
+    await Fs.rm(stashDirectory, { recursive: true, force: true }).catch(() => {})
+    throw cause
   }
-  return { root, states, stashDirectory }
 }
 
 /**
@@ -502,7 +508,7 @@ export const revertPath = async (snapshot: TreeSnapshot, path: string): Promise<
   await Fs.rm(absolute, { recursive: true, force: true })
   await Fs.mkdir(NodePath.dirname(absolute), { recursive: true })
   await Fs.copyFile(stashFile, absolute)
-  await Fs.chmod(absolute, before.executable ? 0o755 : 0o644)
+  await Fs.chmod(absolute, before.mode)
 }
 
 /**
@@ -1170,58 +1176,64 @@ export const snapshotPortals = async (
     if (entry.kind === "link") candidates.add(path)
   }
   const stashDirectory = await Fs.mkdtemp(NodePath.join(Os.tmpdir(), "smthrs-portal-"))
-  const portals: Array<Portal> = []
-  let index = 0
-  for (const link of [...candidates].sort()) {
-    if (skipStatusPath(cacheDirectory, link)) continue
-    const absolute = NodePath.join(root, link)
-    let stats: NodeFs.Stats
-    try {
-      stats = await Fs.lstat(absolute)
-    } catch {
-      continue
-    }
-    if (!stats.isSymbolicLink()) continue
-    let realTarget: string
-    let states: Map<string, PathState> | undefined
-    try {
-      realTarget = await Fs.realpath(absolute)
-    } catch (realpathCause) {
+  try {
+    const portals: Array<Portal> = []
+    let index = 0
+    for (const link of [...candidates].sort()) {
+      if (skipStatusPath(cacheDirectory, link)) continue
+      const absolute = NodePath.join(root, link)
+      let stats: NodeFs.Stats
       try {
-        const target = await Fs.readlink(absolute)
-        const intended = NodePath.resolve(NodePath.dirname(absolute), target)
-        realTarget = await resolveFromExistingAncestor(intended)
-      } catch (cause) {
-        throw new PortalCensusError("unreadable", link, { cause: cause ?? realpathCause })
+        stats = await Fs.lstat(absolute)
+      } catch {
+        continue
       }
-      // The target does not exist yet. An in-workspace destination remains
-      // covered by git; an escaping destination starts as an empty portal so
-      // a file created through the dangling link is visible after the run.
+      if (!stats.isSymbolicLink()) continue
+      let realTarget: string
+      let states: Map<string, PathState> | undefined
+      try {
+        realTarget = await Fs.realpath(absolute)
+      } catch (realpathCause) {
+        try {
+          const target = await Fs.readlink(absolute)
+          const intended = NodePath.resolve(NodePath.dirname(absolute), target)
+          realTarget = await resolveFromExistingAncestor(intended)
+        } catch (cause) {
+          throw new PortalCensusError("unreadable", link, { cause: cause ?? realpathCause })
+        }
+        // The target does not exist yet. An in-workspace destination remains
+        // covered by git; an escaping destination starts as an empty portal so
+        // a file created through the dangling link is visible after the run.
+        if (Path.contains(realRoot, realTarget)) continue
+        states = new Map()
+      }
+      // A symlink resolving inside the workspace is judged by the git write-set,
+      // not here; only an escaping one is a portal.
       if (Path.contains(realRoot, realTarget)) continue
-      states = new Map()
-    }
-    // A symlink resolving inside the workspace is judged by the git write-set,
-    // not here; only an escaping one is a portal.
-    if (Path.contains(realRoot, realTarget)) continue
-    if (states === undefined) {
-      try {
-        states = await walkPortalTarget(realTarget)
-      } catch (cause) {
-        throw new PortalCensusError(cause instanceof PortalOverflow ? "too-large" : "unreadable", link, {
-          cause
-        })
+      if (states === undefined) {
+        try {
+          states = await walkPortalTarget(realTarget)
+        } catch (cause) {
+          throw new PortalCensusError(cause instanceof PortalOverflow ? "too-large" : "unreadable", link, {
+            cause
+          })
+        }
       }
-    }
-    for (const [relativePath, state] of states) {
-      if (state.kind === "file") {
-        const source = relativePath === "" ? realTarget : NodePath.join(realTarget, ...relativePath.split("/"))
-        await Fs.copyFile(source, NodePath.join(stashDirectory, portalStashKey(index, relativePath)))
+      for (const [relativePath, state] of states) {
+        if (state.kind === "file") {
+          const source = relativePath === "" ? realTarget : NodePath.join(realTarget, ...relativePath.split("/"))
+          await Fs.copyFile(source, NodePath.join(stashDirectory, portalStashKey(index, relativePath)))
+        }
       }
+      portals.push({ link, realTarget, states })
+      index += 1
     }
-    portals.push({ link, realTarget, states })
-    index += 1
+    return { root, portals, stashDirectory }
+  } catch (cause) {
+    // The caller never received a snapshot to release; retain the acquisition error.
+    await Fs.rm(stashDirectory, { recursive: true, force: true }).catch(() => {})
+    throw cause
   }
-  return { root, portals, stashDirectory }
 }
 
 /**
@@ -1268,7 +1280,7 @@ export const revertChangedPortals = async (snapshot: PortalSnapshot): Promise<Re
         await Fs.rm(target, { recursive: true, force: true })
         await Fs.mkdir(NodePath.dirname(target), { recursive: true })
         await Fs.copyFile(NodePath.join(snapshot.stashDirectory, portalStashKey(index, relativePath)), target)
-        await Fs.chmod(target, before.executable ? 0o755 : 0o644)
+        await Fs.chmod(target, before.mode)
       }
       escaped.push(relativePath === "" ? portal.link : `${portal.link}/${relativePath}`)
     }
@@ -1982,7 +1994,7 @@ export const treeMatchesManifest = async (
       }
     } else if (state.kind !== "file" || state.digest !== entry.digest) {
       return `${manifest.outDir}/${entry.path} does not match the captured content`
-    } else if (state.executable !== entry.executable) {
+    } else if (((state.mode & 0o111) !== 0) !== entry.executable) {
       return `${manifest.outDir}/${entry.path} does not match the captured mode`
     }
   }

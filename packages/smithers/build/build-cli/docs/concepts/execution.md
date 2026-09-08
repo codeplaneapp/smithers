@@ -26,6 +26,12 @@ never a deletion: the gitignored census holds every ignored file's bytes in a
 stash before the body runs, and a tree it cannot hold whole refuses the target
 before it runs at all.
 
+Dirty-file and escaping-symlink snapshots retain full file permission bits.
+Rollback restores those bits with the bytes, including private modes such as
+`0600` and `0640`; permission-only changes also count as writes. If either
+snapshot acquisition fails, it removes its partial stash and reports the
+original acquisition error.
+
 ### What the census costs
 
 The census costs what a body can change, not what the tree holds. It asks git
