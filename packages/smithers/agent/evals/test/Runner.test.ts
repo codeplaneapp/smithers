@@ -47,6 +47,69 @@ const failureOf = (effect: Effect.Effect<unknown, EvalError, never>): Promise<Ev
   Effect.runPromise(Effect.flip(effect))
 
 describe("Runner", () => {
+  it("isolates mutating executors and scorers across sequential and concurrent runs", async () => {
+    const executorSeen: unknown[] = []
+    const scorerSeen: unknown[] = []
+    const mutator = Scorer.make({
+      id: "packages/smithers/agent/evals/test/Runner/mutator",
+      version: "1",
+      score: ({ input, groundTruth, context }) =>
+        Effect.sync(() => {
+          scorerSeen.push(structuredClone({ input, groundTruth, context }))
+          ;(input as { rows: number[] }).rows.push(99)
+          ;(groundTruth as { rows: number[] }).rows.push(99)
+          ;(context as { rows: number[] }).rows.push(99)
+          return { score: 1 }
+        })
+    })
+    const data = { rows: [1] }
+    const suite = await Effect.runPromise(Suite.make({
+      name: "isolated",
+      concurrency: 2,
+      cases: [{ name: "expected", input: data, expected: data }, { name: "fallback", input: data }],
+      bindings: [0, 1].map(() => Binding.make({ scorer: mutator, appliesTo: target, groundTruth: data, context: data }))
+    }))
+    const executor = executorFor((suiteCase) =>
+      Effect.gen(function*() {
+        executorSeen.push(structuredClone(suiteCase))
+        ;(suiteCase.input as typeof data).rows.push(2)
+        if (suiteCase.expected !== undefined) (suiteCase.expected as typeof data).rows.push(2)
+        Object.assign(suiteCase, { name: "changed" })
+        yield* Effect.yieldNow
+        return { output: suiteCase.input, stepKey: "step", latencyMs: 0, target }
+      })
+    )
+    const run = Runner.run(suite, runOptions).pipe(Effect.provide(executor))
+    const first = await Effect.runPromise(run)
+    const second = await Effect.runPromise(run)
+    const concurrent = await Effect.runPromise(Effect.all([run, run], { concurrency: 2 }))
+    for (const result of [first, second, ...concurrent]) {
+      expect(result.cases.map((entry) => entry.case)).toEqual(["expected", "fallback"])
+      expect(result.cases.map((entry) => entry.execution?.output)).toEqual([
+        { rows: [1, 2] },
+        { rows: [1, 2] }
+      ])
+      expect(result.observations.map((entry) => entry.kind)).toEqual(["score", "score", "score", "score"])
+    }
+    expect(executorSeen).toHaveLength(8)
+    for (let index = 0; index < executorSeen.length; index += 2) {
+      expect(executorSeen.slice(index, index + 2)).toEqual([
+        { name: "expected", input: data, expected: data },
+        { name: "fallback", input: data }
+      ])
+    }
+    expect(scorerSeen).toHaveLength(16)
+    for (const entry of scorerSeen) expect(entry).toEqual({ input: data, groundTruth: data, context: data })
+    expect(suite.cases).toEqual([
+      { name: "expected", input: data, expected: data },
+      { name: "fallback", input: data }
+    ])
+    for (const entry of suite.bindings) {
+      expect(entry.groundTruth).toEqual(data)
+      expect(entry.context).toEqual(data)
+    }
+  })
+
   it("keeps declaration order under bounded concurrency", async () => {
     const suite = await Effect.runPromise(
       Suite.make({

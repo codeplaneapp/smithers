@@ -241,7 +241,7 @@ const inconclusiveCode = (cause: Cause.Cause<unknown>): ScorerErrorCode => {
 const casePath = (name: string): string => `cases['${name}']`
 
 const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<CaseResult> =>
-  executor.run(suiteCase).pipe(
+  Effect.suspend(() => executor.run(structuredClone(suiteCase))).pipe(
     Effect.match({
       onFailure: (cause: unknown) => ({
         case: suiteCase.name,
@@ -267,14 +267,22 @@ const runCase = (executor: CaseExecutorService, suiteCase: Case): Effect.Effect<
 const requestFor = (suiteCase: Case, execution: Execution, binding: Binding): ScoreRequest => ({
   case: suiteCase.name,
   stepKey: execution.stepKey,
-  binding,
+  binding: {
+    ...structuredClone({
+      sampling: binding.sampling,
+      ...(binding.groundTruth === undefined ? {} : { groundTruth: binding.groundTruth }),
+      ...(binding.context === undefined ? {} : { context: binding.context })
+    }),
+    scorer: binding.scorer,
+    appliesTo: binding.appliesTo
+  },
   input: {
-    input: suiteCase.input,
+    input: structuredClone(suiteCase.input),
     output: execution.output,
     ...(suiteCase.expected === undefined && binding.groundTruth === undefined
       ? {}
-      : { groundTruth: suiteCase.expected ?? binding.groundTruth }),
-    ...(binding.context === undefined ? {} : { context: binding.context }),
+      : { groundTruth: structuredClone(suiteCase.expected ?? binding.groundTruth) }),
+    ...(binding.context === undefined ? {} : { context: structuredClone(binding.context) }),
     latencyMs: execution.latencyMs
   }
 })
@@ -405,13 +413,15 @@ const score = (
       const execution = caseResult.execution
       if (execution === undefined) return []
       const suiteCase = suite.cases[index]!
-      return suite.bindings
-        .filter((binding) => binding.appliesTo === execution.target)
-        .map((binding) => requestFor(suiteCase, execution, binding))
+      return suite.bindings.flatMap((binding, bindingIndex) =>
+        binding.appliesTo === execution.target
+          ? [{ request: requestFor(suiteCase, execution, binding), bindingIndex }]
+          : []
+      )
     })
     const sampled = yield* Effect.forEach(
       candidates,
-      (request) =>
+      ({ request, bindingIndex }) =>
         Sampling.decide(
           request.binding.sampling,
           request.stepKey,
@@ -422,7 +432,7 @@ const score = (
             new EvalError({
               code: "invalid_suite",
               message: `Invalid sampling policy for scorer ${label(request.binding)}`,
-              path: `bindings[${suite.bindings.indexOf(request.binding)}].sampling`,
+              path: `bindings[${bindingIndex}].sampling`,
               cause
             })
           )
@@ -594,7 +604,9 @@ const score = (
  * Runs a fixed suite with bounded execution and declaration-order results.
  *
  * Cases run through the provided {@link CaseExecutor} at the suite's
- * concurrency and are returned in declaration order. Every execution is then
+ * concurrency and are returned in declaration order. Each executor receives
+ * its own mutable case copy. Each scorer receives independent copies of the
+ * original case input, expected value, and binding data. Every execution is then
  * graded by the bindings whose `appliesTo` is the flow the execution reports as
  * its target, matched by reference identity, so a binding attached to another
  * flow contributes no observations.

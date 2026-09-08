@@ -59,8 +59,8 @@ export interface MakeOptions {
 /**
  * A validated, named collection of fixed cases and scorer bindings.
  *
- * `cases` and `bindings` are frozen, and every data field they carry is a copy
- * the caller cannot reach.
+ * The suite, cases, bindings, and their inert data are deeply frozen snapshots.
+ * Executable scorer and target identities remain unchanged.
  *
  * @category models
  * @since 0.1.0
@@ -105,15 +105,47 @@ const controlCharacter = (value: string): string | undefined => {
   return undefined
 }
 
+const cloneMessage = "Suite data must be structured-cloneable so the suite cannot change after it is validated"
+
+// Validate before structuredClone can erase a prototype or invoke a getter.
+// Only records and arrays can be protected completely with Object.freeze.
+const validateData = (value: unknown, path: string, seen = new WeakSet<object>()): void => {
+  if (typeof value === "function" || typeof value === "symbol") throw invalid(cloneMessage, path)
+  if (value === null || typeof value !== "object") return
+  if (seen.has(value)) return
+  seen.add(value)
+  const array = Array.isArray(value)
+  const prototype = Object.getPrototypeOf(value)
+  if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
+    throw invalid("Suite data must contain only plain objects, arrays, and structured-cloneable primitives", path)
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (array && key === "length") continue
+    const childPath = typeof key === "string" && array && /^(0|[1-9]\d*)$/.test(key)
+      ? `${path}[${key}]`
+      : `${path}.${String(key)}`
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!
+    if (typeof key === "symbol" || !descriptor.enumerable || !("value" in descriptor)) {
+      throw invalid("Suite data properties must be enumerable string-keyed data fields", childPath)
+    }
+    validateData(descriptor.value, childPath, seen)
+  }
+}
+
+const freezeData = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (value === null || typeof value !== "object" || seen.has(value)) return value
+  seen.add(value)
+  for (const child of Object.values(value)) freezeData(child, seen)
+  return Object.freeze(value)
+}
+
 const clone = (value: unknown, path: string): Effect.Effect<unknown, EvalError> =>
   Effect.try({
-    try: () => structuredClone(value),
-    catch: (cause) =>
-      invalid(
-        "Suite data must be structured-cloneable so the suite cannot change after it is validated",
-        path,
-        cause
-      )
+    try: () => {
+      validateData(value, path)
+      return freezeData(structuredClone(value))
+    },
+    catch: (cause) => cause instanceof EvalError ? cause : invalid(cloneMessage, path, cause)
   })
 
 const validate = (options: MakeOptions): EvalError | undefined => {
@@ -184,9 +216,9 @@ const readBinding = (binding: Binding): Binding => {
 const copyCase = (suiteCase: Case, index: number): Effect.Effect<Case, EvalError> =>
   Effect.gen(function*() {
     const input = yield* clone(suiteCase.input, `cases[${index}].input`)
-    if (suiteCase.expected === undefined) return { name: suiteCase.name, input }
+    if (suiteCase.expected === undefined) return Object.freeze({ name: suiteCase.name, input })
     const expected = yield* clone(suiteCase.expected, `cases[${index}].expected`)
-    return { name: suiteCase.name, input, expected }
+    return Object.freeze({ name: suiteCase.name, input, expected })
   })
 
 const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, EvalError> =>
@@ -208,7 +240,7 @@ const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, Ev
     if (binding.context !== undefined) {
       copied.context = yield* clone(binding.context, `bindings[${index}].context`)
     }
-    return copied
+    return Object.freeze(copied)
   })
 
 /**
@@ -220,9 +252,12 @@ const copyBinding = (binding: Binding, index: number): Effect.Effect<Binding, Ev
  * never saw. Every case and binding is then copied, including a binding's
  * sampling policy, so the suite is a snapshot the caller can no longer reach:
  * mutating an array, case input, or ratio policy afterwards leaves the
- * validated suite unchanged. The copy is a `structuredClone`, which is also the
- * check that the data is inert; a case carrying a function or a class instance
- * fails with `invalid_suite` naming the offending path.
+ * validated suite unchanged. Data is checked before `structuredClone` and
+ * deeply frozen afterwards. Only plain objects, arrays, and cloneable
+ * primitives are admitted, with enumerable string-keyed data properties.
+ * Functions, class instances, mutable built-ins, and accessors fail with
+ * `invalid_suite` naming the offending path. Cycles and shared references are
+ * supported; null-prototype records become ordinary objects in the clone.
  *
  * Fails with `invalid_suite` for an empty or control-character name, no cases,
  * more than `limits.cases` cases, a duplicate case name, or a concurrency that
@@ -243,12 +278,12 @@ export const make = (options: MakeOptions): Effect.Effect<Suite, EvalError> =>
     return Effect.gen(function*() {
       const copiedCases = yield* Effect.forEach(cases, copyCase)
       const copiedBindings = yield* Effect.forEach(bindings, copyBinding)
-      return {
+      return Object.freeze({
         name,
         cases: Object.freeze(copiedCases),
         bindings: Object.freeze(copiedBindings),
         concurrency
-      }
+      })
     })
   })
 
