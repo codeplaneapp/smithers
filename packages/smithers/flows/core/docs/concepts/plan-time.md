@@ -1,6 +1,6 @@
 ---
 title: "Plan time"
-description: "Why every value in this package is inert, what Graph.build actually evaluates, and the rules that come with planning a body against a symbolic placeholder."
+description: "The trust required by Graph.build, the callbacks it executes, and the rules for planning against a symbolic placeholder."
 sidebar:
   order: 1
 ---
@@ -11,32 +11,46 @@ package owns the first half only, and the separation is not stylistic: a
 durable engine cannot cache, resume, schedule, or place work it has not been
 told about in advance.
 
-## Everything here is inert
+## Planning requires trusted declarations
 
 `Flow.make` builds a value. Calling that value builds another value. `Node.map`
 and `Node.andThen` store the functions you hand them without calling them.
-Nothing in this package opens a file, starts a process, calls a model, resolves
-a registry name, or runs an Effect. That is what makes the model safe to hand
-untrusted structure: an agent that emits a declaration has emitted data, not
-behavior.
+Those values can contain executable JavaScript or TypeScript callbacks.
 
-The exception is deliberate and named. `TestRuntime` does execute the deferred
-callbacks a node stores, because a library that builds nodes has to test what
-it built. It is a test helper with no capabilities, no persistence, and no
-scheduling. See
+JavaScript and TypeScript declarations and all planning callbacks must be
+trusted. `Graph.build` executes flow bodies, `Node.andThen` builders,
+`Node.catch` recovery callbacks, and an optional `resolveLayers` callback in
+the caller process with its ambient authority, including access to files,
+credentials, the network, and process state. Callers must keep these callbacks
+pure; the planner does not enforce purity.
+
+Placement, capability, and effect metadata does not sandbox planning.
+`Placement.sandbox()`, an empty capability grant, and sealed effect envelopes
+do not restrict what a planning callback can do. Graph diagnostics describe
+the declared plan, not the callbacks' actual side effects.
+
+For agent-generated or otherwise untrusted declarations, accept a constrained
+data-only format, validate it, and construct nodes through trusted code without
+importing or evaluating supplied JavaScript or TypeScript. If planning requires
+untrusted code, load and plan it inside an externally isolated environment
+whose permissions and resource limits are enforced outside `@smthrs/core`.
+
+`TestRuntime` also executes deferred callbacks, including `Node.map` mappers,
+and requires trusted code. It is a test helper with no persistence or
+scheduling, and provides no sandbox. See
 [Test a declaration without a host](../guides/test-a-declaration.md).
 
 ## What Graph.build evaluates
 
-`Graph.build` walks the declaration once. Along the way it evaluates exactly
-two kinds of function, exactly once each:
+`Graph.build` walks the declaration once. It evaluates:
 
 - Every flow body it enters, against that call's input.
 - Every `Node.andThen` builder and every `Node.catch` recovery arm, against a
   symbolic placeholder standing for the value the arm will receive.
+- The optional `resolveLayers` callback, independently for each node.
 
-It does not evaluate a `Node.map` mapper, does not elaborate a dynamic node,
-and does not run anything the host owns. Evaluating the builders is what makes
+It does not evaluate a `Node.map` mapper or elaborate a dynamic node.
+Host step execution is separate from these planning callbacks. Evaluating the builders is what makes
 the downstream topology visible: the plan contains the report step and its
 dependency on the review step before either has run.
 

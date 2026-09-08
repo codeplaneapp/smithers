@@ -177,9 +177,10 @@ export interface LayerRequest {
 /**
  * Planner inputs used while constructing key material.
  *
- * `resolveLayers` is invoked independently for each node and must be pure. It
- * returns resolved host, model, and permission implementation identities, not
- * Effect Layers or runtime handles.
+ * `resolveLayers` is invoked independently for each node and must be trusted
+ * and pure under the same caller obligation as `build`. It returns resolved
+ * host, model, and permission implementation identities, not Effect Layers or
+ * runtime handles.
  *
  * @category models
  * @since 0.0.0
@@ -1390,10 +1391,17 @@ const freezeGraph = (
 }
 
 /**
- * Builds a graph by evaluating declared flow bodies and pure `Node.andThen`
- * builders exactly once against symbolic predecessor values. This reveals the
- * complete static topology without running a node, an Effect, a `Node.map`
- * value transformation, or a dynamic elaboration.
+ * Builds a graph by evaluating flow bodies against their inputs and
+ * `Node.andThen` builders and `Node.catch` recovery callbacks against symbolic
+ * predecessor values, without executing planned steps, `Node.map` value
+ * transformations, or dynamic elaborations.
+ *
+ * Declarations and all planning callbacks must be trusted and pure. They run
+ * in the caller process with ambient authority; purity is a caller obligation,
+ * not an enforced boundary. Placement, capability, and effect metadata does
+ * not sandbox planning. Use a constrained data-only ingestion boundary or an
+ * externally isolated planner for untrusted declarations. See
+ * https://core.smithers.sh/concepts/plan-time/#planning-requires-trusted-declarations
  *
  * Values supplied to `Node.succeed`, `Node.fail`, and flow calls are retained
  * by reference and read here. Mutating one before this function runs changes

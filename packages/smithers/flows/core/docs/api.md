@@ -15,10 +15,14 @@ import * as Flow from "@smthrs/core/Flow"
 `@smthrs/core/internal/*` and `@smthrs/core/*/index` are not public.
 `@smthrs/core/package.json` is exported.
 
-Every value this package constructs is inert. Nothing here executes a step,
-resolves a registry name, or touches a host. `TestRuntime` is the one
-deliberate exception, and it is a test helper. For the model behind these
-signatures, see [Plan time](./concepts/plan-time.md),
+Flow and Node construction records declarations without executing planned
+steps. JavaScript and TypeScript declarations and all planning callbacks must
+be trusted: `Graph.build` executes them in the caller process with ambient
+process authority. Purity is a caller obligation; placement, capability, and
+effect metadata does not sandbox planning. Use a constrained data-only
+ingestion boundary or an externally isolated planner for untrusted declarations.
+`TestRuntime` also executes deferred callbacks and requires trusted code.
+For the trust boundary and the model behind these signatures, see [Plan time](./concepts/plan-time.md),
 [Identity and key material](./concepts/identity.md), and
 [Effect envelopes](./concepts/effects.md).
 
@@ -535,11 +539,16 @@ Pure graph introspection for flow declarations.
 const build: (flowOrNode: Flow.Any | Node.Any, input?: unknown, options?: BuildOptions) => Graph
 ```
 
-Builds a graph by evaluating declared flow bodies and pure `Node.andThen`
-builders exactly once against symbolic predecessor values, revealing the
-complete static topology without running a node, an Effect, a `Node.map` value
+Builds a graph by evaluating flow bodies against their inputs and
+`Node.andThen` builders and `Node.catch` recovery callbacks against symbolic
+predecessor values. It does not execute planned steps, a `Node.map` value
 transformation, or a dynamic elaboration. `input` is the flow's input and is
 ignored for a node.
+
+All declarations and planning callbacks must be trusted and pure. They run
+with ambient process authority; purity is not enforced, and placement,
+capability, and effect metadata does not sandbox planning. See
+[Planning requires trusted declarations](./concepts/plan-time.md#planning-requires-trusted-declarations).
 
 Values supplied to `Node.succeed`, `Node.fail`, and flow calls are retained by
 reference and read here.
@@ -558,8 +567,10 @@ interface BuildOptions {
 }
 ```
 
-`resolveLayers` is invoked independently for each node and must be pure. It
-returns resolved host, model, and permission implementation identities as
+`resolveLayers` is invoked independently for each node and must be trusted
+and pure under the same
+[planning obligation](./concepts/plan-time.md#planning-requires-trusted-declarations).
+It returns resolved host, model, and permission implementation identities as
 strings, not Effect layers or runtime handles, and the result becomes the
 node's `layers` key material.
 

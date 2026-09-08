@@ -1,6 +1,6 @@
 ---
 title: "@smthrs/core"
-description: "The plan-time data model for agent flows: inert Flow and Node declarations that build into an inspectable graph of steps, dependencies, effect envelopes, and step-key material, without running anything."
+description: "The plan-time data model for agent flows: inert Flow and Node declarations that build into an inspectable graph of steps, dependencies, effect envelopes, and step-key material, without executing planned steps."
 ---
 
 `@smthrs/core` describes agent work without running it. You declare a flow, which
@@ -10,10 +10,19 @@ into a graph you can read, listing the steps, the dependencies between them,
 what each step reads and writes, where it should run, and the material that
 gives it a stable identity.
 
-Nothing in the package executes. It opens no file, starts no process, calls no
-model, and runs no Effect. A declaration is data, which is what makes it safe to
-accept one from an agent, store it, diff it, or review it before anyone acts on
-it.
+JavaScript and TypeScript declarations and all planning callbacks must be
+trusted. `Graph.build` executes flow bodies, continuation builders, recovery
+callbacks, and an optional `resolveLayers` callback in the caller process with
+its ambient authority. Purity is a caller obligation. Placement, capability,
+and effect metadata does not sandbox planning, even with sandbox placement,
+no capabilities, and sealed effects.
+
+Accept agent-generated declarations through a constrained data-only format
+that trusted code validates and translates into nodes. If untrusted code must
+be planned, load and plan it in an externally isolated environment with
+restricted permissions and resources. See [Plan time](./concepts/plan-time.md#planning-requires-trusted-declarations)
+for the trust boundary. `TestRuntime` executes deferred callbacks for tests
+and also requires trusted code.
 
 ## The problem it solves
 
@@ -131,14 +140,14 @@ its data model, start there.
   what the export map keeps private, and the packages that sit above this one.
 - [Quickstart](./quickstart.md): declare two flows, plan them, and read back the
   topology, the dependency references, and the key material.
-- [Plan time](./concepts/plan-time.md): why everything here is inert, what
-  `Graph.build` evaluates, and the placeholder rules that come with it.
+- [Plan time](./concepts/plan-time.md): which declarations must be trusted,
+  what `Graph.build` evaluates, and the placeholder rules that come with it.
 - [Identity and key material](./concepts/identity.md): what makes two
   declarations the same step, and what `Node.capture` fixes.
 - [Effect envelopes](./concepts/effects.md): how a step declares its reads and
   writes, and what the planner does with two writers of one path.
 - [Build limits](./concepts/limits.md): the ten exported bounds that keep a
-  generated declaration from exhausting the host.
+  plan structure within supported sizes. They do not bound callback execution.
 - [Declare a flow](./guides/declare-a-flow.md) and
   [Compose nodes into a plan](./guides/compose-nodes.md): the two builders,
   option by option.
